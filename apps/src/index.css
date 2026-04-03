@@ -41,6 +41,57 @@ body {
   border: 1px solid rgba(106, 183, 255, 0.05);
 }
 
+.reader-container {
+  background: #000;
+  scrollbar-gutter: stable both-edges;
+}
+
+.reader-container .epub-container,
+.reader-container .epub-view,
+.reader-container iframe {
+  background: #000 !important;
+  overflow-x: hidden !important;
+  width: 100% !important;
+  margin: 0 auto !important;
+}
+
+.reader-container.flip-next .epub-view,
+.reader-container.flip-next iframe {
+  animation: flipNext 0.32s ease;
+  transform-origin: right center;
+}
+
+.reader-container.flip-prev .epub-view,
+.reader-container.flip-prev iframe {
+  animation: flipPrev 0.32s ease;
+  transform-origin: left center;
+}
+
+@keyframes flipNext {
+  0% { transform: perspective(1200px) rotateY(0deg); }
+  100% { transform: perspective(1200px) rotateY(-12deg); }
+}
+
+@keyframes flipPrev {
+  0% { transform: perspective(1200px) rotateY(0deg); }
+  100% { transform: perspective(1200px) rotateY(12deg); }
+}
+
+.reader-container iframe {
+  width: 100% !important;
+  height: 100% !important;
+  border: 0;
+}
+
+.reader-container::-webkit-scrollbar-corner {
+  background: #000;
+}
+
+.reader-lastline-fade {
+  transition: opacity 0.6s ease;
+  opacity: 0;
+}
+
 .vertical-text {
   writing-mode: vertical-rl;
   text-orientation: mixed;

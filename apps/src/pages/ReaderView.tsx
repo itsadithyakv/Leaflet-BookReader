@@ -32,6 +32,47 @@ const flattenToc = (items: TocItem[]) => {
   return result;
 };
 
+const normalizeLabel = (label: string) => label.toLowerCase().replace(/\s+/g, " ").trim();
+
+const isFrontMatter = (label: string) => {
+  const text = normalizeLabel(label);
+  const blocked = [
+    "title page",
+    "copyright",
+    "contents",
+    "table of contents",
+    "dedication",
+    "acknowledgments",
+    "acknowledgements",
+    "foreword",
+    "introduction",
+    "preface",
+    "glossary",
+    "index",
+    "about the author",
+    "maps",
+    "map"
+  ];
+  return blocked.some((entry) => text === entry || text.startsWith(`${entry} `));
+};
+
+const isChapterLike = (label: string) => {
+  const text = normalizeLabel(label);
+  if (isFrontMatter(text)) {
+    return false;
+  }
+  if (/(chapter|book|section)\b/.test(text)) {
+    return true;
+  }
+  if (/^(prologue|epilogue)\b/.test(text)) {
+    return true;
+  }
+  if (/^[ivxlcdm]+\.?$/.test(text)) {
+    return true;
+  }
+  return false;
+};
+
 export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const renditionRef = useRef<any>(null);
@@ -39,13 +80,33 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   const relocateHandlerRef = useRef<((location: { start?: { percentage?: number } }) => void) | null>(null);
   const lastProgressRef = useRef(0);
   const lastProgressAtRef = useRef(0);
-  const nextChapterAtRef = useRef(0);
-  const scrollHandlerRef = useRef<((event: Event) => void) | null>(null);
+  const lastMarkerRef = useRef<string | null>(null);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         onClose();
+        return;
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        goNextSection();
+        return;
+      }
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        goPrevSection();
+        return;
+      }
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        const container = getScrollContainer();
+        if (!container) {
+          return;
+        }
+        const delta = Math.max(120, Math.round(container.clientHeight * 0.2));
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        smoothScrollBy(container, delta * direction);
+        event.preventDefault();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -64,6 +125,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
         fontSize?: number;
         sidebarOpen?: boolean;
         cfi?: string;
+        chapterPositions?: Record<string, string>;
       };
     } catch {
       return null;
@@ -79,9 +141,14 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   const sidebarRef = useRef(sidebarOpen);
   const [fontPanelOpen, setFontPanelOpen] = useState(false);
   const [toc, setToc] = useState<TocItem[]>([]);
+  const [tocIndexByHref, setTocIndexByHref] = useState<Record<string, number>>({});
+  const [tocLabelByHref, setTocLabelByHref] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const lastCfiRef = useRef<string | null>(initialPrefs?.cfi ?? null);
+  const chapterPositionsRef = useRef<Record<string, string>>(initialPrefs?.chapterPositions ?? {});
+  const [chapterIndex, setChapterIndex] = useState<number>(0);
+  const [chapterLabel, setChapterLabel] = useState<string>("Chapter");
 
   const coverSrc = useMemo(() => {
     if (!book.coverUrl) {
@@ -95,6 +162,154 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
 
   const [coverFallback, setCoverFallback] = useState<string | null>(null);
   const coverTriedRef = useRef(false);
+
+  const applyReaderInsets = () => {
+    const rendition = renditionRef.current;
+    if (!rendition?.themes) {
+      return;
+    }
+    rendition.themes.override("padding-left", "0px");
+    rendition.themes.override("padding-right", "0px");
+    rendition.themes.override("margin-left", "0px");
+    rendition.themes.override("margin-right", "0px");
+    rendition.themes.override("max-width", "100%");
+    rendition.themes.override("width", "100%");
+    rendition.themes.override("box-sizing", "border-box");
+  };
+
+  const triggerFlipAnimation = (direction: "next" | "prev") => {
+    const container = viewerRef.current;
+    if (!container) {
+      return;
+    }
+    container.classList.remove("flip-next", "flip-prev");
+    void container.offsetWidth;
+    container.classList.add(direction === "next" ? "flip-next" : "flip-prev");
+    window.setTimeout(() => {
+      container.classList.remove("flip-next", "flip-prev");
+    }, 320);
+  };
+
+  const updateLastReadMarker = (cfi: string) => {
+    const rendition = renditionRef.current;
+    if (!rendition?.getContents) {
+      return;
+    }
+    if (lastMarkerRef.current === cfi) {
+      return;
+    }
+    const contentsList = rendition.getContents();
+
+    for (const contents of contentsList) {
+      try {
+        const range = contents.range(cfi);
+        if (!range) {
+          continue;
+        }
+        const rects = range.getClientRects();
+        if (!rects || rects.length === 0) {
+          continue;
+        }
+        const rect = rects[0];
+        const doc = contents.document;
+        const win = contents.window;
+        if (!doc || !win) {
+          continue;
+        }
+        const existing = doc.getElementById("reader-lastline-marker");
+        if (existing) {
+          const bodyRect = doc.body.getBoundingClientRect();
+          const left = Math.max(6, bodyRect.left + win.scrollX + 2);
+          const top = rect.top + win.scrollY + rect.height / 2 - 5;
+          existing.dataset.targetLeft = `${left}`;
+          existing.dataset.targetTop = `${top}`;
+          window.setTimeout(() => {
+            if (existing.dataset.targetLeft && existing.dataset.targetTop) {
+              existing.style.left = `${existing.dataset.targetLeft}px`;
+              existing.style.top = `${existing.dataset.targetTop}px`;
+            }
+          }, 2000);
+          lastMarkerRef.current = cfi;
+          return;
+        }
+        const marker = doc.createElement("div");
+        marker.id = "reader-lastline-marker";
+        marker.style.position = "absolute";
+        marker.style.width = "10px";
+        marker.style.height = "10px";
+        marker.style.borderRadius = "9999px";
+        marker.style.background = "#6ab7ff";
+        marker.style.pointerEvents = "none";
+        marker.style.transition = "left 0.4s ease, top 0.4s ease";
+        const bodyRect = doc.body.getBoundingClientRect();
+        const left = Math.max(6, bodyRect.left + win.scrollX + 2);
+        const top = rect.top + win.scrollY + rect.height / 2 - 5;
+        marker.style.left = `${left}px`;
+        marker.style.top = `${top}px`;
+        doc.body.appendChild(marker);
+        lastMarkerRef.current = cfi;
+        break;
+      } catch {
+        // ignore range errors
+      }
+    }
+  };
+
+  const smoothScrollBy = (element: HTMLElement, delta: number) => {
+    const start = element.scrollTop;
+    const target = start + delta;
+    const duration = 220;
+    let startTime: number | null = null;
+
+    const tick = (time: number) => {
+      if (startTime === null) {
+        startTime = time;
+      }
+      const progress = Math.min(1, (time - startTime) / duration);
+      const eased = progress < 0.5
+        ? 2 * progress * progress
+        : -1 + (4 - 2 * progress) * progress;
+      element.scrollTop = start + (target - start) * eased;
+      if (progress < 1) {
+        requestAnimationFrame(tick);
+      }
+    };
+
+    requestAnimationFrame(tick);
+  };
+
+  const persistReaderState = (override?: Partial<{
+    cfi: string;
+    chapterPositions: Record<string, string>;
+  }>) => {
+    try {
+      localStorage.setItem(
+        storageKey,
+        JSON.stringify({
+          mode: modeRef.current,
+          fontSize: fontSizeRef.current,
+          sidebarOpen: sidebarRef.current,
+          cfi: override?.cfi ?? lastCfiRef.current ?? undefined,
+          chapterPositions: override?.chapterPositions ?? chapterPositionsRef.current
+        })
+      );
+    } catch {
+      // ignore
+    }
+  };
+
+  const displayChapter = (href: string) => {
+    const rendition = renditionRef.current;
+    if (!rendition) {
+      return;
+    }
+    const saved = chapterPositionsRef.current[href];
+    if (saved) {
+      void rendition.display(saved);
+      return;
+    }
+    void rendition.display(href);
+  };
 
   useEffect(() => {
     coverTriedRef.current = false;
@@ -176,31 +391,76 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
             color: "#ffffff",
             lineHeight: "1.8",
             fontFamily: "'Noto Serif', serif",
-            margin: "0",
-            padding: "0 1rem",
+            margin: "0 auto",
+            width: "100%",
+            padding: "0",
             maxWidth: "100%",
             overflowX: "hidden"
+          },
+          "*": {
+            boxSizing: "border-box",
+            maxWidth: "100%"
           },
           img: {
             maxWidth: "100%",
             height: "auto"
           },
+          svg: {
+            maxWidth: "100%",
+            height: "auto"
+          },
+          table: {
+            width: "100%",
+            maxWidth: "100%",
+            display: "block",
+            overflowX: "auto"
+          },
           pre: {
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word"
+          },
+          code: {
             whiteSpace: "pre-wrap",
             wordBreak: "break-word"
           },
           p: {
             margin: "0 0 1.4em 0"
+          },
+          ".reader-lastline": {
+            background: "transparent",
+            position: "relative",
+            display: "inline"
+          },
+          ".reader-lastline::before": {
+            content: "''",
+            position: "absolute",
+            left: "-12px",
+            top: "0.6em",
+            width: "6px",
+            height: "6px",
+            borderRadius: "9999px",
+            background: "#6ab7ff"
           }
         });
         rendition.themes.select("dudereader-dark");
         if (rendition.themes?.fontSize) {
           rendition.themes.fontSize(`${fontSize}px`);
         }
+        applyReaderInsets();
         rendition.flow(mode === "scroll" ? "scrolled-doc" : "paginated");
 
         const navigation = await epub.loaded.navigation;
-        setToc(flattenToc(navigation.toc));
+        const flatToc = flattenToc(navigation.toc);
+        setToc(flatToc);
+        const chapterToc = flatToc.filter((item) => isChapterLike(item.label));
+        const indexMap: Record<string, number> = {};
+        const labelMap: Record<string, string> = {};
+        chapterToc.forEach((item, idx) => {
+          indexMap[item.href] = idx;
+          labelMap[item.href] = item.label;
+        });
+        setTocIndexByHref(indexMap);
+        setTocLabelByHref(labelMap);
 
         const onRelocated = (location: any) => {
           const percentage = location?.start?.percentage ?? 0;
@@ -208,6 +468,13 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
 
           if (location?.start?.cfi) {
             lastCfiRef.current = location.start.cfi;
+            const href = location?.start?.href;
+            if (href) {
+              chapterPositionsRef.current = {
+                ...chapterPositionsRef.current,
+                [href]: location.start.cfi
+              };
+            }
             try {
               localStorage.setItem(
                 storageKey,
@@ -215,7 +482,8 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
                   mode: modeRef.current,
                   fontSize: fontSizeRef.current,
                   sidebarOpen: sidebarRef.current,
-                  cfi: location.start.cfi
+                  cfi: location.start.cfi,
+                  chapterPositions: chapterPositionsRef.current
                 })
               );
             } catch {
@@ -223,18 +491,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
             }
           }
 
-          if (modeRef.current === "scroll") {
-            const end = location?.end;
-            const endPage = end?.displayed?.page ?? 0;
-            const endTotal = end?.displayed?.total ?? 0;
-            const endIsFinalPage = endTotal > 0 && endPage >= endTotal;
-            if (endIsFinalPage && now - nextChapterAtRef.current > 1200) {
-              nextChapterAtRef.current = now;
-              goNextSection();
-            } else {
-              advanceIfNearEnd();
-            }
-          }
+          // no auto-advance in scroll mode
 
           const shouldUpdateProgress =
             Math.abs(percentage - lastProgressRef.current) >= 0.005 ||
@@ -245,6 +502,18 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
             lastProgressAtRef.current = now;
             void bookService.updateProgress(book.id, percentage);
           }
+
+          const href = location?.start?.href;
+          if (href && indexMap[href] !== undefined) {
+            setChapterIndex(indexMap[href]);
+            setChapterLabel(labelMap[href] ?? "Chapter");
+          }
+
+          const markerCfi = location?.end?.cfi ?? location?.start?.cfi;
+          if (markerCfi) {
+            updateLastReadMarker(markerCfi);
+          }
+
         };
         relocateHandlerRef.current = onRelocated;
         rendition.on("relocated", onRelocated);
@@ -254,6 +523,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
         } else {
           await rendition.display();
         }
+        applyReaderInsets();
         setLoading(false);
       } catch (error) {
         setLoadError(error instanceof Error ? error.message : "Failed to load book.");
@@ -266,6 +536,14 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     return () => {
       if (renditionRef.current && relocateHandlerRef.current) {
         renditionRef.current.off("relocated", relocateHandlerRef.current);
+      }
+      if (lastMarkerRef.current && renditionRef.current?.getContents) {
+        const contentsList = renditionRef.current.getContents();
+        contentsList.forEach((contents: any) => {
+          const doc = contents?.document;
+          doc?.getElementById("reader-lastline-marker")?.remove();
+        });
+        lastMarkerRef.current = null;
       }
       if (renditionRef.current) {
         renditionRef.current.destroy();
@@ -284,6 +562,8 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     }
     renditionRef.current.flow(mode === "scroll" ? "scrolled-doc" : "paginated");
     void renditionRef.current.display();
+    applyReaderInsets();
+    persistReaderState();
   }, [mode]);
 
   const getScrollContainer = () => {
@@ -323,109 +603,46 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     if (Array.isArray(spineItems) && typeof index === "number") {
       const next = spineItems[index + 1];
       if (next?.href) {
-        void rendition.display(next.href);
+        if (modeRef.current === "flip") {
+          triggerFlipAnimation("next");
+        }
+        displayChapter(next.href);
         return;
       }
+    }
+    if (modeRef.current === "flip") {
+      triggerFlipAnimation("next");
     }
     void rendition?.next();
   };
 
-  const advanceIfNearEnd = () => {
-    if (!renditionRef.current || modeRef.current !== "scroll") {
-      return;
-    }
-    const now = Date.now();
-    if (now - nextChapterAtRef.current < 1200) {
-      return;
-    }
-
-    const container = getScrollContainer();
-    if (!container) {
-      return;
-    }
-
-    const scrollTop = container.scrollTop;
-    const clientHeight = container.clientHeight;
-    const scrollHeight = container.scrollHeight;
-    if (scrollHeight > 0 && scrollTop + clientHeight >= scrollHeight - 8) {
-      nextChapterAtRef.current = now;
-      goNextSection();
-      return;
-    }
-
-    const iframe = viewerRef.current?.querySelector("iframe");
-    const win = iframe?.contentWindow;
-    const doc = iframe?.contentDocument;
-    if (win && doc) {
-      const iframeScrollTop = win.scrollY ?? doc.documentElement.scrollTop ?? doc.body.scrollTop ?? 0;
-      const iframeClient = doc.documentElement.clientHeight ?? win.innerHeight ?? 0;
-      const iframeHeight = doc.documentElement.scrollHeight ?? doc.body.scrollHeight ?? 0;
-      if (iframeHeight > 0 && iframeScrollTop + iframeClient >= iframeHeight - 8) {
-        nextChapterAtRef.current = now;
-        goNextSection();
+  const goPrevSection = () => {
+    const rendition = renditionRef.current;
+    const epub = bookRef.current as any;
+    const location = rendition?.location;
+    const index = location?.start?.index ?? location?.end?.index;
+    const spineItems = epub?.spine?.items;
+    if (Array.isArray(spineItems) && typeof index === "number") {
+      const prev = spineItems[index - 1];
+      if (prev?.href) {
+        if (modeRef.current === "flip") {
+          triggerFlipAnimation("prev");
+        }
+        displayChapter(prev.href);
+        return;
       }
     }
+    if (modeRef.current === "flip") {
+      triggerFlipAnimation("prev");
+    }
+    void rendition?.prev();
   };
 
-  useEffect(() => {
-    if (!renditionRef.current || mode !== "scroll") {
-      return;
-    }
-
-    const handler = () => {
-      advanceIfNearEnd();
-    };
-
-    const attachIframe = () => {
-      const iframe = viewerRef.current?.querySelector("iframe");
-      const win = iframe?.contentWindow;
-      if (win) {
-        win.addEventListener("scroll", handler, { passive: true });
-      }
-      return win;
-    };
-
-    const scrollContainer = getScrollContainer();
-    if (scrollContainer) {
-      scrollContainer.addEventListener("scroll", handler, { passive: true });
-    }
-    let win = attachIframe();
-
-    const onRendered = () => {
-      if (win) {
-        win.removeEventListener("scroll", handler);
-      }
-      win = attachIframe();
-      advanceIfNearEnd();
-    };
-
-    const manager = renditionRef.current?.manager as any;
-    manager?.on?.("scrolled", handler);
-
-    renditionRef.current.on("rendered", onRendered);
-    return () => {
-      if (scrollContainer) {
-        scrollContainer.removeEventListener("scroll", handler);
-      }
-      if (win) {
-        win.removeEventListener("scroll", handler);
-      }
-      manager?.off?.("scrolled", handler);
-      renditionRef.current.off("rendered", onRendered);
-    };
-  }, [mode]);
+  // no auto-advance listeners in scroll mode
 
   useEffect(() => {
     try {
-      localStorage.setItem(
-        storageKey,
-        JSON.stringify({
-          mode,
-          fontSize,
-          sidebarOpen,
-          cfi: lastCfiRef.current ?? undefined
-        })
-      );
+      persistReaderState();
     } catch {
       // ignore
     }
@@ -436,7 +653,14 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
       return;
     }
     renditionRef.current.themes.fontSize(`${fontSize}px`);
+    applyReaderInsets();
+    persistReaderState();
   }, [fontSize]);
+
+  useEffect(() => {
+    applyReaderInsets();
+    persistReaderState();
+  }, [sidebarOpen]);
 
   useEffect(() => {
     modeRef.current = mode;
@@ -571,7 +795,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
                 key={`${item.href}-${item.label}`}
                 type="button"
                 className="mb-2 w-full rounded-lg px-3 py-2 text-left text-sm text-white/70 transition hover:bg-white/10 hover:text-white"
-                onClick={() => renditionRef.current?.display(item.href)}
+                onClick={() => displayChapter(item.href)}
               >
                 {item.label}
               </button>
@@ -594,28 +818,31 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
               )}
               <div
                 ref={viewerRef}
-                className={`h-full w-full overflow-y-auto overflow-x-hidden pb-16 ${
-                  sidebarOpen ? "px-6 md:px-12" : "px-4 md:px-16"
+                className={`reader-container h-full w-full overflow-y-auto overflow-x-hidden overscroll-x-none pb-20 ${
+                  sidebarOpen ? "px-4 md:px-8" : "px-2 md:px-4"
                 }`}
               />
-              {mode === "flip" && (
-                <div className="pointer-events-none absolute bottom-6 left-1/2 flex -translate-x-1/2 items-center gap-4 rounded-full border border-white/10 bg-black/60 px-4 py-2 text-xs uppercase tracking-widest text-white/60">
+              <div className="pointer-events-none absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center">
+                <div className="pointer-events-auto flex items-center gap-4 rounded-full border border-white/10 bg-black/60 px-4 py-2 text-xs uppercase tracking-widest text-white/60">
                   <button
                     type="button"
-                    className="pointer-events-auto rounded-full border border-white/20 px-3 py-1 text-white/80 transition hover:text-white"
-                    onClick={() => renditionRef.current?.prev()}
+                    className="rounded-full border border-white/20 px-3 py-1 text-white/80 transition hover:text-white"
+                    onClick={() => goPrevSection()}
                   >
-                    Prev
+                    <span className="material-symbols-outlined text-base">chevron_left</span>
                   </button>
+                  <span className="text-[10px] text-white/60">
+                    {chapterLabel} {chapterIndex + 1}
+                  </span>
                   <button
                     type="button"
-                    className="pointer-events-auto rounded-full border border-white/20 px-3 py-1 text-white/80 transition hover:text-white"
-                    onClick={() => renditionRef.current?.next()}
+                    className="rounded-full border border-white/20 px-3 py-1 text-white/80 transition hover:text-white"
+                    onClick={() => goNextSection()}
                   >
-                    Next
+                    <span className="material-symbols-outlined text-base">chevron_right</span>
                   </button>
                 </div>
-              )}
+              </div>
             </div>
           )}
         </main>
