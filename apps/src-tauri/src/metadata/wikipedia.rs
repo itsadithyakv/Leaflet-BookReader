@@ -3,6 +3,7 @@ use reqwest::Client;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct OpenSearchResult(
   String,
   Vec<String>,

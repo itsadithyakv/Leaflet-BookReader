@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useLibraryStore } from "../store/libraryStore";
 
 export type StreakPageProps = {
-  onNavigate: (tab: "library" | "collections" | "streak" | "settings") => void;
+  onNavigate: (tab: "library" | "collections" | "analytics" | "settings") => void;
 };
 
 const formatDate = (value: string | null) => {

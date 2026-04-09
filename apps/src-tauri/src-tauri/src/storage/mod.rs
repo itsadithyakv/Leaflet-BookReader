@@ -5,6 +5,9 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::process::Command;
+use tauri::{AppHandle, Manager};
+use regex::Regex;
 use zip::ZipArchive;
 
 pub struct BasicMetadata {
@@ -14,7 +17,7 @@ pub struct BasicMetadata {
 
 pub fn app_data_dir() -> Result<PathBuf> {
   let base = dirs::data_dir().ok_or_else(|| anyhow::anyhow!("missing app data dir"))?;
-  Ok(base.join("dudereader"))
+  Ok(base.join("leaflet"))
 }
 
 pub fn books_dir() -> Result<PathBuf> {
@@ -48,6 +51,88 @@ pub fn store_book_file(source: &Path, hash: &str) -> Result<PathBuf> {
     fs::copy(source, &dest)?;
   }
   Ok(dest)
+}
+
+fn converter_filename() -> &'static str {
+  #[cfg(target_os = "windows")]
+  {
+    "ebook-convert.exe"
+  }
+  #[cfg(not(target_os = "windows"))]
+  {
+    "ebook-convert"
+  }
+}
+
+fn converter_candidates(app: Option<&AppHandle>) -> Vec<PathBuf> {
+  let mut candidates = Vec::new();
+  if let Some(handle) = app {
+    if let Ok(resource_dir) = handle.path().resource_dir() {
+      candidates.push(
+        resource_dir
+          .join("resources")
+          .join("converters")
+          .join("calibre-portable")
+          .join("Calibre")
+          .join(converter_filename())
+      );
+    }
+    if let Ok(app_data) = handle.path().app_data_dir() {
+      candidates.push(
+        app_data
+          .join("converters")
+          .join("calibre-portable")
+          .join("Calibre")
+          .join(converter_filename())
+      );
+    }
+  }
+  candidates
+}
+
+pub fn converter_installed(app: &AppHandle) -> bool {
+  converter_candidates(Some(app)).iter().any(|path| path.exists())
+}
+
+pub async fn install_converter(app: &AppHandle) -> Result<PathBuf> {
+  if let Some(existing) = converter_candidates(Some(app)).into_iter().find(|path| path.exists()) {
+    return Ok(existing);
+  }
+
+  let install_root = app
+    .path()
+    .app_data_dir()
+    .map_err(|_| anyhow::anyhow!("missing app data dir"))?
+    .join("converters")
+    .join("calibre-portable");
+  fs::create_dir_all(&install_root)?;
+
+  let page = reqwest::get("https://calibre-ebook.com/download_portable")
+    .await?
+    .text()
+    .await?;
+  let version_re = Regex::new(r"Version:\\s*([0-9.]+)").unwrap();
+  let version = version_re
+    .captures(&page)
+    .and_then(|caps| caps.get(1))
+    .map(|m| m.as_str().to_string())
+    .ok_or_else(|| anyhow::anyhow!("unable to detect calibre version"))?;
+
+  let installer_name = format!("calibre-portable-installer-{}.exe", version);
+  let url = format!("https://download.calibre-ebook.com/{}/{}", version, installer_name);
+  let installer_path = install_root.join(&installer_name);
+  let bytes = reqwest::get(&url).await?.bytes().await?;
+  fs::write(&installer_path, bytes)?;
+
+  let status = Command::new(&installer_path).arg(&install_root).status();
+  let _ = fs::remove_file(&installer_path);
+  if status.map(|s| s.success()).unwrap_or(false) {
+    let converter_path = install_root.join("Calibre").join(converter_filename());
+    if converter_path.exists() {
+      return Ok(converter_path);
+    }
+  }
+  Err(anyhow::anyhow!("converter installation failed"))
 }
 
 pub async fn store_cover(url: &str, hash: &str) -> Result<PathBuf> {

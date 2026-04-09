@@ -3,7 +3,7 @@ use crate::metadata::open_library;
 use crate::storage;
 use crate::sync::drive;
 use crate::AppState;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 #[tauri::command]
 pub async fn import_books(paths: Vec<String>, state: State<'_, AppState>) -> Result<Vec<BookRecord>, String> {
@@ -138,5 +138,18 @@ pub async fn drive_auth_wait(state: State<'_, AppState>) -> Result<(), String> {
 pub async fn drive_sync(state: State<'_, AppState>) -> Result<(), String> {
   drive::drive_sync(&state.db)
     .await
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn converter_status(app: AppHandle) -> Result<bool, String> {
+  Ok(storage::converter_installed(&app))
+}
+
+#[tauri::command]
+pub async fn install_converter(app: AppHandle) -> Result<bool, String> {
+  storage::install_converter(&app)
+    .await
+    .map(|_| true)
     .map_err(|e| e.to_string())
 }

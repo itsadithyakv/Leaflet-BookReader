@@ -14,16 +14,25 @@ export const BookCard = ({ book, onRefresh, onOpen }: Props) => {
   const triedFallback = useRef(false);
 
   const coverSrc = book.coverUrl
-    ? isTauri()
-      ? convertFileSrc(book.coverUrl)
-      : book.coverUrl.startsWith("http")
-        ? book.coverUrl
-        : null
+    ? !isTauri() && book.coverUrl.startsWith("http")
+      ? book.coverUrl
+      : null
     : null;
 
   useEffect(() => {
     triedFallback.current = false;
     setFallbackSrc(null);
+  }, [book.id, book.coverUrl]);
+
+  useEffect(() => {
+    if (!isTauri() || !book.coverUrl || book.coverUrl.startsWith("http")) {
+      return;
+    }
+    void bookService.coverData(book.id).then((data) => {
+      if (data) {
+        setFallbackSrc(data);
+      }
+    });
   }, [book.id, book.coverUrl]);
 
   const handleCoverError = () => {
@@ -45,20 +54,26 @@ export const BookCard = ({ book, onRefresh, onOpen }: Props) => {
   return (
     <article
       onClick={() => onOpen(book)}
-      className="group flex h-full w-full cursor-pointer flex-col text-left"
+      className="group flex h-full w-full cursor-pointer flex-col text-left transition-transform duration-300 hover:-translate-y-2"
     >
-      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-xl shadow-2xl transition-transform group-hover:-translate-y-2">
+      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-xl border border-white/5 shadow-[0_20px_40px_rgba(0,0,0,0.55)] transition-all duration-300 group-hover:shadow-[0_28px_60px_rgba(0,0,0,0.65)] group-hover:border-primary/30 group-hover:ring-1 group-hover:ring-primary/40">
         {resolvedCover ? (
-          <img src={resolvedCover} alt={book.title} className="h-full w-full object-cover" onError={handleCoverError} />
+          <img
+            src={resolvedCover}
+            alt={book.title}
+            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
+            onError={handleCoverError}
+          />
         ) : (
           <div className="flex h-full items-center justify-center bg-surface-container-high text-xs text-on-surface-variant">
             No cover yet
           </div>
         )}
-        <div className="absolute inset-0 flex items-end bg-black/70 p-4 opacity-0 transition-opacity group-hover:opacity-100">
+        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/25 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+        <div className="absolute inset-0 flex items-end p-4 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
           <button
             type="button"
-            className="w-full rounded-lg bg-white/20 py-2 text-sm font-bold text-white backdrop-blur-md"
+            className="w-full rounded-lg bg-white/20 py-2 text-sm font-bold text-white shadow-[0_0_14px_rgba(101,168,63,0.35)] backdrop-blur-md transition hover:bg-white/30"
             onClick={(event) => {
               event.stopPropagation();
               onOpen(book);
@@ -75,7 +90,7 @@ export const BookCard = ({ book, onRefresh, onOpen }: Props) => {
       <div>
         <div className="h-1.5 w-full rounded-full bg-surface-container-highest">
           <div
-            className={`h-1.5 rounded-full ${isFinished ? "bg-tertiary" : "bg-primary"} shadow-[0_0_8px_rgba(106,183,255,0.6)]`}
+            className={`h-1.5 rounded-full ${isFinished ? "bg-tertiary" : "bg-primary"} shadow-[0_0_8px_rgba(101,168,63,0.6)]`}
             style={{ width: `${progressPercent}%` }}
           />
         </div>

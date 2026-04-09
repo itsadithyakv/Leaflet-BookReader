@@ -13,8 +13,8 @@
       "icons/icon.ico"
     ]
   },
-  "productName": "DudeReader",
+  "productName": "Leaflet",
   "version": "0.1.0",
-  "identifier": "com.dudereader.app",
+  "identifier": "com.leaflet.app",
   "plugins": {}
 }

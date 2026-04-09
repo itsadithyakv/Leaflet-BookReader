@@ -21,17 +21,22 @@ struct SearchDoc {
   author_name: Option<Vec<String>>,
   subject: Option<Vec<String>>,
   cover_i: Option<i64>,
+  #[allow(dead_code)]
   key: Option<String>
 }
 
-pub async fn fetch_metadata(title: &str, author: Option<&str>) -> Result<Option<OpenLibraryMetadata>> {
+pub async fn fetch_metadata(title: &str, author: Option<&str>, isbn: Option<&str>) -> Result<Option<OpenLibraryMetadata>> {
   let client = Client::new();
-  let mut query = format!("title:{}", title);
-  if let Some(author) = author {
-    query.push_str(" author:");
-    query.push_str(author);
-  }
-  let url = format!("https://openlibrary.org/search.json?q={}", urlencoding::encode(&query));
+  let url = if let Some(isbn) = isbn {
+    format!("https://openlibrary.org/search.json?isbn={}", urlencoding::encode(isbn))
+  } else {
+    let mut query = format!("title:{}", title);
+    if let Some(author) = author {
+      query.push_str(" author:");
+      query.push_str(author);
+    }
+    format!("https://openlibrary.org/search.json?q={}", urlencoding::encode(&query))
+  };
 
   let response: SearchResponse = client.get(url).send().await?.json().await?;
   let doc = match response.docs.first() {

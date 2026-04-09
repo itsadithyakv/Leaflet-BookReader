@@ -76,11 +76,11 @@ pub fn auth_start(state: &mut DriveState) -> Result<AuthStart> {
       if stream.read(&mut buffer).is_ok() {
         if let Some(code) = parse_code_from_request(&buffer, &csrf_secret) {
           let _ = tx.send(code);
-          let _ = respond(&mut stream, "DudeReader authentication complete. You can close this tab.");
+          let _ = respond(&mut stream, "Leaflet authentication complete. You can close this tab.");
           return;
         }
       }
-      let _ = respond(&mut stream, "DudeReader authentication failed. Please retry.");
+      let _ = respond(&mut stream, "Leaflet authentication failed. Please retry.");
     }
   });
 
@@ -127,7 +127,7 @@ pub async fn auth_wait(pending: PendingAuth) -> Result<AuthTokens> {
 pub async fn drive_sync(db_mutex: &std::sync::Mutex<Database>) -> Result<()> {
   let access_token = ensure_access_token(db_mutex).await?;
   let client = reqwest::Client::new();
-  let root_id = ensure_folder(&client, &access_token, "DudeReader", "root").await?;
+  let root_id = ensure_folder(&client, &access_token, "Leaflet", "root").await?;
   let books_folder_id = ensure_folder(&client, &access_token, "books", &root_id).await?;
 
   let local_books = {

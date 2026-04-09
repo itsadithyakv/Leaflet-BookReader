@@ -1,5 +1,5 @@
 [package]
-name = "dudereader"
+name = "leaflet"
 version = "0.1.0"
 edition = "2021"
 build = "build.rs"
@@ -22,6 +22,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 urlencoding = "2.1"
 zip = "0.6"
 dirs = "4"
+regex = "1.10"
 
 [dependencies.tauri]
 version = "2.10.3"

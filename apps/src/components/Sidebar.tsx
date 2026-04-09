@@ -1,10 +1,7 @@
-import Logo from "../assets/DudeReadlogoNobg.png";
-
 const navItems = [
   { label: "Library", icon: "auto_stories" },
   { label: "Collections", icon: "collections_bookmark" },
-  { label: "Streak", icon: "local_fire_department" },
-  { label: "Settings", icon: "settings" }
+  { label: "Analytics", icon: "insights" }
 ];
 
 type SidebarProps = {
@@ -16,19 +13,7 @@ type SidebarProps = {
 
 export const Sidebar = ({ activeItem, onNavigate, onStartReading, startDisabled }: SidebarProps) => {
   return (
-    <aside className="hidden h-full w-64 flex-col border-r border-primary/10 bg-surface-container-low px-4 py-8 shadow-[10px_0_40px_rgba(0,0,0,0.5)] md:flex">
-      <div className="px-2 pb-8">
-        <div className="flex items-center gap-3">
-          <img src={Logo} alt="DudeReads logo" className="h-10 w-10" />
-          <div>
-            <p className="text-lg font-headline font-semibold text-on-surface">The Curator</p>
-            <p className="text-xs uppercase tracking-[0.2em] text-on-surface-variant/70">
-              Moonlit Reader
-            </p>
-          </div>
-        </div>
-      </div>
-
+    <aside className="hidden h-full w-64 flex-col border-r border-primary/10 bg-surface-container-low px-4 py-4 shadow-[10px_0_40px_rgba(0,0,0,0.5)] md:flex">
       <nav className="flex-1 space-y-2 px-2 text-sm">
         {navItems.map((item) => (
           <button
@@ -46,6 +31,19 @@ export const Sidebar = ({ activeItem, onNavigate, onStartReading, startDisabled 
           </button>
         ))}
       </nav>
+
+      <button
+        className={`mx-2 mb-4 flex w-auto items-center gap-3 rounded-lg px-4 py-3 text-left text-sm transition ${
+          activeItem === "Settings"
+            ? "bg-surface-container-high text-primary"
+            : "text-on-surface-variant hover:bg-surface-container-high hover:text-primary"
+        }`}
+        type="button"
+        onClick={() => onNavigate("Settings")}
+      >
+        <span className="material-symbols-outlined">settings</span>
+        <span className={activeItem === "Settings" ? "font-semibold" : ""}>Settings</span>
+      </button>
 
       <div className="mt-auto px-2">
         <button
