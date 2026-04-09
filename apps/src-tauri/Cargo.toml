@@ -24,14 +24,14 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 urlencoding = "2.1"
 zip = "0.6"
 dirs = "4"
-tauri-plugin-dialog = "2.6.0"
+tauri-plugin-dialog = "2.5.6"
 dotenvy = "0.15"
 base64 = "0.22"
 regex = "1.10"
 image = "0.25"
 
 [dependencies.tauri]
-version = "2.10.3"
+version = "2.5.6"
 features = ["protocol-asset"]
 
 [features]
