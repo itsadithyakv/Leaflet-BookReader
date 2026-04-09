@@ -24,7 +24,9 @@ fn main() {
       commands::update_progress,
       commands::drive_auth_start,
       commands::drive_auth_wait,
-      commands::drive_sync
+      commands::drive_sync,
+      commands::converter_status,
+      commands::install_converter
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

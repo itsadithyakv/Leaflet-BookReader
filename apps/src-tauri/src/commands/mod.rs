@@ -1,14 +1,19 @@
 use crate::db::{self, BookRecord};
-use crate::metadata::{open_library, wikipedia};
+use crate::metadata::{normalize, open_library, wikipedia};
 use crate::storage;
 use crate::sync::drive;
 use crate::AppState;
 use base64::Engine;
 use serde::Serialize;
-use tauri::State;
+use std::fs;
+use tauri::{AppHandle, State};
 
 #[tauri::command]
-pub async fn import_books(paths: Vec<String>, state: State<'_, AppState>) -> Result<Vec<BookRecord>, String> {
+pub async fn import_books(
+  paths: Vec<String>,
+  state: State<'_, AppState>,
+  app: AppHandle
+) -> Result<Vec<BookRecord>, String> {
   let mut imported = Vec::new();
 
   for path in paths {
@@ -23,7 +28,10 @@ pub async fn import_books(paths: Vec<String>, state: State<'_, AppState>) -> Res
     }
 
     let stored = storage::store_book_file(source, &hash).map_err(|e| e.to_string())?;
-    let mut basic = storage::extract_basic_metadata(source).map_err(|e| e.to_string())?;
+    let converted =
+      storage::ensure_epub_version(&stored, &hash, Some(&app)).map_err(|e| e.to_string())?;
+    let metadata_source = converted.as_deref().unwrap_or(source);
+    let mut basic = storage::extract_basic_metadata(metadata_source).map_err(|e| e.to_string())?;
 
     let filename = source
       .file_stem()
@@ -36,7 +44,15 @@ pub async fn import_books(paths: Vec<String>, state: State<'_, AppState>) -> Res
     let mut genres = Vec::new();
     let mut cover_url = None;
 
-    if let Ok(Some(meta)) = open_library::fetch_metadata(&title, author.as_deref()).await {
+    let normalized = normalize::normalize_query(&title, author.as_deref());
+    if normalize::is_noisy_title(&title) && !normalized.title.trim().is_empty() {
+      title = normalized.title.clone();
+    }
+    if author.is_none() {
+      author = normalized.author.clone();
+    }
+
+    if let Ok(Some(meta)) = open_library::fetch_metadata(&normalized.title, normalized.author.as_deref(), normalized.isbn.as_deref()).await {
       title = meta.title;
       author = meta.author;
       genres = meta.subjects;
@@ -47,8 +63,12 @@ pub async fn import_books(paths: Vec<String>, state: State<'_, AppState>) -> Res
       }
     }
 
+    if author.is_none() {
+      author = normalized.author.clone();
+    }
+
     if cover_url.is_none() {
-      if let Ok(Some(url)) = wikipedia::fetch_cover(&title, author.as_deref()).await {
+      if let Ok(Some(url)) = wikipedia::fetch_cover(&normalized.title, normalized.author.as_deref()).await {
         if let Ok(path) = storage::store_cover(&url, &hash).await {
           cover_url = Some(path.to_string_lossy().to_string());
         }
@@ -94,7 +114,15 @@ pub async fn refresh_metadata(book_id: String, state: State<'_, AppState>) -> Re
       .ok_or_else(|| "Book not found".to_string())?
   };
 
-  if let Ok(Some(meta)) = open_library::fetch_metadata(&book.title, book.author.as_deref()).await {
+  let normalized = normalize::normalize_query(&book.title, book.author.as_deref());
+  if normalize::is_noisy_title(&book.title) && !normalized.title.trim().is_empty() {
+    book.title = normalized.title.clone();
+  }
+  if book.author.is_none() {
+    book.author = normalized.author.clone();
+  }
+
+  if let Ok(Some(meta)) = open_library::fetch_metadata(&normalized.title, normalized.author.as_deref(), normalized.isbn.as_deref()).await {
     book.title = meta.title;
     book.author = meta.author;
     book.genres = meta.subjects;
@@ -105,8 +133,12 @@ pub async fn refresh_metadata(book_id: String, state: State<'_, AppState>) -> Re
     }
   }
 
+  if book.author.is_none() {
+    book.author = normalized.author.clone();
+  }
+
   if book.cover_url.is_none() {
-    if let Ok(Some(url)) = wikipedia::fetch_cover(&book.title, book.author.as_deref()).await {
+    if let Ok(Some(url)) = wikipedia::fetch_cover(&normalized.title, normalized.author.as_deref()).await {
       if let Ok(path) = storage::store_cover(&url, &book.file_hash).await {
         book.cover_url = Some(path.to_string_lossy().to_string());
       }
@@ -134,7 +166,14 @@ pub async fn fetch_cover(book_id: String, state: State<'_, AppState>) -> Result<
     return Ok(Some(book));
   }
 
-  if let Ok(Some(meta)) = open_library::fetch_metadata(&book.title, book.author.as_deref()).await {
+  let normalized = normalize::normalize_query(&book.title, book.author.as_deref());
+  if normalize::is_noisy_title(&book.title) && !normalized.title.trim().is_empty() {
+    book.title = normalized.title.clone();
+  }
+  if book.author.is_none() {
+    book.author = normalized.author.clone();
+  }
+  if let Ok(Some(meta)) = open_library::fetch_metadata(&normalized.title, normalized.author.as_deref(), normalized.isbn.as_deref()).await {
     if let Some(url) = meta.cover_url {
       if let Ok(path) = storage::store_cover(&url, &book.file_hash).await {
         book.cover_url = Some(path.to_string_lossy().to_string());
@@ -146,7 +185,7 @@ pub async fn fetch_cover(book_id: String, state: State<'_, AppState>) -> Result<
     }
   }
 
-  if let Ok(Some(url)) = wikipedia::fetch_cover(&book.title, book.author.as_deref()).await {
+  if let Ok(Some(url)) = wikipedia::fetch_cover(&normalized.title, normalized.author.as_deref()).await {
     if let Ok(path) = storage::store_cover(&url, &book.file_hash).await {
       book.cover_url = Some(path.to_string_lossy().to_string());
       let db = state.db.lock().unwrap();
@@ -179,7 +218,11 @@ pub fn cover_data(book_id: String, state: State<'_, AppState>) -> Result<Option<
 }
 
 #[tauri::command]
-pub fn read_book_bytes(book_id: String, state: State<'_, AppState>) -> Result<Option<String>, String> {
+pub fn read_book_bytes(
+  book_id: String,
+  state: State<'_, AppState>,
+  app: AppHandle
+) -> Result<Option<String>, String> {
   let book = {
     let db = state.db.lock().unwrap();
     db.find_by_id(&book_id)
@@ -187,7 +230,31 @@ pub fn read_book_bytes(book_id: String, state: State<'_, AppState>) -> Result<Op
       .ok_or_else(|| "Book not found".to_string())?
   };
 
-  let bytes = std::fs::read(&book.local_path).map_err(|e| e.to_string())?;
+  let source_path = std::path::Path::new(&book.local_path);
+  let ext = source_path
+    .extension()
+    .and_then(|v| v.to_str())
+    .unwrap_or("")
+    .to_lowercase();
+
+  let readable_path = if ext == "epub" {
+    source_path.to_path_buf()
+  } else if ext == "mobi" || ext == "azw3" {
+    match storage::ensure_epub_version(source_path, &book.file_hash, Some(&app))
+      .map_err(|e| e.to_string())? {
+      Some(path) => path,
+      None => {
+        return Err(
+          "Converter not installed or conversion failed. Install it in Settings to open this file."
+            .to_string()
+        );
+      }
+    }
+  } else {
+    return Err("This reader supports EPUB files only.".to_string());
+  };
+
+  let bytes = std::fs::read(&readable_path).map_err(|e| e.to_string())?;
   let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
   Ok(Some(encoded))
 }
@@ -252,4 +319,36 @@ pub async fn drive_sync(state: State<'_, AppState>) -> Result<(), String> {
   drive::drive_sync(&state.db)
     .await
     .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn converter_status(app: AppHandle) -> Result<bool, String> {
+  Ok(storage::converter_installed(&app))
+}
+
+#[tauri::command]
+pub async fn install_converter(app: AppHandle) -> Result<bool, String> {
+  storage::install_converter(&app)
+    .await
+    .map(|_| true)
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn clear_all_data(state: State<'_, AppState>) -> Result<(), String> {
+  {
+    let db = state.db.lock().unwrap();
+    db.clear_all().map_err(|e| e.to_string())?;
+  }
+
+  if let Ok(dir) = storage::books_dir() {
+    let _ = fs::remove_dir_all(&dir);
+    let _ = fs::create_dir_all(&dir);
+  }
+  if let Ok(dir) = storage::covers_dir() {
+    let _ = fs::remove_dir_all(&dir);
+    let _ = fs::create_dir_all(&dir);
+  }
+
+  Ok(())
 }

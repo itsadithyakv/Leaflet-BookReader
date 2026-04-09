@@ -71,5 +71,9 @@ export const bookService = {
       progress,
       lastOpened: new Date().toISOString()
     });
+  },
+  async clearAllData(): Promise<void> {
+    requireDesktop();
+    await invoke("clear_all_data");
   }
 };

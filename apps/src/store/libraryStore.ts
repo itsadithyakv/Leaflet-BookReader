@@ -17,9 +17,13 @@ type LibraryState = {
   books: Book[];
   filters: BookFilter;
   loading: boolean;
+  metadataRefreshing: boolean;
+  metadataTotal: number;
+  metadataDone: number;
   syncStatus: DriveSyncStatus;
   stats: ReadingStats;
   driveConnected: boolean;
+  importing: boolean;
   loadBooks: () => Promise<void>;
   loadStats: () => Promise<void>;
   loadDriveStatus: () => Promise<void>;
@@ -31,6 +35,9 @@ type LibraryState = {
   setFilter: (partial: Partial<BookFilter>) => void;
   startDriveAuth: () => Promise<void>;
   syncNow: () => Promise<void>;
+  refreshMissingMetadata: (books?: Book[]) => Promise<void>;
+  updateBookProgress: (id: string, progress: number) => void;
+  resetAll: () => void;
 };
 
 let syncTimer: ReturnType<typeof setTimeout> | null = null;
@@ -39,6 +46,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   books: [],
   filters: defaultFilters,
   loading: false,
+  metadataRefreshing: false,
+  metadataTotal: 0,
+  metadataDone: 0,
   syncStatus: "idle",
   stats: {
     streakDays: 0,
@@ -47,10 +57,12 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     daysLast7: 0
   },
   driveConnected: false,
+  importing: false,
   async loadBooks() {
     set({ loading: true });
     const books = await bookService.list();
     set({ books, loading: false });
+    void get().refreshMissingMetadata(books);
   },
   async loadStats() {
     try {
@@ -76,22 +88,32 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     }
   },
   async importBooks() {
-    const imported = await bookService.importFromDialog();
-    if (imported.length === 0) {
-      return;
+    set({ importing: true });
+    try {
+      const imported = await bookService.importFromDialog();
+      if (imported.length === 0) {
+        return;
+      }
+      const books = [...get().books, ...imported];
+      set({ books });
+      scheduleSync(set);
+    } finally {
+      set({ importing: false });
     }
-    const books = [...get().books, ...imported];
-    set({ books });
-    scheduleSync(set);
   },
   async importPaths(paths) {
-    const imported = await bookService.importPaths(paths);
-    if (imported.length === 0) {
-      return;
+    set({ importing: true });
+    try {
+      const imported = await bookService.importPaths(paths);
+      if (imported.length === 0) {
+        return;
+      }
+      const books = [...get().books, ...imported];
+      set({ books });
+      scheduleSync(set);
+    } finally {
+      set({ importing: false });
     }
-    const books = [...get().books, ...imported];
-    set({ books });
-    scheduleSync(set);
   },
   async refreshMetadata(id: string) {
     const updated = await bookService.refreshMetadata(id);
@@ -136,6 +158,61 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     } catch {
       set({ syncStatus: "error" });
     }
+  },
+  async refreshMissingMetadata(seed) {
+    const all = seed ?? get().books;
+    const needsRefresh = all.filter((book) => {
+      const missingAuthor = !book.author || book.author.trim().length === 0;
+      const missingCover = !book.coverUrl;
+      const missingGenres = !book.genres || book.genres.length === 0;
+      const noisyTitle = /--|anna.?s archive|isbn/i.test(book.title);
+      return missingAuthor || missingCover || missingGenres || noisyTitle;
+    });
+    if (needsRefresh.length === 0) {
+      return;
+    }
+    set({ metadataRefreshing: true, metadataTotal: needsRefresh.length, metadataDone: 0 });
+    let done = 0;
+    for (const book of needsRefresh) {
+      try {
+        const updated = await bookService.refreshMetadata(book.id);
+        set({
+          books: get().books.map((existing) => (existing.id === updated.id ? updated : existing))
+        });
+      } catch {
+        // ignore refresh errors
+      } finally {
+        done += 1;
+        set({ metadataDone: done });
+      }
+    }
+    set({ metadataRefreshing: false });
+  },
+  updateBookProgress(id, progress) {
+    set({
+      books: get().books.map((book) =>
+        book.id === id ? { ...book, progress } : book
+      )
+    });
+  },
+  resetAll() {
+    set({
+      books: [],
+      filters: defaultFilters,
+      loading: false,
+      metadataRefreshing: false,
+      metadataTotal: 0,
+      metadataDone: 0,
+      syncStatus: "idle",
+      stats: {
+        streakDays: 0,
+        totalDays: 0,
+        lastReadAt: null,
+        daysLast7: 0
+      },
+      driveConnected: false,
+      importing: false
+    });
   }
 }));
 

@@ -223,7 +223,7 @@ impl Database {
 
 fn db_path() -> Result<PathBuf> {
   let base = dirs::data_dir().ok_or_else(|| anyhow::anyhow!("missing app data dir"))?;
-  Ok(base.join("dudereader").join("library.db"))
+  Ok(base.join("leaflet").join("library.db"))
 }
 
 pub fn now_iso() -> String {

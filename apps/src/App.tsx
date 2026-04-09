@@ -1,24 +1,30 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Sidebar } from "./components/Sidebar";
+import { AccountBadge } from "./components/AccountBadge";
+import { AccountPanel } from "./components/AccountPanel";
+import { LoginModal } from "./components/LoginModal";
 import { LibraryPage } from "./pages/LibraryPage";
 import { CollectionsPage } from "./pages/CollectionsPage";
-import { StreakPage } from "./pages/StreakPage";
+import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { ReaderView } from "./pages/ReaderView";
 import { useLibraryStore } from "./store/libraryStore";
+import { useAccountStore } from "./store/accountStore";
+import { useHabitStore } from "./store/habitStore";
 import { bookService } from "./services/bookService";
 import { getPlatform } from "./platform";
-import Logo from "./assets/DudeReadlogoNobg.png";
+import Logo from "./assets/LeafletLogo.png";
 import type { Book } from "@shared/models/book";
 
-type Tab = "library" | "collections" | "streak" | "settings";
+type Tab = "library" | "collections" | "analytics" | "settings";
 
 const tabLabels: Record<Tab, string> = {
   library: "Library",
   collections: "Collections",
-  streak: "Streak",
+  analytics: "Analytics",
   settings: "Settings"
 };
 
@@ -28,6 +34,9 @@ const App = () => {
     filters,
     syncStatus,
     driveConnected,
+    metadataRefreshing,
+    metadataTotal,
+    metadataDone,
     loadBooks,
     loadStats,
     loadDriveStatus,
@@ -43,6 +52,28 @@ const App = () => {
   const [toast, setToast] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const [bookmarks, setBookmarks] = useState<string[]>([]);
+  const [accountPanelOpen, setAccountPanelOpen] = useState(false);
+  const [loginModalOpen, setLoginModalOpen] = useState(false);
+
+  const {
+    loggedIn,
+    email,
+    premium,
+    lastSyncedAt,
+    syncState,
+    load: loadAccount,
+    signIn,
+    signOut,
+    upgradePremium,
+    restorePremium,
+    setLastSyncedAt,
+    setSyncState,
+    tier
+  } = useAccountStore();
+
+  const { activeSession, focusSettings, goal, startSession, stopSession, clearSessionShelf } =
+    useHabitStore();
+  const fullscreenLockRef = useRef(false);
 
   const platform = getPlatform();
 
@@ -50,7 +81,8 @@ const App = () => {
     loadBooks();
     loadStats();
     loadDriveStatus();
-  }, [loadBooks, loadStats, loadDriveStatus]);
+    loadAccount();
+  }, [loadBooks, loadStats, loadDriveStatus, loadAccount]);
 
   useEffect(() => {
     if (!isTauri()) {
@@ -120,6 +152,15 @@ const App = () => {
 
   const handleOpenBook = (book: Book) => {
     setSelected(book);
+    if (focusSettings.goalBinding && !activeSession) {
+      const duration = goal.mode === "minutes" && goal.target > 0 ? goal.target : 20;
+      startSession({
+        startedAt: new Date().toISOString(),
+        durationMinutes: duration,
+        bookId: book.id,
+        title: book.title
+      });
+    }
     openBook(book).catch((error) => {
       showToast(resolveErrorMessage(error, "Unable to update reading progress."));
     });
@@ -156,10 +197,129 @@ const App = () => {
     });
   };
 
+  useEffect(() => {
+    if (!loggedIn || !driveConnected) {
+      setSyncState("offline");
+      return;
+    }
+    if (syncStatus === "syncing") {
+      setSyncState("pending");
+    } else if (syncStatus === "success") {
+      setSyncState("synced");
+    } else if (syncStatus === "error") {
+      setSyncState("error");
+    }
+  }, [syncStatus, driveConnected, loggedIn, setSyncState]);
+
+  useEffect(() => {
+    if (!focusSettings.kioskMode) {
+      fullscreenLockRef.current = false;
+      return;
+    }
+
+    if (activeSession) {
+      fullscreenLockRef.current = true;
+      if (isTauri()) {
+        getCurrentWindow().setFullscreen(true).catch(() => {
+          // ignore fullscreen errors
+        });
+      } else if (document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch(() => {
+          // ignore
+        });
+      }
+      return;
+    }
+
+    if (!fullscreenLockRef.current) {
+      return;
+    }
+    fullscreenLockRef.current = false;
+    if (isTauri()) {
+      getCurrentWindow().setFullscreen(false).catch(() => {
+        // ignore
+      });
+    } else if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {
+        // ignore
+      });
+    }
+  }, [activeSession, focusSettings.kioskMode]);
+
+  useEffect(() => {
+    if (!focusSettings.kioskMode) {
+      return;
+    }
+    if (!isTauri()) {
+      const onFullscreenChange = () => {
+        if (activeSession && fullscreenLockRef.current && !document.fullscreenElement) {
+          fullscreenLockRef.current = false;
+          const confirmed = window.confirm(
+            "Exiting fullscreen will clear your sessions bookshelf progress. Continue?"
+          );
+          if (!confirmed) {
+            fullscreenLockRef.current = true;
+            document.documentElement.requestFullscreen().catch(() => {
+              // ignore
+            });
+            return;
+          }
+          stopSession({ reason: "manual_end", cleanSession: false });
+          clearSessionShelf();
+          showToast("Focus paused");
+        }
+      };
+      document.addEventListener("fullscreenchange", onFullscreenChange);
+      return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+    }
+    const windowHandle = getCurrentWindow();
+    const onResize = () => {
+      if (!activeSession || !fullscreenLockRef.current) {
+        return;
+      }
+      windowHandle
+        .isFullscreen()
+        .then((isFullscreen) => {
+          if (!isFullscreen) {
+            fullscreenLockRef.current = false;
+            const confirmed = window.confirm(
+              "Exiting fullscreen will clear your sessions bookshelf progress. Continue?"
+            );
+            if (!confirmed) {
+              fullscreenLockRef.current = true;
+              windowHandle.setFullscreen(true).catch(() => {
+                // ignore
+              });
+              return;
+            }
+            stopSession({ reason: "manual_end", cleanSession: false });
+            clearSessionShelf();
+            showToast("Focus paused");
+          }
+        })
+        .catch(() => {
+          // ignore
+        });
+    };
+    const unlistenPromise = windowHandle.onResized(onResize);
+    return () => {
+      unlistenPromise.then((unlisten) => unlisten()).catch(() => {
+        // ignore
+      });
+    };
+  }, [activeSession, focusSettings.kioskMode, stopSession]);
+
   const handleSync = () => {
-    (driveConnected ? syncNow() : startDriveAuth()).catch((error) => {
-      showToast(resolveErrorMessage(error, "Sync failed. Check Drive status."));
-    });
+    setSyncState("pending");
+    (driveConnected ? syncNow() : startDriveAuth())
+      .then(() => {
+        setLastSyncedAt(new Date().toISOString());
+        setSyncState("synced");
+      })
+      .catch((error) => {
+        setSyncState("error");
+        showToast(resolveErrorMessage(error, "Sync failed. Check Drive status."));
+      });
   };
 
   const lastOpenedBook = useMemo(() => {
@@ -175,11 +335,22 @@ const App = () => {
   const nowReading = lastOpenedBook ?? books[0] ?? null;
   const [nowReadingFallback, setNowReadingFallback] = useState<string | null>(null);
   const nowReadingCover =
-    nowReading?.coverUrl && isTauri() ? convertFileSrc(nowReading.coverUrl) : null;
+    nowReading?.coverUrl && nowReading.coverUrl.startsWith("http") ? nowReading.coverUrl : null;
   const nowBookmarked = nowReading ? bookmarks.includes(nowReading.id) : false;
 
   useEffect(() => {
     setNowReadingFallback(null);
+  }, [nowReading?.id, nowReading?.coverUrl]);
+
+  useEffect(() => {
+    if (!isTauri() || !nowReading?.coverUrl || nowReading.coverUrl.startsWith("http")) {
+      return;
+    }
+    void bookService.coverData(nowReading.id).then((data) => {
+      if (data) {
+        setNowReadingFallback(data);
+      }
+    });
   }, [nowReading?.id, nowReading?.coverUrl]);
 
   const handleNowReadingError = () => {
@@ -194,13 +365,28 @@ const App = () => {
   };
 
   const resolvedNowReadingCover = nowReadingFallback ?? nowReadingCover;
+  const accountTier = tier();
+  const badgeAnimateRef = useRef<string | null>(null);
+  const [badgeAnimate, setBadgeAnimate] = useState(false);
+
+  useEffect(() => {
+    if (badgeAnimateRef.current === accountTier) {
+      return;
+    }
+    badgeAnimateRef.current = accountTier;
+    setBadgeAnimate(true);
+    const timer = window.setTimeout(() => setBadgeAnimate(false), 320);
+    return () => window.clearTimeout(timer);
+  }, [accountTier]);
 
   return (
     <div className="min-h-screen bg-background font-body text-on-surface selection:bg-primary-container selection:text-on-primary-container">
       <header className="sticky top-0 z-50 flex w-full items-center justify-between border-b border-white/5 bg-background/80 px-4 py-4 shadow-[0_4px_30px_rgba(142,68,173,0.06)] backdrop-blur-xl md:px-8">
         <div className="flex items-center gap-3">
-          <img src={Logo} alt="DudeReads Logo" className="h-8 w-auto" />
-          <span className="text-2xl font-headline font-bold tracking-tight text-primary">DudeReads</span>
+          <img src={Logo} alt="Leaflet Logo" className="h-8 w-auto" />
+          <span className="text-2xl font-semibold tracking-tight text-primary font-['Space_Grotesk']">
+            Leaflet
+          </span>
         </div>
         <div className="hidden flex-1 px-6 md:block">
           <div className="relative mx-auto max-w-xl">
@@ -233,17 +419,34 @@ const App = () => {
             <span className="material-symbols-outlined text-base">sync</span>
             {syncStatus === "syncing" ? "Syncing" : "Sync Now"}
           </button>
-          <button
-            className="material-symbols-outlined text-on-surface transition-colors hover:text-primary"
-            type="button"
-            onClick={() => setActiveTab("settings")}
-          >
-            person
-          </button>
-          <div className="h-10 w-10 overflow-hidden rounded-full border border-primary/20 bg-surface-container-high">
-            <div className="flex h-full w-full items-center justify-center bg-primary/20 text-xs font-semibold text-on-surface">
-              DR
-            </div>
+          <div className="relative">
+            <AccountBadge
+              tier={accountTier}
+              syncState={loggedIn ? (driveConnected ? syncState : "offline") : "offline"}
+              onClick={() => setAccountPanelOpen((prev) => !prev)}
+              animate={badgeAnimate}
+            />
+            <AccountPanel
+              open={accountPanelOpen}
+              tier={accountTier}
+              syncState={loggedIn ? (driveConnected ? syncState : "offline") : "offline"}
+              email={email}
+              lastSyncedAt={lastSyncedAt}
+              onSignIn={() => setLoginModalOpen(true)}
+              onSignOut={() => {
+                signOut();
+                setAccountPanelOpen(false);
+              }}
+              onUpgrade={() => {
+                upgradePremium();
+                showToast("Premium unlocked — thank you for supporting Leaflet.");
+              }}
+              onRestore={() => {
+                restorePremium();
+                showToast("Premium restored.");
+              }}
+              onSyncNow={handleSync}
+            />
           </div>
         </div>
       </header>
@@ -262,7 +465,7 @@ const App = () => {
           {activeTab === "collections" && (
             <CollectionsPage onNavigate={setActiveTab} showToast={showToast} />
           )}
-          {activeTab === "streak" && <StreakPage onNavigate={setActiveTab} />}
+          {activeTab === "analytics" && <AnalyticsPage />}
           {activeTab === "settings" && <SettingsPage showToast={showToast} />}
         </main>
       </div>
@@ -323,7 +526,38 @@ const App = () => {
         </div>
       )}
 
+      {metadataRefreshing && books.length >= 60 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+          <div className="flex flex-col items-center gap-3 rounded-2xl border border-white/10 bg-surface-container-high px-6 py-4 text-sm text-on-surface">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            <div className="text-center">
+              <p className="text-sm font-semibold text-on-surface">Refreshing library metadata</p>
+              <p className="text-xs text-on-surface-variant">
+                {metadataDone}/{metadataTotal} books
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {selected && <ReaderView book={selected} onClose={() => setSelected(null)} />}
+
+      <LoginModal
+        open={loginModalOpen}
+        onClose={() => setLoginModalOpen(false)}
+        onLogin={(value) => {
+          signIn(value);
+          setSyncState("pending");
+          setLoginModalOpen(false);
+          setAccountPanelOpen(false);
+          showToast("Your reading is now synced.");
+          handleSync();
+        }}
+        onContinueOffline={() => {
+          setLoginModalOpen(false);
+          setAccountPanelOpen(false);
+        }}
+      />
     </div>
   );
 };

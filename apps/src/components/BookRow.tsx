@@ -14,16 +14,25 @@ export const BookRow = ({ book, onRefresh, onOpen }: Props) => {
   const triedFallback = useRef(false);
 
   const coverSrc = book.coverUrl
-    ? isTauri()
-      ? convertFileSrc(book.coverUrl)
-      : book.coverUrl.startsWith("http")
-        ? book.coverUrl
-        : null
+    ? !isTauri() && book.coverUrl.startsWith("http")
+      ? book.coverUrl
+      : null
     : null;
 
   useEffect(() => {
     triedFallback.current = false;
     setFallbackSrc(null);
+  }, [book.id, book.coverUrl]);
+
+  useEffect(() => {
+    if (!isTauri() || !book.coverUrl || book.coverUrl.startsWith("http")) {
+      return;
+    }
+    void bookService.coverData(book.id).then((data) => {
+      if (data) {
+        setFallbackSrc(data);
+      }
+    });
   }, [book.id, book.coverUrl]);
 
   const handleCoverError = () => {
@@ -65,7 +74,7 @@ export const BookRow = ({ book, onRefresh, onOpen }: Props) => {
       <div className="w-32">
         <div className="h-1.5 w-full rounded-full bg-surface-container-highest">
           <div
-            className="h-1.5 rounded-full bg-primary shadow-[0_0_8px_rgba(106,183,255,0.6)]"
+            className="h-1.5 rounded-full bg-primary shadow-[0_0_8px_rgba(101,168,63,0.6)]"
             style={{ width: `${progressPercent}%` }}
           />
         </div>

@@ -305,11 +305,22 @@ impl Database {
       days_last_7
     })
   }
+
+  pub fn clear_all(&self) -> Result<()> {
+    self.conn.execute_batch(
+      "DELETE FROM book_collections;
+       DELETE FROM collections;
+       DELETE FROM books;
+       DELETE FROM settings;
+       DELETE FROM reading_sessions;"
+    )?;
+    Ok(())
+  }
 }
 
 fn db_path() -> Result<PathBuf> {
   let base = dirs::data_dir().ok_or_else(|| anyhow::anyhow!("missing app data dir"))?;
-  Ok(base.join("dudereader").join("library.db"))
+  Ok(base.join("leaflet").join("library.db"))
 }
 
 pub fn now_iso() -> String {

@@ -7,22 +7,27 @@
     "frontendDist": "../dist"
   },
   "bundle": {
-    "active": false,
-    "targets": "all",
+    "active": true,
+    "targets": ["msi", "nsis"],
+    "resources": [
+      "resources/**/*"
+    ],
     "icon": [
       "icons/icon.ico"
     ]
   },
-  "productName": "DudeReader",
+  "productName": "Leaflet",
   "version": "0.1.0",
-  "identifier": "com.dudereader.app",
+  "identifier": "com.leaflet.app",
   "plugins": {},
   "app": {
     "windows": [
       {
-        "title": "DudeReader",
-        "width": 1280,
-        "height": 860,
+        "title": "Leaflet",
+        "width": 1600,
+        "height": 1000,
+        "minWidth": 1200,
+        "minHeight": 800,
         "resizable": true,
         "fullscreen": false
       }
@@ -32,7 +37,10 @@
       "assetProtocol": {
         "enable": true,
         "scope": [
-          "$APPDATA/**"
+          "$APPDATA/**",
+          "$APPDATA/leaflet/**",
+          "$APPDATA/leaflet/covers/**",
+          "$APPDATA/leaflet/books/**"
         ]
       },
       "capabilities": [
