@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { isTauri } from "@tauri-apps/api/core";
 import type { Book } from "@shared/models/book";
 import ePub from "epubjs";
 import { bookService } from "../services/bookService";
 import { useLibraryStore } from "../store/libraryStore";
-import { getSessionProgress, useHabitStore } from "../store/habitStore";
-import { converterService } from "../services/converterService";
+import { useAutoHideChrome } from "../hooks/useAutoHideChrome";
+import { getSessionProgress, sessionElapsedMs, useHabitStore } from "../store/habitStore";
+import { useReadingHeartbeat } from "../hooks/useReadingHeartbeat";
 import { useAppearanceStore, type ThemeMode } from "../store/appearanceStore";
-import { useAccountStore } from "../store/accountStore";
 import {
   estimateWordDifficulty,
   estimateRsvpPauseMultiplier,
@@ -20,14 +20,13 @@ import {
   type SmartReadCalibration,
   type SmartReadProfile
 } from "../services/smartReadService";
-import paperLightTexture from "../assets/paper-light.webp";
-import paperDarkTexture from "../assets/paper-dark.webp";
+import { PAPER_GRAIN } from "../constants/textures";
+import { UiIcon } from "../components/UiIcon";
+import { PipExitGuard, useFocusLockExit } from "../hooks/useFocusLockExit";
+import { watchForeground } from "../services/windowService";
+import { accountService } from "../services/accountService";
 import ztNatureBoldWoff2 from "../assets/fonts/ZTNature-Bold.woff2";
-import {
-  READABLE_EXTENSIONS,
-  formatDisplayList,
-  getBookExtension
-} from "../constants/bookFormats";
+import { formatSummary, getBookExtension, isReadableExtension } from "../constants/bookFormats";
 
 type ReaderViewProps = {
   book: Book;
@@ -50,7 +49,7 @@ const getReaderFinish = (displayMode: ReaderDisplayMode, theme: ThemeMode) => {
       themeName: "leaflet-light",
       background: "#f0eadc",
       text: "#30291f",
-      texture: paperLightTexture,
+      texture: PAPER_GRAIN,
       textureOpacity: "e0"
     };
   }
@@ -59,7 +58,7 @@ const getReaderFinish = (displayMode: ReaderDisplayMode, theme: ThemeMode) => {
       themeName: "leaflet-dark",
       background: "#191b1a",
       text: "#eeeae0",
-      texture: paperDarkTexture,
+      texture: PAPER_GRAIN,
       textureOpacity: "d4"
     };
   }
@@ -86,21 +85,21 @@ const getReaderFinish = (displayMode: ReaderDisplayMode, theme: ThemeMode) => {
         themeName: "leaflet-light",
         background: "#edeae2",
         text: "#16191e",
-        texture: paperLightTexture,
+        texture: PAPER_GRAIN,
         textureOpacity: "e8"
       }
     : {
         themeName: "leaflet-dark",
         background: "#202227",
         text: "#f7f9fc",
-        texture: paperDarkTexture,
+        texture: PAPER_GRAIN,
         textureOpacity: "e8"
       };
 };
 
 const getReaderFinishBackground = (finish: ReturnType<typeof getReaderFinish>) =>
   finish.texture
-    ? `linear-gradient(${finish.background}${finish.textureOpacity}, ${finish.background}${finish.textureOpacity}), url("${finish.texture}")`
+    ? `linear-gradient(${finish.background}${finish.textureOpacity}, ${finish.background}${finish.textureOpacity}), ${finish.texture}`
     : "none";
 
 type ReaderWord = {
@@ -120,6 +119,8 @@ type ReadingWordState = {
   index: number;
   total: number;
   text: string;
+  /** Punctuation after the word ("," or ".”"), shown in RSVP so sentences still read as sentences. */
+  punctuation: string;
   contextStart: number;
   context: Array<{ text: string; trailing: string; index: number }>;
 };
@@ -190,16 +191,236 @@ const isChapterLike = (label: string) => {
   return false;
 };
 
+/**
+ * Chapter titles, drop caps and ornaments in many books are pictures: black
+ * ink on a white rectangle. On a dark page that is a glaring white box; on the
+ * paper finish it is a whiter patch on cream.
+ *
+ * Such images are recognised by their pixels: no colour, and almost nothing
+ * but paper and ink (few in-between greys, which photos, shaded maps and
+ * pencil drawings are full of). They are marked `data-leaflet-ink`:
+ * - "title" when banner-shaped (wide and short, or small): on a dark page
+ *   these are inverted to white ink, so a heading reads like the text.
+ * - "art" otherwise (a line map, a full-page drawing): these only lose their
+ *   white on the paper finish, and on a dark page stay exactly as drawn, so a
+ *   map is never turned into its negative.
+ * Clicking a marked image shows the original, and clicking again blends it.
+ */
+const INK_SAMPLE = 40;
+const markInkImages = (doc: Document) => {
+  const images = Array.from(doc.querySelectorAll<HTMLImageElement | SVGImageElement>("img, image"));
+  images.forEach((node) => {
+    if (node.dataset.leafletInkChecked) {
+      return;
+    }
+    node.dataset.leafletInkChecked = "1";
+    // epub.js swaps the image's address for its own blob URL after the page
+    // is first built, so the check waits for the image itself to load, and a
+    // probe that fails (the old address) clears the flag to be tried again.
+    // Tag names, not instanceof: the book's images belong to its iframe,
+    // whose HTMLImageElement is a different class from this window's.
+    const isImg = node.tagName.toLowerCase() === "img";
+    if (isImg && !(node as HTMLImageElement).complete) {
+      delete node.dataset.leafletInkChecked;
+      node.addEventListener("load", () => markInkImages(doc), { once: true });
+      return;
+    }
+    const src =
+      isImg
+        ? (node as HTMLImageElement).currentSrc || (node as HTMLImageElement).src
+        : (node as SVGImageElement).href?.baseVal || node.getAttribute("xlink:href") || "";
+    if (!src) {
+      delete node.dataset.leafletInkChecked;
+      return;
+    }
+    const probe = new Image();
+    probe.onerror = () => {
+      delete node.dataset.leafletInkChecked;
+    };
+    probe.onload = () => {
+      try {
+        const canvas = doc.createElement("canvas");
+        canvas.width = INK_SAMPLE;
+        canvas.height = INK_SAMPLE;
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        if (!context || probe.naturalWidth < 24 || probe.naturalHeight < 12) {
+          return;
+        }
+        // Nearest-neighbour sampling: smoothing blurs thick letters into greys,
+        // and a real ink title then failed the paper-and-ink test.
+        context.imageSmoothingEnabled = false;
+        context.drawImage(probe, 0, 0, INK_SAMPLE, INK_SAMPLE);
+        const { data } = context.getImageData(0, 0, INK_SAMPLE, INK_SAMPLE);
+        let light = 0;
+        let midtone = 0;
+        let colourful = 0;
+        let counted = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i + 3] < 16) {
+            continue;
+          }
+          counted += 1;
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          const max = Math.max(r, g, b);
+          const min = Math.min(r, g, b);
+          if (max - min > 40) {
+            colourful += 1;
+          }
+          const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+          if (lum > 225) {
+            light += 1;
+          } else if (lum > 70) {
+            midtone += 1;
+          }
+        }
+        // Transparent line art (dark ink, no background) also blends well.
+        const transparentInk = counted < INK_SAMPLE * INK_SAMPLE * 0.6 && colourful / Math.max(1, counted) < 0.04;
+        // Resampling blurs ink edges into greys, so a little midtone is fine.
+        const inkOnly = counted > 0 && colourful / counted < 0.04 && midtone / counted < 0.12;
+        if (inkOnly && (light / counted > 0.55 || transparentInk)) {
+          const banner = probe.naturalHeight <= probe.naturalWidth * 0.6 || probe.naturalHeight <= 240;
+          node.dataset.leafletInk = banner ? "title" : "art";
+          node.addEventListener("click", () => {
+            node.dataset.leafletInkOff = node.dataset.leafletInkOff ? "" : "1";
+          });
+        }
+      } catch {
+        // A cross-origin (tainted) image cannot be read; leave it be.
+      }
+    };
+    probe.src = src;
+  });
+};
+
+/**
+ * Where the eye should fixate in a word shown on its own (the "optimal
+ * recognition point"): slightly left of centre, by word length. Leading
+ * quotes and brackets are skipped so "“Hello" pivots on the e, not the quote.
+ */
+const rsvpPivotIndex = (text: string) => {
+  const lead = text.match(/^[“"'‘(\[]*/)?.[0].length ?? 0;
+  const length = Math.max(1, text.length - lead);
+  const offset = length <= 1 ? 0 : length <= 5 ? 1 : length <= 9 ? 2 : length <= 13 ? 3 : 4;
+  return Math.min(text.length - 1, lead + offset);
+};
+
+/** The book's text starts this far down, below the floating toolbar. */
+const PAGE_TOP_PAD = 80;
+
+/** Turns what failed while opening a book into something a reader can act on. */
+const friendlyOpenError = (message: string) => {
+  if (/os error 2|cannot find the (file|path)|no such file|not found on disk/i.test(message)) {
+    return "The book file is missing. It may have been moved or deleted outside Leaflet. Import it again to keep reading.";
+  }
+  if (/encrypt|drm|adept/i.test(message)) {
+    return "This book is copy-protected (DRM), so Leaflet can't open it. Books bought from most stores need their DRM removed by the store's own app first.";
+  }
+  if (/no section found|not a readable epub|damaged|invalid|zip/i.test(message)) {
+    return "This book couldn't be read. The file may be damaged; importing it again sometimes helps.";
+  }
+  return message || "This book couldn't be opened.";
+};
+
+/** Auto-scroll's own default, remembered across books once the reader tunes it. */
+const AUTO_SCROLL_DEFAULT_KEY = "leaflet.reader.autoScrollSpeed";
+/** Auto-scroll steps back while the reader scrolls by hand, for this long. */
+const AUTO_SCROLL_YIELD_BACK_MS = 3000;
+const AUTO_SCROLL_YIELD_AHEAD_MS = 1200;
+/** Retuning from corrections happens at most this often. */
+const AUTO_SCROLL_TUNE_COOLDOWN_MS = 12_000;
+
+/**
+ * Auto-scroll pace in lines of text per minute. The slider (0..100) sets this;
+ * pixels follow from the font size, so a bigger font scrolls faster in pixels
+ * and exactly as fast in reading. Lines are 1.8em tall (see the typography).
+ */
+const autoScrollLinesPerMinute = (speed: number) =>
+  Math.round((3 + Math.min(100, Math.max(0, speed)) * 0.45) * 1.852);
+const autoScrollPixelsPerSecond = (speed: number, fontSize: number) =>
+  (autoScrollLinesPerMinute(speed) * 1.8 * fontSize) / 60;
+
+const readAutoScrollDefault = () => {
+  try {
+    const value = Number(localStorage.getItem(AUTO_SCROLL_DEFAULT_KEY));
+    return Number.isFinite(value) && value > 0 ? Math.min(100, value) : 35;
+  } catch {
+    return 35;
+  }
+};
+
+/** How long auto-scroll or Smart Read keeps crediting time after the last real input. */
+const HANDS_FREE_GRACE_MS = 5 * 60_000;
+
+const READER_BLOCK_SELECTOR =
+  "p, li, blockquote, pre, h1, h2, h3, h4, h5, h6, dd, dt, td, th, figcaption, div, section, article, body";
+const SENTENCE_END_PATTERN = /[.!?][”"')\]]*\s*$/;
+
+/** True when nothing but inline markup separates the end of `a` from the start of `b`. */
+const isInlineJoin = (a: Text, b: Text) => {
+  try {
+    const range = a.ownerDocument.createRange();
+    range.setStart(a, a.data.length);
+    range.setEnd(b, 0);
+    return (
+      range.toString() === "" && !range.cloneContents().querySelector("br, img, hr, svg, image")
+    );
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Time a word is held for, in units of one word at the nominal WPM. Pauses are
+ * relative so they shrink with speed: a fixed 620ms paragraph pause is a blink
+ * at 150 WPM and ten words' worth at 1000.
+ */
+const getPaceFactor = (word: ReaderWord, mode: "speed" | "smart") =>
+  (mode === "speed" ? word.rsvpPauseMultiplier : 1) +
+  (word.paragraphEnd ? 1.6 : word.sentenceEnd ? 0.9 : /[,;:—–]\s*$/.test(word.trailing) ? 0.4 : 0);
+
+/**
+ * Scales the per-word factors so a section averages out at the chosen WPM. The
+ * pauses used to be added on top, so "600 WPM" actually ran at about 400.
+ */
+const getPaceScale = (words: ReaderWord[], mode: "speed" | "smart") => {
+  if (words.length === 0) return 1;
+  const total = words.reduce((sum, word) => sum + getPaceFactor(word, mode), 0);
+  return Math.min(1, Math.max(0.55, words.length / Math.max(1, total)));
+};
+
 export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const renditionRef = useRef<any>(null);
   const bookRef = useRef<ReturnType<typeof ePub> | null>(null);
   const relocateHandlerRef = useRef<((location: { start?: { percentage?: number } }) => void) | null>(null);
-  const lastProgressRef = useRef(0);
+  // Seeded from the library, so closing a book before its position is known
+  // writes back what was there rather than 0.
+  const lastProgressRef = useRef(typeof book.progress === "number" ? book.progress : 0);
   const lastProgressAtRef = useRef(0);
-  const lastComputedProgressRef = useRef(-1);
+  const lastComputedProgressRef = useRef(typeof book.progress === "number" ? book.progress : -1);
+  /**
+   * Progress is saved only once the position is trustworthy: the saved place
+   * was restored, or the reader has moved. Opening a book with no local
+   * position (another device, cleared data) used to save ~0 on the first
+   * render, and that 0 then synced over the real progress everywhere.
+   */
+  const progressArmedRef = useRef(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const lastMarkerRef = useRef<string | null>(null);
   const scrollAdvanceLockRef = useRef(false);
+  /**
+   * Until then, the app itself is moving the page (a chapter jump, a bookmark,
+   * restoring your place, reflowing after a font change). While the content
+   * is swapped the scroll position jumps, which looked exactly like scrolling
+   * to the bottom, and "next chapter" fired and beat the jump: picking
+   * Chapter 4 from the list landed on Chapter 2.
+   */
+  const navigatingUntilRef = useRef(0);
+  const markNavigating = (ms = 1500) => {
+    navigatingUntilRef.current = Date.now() + ms;
+  };
   const scrollAdvanceTimerRef = useRef<number | null>(null);
   const scrollContainerRef = useRef<HTMLElement | null>(null);
   const autoScrollRafRef = useRef<number | null>(null);
@@ -223,6 +444,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   const readingPausedRef = useRef(false);
   const speedReadWpmRef = useRef(260);
   const readerWordsRef = useRef<ReaderWord[]>([]);
+  const readingPaceScaleRef = useRef({ speed: 1, smart: 1 });
   const activeWordIndexRef = useRef(0);
   const readerDotAnchorIndexRef = useRef<number | null>(null);
   const readerDotUserAnchorUntilRef = useRef(0);
@@ -237,20 +459,35 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   const activeSession = useHabitStore((state) => state.activeSession);
   const focusSettings = useHabitStore((state) => state.focusSettings);
   const stopSession = useHabitStore((state) => state.stopSession);
-  const clearSessionShelf = useHabitStore((state) => state.clearSessionShelf);
   const extendSession = useHabitStore((state) => state.extendSession);
-  const addSessionNote = useHabitStore((state) => state.addSessionNote);
+  // Credits time toward the daily goal while this reader is open and in use.
+  const markReadingActivity = useReadingHeartbeat(true);
+  // Last wheel or key press from the reader's own hands. A scroll event cannot
+  // tell auto-scroll or Smart Read from a person, so on its own it kept the
+  // heartbeat crediting minutes for a reader who had walked away. Hands-free
+  // reading still counts, for a grace window after the last real input.
+  const lastHandsOnAtRef = useRef(Date.now());
+  const openedAtRef = useRef(Date.now());
+  // Key and wheel input inside the epub.js iframe never reaches this window, so
+  // the content documents forward to these (see bindContentInput).
+  const readerKeyHandlerRef = useRef<((event: KeyboardEvent) => void) | null>(null);
+  const contentWheelHandlerRef = useRef<((deltaY: number) => void) | null>(null);
   const [coffeeProgress, setCoffeeProgress] = useState(0);
   const [checkpointOpen, setCheckpointOpen] = useState(false);
   const [checkpointLevel, setCheckpointLevel] = useState<0.5 | 0.9 | 1 | null>(null);
   const checkpointTimerRef = useRef<number | null>(null);
   const [focusToast, setFocusToast] = useState<string | null>(null);
   const focusToastTimerRef = useRef<number | null>(null);
+  // Bound into the book's iframes and listeners once; they read live state
+  // through these.
+  const holdAutoScrollRef = useRef<(held: boolean) => void>(() => undefined);
+  const noteAutoScrollCorrectionRef = useRef<(container: HTMLElement, deltaY: number) => void>(
+    () => undefined
+  );
+  // The key handler is bound once; this keeps it calling the current toast.
+  const showFocusToastRef = useRef<(message: string) => void>(() => undefined);
   const checkpointRef = useRef(0);
   const sessionStartRef = useRef<string | null>(null);
-  const [noteModalOpen, setNoteModalOpen] = useState(false);
-  const [noteText, setNoteText] = useState("");
-  const [noteSessionId, setNoteSessionId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!activeSession) {
@@ -323,32 +560,27 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     if (checkpointOpen && checkpointLevel === 1) {
       return;
     }
+    // The 100% checkpoint was opened by the effect above in this same commit;
+    // its state update has not landed yet, but its timer has. Without this the
+    // session stopped before "Continue +10 min" could ever be pressed.
+    if (checkpointRef.current === 1 && checkpointTimerRef.current) {
+      return;
+    }
     const totalSeconds = activeSession.durationMinutes * 60;
-    const elapsedSeconds = Math.max(0, Math.round((Date.now() - Date.parse(activeSession.startedAt)) / 1000));
+    const elapsedSeconds = Math.round(sessionElapsedMs(activeSession) / 1000);
     if (elapsedSeconds >= totalSeconds) {
       handleStopSession({ reason: "completed", cleanSession: true });
     }
   }, [activeSession, checkpointOpen, checkpointLevel, coffeeProgress]);
 
   const handleStopSession = (options?: { reason?: "completed" | "manual_end"; cleanSession?: boolean }) => {
-    if (options?.reason === "manual_end") {
-      const confirmed = window.confirm(
-        "Ending focus now will clear your sessions bookshelf progress. Continue?"
-      );
-      if (!confirmed) {
-        return;
-      }
-    }
-    const sessionId = stopSession(options);
-    if (options?.reason === "manual_end") {
-      clearSessionShelf();
-    }
-    if (sessionId && focusSettings.sessionNotes) {
-      setNoteSessionId(sessionId);
-      setNoteText("");
-      setNoteModalOpen(true);
-    }
+    // The wrap-up screen (mounted in App, above the reader) takes it from
+    // here, note included.
+    void stopSession(options);
   };
+
+  // Focus lock: leaving the book mid-session takes intent (see the hook).
+  const exitGuard = useFocusLockExit(onClose);
 
   const handleCheckpointContinue = () => {
     if (checkpointLevel === 1) {
@@ -373,8 +605,28 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      // Typing in the session note (or any field) owns the keyboard: Space must
+      // type a space, arrows move the caret, and Escape must not close the
+      // reader and throw the note away.
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable ||
+          target.closest?.('[role="alertdialog"]'))
+      ) {
+        return;
+      }
+      // Dotty's own slider handles ArrowUp/Down and prevents default; the page
+      // must not also scroll or change section underneath it.
+      if (event.defaultPrevented) {
+        return;
+      }
+      lastHandsOnAtRef.current = Date.now();
       if (event.key === "Escape") {
-        onClose();
+        exitGuard.escape(event);
         return;
       }
       if (event.key === "ArrowRight") {
@@ -393,10 +645,28 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
         goPrevSection();
         return;
       }
+      if (event.key === "+" || event.key === "=" || event.key === "-" || event.key === "_") {
+        const faster = event.key === "+" || event.key === "=";
+        event.preventDefault();
+        if (readingModeRef.current === "standard") {
+          const next = Math.min(100, Math.max(0, autoScrollSpeedRef.current + (faster ? 5 : -5)));
+          setAutoScrollSpeed(next);
+          showFocusToastRef.current(`Auto-scroll ${autoScrollLinesPerMinute(next)} lines/min`);
+        } else if (readingModeRef.current === "speed") {
+          const next = Math.min(1000, Math.max(120, speedReadWpmRef.current + (faster ? 20 : -20)));
+          setSpeedReadWpm(next);
+          showFocusToastRef.current(`${next} words/min`);
+        }
+        return;
+      }
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         const container = getScrollContainer();
         if (!container) {
           return;
+        }
+        if (autoScrollActiveRef.current) {
+          autoScrollYieldUntilRef.current =
+            Date.now() + (event.key === "ArrowUp" ? AUTO_SCROLL_YIELD_BACK_MS : AUTO_SCROLL_YIELD_AHEAD_MS);
         }
         if (event.key === "ArrowDown") {
           const atBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 2;
@@ -412,9 +682,6 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
         event.preventDefault();
       }
       if (event.code === "Space") {
-        if ((event.target as HTMLElement | null)?.tagName === "INPUT") {
-          return;
-        }
         event.preventDefault();
         if (readingModeRef.current === "standard") {
           setAutoScrollActive((prev) => !prev);
@@ -424,7 +691,13 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
       }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    readerKeyHandlerRef.current = onKey;
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      if (readerKeyHandlerRef.current === onKey) {
+        readerKeyHandlerRef.current = null;
+      }
+    };
   }, [onClose]);
 
   useEffect(() => {
@@ -464,8 +737,11 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
       }
       if (lastComputedProgressRef.current >= 0) {
         const progress = Math.min(1, Math.max(0, lastComputedProgressRef.current));
-        void bookService.updateProgress(book.id, progress);
-        updateBookProgress(book.id, progress);
+        // The exact line goes along only once the position is trustworthy;
+        // otherwise this is just "opened and closed", which keeps what synced.
+        const position = progressArmedRef.current ? lastCfiRef.current : null;
+        void bookService.updateProgress(book.id, progress, position ?? undefined);
+        updateBookProgress(book.id, progress, position ?? undefined);
       }
     };
   }, []);
@@ -484,7 +760,9 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
         displayMode?: ReaderDisplayMode;
         autoScrollSpeed?: number;
         speedReadWpm?: number;
+        readerDotEnabled?: boolean;
         cfi?: string;
+        cfiProgress?: number;
         chapterPositions?: Record<string, string>;
       };
     } catch {
@@ -499,7 +777,20 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   const sidebarRef = useRef(sidebarOpen);
   const [fontPanelOpen, setFontPanelOpen] = useState(false);
   const [autoScrollActive, setAutoScrollActive] = useState(false);
-  const [autoScrollSpeed, setAutoScrollSpeed] = useState(initialPrefs?.autoScrollSpeed ?? 35);
+  const [autoScrollSpeed, setAutoScrollSpeed] = useState(
+    () => initialPrefs?.autoScrollSpeed ?? readAutoScrollDefault()
+  );
+  // Auto-scroll steps aside, without stopping, while a hand is on the page:
+  // held down (hold to pause), or scrolling by hand (it yields, then resumes
+  // from wherever the reader left it).
+  const autoScrollActiveRef = useRef(false);
+  const autoScrollHeldRef = useRef(false);
+  const [autoScrollHeld, setAutoScrollHeld] = useState(false);
+  const autoScrollYieldUntilRef = useRef(0);
+  // Hand scrolling during auto-scroll is a correction: ahead means too slow,
+  // back means too fast. Bursts are summed, then retune the speed a notch.
+  const autoScrollCorrectionRef = useRef({ net: 0, lastAt: 0 });
+  const autoScrollTunedAtRef = useRef(0);
   const [displayMode, setDisplayMode] = useState<ReaderDisplayMode>(
     initialPrefs?.displayMode ?? "paper"
   );
@@ -522,9 +813,13 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   displayModeRef.current = displayMode;
   readerThemeRef.current = readerTheme;
   autoScrollSpeedRef.current = autoScrollSpeed;
+  autoScrollActiveRef.current = autoScrollActive;
   speedReadWpmRef.current = speedReadWpm;
   const toggleTheme = useAppearanceStore((state) => state.toggleTheme);
-  const accountEmail = useAccountStore((state) => state.email);
+  // Calibration is per reader. It keys off the connected Google account when
+  // there is one, and is device-local otherwise -- it used to key off whatever
+  // had been typed into a sign-in modal that verified nothing.
+  const accountEmail = useLibraryStore((state) => state.sync.accountEmail);
   const smartProfileRef = useRef<SmartReadProfile>(loadSmartReadProfile(accountEmail));
   const smartCalibrationRef = useRef<SmartReadCalibration>(
     loadSmartReadCalibration(accountEmail)
@@ -532,17 +827,49 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   const [morePanelOpen, setMorePanelOpen] = useState(false);
   const morePanelRef = useRef<HTMLDivElement | null>(null);
   const morePanelCloseRef = useRef<number | null>(null);
-  const [readerDotEnabled, setReaderDotEnabled] = useState(true);
+  const [readerDotEnabled, setReaderDotEnabled] = useState(initialPrefs?.readerDotEnabled ?? true);
+  // Sync during render: the load effect runs before the [readerDotEnabled]
+  // effect, and would otherwise create a dot the user had switched off.
+  readerDotEnabledRef.current = readerDotEnabled;
   const [bookmarkPanelOpen, setBookmarkPanelOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // The toolbar steps out of the way while reading. It stays put whenever one of
+  // its own panels is open, which would otherwise vanish along with it. The
+  // chapter list is not one of them: it opens on its own, under a hidden bar.
+  const {
+    visible: chromeVisible,
+    reveal: revealChrome,
+    hover: hoverChrome
+  } = useAutoHideChrome(fontPanelOpen || bookmarkPanelOpen || morePanelOpen || loading || loadError !== null);
+  // The page renders inside an epub.js iframe, and events there do not reach
+  // this document — so without binding into it, a tap on the text could never
+  // bring the toolbar back on a touch screen.
+  const revealChromeRef = useRef(revealChrome);
+  revealChromeRef.current = revealChrome;
   const [bookmarks, setBookmarks] = useState<
     Array<{ id: string; cfi: string; label: string; createdAt: string }>
   >([]);
   const [toc, setToc] = useState<TocItem[]>([]);
   const [tocIndexByHref, setTocIndexByHref] = useState<Record<string, number>>({});
   const [tocLabelByHref, setTocLabelByHref] = useState<Record<string, string>>({});
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const lastCfiRef = useRef<string | null>(initialPrefs?.cfi ?? null);
+  // Where to reopen: this device's own last line, unless the synced position
+  // (read on another device) is further on, or this device has none.
+  const lastCfiRef = useRef<string | null>(
+    (() => {
+      const local = initialPrefs?.cfi ?? null;
+      const synced = book.position ?? null;
+      if (!synced || synced === local) {
+        return local ?? synced;
+      }
+      if (!local) {
+        return synced;
+      }
+      const localProgress = initialPrefs?.cfiProgress ?? 0;
+      return (book.progress ?? 0) > localProgress + 0.002 ? synced : local;
+    })()
+  );
+  const lastCfiProgressRef = useRef<number | null>(initialPrefs?.cfiProgress ?? null);
   const chapterPositionsRef = useRef<Record<string, string>>(initialPrefs?.chapterPositions ?? {});
   const [chapterIndex, setChapterIndex] = useState<number>(0);
   const [chapterLabel, setChapterLabel] = useState<string>("Chapter");
@@ -805,6 +1132,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
       index,
       total: words.length,
       text: word.text,
+      punctuation: word.trailing.trim(),
       contextStart,
       context: words.slice(contextStart, contextStart + 42).map((entry, offset) => ({
         text: entry.text,
@@ -814,7 +1142,10 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     };
   };
 
-  const applyUserReadingAnchor = (index: number) => {
+  const applyUserReadingAnchor = (
+    index: number,
+    options?: { commitPaceFrom?: number }
+  ) => {
     const words = readerWordsRef.current;
     if (words.length === 0) return;
     if (readerDotOffscreenTimerRef.current) {
@@ -822,23 +1153,29 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
       readerDotOffscreenTimerRef.current = null;
     }
     const clampedIndex = Math.min(words.length - 1, Math.max(0, index));
-    const previousIndex = activeWordIndexRef.current;
-    const delta = clampedIndex - previousIndex;
     readerDotAnchorIndexRef.current = clampedIndex;
     readerDotUserAnchorUntilRef.current = Number.POSITIVE_INFINITY;
     activeWordIndexRef.current = clampedIndex;
     programmaticScrollUntilRef.current = 0;
     smartManualOverrideUntilRef.current = Date.now() + 2200;
-    if (readingModeRef.current === "smart" && Math.abs(delta) >= 8) {
-      const adjustment = Math.min(0.08, Math.max(0.012, Math.abs(delta) / 1400));
-      smartPaceBiasRef.current = Math.min(
-        1.3,
-        Math.max(0.72, smartPaceBiasRef.current + (delta > 0 ? adjustment : -adjustment))
-      );
-      if (delta < 0 && smartSessionRef.current) {
-        smartSessionRef.current.rereads += Math.max(1, Math.round(Math.abs(delta) / 80));
+
+    // Only a completed gesture adjusts the pace, and it is measured from where
+    // the gesture started rather than from the previous animation frame.
+    const paceOrigin = options?.commitPaceFrom;
+    if (paceOrigin !== undefined && readingModeRef.current === "smart") {
+      const delta = clampedIndex - paceOrigin;
+      if (Math.abs(delta) >= 8) {
+        const adjustment = Math.min(0.08, Math.max(0.012, Math.abs(delta) / 1400));
+        smartPaceBiasRef.current = Math.min(
+          1.3,
+          Math.max(0.72, smartPaceBiasRef.current + (delta > 0 ? adjustment : -adjustment))
+        );
+        if (delta < 0 && smartSessionRef.current) {
+          smartSessionRef.current.rereads += Math.max(1, Math.round(Math.abs(delta) / 80));
+        }
       }
     }
+
     if (readingModeRef.current !== "standard") {
       setReadingWord(buildReadingWordState(clampedIndex));
     }
@@ -869,13 +1206,18 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
 
     let dragging = false;
     let pendingClientY = 0;
-    const moveToClientY = (clientY: number) => {
+    let gestureStartIndex = 0;
+    const moveToClientY = (clientY: number, commit = false) => {
       const rect = container.getBoundingClientRect();
       const ratio = Math.min(0.98, Math.max(0.02, (clientY - rect.top) / Math.max(1, rect.height)));
-      applyUserReadingAnchor(findNearestWordIndex(ratio));
+      applyUserReadingAnchor(
+        findNearestWordIndex(ratio),
+        commit ? { commitPaceFrom: gestureStartIndex } : undefined
+      );
     };
     element.onpointerdown = (event) => {
       dragging = true;
+      gestureStartIndex = readerDotAnchorIndexRef.current ?? activeWordIndexRef.current;
       pendingClientY = event.clientY;
       element.classList.add("reader-dot-dragging");
       element.dataset.dragging = "true";
@@ -899,7 +1241,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
       if (element.hasPointerCapture(event.pointerId)) {
         element.releasePointerCapture(event.pointerId);
       }
-      moveToClientY(event.clientY);
+      moveToClientY(event.clientY, true);
     };
     element.onpointercancel = () => {
       dragging = false;
@@ -910,7 +1252,8 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
       if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
       event.preventDefault();
       const step = event.key === "ArrowDown" ? 8 : -8;
-      applyUserReadingAnchor((readerDotAnchorIndexRef.current ?? activeWordIndexRef.current) + step);
+      const from = readerDotAnchorIndexRef.current ?? activeWordIndexRef.current;
+      applyUserReadingAnchor(from + step, { commitPaceFrom: from });
     };
   };
 
@@ -1088,7 +1431,10 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
       Date.now() < readerDotUserAnchorUntilRef.current &&
       previousAnchor !== null &&
       previousWordCount > 0;
+    const previousDocument = readerWordsRef.current[0]?.node.ownerDocument ?? null;
     const words: ReaderWord[] = [];
+    // Parallel to `words`: the block element each word sits in.
+    const blocks: Array<Element | null> = [];
     const contentsList = rendition?.getContents?.() ?? [];
     contentsList.forEach((contents: any) => {
       const doc = contents?.document as Document | undefined;
@@ -1106,20 +1452,45 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
           Boolean(parent.closest("script, style, noscript, svg, [aria-hidden='true']")) ||
           parent.hidden;
         if (!hidden && textNode.data.trim()) {
+          const block = parent.closest(READER_BLOCK_SELECTOR);
           const matches = Array.from(
             textNode.data.matchAll(/[\p{L}\p{N}]+(?:[’'\-][\p{L}\p{N}]+)*/gu)
           );
+          // Text before the first word here (". Then", or a node that is only
+          // punctuation) belongs to the previous word when it sits in the same
+          // block -- "<em>no</em>. Then" used to lose its sentence end.
+          const previous = words[words.length - 1];
+          const previousInBlock =
+            previous && previous.iframe === iframe && blocks[blocks.length - 1] === block;
+          const leadingEnd = matches[0]?.index ?? textNode.data.length;
+          if (previousInBlock && leadingEnd > 0) {
+            previous.trailing += textNode.data.slice(0, leadingEnd);
+            previous.sentenceEnd = SENTENCE_END_PATTERN.test(`${previous.text}${previous.trailing}`);
+          }
           matches.forEach((match, matchIndex) => {
             const start = match.index ?? 0;
             const text = match[0];
             const end = start + text.length;
             const nextStart = matches[matchIndex + 1]?.index ?? textNode.data.length;
             const trailing = textNode.data.slice(end, nextStart);
-            const sentenceEnd = /[.!?][”"')\]]*\s*$/.test(`${text}${trailing}`);
-            const paragraphEnd =
-              matchIndex === matches.length - 1 &&
-              !textNode.nextSibling &&
-              Boolean(parent.closest("p, li, blockquote, pre"));
+            // A word split across inline nodes ("<span>T</span>he", a styled
+            // syllable) is one word, not two flashes.
+            const last = words[words.length - 1];
+            if (
+              matchIndex === 0 &&
+              start === 0 &&
+              previousInBlock &&
+              last &&
+              last.trailing === "" &&
+              last.end === last.node.data.length &&
+              isInlineJoin(last.node, textNode)
+            ) {
+              last.text += text;
+              last.trailing = trailing;
+              last.difficulty = estimateWordDifficulty(last.text);
+              last.sentenceEnd = SENTENCE_END_PATTERN.test(`${last.text}${trailing}`);
+              return;
+            }
             words.push({
               text,
               trailing,
@@ -1128,14 +1499,20 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
               end,
               difficulty: estimateWordDifficulty(text),
               rsvpPauseMultiplier: 1,
-              sentenceEnd,
-              paragraphEnd,
+              sentenceEnd: SENTENCE_END_PATTERN.test(`${text}${trailing}`),
+              paragraphEnd: false,
               iframe
             });
+            blocks.push(block);
           });
         }
         node = walker.nextNode();
       }
+    });
+    // A paragraph ends where the next word is in another block. Checking the
+    // text node's siblings instead paused for a paragraph after every <em>.
+    words.forEach((word, index) => {
+      word.paragraphEnd = Boolean(blocks[index]) && blocks[index + 1] !== blocks[index];
     });
     const localFrequency = new Map<string, number>();
     words.forEach((word) => {
@@ -1148,9 +1525,25 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
         localFrequency.get(word.text.toLocaleLowerCase()) ?? 1
       );
     });
+    readingPaceScaleRef.current = {
+      speed: getPaceScale(words, "speed"),
+      smart: getPaceScale(words, "smart")
+    };
     readerWordsRef.current = words;
     manualReadingRef.current = null;
-    const nextIndex = preserveUserAnchor
+    // Re-indexing the same section (font size, re-render) must not move an
+    // RSVP or Smart Read position; only a new section starts over.
+    const keepReadingPosition =
+      readingModeRef.current !== "standard" &&
+      previousWordCount > 0 &&
+      words.length > 0 &&
+      previousDocument === words[0].node.ownerDocument;
+    const nextIndex = keepReadingPosition
+      ? Math.round(
+          (activeWordIndexRef.current / Math.max(1, previousWordCount - 1)) *
+            Math.max(0, words.length - 1)
+        )
+      : preserveUserAnchor
       ? Math.round((previousAnchor / Math.max(1, previousWordCount - 1)) * Math.max(0, words.length - 1))
       : startAtViewport && words.length > 0
         ? findNearestWordIndex()
@@ -1178,10 +1571,15 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     }, delay);
   };
 
+  // A gap longer than this between scroll observations means the reader was
+  // left open, not that the page took that long to read.
+  const MAX_OBSERVED_READING_GAP_MS = 4 * 60 * 1000;
+
   const saveObservedReading = (fromIndex: number, toIndex: number, elapsedMs: number, rereads = 0) => {
     const words = readerWordsRef.current;
     const count = Math.abs(toIndex - fromIndex);
     if (count < 18 || elapsedMs < 5000 || words.length === 0) return;
+    if (elapsedMs > MAX_OBSERVED_READING_GAP_MS) return;
     const start = Math.min(fromIndex, toIndex);
     const end = Math.min(words.length, Math.max(fromIndex, toIndex));
     const sampleWords = words.slice(start, end);
@@ -1379,10 +1777,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
               })();
         makeReaderDotInteractive(dot, container);
 
-        if (!dot.dataset.fixedLeft) {
-          dot.style.left = `${target.left}px`;
-          dot.dataset.fixedLeft = `${target.left}`;
-        } else if (dot.dataset.fixedLeft !== `${target.left}`) {
+        if (dot.dataset.fixedLeft !== `${target.left}`) {
           dot.style.left = `${target.left}px`;
           dot.dataset.fixedLeft = `${target.left}`;
         }
@@ -1496,7 +1891,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   };
 
   const triggerScrollAdvance = () => {
-    if (scrollAdvanceLockRef.current) {
+    if (scrollAdvanceLockRef.current || Date.now() < navigatingUntilRef.current) {
       return;
     }
     scrollAdvanceLockRef.current = true;
@@ -1506,11 +1901,15 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     scrollAdvanceTimerRef.current = window.setTimeout(() => {
       scrollAdvanceLockRef.current = false;
     }, 900);
+    // A beat at the top of a new chapter, so auto-scroll never carries its
+    // heading off the screen before it has been seen.
+    autoScrollYieldUntilRef.current = Date.now() + 1500;
     goNextSection();
   };
 
   const persistReaderState = (override?: Partial<{
     cfi: string;
+    cfiProgress: number;
     chapterPositions: Record<string, string>;
   }>) => {
     try {
@@ -1522,7 +1921,9 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
           displayMode: displayModeRef.current,
           autoScrollSpeed: autoScrollSpeedRef.current,
           speedReadWpm: speedReadWpmRef.current,
+          readerDotEnabled: readerDotEnabledRef.current,
           cfi: override?.cfi ?? lastCfiRef.current ?? undefined,
+          cfiProgress: override?.cfiProgress ?? lastCfiProgressRef.current ?? undefined,
           chapterPositions: override?.chapterPositions ?? chapterPositionsRef.current
         })
       );
@@ -1557,11 +1958,27 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     saveBookmarks([entry, ...bookmarks]);
   };
 
+  // Drops a user-placed Dotty pin so automatic tracking resumes.
+  const releaseUserReadingAnchor = () => {
+    readerDotUserAnchorUntilRef.current = 0;
+    readerDotAnchorIndexRef.current = null;
+    if (readerDotOffscreenTimerRef.current) {
+      window.clearTimeout(readerDotOffscreenTimerRef.current);
+      readerDotOffscreenTimerRef.current = null;
+    }
+  };
+
   const openBookmark = (cfi: string) => {
     if (!renditionRef.current) {
       return;
     }
     setBookmarkPanelOpen(false);
+    // Jumping elsewhere invalidates a pinned Dotty. Without this the pin
+    // survives and prepareReaderWords rescales it proportionally into the new
+    // section, dropping Dotty at an unrelated line. displayChapter already does
+    // this; the bookmark path did not.
+    releaseUserReadingAnchor();
+    markNavigating();
     void renditionRef.current.display(cfi);
   };
 
@@ -1571,22 +1988,53 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
       return;
     }
     const useSaved = options?.useSaved ?? true;
-    readerDotUserAnchorUntilRef.current = 0;
-    readerDotAnchorIndexRef.current = null;
-    if (readerDotOffscreenTimerRef.current) {
-      window.clearTimeout(readerDotOffscreenTimerRef.current);
-      readerDotOffscreenTimerRef.current = null;
-    }
+    releaseUserReadingAnchor();
     const saved = chapterPositionsRef.current[href];
     const target = useSaved && saved ? saved : href;
-    void rendition.display(target).then(() => {
-      if (!useSaved) {
-        const container = ensureScrollContainer();
-        if (container) {
-          container.scrollTop = 0;
+    progressArmedRef.current = true;
+    // An entry with an anchor ("ch34.xhtml#c4") is opened as its file, then
+    // scrolled to below: handed the anchor form, epub.js's scrolling mode
+    // showed a neighbouring section instead.
+    const fileTarget = !useSaved && target.includes("#") ? target.slice(0, target.indexOf("#")) : target;
+    markNavigating();
+    void rendition
+      .display(fileTarget)
+      .then(() => {
+        if (useSaved) {
+          return;
         }
-      }
-    });
+        const container = ensureScrollContainer();
+        if (!container) {
+          return;
+        }
+        const hashAt = target.indexOf("#");
+        if (hashAt < 0) {
+          // A chapter entry: its top.
+          container.scrollTop = 0;
+          return;
+        }
+        // An entry into the middle of a file (several chapters per file).
+        // epub.js loads the file but, in scrolling mode, stays at its top, so
+        // scroll to the anchor ourselves, just below the floating toolbar.
+        const id = decodeURIComponent(target.slice(hashAt + 1));
+        const toAnchor = () => {
+          for (const frame of Array.from(container.querySelectorAll("iframe"))) {
+            const anchor = frame.contentDocument?.getElementById(id);
+            if (anchor) {
+              const top =
+                anchor.getBoundingClientRect().top + frame.getBoundingClientRect().top - container.getBoundingClientRect().top;
+              container.scrollTop = Math.max(0, container.scrollTop + top - PAGE_TOP_PAD);
+              return;
+            }
+          }
+        };
+        // epub.js settles the new section at its top a moment after display
+        // resolves, so the jump is made again once that has happened.
+        toAnchor();
+        requestAnimationFrame(toAnchor);
+        window.setTimeout(toAnchor, 250);
+      })
+      .catch(() => undefined);
   };
 
   useEffect(() => {
@@ -1614,6 +2062,9 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     setLoading(true);
     setLoadError(null);
     setToc([]);
+    // Closing the book (or opening another) mid-load must stop this one:
+    // otherwise it kept parsing a whole book nobody was looking at.
+    let cancelled = false;
 
     if (!localPath) {
       setLoadError("Missing book file.");
@@ -1624,32 +2075,19 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     const load = async () => {
       try {
         const ext = getBookExtension(localPath);
-        if (ext && !READABLE_EXTENSIONS.includes(ext) && ext !== "mobi" && ext !== "azw3") {
-          const supported = formatDisplayList(READABLE_EXTENSIONS);
-          setLoadError(`This reader supports ${supported} files only.`);
+        if (ext && !isReadableExtension(ext)) {
+          setLoadError(`This reader supports ${formatSummary()} files.`);
           setLoading(false);
           return;
         }
-        if (isTauri() && ext !== "epub") {
-          const installed = await converterService.status().catch(() => false);
-          if (!installed) {
-            setLoadError("Converter not installed. Install it in Settings to open this file.");
-            setLoading(false);
-            return;
-          }
-        }
         let buffer: ArrayBuffer;
         if (isTauri()) {
-          const base64 = await bookService.readBookBytes(book.id);
-          if (!base64) {
-            throw new Error("Unable to read the book file. Make sure you're running the desktop app.");
+          // Raw bytes straight from the backend: no base64 round trip, which
+          // used to cost four to five times the book's size in memory.
+          buffer = await bookService.readBookBytes(book.id);
+          if (cancelled) {
+            return;
           }
-          const binary = atob(base64);
-          const bytes = new Uint8Array(binary.length);
-          for (let i = 0; i < binary.length; i += 1) {
-            bytes[i] = binary.charCodeAt(i);
-          }
-          buffer = bytes.buffer;
         } else {
           const source = localPath;
           const response = await fetch(source);
@@ -1657,6 +2095,9 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
             throw new Error("fetch failed");
           }
           buffer = await response.arrayBuffer();
+        }
+        if (cancelled) {
+          return;
         }
 
         if (bookRef.current) {
@@ -1667,23 +2108,16 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
         let epub: ReturnType<typeof ePub>;
         try {
           epub = ePub(buffer);
-        } catch (error) {
-          const supported = formatDisplayList(READABLE_EXTENSIONS);
-          if (ext && ext !== "epub") {
-            setLoadError(
-              `Conversion failed for ${ext.toUpperCase()}. Reinstall the converter in Settings and try again.`
-            );
-          } else {
-            const suffix = ext ? ` ${ext.toUpperCase()} files can be imported, but aren't readable yet.` : "";
-            setLoadError(`This reader currently supports ${supported} files only.${suffix}`);
-          }
+        } catch {
+          setLoadError(
+            ext && ext !== "epub"
+              ? `Leaflet converted this ${ext.toUpperCase()} file but could not read the result. Re-import the book and try again.`
+              : "This file is not a readable EPUB. It may be damaged."
+          );
           setLoading(false);
           return;
         }
         bookRef.current = epub;
-        if (epub.locations && typeof epub.locations.generate === "function") {
-          void epub.locations.generate(1600);
-        }
 
         if (!viewerRef.current) {
           throw new Error("Reader container not ready.");
@@ -1709,11 +2143,31 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
               @font-face { font-family: "ZT Nature"; src: url("${ztNatureBoldWoff2}") format("woff2"); font-display: swap; font-weight: 700; }
               :root { --reader-font-size: ${fontSizeRef.current}px; }
               html { font-size: var(--reader-font-size) !important; width: 100% !important; max-width: 100% !important; transition: padding 0.25s ease; }
-              body { font-size: 1em !important; margin: 0 !important; padding-left: var(--reader-content-pad, 24px) !important; padding-right: var(--reader-content-pad, 24px) !important; text-align: justify !important; text-justify: inter-word !important; hyphens: auto; width: 100% !important; max-width: 100% !important; box-sizing: border-box; transition: padding 0.25s ease; }
+              body { font-size: 1em !important; margin: 0 !important; padding-top: ${PAGE_TOP_PAD}px !important; padding-left: var(--reader-content-pad, 24px) !important; padding-right: var(--reader-content-pad, 24px) !important; text-align: justify !important; text-justify: inter-word !important; hyphens: auto; width: 100% !important; max-width: 100% !important; box-sizing: border-box; transition: padding 0.25s ease; }
               body > *:first-child { margin-top: 0 !important; padding-top: 0 !important; }
-              body * { font-size: inherit !important; line-height: inherit; box-sizing: border-box; max-width: 100% !important; }
+              /* One reading size for running text, whatever the publisher
+                 set; headings, footnote markers and small print keep their
+                 proportions (a blanket rule made headings body-sized and
+                 footnote numbers full-sized). */
+              body :where(p, div, span, li, blockquote, td, th, dd, dt, a, em, i, b, strong, cite, section, article, font) { font-size: inherit !important; }
+              body * { line-height: inherit; box-sizing: border-box; max-width: 100% !important; }
+              h1 { font-size: 1.6em !important; }
+              h2 { font-size: 1.4em !important; }
+              h3 { font-size: 1.22em !important; }
+              h4, h5, h6 { font-size: 1.08em !important; }
+              sup, sub { font-size: 0.72em !important; line-height: 0 !important; }
+              small { font-size: 0.86em !important; }
               body > * { max-width: 100% !important; }
               p { text-align: justify !important; text-justify: inter-word !important; hyphens: auto; text-indent: 0 !important; margin-left: 0 !important; margin-bottom: 1.6em !important; }
+              /* Scene breaks, epigraphs and title lines the book centres stay centred. */
+              p[align="center"], p.center, p.centered, p[style*="text-align: center"], p[style*="text-align:center"],
+              div[align="center"] p, .center p, .centered p { text-align: center !important; }
+              /* On a dark page, text the publisher coloured dark (common in
+                 InDesign exports) takes the page's ink, links the accent,
+                 and boxes lose light backgrounds that would glare. */
+              html[data-reader-dark="1"] body :where(div, span, em, i, b, strong, small, cite, section, article, figcaption, sup, sub, font, dfn, abbr) { color: inherit !important; }
+              html[data-reader-dark="1"] body a { color: #8cc95a !important; }
+              html[data-reader-dark="1"] body :where(div, section, article, aside, p, blockquote, table, tr, td, th) { background-color: transparent !important; }
               p, div, section, article, blockquote, li { text-indent: 0 !important; margin-left: 0 !important; }
               h1, h2, h3, h4, h5, h6 { font-family: "ZT Nature", "Segoe UI", sans-serif !important; font-weight: 700 !important; letter-spacing: -0.01em; }
               html[data-reader-finish="paper"] body { color: #30291f !important; }
@@ -1800,6 +2254,17 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
                 text-shadow: none !important;
               }
               html[data-reader-finish="true-black"] ::selection { background: rgba(114, 171, 68, 0.42); }
+              /* Ink-on-white pictures (see markInkImages) take the page's
+                 colour: on a light page the white multiplies into the paper;
+                 on a dark page only headings and ornaments are inverted to
+                 white ink and screened onto the page. Maps and drawings stay
+                 as drawn. A click toggles the original. */
+              html[data-reader-dark="0"] [data-leaflet-ink]:not([data-leaflet-ink-off="1"]) { mix-blend-mode: multiply; }
+              html[data-reader-dark="1"] [data-leaflet-ink="title"]:not([data-leaflet-ink-off="1"]) {
+                filter: invert(1) hue-rotate(180deg) brightness(0.92);
+                mix-blend-mode: screen;
+              }
+              [data-leaflet-ink] { cursor: pointer; }
             `;
             doc.head.appendChild(style);
           } else {
@@ -1815,12 +2280,14 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
           const finish = getReaderFinish(currentDisplayMode, currentReaderTheme);
           const finishBackground = getReaderFinishBackground(finish);
           doc.documentElement.dataset.readerFinish = currentDisplayMode;
+          doc.documentElement.dataset.readerDark = finish.themeName === "leaflet-dark" ? "1" : "0";
+          markInkImages(doc);
           doc.documentElement.style.backgroundColor = finish.background;
           doc.body.style.backgroundColor = finish.background;
           doc.documentElement.style.backgroundImage = finishBackground;
           doc.body.style.backgroundImage = finishBackground;
-          doc.documentElement.style.backgroundSize = finish.texture ? "cover" : "auto";
-          doc.body.style.backgroundSize = finish.texture ? "cover" : "auto";
+          doc.documentElement.style.backgroundSize = "auto";
+          doc.body.style.backgroundSize = "auto";
         });
 
         rendition.themes.register("leaflet-dark", {
@@ -1973,11 +2440,9 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
         ensureSingleScrollContainer();
 
         const navigation = await epub.loaded.navigation;
-        const flatToc = flattenToc(navigation.toc);
-        setToc(flatToc);
-        const chapterToc = flatToc.filter((item) => isChapterLike(item.label));
-        const indexMap: Record<string, number> = {};
-        const labelMap: Record<string, string> = {};
+        if (cancelled) {
+          return;
+        }
         const spineIndexByHref: Record<string, number> = {};
         const spineItems = epub.spine?.items ?? [];
         spineItems.forEach((item: any, idx: number) => {
@@ -1985,15 +2450,57 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
             spineIndexByHref[item.href] = idx;
           }
         });
+        // TOC links are written relative to the table of contents file, but
+        // sections are named relative to the package file. When the two live
+        // in different folders (nav in Text/, chapters beside it), the raw
+        // links matched nothing: chapter entries did nothing when clicked,
+        // and progress had no chapters to count.
+        const packaging = (epub as unknown as { packaging?: { navPath?: string; ncxPath?: string } }).packaging;
+        const tocFile = packaging?.navPath || packaging?.ncxPath || "";
+        const tocDir = tocFile.includes("/") ? tocFile.slice(0, tocFile.lastIndexOf("/") + 1) : "";
+        const resolveTocHref = (href: string) => {
+          const hashAt = href.indexOf("#");
+          const path = hashAt >= 0 ? href.slice(0, hashAt) : href;
+          const fragment = hashAt >= 0 ? href.slice(hashAt) : "";
+          if (!path || spineIndexByHref[path] !== undefined || /^[a-z]+:/i.test(path)) {
+            return href;
+          }
+          const parts: string[] = [];
+          for (const part of `${tocDir}${path}`.split("/")) {
+            if (part === "..") {
+              parts.pop();
+            } else if (part && part !== ".") {
+              parts.push(part);
+            }
+          }
+          const joined = parts.join("/");
+          let decoded = joined;
+          try {
+            decoded = decodeURIComponent(joined);
+          } catch {
+            // A stray "%" in a file name: the raw form is the only candidate.
+          }
+          const candidates = [joined, decoded];
+          const match = candidates.find((candidate) => spineIndexByHref[candidate] !== undefined);
+          return match ? `${match}${fragment}` : href;
+        };
+        const flatToc = flattenToc(navigation.toc).map((item) => ({ ...item, href: resolveTocHref(item.href) }));
+        setToc(flatToc);
+        const chapterToc = flatToc.filter((item) => isChapterLike(item.label));
+        const indexMap: Record<string, number> = {};
+        const labelMap: Record<string, string> = {};
+        // Chapters are counted per section file: a location reports its file,
+        // never the anchor inside it, so the keys drop the "#...".
         let dedupIndex = 0;
         const seenHrefs = new Set<string>();
         chapterToc.forEach((item) => {
-          if (seenHrefs.has(item.href)) {
+          const file = item.href.split("#")[0];
+          if (seenHrefs.has(file)) {
             return;
           }
-          seenHrefs.add(item.href);
-          indexMap[item.href] = dedupIndex;
-          labelMap[item.href] = item.label;
+          seenHrefs.add(file);
+          indexMap[file] = dedupIndex;
+          labelMap[file] = item.label;
           dedupIndex += 1;
         });
         setTocIndexByHref(indexMap);
@@ -2049,8 +2556,11 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
             };
 
             if (chapterTotal > 0 && typeof chapterIndex === "number") {
+              // Past the last chapter is back matter: endnotes, acknowledgements.
+              // A footnote link into it is not finishing the book, so the
+              // progress stays where the reading was.
               if (typeof spineIndex === "number" && typeof lastChapterSpine === "number" && spineIndex > lastChapterSpine) {
-                return 1;
+                return null;
               }
               const within = sectionProgress();
               if (chapterIndex >= chapterTotal - 1 && within >= 0.98) {
@@ -2074,10 +2584,15 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
               return Math.min(1, Math.max(0, direct));
             }
 
-            return 0;
+            // Unknown (epub.js is still indexing the book): better to save
+            // nothing than a 0 that overwrites real progress.
+            return null;
           };
 
           const percentage = resolveProgress();
+          if (percentage !== null) {
+            lastCfiProgressRef.current = percentage;
+          }
           const now = Date.now();
           if (location?.start?.cfi) {
             lastCfiRef.current = location.start.cfi;
@@ -2096,15 +2611,21 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
 
           // no auto-advance in scroll mode
 
+          if (!progressArmedRef.current && lastHandsOnAtRef.current > openedAtRef.current) {
+            progressArmedRef.current = true;
+          }
           const shouldUpdateProgress =
-            Math.abs(percentage - lastProgressRef.current) >= 0.005 ||
-            now - lastProgressAtRef.current >= 10000;
+            percentage !== null &&
+            progressArmedRef.current &&
+            (Math.abs(percentage - lastProgressRef.current) >= 0.005 || now - lastProgressAtRef.current >= 10000);
 
-          if (shouldUpdateProgress) {
+          if (shouldUpdateProgress && percentage !== null) {
             lastProgressRef.current = percentage;
             lastProgressAtRef.current = now;
-            void bookService.updateProgress(book.id, percentage);
-            updateBookProgress(book.id, percentage);
+            const position = location?.start?.cfi ?? null;
+            lastCfiProgressRef.current = percentage;
+            void bookService.updateProgress(book.id, percentage, position);
+            updateBookProgress(book.id, percentage, position ?? undefined);
             lastComputedProgressRef.current = percentage;
           }
 
@@ -2123,23 +2644,148 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
         };
         relocateHandlerRef.current = onRelocated;
         rendition.on("relocated", onRelocated);
+        const bindChromeReveal = () => {
+          (rendition.getContents?.() ?? []).forEach((contents: any) => {
+            const doc = contents?.document as Document | undefined;
+            if (!doc || (doc as any).__leafletChromeBound) {
+              return;
+            }
+            (doc as any).__leafletChromeBound = true;
+            const handsOn = () => {
+              lastHandsOnAtRef.current = Date.now();
+              markReadingActivity();
+            };
+            doc.addEventListener(
+              "pointerdown",
+              (event) => {
+                handsOn();
+                if (event.pointerType === "touch") {
+                  revealChromeRef.current();
+                }
+                holdAutoScrollRef.current(true);
+              },
+              { passive: true }
+            );
+            // Web links in a book open in the browser. epub.js marks them
+            // target=_blank, which the sandboxed page silently blocks, so
+            // they used to do nothing. Links within the book are left to
+            // epub.js, which turns them into jumps.
+            doc.addEventListener(
+              "click",
+              (event) => {
+                const anchor = (event.target as Element | null)?.closest?.("a[href]");
+                const href = anchor?.getAttribute("href") ?? "";
+                if (!/^https?:\/\//i.test(href)) {
+                  return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                const secure = href.replace(/^http:\/\//i, "https://");
+                accountService.openLink(secure).catch(() => showFocusToastRef.current("Couldn't open that link."));
+              },
+              true
+            );
+            // Hold to pause: auto-scroll waits while a finger or button is
+            // down on the text (which is also when a passage is being selected).
+            const release = () => holdAutoScrollRef.current(false);
+            doc.addEventListener("pointerup", release, { passive: true });
+            doc.addEventListener("pointercancel", release, { passive: true });
+            // Once the text has been clicked the iframe owns focus, and Space,
+            // arrows and Escape stopped working in every mode.
+            doc.addEventListener("keydown", (event) => {
+              handsOn();
+              readerKeyHandlerRef.current?.(event);
+            });
+            // Wheeling over the text scrolls the outer container but the wheel
+            // event itself stays in here; without it, manual reading stopped
+            // earning time five minutes after the reader opened.
+            doc.addEventListener(
+              "wheel",
+              (event) => {
+                handsOn();
+                contentWheelHandlerRef.current?.(event.deltaY);
+              },
+              { passive: true }
+            );
+            doc.addEventListener("pointermove", () => markReadingActivity(), { passive: true });
+          });
+        };
+        bindChromeReveal();
         rendition.on?.("rendered", () => {
           applyReaderTypography();
           ensureSingleScrollContainer();
           ensureScrollContainer();
           scheduleReaderWordIndex(true);
+          bindChromeReveal();
+          // Images have their final addresses by now; check any the first
+          // pass couldn't read.
+          (rendition.getContents?.() ?? []).forEach((contents: any) => {
+            if (contents?.document) {
+              markInkImages(contents.document);
+            }
+          });
         });
 
-        if (lastCfiRef.current) {
-          await rendition.display(lastCfiRef.current);
-        } else {
-          await rendition.display();
-        }
         applyReaderInsets();
+        // The saved place, if it still resolves. A stale or broken position
+        // used to reject here and the book never opened again.
+        markNavigating(2500);
+        const restored = lastCfiRef.current
+          ? await rendition.display(lastCfiRef.current).then(
+              () => true,
+              () => false
+            )
+          : false;
+        if (cancelled) {
+          return;
+        }
+        if (restored) {
+          progressArmedRef.current = true;
+          // epub.js puts the saved line at the very top, under the toolbar.
+          const container = ensureScrollContainer();
+          if (container) {
+            container.scrollTop = Math.max(0, container.scrollTop - PAGE_TOP_PAD);
+          }
+        } else {
+          // No local position (another device, cleared data): start at the
+          // chapter the synced progress points into, rather than page one.
+          const progress = typeof book.progress === "number" ? book.progress : 0;
+          const chapters = chapterSpineIndicesRef.current;
+          const spineIndex =
+            progress > 0.01 && progress < 0.995 && chapters.length > 1
+              ? chapters[Math.min(chapters.length - 1, Math.floor(progress * chapters.length))]
+              : null;
+          const href = spineIndex !== null ? epub.spine?.items?.[spineIndex]?.href : null;
+          await (href ? rendition.display(href) : rendition.display()).catch(() => rendition.display());
+          if (progress <= 0.001) {
+            progressArmedRef.current = true;
+          }
+        }
+        if (cancelled) {
+          return;
+        }
         scheduleReaderWordIndex(true);
         setLoading(false);
+        // Indexing the whole book (for progress in books without usable
+        // chapters) waits until the first page is up, and runs when idle.
+        const locations = epub.locations;
+        if (locations && typeof locations.generate === "function") {
+          const start = () => {
+            if (!cancelled) {
+              void locations.generate(1600);
+            }
+          };
+          if (typeof window.requestIdleCallback === "function") {
+            window.requestIdleCallback(start, { timeout: 4000 });
+          } else {
+            window.setTimeout(start, 1200);
+          }
+        }
       } catch (error) {
-        setLoadError(error instanceof Error ? error.message : "Failed to load book.");
+        if (cancelled) {
+          return;
+        }
+        setLoadError(friendlyOpenError(error instanceof Error ? error.message : String(error ?? "")));
         setLoading(false);
       }
     };
@@ -2147,6 +2793,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     load();
 
     return () => {
+      cancelled = true;
       if (renditionRef.current && relocateHandlerRef.current) {
         renditionRef.current.off("relocated", relocateHandlerRef.current);
       }
@@ -2160,7 +2807,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
         bookRef.current = null;
       }
     };
-  }, [book.id, localPath]);
+  }, [book.id, localPath, reloadKey]);
 
   useEffect(() => {
     if (loading) return;
@@ -2176,6 +2823,18 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
         const height = Math.max(1, Math.round(viewer.clientHeight));
         rendition.resize(width, height);
         ensureSingleScrollContainer();
+        // Reflow moves the anchored word; the marker has to follow it. RSVP has
+        // no Dotty (repositioning here used to recreate it), and an unpinned
+        // Dotty in standard mode follows the last visible line, not a word.
+        const mode = readingModeRef.current;
+        if (readerDotEnabledRef.current && readerWordsRef.current.length > 0 && mode !== "speed") {
+          const pinned = Date.now() < readerDotUserAnchorUntilRef.current;
+          if (mode === "smart" || pinned) {
+            positionReaderDotAtWord(readerDotAnchorIndexRef.current ?? activeWordIndexRef.current);
+          } else {
+            scheduleReaderDotUpdate();
+          }
+        }
       });
     };
     const observer = new ResizeObserver(syncViewport);
@@ -2209,10 +2868,11 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
       doc.documentElement.style.backgroundColor = finish.background;
       doc.body.style.backgroundColor = finish.background;
       doc.documentElement.dataset.readerFinish = displayMode;
+      doc.documentElement.dataset.readerDark = finish.themeName === "leaflet-dark" ? "1" : "0";
       doc.documentElement.style.backgroundImage = finishBackground;
       doc.body.style.backgroundImage = finishBackground;
-      doc.documentElement.style.backgroundSize = finish.texture ? "cover" : "auto";
-      doc.body.style.backgroundSize = finish.texture ? "cover" : "auto";
+      doc.documentElement.style.backgroundSize = "auto";
+      doc.body.style.backgroundSize = "auto";
       doc.documentElement.style.color = finish.text;
       doc.body.style.color = finish.text;
     });
@@ -2242,11 +2902,20 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
       if (!target) {
         return;
       }
+      handleWheel(target, event.deltaY);
+    };
+
+    const handleWheel = (target: HTMLElement, deltaY: number) => {
+      markReadingActivity();
+      lastHandsOnAtRef.current = Date.now();
       programmaticScrollUntilRef.current = 0;
+      if (autoScrollActiveRef.current) {
+        noteAutoScrollCorrectionRef.current(target, deltaY);
+      }
       if (readingModeRef.current === "smart") {
         smartManualOverrideUntilRef.current = Date.now() + 2200;
       }
-      if (event.deltaY > 0) {
+      if (deltaY > 0) {
         lastWheelDownAtRef.current = Date.now();
         if (isAtScrollBottom(target, 2)) {
           triggerScrollAdvance();
@@ -2263,6 +2932,9 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
         return;
       }
       const now = Date.now();
+      if (now - lastHandsOnAtRef.current < HANDS_FREE_GRACE_MS) {
+        markReadingActivity();
+      }
       const last = lastScrollTopRef.current ?? target.scrollTop;
       const delta = target.scrollTop - last;
       lastScrollTopRef.current = target.scrollTop;
@@ -2293,6 +2965,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
       resizeObserver.observe(container);
       container.addEventListener("wheel", onWheel, { passive: true });
       container.addEventListener("scroll", onScroll, { passive: true });
+      contentWheelHandlerRef.current = (deltaY) => handleWheel(container, deltaY);
     };
 
     const detach = () => {
@@ -2301,6 +2974,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
       }
       activeContainer.removeEventListener("wheel", onWheel);
       activeContainer.removeEventListener("scroll", onScroll);
+      contentWheelHandlerRef.current = null;
       resizeObserver?.disconnect();
       resizeObserver = null;
       activeContainer = null;
@@ -2361,9 +3035,25 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     }
 
     autoScrollLastTimeRef.current = null;
+    // Starting (or retuning) is deliberate, so the hands-free window restarts.
+    lastHandsOnAtRef.current = Date.now();
 
     const tick = (time: number) => {
       if (!autoScrollActive) {
+        return;
+      }
+      const now = Date.now();
+      // Nobody has touched the page for a while: stop rather than scroll a
+      // chapter past an empty chair (and stop crediting minutes for it).
+      if (now - lastHandsOnAtRef.current >= HANDS_FREE_GRACE_MS) {
+        setAutoScrollActive(false);
+        showFocusToastRef.current("Auto-scroll paused. Still reading? Press Space.");
+        return;
+      }
+      if (autoScrollHeldRef.current || now < autoScrollYieldUntilRef.current) {
+        autoScrollLastTimeRef.current = time;
+        autoScrollCarryRef.current = 0;
+        autoScrollRafRef.current = requestAnimationFrame(tick);
         return;
       }
       if (autoScrollLastTimeRef.current === null) {
@@ -2372,8 +3062,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
       const deltaSeconds = Math.min(0.2, (time - autoScrollLastTimeRef.current) / 1000);
       autoScrollLastTimeRef.current = time;
       const before = container.scrollTop;
-      const normalized = Math.min(100, Math.max(0, autoScrollSpeed)) / 100;
-      const speedPxPerSecond = 3 + normalized * 45;
+      const speedPxPerSecond = autoScrollPixelsPerSecond(autoScrollSpeed, fontSizeRef.current);
       autoScrollCarryRef.current += speedPxPerSecond * deltaSeconds;
       const move = Math.floor(autoScrollCarryRef.current);
       if (move > 0) {
@@ -2417,8 +3106,65 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     saveSmartReadProfile(accountEmail, next);
   };
 
+  // The speed a reader settles on becomes the starting speed for other books.
+  useEffect(() => {
+    try {
+      localStorage.setItem(AUTO_SCROLL_DEFAULT_KEY, String(autoScrollSpeed));
+    } catch {
+      // A preference; losing it only means starting from the default.
+    }
+  }, [autoScrollSpeed]);
+
+  // A hold that ends outside the book (over the toolbar, off the window) must
+  // still let go, or auto-scroll would wait forever.
+  useEffect(() => {
+    if (!autoScrollHeld) {
+      return;
+    }
+    const release = () => holdAutoScrollRef.current(false);
+    window.addEventListener("pointerup", release);
+    window.addEventListener("blur", release);
+    return () => {
+      window.removeEventListener("pointerup", release);
+      window.removeEventListener("blur", release);
+    };
+  }, [autoScrollHeld]);
+
+  useEffect(() => {
+    if (!autoScrollActive) {
+      holdAutoScrollRef.current(false);
+    }
+  }, [autoScrollActive]);
+
+  // Nothing moves on its own while Leaflet is in the background: coming back
+  // to find auto-scroll three pages on, or RSVP a chapter ahead, loses the
+  // place. Resuming is left to the reader, who needs a moment to find the line.
+  useEffect(
+    () =>
+      watchForeground((inFront) => {
+        if (inFront) {
+          return;
+        }
+        if (autoScrollActiveRef.current) {
+          setAutoScrollActive(false);
+          showFocusToastRef.current("Auto-scroll paused while you were away. Space to carry on.");
+        } else if (readingModeRef.current !== "standard" && !readingPausedRef.current) {
+          readingPausedRef.current = true;
+          setReadingPaused(true);
+          showFocusToastRef.current("Paused while you were away. Space to carry on.");
+        }
+      }),
+    []
+  );
+
   useEffect(() => {
     readingPausedRef.current = readingPaused;
+    // Resuming is always deliberate, by key or by the play button, so it
+    // restarts the hands-free window; otherwise the idle pause would fire again
+    // on the next word.
+    if (!readingPaused) {
+      lastHandsOnAtRef.current = Date.now();
+    }
   }, [readingPaused]);
 
   useEffect(() => {
@@ -2506,10 +3252,27 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
           schedule(500);
           return;
         }
-        const index = Math.min(activeWordIndexRef.current, words.length - 1);
+        if (activeWordIndexRef.current >= words.length) {
+          // The last word has had its full time on screen; move on.
+          continueInNextSection();
+          return;
+        }
+        const index = Math.max(0, activeWordIndexRef.current);
         const word = words[index];
         const now = Date.now();
         const mode = readingModeRef.current;
+        // Playing hands-free counts as reading for the same grace window as
+        // auto-scroll. Past it, pause rather than play on to an empty room:
+        // playback and credited time then always agree, and a reader who
+        // stepped away comes back to the word they left on.
+        if (now - lastHandsOnAtRef.current >= HANDS_FREE_GRACE_MS) {
+          readingPausedRef.current = true;
+          setReadingPaused(true);
+          showFocusToast("Still reading? Press Space to carry on.");
+          schedule(180);
+          return;
+        }
+        markReadingActivity();
         let wpm = speedReadWpmRef.current;
         if (mode === "smart") {
           const calibration = smartCalibrationRef.current;
@@ -2542,42 +3305,84 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
             session.difficultySamples += 1;
           }
           positionReaderDotAtWord(index);
+        } else {
+          // Only RSVP renders the word; in Smart Read this re-rendered the
+          // whole reader on every word for nothing.
+          setReadingWord(buildReadingWordState(index));
         }
-        setReadingWord(buildReadingWordState(index));
         scrollWordIntoReadingBand(index);
 
-        if (index >= words.length - 1) {
-          finishSmartSession();
-          goNextSection();
-          setReadingWord(null);
-          readingEngineTimerRef.current = window.setTimeout(() => {
-            prepareReaderWords(true);
-            activeWordIndexRef.current = findNearestWordIndex();
-            if (readingModeRef.current === "smart") {
-              const startedAt = Date.now();
-              smartSessionRef.current = {
-                startedAt,
-                activeMs: 0,
-                lastTickAt: startedAt,
-                startIndex: activeWordIndexRef.current,
-                furthestIndex: activeWordIndexRef.current,
-                difficultyTotal: 0,
-                difficultySamples: 0,
-                rereads: 0
-              };
-            }
-            schedule(mode === "smart" ? 2200 : 700);
-          }, 1100);
-          return;
-        }
-
         activeWordIndexRef.current = index + 1;
-        const punctuationPause = word.paragraphEnd ? 620 : word.sentenceEnd ? 280 : /[,;:]$/.test(word.trailing.trim()) ? 120 : 0;
+        const paceMode = mode === "speed" ? "speed" : "smart";
         const paceDelay =
           (60000 / Math.max(70, wpm)) *
-          (mode === "speed" ? word.rsvpPauseMultiplier : 1);
-        schedule(Math.round(paceDelay + punctuationPause));
+          getPaceFactor(word, paceMode) *
+          readingPaceScaleRef.current[paceMode];
+        schedule(Math.round(paceDelay));
       }, delay);
+    };
+
+    const startSmartSessionAt = (index: number) => {
+      const startedAt = Date.now();
+      smartSessionRef.current = {
+        startedAt,
+        activeMs: 0,
+        lastTickAt: startedAt,
+        startIndex: index,
+        furthestIndex: index,
+        difficultyTotal: 0,
+        difficultySamples: 0,
+        rereads: 0
+      };
+    };
+
+    // Advances to the next section and resumes at its first word once it has
+    // actually rendered. A fixed 1.1s wait used to re-index the old section on a
+    // slow render (and skip a chapter), start ~40% down the new page, stall on
+    // image-only sections, and loop the last page forever at the end of a book.
+    const continueInNextSection = () => {
+      finishSmartSession();
+      const before = renditionRef.current?.location;
+      const fromHref = before?.start?.href ?? before?.end?.href ?? null;
+      goNextSection();
+      let attempts = 0;
+      const waitForSection = () => {
+        if (stopped || readingModeRef.current === "standard") return;
+        const location = renditionRef.current?.location;
+        const href = location?.start?.href ?? location?.end?.href ?? null;
+        if (href === fromHref) {
+          attempts += 1;
+          if (attempts < 12) {
+            readingEngineTimerRef.current = window.setTimeout(waitForSection, 250);
+            return;
+          }
+          // Nothing came next: this is the end of the book.
+          activeWordIndexRef.current = Math.max(0, readerWordsRef.current.length - 1);
+          readingPausedRef.current = true;
+          setReadingPaused(true);
+          showFocusToast("End of book");
+          schedule(180);
+          return;
+        }
+        if (wordIndexTimerRef.current) {
+          window.clearTimeout(wordIndexTimerRef.current);
+          wordIndexTimerRef.current = null;
+        }
+        prepareReaderWords(false);
+        if (readerWordsRef.current.length === 0) {
+          continueInNextSection();
+          return;
+        }
+        activeWordIndexRef.current = 0;
+        readerDotAnchorIndexRef.current = 0;
+        if (readingModeRef.current === "smart") {
+          startSmartSessionAt(0);
+        } else {
+          setReadingWord(buildReadingWordState(0));
+        }
+        schedule(readingModeRef.current === "smart" ? 1400 : 700);
+      };
+      readingEngineTimerRef.current = window.setTimeout(waitForSection, 400);
     };
 
     schedule(readingMode === "smart" ? 2400 : 650);
@@ -2673,6 +3478,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     while (index >= 0 && index < spineItems.length) {
       const item = spineItems[index];
       if (!isSkippableSpine(item)) {
+        markNavigating();
         void rendition.display(item.href);
         return true;
       }
@@ -2749,20 +3555,43 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     }
   }, [fontSize, sidebarOpen, displayMode, autoScrollSpeed, speedReadWpm, storageKey]);
 
+  const appliedFontSizeRef = useRef(fontSize);
   useEffect(() => {
     if (!renditionRef.current?.themes?.fontSize) {
       applyReaderTypography();
       return;
     }
+    // Bigger or smaller text changes the chapter's height while the scroll
+    // position stays put, so the page jumped by hundreds of pixels. Note the
+    // line in view first, and return to it once the text has reflowed.
+    const rendition = renditionRef.current;
+    const changed = appliedFontSizeRef.current !== fontSize;
+    appliedFontSizeRef.current = fontSize;
+    const anchor: string | undefined = changed ? rendition.location?.start?.cfi : undefined;
     fontSizeRef.current = fontSize;
     applyReaderTypography();
     applyReaderInsets();
+    if (anchor) {
+      requestAnimationFrame(() => {
+        markNavigating();
+        void rendition
+          .display(anchor)
+          .then(() => {
+            const container = ensureScrollContainer();
+            if (container) {
+              container.scrollTop = Math.max(0, container.scrollTop - PAGE_TOP_PAD);
+            }
+          })
+          .catch(() => undefined);
+      });
+    }
     scheduleReaderWordIndex(true);
     persistReaderState();
   }, [fontSize]);
 
   useEffect(() => {
     readerDotEnabledRef.current = readerDotEnabled;
+    persistReaderState();
     if (!readerDotEnabled) {
       removeLastReadMarker();
       return;
@@ -2838,9 +3667,31 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     });
   };
   const isLight = readerTheme === "light";
-  const rsvpPivot = readingWord
-    ? Math.min(readingWord.text.length - 1, Math.max(0, Math.floor(readingWord.text.length * 0.36)))
-    : 0;
+  // The optimal recognition point: the letter the eye should land on, a little
+  // left of centre. It stays pinned to the same spot on screen word after
+  // word, so the eye never has to move; only the letters around it change.
+  const rsvpPivot = readingWord ? rsvpPivotIndex(readingWord.text) : 0;
+  // RSVP takes its colours from the page, not the app: a true-black page gets
+  // a dark stage even when the rest of Leaflet is light, and the paper finish
+  // stays paper when the app is dark.
+  const rsvpFinish = getReaderFinish(displayMode, readerTheme);
+  const rsvpDark = rsvpFinish.themeName === "leaflet-dark";
+  // The page's own colours, for everything around the book text (its gutters,
+  // the scrollbar, the frame), which otherwise followed the app's theme and
+  // showed as pale strips beside a dark page.
+  const pageStyle = {
+    "--reader-page-bg": rsvpFinish.background,
+    "--reader-page-ink": rsvpFinish.text,
+    colorScheme: rsvpDark ? "dark" : "light"
+  } as CSSProperties;
+  const rsvpStyle = {
+    "--rsvp-bg": rsvpFinish.background,
+    "--rsvp-text": rsvpFinish.text,
+    "--rsvp-accent": rsvpDark ? "#8cc95a" : "#0b7a45"
+  } as CSSProperties;
+  const rsvpWordsLeft = readingWord ? Math.max(0, readingWord.total - readingWord.index - 1) : 0;
+  const rsvpMinutesLeft = Math.max(1, Math.round(rsvpWordsLeft / Math.max(60, speedReadWpm)));
+  const rsvpProgress = readingWord ? (readingWord.index + 1) / Math.max(1, readingWord.total) : 0;
   const showFocusToast = (message: string) => {
     setFocusToast(message);
     if (focusToastTimerRef.current) {
@@ -2850,10 +3701,65 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
       setFocusToast(null);
     }, 2400);
   };
+  showFocusToastRef.current = showFocusToast;
+
+  holdAutoScrollRef.current = (held: boolean) => {
+    if (held && !autoScrollActiveRef.current) {
+      return;
+    }
+    if (autoScrollHeldRef.current === held) {
+      return;
+    }
+    autoScrollHeldRef.current = held;
+    setAutoScrollHeld(held);
+    if (!held) {
+      // A short breath after letting go, so the line being read stays put.
+      autoScrollYieldUntilRef.current = Math.max(autoScrollYieldUntilRef.current, Date.now() + 400);
+    }
+  };
+
+  /**
+   * Hand scrolling while auto-scroll runs. Auto-scroll yields (longer when
+   * going back: that is re-reading), and a consistent correction retunes it.
+   */
+  noteAutoScrollCorrectionRef.current = (container: HTMLElement, deltaY: number) => {
+    const now = Date.now();
+    autoScrollYieldUntilRef.current =
+      now + (deltaY < 0 ? AUTO_SCROLL_YIELD_BACK_MS : AUTO_SCROLL_YIELD_AHEAD_MS);
+    const correction = autoScrollCorrectionRef.current;
+    if (now - correction.lastAt > 1500) {
+      correction.net = 0;
+    }
+    correction.net += deltaY;
+    correction.lastAt = now;
+    if (now - autoScrollTunedAtRef.current < AUTO_SCROLL_TUNE_COOLDOWN_MS) {
+      return;
+    }
+    const page = Math.max(200, container.clientHeight);
+    const step = correction.net > page * 0.5 ? 4 : correction.net < -page * 0.35 ? -5 : 0;
+    if (step === 0) {
+      return;
+    }
+    correction.net = 0;
+    autoScrollTunedAtRef.current = now;
+    const next = Math.min(100, Math.max(0, autoScrollSpeedRef.current + step));
+    if (next === autoScrollSpeedRef.current) {
+      return;
+    }
+    setAutoScrollSpeed(next);
+    showFocusToast(
+      step > 0
+        ? `Reading ahead? Sped up to ${autoScrollLinesPerMinute(next)} lines/min`
+        : `Scrolling back? Slowed to ${autoScrollLinesPerMinute(next)} lines/min`
+    );
+  };
+
 
   return (
     <div
       className={`reader-scope fixed inset-0 z-50 h-full w-full overflow-hidden reader-bg ${
+        chromeVisible ? "" : "reader-chrome-hidden"
+      } ${
         isLight ? "reader-light" : ""
       } ${displayMode === "paper" ? "reader-paper-finish" : ""} ${
         displayMode === "dark-paper" ? "reader-dark-paper-finish" : ""
@@ -2864,18 +3770,42 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
       } ${
         readingMode === "speed" ? "reader-speed-active" : ""
       }`}
+      style={pageStyle}
     >
-      <header className="reader-toolbar fixed left-0 right-0 top-0 z-50 flex w-full items-center justify-between px-6 py-5 md:px-8 transition-all duration-300">
-        <div className="flex items-center gap-4">
+      <header
+        className="reader-toolbar fixed left-0 right-0 top-0 z-50 flex w-full items-center justify-between px-6 py-5 md:px-8"
+        onPointerEnter={() => hoverChrome(true)}
+        onPointerLeave={() => hoverChrome(false)}
+        onFocus={revealChrome}
+      >
+        <div className="relative flex items-center gap-2 md:gap-4">
           <button
             type="button"
             className="group flex items-center gap-2 transition-all reader-icon reader-hover-accent"
-            onClick={onClose}
+            onClick={() => void exitGuard.requestClose()}
+            onMouseEnter={() => exitGuard.guard()}
+            title={exitGuard.locked ? "Focus lock is on: leaving ends the session" : undefined}
           >
             <span className="material-symbols-outlined transition-transform group-hover:-translate-x-1 reader-accent">
               arrow_back
             </span>
-            <span className="text-xs uppercase tracking-widest reader-accent">Back to Library</span>
+            {/* The label is the first thing to drop on a narrow toolbar; the
+                arrow carries the meaning on its own. */}
+            <span className="hidden text-xs uppercase tracking-widest reader-accent sm:inline">
+              Back to Library
+            </span>
+          </button>
+          <PipExitGuard shown={exitGuard.guardShown} onDone={exitGuard.clearGuard} />
+          {/* The chapter list otherwise opens only from a 6px hover strip,
+              which a finger cannot hit and a touch screen cannot reveal. */}
+          <button
+            type="button"
+            className="reader-chapters-toggle reader-icon transition-colors reader-hover-accent"
+            onClick={() => setSidebarOpen((open) => !open)}
+            aria-expanded={sidebarOpen}
+            aria-label={sidebarOpen ? "Hide chapters" : "Show chapters"}
+          >
+            <span className="material-symbols-outlined">list</span>
           </button>
         </div>
         <div className="absolute left-1/2 hidden -translate-x-1/2 flex-col items-center text-center md:flex">
@@ -3055,10 +3985,10 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
                       value={autoScrollSpeed}
                       onChange={(event) => setAutoScrollSpeed(Number(event.target.value))}
                       className="h-1 w-24 cursor-pointer accent-current"
-                      title={`Auto scroll speed ${Math.round(3 + autoScrollSpeed * 0.45)} pixels per second`}
+                      title={`Auto scroll: ${autoScrollLinesPerMinute(autoScrollSpeed)} lines a minute (+ and - to adjust)`}
                     />
                     <span className="ml-auto tabular-nums reader-muted">
-                      {Math.round(3 + autoScrollSpeed * 0.45)} px/s
+                      {autoScrollLinesPerMinute(autoScrollSpeed)} lines/min
                     </span>
                   </div>
                 </div>
@@ -3128,6 +4058,14 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
           </div>
         </div>
       </header>
+      {/* The top edge of the window: resting the pointer here brings the bar
+          back. The page is an iframe, so the bar cannot see the pointer
+          arrive over the text; this strip can. */}
+      {!chromeVisible && (
+        <div className="reader-toolbar-hot-zone" aria-hidden="true" onPointerEnter={() => hoverChrome(true)}>
+          <span className="reader-toolbar-handle" />
+        </div>
+      )}
 
       <div className="reader-shell">
         <div
@@ -3146,7 +4084,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
               scheduleReaderSidebarClose();
             }
           }}
-          className={`reader-sidebar leather-surface hidden w-72 flex-col border-r px-6 py-6 text-sm md:flex reader-border ${
+          className={`reader-sidebar leather-surface flex w-72 flex-col border-r px-6 py-6 text-sm reader-border ${
             sidebarOpen
               ? "reader-sidebar-open"
               : "reader-sidebar-closed pointer-events-none"
@@ -3173,7 +4111,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
               </div>
             )}
             {toc.map((item) => {
-              const active = currentHref ? item.href === currentHref : false;
+              const active = currentHref ? item.href.split("#")[0] === currentHref : false;
               return (
               <button
                 key={`${item.href}-${item.label}`}
@@ -3193,10 +4131,33 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
           </div>
         </aside>
 
+        {/* Tapping the page is the expected way to dismiss a slide-over, and
+            there is no hover-out to close it with on a touch screen. */}
+        {sidebarOpen && (
+          <button
+            type="button"
+            className="reader-sidebar-scrim md:hidden"
+            aria-label="Close chapters"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
+
         <main className="reader-main overflow-hidden">
           {loadError && (
-            <div className="mx-auto mt-24 max-w-2xl rounded-xl border reader-border reader-panel p-6 text-center reader-muted">
-              {loadError}
+            <div className="mx-auto mt-28 max-w-lg rounded-xl border reader-border reader-panel p-6 text-center" role="alert">
+              <p className="text-sm leading-relaxed reader-text-color">{loadError}</p>
+              <div className="mt-5 flex justify-center gap-3">
+                <button type="button" className="rounded-lg border px-4 py-2 text-xs uppercase tracking-widest reader-border reader-pill reader-icon" onClick={onClose}>
+                  Back to library
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg border px-4 py-2 text-xs uppercase tracking-widest reader-border reader-pill reader-accent"
+                  onClick={() => setReloadKey((key) => key + 1)}
+                >
+                  Try again
+                </button>
+              </div>
             </div>
           )}
           {!loadError && (
@@ -3211,25 +4172,82 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
                 className="reader-container reader-scroll h-full w-full overflow-hidden overscroll-x-none"
               />
               {readingMode === "speed" && readingWord && (
-                <div className="reader-speedread-overlay pointer-events-none absolute inset-0 z-20">
-                  <div className="reader-rsvp-word absolute left-1/2 top-[10%] -translate-x-1/2" aria-hidden="true">
-                    <span>{readingWord.text.slice(0, rsvpPivot)}</span>
-                    <span className="reader-rsvp-focus">{readingWord.text[rsvpPivot]}</span>
-                    <span>{readingWord.text.slice(rsvpPivot + 1)}</span>
+                <div
+                  className={`reader-rsvp-stage pointer-events-none absolute inset-0 z-20 ${
+                    rsvpDark ? "is-dark" : "is-light"
+                  } ${readingPaused ? "is-paused" : ""}`}
+                  style={rsvpStyle}
+                >
+                  <div className="reader-rsvp-reticle" aria-hidden="true">
+                    <span className="reader-rsvp-guide" />
+                    <div className="reader-rsvp-line">
+                      <span className="reader-rsvp-pre">{readingWord.text.slice(0, rsvpPivot)}</span>
+                      <span className="reader-rsvp-focus">{readingWord.text[rsvpPivot]}</span>
+                      <span className="reader-rsvp-post">
+                        {readingWord.text.slice(rsvpPivot + 1)}
+                        <span className="reader-rsvp-punct">{readingWord.punctuation}</span>
+                      </span>
+                    </div>
+                    <span className="reader-rsvp-guide" />
                   </div>
-                  <div
-                    key={readingWord.contextStart}
-                    className="reader-rsvp-context absolute bottom-20 left-1/2 w-[min(820px,76vw)] -translate-x-1/2"
-                  >
+
+                  {/* Keyed on the pace, so changing it shows the row again
+                      and restarts its fade. */}
+                  <div key={speedReadWpm} className="reader-rsvp-meta">
+                    <span className="reader-rsvp-meta-label tabular-nums">{speedReadWpm} wpm</span>
+                    <span className="reader-rsvp-progress" aria-hidden="true">
+                      <i style={{ transform: `scaleX(${rsvpProgress})` }} />
+                    </span>
+                    <span className="reader-rsvp-meta-label tabular-nums">~{rsvpMinutesLeft} min left in chapter</span>
+                  </div>
+
+                  <div key={readingWord.contextStart} className="reader-rsvp-context">
                     {readingWord.context.map((word) => (
                       <span
                         key={`${word.index}-${word.text}`}
-                        className={word.index === readingWord.index ? "reader-rsvp-current" : ""}
+                        className={
+                          word.index === readingWord.index
+                            ? "reader-rsvp-current"
+                            : word.index < readingWord.index
+                              ? "reader-rsvp-read"
+                              : ""
+                        }
                       >
                         {word.text}
                         {word.trailing || " "}
                       </span>
                     ))}
+                  </div>
+
+                  <div className="reader-rsvp-controls pointer-events-auto" role="group" aria-label="SpeedRead">
+                    <button
+                      type="button"
+                      className="reader-rsvp-button"
+                      onClick={() => setSpeedReadWpm((value) => Math.max(120, value - 20))}
+                      title="Slower (-)"
+                      aria-label="Slower"
+                    >
+                      <UiIcon name="minus" size={16} />
+                    </button>
+                    <button
+                      type="button"
+                      className="reader-rsvp-play"
+                      onClick={() => setReadingPaused((value) => !value)}
+                      title={readingPaused ? "Resume (Space)" : "Pause (Space)"}
+                      aria-label={readingPaused ? "Resume" : "Pause"}
+                    >
+                      <UiIcon name={readingPaused ? "play" : "pause"} size={18} />
+                    </button>
+                    <button
+                      type="button"
+                      className="reader-rsvp-button"
+                      onClick={() => setSpeedReadWpm((value) => Math.min(1000, value + 20))}
+                      title="Faster (+)"
+                      aria-label="Faster"
+                    >
+                      <UiIcon name="plus" size={16} />
+                    </button>
+                    {readingPaused && <span className="reader-rsvp-hint">Paused · Space to resume</span>}
                   </div>
                 </div>
               )}
@@ -3387,7 +4405,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
               {checkpointLevel === 1 ? (
                 <button
                   type="button"
-                  className="rounded-md bg-primary px-3 py-1 text-[10px] font-semibold text-on-primary"
+                  className="tactile-button tactile-button-primary rounded-md px-3 py-1 text-[10px] font-semibold"
                   onClick={handleCheckpointEnd}
                 >
                   End Session
@@ -3412,6 +4430,47 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
         </div>
       )}
 
+      {/* Auto-scroll's own control while it runs: the toolbar hides itself
+          while reading, and pausing should never mean hunting for a menu. */}
+      {readingMode === "standard" && autoScrollActive && (
+        <div
+          className={`reader-autoscroll-pill reader-panel reader-border ${chromeVisible || autoScrollHeld ? "is-awake" : ""}`}
+          role="group"
+          aria-label="Auto scroll"
+        >
+          <button
+            type="button"
+            className="reader-autoscroll-button reader-icon reader-hover-accent"
+            onClick={() => setAutoScrollSpeed((value) => Math.max(0, value - 5))}
+            title="Slower (-)"
+            aria-label="Slower"
+          >
+            <UiIcon name="minus" size={16} />
+          </button>
+          <button
+            type="button"
+            className="reader-autoscroll-main reader-accent"
+            onClick={() => setAutoScrollActive(false)}
+            title="Pause (Space)"
+          >
+            <UiIcon name={autoScrollHeld ? "hand" : "pause"} size={16} />
+            <span className="tabular-nums">
+              {autoScrollHeld ? "Holding" : `${autoScrollLinesPerMinute(autoScrollSpeed)} lines/min`}
+            </span>
+          </button>
+          <button
+            type="button"
+            className="reader-autoscroll-button reader-icon reader-hover-accent"
+            onClick={() => setAutoScrollSpeed((value) => Math.min(100, value + 5))}
+            title="Faster (+)"
+            aria-label="Faster"
+          >
+            <UiIcon name="plus" size={16} />
+          </button>
+          <span className="reader-autoscroll-hint reader-muted">Space pauses · hold the page to wait</span>
+        </div>
+      )}
+
       {focusToast && (
         <div className="fixed bottom-6 right-6 z-[60]">
           <div className="rounded-full border px-4 py-2 text-[10px] uppercase tracking-widest shadow-xl reader-panel reader-border reader-muted">
@@ -3420,47 +4479,6 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
         </div>
       )}
 
-      {noteModalOpen && noteSessionId && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 px-6">
-          <div className="w-full max-w-sm rounded-xl border p-6 reader-panel reader-border">
-            <div className="text-xs uppercase tracking-widest reader-muted">Session Notes</div>
-            <h3 className="mt-2 text-lg font-headline font-bold reader-text-color">Add a quick note</h3>
-            <textarea
-              className="mt-4 h-28 w-full resize-none rounded-xl border border-outline-variant/30 bg-surface-container-low px-3 py-2 text-sm text-on-surface"
-              placeholder="What did you read or learn?"
-              value={noteText}
-              onChange={(event) => setNoteText(event.target.value)}
-            />
-            <div className="mt-5 flex items-center justify-between">
-              <button
-                type="button"
-                className="rounded-md border px-4 py-2 text-xs uppercase tracking-widest transition reader-border reader-icon reader-hover-accent"
-                onClick={() => {
-                  setNoteModalOpen(false);
-                  setNoteSessionId(null);
-                  setNoteText("");
-                }}
-              >
-                Skip
-              </button>
-              <button
-                type="button"
-                className="rounded-md bg-primary px-4 py-2 text-xs font-semibold text-on-primary"
-                onClick={() => {
-                  if (noteText.trim()) {
-                    addSessionNote(noteSessionId, noteText.trim());
-                  }
-                  setNoteModalOpen(false);
-                  setNoteSessionId(null);
-                  setNoteText("");
-                }}
-              >
-                Save Note
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
