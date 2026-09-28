@@ -31,6 +31,14 @@ export type SmartReadCalibration = {
 
 const STORAGE_PREFIX = "leaflet.smart-read.v1";
 const DEFAULT_WPM = 185;
+/**
+ * Observations outside this band are not reading. Below it means the reader was
+ * left open and the idle gap got counted as reading time; above it means the
+ * page was scrolled past rather than read. Both used to be clamped into range,
+ * which still dragged the learned pace toward whichever bound they hit.
+ */
+const PLAUSIBLE_MIN_WPM = 45;
+const PLAUSIBLE_MAX_WPM = 900;
 export const DEFAULT_SMART_READ_CALIBRATION: SmartReadCalibration = {
   minWpm: 120,
   maxWpm: 320
@@ -270,6 +278,9 @@ export const recordSmartReadSample = (
   }
   const minutes = sample.elapsedMs / 60000;
   const rawWpm = sample.words / Math.max(minutes, 0.08);
+  if (!Number.isFinite(rawWpm) || rawWpm < PLAUSIBLE_MIN_WPM || rawWpm > PLAUSIBLE_MAX_WPM) {
+    return profile;
+  }
   const difficultyAdjustedWpm = clamp(rawWpm * clamp(sample.difficulty, 0.85, 1.7), 70, 420);
   const weight = clamp(sample.words / 180, 0.35, 3);
   const genres = { ...profile.genres };
