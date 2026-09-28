@@ -9,6 +9,8 @@ const requireDesktop = () => {
   }
 };
 
+export type EpubSection = { href: string; bytes: number; linear: boolean };
+
 export const bookService = {
   async list(): Promise<Book[]> {
     if (!isTauri()) {
@@ -41,9 +43,36 @@ export const bookService = {
     }
     return invoke<Book[]>("import_books", { paths });
   },
+  /**
+   * The reader's word on a book's series: a name and number, `""` for "not in
+   * a series", or `null` to let the library work it out again.
+   */
+  async setSeries(bookId: string, series: string | null, seriesIndex: number | null): Promise<Book | null> {
+    if (!isTauri()) {
+      return null;
+    }
+    return invoke<Book>("book_set_series", { bookId, series, seriesIndex });
+  },
+  /** Reads the series inside the books already in the library, once ever. How many gained one. */
+  async scanSeries(): Promise<number> {
+    if (!isTauri()) {
+      return 0;
+    }
+    return invoke<number>("scan_series");
+  },
   async refreshMetadata(bookId: string): Promise<Book> {
     requireDesktop();
     return invoke<Book>("refresh_metadata", { bookId });
+  },
+  /**
+   * An EPUB's sections in reading order with their sizes (from the archive's
+   * directory, nothing decompressed), for progress by how much has been read.
+   */
+  async epubSections(bookId: string): Promise<EpubSection[]> {
+    if (!isTauri()) {
+      return [];
+    }
+    return invoke<EpubSection[]>("epub_sections", { bookId });
   },
   async fetchCover(bookId: string): Promise<Book | null> {
     if (!isTauri()) {
@@ -51,11 +80,12 @@ export const bookService = {
     }
     return invoke<Book | null>("fetch_cover", { bookId });
   },
-  async coverData(bookId: string): Promise<string | null> {
+  /** The cover as a data URL; `thumb` asks for the library's small version. */
+  async coverData(bookId: string, options: { thumb?: boolean } = {}): Promise<string | null> {
     if (!isTauri()) {
       return null;
     }
-    return invoke<string | null>("cover_data", { bookId });
+    return invoke<string | null>("cover_data", { bookId, thumb: options.thumb ?? false });
   },
   /**
    * The book's file, as raw bytes. The backend returns a raw IPC body, which

@@ -50,16 +50,23 @@ type LibraryState = {
   ensureBookFile: (book: Book) => Promise<Book>;
   deleteBook: (id: string) => Promise<void>;
   refreshMissingMetadata: (books?: Book[]) => Promise<void>;
+  /** See `bookService.setSeries`. */
+  setSeries: (id: string, series: string | null, seriesIndex: number | null) => Promise<void>;
   /** `position` left undefined keeps the book's current CFI. */
   updateBookProgress: (id: string, progress: number, position?: string | null) => void;
   resetAll: () => void;
 };
 
 let syncTimer: ReturnType<typeof setTimeout> | null = null;
+let seriesScanned = false;
 
 // Some books simply have no match upstream. Without a cooldown the library
 // re-ran those lookups on every launch, forever.
 const METADATA_RETRY_COOLDOWN_MS = 14 * 24 * 60 * 60 * 1000;
+/** Metadata lookups running at once. Open Library asks clients to be gentle. */
+const METADATA_CONCURRENCY = 3;
+/** How often finished lookups are written to the library while a refresh runs. */
+const METADATA_FLUSH_MS = 400;
 
 export const isMetadataRetryDue = (book: Book, now = Date.now()) => {
   if (!book.metadataCheckedAt) {
@@ -95,6 +102,31 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const books = await bookService.list();
     set({ books, loading: false });
     void get().refreshMissingMetadata(books);
+    if (!seriesScanned) {
+      // Books imported before series were read have theirs read once, here.
+      seriesScanned = true;
+      bookService
+        .scanSeries()
+        .then(async (found) => {
+          if (found > 0) {
+            set({ books: await bookService.list() });
+          }
+        })
+        .catch(() => {
+          // Tried again next launch.
+          seriesScanned = false;
+        });
+    }
+  },
+  async setSeries(id, series, seriesIndex) {
+    const updated = await bookService.setSeries(id, series, seriesIndex);
+    // The preview has no database: the change lives in memory.
+    const current = get().books.find((book) => book.id === id);
+    const next = updated ?? (current ? { ...current, series, seriesIndex } : null);
+    if (next) {
+      set({ books: replaceBook(get().books, next) });
+      scheduleSync(set, get);
+    }
   },
   async loadStats() {
     try {
@@ -267,23 +299,41 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       return;
     }
     set({ metadataRefreshing: true, metadataTotal: needsRefresh.length, metadataDone: 0 });
+    // A few lookups at a time, and the library updated in batches: one at a
+    // time with a store write per book re-rendered a large library hundreds
+    // of times, and one slow lookup held up every book behind it.
     let done = 0;
-    for (const book of needsRefresh) {
-      let updated: Book | null = null;
-      try {
-        updated = await bookService.refreshMetadata(book.id);
-      } catch {
-        // ignore refresh errors
-      }
-      done += 1;
-      // One store write per book, not two — every write re-renders the library.
+    let waiting: Book[] = [];
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+    const flush = () => {
+      flushTimer = null;
+      const batch = waiting;
+      waiting = [];
       set({
         metadataDone: done,
-        books: updated
-          ? replaceBook(get().books, updated)
-          : get().books
+        books: batch.reduce((books, updated) => replaceBook(books, updated), get().books)
       });
+    };
+    const queue = [...needsRefresh];
+    const worker = async () => {
+      for (let book = queue.shift(); book; book = queue.shift()) {
+        try {
+          const updated = await bookService.refreshMetadata(book.id);
+          if (updated) {
+            waiting.push(updated);
+          }
+        } catch {
+          // A book without a match keeps what it has; it is retried after the cooldown.
+        }
+        done += 1;
+        flushTimer ??= setTimeout(flush, METADATA_FLUSH_MS);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(METADATA_CONCURRENCY, needsRefresh.length) }, worker));
+    if (flushTimer) {
+      clearTimeout(flushTimer);
     }
+    flush();
     set({ metadataRefreshing: false });
   },
   updateBookProgress(id, progress, position) {

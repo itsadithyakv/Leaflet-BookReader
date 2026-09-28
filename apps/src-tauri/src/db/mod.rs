@@ -6,6 +6,50 @@ use std::fs;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// A bookmark or a highlight (with an optional note) in a book.
+///
+/// Kept in the database and carried in the backup document, so they survive a
+/// reinstall and reach a new computer. They used to live in the webview's
+/// storage, which clearing site data or reinstalling threw away. Deletion is a
+/// tombstone (`deleted_at`), like a book's, so it reaches the other copies.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "camelCase")]
+pub struct Annotation {
+  pub id: String,
+  pub book_id: String,
+  /// "bookmark" or "highlight".
+  pub kind: String,
+  /// Where it is: a CFI (a range, for a highlight).
+  pub cfi: String,
+  /// The highlighted words.
+  pub text: Option<String>,
+  pub note: Option<String>,
+  pub color: Option<String>,
+  /// The chapter it is in, as the reader showed it.
+  pub chapter: Option<String>,
+  pub created_at: String,
+  /// Every change, the delete included; the newest wins when copies merge.
+  pub updated_at: String,
+  pub deleted_at: Option<String>
+}
+
+/// A collection the reader made ("Summer reading", "Book club"): a name and the
+/// books in it, in the order they were added.
+///
+/// One record, carried whole in the backup document: the newest edit of a
+/// collection wins, and a delete is a tombstone, as for annotations. Series and
+/// smart shelves are not stored at all; the app works them out from the library.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "camelCase")]
+pub struct Collection {
+  pub id: String,
+  pub name: String,
+  pub book_ids: Vec<String>,
+  pub created_at: String,
+  pub updated_at: String,
+  pub deleted_at: Option<String>
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BookRecord {
@@ -23,6 +67,16 @@ pub struct BookRecord {
   /// Written with `progress` and shares its `progress_updated_at`.
   #[serde(default)]
   pub position: Option<String>,
+  /// The series the book is in, from the book itself (Calibre's and EPUB 3's
+  /// series metadata) or set by the reader. `Some("")` is the reader saying
+  /// "not part of a series", which stops the app guessing one from the title.
+  /// Part of the metadata group: it changes `metadata_updated_at` and travels
+  /// with the title.
+  #[serde(default)]
+  pub series: Option<String>,
+  /// Its number in the series (`2.5` for a novella between two books).
+  #[serde(default)]
+  pub series_index: Option<f32>,
   pub last_opened: Option<String>,
   pub created_at: String,
   /// When metadata enrichment last ran for this book, successful or not. Used to
@@ -88,10 +142,19 @@ impl Database {
     if let Some(parent) = path.parent() {
       fs::create_dir_all(parent)?;
     }
+    let existed = path.exists();
     let conn = Connection::open(&path)?;
+    if existed {
+      backup_before_upgrade(&conn, &path);
+    }
     let db = Self { conn, path };
     db.init_schema()?;
     Ok(db)
+  }
+
+  /// The schema version the database is at (`PRAGMA user_version`).
+  pub fn schema_version(&self) -> i64 {
+    self.conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap_or(0)
   }
 
   pub fn path(&self) -> &Path {
@@ -101,6 +164,9 @@ impl Database {
   fn init_schema(&self) -> Result<()> {
     apply_schema(&self.conn)
   }
+
+  /// The columns `row_to_book` reads, in its order.
+  const BOOK_COLUMNS: &'static str = "id, title, author, genres, cover_url, local_path, file_hash, progress, last_opened, created_at, metadata_checked_at, metadata_updated_at, progress_updated_at, deleted_at, position, series, series_index";
 
   fn row_to_book(row: &rusqlite::Row<'_>) -> rusqlite::Result<BookRecord> {
     let genres_json: Option<String> = row.get(3)?;
@@ -117,6 +183,8 @@ impl Database {
       file_hash: row.get(6)?,
       progress: row.get(7)?,
       position: row.get(14)?,
+      series: row.get(15)?,
+      series_index: row.get(16)?,
       last_opened: row.get(8)?,
       created_at: row.get(9)?,
       metadata_checked_at: row.get(10)?,
@@ -133,9 +201,9 @@ impl Database {
   /// The visible library. Tombstoned books are excluded: their rows survive
   /// only so the deletion can propagate.
   pub fn list_books(&self) -> Result<Vec<BookRecord>> {
-    let mut stmt = self.conn.prepare(
-      "SELECT id, title, author, genres, cover_url, local_path, file_hash, progress, last_opened, created_at, metadata_checked_at, metadata_updated_at, progress_updated_at, deleted_at, position FROM books WHERE deleted_at IS NULL"
-    )?;
+    let mut stmt = self
+      .conn
+      .prepare(&format!("SELECT {} FROM books WHERE deleted_at IS NULL", Self::BOOK_COLUMNS))?;
     let rows = stmt.query_map([], Self::row_to_book)?;
 
     let mut books = Vec::new();
@@ -146,9 +214,9 @@ impl Database {
   }
 
   pub fn find_by_id(&self, id: &str) -> Result<Option<BookRecord>> {
-    let mut stmt = self.conn.prepare(
-      "SELECT id, title, author, genres, cover_url, local_path, file_hash, progress, last_opened, created_at, metadata_checked_at, metadata_updated_at, progress_updated_at, deleted_at, position FROM books WHERE id = ?1"
-    )?;
+    let mut stmt = self
+      .conn
+      .prepare(&format!("SELECT {} FROM books WHERE id = ?1", Self::BOOK_COLUMNS))?;
     let mut rows = stmt.query(params![id])?;
     if let Some(row) = rows.next()? {
       return Ok(Some(Self::row_to_book(row)?));
@@ -157,9 +225,9 @@ impl Database {
   }
 
   pub fn find_by_hash(&self, hash: &str) -> Result<Option<BookRecord>> {
-    let mut stmt = self.conn.prepare(
-      "SELECT id, title, author, genres, cover_url, local_path, file_hash, progress, last_opened, created_at, metadata_checked_at, metadata_updated_at, progress_updated_at, deleted_at, position FROM books WHERE file_hash = ?1"
-    )?;
+    let mut stmt = self
+      .conn
+      .prepare(&format!("SELECT {} FROM books WHERE file_hash = ?1", Self::BOOK_COLUMNS))?;
     let mut rows = stmt.query(params![hash])?;
     if let Some(row) = rows.next()? {
       return Ok(Some(Self::row_to_book(row)?));
@@ -170,8 +238,8 @@ impl Database {
   pub fn upsert_book(&self, book: &BookRecord) -> Result<()> {
     let genres_json = serde_json::to_string(&book.genres).ok();
     self.conn.execute(
-      "INSERT INTO books (id, title, author, genres, cover_url, local_path, file_hash, progress, last_opened, created_at, metadata_checked_at, metadata_updated_at, progress_updated_at, deleted_at, position)
-      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+      "INSERT INTO books (id, title, author, genres, cover_url, local_path, file_hash, progress, last_opened, created_at, metadata_checked_at, metadata_updated_at, progress_updated_at, deleted_at, position, series, series_index)
+      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
         author = excluded.author,
@@ -186,7 +254,9 @@ impl Database {
         metadata_updated_at = excluded.metadata_updated_at,
         progress_updated_at = excluded.progress_updated_at,
         deleted_at = excluded.deleted_at,
-        position = excluded.position",
+        position = excluded.position,
+        series = excluded.series,
+        series_index = excluded.series_index",
       params![
         book.id,
         book.title,
@@ -202,12 +272,16 @@ impl Database {
         book.metadata_updated_at,
         book.progress_updated_at,
         book.deleted_at,
-        book.position
+        book.position,
+        book.series,
+        book.series_index
       ]
     )?;
     Ok(())
   }
 
+  /// Writes what an enrichment pass found. Not the series: the reader may have
+  /// set it while the lookup was out, and a lookup never finds one.
   pub fn update_metadata(&self, book: &BookRecord) -> Result<()> {
     let genres_json = serde_json::to_string(&book.genres).ok();
     self.conn.execute(
@@ -225,12 +299,31 @@ impl Database {
     Ok(())
   }
 
+  /// The reader's word on a book's series (`Some("")`: none). A metadata edit,
+  /// so it is stamped and travels with the title.
+  pub fn set_series(&self, id: &str, series: Option<&str>, index: Option<f32>) -> Result<bool> {
+    let changed = self.conn.execute(
+      "UPDATE books SET series = ?1, series_index = ?2, metadata_updated_at = ?3 WHERE id = ?4",
+      params![series, index, now_iso(), id]
+    )?;
+    Ok(changed > 0)
+  }
+
+  /// Fills in a series read from the book's own file, where there is none yet.
+  /// Not stamped: every device reads the same file and finds the same answer,
+  /// and the sync merge prefers a known series over none on a tie.
+  pub fn fill_series_from_file(&self, id: &str, series: &str, index: Option<f32>) -> Result<()> {
+    self.conn.execute(
+      "UPDATE books SET series = ?1, series_index = ?2 WHERE id = ?3 AND series IS NULL",
+      params![series, index, id]
+    )?;
+    Ok(())
+  }
+
   /// Every book row including tombstones. Only sync wants these: a deletion
   /// has to travel to the other devices before its row can be forgotten.
   pub fn list_books_for_sync(&self) -> Result<Vec<BookRecord>> {
-    let mut stmt = self.conn.prepare(
-      "SELECT id, title, author, genres, cover_url, local_path, file_hash, progress, last_opened, created_at, metadata_checked_at, metadata_updated_at, progress_updated_at, deleted_at, position FROM books"
-    )?;
+    let mut stmt = self.conn.prepare(&format!("SELECT {} FROM books", Self::BOOK_COLUMNS))?;
     let rows = stmt.query_map([], Self::row_to_book)?;
     let mut books = Vec::new();
     for row in rows {
@@ -323,6 +416,13 @@ impl Database {
 
   /// The whole day ledger, keyed by local date. Small enough to read whole:
   /// one row per day the app was used.
+  /// The latest day with reading on it, if any.
+  pub fn latest_reading_day(&self) -> Result<Option<String>> {
+    Ok(self
+      .conn
+      .query_row("SELECT max(date_key) FROM reading_days WHERE minutes > 0", [], |row| row.get::<_, Option<String>>(0))?)
+  }
+
   pub fn reading_days(&self) -> Result<HashMap<String, crate::habit::DayRecord>> {
     let mut stmt = self.conn.prepare(
       "SELECT date_key, minutes, goal_minutes, freeze_used, grace_used FROM reading_days"
@@ -349,10 +449,10 @@ impl Database {
   /// against, since they are never credited again.
   pub fn credit_minutes(&self, date_key: &str, minutes: f64, goal_minutes: i64) -> Result<()> {
     self.conn.execute(
-      "INSERT INTO reading_days (date_key, minutes, goal_minutes) VALUES (?1, ?2, ?3)
+      "INSERT INTO reading_days (date_key, minutes, goal_minutes) VALUES (?1, min(?2, 1440), ?3)
        ON CONFLICT(date_key) DO UPDATE SET
-         minutes = reading_days.minutes + excluded.minutes,
-         goal_minutes = excluded.goal_minutes",
+         minutes = min(1440, reading_days.minutes + excluded.minutes),
+         goal_minutes = max(reading_days.goal_minutes, excluded.goal_minutes)",
       params![date_key, minutes.max(0.0), goal_minutes]
     )?;
     Ok(())
@@ -547,6 +647,155 @@ impl Database {
 
   /// Every purchase, oldest first. The balance is derived from these and the
   /// habit ledger; nothing stores it.
+  fn row_to_annotation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Annotation> {
+    Ok(Annotation {
+      id: row.get(0)?,
+      book_id: row.get(1)?,
+      kind: row.get(2)?,
+      cfi: row.get(3)?,
+      text: row.get(4)?,
+      note: row.get(5)?,
+      color: row.get(6)?,
+      chapter: row.get(7)?,
+      created_at: row.get(8)?,
+      updated_at: row.get(9)?,
+      deleted_at: row.get(10)?
+    })
+  }
+
+  const ANNOTATION_COLUMNS: &'static str =
+    "id, book_id, kind, cfi, text, note, color, chapter, created_at, updated_at, deleted_at";
+
+  /// A book's bookmarks and highlights, oldest first, without deleted ones.
+  pub fn annotations_for_book(&self, book_id: &str) -> Result<Vec<Annotation>> {
+    let mut stmt = self.conn.prepare(&format!(
+      "SELECT {} FROM annotations WHERE book_id = ?1 AND deleted_at IS NULL ORDER BY created_at, id",
+      Self::ANNOTATION_COLUMNS
+    ))?;
+    let rows = stmt.query_map([book_id], Self::row_to_annotation)?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+  }
+
+  /// Every annotation, deleted ones included, for the backup document.
+  pub fn all_annotations(&self) -> Result<Vec<Annotation>> {
+    let mut stmt = self
+      .conn
+      .prepare(&format!("SELECT {} FROM annotations ORDER BY id", Self::ANNOTATION_COLUMNS))?;
+    let rows = stmt.query_map([], Self::row_to_annotation)?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+  }
+
+  pub fn find_annotation(&self, id: &str) -> Result<Option<Annotation>> {
+    Ok(self
+      .conn
+      .query_row(
+        &format!("SELECT {} FROM annotations WHERE id = ?1", Self::ANNOTATION_COLUMNS),
+        [id],
+        Self::row_to_annotation
+      )
+      .optional()?)
+  }
+
+  /// Writes an annotation as given (insert or replace).
+  pub fn put_annotation(&self, a: &Annotation) -> Result<()> {
+    self.conn.execute(
+      "INSERT INTO annotations (id, book_id, kind, cfi, text, note, color, chapter, created_at, updated_at, deleted_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+       ON CONFLICT(id) DO UPDATE SET
+         book_id = excluded.book_id, kind = excluded.kind, cfi = excluded.cfi,
+         text = excluded.text, note = excluded.note, color = excluded.color,
+         chapter = excluded.chapter, created_at = excluded.created_at,
+         updated_at = excluded.updated_at, deleted_at = excluded.deleted_at",
+      params![a.id, a.book_id, a.kind, a.cfi, a.text, a.note, a.color, a.chapter, a.created_at, a.updated_at, a.deleted_at]
+    )?;
+    Ok(())
+  }
+
+  /// Drops deleted annotations the backup no longer carries (their tombstones
+  /// are old enough that every copy has seen them).
+  pub fn retire_annotation_tombstones(&self, keep: &[String]) -> Result<()> {
+    let deleted: Vec<String> = {
+      let mut stmt = self.conn.prepare("SELECT id FROM annotations WHERE deleted_at IS NOT NULL")?;
+      let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+      rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    for id in deleted.iter().filter(|id| !keep.contains(id)) {
+      self.conn.execute("DELETE FROM annotations WHERE id = ?1", [id])?;
+    }
+    Ok(())
+  }
+
+  fn row_to_collection(row: &rusqlite::Row<'_>) -> rusqlite::Result<Collection> {
+    let book_ids: String = row.get(2)?;
+    Ok(Collection {
+      id: row.get(0)?,
+      name: row.get(1)?,
+      book_ids: serde_json::from_str(&book_ids).unwrap_or_default(),
+      created_at: row.get(3)?,
+      updated_at: row.get(4)?,
+      deleted_at: row.get(5)?
+    })
+  }
+
+  const COLLECTION_COLUMNS: &'static str = "id, name, book_ids, created_at, updated_at, deleted_at";
+
+  /// The reader's collections, oldest first, without deleted ones.
+  pub fn collections(&self) -> Result<Vec<Collection>> {
+    let mut stmt = self.conn.prepare(&format!(
+      "SELECT {} FROM collections WHERE deleted_at IS NULL ORDER BY created_at, id",
+      Self::COLLECTION_COLUMNS
+    ))?;
+    let rows = stmt.query_map([], Self::row_to_collection)?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+  }
+
+  /// Every collection, deleted ones included, for the backup document.
+  pub fn all_collections(&self) -> Result<Vec<Collection>> {
+    let mut stmt = self
+      .conn
+      .prepare(&format!("SELECT {} FROM collections ORDER BY id", Self::COLLECTION_COLUMNS))?;
+    let rows = stmt.query_map([], Self::row_to_collection)?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+  }
+
+  pub fn find_collection(&self, id: &str) -> Result<Option<Collection>> {
+    Ok(self
+      .conn
+      .query_row(
+        &format!("SELECT {} FROM collections WHERE id = ?1", Self::COLLECTION_COLUMNS),
+        [id],
+        Self::row_to_collection
+      )
+      .optional()?)
+  }
+
+  /// Writes a collection as given (insert or replace).
+  pub fn put_collection(&self, c: &Collection) -> Result<()> {
+    let book_ids = serde_json::to_string(&c.book_ids)?;
+    self.conn.execute(
+      "INSERT INTO collections (id, name, book_ids, created_at, updated_at, deleted_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+       ON CONFLICT(id) DO UPDATE SET
+         name = excluded.name, book_ids = excluded.book_ids, created_at = excluded.created_at,
+         updated_at = excluded.updated_at, deleted_at = excluded.deleted_at",
+      params![c.id, c.name, book_ids, c.created_at, c.updated_at, c.deleted_at]
+    )?;
+    Ok(())
+  }
+
+  /// Drops deleted collections the backup no longer carries.
+  pub fn retire_collection_tombstones(&self, keep: &[String]) -> Result<()> {
+    let deleted: Vec<String> = {
+      let mut stmt = self.conn.prepare("SELECT id FROM collections WHERE deleted_at IS NOT NULL")?;
+      let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+      rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    for id in deleted.iter().filter(|id| !keep.contains(id)) {
+      self.conn.execute("DELETE FROM collections WHERE id = ?1", [id])?;
+    }
+    Ok(())
+  }
+
   pub fn pip_purchases(&self) -> Result<Vec<crate::pip::Purchase>> {
     let mut stmt = self.conn.prepare(
       "SELECT id, item_kind, item_id, price, bought_at FROM pip_purchases ORDER BY bought_at, id"
@@ -769,7 +1018,8 @@ impl Database {
        DELETE FROM pip_purchases;
        DELETE FROM pip_state;
        DELETE FROM pip_plantings;
-       DELETE FROM pip_harvests;"
+       DELETE FROM pip_harvests;
+       DELETE FROM annotations;"
     )?;
     Ok(())
   }
@@ -792,11 +1042,20 @@ fn apply_schema(conn: &Connection) -> Result<()> {
         metadata_updated_at TEXT,
         progress_updated_at TEXT,
         deleted_at TEXT,
-        position TEXT
+        position TEXT,
+        series TEXT,
+        series_index REAL
       );
+      /* The reader's own collections (see Collection). book_ids is a JSON list.
+         book_collections below is unused: it predates collections being carried
+         whole in the backup. */
       CREATE TABLE IF NOT EXISTS collections (
         id TEXT PRIMARY KEY,
-        name TEXT NOT NULL
+        name TEXT NOT NULL,
+        book_ids TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL DEFAULT '',
+        updated_at TEXT NOT NULL DEFAULT '',
+        deleted_at TEXT
       );
       CREATE TABLE IF NOT EXISTS book_collections (
         book_id TEXT NOT NULL,
@@ -871,6 +1130,21 @@ fn apply_schema(conn: &Connection) -> Result<()> {
         seeds INTEGER NOT NULL,
         harvested_at TEXT NOT NULL
       );
+      /* Bookmarks and highlights (see Annotation). */
+      CREATE TABLE IF NOT EXISTS annotations (
+        id TEXT PRIMARY KEY,
+        book_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        cfi TEXT NOT NULL,
+        text TEXT,
+        note TEXT,
+        color TEXT,
+        chapter TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS annotations_book_idx ON annotations (book_id);
       /* Pip's look, home and mood: one row. accessories and room_layout are
          JSON (a list of ids; spot -> item id). */
       CREATE TABLE IF NOT EXISTS pip_state (
@@ -885,15 +1159,93 @@ fn apply_schema(conn: &Connection) -> Result<()> {
         updated_at TEXT NOT NULL
       );"
   )?;
-  // Fail harmlessly when the column is already present, which is the point:
-  // existing libraries gain them once, new ones already have them.
-  let _ = conn.execute("ALTER TABLE books ADD COLUMN metadata_checked_at TEXT", []);
-  let _ = conn.execute("ALTER TABLE books ADD COLUMN metadata_updated_at TEXT", []);
-  let _ = conn.execute("ALTER TABLE books ADD COLUMN progress_updated_at TEXT", []);
-  let _ = conn.execute("ALTER TABLE books ADD COLUMN deleted_at TEXT", []);
-  // Existing rows get NULL: the reader reopens at the percentage, as before.
-  let _ = conn.execute("ALTER TABLE books ADD COLUMN position TEXT", []);
+  upgrade(conn)
+}
+
+/// The schema version this build expects.
+///
+/// To change the schema: bump this, add a step to `upgrade` for the new
+/// version, and put the new shape in the `CREATE TABLE`s above too (a new
+/// library is created at the latest version directly). Never edit a step that
+/// has shipped.
+pub const SCHEMA_VERSION: i64 = 3;
+
+/// Brings an older database up to `SCHEMA_VERSION`, one version at a time,
+/// all in one transaction: a step that fails leaves the database as it was.
+fn upgrade(conn: &Connection) -> Result<()> {
+  let from: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+  if from >= SCHEMA_VERSION {
+    return Ok(());
+  }
+  let tx = conn.unchecked_transaction()?;
+  if from < 1 {
+    // Columns added before the schema had a version. Libraries from then may
+    // already have some of them; new ones have them all.
+    add_column(&tx, "books", "metadata_checked_at TEXT")?;
+    add_column(&tx, "books", "metadata_updated_at TEXT")?;
+    add_column(&tx, "books", "progress_updated_at TEXT")?;
+    add_column(&tx, "books", "deleted_at TEXT")?;
+    // Existing rows get NULL: the reader reopens at the percentage, as before.
+    add_column(&tx, "books", "position TEXT")?;
+  }
+  // Version 2 added the annotations table, which the CREATE TABLE IF NOT
+  // EXISTS above makes for every library, old or new; there is nothing to move.
+  if from < 3 {
+    // A book's series, and collections the reader makes. The collections table
+    // existed, empty and unused, since the first version.
+    add_column(&tx, "books", "series TEXT")?;
+    add_column(&tx, "books", "series_index REAL")?;
+    add_column(&tx, "collections", "book_ids TEXT NOT NULL DEFAULT '[]'")?;
+    add_column(&tx, "collections", "created_at TEXT NOT NULL DEFAULT ''")?;
+    add_column(&tx, "collections", "updated_at TEXT NOT NULL DEFAULT ''")?;
+    add_column(&tx, "collections", "deleted_at TEXT")?;
+  }
+  tx.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))?;
+  tx.commit()?;
+  crate::diag::info(&format!("library database upgraded from version {from} to {SCHEMA_VERSION}"));
   Ok(())
+}
+
+/// Adds a column unless it is already there. Only that case is forgiven: a
+/// full disk or a locked file is an error, not something to skip past.
+fn add_column(conn: &Connection, table: &str, column: &str) -> Result<()> {
+  let name = column.split_whitespace().next().unwrap_or(column);
+  let exists: bool = conn
+    .prepare(&format!("SELECT 1 FROM pragma_table_info('{table}') WHERE name = ?1"))?
+    .exists([name])?;
+  if !exists {
+    conn.execute(&format!("ALTER TABLE {table} ADD COLUMN {column}"), [])?;
+  }
+  Ok(())
+}
+
+/// Copies the database before an upgrade, as `library.db.bak-v<version>`, so a
+/// bad upgrade can be undone by hand. `VACUUM INTO` writes a consistent copy
+/// even while the file is open. A failed copy is logged, not fatal: the
+/// upgrade steps are small and transactional on their own.
+fn backup_before_upgrade(conn: &Connection, path: &Path) {
+  let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap_or(0);
+  let has_books: bool = conn
+    .query_row("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'books'", [], |_| Ok(true))
+    .optional()
+    .ok()
+    .flatten()
+    .unwrap_or(false);
+  if version >= SCHEMA_VERSION || !has_books {
+    return;
+  }
+  let backup = PathBuf::from(format!("{}.bak-v{version}", path.display()));
+  if backup.exists() {
+    return;
+  }
+  if let Err(error) = conn.execute("VACUUM INTO ?1", [backup.to_string_lossy()]) {
+    crate::diag::warn(&format!("could not back up the library before upgrading it: {error}"));
+  }
+}
+
+/// Where the library database lives.
+pub fn database_path() -> Result<PathBuf> {
+  db_path()
 }
 
 fn db_path() -> Result<PathBuf> {
@@ -959,9 +1311,7 @@ pub(crate) mod tests {
     assert!(column_names(&conn, "books").contains(&"metadata_checked_at".to_string()));
 
     let mut stmt = conn
-      .prepare(
-        "SELECT id, title, author, genres, cover_url, local_path, file_hash, progress, last_opened, created_at, metadata_checked_at, metadata_updated_at, progress_updated_at, deleted_at, position FROM books"
-      )
+      .prepare(&format!("SELECT {} FROM books", Database::BOOK_COLUMNS))
       .expect("prepare");
     let books: Vec<BookRecord> = stmt
       .query_map([], Database::row_to_book)
@@ -980,6 +1330,24 @@ pub(crate) mod tests {
     assert_eq!(books[0].position, None, "migrated books reopen at their percentage");
   }
 
+  #[test]
+  fn an_upgrade_stamps_the_schema_version_and_is_idempotent() {
+    let conn = Connection::open_in_memory().expect("open");
+    legacy_schema(&conn);
+    apply_schema(&conn).expect("first upgrade");
+    let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).expect("version");
+    assert_eq!(version, SCHEMA_VERSION);
+    apply_schema(&conn).expect("running it again changes nothing");
+    assert_eq!(column_names(&conn, "books").iter().filter(|name| *name == "position").count(), 1);
+  }
+
+  #[test]
+  fn an_upgrade_does_not_swallow_real_errors() {
+    let conn = Connection::open_in_memory().expect("open");
+    // No books table at all: adding a column to it must fail, not be skipped.
+    assert!(add_column(&conn, "books", "position TEXT").is_err());
+  }
+
   fn seeded_book(db: &Database) {
     db.conn
       .execute(
@@ -988,6 +1356,72 @@ pub(crate) mod tests {
         []
       )
       .expect("seed");
+  }
+
+  #[test]
+  fn a_series_from_the_file_never_overrides_the_readers_word() {
+    let db = memory_db();
+    seeded_book(&db);
+    db.fill_series_from_file("b1", "Discworld", Some(1.0)).expect("fill");
+    let book = db.find_by_id("b1").expect("query").expect("present");
+    assert_eq!((book.series.as_deref(), book.series_index), (Some("Discworld"), Some(1.0)));
+    // Filling from the file is not an edit: it leaves the metadata stamp alone.
+    assert_eq!(book.metadata_updated_at, None);
+
+    // The reader says it is in no series; a later scan does not bring one back.
+    assert!(db.set_series("b1", Some(""), None).expect("set"));
+    db.fill_series_from_file("b1", "Discworld", Some(1.0)).expect("fill again");
+    let book = db.find_by_id("b1").expect("query").expect("present");
+    assert_eq!(book.series.as_deref(), Some(""));
+    assert!(book.metadata_updated_at.is_some(), "the reader's word is stamped, so it syncs");
+    assert!(!db.set_series("missing", Some("X"), None).expect("set"));
+  }
+
+  #[test]
+  fn collections_are_saved_listed_and_deleted_as_tombstones() {
+    let db = memory_db();
+    let mut shelf = Collection {
+      id: "c1".into(),
+      name: "Book club".into(),
+      book_ids: vec!["b2".into(), "b1".into()],
+      created_at: "2026-09-01T10:00:00Z".into(),
+      updated_at: "2026-09-01T10:00:00Z".into(),
+      deleted_at: None
+    };
+    db.put_collection(&shelf).expect("save");
+    assert_eq!(db.collections().expect("list"), vec![shelf.clone()]);
+
+    shelf.deleted_at = Some("2026-09-02T10:00:00Z".into());
+    db.put_collection(&shelf).expect("delete");
+    assert!(db.collections().expect("list").is_empty());
+    assert_eq!(db.all_collections().expect("all").len(), 1, "the tombstone stays for the backup");
+    db.retire_collection_tombstones(&[]).expect("retire");
+    assert!(db.all_collections().expect("all").is_empty());
+  }
+
+  #[test]
+  fn version_3_adds_series_and_collection_columns_to_an_old_library() {
+    let conn = Connection::open_in_memory().expect("open");
+    conn
+      .execute_batch(
+        "CREATE TABLE books (id TEXT PRIMARY KEY, title TEXT NOT NULL, author TEXT, genres TEXT,
+           cover_url TEXT, local_path TEXT NOT NULL, file_hash TEXT NOT NULL, progress REAL DEFAULT 0,
+           last_opened TEXT, created_at TEXT NOT NULL);
+         CREATE TABLE collections (id TEXT PRIMARY KEY, name TEXT NOT NULL);
+         INSERT INTO collections (id, name) VALUES ('old', 'Never used');
+         PRAGMA user_version = 2;"
+      )
+      .expect("old library");
+    apply_schema(&conn).expect("upgrade");
+    for column in ["series", "series_index"] {
+      assert!(column_names(&conn, "books").contains(&column.to_string()), "{column}");
+    }
+    for column in ["book_ids", "created_at", "updated_at", "deleted_at"] {
+      assert!(column_names(&conn, "collections").contains(&column.to_string()), "{column}");
+    }
+    let db = Database { conn, path: PathBuf::from(":memory:") };
+    let old = db.find_collection("old").expect("query").expect("present");
+    assert!(old.book_ids.is_empty());
   }
 
   #[test]

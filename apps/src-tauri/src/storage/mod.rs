@@ -1,6 +1,4 @@
 use anyhow::Result;
-use quick_xml::events::Event;
-use quick_xml::Reader;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Read;
@@ -12,14 +10,17 @@ use tauri::{AppHandle, Manager};
 use tokio::io::AsyncWriteExt;
 #[cfg(desktop)]
 use regex::Regex;
-use zip::ZipArchive;
+
+pub mod epub;
 
 #[cfg(desktop)]
 static CONVERTER_INSTALL_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 pub struct BasicMetadata {
   pub title: Option<String>,
-  pub author: Option<String>
+  pub author: Option<String>,
+  pub series: Option<String>,
+  pub series_index: Option<f32>
 }
 
 /// Where the library lives, set once at startup from Tauri's path resolver.
@@ -74,7 +75,14 @@ pub fn store_book_file(source: &Path, hash: &str) -> Result<PathBuf> {
   fs::create_dir_all(&dir)?;
   let dest = dir.join(format!("{}.{}", hash, ext));
   if !dest.exists() {
-    fs::copy(source, &dest)?;
+    // Through a staging file: an interrupted copy straight to `dest` left a
+    // truncated book that the `exists()` check above then trusted forever.
+    let staging = dir.join(format!("{}.{}.part", hash, ext));
+    fs::copy(source, &staging)?;
+    if let Err(error) = fs::rename(&staging, &dest) {
+      let _ = fs::remove_file(&staging);
+      return Err(error.into());
+    }
   }
   Ok(dest)
 }
@@ -769,20 +777,91 @@ pub async fn store_cover(url: &str, hash: &str) -> Result<PathBuf> {
 
   // Without these checks a 404 page or a redirect to HTML was written to disk and
   // cached forever, permanently blocking the real cover for that book.
-  let bytes = reqwest::get(url).await?.error_for_status()?.bytes().await?;
-  if sniff_image_mime(&bytes).is_none() {
-    return Err(anyhow::anyhow!("cover response was not an image"));
-  }
+  let client = reqwest::Client::builder().timeout(Duration::from_secs(20)).build()?;
+  let bytes = client.get(url).send().await?.error_for_status()?.bytes().await?;
+  store_cover_bytes(&bytes, hash)
+}
 
-  // Write via a temp file so an interrupted download cannot leave a truncated
+/// Saves cover image bytes (from the internet or from inside the book) as the
+/// book's cover. A cover already saved is kept: the book's own, saved at
+/// import, is not replaced by a guess from a search.
+pub fn store_cover_bytes(bytes: &[u8], hash: &str) -> Result<PathBuf> {
+  if sniff_image_mime(bytes).is_none() {
+    return Err(anyhow::anyhow!("cover was not an image"));
+  }
+  let dir = covers_dir()?;
+  fs::create_dir_all(&dir)?;
+  let dest = dir.join(format!("{}-cover.jpg", hash));
+  if dest.exists() {
+    return Ok(dest);
+  }
+  // Write via a temp file so an interrupted write cannot leave a truncated
   // cover behind that the `dest.exists()` short-circuit would then trust.
   let staging = dir.join(format!("{}-cover.part", hash));
+  fs::write(&staging, bytes)?;
+  if let Err(error) = fs::rename(&staging, &dest) {
+    let _ = fs::remove_file(&staging);
+    return Err(error.into());
+  }
+  Ok(dest)
+}
+
+/// Widest a library thumbnail is drawn: a grid card is about 180 px wide, so
+/// this covers a 2x display with room to spare.
+const THUMB_WIDTH: u32 = 360;
+
+/// A small JPEG of a book's cover for the library grid, made once and kept
+/// beside the cover. Full covers are often 100 to 300 KB, and the grid used to
+/// load every one of them in full, as base64, for every card.
+pub fn cover_thumbnail(cover: &Path, hash: &str) -> Result<PathBuf> {
+  thumbnail_into(&covers_dir()?, cover, hash)
+}
+
+fn thumbnail_into(dir: &Path, cover: &Path, hash: &str) -> Result<PathBuf> {
+  let dest = dir.join(format!("{}-thumb.jpg", hash));
+  if dest.exists() {
+    return Ok(dest);
+  }
+  let image = image::load_from_memory(&fs::read(cover)?)?;
+  let small = if image.width() > THUMB_WIDTH {
+    image.thumbnail(THUMB_WIDTH, THUMB_WIDTH * 3)
+  } else {
+    image
+  };
+  let mut bytes = Vec::new();
+  let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 82);
+  small.to_rgb8().write_with_encoder(encoder)?;
+  let staging = dir.join(format!("{}-thumb.part", hash));
   fs::write(&staging, &bytes)?;
   if let Err(error) = fs::rename(&staging, &dest) {
     let _ = fs::remove_file(&staging);
     return Err(error.into());
   }
   Ok(dest)
+}
+
+/// What a deleted book leaves besides its own file: the cover, its thumbnail,
+/// and the EPUB made when another format was converted. Best effort.
+pub fn remove_book_extras(hash: &str, book_path: &Path) {
+  if let Ok(dir) = covers_dir() {
+    let _ = fs::remove_file(dir.join(format!("{}-cover.jpg", hash)));
+    let _ = fs::remove_file(dir.join(format!("{}-thumb.jpg", hash)));
+  }
+  if let Ok(converted) = converted_epub_path(hash) {
+    if converted != book_path {
+      let _ = fs::remove_file(converted);
+    }
+  }
+}
+
+/// The cover inside an EPUB, saved as the book's cover. `None` for other
+/// formats, or a book without one.
+pub fn store_embedded_cover(book_path: &Path, hash: &str) -> Option<PathBuf> {
+  if normalized_ext(book_path) != "epub" {
+    return None;
+  }
+  let bytes = epub::cover(book_path).ok().flatten()?;
+  store_cover_bytes(&bytes, hash).ok()
 }
 
 pub fn extract_basic_metadata(path: &Path) -> Result<BasicMetadata> {
@@ -794,71 +873,47 @@ pub fn extract_basic_metadata(path: &Path) -> Result<BasicMetadata> {
   }
   Ok(BasicMetadata {
     title: None,
-    author: None
+    author: None,
+    series: None,
+    series_index: None
   })
 }
 
 fn extract_epub_metadata(path: &Path) -> Result<BasicMetadata> {
-  let file = fs::File::open(path)?;
-  let mut archive = ZipArchive::new(file)?;
-  let mut opf_index = None;
-  for i in 0..archive.len() {
-    let file = archive.by_index(i)?;
-    let name = file.name().to_lowercase();
-    if name.ends_with("content.opf") || name.ends_with("package.opf") {
-      opf_index = Some(i);
-      break;
-    }
-  }
-  let index = opf_index.ok_or_else(|| anyhow::anyhow!("missing opf"))?;
-  let mut opf_file = archive.by_index(index)?;
-  let mut contents = String::new();
-  opf_file.read_to_string(&mut contents)?;
-
-  let mut reader = Reader::from_str(&contents);
-  reader.trim_text(true);
-  let mut buf = Vec::new();
-  let mut title: Option<String> = None;
-  let mut author: Option<String> = None;
-  let mut capture = None;
-
-  loop {
-    match reader.read_event_into(&mut buf) {
-      Ok(Event::Start(e)) => {
-        let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
-        if name.ends_with("title") {
-          capture = Some("title".to_string());
-        } else if name.ends_with("creator") {
-          capture = Some("creator".to_string());
-        }
-      }
-      Ok(Event::Text(e)) => {
-        if let Some(kind) = capture.as_deref() {
-          let value = e.unescape()?.to_string();
-          if kind == "title" && title.is_none() {
-            title = Some(value.clone());
-          }
-          if kind == "creator" && author.is_none() {
-            author = Some(value);
-          }
-        }
-      }
-      Ok(Event::End(_)) => {
-        capture = None;
-      }
-      Ok(Event::Eof) => break,
-      Err(_) => break,
-      _ => {}
-    }
-    buf.clear();
-  }
-
-  Ok(BasicMetadata { title, author })
+  let package = epub::package(path)?;
+  Ok(BasicMetadata {
+    title: package.title,
+    author: package.author,
+    series: package.series,
+    series_index: package.series_index
+  })
 }
 
 #[cfg(test)]
 mod tests {
+  use crate::LockExt;
   use super::*;
+
+  #[test]
+  fn a_cover_thumbnail_is_a_small_jpeg_made_once() {
+    let dir = std::env::temp_dir().join("leaflet-thumb-test");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("dir");
+    let cover = dir.join("big-cover.png");
+    image::RgbImage::from_pixel(1200, 1800, image::Rgb([180, 60, 40]))
+      .save(&cover)
+      .expect("cover");
+    let thumb = thumbnail_into(&dir, &cover, "h").expect("thumbnail");
+    let bytes = fs::read(&thumb).expect("read");
+    assert_eq!(sniff_image_mime(&bytes), Some("image/jpeg"));
+    let small = image::load_from_memory(&bytes).expect("decode");
+    assert_eq!((small.width(), small.height()), (THUMB_WIDTH, THUMB_WIDTH * 3 / 2), "keeps the shape");
+    assert!(bytes.len() < fs::metadata(&cover).expect("meta").len() as usize || bytes.len() < 60_000);
+    // Made once: a second call returns the same file untouched.
+    let again = thumbnail_into(&dir, &cover, "h").expect("again");
+    assert_eq!(again, thumb);
+    let _ = fs::remove_dir_all(&dir);
+  }
 
   #[test]
   fn conversions_of_one_book_run_one_at_a_time() {
@@ -880,7 +935,7 @@ mod tests {
       thread.join().unwrap();
     }
     // The last one out forgets the entry.
-    assert!(!CONVERSION_LOCKS.lock().unwrap().contains_key("same-book"));
+    assert!(!CONVERSION_LOCKS.guard().contains_key("same-book"));
   }
 
   #[test]

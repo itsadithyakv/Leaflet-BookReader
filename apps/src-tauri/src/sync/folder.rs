@@ -222,6 +222,8 @@ mod tests {
       file_hash: id.to_string(),
       progress,
       position: None,
+      series: None,
+      series_index: None,
       last_opened: None,
       created_at: now.to_string(),
       metadata_checked_at: None,

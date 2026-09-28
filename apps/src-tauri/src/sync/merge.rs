@@ -58,6 +58,13 @@ pub struct BookEntry {
   /// before it existed still parse.
   #[serde(default)]
   pub position: Option<String>,
+  /// The series and the book's number in it (`Some("")`: the reader said it is
+  /// in none). Part of the metadata group, so it travels with the title.
+  /// Defaulted: documents written before it existed still parse.
+  #[serde(default)]
+  pub series: Option<String>,
+  #[serde(default)]
+  pub series_index: Option<f32>,
   /// When `progress` last changed — *not* when the book was last opened.
   /// Conflating the two is what let a device that merely opened a book roll
   /// another device's reading position backwards.
@@ -134,7 +141,15 @@ pub struct SyncDoc {
   pub harvests: Vec<Harvest>,
   /// Pip's look, home and mood. One record, newest write wins.
   #[serde(default)]
-  pub pip: Option<PipState>
+  pub pip: Option<PipState>,
+  /// Bookmarks and highlights. Per id, the newest edit wins (a delete is an
+  /// edit, kept as a tombstone).
+  #[serde(default)]
+  pub annotations: Vec<crate::db::Annotation>,
+  /// The reader's own collections. Per id, the newest edit wins, as for
+  /// annotations.
+  #[serde(default)]
+  pub collections: Vec<crate::db::Collection>
 }
 
 impl SyncDoc {
@@ -148,7 +163,9 @@ impl SyncDoc {
       purchases: Vec::new(),
       plantings: Vec::new(),
       harvests: Vec::new(),
-      pip: None
+      pip: None,
+      annotations: Vec::new(),
+      collections: Vec::new()
     }
   }
 
@@ -202,7 +219,14 @@ fn merge_book(a: &BookEntry, b: &BookEntry) -> BookEntry {
     Ordering::Greater => a,
     Ordering::Less => b,
     Ordering::Equal => {
-      if (&a.title, &a.author, &a.genres) >= (&b.title, &b.author, &b.genres) {
+      // A series is compared too, and a known one beats none (`None` sorts
+      // first): a series read from the file is filled in without a new stamp,
+      // since every device reads the same file to the same answer.
+      let index = |x: &BookEntry| x.series_index.map(|value| value.to_bits() as i64).unwrap_or(-1);
+      let order = (&a.title, &a.author, &a.genres, &a.series)
+        .cmp(&(&b.title, &b.author, &b.genres, &b.series))
+        .then_with(|| index(a).cmp(&index(b)));
+      if order != Ordering::Less {
         a
       } else {
         b
@@ -266,6 +290,8 @@ fn merge_book(a: &BookEntry, b: &BookEntry) -> BookEntry {
     title: metadata_from.title.clone(),
     author: metadata_from.author.clone(),
     genres: metadata_from.genres.clone(),
+    series: metadata_from.series.clone(),
+    series_index: metadata_from.series_index,
     metadata_updated_at: metadata_from.metadata_updated_at.clone(),
     progress: progress_from.progress,
     // Taken from the progress winner even when it is `None`: filling it from the
@@ -349,6 +375,62 @@ fn merge_pip(a: &Option<PipState>, b: &Option<PipState>) -> Option<PipState> {
     (None, Some(y)) => Some(y.clone()),
     (None, None) => None
   }
+}
+
+/// A record edited as a whole, deleted as a tombstone: annotations and
+/// collections.
+trait Edited: Clone + Ord {
+  fn id(&self) -> &str;
+  fn updated_at(&self) -> &str;
+  fn deleted_at(&self) -> &Option<String>;
+}
+
+impl Edited for crate::db::Annotation {
+  fn id(&self) -> &str {
+    &self.id
+  }
+  fn updated_at(&self) -> &str {
+    &self.updated_at
+  }
+  fn deleted_at(&self) -> &Option<String> {
+    &self.deleted_at
+  }
+}
+
+impl Edited for crate::db::Collection {
+  fn id(&self) -> &str {
+    &self.id
+  }
+  fn updated_at(&self) -> &str {
+    &self.updated_at
+  }
+  fn deleted_at(&self) -> &Option<String> {
+    &self.deleted_at
+  }
+}
+
+/// Two copies of one record: the newer edit wins. An exact tie is decided by
+/// the records themselves, so every device picks the same one.
+fn merge_edited<T: Edited>(a: &[T], b: &[T], cutoff: i64) -> Vec<T> {
+  let mut out: BTreeMap<String, T> = BTreeMap::new();
+  for item in a.iter().chain(b.iter()) {
+    let replace = match out.get(item.id()) {
+      None => true,
+      Some(existing) => match instant(item.updated_at()).cmp(&instant(existing.updated_at())) {
+        Ordering::Greater => true,
+        Ordering::Less => false,
+        Ordering::Equal => item > existing
+      }
+    };
+    if replace {
+      out.insert(item.id().to_string(), item.clone());
+    }
+  }
+  out
+    .into_values()
+    // Old tombstones leave, as books' do.
+    .filter(|item| instant_opt(item.deleted_at()).map(|at| at >= cutoff).unwrap_or(true))
+    .collect()
 }
 
 /// Records that never change once made (plantings, harvests): a union by id.
@@ -436,6 +518,8 @@ pub fn merge(local: &SyncDoc, remote: &SyncDoc, now: &str) -> SyncDoc {
   SyncDoc {
     version: DOC_VERSION,
     updated_at: now.to_string(),
+    annotations: merge_edited(&local.annotations, &remote.annotations, cutoff),
+    collections: merge_edited(&local.collections, &remote.collections, cutoff),
     plantings: union_by_id(&local.plantings, &remote.plantings, |p| p.id.as_str()),
     harvests: union_by_id(&local.harvests, &remote.harvests, |h| h.id.as_str()),
     books,
@@ -473,6 +557,8 @@ impl BookEntry {
         .unwrap_or_else(|| book.created_at.clone()),
       progress: book.progress,
       position: book.position.clone(),
+      series: book.series.clone(),
+      series_index: book.series_index,
       progress_updated_at: book
         .progress_updated_at
         .clone()
@@ -496,6 +582,8 @@ impl BookEntry {
       file_hash: self.id.clone(),
       progress: self.progress,
       position: self.position.clone(),
+      series: self.series.clone(),
+      series_index: self.series_index,
       last_opened: self.last_opened.clone(),
       created_at: self.created_at.clone(),
       metadata_checked_at: None,
@@ -619,6 +707,8 @@ mod tests {
       metadata_updated_at: "2026-01-01T00:00:00+00:00".to_string(),
       progress: 0.0,
       position: None,
+      series: None,
+      series_index: None,
       progress_updated_at: "2026-01-01T00:00:00+00:00".to_string(),
       last_opened: None,
       created_at: "2026-01-01T00:00:00+00:00".to_string(),
@@ -636,7 +726,9 @@ mod tests {
       purchases: Vec::new(),
       plantings: Vec::new(),
       harvests: Vec::new(),
-      pip: None
+      pip: None,
+      annotations: Vec::new(),
+      collections: Vec::new()
     }
   }
 
@@ -743,6 +835,88 @@ mod tests {
   }
 
   // ---- the properties that make sync safe --------------------------------
+
+  fn note(id: &str, updated_at: &str, text: &str, deleted_at: Option<&str>) -> crate::db::Annotation {
+    crate::db::Annotation {
+      id: id.into(),
+      book_id: "b".into(),
+      kind: "highlight".into(),
+      cfi: "epubcfi(/6/2!/4/2,/1:0,/1:5)".into(),
+      text: Some(text.into()),
+      note: None,
+      color: None,
+      chapter: None,
+      created_at: "2026-09-01T10:00:00Z".into(),
+      updated_at: updated_at.into(),
+      deleted_at: deleted_at.map(Into::into)
+    }
+  }
+
+  #[test]
+  fn annotations_merge_newest_edit_wins_and_deletes_travel() {
+    let now = "2026-09-28T12:00:00Z";
+    let mut a = SyncDoc::empty(now);
+    let mut b = SyncDoc::empty(now);
+    a.annotations = vec![note("n1", "2026-09-10T10:00:00Z", "old", None), note("n2", "2026-09-10T10:00:00Z", "kept", None)];
+    b.annotations = vec![
+      note("n1", "2026-09-12T10:00:00Z", "edited", None),
+      note("n2", "2026-09-20T10:00:00Z", "kept", Some("2026-09-20T10:00:00Z")),
+      note("n3", "2026-09-11T10:00:00Z", "new", None)
+    ];
+    let ab = merge(&a, &b, now);
+    let ba = merge(&b, &a, now);
+    assert_eq!(ab.annotations, ba.annotations, "commutative");
+    assert_eq!(merge(&ab, &b, now).annotations, ab.annotations, "idempotent");
+    let by_id = |id: &str| ab.annotations.iter().find(|n| n.id == id).cloned();
+    assert_eq!(by_id("n1").and_then(|n| n.text).as_deref(), Some("edited"));
+    assert!(by_id("n2").map(|n| n.deleted_at.is_some()).unwrap_or(false), "a delete reaches the other copy");
+    assert!(by_id("n3").is_some());
+    // An old tombstone is dropped, as a book's is.
+    let mut old = SyncDoc::empty(now);
+    old.annotations = vec![note("gone", "2026-01-01T00:00:00Z", "x", Some("2026-01-01T00:00:00Z"))];
+    assert!(merge(&old, &SyncDoc::empty(now), now).annotations.is_empty());
+  }
+
+  #[test]
+  fn a_known_series_wins_a_tie_and_a_readers_edit_wins_outright() {
+    let plain = entry("aaa");
+    let mut scanned = entry("aaa");
+    scanned.series = Some("Harry Potter".into());
+    scanned.series_index = Some(2.0);
+    // Same stamp: one device read the series from the file, the other has not.
+    let ab = merge(&doc(vec![plain.clone()]), &doc(vec![scanned.clone()]), NOW);
+    let ba = merge(&doc(vec![scanned.clone()]), &doc(vec![plain.clone()]), NOW);
+    assert_eq!(ab, ba, "commutative");
+    assert_eq!(find(&ab, "aaa").series.as_deref(), Some("Harry Potter"));
+    assert_eq!(find(&ab, "aaa").series_index, Some(2.0));
+
+    // The reader says "not in a series", later: that holds.
+    let mut none = plain.clone();
+    none.series = Some(String::new());
+    none.metadata_updated_at = "2026-03-01T00:00:00+00:00".into();
+    let merged = merge(&doc(vec![scanned]), &doc(vec![none]), NOW);
+    assert_eq!(find(&merged, "aaa").series.as_deref(), Some(""));
+  }
+
+  #[test]
+  fn collections_merge_newest_edit_wins() {
+    let shelf = |name: &str, books: &[&str], updated_at: &str| crate::db::Collection {
+      id: "c1".into(),
+      name: name.into(),
+      book_ids: books.iter().map(|id| id.to_string()).collect(),
+      created_at: "2026-09-01T10:00:00Z".into(),
+      updated_at: updated_at.into(),
+      deleted_at: None
+    };
+    let now = "2026-09-28T12:00:00Z";
+    let mut a = SyncDoc::empty(now);
+    let mut b = SyncDoc::empty(now);
+    a.collections = vec![shelf("Book club", &["b1"], "2026-09-10T10:00:00Z")];
+    b.collections = vec![shelf("Book club", &["b1", "b2"], "2026-09-12T10:00:00Z")];
+    let ab = merge(&a, &b, now);
+    assert_eq!(ab.collections, merge(&b, &a, now).collections, "commutative");
+    assert_eq!(ab.collections[0].book_ids, vec!["b1".to_string(), "b2".to_string()]);
+  }
 
   #[test]
   fn merge_is_commutative() {
@@ -987,6 +1161,8 @@ mod tests {
       file_hash: "aaa".to_string(),
       progress: 0.1,
       position: None,
+      series: None,
+      series_index: None,
       last_opened: None,
       created_at: "2026-01-01T00:00:00+00:00".to_string(),
       metadata_checked_at: None,

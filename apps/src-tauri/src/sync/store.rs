@@ -58,7 +58,9 @@ pub fn snapshot(db: &Database, now: &str) -> Result<SyncDoc> {
     purchases: db.pip_purchases()?,
     plantings: db.pip_plantings()?,
     harvests: db.pip_harvests()?,
-    pip: db.pip_state()?
+    pip: db.pip_state()?,
+    annotations: db.all_annotations()?,
+    collections: db.all_collections()?
   })
 }
 
@@ -149,6 +151,16 @@ pub fn apply(db: &Database, doc: &SyncDoc) -> Result<Applied> {
   if let Some(pip) = &doc.pip {
     db.put_pip_state(pip)?;
   }
+  for annotation in &doc.annotations {
+    db.put_annotation(annotation)?;
+  }
+  let carried: Vec<String> = doc.annotations.iter().map(|a| a.id.clone()).collect();
+  db.retire_annotation_tombstones(&carried)?;
+  for collection in &doc.collections {
+    db.put_collection(collection)?;
+  }
+  let carried: Vec<String> = doc.collections.iter().map(|c| c.id.clone()).collect();
+  db.retire_collection_tombstones(&carried)?;
 
   // Tombstones the merge has retired can finally leave the database.
   let keep: Vec<String> = doc
@@ -187,6 +199,8 @@ mod tests {
       file_hash: id.to_string(),
       progress,
       position: None,
+      series: None,
+      series_index: None,
       last_opened: None,
       created_at: "2026-01-01T00:00:00+00:00".to_string(),
       metadata_checked_at: Some("2026-02-01T00:00:00+00:00".to_string()),
@@ -218,7 +232,9 @@ mod tests {
       purchases: Vec::new(),
       plantings: Vec::new(),
       harvests: Vec::new(),
-      pip: None
+      pip: None,
+      annotations: Vec::new(),
+      collections: Vec::new()
     };
 
     apply(&db, &doc).expect("apply");
@@ -247,7 +263,9 @@ mod tests {
       purchases: Vec::new(),
       plantings: Vec::new(),
       harvests: Vec::new(),
-      pip: None
+      pip: None,
+      annotations: Vec::new(),
+      collections: Vec::new()
     };
     apply(&db, &doc).expect("apply");
 
@@ -277,7 +295,9 @@ mod tests {
       purchases: Vec::new(),
       plantings: Vec::new(),
       harvests: Vec::new(),
-      pip: None
+      pip: None,
+      annotations: Vec::new(),
+      collections: Vec::new()
     };
     apply(&db, &doc).expect("apply");
 
@@ -310,7 +330,9 @@ mod tests {
       purchases: Vec::new(),
       plantings: Vec::new(),
       harvests: Vec::new(),
-      pip: None
+      pip: None,
+      annotations: Vec::new(),
+      collections: Vec::new()
     };
     let applied = apply(&db, &doc).expect("apply");
 
@@ -340,7 +362,9 @@ mod tests {
       purchases: Vec::new(),
       plantings: Vec::new(),
       harvests: Vec::new(),
-      pip: None
+      pip: None,
+      annotations: Vec::new(),
+      collections: Vec::new()
     };
     let applied = apply(&db, &doc).expect("apply");
 
@@ -368,7 +392,9 @@ mod tests {
       purchases: Vec::new(),
       plantings: Vec::new(),
       harvests: Vec::new(),
-      pip: None
+      pip: None,
+      annotations: Vec::new(),
+      collections: Vec::new()
     };
 
     apply(&db, &doc).expect("first");
@@ -413,7 +439,9 @@ mod tests {
       purchases: Vec::new(),
       plantings: Vec::new(),
       harvests: Vec::new(),
-      pip: None
+      pip: None,
+      annotations: Vec::new(),
+      collections: Vec::new()
     };
 
     apply(&db, &doc).expect("apply");
@@ -442,6 +470,64 @@ mod tests {
 
   /// Seeds spent and Pip's look are in the backup: restoring on a new
   /// machine brings the wardrobe back rather than refunding it.
+  #[test]
+  fn annotations_travel_and_retired_tombstones_leave() {
+    let from = memory_db();
+    let to = memory_db();
+    let annotation = crate::db::Annotation {
+      id: "h1".into(),
+      book_id: "b1".into(),
+      kind: "highlight".into(),
+      cfi: "epubcfi(/6/2!/4/2,/1:0,/1:5)".into(),
+      text: Some("It was a dark and stormy night".into()),
+      note: Some("classic".into()),
+      color: Some("yellow".into()),
+      chapter: Some("Chapter 1".into()),
+      created_at: "2026-09-01T10:00:00Z".into(),
+      updated_at: "2026-09-01T10:00:00Z".into(),
+      deleted_at: None
+    };
+    from.put_annotation(&annotation).expect("save");
+    let doc = snapshot(&from, "2026-09-02T00:00:00Z").expect("snapshot");
+    assert_eq!(doc.annotations.len(), 1);
+    apply(&to, &doc).expect("apply");
+    assert_eq!(to.annotations_for_book("b1").expect("list"), vec![annotation.clone()]);
+
+    // A tombstone the document no longer carries is removed for good.
+    let mut gone = annotation.clone();
+    gone.deleted_at = Some("2026-09-03T00:00:00Z".into());
+    to.put_annotation(&gone).expect("delete");
+    let mut empty = doc.clone();
+    empty.annotations.clear();
+    apply(&to, &empty).expect("apply");
+    assert!(to.find_annotation("h1").expect("find").is_none());
+  }
+
+  #[test]
+  fn collections_and_series_travel() {
+    let from = memory_db();
+    let to = memory_db();
+    let mut book = record("aaa", 0.2);
+    book.series = Some("The Expanse".into());
+    book.series_index = Some(3.0);
+    from.upsert_book(&book).expect("seed");
+    let shelf = crate::db::Collection {
+      id: "c1".into(),
+      name: "Space".into(),
+      book_ids: vec!["aaa".into()],
+      created_at: "2026-09-01T10:00:00Z".into(),
+      updated_at: "2026-09-01T10:00:00Z".into(),
+      deleted_at: None
+    };
+    from.put_collection(&shelf).expect("save");
+
+    let doc = snapshot(&from, "2026-09-02T00:00:00Z").expect("snapshot");
+    apply(&to, &doc).expect("apply");
+    assert_eq!(to.collections().expect("list"), vec![shelf]);
+    let arrived = to.find_by_id("aaa").expect("query").expect("present");
+    assert_eq!((arrived.series.as_deref(), arrived.series_index), (Some("The Expanse"), Some(3.0)));
+  }
+
   #[test]
   fn pip_purchases_and_state_travel() {
     let from = memory_db();

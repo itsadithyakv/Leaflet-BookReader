@@ -13,6 +13,14 @@ export type Book = {
    * page-based books, whose page follows from `progress`.
    */
   position?: string | null;
+  /**
+   * The series the book is in, from the book itself or set by the reader;
+   * `""` means the reader said it is in none. Most books have nothing here and
+   * the library works their series out (src/library/series.ts).
+   */
+  series?: string | null;
+  /** Its number in the series (2.5 for a novella between two books). */
+  seriesIndex?: number | null;
   lastOpened: string | null;
   createdAt: string;
   // Last time metadata enrichment ran for this book, successful or not.
@@ -30,6 +38,6 @@ export type BookFilter = {
   query: string;
   author: string;
   genre: string;
-  sort: "recent" | "opened" | "author";
+  sort: "recent" | "opened" | "title" | "author" | "series";
   view: "grid" | "list";
 };
