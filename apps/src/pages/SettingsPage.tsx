@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useLibraryStore } from "../store/libraryStore";
 import { useShallow } from "zustand/react/shallow";
 import { useHabitStore } from "../store/habitStore";
@@ -21,6 +21,7 @@ import { PRIVACY_URL, SUPPORT_EMAIL, TERMS_URL } from "../constants/links";
 import { openStoreReview } from "../components/RatePrompt";
 import { useAccountStore } from "../store/accountStore";
 import { accountService, errorMessage } from "../services/accountService";
+import { diagnosticsService } from "../services/diagnosticsService";
 import { AvatarPicker } from "../components/AvatarPicker";
 import { PipAvatar } from "../components/community/PipAvatar";
 import { randomAvatar } from "../pip/avatars";
@@ -50,8 +51,6 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
     clearDriveCredentials,
     syncNow,
     loadSyncStatus,
-    filters,
-    setFilter,
     resetAll: resetLibrary
   } = useLibraryStore();
   const {
@@ -142,25 +141,6 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
   // Readers of a release build sign in with the client it ships. Pasting one's
   // own is a developer affordance, offered only when the build has none.
   const showClientSetup = sync.driveCredentialSource !== "built-in";
-
-  const activeFilters = useMemo(() => {
-    const items: string[] = [];
-    if (filters.query.trim().length > 0) {
-      items.push(`Search: "${filters.query.trim()}"`);
-    }
-    if (filters.author !== "all") {
-      items.push(`Author: ${filters.author}`);
-    }
-    if (filters.genre !== "all") {
-      items.push(`Genre: ${filters.genre}`);
-    }
-    return items;
-  }, [filters.author, filters.genre, filters.query]);
-
-  const resetFilters = () => {
-    setFilter({ query: "", author: "all", genre: "all", sort: "recent", view: "grid" });
-    showToast("Filters reset.");
-  };
 
   const handleChooseFolder = async () => {
     try {
@@ -335,7 +315,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
       <div>
         <h2 className="page-title text-4xl">Settings</h2>
         <p className="mt-2 text-sm text-on-surface-variant">
-          Manage backups and keep your archive tidy.
+          Appearance, Pip, backup, your reading goal and your account.
         </p>
       </div>
 
@@ -633,20 +613,6 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
         )}
 
         <div className="paper-surface rounded-xl p-5">
-          <p className="text-xs uppercase tracking-widest text-on-surface-variant">Library Filters</p>
-          <p className="mt-3 text-sm text-on-surface-variant">
-            {activeFilters.length === 0 ? "No filters applied." : activeFilters.join(" | ")}
-          </p>
-          <button
-            type="button"
-            className="tactile-button mt-4 px-4 py-2 text-xs"
-            onClick={resetFilters}
-          >
-            Reset Filters
-          </button>
-        </div>
-
-        <div className="paper-surface rounded-xl p-5">
           <p className="text-xs uppercase tracking-widest text-on-surface-variant">
             Smart Read Calibration
           </p>
@@ -881,6 +847,20 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                     Terms of use
                   </button>
                 )}
+                <button
+                  type="button"
+                  className="tactile-button px-4 py-2 text-xs"
+                  title="Copies versions, settings and the recent log (no passwords or book contents) to paste into an email"
+                  onClick={() =>
+                    void diagnosticsService
+                      .report()
+                      .then((report) => navigator.clipboard.writeText(report))
+                      .then(() => showToast(`Diagnostics copied. Paste them into an email to ${SUPPORT_EMAIL}.`))
+                      .catch(() => showToast("Couldn't copy diagnostics."))
+                  }
+                >
+                  Copy diagnostics
+                </button>
               </div>
             </div>
           </div>
@@ -906,7 +886,6 @@ const AccountCard = ({ showToast }: { showToast: (message: string) => void }) =>
   const signOut = useAccountStore((state) => state.signOut);
   const changePassword = useAccountStore((state) => state.changePassword);
   const deleteAccount = useAccountStore((state) => state.deleteAccount);
-  const saveAvatar = useAccountStore((state) => state.setAvatar);
 
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
@@ -914,7 +893,7 @@ const AccountCard = ({ showToast }: { showToast: (message: string) => void }) =>
   const [displayName, setDisplayName] = useState("");
   // Preselected at random, so a reader who skips past it still gets a Pip of their own.
   const [avatar, setAvatar] = useState(() => randomAvatar().id);
-  const [panel, setPanel] = useState<"none" | "password" | "delete" | "avatar">("none");
+  const [panel, setPanel] = useState<"none" | "password" | "delete">("none");
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [busy, setBusy] = useState(false);
@@ -944,11 +923,8 @@ const AccountCard = ({ showToast }: { showToast: (message: string) => void }) =>
       .finally(() => setBusy(false));
   };
 
-  const open = (which: "password" | "delete" | "avatar" | "none") => {
+  const open = (which: "password" | "delete" | "none") => {
     reset();
-    if (which === "avatar") {
-      setAvatar(status.account?.avatar ?? randomAvatar().id);
-    }
     setPanel(which);
   };
 
@@ -969,29 +945,16 @@ const AccountCard = ({ showToast }: { showToast: (message: string) => void }) =>
       <div className="paper-surface rounded-xl p-5">
         <p className="text-xs uppercase tracking-widest text-on-surface-variant">Account</p>
         <div className="mt-3 flex items-center gap-3">
-          {account?.avatar && panel !== "avatar" && (
-            <PipAvatar seed={null} avatar={account.avatar} size={48} play="idle" label="Your avatar" />
-          )}
+          {account?.avatar && <PipAvatar seed={null} avatar={account.avatar} size={48} play="idle" label="Your Pip" />}
           <div className="min-w-0">
-            <p className="truncate font-headline text-2xl font-bold text-on-surface">
-              {account?.displayName || account?.email || "Signed in"}
-            </p>
-            {account?.displayName && (
-              <p className="mt-1 truncate text-xs text-on-surface-variant">{account.email}</p>
+            <p className="truncate font-headline text-2xl font-bold text-on-surface">{account?.email || "Signed in"}</p>
+            {FEATURES.community && (
+              <p className="mt-1 text-xs text-on-surface-variant">Your name, handle and Pip are on Social → Community.</p>
             )}
           </div>
         </div>
         {status.offline && (
           <p className="mt-2 text-[11px] text-on-surface-variant">Offline. Showing saved details.</p>
-        )}
-
-        {panel === "avatar" && (
-          <div className="mt-4">
-            <AvatarPicker value={avatar} onChange={setAvatar} disabled={busy} label="Your avatar" />
-            <p className="mt-2 text-[10px] text-on-surface-variant">
-              Shown on the leaderboard and your reader card once your profile is public.
-            </p>
-          </div>
         )}
 
         {panel === "password" && (
@@ -1040,9 +1003,6 @@ const AccountCard = ({ showToast }: { showToast: (message: string) => void }) =>
         <div className="mt-4 flex flex-wrap gap-3">
           {panel === "none" && (
             <>
-              <button type="button" className="tactile-button px-4 py-2 text-xs" onClick={() => open("avatar")}>
-                {account?.avatar ? "Change avatar" : "Pick an avatar"}
-              </button>
               <button type="button" className="tactile-button px-4 py-2 text-xs" onClick={() => open("password")}>
                 Change password
               </button>
@@ -1071,16 +1031,6 @@ const AccountCard = ({ showToast }: { showToast: (message: string) => void }) =>
               onClick={() => attempt(() => changePassword(current, next), "Password changed.")}
             >
               {busy ? "Saving…" : "Save password"}
-            </button>
-          )}
-          {panel === "avatar" && (
-            <button
-              type="button"
-              className="tactile-button tactile-button-primary px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={busy || avatar === account?.avatar}
-              onClick={() => attempt(() => saveAvatar(avatar), "Avatar saved.")}
-            >
-              {busy ? "Saving…" : "Save avatar"}
             </button>
           )}
           {panel === "delete" && (

@@ -4,6 +4,7 @@ import { isTauri } from "@tauri-apps/api/core";
 import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { installAppGuards } from "./platform/desktop/appGuards";
+import { diagnosticsService } from "./services/diagnosticsService";
 import "./index.css";
 
 // Only the packaged app: `tauri dev` keeps F5 and the inspector, and a plain
@@ -11,6 +12,9 @@ import "./index.css";
 if (import.meta.env.PROD && isTauri()) {
   installAppGuards();
 }
+
+// Errors in the interface go to the log file; the release build has no console.
+diagnosticsService.install();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

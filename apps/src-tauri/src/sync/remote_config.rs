@@ -17,6 +17,7 @@ use base64::Engine;
 use ring::signature::{UnparsedPublicKey, ED25519};
 use serde::Deserialize;
 use std::time::Duration;
+use crate::LockExt;
 
 /// Where the config lives. A build can point elsewhere (a staging site).
 const DEFAULT_CONFIG_URL: &str = "https://itsadithyakv.github.io/Leaflet-BookReader/config.json";
@@ -86,7 +87,7 @@ pub async fn refresh(db_mutex: &std::sync::Mutex<Database>) -> Result<Option<Str
   let config = verify(&body, &public_key())?;
   let base = cloud::normalise_api_base(&config.api_base)?;
 
-  let db = db_mutex.lock().unwrap();
+  let db = db_mutex.guard();
   // Never step back to an older signed file: a replayed old config could
   // point at a server that has since been retired and taken over.
   let previous = db.get_setting(ISSUED_SETTING)?.unwrap_or_default();

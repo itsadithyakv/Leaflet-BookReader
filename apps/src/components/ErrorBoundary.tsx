@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { diagnosticsService } from "../services/diagnosticsService";
 
 type Props = { children: ReactNode };
 type State = { error: Error | null };
@@ -24,6 +25,8 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("[leaflet] render failed", error, info.componentStack);
+    const where = info.componentStack?.trim().split("\n")[0] ?? "";
+    diagnosticsService.logError(`screen crashed${where ? ` ${where}` : ""}`, error);
   }
 
   private reload = () => {

@@ -26,7 +26,8 @@ struct SearchDoc {
 }
 
 pub async fn fetch_metadata(title: &str, author: Option<&str>, isbn: Option<&str>) -> Result<Option<OpenLibraryMetadata>> {
-  let client = Client::new();
+  // A hung lookup used to stall the whole metadata queue behind it.
+  let client = Client::builder().timeout(std::time::Duration::from_secs(15)).build()?;
   let url = if let Some(isbn) = isbn {
     format!("https://openlibrary.org/search.json?isbn={}", urlencoding::encode(isbn))
   } else {

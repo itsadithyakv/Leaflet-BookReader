@@ -13,6 +13,7 @@ use chrono::{Local, NaiveDateTime};
 use serde::Serialize;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
+use crate::LockExt;
 
 const SETTINGS_KEY: &str = "reminder_settings";
 const FIRED_KEY: &str = "reminder_fired";
@@ -116,7 +117,7 @@ fn tick<R: Runtime>(app: &AppHandle<R>) {
   let now = Local::now().naive_local();
 
   let (due, mut log) = {
-    let db = state.db.lock().unwrap();
+    let db = state.db.guard();
     let settings = read_settings(&db);
     if !settings.any_enabled() {
       return;
@@ -125,9 +126,9 @@ fn tick<R: Runtime>(app: &AppHandle<R>) {
       return;
     };
     let log: FiredLog = read_json(&db, FIRED_KEY);
-    let mut activity = *runtime.activity.lock().unwrap();
+    let mut activity = *runtime.activity.guard();
     activity.focused = focused(app);
-    let voice = *runtime.voice.lock().unwrap();
+    let voice = *runtime.voice.guard();
     (due_now(&settings, voice, &habit, activity, &log, now), log)
   };
 
@@ -142,7 +143,7 @@ fn tick<R: Runtime>(app: &AppHandle<R>) {
   for kind in &due.superseded {
     log.mark(*kind, &due.reminder.date_key);
   }
-  let db = state.db.lock().unwrap();
+  let db = state.db.guard();
   let _ = write_json(&db, FIRED_KEY, &log);
 }
 
@@ -161,7 +162,7 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) {
   // out while it was closed counts as sent for the day; the rest of Windows'
   // schedule is withdrawn, because only the running app can see a book open.
   if let Some(state) = app.try_state::<AppState>() {
-    let db = state.db.lock().unwrap();
+    let db = state.db.guard();
     let scheduled: Vec<ScheduledRecord> = read_json(&db, SCHEDULED_KEY);
     if !scheduled.is_empty() {
       let mut log: FiredLog = read_json(&db, FIRED_KEY);
@@ -195,10 +196,10 @@ pub fn schedule_for_exit<R: Runtime>(app: &AppHandle<R>) {
   };
   let voice = app
     .try_state::<ReminderRuntime>()
-    .map(|runtime| *runtime.voice.lock().unwrap())
+    .map(|runtime| *runtime.voice.guard())
     .unwrap_or_default();
   let now = Local::now().naive_local();
-  let db = state.db.lock().unwrap();
+  let db = state.db.guard();
   let settings = read_settings(&db);
   let plans = if settings.any_enabled() {
     match habit_view(&db, &settings, now) {
@@ -229,7 +230,7 @@ pub fn note_activation<R: Runtime>(app: &AppHandle<R>, args: &[String]) {
     return;
   };
   if let Some(runtime) = app.try_state::<ReminderRuntime>() {
-    *runtime.activation.lock().unwrap() = Some(route);
+    *runtime.activation.guard() = Some(route);
   }
   let _ = app.emit(ACTIVATION_EVENT, ());
 }
@@ -245,7 +246,7 @@ fn status<R: Runtime>(app: &AppHandle<R>, settings: ReminderSettings) -> Reminde
 
 #[tauri::command]
 pub fn reminders_get(app: AppHandle, state: State<'_, AppState>) -> ReminderStatus {
-  let settings = read_settings(&state.db.lock().unwrap());
+  let settings = read_settings(&state.db.guard());
   status(&app, settings)
 }
 
@@ -259,7 +260,7 @@ pub fn reminders_set(
   state: State<'_, AppState>
 ) -> Result<ReminderStatus, String> {
   let settings = settings.sanitized();
-  write_json(&state.db.lock().unwrap(), SETTINGS_KEY, &settings)?;
+  write_json(&state.db.guard(), SETTINGS_KEY, &settings)?;
   Ok(status(&app, settings))
 }
 
@@ -273,17 +274,17 @@ pub fn reminders_context(
   runtime: State<'_, ReminderRuntime>
 ) {
   {
-    let mut activity = runtime.activity.lock().unwrap();
+    let mut activity = runtime.activity.guard();
     activity.session_running = session_running;
     activity.book_open = book_open;
   }
-  *runtime.voice.lock().unwrap() = PipVoice::from_mode(&pip_mode);
+  *runtime.voice.guard() = PipVoice::from_mode(&pip_mode);
 }
 
 /// The route a toast click asked for, once.
 #[tauri::command]
 pub fn reminders_take_activation(runtime: State<'_, ReminderRuntime>) -> Option<String> {
-  runtime.activation.lock().unwrap().take().map(str::to_string)
+  runtime.activation.guard().take().map(str::to_string)
 }
 
 /// Shows one reminder now, so the reader can see what it looks like (and find
@@ -296,9 +297,9 @@ pub fn reminders_preview(
   state: State<'_, AppState>
 ) -> Result<(), String> {
   let now = Local::now().naive_local();
-  let voice = *runtime.voice.lock().unwrap();
+  let voice = *runtime.voice.guard();
   let reminder = {
-    let db = state.db.lock().unwrap();
+    let db = state.db.guard();
     let settings = read_settings(&db);
     let (habit, goal) = habit_view(&db, &settings, now)?;
     let remaining = if habit.met { goal.max(1) } else { (habit.goal as f64 - habit.minutes).ceil().max(1.0) as i64 };

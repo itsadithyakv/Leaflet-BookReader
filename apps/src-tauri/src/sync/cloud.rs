@@ -25,6 +25,7 @@ use flate2::Compression;
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::time::Duration;
+use crate::LockExt;
 
 pub const API_BASE_SETTING: &str = "cloud_api_base";
 pub const PROFILE_VISIBILITY_SETTING: &str = "cloud_profile_visibility";
@@ -261,14 +262,14 @@ fn remember_account(db: &Database, base: &str, account: &Account) -> Result<()> 
 }
 
 fn configured_base(db_mutex: &std::sync::Mutex<Database>) -> Result<String> {
-  let db = db_mutex.lock().map_err(|_| anyhow!("library is busy"))?;
+  let db = db_mutex.guard();
   api_base(&db).ok_or_else(|| anyhow!("No Leaflet server is configured."))
 }
 
 /// The configured server and this device's session for it. A token minted by
 /// a different server is dropped rather than sent there.
 fn session_token(db_mutex: &std::sync::Mutex<Database>) -> Result<(String, String)> {
-  let db = db_mutex.lock().map_err(|_| anyhow!("library is busy"))?;
+  let db = db_mutex.guard();
   let base = api_base(&db).ok_or_else(|| anyhow!("No Leaflet server is configured."))?;
   let owner = db.get_setting(ACCOUNT_API_SETTING).ok().flatten().unwrap_or_default();
   match load_session_token() {
@@ -329,7 +330,7 @@ async fn start_session(
     return Err(account_failure(response).await);
   }
   let session: SessionResponse = response.json().await?;
-  let db = db_mutex.lock().map_err(|_| anyhow!("library is busy"))?;
+  let db = db_mutex.guard();
   store_session_token(&session.token)?;
   remember_account(&db, &base, &session.account)?;
   Ok(AccountStatus {
@@ -366,7 +367,7 @@ pub async fn login(db_mutex: &std::sync::Mutex<Database>, email: &str, password:
 /// expired or revoked session is noticed; offline, falls back to the cache.
 pub async fn status(db_mutex: &std::sync::Mutex<Database>, refresh: bool) -> Result<AccountStatus> {
   let base = {
-    let db = db_mutex.lock().map_err(|_| anyhow!("library is busy"))?;
+    let db = db_mutex.guard();
     api_base(&db)
   };
   let Some(base) = base else {
@@ -381,7 +382,7 @@ pub async fn status(db_mutex: &std::sync::Mutex<Database>, refresh: bool) -> Res
     return Ok(signed_out);
   };
   let cached = {
-    let db = db_mutex.lock().map_err(|_| anyhow!("library is busy"))?;
+    let db = db_mutex.guard();
     cached_account(&db)
   };
   if !refresh {
@@ -391,12 +392,12 @@ pub async fn status(db_mutex: &std::sync::Mutex<Database>, refresh: bool) -> Res
   match client()?.get(format!("{base}/v1/auth/me")).bearer_auth(&token).send().await {
     Ok(response) if response.status().is_success() => {
       let me: MeResponse = response.json().await?;
-      let db = db_mutex.lock().map_err(|_| anyhow!("library is busy"))?;
+      let db = db_mutex.guard();
       remember_account(&db, &base, &me.account)?;
       Ok(AccountStatus { signed_in: true, account: Some(me.account), ..signed_out })
     }
     Ok(response) if response.status() == reqwest::StatusCode::UNAUTHORIZED => {
-      let db = db_mutex.lock().map_err(|_| anyhow!("library is busy"))?;
+      let db = db_mutex.guard();
       clear_session(&db);
       Ok(signed_out)
     }
@@ -415,7 +416,7 @@ pub async fn logout(db_mutex: &std::sync::Mutex<Database>) -> Result<AccountStat
       .await;
   }
   {
-    let db = db_mutex.lock().map_err(|_| anyhow!("library is busy"))?;
+    let db = db_mutex.guard();
     clear_session(&db);
   }
   status(db_mutex, false).await
@@ -437,7 +438,7 @@ pub async fn set_avatar(db_mutex: &std::sync::Mutex<Database>, avatar: Option<&s
     return Err(account_failure(response).await);
   }
   let me: MeResponse = response.json().await?;
-  let db = db_mutex.lock().map_err(|_| anyhow!("library is busy"))?;
+  let db = db_mutex.guard();
   remember_account(&db, &base, &me.account)?;
   Ok(AccountStatus {
     available: true,
@@ -481,7 +482,7 @@ pub async fn delete_account(db_mutex: &std::sync::Mutex<Database>, password: &st
     return Err(account_failure(response).await);
   }
   {
-    let db = db_mutex.lock().map_err(|_| anyhow!("library is busy"))?;
+    let db = db_mutex.guard();
     clear_session(&db);
     let _ = db.set_setting(PROFILE_VISIBILITY_SETTING, "");
   }
@@ -517,7 +518,7 @@ pub async fn sync(db_mutex: &std::sync::Mutex<Database>, now: &str) -> Result<Sy
       .unwrap_or_else(|| SyncDoc::empty(now));
 
     let local = {
-      let db = db_mutex.lock().map_err(|_| anyhow!("library is busy"))?;
+      let db = db_mutex.guard();
       store::snapshot(&db, now)?
     };
     let merged = merge::merge(&local, &remote, now);
@@ -550,7 +551,7 @@ pub async fn sync(db_mutex: &std::sync::Mutex<Database>, now: &str) -> Result<Sy
   };
 
   let applied = {
-    let db = db_mutex.lock().map_err(|_| anyhow!("library is busy"))?;
+    let db = db_mutex.guard();
     store::apply(&db, &merged)?
   };
 
@@ -639,13 +640,6 @@ fn private_visibility() -> String {
   "private".to_string()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Leaderboard {
-  pub week_key: String,
-  pub entries: Vec<Profile>
-}
-
 pub async fn get_profile(db_mutex: &std::sync::Mutex<Database>) -> Result<Profile> {
   let (base, token) = session_token(db_mutex)?;
   let response = client()?
@@ -678,46 +672,6 @@ pub async fn put_profile(
   }
   if !response.status().is_success() {
     forget_if_unauthorised(db_mutex, response.status());
-    return Err(describe_failure(response).await);
-  }
-  Ok(response.json().await?)
-}
-
-/// The board is public, so this needs no token — a reader can see where they
-/// would stand before deciding to join it.
-///
-/// `week_key` is the reader's own local ISO week, so the board they see is the
-/// one their published minutes count towards.
-pub async fn leaderboard(db_mutex: &std::sync::Mutex<Database>, week_key: &str) -> Result<Leaderboard> {
-  let base = configured_base(db_mutex)?;
-  let response = client()?
-    .get(format!("{base}/v1/leaderboard"))
-    .query(&[("week", week_key)])
-    .send()
-    .await
-    .map_err(unreachable)?;
-  if !response.status().is_success() {
-    return Err(describe_failure(response).await);
-  }
-  Ok(response.json().await?)
-}
-
-pub async fn profile_by_handle(
-  db_mutex: &std::sync::Mutex<Database>,
-  handle: &str
-) -> Result<Profile> {
-  let base = {
-    let db = db_mutex.lock().map_err(|_| anyhow!("library is busy"))?;
-    api_base(&db).ok_or_else(|| anyhow!("No Leaflet server is configured."))?
-  };
-  let response = client()?
-    .get(format!("{base}/v1/profile/{}", urlencoding::encode(handle)))
-    .send()
-    .await?;
-  if response.status() == reqwest::StatusCode::NOT_FOUND {
-    return Err(anyhow!("No shared profile with that handle."));
-  }
-  if !response.status().is_success() {
     return Err(describe_failure(response).await);
   }
   Ok(response.json().await?)

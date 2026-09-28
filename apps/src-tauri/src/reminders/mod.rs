@@ -23,6 +23,12 @@ use std::collections::HashMap;
 pub mod runtime;
 mod toast;
 
+/// Whether this process runs from the MSIX package (reminders are scheduled
+/// with Windows only then).
+pub fn packaged() -> bool {
+  toast::packaged()
+}
+
 /// Nothing fires from this time of night...
 pub const QUIET_START: u32 = 23 * 60;
 /// ...until this time in the morning, whatever the settings say.

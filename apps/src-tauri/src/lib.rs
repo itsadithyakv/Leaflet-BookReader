@@ -10,6 +10,7 @@ mod comic;
 mod commands;
 mod convert;
 mod db;
+mod diag;
 mod formats;
 mod habit;
 mod metadata;
@@ -19,7 +20,65 @@ mod storage;
 mod sync;
 
 use std::path::Path;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use tauri::Manager;
+
+/// `lock()` that survives a panic elsewhere.
+///
+/// A plain `lock().unwrap()` turns one panic while a lock is held into a panic
+/// on every later use: the mutex is "poisoned" and every command touching the
+/// library fails until the app restarts. The data behind these locks (a SQLite
+/// connection, whose transactions roll back when dropped, and small caches) is
+/// still usable after such a panic, so the guard is recovered instead.
+pub trait LockExt<T> {
+  fn guard(&self) -> MutexGuard<'_, T>;
+}
+
+impl<T> LockExt<T> for Mutex<T> {
+  fn guard(&self) -> MutexGuard<'_, T> {
+    self.lock().unwrap_or_else(PoisonError::into_inner)
+  }
+}
+
+/// Opens the library database, or explains why it can't and offers a way on.
+///
+/// A locked, damaged or unreadable `library.db` used to end the app before its
+/// window appeared, with nothing on screen and nothing logged. Now the reader
+/// is told, and can set the broken file aside (it is renamed, never deleted)
+/// and start with an empty library. Book files are not touched.
+fn open_database() -> Result<db::Database, String> {
+  let error = match db::Database::new() {
+    Ok(database) => return Ok(database),
+    Err(error) => error
+  };
+  diag::error(&format!("the library database did not open: {error:#}"));
+  let path = db::database_path().map_err(|e| e.to_string())?;
+  let set_aside = diag::ask(
+    "Leaflet can't open your library",
+    &format!(
+      "Leaflet couldn't open its library database:\n\n{error}\n\nIf another copy of Leaflet is running, choose No, close it, and try again.\n\nChoose Yes to set the damaged database aside and start with an empty library. Your book files are kept, the old database is renamed (not deleted), and a Drive backup can restore your library.\n\nThe database is at:\n{}",
+      path.display()
+    )
+  );
+  if !set_aside {
+    return Err(format!("library database did not open: {error}"));
+  }
+  let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+  for suffix in ["", "-wal", "-shm"] {
+    let from = std::path::PathBuf::from(format!("{}{suffix}", path.display()));
+    if from.exists() {
+      let to = std::path::PathBuf::from(format!("{}.broken-{stamp}{suffix}", path.display()));
+      if let Err(rename) = std::fs::rename(&from, &to) {
+        diag::error(&format!("could not set {} aside: {rename}", from.display()));
+      }
+    }
+  }
+  diag::warn(&format!("set the damaged library database aside as {}.broken-{stamp}", path.display()));
+  db::Database::new().map_err(|again| {
+    diag::error(&format!("a fresh library database did not open either: {again:#}"));
+    format!("a fresh library database did not open: {again}")
+  })
+}
 
 pub struct AppState {
   pub db: std::sync::Mutex<db::Database>,
@@ -79,7 +138,7 @@ pub fn run() {
     let paths = supported_book_paths(args.into_iter().skip(1));
     if !paths.is_empty() {
       let state = app.state::<AppState>();
-      state.pending_open_paths.lock().unwrap().extend(paths);
+      state.pending_open_paths.guard().extend(paths);
       let _ = tauri::Emitter::emit(app, "open-book-files", ());
     }
 
@@ -101,8 +160,20 @@ pub fn run() {
       if let Ok(dir) = _app.path().app_data_dir() {
         storage::set_app_data_dir(dir);
       }
+      diag::install_panic_hook();
+      diag::info(&format!("Leaflet {} starting", env!("CARGO_PKG_VERSION")));
+      let database = match open_database() {
+        Ok(database) => database,
+        Err(message) => {
+          diag::tell(
+            "Leaflet can't start",
+            &format!("{message}\n\nDetails are in the log:\n{}", diag::log_path().map(|p| p.display().to_string()).unwrap_or_default())
+          );
+          return Err(message.into());
+        }
+      };
       _app.manage(AppState {
-        db: std::sync::Mutex::new(db::Database::new().expect("db init failed")),
+        db: std::sync::Mutex::new(database),
         drive: std::sync::Mutex::new(sync::DriveState::default()),
         pending_open_paths: std::sync::Mutex::new(startup_paths),
         sync_lock: tokio::sync::Mutex::new(()),
@@ -166,12 +237,21 @@ pub fn run() {
       commands::set_cloud_api,
       commands::social_profile,
       commands::save_social_profile,
-      commands::social_leaderboard,
-      commands::social_profile_by_handle,
+      commands::publish_social_stats,
+      commands::log_client_error,
+      commands::diagnostics,
+      commands::epub_sections,
+      commands::annotations_list,
+      commands::annotation_save,
+      commands::annotation_delete,
+      commands::collections_list,
+      commands::collection_save,
+      commands::collection_delete,
+      commands::book_set_series,
+      commands::scan_series,
       commands::community_leaderboard,
       commands::community_profile,
       commands::community_follow,
-      commands::community_following,
       commands::community_kudos,
       commands::community_challenge,
       commands::community_respond_duel,

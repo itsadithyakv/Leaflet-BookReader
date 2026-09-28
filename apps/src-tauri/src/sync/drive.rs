@@ -33,6 +33,7 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::Path;
 use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
+use crate::LockExt;
 
 const DRIVE_SCOPE: &str = "https://www.googleapis.com/auth/drive.file";
 /// Identity, so the account panel can name the connected Google account instead
@@ -531,7 +532,7 @@ async fn refresh_access_token(
 
 pub(crate) async fn ensure_access_token(db_mutex: &std::sync::Mutex<Database>) -> Result<String> {
   let (access_token, refresh_token, expires_at, credentials) = {
-    let db = db_mutex.lock().map_err(|_| anyhow!("library is busy"))?;
+    let db = db_mutex.guard();
     (
       db.get_setting(ACCESS_SETTING)?.filter(|value| !value.is_empty()),
       load_refresh_token(&db)?,
@@ -555,7 +556,7 @@ pub(crate) async fn ensure_access_token(db_mutex: &std::sync::Mutex<Database>) -
 
   let bundle = refresh_access_token(&refresh_token, &credentials).await?;
   {
-    let db = db_mutex.lock().map_err(|_| anyhow!("library is busy"))?;
+    let db = db_mutex.guard();
     db.set_setting(ACCESS_SETTING, &bundle.access_token)?;
     db.set_setting(EXPIRES_SETTING, &bundle.expires_at)?;
   }
@@ -917,7 +918,7 @@ pub async fn sync(db_mutex: &std::sync::Mutex<Database>, now: &str) -> Result<Sy
   let merged = loop {
     let (remote, remote_file) = read_remote_state(&client, &token, &root, now).await?;
     let local = {
-      let db = db_mutex.lock().map_err(|_| anyhow!("library is busy"))?;
+      let db = db_mutex.guard();
       store::snapshot(&db, now)?
     };
     let merged = merge::merge(&local, &remote, now);
@@ -949,7 +950,7 @@ pub async fn sync(db_mutex: &std::sync::Mutex<Database>, now: &str) -> Result<Sy
   };
 
   let applied = {
-    let db = db_mutex.lock().map_err(|_| anyhow!("library is busy"))?;
+    let db = db_mutex.guard();
     store::apply(&db, &merged)?
   };
 
@@ -1005,7 +1006,7 @@ pub async fn fetch_book(db_mutex: &std::sync::Mutex<Database>, book_id: &str) ->
     .build()?;
 
   let record = {
-    let db = db_mutex.lock().map_err(|_| anyhow!("library is busy"))?;
+    let db = db_mutex.guard();
     db.find_by_id(book_id)?.ok_or_else(|| anyhow!("unknown book"))?
   };
   let entry = BookEntry::from_record(&record);

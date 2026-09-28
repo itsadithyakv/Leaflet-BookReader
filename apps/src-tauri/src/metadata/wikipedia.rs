@@ -22,7 +22,7 @@ struct Thumbnail {
 }
 
 pub async fn fetch_cover(title: &str, author: Option<&str>) -> Result<Option<String>> {
-  let client = Client::new();
+  let client = Client::builder().timeout(std::time::Duration::from_secs(15)).build()?;
   let mut query = title.to_string();
   if let Some(author) = author {
     if !author.trim().is_empty() {
