@@ -4,12 +4,11 @@ import { EMPTY_SNAPSHOT, getDateKey } from "../services/habitService";
 import { useHabitStore } from "../store/habitStore";
 import { useLibraryStore } from "../store/libraryStore";
 import { usePipStore } from "../store/pipStore";
+import { isFinished } from "../constants/books";
 import { goalBeat, pickBeat, type PipBeat } from "../pip/moments";
 
 const DAY_MS = 86_400_000;
 const WELCOME_BACK_DAYS = 3;
-/** Progress at which a book counts as finished; the last page rarely reads 1.0. */
-const FINISHED_AT = 0.98;
 
 const daysBetween = (fromKey: string, toKey: string) =>
   Math.round((Date.parse(`${toKey}T00:00:00`) - Date.parse(`${fromKey}T00:00:00`)) / DAY_MS);
@@ -98,7 +97,7 @@ export const usePipReactions = (readerOpen: boolean) => {
     }
     const finished = books.find((book) => {
       const before = previous.get(book.id);
-      return before !== undefined && before < FINISHED_AT && (book.progress ?? 0) >= FINISHED_AT;
+      return before !== undefined && !isFinished(before) && isFinished(book.progress);
     });
     if (finished) {
       celebrate(pickBeat("bookFinished", finished.id));

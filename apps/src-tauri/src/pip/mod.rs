@@ -120,8 +120,24 @@ pub struct Purchase {
   pub bought_at: String
 }
 
-pub fn spent(purchases: &[Purchase]) -> i64 {
-  purchases.iter().map(|purchase| purchase.price.max(0)).sum()
+/// Seeds spent. Food and seed packets count every time; anything kept (a skin,
+/// a chair) counts once, however many records say it was bought: two devices
+/// offline can each buy the same thing, and a sync must not charge twice.
+pub fn spent(catalogue: &Catalogue, purchases: &[Purchase]) -> i64 {
+  let mut ordered: Vec<&Purchase> = purchases.iter().collect();
+  ordered.sort_by(|a, b| a.bought_at.cmp(&b.bought_at).then_with(|| a.id.cmp(&b.id)));
+  let mut kept: BTreeSet<(&str, &str)> = BTreeSet::new();
+  ordered
+    .into_iter()
+    .filter(|purchase| {
+      let consumable = catalogue
+        .get(&purchase.item_kind, &purchase.item_id)
+        .map(|item| item.consumable)
+        .unwrap_or(false);
+      consumable || kept.insert((purchase.item_kind.as_str(), purchase.item_id.as_str()))
+    })
+    .map(|purchase| purchase.price.max(0))
+    .sum()
 }
 
 /// What the reader owns: everything free, plus everything bought except food,
@@ -256,7 +272,8 @@ pub struct Harvest {
   pub id: String,
   pub planting_id: String,
   /// The plant's yield when picked. The balance never counts more than the
-  /// plant gives, nor a harvest of a plant that was not ripe.
+  /// plant gives. A harvest is only recorded once Rust has seen the plant ripe,
+  /// so a recorded harvest is final (see `habit::seeds::grow`).
   pub seeds: i64,
   pub harvested_at: String
 }
@@ -586,8 +603,16 @@ mod tests {
 
   #[test]
   fn spending_is_the_sum_of_purchases() {
-    assert_eq!(spent(&[bought("skin", "robot", 700), bought("treat", "apple", 10)]), 710);
-    assert_eq!(spent(&[]), 0);
+    assert_eq!(spent(&catalogue(), &[bought("skin", "robot", 700), bought("treat", "apple", 10)]), 710);
+    assert_eq!(spent(&catalogue(), &[]), 0);
+    // The same skin bought on two devices before they synced: paid once.
+    let mut twice = bought("skin", "robot", 700);
+    twice.id = "other-device".into();
+    assert_eq!(spent(&catalogue(), &[bought("skin", "robot", 700), twice]), 700);
+    // Food is eaten, so buying it twice is two purchases.
+    let mut second_apple = bought("treat", "apple", 10);
+    second_apple.id = "second".into();
+    assert_eq!(spent(&catalogue(), &[bought("treat", "apple", 10), second_apple]), 20);
   }
 
   #[test]

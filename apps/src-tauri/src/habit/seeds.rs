@@ -257,8 +257,12 @@ impl Garden {
 /// planting still growing, spilling into the next; with nothing growing it
 /// fills the barrel (overflow is lost, like rain). A new planting drinks from
 /// the barrel first. A ripe plant takes no more water. The result depends only
-/// on the records, so every device agrees and a sync can only bring plants
-/// closer to ripe, never further.
+/// on the records, so every device agrees.
+///
+/// A harvest, once recorded, is final. Rust records one only after seeing the
+/// plant ripe, but a sync can bring in an older planting from another device
+/// that drinks first, leaving a harvested plant "unripe" on replay; its seeds,
+/// perhaps already spent, used to vanish from the balance.
 pub fn grow(drops: &[(i64, f64)], plantings: &[PlantingIn<'_>], harvests: &[HarvestIn<'_>]) -> Garden {
   let mut order: Vec<&PlantingIn<'_>> = plantings.iter().collect();
   order.sort_by(|a, b| a.planted_at_ms.cmp(&b.planted_at_ms).then_with(|| a.id.cmp(b.id)));
@@ -323,8 +327,8 @@ pub fn grow(drops: &[(i64, f64)], plantings: &[PlantingIn<'_>], harvests: &[Harv
     if !seen_ids.insert(planting.id) {
       continue;
     }
-    let ripe = water_in[index] >= planting.need;
-    let harvest = by_planting.get(planting.id).filter(|_| ripe);
+    let harvest = by_planting.get(planting.id);
+    let ripe = water_in[index] >= planting.need || harvest.is_some();
     let seeds = harvest.map(|h| h.seeds.clamp(0, planting.yield_seeds)).unwrap_or(0);
     harvested_total += seeds;
     plants.push(PlantState {
@@ -509,14 +513,17 @@ mod tests {
   }
 
   #[test]
-  fn a_harvest_counts_only_for_a_ripe_plant_and_only_once() {
+  fn a_harvest_counts_once_and_stays_counted() {
     let plants = [planting("p", 1, 0, 60.0, 20)];
     let harvests = [
       HarvestIn { id: "h1", planting_id: "p", seeds: 20 },
       HarvestIn { id: "h2", planting_id: "p", seeds: 20 }
     ];
-    let unripe = grow(&[(10, 30.0)], &plants, &harvests);
-    assert_eq!(unripe.harvested, 0, "a harvest record for an unripe plant is not seeds");
+    // Another device's older planting arrives in a sync and drinks first: the
+    // harvest already made stands.
+    let synced = [planting("older", 2, -50, 60.0, 20), planting("p", 1, 0, 60.0, 20)];
+    let after_sync = grow(&[(10, 60.0)], &synced, &harvests);
+    assert_eq!(after_sync.harvested, 20, "a recorded harvest is not taken back by a sync");
     let ripe = grow(&[(10, 60.0)], &plants, &harvests);
     assert_eq!(ripe.harvested, 20, "once, however many records");
     assert!(ripe.plants[0].harvested);
