@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MSIX manifest template for the Microsoft Store build of Leaflet.
+
+  build-msix.ps1 copies this into the staging folder and replaces:
+    __VERSION__        4-part version from tauri.conf.json, last part 0 (e.g. 0.1.0.0)
+    __LARGE_TILE_ATTRS__ Wide310x150Logo + Square310x310Logo attributes, or
+                         nothing when the wide tile could not be generated (the
+                         schema only allows Square310x310 alongside Wide310x150)
+
+  Identity values come from Partner Center (Product identity page) and must match
+  it exactly or the upload is rejected. DisplayName MUST equal the reserved app
+  name character for character: "Leaflet Book Reader" is inferred from the
+  identity name and has NOT been confirmed against the reservation.
+
+  See docs/release-msix.md.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap3 rescap">
+
+  <Identity
+    Name="AdithyaKV.LeafletBookReader"
+    Publisher="CN=30ED0224-8255-4781-8ACD-EE3EF146115F"
+    Version="__VERSION__"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>Leaflet Book Reader</DisplayName>
+    <PublisherDisplayName>PaperKite</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+    <Description>A calm, offline-first reader for EPUB, PDF, comics and plain-text books.</Description>
+  </Properties>
+
+  <Dependencies>
+    <!-- 1809. MaxVersionTested is informational; bump it when testing on newer Windows. -->
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Applications>
+    <Application
+      Id="Leaflet"
+      Executable="leaflet.exe"
+      EntryPoint="Windows.FullTrustApplication">
+
+      <uap:VisualElements
+        DisplayName="Leaflet Book Reader"
+        Description="Leaflet Book Reader"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile
+          ShortName="Leaflet"__LARGE_TILE_ATTRS__>
+          <uap:ShowNameOnTiles>
+            <uap:ShowOn Tile="square150x150Logo" />
+          </uap:ShowNameOnTiles>
+        </uap:DefaultTile>
+      </uap:VisualElements>
+
+      <!--
+        Formats Leaflet opens without Calibre (apps/src-tauri/src/formats/mod.rs:
+        Epub / Pdf / Comic / Builtin tiers). The file path arrives as argv[1] and
+        is picked up by supported_book_paths() in src/lib.rs; a second launch is
+        forwarded to the running window by tauri-plugin-single-instance.
+        Calibre-only formats (mobi, azw3, ...) are deliberately left out: see the
+        Calibre section of docs/release-msix.md. So are .html/.htm/.xhtml:
+        Leaflet imports them from the library, but offering to open every web
+        page on the machine is not what a book reader should claim. .htmlz is
+        an e-book zip that nothing else opens, so it stays.
+      -->
+      <Extensions>
+        <!--
+          Reading reminders (src-tauri/src/reminders). A toast click opens
+          leaflet-reader://continue; Windows starts leaflet.exe with the URI as
+          argv[1] (or forwards it to the running window through single-instance)
+          and the app reopens the last book. Protocol activation is used rather
+          than a toast COM activator: it needs no COM server in the exe, and it
+          works whether or not Leaflet is running. Only "continue" is acted on;
+          any other leaflet-reader: link just opens the app.
+        -->
+        <uap3:Extension Category="windows.protocol">
+          <uap3:Protocol Name="leaflet-reader" Parameters="&quot;%1&quot;" />
+        </uap3:Extension>
+        <uap:Extension Category="windows.fileTypeAssociation">
+          <uap:FileTypeAssociation Name="leaflet.epub">
+            <uap:DisplayName>EPUB book</uap:DisplayName>
+            <uap:Logo>Assets\Square44x44Logo.png</uap:Logo>
+            <uap:SupportedFileTypes>
+              <uap:FileType ContentType="application/epub+zip">.epub</uap:FileType>
+            </uap:SupportedFileTypes>
+          </uap:FileTypeAssociation>
+        </uap:Extension>
+        <uap:Extension Category="windows.fileTypeAssociation">
+          <uap:FileTypeAssociation Name="leaflet.pdf">
+            <uap:DisplayName>PDF document</uap:DisplayName>
+            <uap:Logo>Assets\Square44x44Logo.png</uap:Logo>
+            <uap:SupportedFileTypes>
+              <uap:FileType ContentType="application/pdf">.pdf</uap:FileType>
+            </uap:SupportedFileTypes>
+          </uap:FileTypeAssociation>
+        </uap:Extension>
+        <uap:Extension Category="windows.fileTypeAssociation">
+          <uap:FileTypeAssociation Name="leaflet.comic">
+            <uap:DisplayName>Comic book archive</uap:DisplayName>
+            <uap:Logo>Assets\Square44x44Logo.png</uap:Logo>
+            <uap:SupportedFileTypes>
+              <uap:FileType ContentType="application/vnd.comicbook+zip">.cbz</uap:FileType>
+            </uap:SupportedFileTypes>
+          </uap:FileTypeAssociation>
+        </uap:Extension>
+        <uap:Extension Category="windows.fileTypeAssociation">
+          <uap:FileTypeAssociation Name="leaflet.fb2">
+            <uap:DisplayName>FictionBook</uap:DisplayName>
+            <uap:Logo>Assets\Square44x44Logo.png</uap:Logo>
+            <uap:SupportedFileTypes>
+              <uap:FileType>.fb2</uap:FileType>
+              <uap:FileType>.fbz</uap:FileType>
+            </uap:SupportedFileTypes>
+          </uap:FileTypeAssociation>
+        </uap:Extension>
+        <uap:Extension Category="windows.fileTypeAssociation">
+          <uap:FileTypeAssociation Name="leaflet.text">
+            <uap:DisplayName>Plain-text book</uap:DisplayName>
+            <uap:Logo>Assets\Square44x44Logo.png</uap:Logo>
+            <uap:SupportedFileTypes>
+              <uap:FileType ContentType="text/plain">.txt</uap:FileType>
+              <uap:FileType>.txtz</uap:FileType>
+            </uap:SupportedFileTypes>
+          </uap:FileTypeAssociation>
+        </uap:Extension>
+        <uap:Extension Category="windows.fileTypeAssociation">
+          <uap:FileTypeAssociation Name="leaflet.htmlz">
+            <uap:DisplayName>HTMLZ book</uap:DisplayName>
+            <uap:Logo>Assets\Square44x44Logo.png</uap:Logo>
+            <uap:SupportedFileTypes>
+              <uap:FileType>.htmlz</uap:FileType>
+            </uap:SupportedFileTypes>
+          </uap:FileTypeAssociation>
+        </uap:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <!-- Google Drive backup, the optional Leaflet API. Declarative for full trust. -->
+    <Capability Name="internetClient" />
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>
