@@ -45,6 +45,10 @@ const app = createApp(db, { corsOrigin: process.env.CORS_ORIGIN || "", mailer })
 
 const server = app.listen(port, host, () => {
   console.log(`Leaflet API on http://${host}:${port}`);
+  // Is the reset mailer set up right? Checked in the background (it sends
+  // nothing), so a wrong secret shows in the log now rather than as a reader
+  // who never gets a code.
+  mailer?.check?.().then(({ ok, detail }) => (ok ? console.log : console.warn)(`[leaflet] ${detail}`));
 });
 // Keep-alive sockets from the proxy should not hold shutdown open for long.
 server.keepAliveTimeout = 65_000;

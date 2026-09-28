@@ -163,8 +163,12 @@ set up yet.
    **Advanced** → **Go to Leaflet mailer (unsafe)** → **Allow**. (It is your
    own script; the warning is for scripts that are not published.)
 7. **Copy the Web app URL**, `https://script.google.com/macros/s/…/exec`.
-   Open it in a browser: `{"ok":true,"service":"leaflet-mailer","quotaLeft":100}`
-   means it is live.
+   Open it in a **private (InPrivate/Incognito) window**:
+   `{"ok":true,"service":"leaflet-mailer","quotaLeft":100}` means it is live.
+   In a normal window where you are signed in to more than one Google account,
+   Google shows "Sorry, unable to open the file at present" instead. That is
+   Google mixing up the accounts, not a fault in the script, and it does not
+   affect the server, which calls it signed out.
 8. **Give the server both values.** On the VM:
    ```bash
    sudo nano /etc/leaflet-api.env
@@ -179,7 +183,10 @@ set up yet.
    sudo systemctl restart leaflet-api
    sudo journalctl -u leaflet-api -n 5
    ```
-   The warning "password reset is off" is gone.
+   The log says `[leaflet] reset mailer ready (100 emails left today)`: the
+   server has checked the URL and the secret (a check that sends nothing). If
+   it says the secret was refused, the two values differ; if it could not be
+   checked, look at the URL and that access is **Anyone**.
 9. **Try it**: in the app, Settings → Account → **Forgot password?** with an
    address that has an account. The code arrives within a minute (check spam
    the first time and mark it "not spam").
@@ -189,9 +196,15 @@ reset emails per address an hour; **3 completed resets per account a year**,
 after which the email says when it can be reset again instead of carrying a
 code.
 
-After editing the script later: **Deploy → Manage deployments** → pencil →
+After editing the script later (or pasting a newer copy of
+`password-reset-mailer.gs`): **Deploy → Manage deployments** → pencil →
 Version: **New version** → Deploy. The URL stays the same; a new *deployment*
 would give a new URL.
+
+Google's web apps are slow and uneven (a few seconds per email, now and then
+far more, and the reply sometimes needs several reads). The server sends each
+email once, after the reader already has their answer, and never re-sends to
+get a reply, so a slow Google means a late email, never two.
 
 ### Caddy — add one block, change nothing else
 

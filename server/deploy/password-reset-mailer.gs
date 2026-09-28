@@ -7,6 +7,8 @@
  *
  *   {secret, kind: "code",  to, code, minutes}  the reset code
  *   {secret, kind: "limit", to, availableOn}    this year's 3 resets are used up
+ *   {secret, kind: "ping"}                       checks the secret, sends nothing
+ *                                                (the API does this when it starts)
  *
  * It sends nothing else, so the worst a leaked secret can do is send Leaflet
  * reset emails. Step-by-step setup: docs/deploy.md, "Password-reset emails".
@@ -34,6 +36,9 @@ function doPost(e) {
   var secret = PropertiesService.getScriptProperties().getProperty("SECRET");
   if (!secret || body.secret !== secret) {
     return reply({ ok: false, error: "forbidden" });
+  }
+  if (body.kind === "ping") {
+    return reply({ ok: true, quotaLeft: MailApp.getRemainingDailyQuota() });
   }
 
   var to = String(body.to || "").trim();

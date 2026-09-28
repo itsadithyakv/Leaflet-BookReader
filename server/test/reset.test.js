@@ -235,28 +235,100 @@ describe("password reset", () => {
 });
 
 describe("Apps Script mailer", () => {
-  test("posts the secret and the message, and fails on a refusal", async () => {
-    const seen = [];
+  /**
+   * A stand-in for Google: POST /exec "runs the script" and redirects to an
+   * output page, whose first `failReads` reads show the "unable to open" page.
+   */
+  async function fakeGoogle({ reply = { ok: true }, failReads = 0 } = {}) {
     const { createServer } = await import("node:http");
-    let answer = { ok: true };
-    const fake = createServer((request, response) => {
-      let data = "";
-      request.on("data", (chunk) => (data += chunk));
-      request.on("end", () => {
-        seen.push(JSON.parse(data));
-        response.setHeader("content-type", "application/json");
-        response.end(JSON.stringify(answer));
-      });
+    const seen = { posts: [], reads: 0 };
+    const server = createServer((request, response) => {
+      if (request.method === "POST") {
+        let data = "";
+        request.on("data", (chunk) => (data += chunk));
+        request.on("end", () => {
+          seen.posts.push(JSON.parse(data));
+          response.writeHead(302, { location: "/echo?user_content_key=abc" });
+          response.end();
+        });
+        return;
+      }
+      seen.reads += 1;
+      if (seen.reads <= failReads) {
+        response.writeHead(404, { "content-type": "text/html" });
+        response.end("<html>Sorry, unable to open the file at present.</html>");
+        return;
+      }
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify(reply));
     });
-    await new Promise((resolve) => fake.listen(0, "127.0.0.1", resolve));
-    const mailer = appsScriptMailer({ url: `http://127.0.0.1:${fake.address().port}/exec`, secret: "s3cret" });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    return { url: `http://127.0.0.1:${server.address().port}/exec`, seen, close: () => new Promise((resolve) => server.close(resolve)) };
+  }
+
+  const message = { kind: "code", to: "a@example.com", code: "ABCD-EFGH", minutes: 15 };
+
+  test("posts the secret and the message once, and reads the reply behind the redirect", async () => {
+    const google = await fakeGoogle();
     try {
-      await mailer({ kind: "code", to: "a@example.com", code: "ABCD-EFGH", minutes: 15 });
-      assert.deepEqual(seen[0], { secret: "s3cret", kind: "code", to: "a@example.com", code: "ABCD-EFGH", minutes: 15 });
-      answer = { ok: false, error: "forbidden" };
-      await assert.rejects(mailer({ kind: "code", to: "a@example.com", code: "ABCD-EFGH", minutes: 15 }), /forbidden/);
+      await appsScriptMailer({ url: google.url, readPauseMs: 5, secret: "s3cret" })(message);
+      assert.deepEqual(google.seen.posts, [{ secret: "s3cret", ...message }]);
     } finally {
-      await new Promise((resolve) => fake.close(resolve));
+      await google.close();
+    }
+  });
+
+  test("retries only the read, never the post (a second post would be a second email)", async () => {
+    const google = await fakeGoogle({ failReads: 2 });
+    try {
+      await appsScriptMailer({ url: google.url, readPauseMs: 5, secret: "s3cret" })(message);
+      assert.equal(google.seen.posts.length, 1);
+      assert.equal(google.seen.reads, 3, "two failed reads, then the reply");
+    } finally {
+      await google.close();
+    }
+  });
+
+  test("an unreadable reply is a warning, not a failure: the script already ran", async () => {
+    const google = await fakeGoogle({ failReads: 99 });
+    const warnings = [];
+    try {
+      await appsScriptMailer({ url: google.url, readPauseMs: 5, secret: "s3cret", log: { warn: (line) => warnings.push(line) } })(message);
+      assert.equal(google.seen.posts.length, 1);
+      assert.equal(warnings.length, 1);
+    } finally {
+      await google.close();
+    }
+  });
+
+  test("check() pings without sending and names a wrong secret", async () => {
+    const good = await fakeGoogle({ reply: { ok: true, quotaLeft: 97 } });
+    const refused = await fakeGoogle({ reply: { ok: false, error: "forbidden" } });
+    const unreadable = await fakeGoogle({ failReads: 99 });
+    try {
+      const ready = await appsScriptMailer({ url: good.url, readPauseMs: 5, secret: "s3cret" }).check();
+      assert.deepEqual(ready, { ok: true, detail: "reset mailer ready (97 emails left today)" });
+      assert.deepEqual(good.seen.posts, [{ secret: "s3cret", kind: "ping" }]);
+
+      const wrong = await appsScriptMailer({ url: refused.url, readPauseMs: 5, secret: "nope" }).check();
+      assert.equal(wrong.ok, false);
+      assert.match(wrong.detail, /RESET_MAIL_SECRET/);
+
+      // A ping sends nothing, so it may be tried again until it gets an answer.
+      const unknown = await appsScriptMailer({ url: unreadable.url, readPauseMs: 1, secret: "s3cret" }).check(2);
+      assert.equal(unknown.ok, false);
+      assert.equal(unreadable.seen.posts.length, 2);
+    } finally {
+      await Promise.all([good.close(), refused.close(), unreadable.close()]);
+    }
+  });
+
+  test("a refusal from the script is an error", async () => {
+    const google = await fakeGoogle({ reply: { ok: false, error: "forbidden" } });
+    try {
+      await assert.rejects(appsScriptMailer({ url: google.url, readPauseMs: 5, secret: "wrong" })(message), /forbidden/);
+    } finally {
+      await google.close();
     }
   });
 });
