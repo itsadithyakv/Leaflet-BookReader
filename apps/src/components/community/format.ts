@@ -1,4 +1,4 @@
-import { SKINS } from "../../pip";
+import { SKINS } from "../../pip/core";
 import type { CommunityPerson } from "../../services/socialService";
 
 /**

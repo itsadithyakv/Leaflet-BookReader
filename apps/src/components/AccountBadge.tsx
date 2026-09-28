@@ -18,9 +18,9 @@ type AccountBadgeProps = {
 
 const modeConfig: Record<SyncMode, { label: string; icon: UiIconName; tooltip: string; className: string }> = {
   off: {
-    label: "Local",
+    label: "No backup",
     icon: "cloud",
-    tooltip: "Not backed up. Connect Google Drive in Settings to keep your library safe.",
+    tooltip: "Not backed up. Select to set up a backup to Google Drive.",
     className: "text-on-surface-variant border-outline-variant/40 bg-surface-container-high/70"
   },
   folder: {
@@ -30,7 +30,7 @@ const modeConfig: Record<SyncMode, { label: string; icon: UiIconName; tooltip: s
     className: "text-primary border-primary/30 bg-surface-container-high"
   },
   drive: {
-    label: "Drive",
+    label: "Backed up",
     icon: "cloud",
     tooltip: "Backed up to Google Drive",
     className: "text-primary border-primary/30 bg-surface-container-high"

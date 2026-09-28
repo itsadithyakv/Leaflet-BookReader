@@ -4,6 +4,8 @@ import type { Duel } from "../../services/socialService";
 import { useCommunityStore } from "./communityStore";
 import { PipAvatar } from "./PipAvatar";
 import { at, errorText, localWeekEnd, minutesText, nameOf, timeLeftText } from "./format";
+import { duelDeclinedText, duelOnText } from "./copy";
+import { SectionHeader } from "../ui/SectionHeader";
 
 const resultText = (duel: Duel) =>
   duel.result === "won" ? "You won this one." : duel.result === "lost" ? `${at(duel.them?.handle)} took this one.` : "A dead heat.";
@@ -39,7 +41,7 @@ const DuelCard = ({ duel, showToast }: { duel: Duel; showToast: (message: string
   const answer = (accept: boolean) => {
     setBusy(true);
     respond(duel.id, accept)
-      .then(() => showToast(accept ? `Duel on. Good luck against ${at(them.handle)}!` : "Declined. No hard feelings."))
+      .then(() => showToast(accept ? duelOnText(them.handle) : duelDeclinedText))
       .catch((cause) => showToast(errorText(cause)))
       .finally(() => setBusy(false));
   };
@@ -102,10 +104,7 @@ export const DuelCards = ({ showToast }: { showToast: (message: string) => void 
   }
   return (
     <section className="paper-surface rounded-xl p-6" aria-labelledby="duels-title">
-      <p className="text-xs uppercase tracking-widest text-on-surface-variant">Friendly rivalry</p>
-      <h2 id="duels-title" className="page-title mt-2 text-2xl">
-        Duels
-      </h2>
+      <SectionHeader eyebrow="This week" title="Duels" id="duels-title" />
       <ul className="mt-4 grid gap-3 md:grid-cols-2">
         {duels.map((duel) => (
           <DuelCard key={duel.id} duel={duel} showToast={showToast} />

@@ -1,6 +1,8 @@
 import { useEffect } from "react";
 import { FEATURES } from "../constants/features";
 import { useAccountStore } from "../store/accountStore";
+import { useHabitStore } from "../store/habitStore";
+import { socialService } from "../services/socialService";
 import { useLibraryStore } from "../store/libraryStore";
 import { usePipStore } from "../store/pipStore";
 import { pickBeat, type PipMoment } from "../pip/moments";
@@ -11,11 +13,12 @@ import type { CommunityBoard } from "../services/socialService";
 /**
  * The community's heartbeat, mounted once in App.
  *
- * Every five minutes while signed in (and the window is visible) it fetches new
- * inbox events and the Following board, notices when someone on that board
- * has just passed the reader, and lets Pip react — once per poll at most, to
- * the most interesting thing that happened. Returns the unread count for the
- * nav badge.
+ * Every five minutes while signed in (and the window is visible) it publishes
+ * the reader's own minutes, fetches new inbox events and the Following board,
+ * notices when someone on that board has just passed the reader, and lets Pip
+ * react — once per poll at most, to the most interesting thing that happened.
+ * A finished session publishes straight away, so the board reflects it when
+ * the reader goes to look. Returns the unread count for the nav badge.
  */
 
 const POLL_MS = 5 * 60_000;
@@ -112,6 +115,8 @@ export const useCommunityPulse = () => {
       } catch {
         // Offline or signed out server-side; try again next time.
       }
+      // Our own numbers first, so the board we fetch next already has them.
+      await socialService.publishStats();
       try {
         const board = await store.loadBoard("following");
         if (board) {
@@ -149,6 +154,24 @@ export const useCommunityPulse = () => {
 
     void tick();
     const timer = window.setInterval(() => void tick(), POLL_MS);
+    // A session was recorded (the ledger already holds it): publish now,
+    // then refresh the boards that are showing.
+    const unsubscribe = useHabitStore.subscribe((state, previous) => {
+      if (state.snapshot.sessions.length === previous.snapshot.sessions.length) {
+        return;
+      }
+      void socialService.publishStats({ force: true }).then((published) => {
+        if (!published || stopped) {
+          return;
+        }
+        const store = useCommunityStore.getState();
+        if (store.boards.everyone) {
+          void store.loadBoard("everyone");
+        }
+        void store.loadBoard("following");
+        void store.loadDuels();
+      });
+    });
     // Back from another window: catch up, but not more often than every minute.
     const onVisible = () => {
       if (!document.hidden && Date.now() - lastRun > 60_000) {
@@ -158,6 +181,7 @@ export const useCommunityPulse = () => {
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       stopped = true;
+      unsubscribe();
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };

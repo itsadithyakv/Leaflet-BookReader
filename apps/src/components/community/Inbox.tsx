@@ -3,6 +3,8 @@ import { PipSprite } from "../PipSprite";
 import { useCommunityStore, type InboxItem } from "./communityStore";
 import { PipAvatar } from "./PipAvatar";
 import { at, errorText, relativeTime } from "./format";
+import { duelDeclinedText, duelOnText, kudosReceivedText } from "./copy";
+import { SectionHeader } from "../ui/SectionHeader";
 
 const describe = (item: InboxItem): string => {
   const who = at(item.actor.handle);
@@ -10,7 +12,7 @@ const describe = (item: InboxItem): string => {
     case "follow":
       return `${who} started following you.`;
     case "kudos":
-      return `${who} sent you a leaf of kudos.`;
+      return kudosReceivedText(item.actor.handle);
     case "duel_invite":
       return `${who} challenged you to a duel this week.`;
     case "duel_accepted":
@@ -42,7 +44,7 @@ const InviteActions = ({ item, showToast }: { item: InboxItem; showToast: (messa
   const answer = (accept: boolean) => {
     setBusy(true);
     respond(item.duel!.id, accept)
-      .then(() => showToast(accept ? `Duel on. Good luck against ${at(item.actor.handle)}!` : "Declined. No hard feelings."))
+      .then(() => showToast(accept ? duelOnText(item.actor.handle) : duelDeclinedText))
       .catch((cause) => showToast(errorText(cause)))
       .finally(() => setBusy(false));
   };
@@ -78,10 +80,7 @@ export const Inbox = ({ showToast }: { showToast: (message: string) => void }) =
 
   return (
     <section className="paper-surface rounded-xl p-6" aria-labelledby="inbox-title">
-      <p className="text-xs uppercase tracking-widest text-on-surface-variant">News</p>
-      <h2 id="inbox-title" className="page-title mt-2 text-2xl">
-        Inbox
-      </h2>
+      <SectionHeader eyebrow="News" title="Inbox" id="inbox-title" />
       {inbox.length === 0 ? (
         <div className="mt-2 flex items-center gap-4 py-3">
           <PipSprite move="sleep" size={48} still />

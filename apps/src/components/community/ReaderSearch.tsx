@@ -4,6 +4,7 @@ import { socialService, type SearchResult } from "../../services/socialService";
 import { useCommunityStore } from "./communityStore";
 import { PipAvatar } from "./PipAvatar";
 import { at, errorText, minutesText, nameOf } from "./format";
+import { SectionHeader } from "../ui/SectionHeader";
 
 const DEBOUNCE_MS = 300;
 
@@ -41,10 +42,7 @@ export const ReaderSearch = () => {
 
   return (
     <section className="paper-surface rounded-xl p-6" aria-labelledby="find-title">
-      <p className="text-xs uppercase tracking-widest text-on-surface-variant">Visit a shelf</p>
-      <h2 id="find-title" className="page-title mt-2 text-2xl">
-        Find readers
-      </h2>
+      <SectionHeader eyebrow="Visit a shelf" title="Find readers" id="find-title" />
       <div className="relative mt-4">
         <UiIcon name="search" size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant" />
         <input

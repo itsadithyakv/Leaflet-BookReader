@@ -164,7 +164,7 @@ export const AccountPanel = ({
             )}
             <span className="min-w-0 truncate text-[11px] text-on-surface-variant">
               {accountStatus.signedIn
-                ? `Signed in as ${accountStatus.account?.displayName || accountStatus.account?.email || "you"}`
+                ? `Signed in as ${accountStatus.account?.email || "you"}`
                 : "Not signed in. Optional, in Settings."}
             </span>
           </div>

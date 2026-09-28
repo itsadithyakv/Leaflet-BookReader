@@ -1,6 +1,10 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Flame, Play } from "lucide-react";
+import { BookOpen, Flame } from "lucide-react";
+import type { Book } from "@shared/models/book";
 import { PipSprite } from "../PipSprite";
+import { SectionHeader } from "../ui/SectionHeader";
+import { SegmentedTabs, panelId, tabId } from "../ui/SegmentedTabs";
+import { COPY, streakText } from "./copy";
 import type { BoardEntry, BoardScope, CommunityBoard } from "../../services/socialService";
 import { useCommunityStore } from "./communityStore";
 import { CountUp } from "./CountUp";
@@ -16,8 +20,13 @@ type LeaderboardProps = {
   canJoin: boolean;
   goalMinutes: number;
   sessionActive: boolean;
-  onStartSession: (minutes: number) => void;
+  /** The book "keep reading" opens. */
+  nowReading: Book | null;
+  /** Starts a session of this many minutes on that book and opens it. */
+  onReadNow: (minutes: number) => void;
 };
+
+const BOARD_ID = "board";
 
 /** Re-renders every `ms`, for countdowns. */
 const useNow = (ms: number) => {
@@ -166,7 +175,7 @@ const Row = ({ entry, leader, delta, onOpen, rowRef, pinned }: RowProps) => {
             />
           </span>
         </span>
-        <span className="flex w-10 shrink-0 items-center justify-end gap-0.5 text-xs tabular-nums text-on-surface-variant" title={`${entry.streak}-day streak`}>
+        <span className="flex w-10 shrink-0 items-center justify-end gap-0.5 text-xs tabular-nums text-on-surface-variant" title={`Streak: ${streakText(entry.streak)}`}>
           {entry.streak > 0 && (
             <>
               <Flame size={13} className="text-[#d9886e]" aria-hidden />
@@ -195,7 +204,7 @@ const PipNote = ({ move, children }: { move: string; children: ReactNode }) => (
  * follow, a podium, your own row always findable, and how far to the next
  * place. Refreshed by the Social page every minute.
  */
-export const Leaderboard = ({ signedIn, canJoin, goalMinutes, sessionActive, onStartSession }: LeaderboardProps) => {
+export const Leaderboard = ({ signedIn, canJoin, goalMinutes, sessionActive, nowReading, onReadNow }: LeaderboardProps) => {
   const chosen = useCommunityStore((state) => state.scope);
   // Following needs an account; signed out, the board is Everyone's.
   const scope: BoardScope = chosen === "following" && !signedIn ? "everyone" : chosen;
@@ -237,58 +246,50 @@ export const Leaderboard = ({ signedIn, canJoin, goalMinutes, sessionActive, onS
   // The next place up, and what it takes to get there.
   const above = you && you.rank > 1 ? entries.find((entry) => entry.rank === you.rank - 1) ?? entries[entries.length - 1] : null;
   const gap = above && you ? Math.max(1, Math.floor(above.weekMinutes - you.weekMinutes) + 1) : 0;
+  // Enough to pass the next reader, and never less than a day's goal.
   const sessionMinutes = Math.max(goalMinutes > 0 ? goalMinutes : 20, Math.ceil(gap / 5) * 5);
-
-  const tab = (value: BoardScope, label: string) => {
-    const disabled = value === "following" && !signedIn;
-    return (
-      <button
-        type="button"
-        role="tab"
-        aria-selected={scope === value}
-        disabled={disabled}
-        title={disabled ? "Sign in to follow readers" : undefined}
-        onClick={() => {
-          setScope(value);
-          setExpanded(false);
-        }}
-        className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-          scope === value ? "bg-primary text-on-primary" : "text-on-surface-variant hover:bg-surface-container-high"
-        }`}
-      >
-        {label}
-      </button>
-    );
-  };
+  const offerReading = canJoin && (!you || you.rank > 1);
+  const readLabel = sessionActive ? "Back to your book" : nowReading ? "Keep reading" : "Pick a book";
+  const readHint = sessionActive
+    ? "A session is running; this opens your book"
+    : nowReading
+      ? `A ${sessionMinutes}-minute session on ${nowReading.title}`
+      : "Your library, to pick something to read";
 
   return (
     <section className="paper-surface rounded-xl p-6" aria-labelledby="board-title">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-xs uppercase tracking-widest text-on-surface-variant">This week</p>
-          <h2 id="board-title" className="page-title mt-2 text-2xl">
-            Leaderboard
-          </h2>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-on-surface-variant" title="Every Monday, local time">
-            Resets in {timeLeftText(localWeekEnd(now), now)}
-          </span>
-          <div role="tablist" aria-label="Board" className="flex gap-1 rounded-full bg-surface-container p-1">
-            {tab("everyone", "Everyone")}
-            {tab("following", "Following")}
-          </div>
-        </div>
-      </div>
+      <SectionHeader
+        eyebrow="This week"
+        title="Leaderboard"
+        id="board-title"
+        actions={
+          <>
+            <span className="text-xs text-on-surface-variant" title={COPY.boardResets}>
+              Resets in {timeLeftText(localWeekEnd(now), now)}
+            </span>
+            <SegmentedTabs
+              label="Board"
+              idPrefix={BOARD_ID}
+              value={scope}
+              onChange={(next) => {
+                setScope(next);
+                setExpanded(false);
+              }}
+              tabs={[
+                { id: "everyone", label: "Everyone" },
+                { id: "following", label: "Following", disabled: !signedIn, hint: signedIn ? undefined : COPY.signIn }
+              ]}
+            />
+          </>
+        }
+      />
 
-      {/* Where you stand, and the next step up. */}
+      {/* Where you stand, and the next step up. Only for readers on the board;
+          the card above already says how to join. */}
+      {canJoin && (
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-surface-container/60 px-4 py-3">
         <p className="text-sm text-on-surface">
-          {!signedIn
-            ? "Sign in (Settings → Account) and make your profile public to join the board."
-            : !canJoin
-              ? "Make your profile public to join in. Only readers who share appear here."
-              : !you
+          {!you
                 ? "Read a few minutes this week and you're on the board."
                 : you.rank === 1
                   ? "You're leading this week. Enjoy the view."
@@ -303,22 +304,23 @@ export const Leaderboard = ({ signedIn, canJoin, goalMinutes, sessionActive, onS
                     )
                     : `You're #${you.rank} this week.`}
         </p>
-        {canJoin && you && you.rank > 1 && (
+        {offerReading && (
           <button
             type="button"
-            className="tactile-button tactile-button-primary flex items-center gap-1.5 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={sessionActive}
-            title={sessionActive ? "A session is already running" : `Start a ${sessionMinutes}-minute session`}
-            onClick={() => onStartSession(sessionMinutes)}
+            className="tactile-button tactile-button-primary flex items-center gap-1.5 px-4 py-2 text-xs"
+            title={readHint}
+            onClick={() => onReadNow(sessionMinutes)}
           >
-            <Play size={13} aria-hidden />
-            {sessionActive ? "Session running" : "Start a session"}
+            <BookOpen size={13} aria-hidden />
+            {readLabel}
           </button>
         )}
       </div>
+      )}
 
       {error && !board && <p className="mt-4 rounded-lg bg-error-container/40 px-3 py-2 text-xs text-on-surface">{error}</p>}
 
+      <div id={panelId(BOARD_ID, scope)} role="tabpanel" aria-labelledby={tabId(BOARD_ID, scope)}>
       {loading && !board && <PipNote move="look">Checking who's reading…</PipNote>}
 
       {board && entries.length === 0 && (
@@ -330,7 +332,7 @@ export const Leaderboard = ({ signedIn, canJoin, goalMinutes, sessionActive, onS
       )}
 
       {entries.length > 0 && (
-        <ol className="relative mt-3 flex flex-col gap-1" aria-label={`${scope === "following" ? "Following" : "Everyone"} leaderboard`}>
+        <ol className="relative mt-3 flex flex-col gap-1" aria-label={`${scope === "following" ? "Following" : "Everyone"}, this week`}>
           {shown.map((entry) => (
             <Row
               key={entry.handle}
@@ -354,6 +356,7 @@ export const Leaderboard = ({ signedIn, canJoin, goalMinutes, sessionActive, onS
           {expanded ? "Show the top 10" : `Show all ${entries.length}`}
         </button>
       )}
+      </div>
 
       {/* Your row, pinned while it is out of view (or beyond the list). */}
       {you && (!youShown || !ownVisible) && (

@@ -26,7 +26,7 @@ import { cachedBoard, rememberBoard } from "../boardCache.js";
  * inbox, and finding readers by handle.
  *
  * Friendly competition, strictly opt-in: only public profiles appear, and only
- * a reader with a public profile can follow, cheer or challenge. Private and
+ * a reader with a public profile can follow, send kudos or challenge. Private and
  * missing handles are indistinguishable (both 404).
  */
 
@@ -288,7 +288,7 @@ export function communityRoutes(db, limits = defaultLimits()) {
     })
   );
 
-  /** A leaf of kudos: once per reader, per local day. */
+  /** Kudos: once per reader, per local day. */
   router.post(
     "/kudos/:handle",
     auth,

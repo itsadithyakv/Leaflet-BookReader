@@ -80,12 +80,6 @@ export type SocialProfile = {
   rank?: number | null;
 };
 
-export type Leaderboard = {
-  /** ISO week, e.g. `2026-W36`. The board resets with it. */
-  weekKey: string;
-  entries: SocialProfile[];
-};
-
 export const EMPTY_PROFILE: SocialProfile = {
   handle: null,
   displayName: null,

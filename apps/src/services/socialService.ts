@@ -1,12 +1,10 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import {
-  EMPTY_PROFILE,
-  type Leaderboard,
-  type SocialProfile,
-  type SyncStatus
-} from "@shared/sync/types";
+import { EMPTY_PROFILE, type SocialProfile, type SyncStatus } from "@shared/sync/types";
 
-const EMPTY_BOARD: Leaderboard = { weekKey: "", entries: [] };
+/** Publishing is cheap but not free; once a minute is plenty for a weekly board. */
+const PUBLISH_EVERY_MS = 60_000;
+let lastPublish = 0;
+let publishing: Promise<boolean> | null = null;
 
 // ---- community types --------------------------------------------------------
 //
@@ -153,19 +151,29 @@ export const socialService = {
     });
   },
 
-  /** This week's board. Public, so it can be read before joining it. */
-  async leaderboard(): Promise<Leaderboard> {
+  /**
+   * Publishes this week's minutes, streak and shelf, when the profile is
+   * public. Called when a session ends, when the Social page opens and on the
+   * community pulse, at most once a minute unless `force`d. Never throws: a
+   * board a minute stale is not worth an error.
+   */
+  async publishStats(options: { force?: boolean } = {}): Promise<boolean> {
     if (!isTauri()) {
-      return EMPTY_BOARD;
+      return false;
     }
-    return invoke<Leaderboard>("social_leaderboard");
-  },
-
-  async profileByHandle(handle: string): Promise<SocialProfile> {
-    if (!isTauri()) {
-      return EMPTY_PROFILE;
+    if (publishing) {
+      return publishing;
     }
-    return invoke<SocialProfile>("social_profile_by_handle", { handle });
+    if (!options.force && Date.now() - lastPublish < PUBLISH_EVERY_MS) {
+      return false;
+    }
+    lastPublish = Date.now();
+    publishing = call<boolean>("publish_social_stats")
+      .catch(() => false)
+      .finally(() => {
+        publishing = null;
+      });
+    return publishing;
   },
 
   // ---- community ------------------------------------------------------------
@@ -193,14 +201,7 @@ export const socialService = {
     return call("community_follow", { handle, follow });
   },
 
-  async following(): Promise<{ following: CommunityPerson[]; followerCount: number }> {
-    if (!isTauri()) {
-      return { following: [], followerCount: 0 };
-    }
-    return call("community_following");
-  },
-
-  /** A leaf of kudos; once per reader per local day. */
+  /** Kudos; once per reader per local day. */
   async sendKudos(handle: string): Promise<{ sent: boolean; kudosThisWeek: number }> {
     if (!isTauri()) {
       return { sent: false, kudosThisWeek: 0 };

@@ -128,8 +128,8 @@ const POOLS: Record<PipMoment, Beat[]> = {
   // Community. `name` is "@handle". Friendly rivalry: the drama is Pip's, the
   // reader is never behind or letting anyone down.
   kudosReceived: [
-    { move: "kudos", line: (v) => `${v.name ?? "someone"} sent you a leaf. i'm keeping it.` },
-    { move: "kudos", line: (v) => `a leaf from ${v.name ?? "a reader"}. we're glowing.` }
+    { move: "kudos", line: (v) => `${v.name ?? "someone"} sent you kudos. i'm keeping them.` },
+    { move: "kudos", line: (v) => `kudos from ${v.name ?? "a reader"}. we're glowing.` }
   ],
   newFollower: [
     { move: "welcome", line: (v) => `${v.name ?? "someone"} is following along now. hi!` },
