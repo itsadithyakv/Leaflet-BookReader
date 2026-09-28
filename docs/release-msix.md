@@ -155,7 +155,7 @@ $password = ConvertTo-SecureString -String "leaflet-test" -Force -AsPlainText
 Export-PfxCertificate -Cert $cert -FilePath "$env:TEMP\leaflet-test.pfx" -Password $password
 Import-PfxCertificate -FilePath "$env:TEMP\leaflet-test.pfx" -CertStoreLocation Cert:\LocalMachine\TrustedPeople -Password $password
 .\build-msix.ps1 -SkipBuild -CertificatePath "$env:TEMP\leaflet-test.pfx" -CertificatePassword "leaflet-test"
-Add-AppxPackage ..\target\msix\Leaflet_0.1.0.0_x64.msix
+Add-AppxPackage ..\target\msix\Leaflet_1.0.0.0_x64.msix
 ```
 
 (The TrustedPeople import needs an administrator PowerShell.) Uninstall with

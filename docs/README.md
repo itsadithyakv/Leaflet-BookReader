@@ -13,6 +13,9 @@ why it is built that way. Written for someone picking the codebase up cold.
 | [data-model.md](data-model.md) | SQLite schema, migrations, the sync document |
 | [building.md](building.md) | Desktop and Android builds, the traps |
 | [release-msix.md](release-msix.md) | Packaging for the Microsoft Store and submitting |
+| [deploy.md](deploy.md) | The 1.0 run sheet: GitHub Pages, Atlas, the VM, the API, the Store build |
+| [release-notes-1.0.md](release-notes-1.0.md) | What 1.0 does, and its known issues |
+| [store-listing.md](store-listing.md) | Paste-ready Store description, features and search terms |
 | [testing.md](testing.md) | What is tested, what is not, and how to verify UI |
 | [legal/](legal/) | Privacy policy and terms of use (drafts to review) |
 

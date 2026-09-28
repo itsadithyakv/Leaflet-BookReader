@@ -1,6 +1,6 @@
 {
   "name": "leaflet-server",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "Accounts, leaderboard and opaque sync-state API for Leaflet. Holds the Mongo connection so the app never has to.",
