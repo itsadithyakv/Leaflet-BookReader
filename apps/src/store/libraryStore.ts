@@ -1,8 +1,9 @@
 import { create } from "zustand";
 import type { Book, BookFilter } from "@shared/models/book";
-import type { DriveSyncStatus } from "@shared/sync/types";
+import { EMPTY_SYNC_STATUS, type DriveSyncStatus, type SyncStatus } from "@shared/sync/types";
 import { bookService } from "../services/bookService";
-import { driveSyncService } from "../services/driveSyncService";
+import { syncService } from "../services/syncService";
+import { socialService } from "../services/socialService";
 import { statsService, type ReadingStats } from "../services/statsService";
 
 const defaultFilters: BookFilter = {
@@ -21,12 +22,16 @@ type LibraryState = {
   metadataTotal: number;
   metadataDone: number;
   syncStatus: DriveSyncStatus;
+  /** The last error a sync run produced, so the UI can say what went wrong. */
+  syncError: string | null;
+  sync: SyncStatus;
   stats: ReadingStats;
-  driveConnected: boolean;
   importing: boolean;
+  /** Books currently being fetched from the shared store, by id. */
+  downloading: string[];
   loadBooks: () => Promise<void>;
   loadStats: () => Promise<void>;
-  loadDriveStatus: () => Promise<void>;
+  loadSyncStatus: () => Promise<void>;
   importBooks: () => Promise<void>;
   importPaths: (paths: string[]) => Promise<Book[]>;
   refreshMetadata: (id: string) => Promise<void>;
@@ -34,9 +39,19 @@ type LibraryState = {
   openBook: (book: Book) => Promise<void>;
   setFilter: (partial: Partial<BookFilter>) => void;
   startDriveAuth: () => Promise<void>;
+  disconnectDrive: () => Promise<void>;
+  setDriveCredentials: (clientId: string, clientSecret: string) => Promise<void>;
+  clearDriveCredentials: () => Promise<void>;
+  setSyncFolder: (path: string | null) => Promise<void>;
+  setCloudApi: (url: string) => Promise<void>;
   syncNow: () => Promise<void>;
+  /** Backs up soon, coalescing with any other change that lands meanwhile. */
+  requestBackup: () => void;
+  ensureBookFile: (book: Book) => Promise<Book>;
+  deleteBook: (id: string) => Promise<void>;
   refreshMissingMetadata: (books?: Book[]) => Promise<void>;
-  updateBookProgress: (id: string, progress: number) => void;
+  /** `position` left undefined keeps the book's current CFI. */
+  updateBookProgress: (id: string, progress: number, position?: string | null) => void;
   resetAll: () => void;
 };
 
@@ -65,14 +80,16 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   metadataTotal: 0,
   metadataDone: 0,
   syncStatus: "idle",
+  syncError: null,
+  sync: EMPTY_SYNC_STATUS,
   stats: {
     streakDays: 0,
     totalDays: 0,
     lastReadAt: null,
     daysLast7: 0
   },
-  driveConnected: false,
   importing: false,
+  downloading: [],
   async loadBooks() {
     set({ loading: true });
     const books = await bookService.list();
@@ -94,12 +111,11 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       });
     }
   },
-  async loadDriveStatus() {
+  async loadSyncStatus() {
     try {
-      const status = await driveSyncService.status();
-      set({ driveConnected: status.connected });
+      set({ sync: await syncService.status() });
     } catch {
-      set({ driveConnected: false });
+      set({ sync: EMPTY_SYNC_STATUS });
     }
   },
   async importBooks() {
@@ -145,6 +161,34 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     }
     set({ books: replaceBook(get().books, updated) });
   },
+  /**
+   * Fetches a book's bytes if this device only has the entry.
+   *
+   * Sync moves a kilobyte-sized index everywhere and leaves the files where
+   * they are, so a newly connected device is usable at once and pays for a book
+   * only when it is opened.
+   */
+  async ensureBookFile(book: Book) {
+    if (book.available !== false) {
+      return book;
+    }
+    set({ downloading: [...get().downloading, book.id] });
+    try {
+      await syncService.downloadBook(book.id);
+      const refreshed = { ...book, available: true };
+      set({ books: replaceBook(get().books, refreshed) });
+      return refreshed;
+    } finally {
+      set({ downloading: get().downloading.filter((id) => id !== book.id) });
+    }
+  },
+
+  async deleteBook(id: string) {
+    await syncService.deleteBook(id);
+    set({ books: get().books.filter((book) => book.id !== id) });
+    scheduleSync(set, get);
+  },
+
   async openBook(book: Book) {
     const now = new Date().toISOString();
     await bookService.updateProgress(book.id, book.progress);
@@ -159,18 +203,50 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     set({ filters: { ...get().filters, ...partial } });
   },
   async startDriveAuth() {
-    await driveSyncService.startAuth();
-    await driveSyncService.waitForAuth();
-    set({ driveConnected: true });
+    // The backend opens the consent page in the system browser and this waits
+    // for the loopback callback. It rejects with a reason -- cancelled, timed
+    // out, refused -- rather than hanging as the old listener did.
+    await syncService.startDriveAuth();
+    await syncService.waitForDriveAuth();
+    await get().loadSyncStatus();
     await get().syncNow();
   },
+  async disconnectDrive() {
+    set({ sync: await syncService.disconnectDrive(), syncStatus: "idle", syncError: null });
+  },
+  async setDriveCredentials(clientId: string, clientSecret: string) {
+    set({ sync: await syncService.setDriveCredentials(clientId, clientSecret) });
+  },
+  async clearDriveCredentials() {
+    set({ sync: await syncService.clearDriveCredentials(), syncStatus: "idle", syncError: null });
+  },
+  async setCloudApi(url: string) {
+    const status = await socialService.setApiBase(url);
+    if (status) {
+      set({ sync: status });
+    }
+  },
+  async setSyncFolder(path: string | null) {
+    set({ sync: await syncService.setFolder(path) });
+    if (path) {
+      await get().syncNow();
+    }
+  },
+  requestBackup() {
+    scheduleSync(set, get);
+  },
   async syncNow() {
-    set({ syncStatus: "syncing" });
+    set({ syncStatus: "syncing", syncError: null });
     try {
-      await driveSyncService.syncNow();
-      set({ syncStatus: "success" });
+      await syncService.syncNow();
+      // Sync can add, remove and re-position books, so the library is re-read
+      // rather than patched: guessing which rows changed is how the two views
+      // drift apart.
+      const [books, status] = await Promise.all([bookService.list(), syncService.status()]);
+      set({ books, sync: status, syncStatus: "success" });
     } catch (error) {
-      set({ syncStatus: "error" });
+      const message = error instanceof Error ? error.message : String(error);
+      set({ syncStatus: "error", syncError: message });
       throw error;
     }
   },
@@ -210,10 +286,12 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     }
     set({ metadataRefreshing: false });
   },
-  updateBookProgress(id, progress) {
+  updateBookProgress(id, progress, position) {
     set({
       books: get().books.map((book) =>
-        book.id === id ? { ...book, progress } : book
+        book.id === id
+          ? { ...book, progress, position: position === undefined ? book.position : position }
+          : book
       )
     });
   },
@@ -226,14 +304,16 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       metadataTotal: 0,
       metadataDone: 0,
       syncStatus: "idle",
+      syncError: null,
+      sync: EMPTY_SYNC_STATUS,
       stats: {
         streakDays: 0,
         totalDays: 0,
         lastReadAt: null,
         daysLast7: 0
       },
-      driveConnected: false,
-      importing: false
+      importing: false,
+      downloading: []
     });
   }
 }));
@@ -256,23 +336,27 @@ function mergeBooks(existing: Book[], imported: Book[]) {
   return Array.from(byId.values());
 }
 
+/**
+ * Publishes local changes shortly after they settle.
+ *
+ * Debounced because importing ten books fires ten times, and each sync is a
+ * full merge round trip.
+ */
 function scheduleSync(
   set: (state: Partial<LibraryState>) => void,
   get: () => LibraryState
 ) {
-  if (!get().driveConnected) {
+  const { driveConnected, folderPath } = get().sync;
+  if (!driveConnected && !folderPath) {
     return;
   }
   if (syncTimer) {
     clearTimeout(syncTimer);
   }
-  syncTimer = setTimeout(async () => {
-    set({ syncStatus: "syncing" });
-    try {
-      await driveSyncService.syncNow();
-      set({ syncStatus: "success" });
-    } catch {
-      set({ syncStatus: "error" });
-    }
+  syncTimer = setTimeout(() => {
+    void get().syncNow().catch(() => {
+      // A background sync failure is already recorded in `syncError`; the user
+      // is not interrupted for it.
+    });
   }, 1500);
 }

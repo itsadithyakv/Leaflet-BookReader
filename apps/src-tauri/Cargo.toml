@@ -4,13 +4,48 @@ version = "0.1.0"
 edition = "2021"
 build = "build.rs"
 
+# Android and iOS load the app as a shared library from their own host activity
+# instead of starting a Rust binary, so the crate has to produce one. The desktop
+# binary links the same `rlib`, so there is a single implementation.
+[lib]
+name = "leaflet_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+# A phone downloads this binary; a desktop only unpacks it once. The debug APK
+# was 206 MB and nearly all of it was symbols nobody ships.
+#
+# Cargo has no per-platform profiles, so these apply to the desktop release too.
+# Every setting here is therefore one that costs nothing behaviourally:
+#
+#   `opt-level = "s"` was tried and dropped -- it would slow the hashing and
+#   conversion work on desktop to save a little size on mobile.
+#
+#   `panic = "abort"` was tried and dropped for a sharper reason: the import
+#   path turns a panicking `spawn_blocking` task into "Import task failed"
+#   rather than taking the app down, and Leaflet parses arbitrary user files,
+#   which is exactly where a panic comes from.
+[profile.release]
+# The single biggest saving, and it costs nothing at runtime.
+strip = "symbols"
+# Whole-program optimisation, which also drops code no path can reach -- so the
+# desktop-only branches compiled out below leave nothing behind. Usually makes
+# the result faster as well as smaller.
+lto = true
+codegen-units = 1
+
 [build-dependencies]
 tauri-build = { version = "2.5.6", features = [] }
 
 [dependencies]
+# Ed25519 check of the signed server config (already in the tree via rustls).
+ring = "0.17"
 anyhow = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 hex = "0.4"
+# Compresses the sync document before it is stored. JSON with repeated keys
+# and ISO timestamps packs about 6:1, which is what keeps a free-tier cluster
+# viable at a few thousand readers.
+flate2 = "1"
 oauth2 = { version = "4.4", default-features = false, features = ["reqwest", "rustls-tls"] }
 quick-xml = "0.31"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart", "stream"] }
@@ -18,20 +53,47 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "sync"] }
 urlencoding = "2.1"
 zip = "0.6"
 dirs = "4"
 tauri-plugin-dialog = "2.5.6"
-tauri-plugin-single-instance = "2.4.3"
+# Opens the OAuth consent page in the system browser. Google refuses to run its
+# sign-in inside an embedded webview, so `window.open` from the frontend could
+# never have worked.
+tauri-plugin-opener = "2"
+# Keeps the Drive refresh token in the OS credential store rather than a
+# plaintext column in the library database.
+keyring = { version = "3", features = ["windows-native", "apple-native", "linux-native"] }
 dotenvy = "0.15"
 base64 = "0.22"
 regex = "1.10"
 image = { version = "0.25", default-features = false, features = ["png"] }
 
+# Focuses an already-running window when a second launch arrives with a file.
+# A phone has no such concept and the plugin has no mobile implementation.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = "2.4.3"
+
+# Reading reminders (src/reminders/toast.rs): Windows toasts, shown now or
+# scheduled with Windows for when the app is closed. Called directly because
+# the notification plugin can neither schedule nor use the MSIX identity.
+# Same version Tauri already builds, so this adds features, not a crate.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+  "Data_Xml_Dom",
+  "Foundation",
+  "UI_Notifications",
+  "Win32_Foundation",
+  "Win32_Storage_Packaging_Appx"
+] }
+
+# No `protocol-asset`: covers and book bytes reach the webview through commands,
+# so nothing needs `asset://`, and leaving it on exposed the whole app-data
+# folder (library database included) to any script running in the webview.
 [dependencies.tauri]
 version = "2.5.6"
-features = ["protocol-asset"]
+features = []
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

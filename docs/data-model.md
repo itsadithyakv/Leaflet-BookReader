@@ -1,0 +1,170 @@
+# Data model
+
+## SQLite
+
+One file, `<app data>/library.db`, opened through `rusqlite` with a bundled
+SQLite so there is no system dependency on any platform.
+
+### `books`
+
+| Column | Notes |
+| --- | --- |
+| `id` TEXT PK | SHA-256 of the file contents |
+| `title`, `author`, `genres` | `genres` is a JSON array |
+| `cover_url` | **Local** path to the cached cover. Never synced. |
+| `local_path` | **Local** absolute path. Never synced. |
+| `file_hash` | Same as `id`; kept for the index |
+| `progress` REAL | 0–1 |
+| `position` TEXT | Exact place (EPUB CFI); `NULL` for page-based books. Written with `progress` |
+| `last_opened`, `created_at` | RFC 3339 |
+| `metadata_checked_at` | Drives the 14-day enrichment cooldown |
+| `metadata_updated_at` | When title/author/genres last changed |
+| `progress_updated_at` | When `progress` last changed — *not* when opened |
+| `deleted_at` | Tombstone; the row survives so the deletion can travel |
+
+`list_books()` excludes tombstoned rows; `list_books_for_sync()` includes them.
+
+The two `*_updated_at` columns exist for the sync merge. `update_progress` only
+stamps `progress_updated_at` when the value actually moved, which is what stops a
+device that merely opened a book from winning the merge.
+
+`BookRecord` also carries a computed, non-column field: `available`, a filesystem
+check for whether the book's bytes are on *this* device.
+
+### `reading_days` — the habit ledger
+
+| Column | Notes |
+| --- | --- |
+| `date_key` TEXT PK | **Local** calendar day, `YYYY-MM-DD` |
+| `minutes` REAL | Credited by the reading heartbeat |
+| `goal_minutes` INTEGER | Snapshotted per day, so changing the goal does not rewrite history |
+| `freeze_used`, `grace_used` | Whether a missed day was paid for |
+
+The streak is **derived** from these rows rather than stored, so it can never
+drift from the minutes that earned it.
+
+### `focus_sessions` — the shelf
+
+`id`, `started_at`, `ended_at`, `date_key`, `minutes`, `book_id`, `title`,
+`notes`, `ended_reason` (`completed` | `manual_end`), `clean`, `style_seed`,
+`burned_at`.
+
+`style_seed` replaces a persisted decoration blob — the shelf's appearance is
+derived deterministically from the seed at render time. `burned_at` tombstones a
+session when a streak breaks, rather than deleting it.
+
+### `pip_purchases`, `pip_plantings`, `pip_harvests`, `pip_state` — Pip's shop and garden
+
+`pip_purchases`: `id` (random), `item_kind`, `item_id`, `price` (as paid),
+`bought_at`. `pip_plantings`: `id` (the seed packet's purchase id), `plot`,
+`plant`, `planted_at`. `pip_harvests`: `id`, `planting_id`, `seeds`,
+`harvested_at`. All append-only. Nothing about the garden's growth or the seed
+balance is stored: `habit/seeds.rs` replays the reading (the ledger above)
+against the plantings, and the balance is the welcome gift + valid harvests +
+goal bonuses − purchases.
+
+`pip_state`: one row (`id = 1`): `variant`, `accessories` (JSON list),
+`room_layout` (JSON: `level/slot` to item, `level/@wallpaper`, `level/@floor`),
+`room_style`, `mood`, `mood_updated_at`, `signature`, `updated_at`. See
+[features.md](features.md#seeds-and-the-pip-tab).
+
+### `collections` / `book_collections`
+
+Named groups, many-to-many.
+
+### `reading_sessions`
+
+`UNIQUE(book_id, date_key)`, written as a side effect of `update_progress`.
+Predates the habit ledger and carries no duration; the ledger is the real record.
+
+### `settings`
+
+A key/value table. Holds the habit goal and streak state (as JSON), the sync
+folder path, the last sync time, the Drive access token and expiry, the Drive
+account email, and a Drive OAuth client if the reader supplied one.
+
+The Drive **refresh** token is not here — it goes to the OS keychain, with this
+table as the fallback where no keychain exists.
+
+## Migrations
+
+`apply_schema()` runs `CREATE TABLE IF NOT EXISTS` for everything, then issues
+best-effort `ALTER TABLE ... ADD COLUMN` for each column added since v1:
+
+```rust
+let _ = conn.execute("ALTER TABLE books ADD COLUMN metadata_checked_at TEXT", []);
+let _ = conn.execute("ALTER TABLE books ADD COLUMN metadata_updated_at TEXT", []);
+let _ = conn.execute("ALTER TABLE books ADD COLUMN progress_updated_at TEXT", []);
+let _ = conn.execute("ALTER TABLE books ADD COLUMN deleted_at TEXT", []);
+let _ = conn.execute("ALTER TABLE books ADD COLUMN position TEXT", []);
+```
+
+The `let _ =` is the point: the statement fails harmlessly when the column is
+already there. New databases get it from `CREATE TABLE`, existing ones gain it
+once. There is no version number and no down-migration.
+
+Rows written before the stamp columns existed have `NULL` in them; the sync
+converter falls back to `created_at`, so an un-stamped record loses to any real
+edit rather than winning by accident.
+
+## The sync document
+
+Defined in `sync/merge.rs`. This is what crosses between devices — as
+`state.json` in a sync folder, or as a file in the Drive `Leaflet/` folder.
+
+```jsonc
+{
+  "version": 1,
+  "updatedAt": "2026-09-04T12:00:00+00:00",
+  "books": [
+    {
+      "id": "<sha256>",
+      "ext": "epub",              // the receiver names its copy <id>.<ext>
+      "title": "…",
+      "author": "…",
+      "genres": [],
+      "metadataUpdatedAt": "…",   // title/author/genres move as one group
+      "progress": 0.42,
+      "position": "epubcfi(…)",   // optional; travels with progress
+      "progressUpdatedAt": "…",   // distinct from lastOpened, on purpose
+      "lastOpened": "…",
+      "createdAt": "…",
+      "deletedAt": null           // tombstone
+    }
+  ],
+  "days":     [ /* the habit ledger */ ],
+  "sessions": [ /* the shelf */ ],
+  "purchases": [ /* Pip's shop: what was bought */ ],
+  "plantings": [ /* Pip's garden: what was planted where */ ],
+  "harvests": [ /* ...and what was picked */ ],
+  "pip":      { /* Pip's look, room and mood */ }
+}
+```
+
+Book files live beside it as `books/<sha256>.<ext>` and are fetched on demand.
+
+### Merge rules
+
+- **Metadata** — newest `metadataUpdatedAt` wins, as a group.
+- **Progress** — newest `progressUpdatedAt` wins. A tie keeps the further
+  position; never lose a reader's place. `position` (the CFI) is taken from the
+  same winner, even when it has none, so a percentage is never paired with
+  another device's place. Documents without the field parse as `null`.
+- **`lastOpened`** — the maximum; it is not a contested value.
+- **`createdAt`** — the minimum; the earliest import is the truth.
+- **Deletion** — holds unless the other device edited the book *after* it, which
+  is how re-importing a removed book brings it back instead of being undone.
+- **Ledger minutes** — the maximum, not the sum. Neither device knows how much of
+  the other's time overlapped its own, and a sum would let repeated syncing
+  inflate a streak.
+- **Freeze / grace** — OR'd. Spending it on one device spends it everywhere.
+- **Sessions** — union by id; a burn is a tombstone and sticks.
+- **Purchases, plantings, harvests** — unions by id; they never change once made.
+- **Pip's state** — newest `updatedAt` wins, whole; a tie is settled by content.
+
+Exact timestamp ties fall back to comparing the values themselves, so the result
+cannot depend on argument order. Output is ordered by a `BTreeMap`, so two
+devices produce byte-identical documents from the same inputs.
+
+All timestamps are compared as **instants**, never as strings: `+05:30` sorts
+after `+00:00` as text while being the earlier moment.

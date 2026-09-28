@@ -43,7 +43,12 @@
       }
     ],
     "icon": [
-      "icons/icon.ico"
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico",
+      "icons/icon.png"
     ]
   },
   "productName": "Leaflet",
@@ -56,24 +61,32 @@
         "title": "Leaflet",
         "width": 1600,
         "height": 1000,
-        "minWidth": 1200,
-        "minHeight": 800,
+        "minWidth": 380,
+        "minHeight": 480,
         "resizable": true,
         "maximized": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "center": true,
+        "zoomHotkeysEnabled": false
       }
     ],
     "security": {
-      "csp": null,
-      "assetProtocol": {
-        "enable": true,
-        "scope": [
-          "$APPDATA/**",
-          "$APPDATA/leaflet/**",
-          "$APPDATA/leaflet/covers/**",
-          "$APPDATA/leaflet/books/**"
-        ]
+      "csp": {
+        "default-src": "'self' ipc: http://ipc.localhost",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline' blob:",
+        "img-src": "'self' data: blob:",
+        "font-src": "'self' data: blob:",
+        "media-src": "'self' data: blob:",
+        "connect-src": "'self' ipc: http://ipc.localhost blob: data:",
+        "worker-src": "'self' blob:",
+        "frame-src": "'self' blob:",
+        "object-src": "'none'",
+        "base-uri": "'self'",
+        "form-action": "'none'"
       },
+      "devCsp": "default-src * ipc: http://ipc.localhost data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src * ipc: http://ipc.localhost ws: wss: data: blob:",
+      "dangerousDisableAssetCspModification": ["style-src"],
       "capabilities": [
         "default"
       ]

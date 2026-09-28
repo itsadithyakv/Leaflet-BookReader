@@ -18,6 +18,20 @@ export async function pickBookFiles(): Promise<string[]> {
   return module.pickBookFiles();
 }
 
+/**
+ * Picks the directory that carries sync.
+ *
+ * Desktop only: a phone has no folder its cloud client keeps in step, so those
+ * devices use the Drive transport instead.
+ */
+export async function pickSyncFolder(): Promise<string | null> {
+  if (getPlatform() === "mobile") {
+    return null;
+  }
+  const module = await import("./desktop/file");
+  return module.pickSyncFolder();
+}
+
 export async function ensureBookPermissions(): Promise<boolean> {
   if (getPlatform() === "mobile") {
     const module = await import("./mobile/permissions");
@@ -25,13 +39,4 @@ export async function ensureBookPermissions(): Promise<boolean> {
   }
   const module = await import("./desktop/permissions");
   return module.ensureBookPermissions();
-}
-
-export async function getLibraryPath(): Promise<string> {
-  if (getPlatform() === "mobile") {
-    const module = await import("./mobile/storage");
-    return module.getMobileLibraryDir();
-  }
-  const module = await import("./desktop/storage");
-  return module.getAppStorageDir();
 }

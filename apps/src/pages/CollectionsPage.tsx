@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useLibraryStore } from "../store/libraryStore";
 
 export type CollectionsPageProps = {
-  onNavigate: (tab: "library" | "collections" | "analytics" | "settings") => void;
+  onNavigate: (tab: "library" | "collections" | "social" | "settings") => void;
   showToast: (message: string) => void;
 };
 

@@ -2,13 +2,16 @@
   "identifier": "default",
   "description": "Default application permissions",
   "local": true,
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:event:default",
     "core:event:allow-listen",
     "core:webview:default",
-    "core:webview:allow-internal-toggle-devtools",
     "core:resources:default",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-is-fullscreen",
     "dialog:default"
   ]
 }

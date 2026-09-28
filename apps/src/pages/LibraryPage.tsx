@@ -7,9 +7,16 @@ import { BookList } from "../components/BookList";
 import { isMetadataRetryDue, useLibraryStore } from "../store/libraryStore";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import type { Book, BookFilter } from "@shared/models/book";
-import { IMPORTABLE_EXTENSIONS, formatDisplayList } from "../constants/bookFormats";
-import { getDateKey, getSessionProgress, isGoalMet, useHabitStore } from "../store/habitStore";
+import {
+  dependencyFreeSummary,
+  externalConverterCount,
+  formatSummary,
+  getBookExtension,
+  isImportableExtension
+} from "../constants/bookFormats";
+import { getSessionProgress, sessionElapsedMs, useHabitStore } from "../store/habitStore";
 import { UiIcon } from "../components/UiIcon";
+import { MobileComingSoonBanner } from "../components/MobileComingSoonBanner";
 
 const sortBooks = (books: Book[], sort: "recent" | "opened" | "author") => {
   const copy = [...books];
@@ -34,7 +41,7 @@ const sortOptions: Array<{ value: BookFilter["sort"]; label: string }> = [
 
 export type LibraryPageProps = {
   onOpenBook: (book: Book) => void;
-  onNavigate: (tab: "library" | "collections" | "analytics" | "settings") => void;
+  onNavigate: (tab: "library" | "collections" | "social" | "settings") => void;
   showToast: (message: string) => void;
 };
 
@@ -58,7 +65,7 @@ const resolveErrorMessage = (error: unknown, fallback: string) => {
 };
 
 export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPageProps) => {
-  const { books, filters, loading, importing, stats, importBooks, importPaths, refreshMetadata, fetchCover, setFilter } =
+  const { books, filters, loading, importing, stats, importBooks, importPaths, refreshMetadata, fetchCover, deleteBook, setFilter } =
     useLibraryStore(
       useShallow((state) => ({
         books: state.books,
@@ -69,37 +76,27 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
         importBooks: state.importBooks,
         importPaths: state.importPaths,
         refreshMetadata: state.refreshMetadata,
+        deleteBook: state.deleteBook,
         fetchCover: state.fetchCover,
         setFilter: state.setFilter
       }))
     );
-  const { activeSession, startSession, stopSession, clearSessionShelf, focusSettings, addSessionNote, goal, daily } =
+  const { activeSession, startSession, stopSession, snapshot } =
     useHabitStore(
       useShallow((state) => ({
         activeSession: state.activeSession,
         startSession: state.startSession,
         stopSession: state.stopSession,
-        clearSessionShelf: state.clearSessionShelf,
-        focusSettings: state.focusSettings,
-        addSessionNote: state.addSessionNote,
-        goal: state.goal,
-        daily: state.daily
+        snapshot: state.snapshot
       }))
     );
   const [sessionDuration, setSessionDuration] = useState(20);
-  const [noteModalOpen, setNoteModalOpen] = useState(false);
-  const [noteText, setNoteText] = useState("");
-  const [noteSessionId, setNoteSessionId] = useState<string | null>(null);
-  const todayKey = getDateKey();
-  const todayRecord = daily[todayKey];
-  const todayMinutes = todayRecord?.minutes ?? 0;
-  const goalMet = isGoalMet(goal, todayRecord);
+  const todayMinutes = snapshot.todayMinutes;
+  const goalMet = snapshot.todayMet;
   const goalPercent =
-    goal.mode === "minutes" && goal.target > 0
-      ? Math.min(100, Math.round((todayMinutes / goal.target) * 100))
-      : goalMet
-        ? 100
-        : 0;
+    snapshot.goalMinutes > 0
+      ? Math.min(100, Math.round((todayMinutes / snapshot.goalMinutes) * 100))
+      : 0;
   const [sessionTick, setSessionTick] = useState(0);
   const [sessionRemaining, setSessionRemaining] = useState<number | null>(null);
   const [dropActive, setDropActive] = useState(false);
@@ -145,6 +142,17 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
     });
   };
 
+  /**
+   * Removes a book everywhere. The row is tombstoned rather than dropped, so
+   * the removal reaches the reader's other devices instead of being undone by
+   * them on the next sync.
+   */
+  const handleRemoveBook = (book: Book) => {
+    deleteBook(book.id)
+      .then(() => showToast(`Removed ${book.title}.`))
+      .catch((error) => showToast(resolveErrorMessage(error, "Could not remove that book.")));
+  };
+
   const isOverImportArea = useCallback((x: number, y: number) => {
     const dropArea = importDropRef.current;
     if (!dropArea) {
@@ -154,7 +162,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
     const pointX = x / scale;
     const pointY = y / scale;
     const bounds = dropArea.getBoundingClientRect();
-    return (
+      return (
       pointX >= bounds.left &&
       pointX <= bounds.right &&
       pointY >= bounds.top &&
@@ -167,12 +175,9 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
       if (importing) {
         return;
       }
-      const supported = paths.filter((path) => {
-        const extension = path.split(".").pop()?.toLowerCase() ?? "";
-        return IMPORTABLE_EXTENSIONS.includes(extension);
-      });
+      const supported = paths.filter((path) => isImportableExtension(getBookExtension(path)));
       if (supported.length === 0) {
-        showToast(`Choose ${formatDisplayList(IMPORTABLE_EXTENSIONS)} files.`);
+        showToast(`Choose a supported book file — ${formatSummary()}.`);
         return;
       }
       importPaths(supported)
@@ -240,19 +245,8 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
   };
 
   const handleEndSession = () => {
-    const confirmed = window.confirm(
-      "Ending focus now will clear your sessions bookshelf progress. Continue?"
-    );
-    if (!confirmed) {
-      return;
-    }
-    const sessionId = stopSession({ reason: "manual_end", cleanSession: false });
-    clearSessionShelf();
-    if (sessionId && focusSettings.sessionNotes) {
-      setNoteSessionId(sessionId);
-      setNoteText("");
-      setNoteModalOpen(true);
-    }
+    // The wrap-up screen (mounted in App) takes it from here, note included.
+    void stopSession({ reason: "manual_end", cleanSession: false });
   };
 
   const requestedCovers = useRef(new Set<string>());
@@ -288,17 +282,12 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
       return;
     }
     const totalSeconds = activeSession.durationMinutes * 60;
-    const elapsedSeconds = Math.max(0, Math.round((Date.now() - Date.parse(activeSession.startedAt)) / 1000));
+    const elapsedSeconds = Math.round(sessionElapsedMs(activeSession) / 1000);
     const remaining = Math.max(0, totalSeconds - elapsedSeconds);
     const minutesLeft = Math.ceil(remaining / 60);
     setSessionRemaining(minutesLeft);
     if (remaining <= 0) {
-      const sessionId = stopSession({ reason: "completed", cleanSession: true });
-      if (sessionId && focusSettings.sessionNotes) {
-        setNoteSessionId(sessionId);
-        setNoteText("");
-        setNoteModalOpen(true);
-      }
+      void stopSession({ reason: "completed", cleanSession: true });
     }
   }, [activeSession, sessionTick]);
 
@@ -321,9 +310,14 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
         </div>
       </div>
 
+      <MobileComingSoonBanner />
+
       <section className="grid min-w-0 gap-6 xl:grid-cols-12">
+        {/* clip, not hidden: the resting and running layers are stacked, and an
+            overflow-hidden box is still scrollable, so focusing Pip's button
+            scrolled the card to reveal the taller hidden layer. */}
         <div
-          className="paper-surface relative min-w-0 overflow-hidden rounded-xl p-6 xl:col-span-8"
+          className="paper-surface relative min-w-0 overflow-clip rounded-xl p-6 xl:col-span-8"
         >
           <div className="relative z-10">
             <div className="relative">
@@ -340,7 +334,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
                   </div>
                 </div>
                 <div className="mt-3 grid gap-3">
-                  <div className="inset-field flex min-w-0 flex-wrap items-center gap-4 p-3">
+                  <div className="inset-field flex min-w-0 flex-wrap items-center gap-4 p-3" data-tour="session">
                     <p className="text-xs uppercase tracking-[0.2em] text-on-surface-variant">Focus Session</p>
                     <div className="ml-auto flex flex-wrap items-center gap-3">
                       <select
@@ -435,6 +429,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
 
         <button
           ref={importDropRef}
+          data-tour="import"
           type="button"
           className={`import-drop-zone paper-surface relative flex min-w-0 flex-col items-center justify-center p-8 xl:col-span-4 ${
             importing
@@ -460,52 +455,16 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
           </div>
           <h3 className="page-title text-2xl">Import Books</h3>
           <p className="mt-2 max-w-xs text-center text-sm text-on-surface-variant">
-            Drop {formatDisplayList(IMPORTABLE_EXTENSIONS)} here, or click to browse
+            Drop a book here, or click to browse
+          </p>
+          <p className="mt-3 max-w-xs text-center text-xs leading-5 text-on-surface-variant/75">
+            {dependencyFreeSummary()} open straight away.
+            <br />
+            {externalConverterCount()} more formats need the optional converter.
           </p>
         </button>
       </section>
 
-      {noteModalOpen && noteSessionId && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-6">
-          <div className="modal-surface w-full max-w-sm rounded-xl p-6">
-            <div className="text-xs uppercase tracking-widest text-on-surface-variant">Session Notes</div>
-            <h3 className="page-title mt-2 text-2xl text-on-surface">Add a quick note</h3>
-            <textarea
-              className="mt-4 h-28 w-full resize-none rounded-xl border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface"
-              placeholder="What did you read or learn?"
-              value={noteText}
-              onChange={(event) => setNoteText(event.target.value)}
-            />
-            <div className="mt-5 flex items-center justify-between">
-              <button
-                type="button"
-                className="tactile-button px-4 py-2 text-xs uppercase tracking-widest"
-                onClick={() => {
-                  setNoteModalOpen(false);
-                  setNoteSessionId(null);
-                  setNoteText("");
-                }}
-              >
-                Skip
-              </button>
-              <button
-                type="button"
-                className="tactile-button tactile-button-primary px-4 py-2 text-xs font-semibold"
-                onClick={() => {
-                  if (noteText.trim()) {
-                    addSessionNote(noteSessionId, noteText.trim());
-                  }
-                  setNoteModalOpen(false);
-                  setNoteSessionId(null);
-                  setNoteText("");
-                }}
-              >
-                Save Note
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       <section className="flex flex-1 flex-col gap-6">
         <div className="flex flex-wrap items-end justify-between gap-6">
@@ -590,7 +549,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
             <div className="paper-surface flex h-full flex-col items-center justify-center gap-3 rounded-xl p-8 text-center text-on-surface-variant">
               <p className="text-lg font-semibold text-on-surface">No books yet</p>
               <p className="max-w-md text-sm">
-                Import {formatDisplayList(IMPORTABLE_EXTENSIONS)} files to populate your library.
+                Import {dependencyFreeSummary()} and more to populate your library.
               </p>
               <button
                 className="tactile-button tactile-button-primary px-4 py-2 text-sm font-semibold"
@@ -603,7 +562,12 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
           ) : filters.view === "grid" ? (
             <BookGrid books={filteredBooks} onRefresh={refreshMetadata} onOpen={onOpenBook} />
           ) : (
-            <BookList books={filteredBooks} onRefresh={refreshMetadata} onOpen={onOpenBook} />
+            <BookList
+              books={filteredBooks}
+              onRefresh={refreshMetadata}
+              onOpen={onOpenBook}
+              onRemove={handleRemoveBook}
+            />
           )}
         </div>
       </section>
