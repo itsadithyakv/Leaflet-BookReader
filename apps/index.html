@@ -2,23 +2,33 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#141311" />
+    <!-- viewport-fit=cover lets the layout paint under a notch; the safe-area
+         insets in index.css then keep content clear of it. maximum-scale stops
+         iOS zooming the whole page when a text field takes focus. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#e8dfcb" />
+    <!-- Without it the browser asks for /favicon.ico, which does not exist. -->
+    <link rel="icon" type="image/png" href="/favicon.png" />
     <title>Leaflet</title>
     <script>
       (() => {
         try {
+          // Mirrors appearanceStore: light unless the reader chose dark, or
+          // chose to follow Windows. Runs before paint so there is no flash.
           const saved = JSON.parse(localStorage.getItem("leaflet.appearance.v1") || "null");
           const theme = saved?.theme === "light" || saved?.theme === "dark"
             ? saved.theme
-            : window.matchMedia("(prefers-color-scheme: light)").matches
-              ? "light"
-              : "dark";
+            : saved?.theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light";
           document.documentElement.dataset.theme = theme;
           document.documentElement.style.colorScheme = theme;
         } catch {
-          document.documentElement.dataset.theme = "dark";
-          document.documentElement.style.colorScheme = "dark";
+          document.documentElement.dataset.theme = "light";
+          document.documentElement.style.colorScheme = "light";
         }
       })();
     </script>

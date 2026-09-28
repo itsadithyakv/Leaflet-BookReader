@@ -3,6 +3,16 @@ module.exports = {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
+      screens: {
+        // A landscape phone is *wider* than `md` (844x390 on an iPhone 14), so
+        // width alone misreads it as a tablet. Height is the real constraint
+        // there, and these two carry that distinction into the markup.
+        short: { raw: "(max-height: 520px)" },
+        tall: { raw: "(min-height: 521px)" },
+        // Touch input, regardless of screen size: hover affordances do not
+        // exist and hit targets need to be finger-sized.
+        touch: { raw: "(hover: none) and (pointer: coarse)" }
+      },
       colors: {
         background: "rgb(var(--color-background) / <alpha-value>)",
         surface: "rgb(var(--color-surface) / <alpha-value>)",

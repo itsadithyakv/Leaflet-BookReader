@@ -1,55 +1,67 @@
 import { UiIcon, type UiIconName } from "./UiIcon";
+import type { DriveSyncStatus } from "@shared/sync/types";
 
-type AccountTier = "offline" | "cloud" | "premium";
-type SyncState = "offline" | "pending" | "synced" | "error";
+/**
+ * How sync is set up. There is no account tier: sync runs against the reader's
+ * own storage, so there is nothing to sign up for and nothing to pay for.
+ */
+export type SyncMode = "off" | "folder" | "drive";
 
 type AccountBadgeProps = {
-  tier: AccountTier;
-  syncState: SyncState;
+  mode: SyncMode;
+  status: DriveSyncStatus;
+  /** Books in the library whose file is not on this device yet. */
+  pending: number;
   onClick: () => void;
   animate: boolean;
 };
 
-const tierConfig: Record<AccountTier, { label: string; icon: UiIconName; tooltip: string; className: string }> = {
-  offline: {
-    label: "Offline",
+const modeConfig: Record<SyncMode, { label: string; icon: UiIconName; tooltip: string; className: string }> = {
+  off: {
+    label: "Local",
     icon: "cloud",
-    tooltip: "Sign in to sync your reading across devices",
+    tooltip: "Not backed up. Connect Google Drive in Settings to keep your library safe.",
     className: "text-on-surface-variant border-outline-variant/40 bg-surface-container-high/70"
   },
-  cloud: {
-    label: "Cloud",
+  folder: {
+    label: "Folder",
     icon: "cloud",
-    tooltip: "Sync enabled. Upgrade for premium features",
+    tooltip: "Syncing through your sync folder",
     className: "text-primary border-primary/30 bg-surface-container-high"
   },
-  premium: {
-    label: "Premium",
-    icon: "sparkle",
-    tooltip: "Premium active — sync & extras unlocked",
-    className: "leaflet-premium-badge"
+  drive: {
+    label: "Drive",
+    icon: "cloud",
+    tooltip: "Backed up to Google Drive",
+    className: "text-primary border-primary/30 bg-surface-container-high"
   }
 };
 
-const syncDot = (state: SyncState) => {
-  if (state === "pending") return "bg-yellow-400";
-  if (state === "synced") return "bg-emerald-400";
-  if (state === "error") return "bg-red-400";
+const statusDot = (status: DriveSyncStatus, mode: SyncMode) => {
+  if (mode === "off") return "bg-slate-500";
+  if (status === "syncing") return "bg-yellow-400";
+  if (status === "error") return "bg-red-400";
+  if (status === "success") return "bg-emerald-400";
   return "bg-slate-500";
 };
 
-export const AccountBadge = ({ tier, syncState, onClick, animate }: AccountBadgeProps) => {
-  const config = tierConfig[tier];
+export const AccountBadge = ({ mode, status, pending, onClick, animate }: AccountBadgeProps) => {
+  const config = modeConfig[mode];
+  const tooltip =
+    pending > 0
+      ? `${config.tooltip} — ${pending} ${pending === 1 ? "book" : "books"} not downloaded yet`
+      : config.tooltip;
+
   return (
     <button
       type="button"
-      title={config.tooltip}
+      title={tooltip}
       onClick={onClick}
       className={`leaflet-account-badge ${animate ? "leaflet-account-pop" : ""} ${config.className}`}
     >
       <UiIcon name={config.icon} size={17} />
       <span className="text-[11px] font-semibold uppercase tracking-[0.2em]">{config.label}</span>
-      <span className={`h-2 w-2 rounded-full ${syncDot(syncState)}`} />
+      <span className={`h-2 w-2 rounded-full ${statusDot(status, mode)}`} />
     </button>
   );
 };
