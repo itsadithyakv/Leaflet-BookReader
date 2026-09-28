@@ -12,7 +12,7 @@ import { stateRoutes } from "./routes/state.js";
  * Kept apart from `index.js` so tests can run the real app against a throwaway
  * database, with their own (tiny) rate limits, without reading the environment.
  */
-export function createApp(db, { limits = defaultLimits(), corsOrigin = "" } = {}) {
+export function createApp(db, { limits = defaultLimits(), corsOrigin = "", mailer = null } = {}) {
   const app = express();
   app.disable("x-powered-by");
   // Nothing sends If-None-Match (the app calls from Rust), so an ETag is a
@@ -63,7 +63,8 @@ export function createApp(db, { limits = defaultLimits(), corsOrigin = "" } = {}
 
   // No global body parser: each route parses its own body with its own limit,
   // and routes that need an account authenticate before parsing anything.
-  app.use("/v1", accountRoutes(db, limits));
+  // Tests pass only the limits they care about.
+  app.use("/v1", accountRoutes(db, { ...defaultLimits(), ...limits }, mailer));
   app.use("/v1", stateRoutes(db));
   app.use("/v1", socialRoutes(db));
   // After socialRoutes, so `/profile/me` is matched before `/profile/:handle`.

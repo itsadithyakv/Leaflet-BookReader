@@ -55,6 +55,11 @@ one, we store the following on our server:
   password as a salted scrypt hash. We never store or see your password itself.
 - **Sign-in sessions:** a hashed token for each device you are signed in on,
   with when it was created and last used, so that you stay signed in.
+- **Password reset:** if you ask for a reset code, a hash of the code, when it
+  expires (15 minutes later) and how many wrong tries it has had. It is deleted
+  once used, after five wrong tries, or when it expires. We also keep the dates
+  of your resets from the last year, because an account can be reset three
+  times a year.
 - **Profile, only if you make it public:** a handle you choose, your display
   name, and weekly reading minutes, streak and number of finished books, which
   are shown on leaderboards. Profiles are private by default, and a private
@@ -91,6 +96,10 @@ challenged.
   reads at startup to find our server, are hosted on GitHub Pages. Loading them
   sends GitHub the usual web request information, such as your IP address, under
   GitHub's privacy statement. No account or reading information is sent.
+- **Gmail (password reset emails).** If you ask to reset your password, your
+  email address and the one-time code are passed to Google's Apps Script and
+  sent from our Gmail account, so Google handles that email under its own
+  privacy terms. Nothing else about you or your reading is included.
 - **DuckDNS.** Our server's address, `leafletapp.duckdns.org`, is provided by
   DuckDNS, which only translates the name into the server's IP address.
 - **Microsoft Store.** The Store handles downloads and updates of the app under
@@ -106,7 +115,8 @@ to the minimum the features need.
 ## How long we keep it
 
 We keep your account information until you delete your account. Sign-in
-sessions expire after 90 days without use. Community data is kept only as long
+sessions expire after 90 days without use, and a password reset code after 15
+minutes. Community data is kept only as long
 as it is useful: kudos for 21 days, your inbox of notifications for 60 days,
 weekly duels for 90 days, and a follow until either reader removes it. Making
 your profile private hides you from boards, inboxes and duels straight away. When you delete your account from

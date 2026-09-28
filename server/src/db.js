@@ -21,6 +21,12 @@ import { MongoClient } from "mongodb";
  *             since only "this week" and "today" are ever asked of it.
  * `duels`     one per pair per week; expires after 90 days.
  * `events`    the inbox, materialised; expires after 60 days.
+ *
+ *             (`accounts.passwordResets` keeps when the last year's resets were
+ *             completed; three a year is the limit.)
+ * `resets`    at most one pending password reset per account: the SHA-256 of
+ *             the emailed code, how many wrong tries it has had, and when it
+ *             expires (15 minutes; the TTL index removes it).
  */
 
 const DAY_SECONDS = 24 * 60 * 60;
@@ -86,6 +92,8 @@ export async function ensureIndexes(db) {
     { name: "leaderboard" }
   );
 
+  await resets(db).createIndex({ expiresAt: 1 }, { name: "expiry", expireAfterSeconds: 0 });
+
   await ensureCommunityIndexes(db);
 }
 
@@ -121,6 +129,7 @@ export const follows = (db) => db.collection("follows");
 export const kudos = (db) => db.collection("kudos");
 export const duels = (db) => db.collection("duels");
 export const events = (db) => db.collection("events");
+export const resets = (db) => db.collection("resets");
 
 export async function close() {
   if (client) {

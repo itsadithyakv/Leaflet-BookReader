@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { accounts, profiles, sessions, states } from "../db.js";
+import { createHash, randomInt, timingSafeEqual } from "node:crypto";
+import { accounts, profiles, resets, sessions, states } from "../db.js";
 import { HttpError, asyncHandler, smallJson } from "../http.js";
 import { accountView, createSession, loadAccount, requireAccount } from "../auth.js";
 import { burnPasswordCheck, hashPassword, passwordProblem, verifyPassword } from "../passwords.js";
@@ -20,6 +21,53 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const EMAIL_MAX = 254;
 const DISPLAY_NAME_MAX = 40;
 const LOGIN_FAILED = "Email or password is incorrect.";
+
+// ---- password reset ---------------------------------------------------------
+//
+// A code, not a link: the app is a desktop program with no web page for a
+// link to open, and a code is typed where the reader already is.
+//
+// Eight characters from 29 that are hard to misread (no 0/O, 1/I/L, U/V),
+// shown as ABCD-EFGH: 29^8 ≈ 5e11 codes, valid 15 minutes, 5 wrong tries,
+// then gone.
+const RESET_ALPHABET = "ABCDEFGHJKMNPQRSTWXYZ23456789";
+const RESET_LENGTH = 8;
+export const RESET_MINUTES = 15;
+const RESET_TRIES = 5;
+const RESET_FAILED = "That code is wrong or has expired. Ask for a new one.";
+// Completed resets allowed per account in any 365 days. Past that, the request
+// emails an explanation instead of a code (the reply on screen stays the same,
+// so it still cannot tell whether an address has an account).
+export const RESETS_PER_YEAR = 3;
+const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+
+/** The account's completed resets in the last 365 days, oldest first. */
+function resetsThisYear(account, now = Date.now()) {
+  return (account.passwordResets ?? [])
+    .map((at) => new Date(at))
+    .filter((at) => now - at.getTime() < YEAR_MS)
+    .sort((a, b) => a - b);
+}
+
+/** "12 March 2027": the day a reset is possible again. */
+function resetAvailableOn(recent) {
+  const at = new Date(recent[0].getTime() + YEAR_MS);
+  return at.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+}
+
+function newResetCode() {
+  let code = "";
+  for (let index = 0; index < RESET_LENGTH; index += 1) {
+    code += RESET_ALPHABET[randomInt(RESET_ALPHABET.length)];
+  }
+  return `${code.slice(0, 4)}-${code.slice(4)}`;
+}
+
+/** What the reader typed, as stored: upper case, no spaces or dashes. */
+function resetDigest(code) {
+  const cleaned = typeof code === "string" ? code.toUpperCase().replace(/[^A-Z0-9]/g, "") : "";
+  return createHash("sha256").update(cleaned).digest();
+}
 
 export function normaliseEmail(value) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
@@ -53,11 +101,13 @@ function cleanAvatar(value) {
   return value;
 }
 
-export function accountRoutes(db, limits) {
+export function accountRoutes(db, limits, mailer = null) {
   const router = Router();
   const byIp = new RateLimiter(limits.ip);
   const byEmail = new RateLimiter(limits.email);
   const signups = new RateLimiter(limits.signup);
+  const resetsByIp = new RateLimiter(limits.resetIp);
+  const resetsByEmail = new RateLimiter(limits.resetEmail);
   const auth = requireAccount(db);
 
   const tooMany = (seconds) =>
@@ -151,6 +201,126 @@ export function accountRoutes(db, limits) {
       if (!account || !ok) {
         throw new HttpError(401, LOGIN_FAILED);
       }
+      const token = await createSession(db, account._id);
+      response.json({ token, account: accountView(account) });
+    })
+  );
+
+  /**
+   * Emails a reset code, if the address has an account. The answer is the same
+   * either way, and the email is sent after answering, so neither the reply nor
+   * its timing tells whether an address is registered.
+   */
+  router.post(
+    "/auth/reset/request",
+    smallJson,
+    asyncHandler(async (request, response) => {
+      if (!mailer) {
+        throw new HttpError(503, "Password reset isn't set up on this server yet.");
+      }
+      const email = normaliseEmail(request.body?.email);
+      const problem = emailProblem(email);
+      if (problem) {
+        throw new HttpError(400, problem);
+      }
+      const ipKey = request.ip ?? "unknown";
+      const wait = Math.max(resetsByIp.blockedFor(ipKey), resetsByEmail.blockedFor(email));
+      if (wait) {
+        throw tooMany(wait);
+      }
+      resetsByIp.hit(ipKey);
+      resetsByEmail.hit(email);
+
+      const account = await accounts(db).findOne({ email }, { projection: { _id: 1, passwordResets: 1 } });
+      const recent = account ? resetsThisYear(account) : [];
+      if (account && recent.length >= RESETS_PER_YEAR) {
+        const availableOn = resetAvailableOn(recent);
+        Promise.resolve()
+          .then(() => mailer({ kind: "limit", to: email, availableOn }))
+          .catch((error) => console.error("[leaflet] reset limit email not sent:", error?.message ?? error));
+      } else if (account) {
+        const code = newResetCode();
+        const now = new Date();
+        // A new code replaces the last one, and its count of wrong tries.
+        await resets(db).replaceOne(
+          { _id: account._id },
+          {
+            codeHash: resetDigest(code).toString("hex"),
+            attempts: 0,
+            createdAt: now,
+            expiresAt: new Date(now.getTime() + RESET_MINUTES * 60_000)
+          },
+          { upsert: true }
+        );
+        Promise.resolve()
+          .then(() => mailer({ kind: "code", to: email, code, minutes: RESET_MINUTES }))
+          .catch((error) => console.error("[leaflet] reset email not sent:", error?.message ?? error));
+      }
+      response.json({ ok: true, minutes: RESET_MINUTES });
+    })
+  );
+
+  /**
+   * Sets a new password with an emailed code, signs out every device, and
+   * signs this one in.
+   */
+  router.post(
+    "/auth/reset/confirm",
+    smallJson,
+    asyncHandler(async (request, response) => {
+      limitIp(request);
+      const body = request.body ?? {};
+      const email = normaliseEmail(body.email);
+      const problem = passwordProblem(body.password);
+      if (problem) {
+        throw new HttpError(400, problem);
+      }
+      const key = `reset:${email}`;
+      const wait = byEmail.blockedFor(key);
+      if (wait) {
+        throw tooMany(wait);
+      }
+      const account = emailProblem(email) ? null : await accounts(db).findOne({ email });
+      const pending = account ? await resets(db).findOne({ _id: account._id }) : null;
+      const fresh = pending && pending.expiresAt > new Date() && pending.attempts < RESET_TRIES;
+      const matches =
+        fresh && timingSafeEqual(Buffer.from(pending.codeHash, "hex"), resetDigest(body.code));
+      if (!matches) {
+        byEmail.hit(key);
+        if (pending) {
+          // Wrong tries use the code up; the last one takes it away.
+          if (pending.attempts + 1 >= RESET_TRIES) {
+            await resets(db).deleteOne({ _id: pending._id });
+          } else {
+            await resets(db).updateOne({ _id: pending._id }, { $inc: { attempts: 1 } });
+          }
+        }
+        throw new HttpError(400, RESET_FAILED);
+      }
+      byEmail.reset(key);
+      const recent = resetsThisYear(account);
+      if (recent.length >= RESETS_PER_YEAR) {
+        await resets(db).deleteOne({ _id: account._id });
+        throw new HttpError(403, `This account has been reset ${RESETS_PER_YEAR} times this year. It can be reset again on ${resetAvailableOn(recent)}.`);
+      }
+
+      // The code is spent before anything else, so it can never be used twice.
+      const { deletedCount } = await resets(db).deleteOne({ _id: account._id, codeHash: pending.codeHash });
+      if (deletedCount !== 1) {
+        throw new HttpError(400, RESET_FAILED);
+      }
+      await accounts(db).updateOne(
+        { _id: account._id },
+        {
+          $set: {
+            passwordHash: await hashPassword(body.password),
+            passwordChangedAt: new Date(),
+            // Only the last year's are kept; older ones no longer count.
+            passwordResets: [...recent, new Date()]
+          }
+        }
+      );
+      await sessions(db).deleteMany({ userId: account._id });
       const token = await createSession(db, account._id);
       response.json({ token, account: accountView(account) });
     })
@@ -253,6 +423,7 @@ export function accountRoutes(db, limits) {
       forgetBoards();
       await states(db).deleteOne({ _id: account._id });
       await sessions(db).deleteMany({ userId: account._id });
+      await resets(db).deleteOne({ _id: account._id });
       await accounts(db).deleteOne({ _id: account._id });
       response.json({ deleted: true });
     })

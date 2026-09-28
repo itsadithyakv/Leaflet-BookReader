@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { createApp } from "./app.js";
 import { close, connect } from "./db.js";
+import { mailerFromEnv } from "./mail.js";
 
 /**
  * Leaflet's only server: accounts, the leaderboard, and an opaque copy of each
@@ -32,8 +33,15 @@ if (!uri) {
   process.exit(1);
 }
 
+// Password reset sends through a Google Apps Script web app; without its
+// address and secret the reset endpoints say it is not set up.
+const mailer = mailerFromEnv();
+if (!mailer) {
+  console.warn("[leaflet] RESET_MAIL_URL / RESET_MAIL_SECRET not set: password reset is off.");
+}
+
 const db = await connect(uri, dbName);
-const app = createApp(db, { corsOrigin: process.env.CORS_ORIGIN || "" });
+const app = createApp(db, { corsOrigin: process.env.CORS_ORIGIN || "", mailer });
 
 const server = app.listen(port, host, () => {
   console.log(`Leaflet API on http://${host}:${port}`);

@@ -35,6 +35,8 @@ creates a `leaflet_test_<random>` database that it drops at the end.
 | `HOST` | `127.0.0.1` | Keep on loopback; Caddy is the only thing that should reach it. |
 | `PORT` | `8787` | |
 | `CORS_ORIGIN` | empty (off) | Only for calling the API from a browser page. The app does not need it. |
+| `RESET_MAIL_URL` | empty (reset off) | The Apps Script web app that sends reset emails (`deploy/password-reset-mailer.gs`). |
+| `RESET_MAIL_SECRET` | empty | The shared secret, equal to the script's `SECRET` property. |
 
 A `.env` in the working directory is loaded if present (variables already set
 win). Production uses systemd's `EnvironmentFile` instead, and deploys no `.env`.
@@ -55,6 +57,8 @@ Authenticated routes take `Authorization: Bearer <token>`. Errors are
 | `POST /v1/auth/logout` | ✓ | Ends this session. |
 | `GET /v1/auth/me` | ✓ | `{account}`. |
 | `POST /v1/auth/password` | ✓ | `{current, next}`. Signs out every other session. `403` if `current` is wrong. |
+| `POST /v1/auth/reset/request` | | `{email}` → `{ok, minutes}`, the same whether or not the address has an account; emails a code if it does (or, after 3 resets in 365 days, an email saying when it can be reset again). `429` past 3 per address or 10 per IP an hour; `503` if no mailer is configured. |
+| `POST /v1/auth/reset/confirm` | | `{email, code, password}` → `{token, account}`. Sets the password, ends every session, signs in. `400` "That code is wrong or has expired." |
 | `PATCH /v1/account` | ✓ | `{displayName?, avatar?}`. Only the fields sent change; `avatar: null` clears it. The avatar is copied onto the profile too. |
 | `DELETE /v1/account` | ✓ | `{password}`. Deletes community data, account, profile, state and all sessions. |
 | `GET /v1/state` | ✓ | `{version, state}` (base64 gzipped blob, or `null`). |
@@ -119,6 +123,9 @@ In memory, per process (see `src/rateLimit.js`):
 | New accounts per IP, and per email | 5 / hour |
 | Community writes (follow, unfollow, kudos, duel, accept, decline) per account | 60 / 15 min |
 | Searches per IP | 120 / 5 min |
+| Password-reset emails per IP / per email address | 10 / hour · 3 / hour |
+| Completed password resets per account | 3 / 365 days (stored on the account; past it the email explains when) |
+| Wrong reset codes per email address | 10 / 15 min, and 5 per code |
 
 Because they live in memory, **they assume a single instance** and reset on
 restart. Running several instances would multiply the limits; move the counters
@@ -130,7 +137,8 @@ it by sending the header directly.
 ## Exactly what is stored per reader
 
 For the privacy policy. Four core collections keyed by the account's
-ObjectId, and four small community collections that reference it.
+ObjectId, a short-lived password-reset record, and four small community
+collections that reference it.
 
 **`accounts`** — one per account
 - `_id` — ObjectId
@@ -139,11 +147,18 @@ ObjectId, and four small community collections that reference it.
 - `displayName` — optional, up to 40 characters, or `null`
 - `avatar` — optional, one of the ids in `src/avatars.js`, or `null`
 - `createdAt`, `passwordChangedAt` — dates
+- `passwordResets` — when the password was reset with an emailed code, the last 365 days only (for the 3-a-year limit)
 
 **`sessions`** — one per signed-in device
 - `_id` — SHA-256 (hex) of the session token
 - `userId` — the account's ObjectId
 - `createdAt`, `lastUsedAt`, `expiresAt` — dates
+
+**`resets`** — only while a password reset is pending; **deleted after 15 minutes** (TTL), when used, or after 5 wrong tries
+- `_id` — the account's ObjectId
+- `codeHash` — SHA-256 (hex) of the emailed code (never the code)
+- `attempts` — wrong tries so far
+- `createdAt`, `expiresAt` — dates
 
 **`profiles`** — only once the reader saves a profile (private by default)
 - `_id` — the account's ObjectId
@@ -201,7 +216,7 @@ self-reported by the client (the server cannot read the state blob by design).
 `DELETE /v1/account` (password required) deletes, in order, the reader's
 community data (follows in both directions, kudos sent and received, duels
 they are in, their inbox and the events they caused in others' inboxes), the
-profile, the state, every session, then the account. `DELETE /v1/profile/me`
+profile, the state, every session, a pending reset, then the account. `DELETE /v1/profile/me`
 removes the same community data along with the profile. Sessions go before the account so a
 failure part-way leaves an account the reader can still sign in to and delete
 again. Nothing is kept afterwards (Atlas backups, if enabled on a paid tier,
@@ -293,6 +308,4 @@ for `localhost` / `127.0.0.1` / `[::1]`.
 ## Not built yet
 
 - Email verification (addresses are not confirmed).
-- Password reset by email — a reader who forgets their password today cannot
-  recover the account; their local library is unaffected.
 - Shared rate-limit store for more than one instance.

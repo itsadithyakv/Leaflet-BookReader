@@ -75,6 +75,10 @@ export function defaultLimits() {
     // Community writes (follow, kudos, duels) per account.
     social: { limit: 60, windowMs: 15 * MINUTE },
     // Handle searches per IP. Debounced typing is a handful per lookup.
-    search: { limit: 120, windowMs: 5 * MINUTE }
+    search: { limit: 120, windowMs: 5 * MINUTE },
+    // Password-reset emails: per address asking, and per email address asked
+    // about. Each one is a real email from a Gmail with a daily quota.
+    resetIp: { limit: 10, windowMs: 60 * MINUTE },
+    resetEmail: { limit: 3, windowMs: 60 * MINUTE }
   };
 }

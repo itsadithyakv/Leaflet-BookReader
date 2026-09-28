@@ -89,7 +89,8 @@ This is the first public release.
   highlights, notes and collections, restorable on a new computer. Leaflet can
   only see the files it created there.
 - **Leaflet account** (email and password): one identity for the leaderboards
-  now and the mobile app later.
+  now and the mobile app later. Forgot your password? Leaflet emails you a code
+  to set a new one (up to three times a year).
 - **Community:** weekly leaderboards (everyone, or the readers you follow),
   follows, kudos, friendly weekly duels, an inbox, and a public reader card
   with your shelf. Your profile is **private until you make it public**.
@@ -115,8 +116,9 @@ Drive. Full policy:
 - **PDFs** can't be searched or highlighted yet (text books can), and very
   large PDFs (hundreds of MB) may not open.
 - **Links inside books** to websites don't open yet.
-- **Accounts** have no email verification or password reset yet; a forgotten
-  password means a new account (your library on this computer is unaffected).
+- **Accounts** don't verify email addresses yet. Password-reset emails come
+  from a Gmail address, so check spam if one doesn't arrive, and there's a
+  daily limit of about 100.
 - **Duel results** can appear up to a day after the week ends, as they wait
   for the week to end in every time zone.
 - **Formats beyond the built-in six** need Calibre installed from
@@ -132,4 +134,4 @@ Drive. Full policy:
 | Package | MSIX, `AdithyaKV.LeafletBookReader`, publisher PaperKite |
 | Library database | SQLite, schema version 3 (upgrades older libraries in place, with a backup copy first) |
 | API | Node 22 + MongoDB Atlas, `https://leafletapp.duckdns.org` (found through the signed config on GitHub Pages) |
-| Tests at release | 254 Rust, 37 app (Vitest), 43 server |
+| Tests at release | 254 Rust, 37 app (Vitest), 51 server |

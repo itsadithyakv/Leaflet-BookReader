@@ -363,6 +363,35 @@ pub async fn login(db_mutex: &std::sync::Mutex<Database>, email: &str, password:
   start_session(db_mutex, "/v1/auth/login", body).await
 }
 
+/// Asks the server to email a password-reset code. It answers the same whether
+/// or not the address has an account; returns how long the code lasts.
+pub async fn request_password_reset(db_mutex: &std::sync::Mutex<Database>, email: &str) -> Result<u32> {
+  let base = configured_base(db_mutex)?;
+  let response = client()?
+    .post(format!("{base}/v1/auth/reset/request"))
+    .json(&serde_json::json!({ "email": email }))
+    .send()
+    .await
+    .map_err(unreachable)?;
+  if !response.status().is_success() {
+    return Err(account_failure(response).await);
+  }
+  let reply: serde_json::Value = response.json().await.unwrap_or_default();
+  Ok(reply.get("minutes").and_then(|value| value.as_u64()).unwrap_or(15) as u32)
+}
+
+/// Sets a new password with the emailed code. The server signs every device
+/// out and this one in, so the answer is a session, like a login.
+pub async fn reset_password(
+  db_mutex: &std::sync::Mutex<Database>,
+  email: &str,
+  code: &str,
+  password: &str
+) -> Result<AccountStatus> {
+  let body = serde_json::json!({ "email": email, "code": code, "password": password });
+  start_session(db_mutex, "/v1/auth/reset/confirm", body).await
+}
+
 /// Who is signed in. With `refresh`, asks the server, which is also how an
 /// expired or revoked session is noticed; offline, falls back to the cache.
 pub async fn status(db_mutex: &std::sync::Mutex<Database>, refresh: bool) -> Result<AccountStatus> {

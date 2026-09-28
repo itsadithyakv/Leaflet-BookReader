@@ -61,8 +61,39 @@ workflow publishes `site/` once Pages is switched on (step 2).
    `0.0.0.0/0`.
 4. **Connect → Drivers** → copy the `mongodb+srv://…` string and put the user's
    password in it. Keep it for step 4; paste it nowhere else.
+   A password with `@ : / ? # %` in it must be URL-encoded in the string
+   (`@` → `%40`); a letters-and-digits password avoids the question.
+
+**Only the server connects to MongoDB.** The app never sees the string: it
+talks to `https://leafletapp.duckdns.org`, and the server talks to Atlas. So
+the string goes in exactly one place, `/etc/leaflet-api.env` on the VM
+(step 4). There is nothing Mongo-related to put in the app's build or in
+`apps/.env`.
 
 The server creates its own collections and indexes on first start.
+
+### 3b. Optional: check the string from your PC first
+
+Proves the user, password and string are right before the VM is involved.
+
+1. Atlas → Network Access → **Add Current IP Address** (this PC; delete the
+   entry afterwards).
+2. In `D:\Leaflet\server`, create `.env` (it is git-ignored) with:
+   ```
+   MONGO_URI=mongodb+srv://USER:PASSWORD@CLUSTER.mongodb.net/?retryWrites=true&w=majority
+   MONGO_DB=leaflet
+   ```
+3. Run it:
+   ```powershell
+   cd D:\Leaflet\server
+   npm install
+   npm start
+   ```
+   `Leaflet API on http://127.0.0.1:8787` means it connected (a Mongo error
+   and exit means it did not). `http://127.0.0.1:8787/health` in a browser
+   shows `{"ok":true}`, and Atlas → Browse Collections now shows the
+   `leaflet` database. Ctrl+C to stop.
+4. Delete `server\.env` and the extra Atlas IP entry.
 
 ## 4. The VM, one time — *ssh into the VM*
 
@@ -94,7 +125,73 @@ MONGO_URI=mongodb+srv://USER:PASSWORD@CLUSTER.mongodb.net/?retryWrites=true&w=ma
 MONGO_DB=leaflet
 HOST=127.0.0.1
 PORT=8787
+RESET_MAIL_URL=https://script.google.com/macros/s/DEPLOYMENT_ID/exec
+RESET_MAIL_SECRET=the-long-random-string-from-step-4b
 ```
+
+The two `RESET_MAIL_*` lines come from step 4b; leave them out until then
+(password reset stays off and says so).
+
+### 4b. Password-reset emails — *script.google.com*
+
+Free: Google Apps Script sends from a Gmail account, about 100 emails a day.
+The emails come **from** whichever Gmail owns the script, so use the one you
+want readers to see (a dedicated one, e.g. `leaflet.app.mail@gmail.com`, keeps
+resets out of your personal Sent folder). It can be done before or after the
+rest of step 4 and step 5; until it is, "Forgot password?" says reset is not
+set up yet.
+
+1. **Make the secret.** In PowerShell, copy what this prints:
+   ```powershell
+   $bytes = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes); [Convert]::ToBase64String($bytes)
+   ```
+2. **Create the project.** Sign in to that Gmail, open
+   <https://script.google.com>, **New project**. Click "Untitled project" at
+   the top and name it **Leaflet mailer**.
+3. **Paste the script.** Select everything in `Code.gs`, delete it, and paste
+   the whole of [`server/deploy/password-reset-mailer.gs`](../server/deploy/password-reset-mailer.gs).
+   Check `SUPPORT_EMAIL` near the top (where a reader who has used up a year's
+   resets is told to write). **Save** (Ctrl+S).
+4. **Add the secret.** Left bar → **Project Settings** (gear) → scroll to
+   **Script Properties** → **Add script property**: Property `SECRET`, Value =
+   the string from step 1 → **Save script properties**.
+5. **Deploy.** Top right **Deploy → New deployment** → gear next to "Select
+   type" → **Web app**. Description "v1"; **Execute as: Me**; **Who has
+   access: Anyone** → **Deploy**.
+6. **Authorise.** Google asks for permission to send email as you: **Authorize
+   access** → pick the account → "Google hasn't verified this app" →
+   **Advanced** → **Go to Leaflet mailer (unsafe)** → **Allow**. (It is your
+   own script; the warning is for scripts that are not published.)
+7. **Copy the Web app URL**, `https://script.google.com/macros/s/…/exec`.
+   Open it in a browser: `{"ok":true,"service":"leaflet-mailer","quotaLeft":100}`
+   means it is live.
+8. **Give the server both values.** On the VM:
+   ```bash
+   sudo nano /etc/leaflet-api.env
+   ```
+   add
+   ```
+   RESET_MAIL_URL=https://script.google.com/macros/s/…/exec
+   RESET_MAIL_SECRET=<the string from step 1>
+   ```
+   then, if the API is already running (step 5 done):
+   ```bash
+   sudo systemctl restart leaflet-api
+   sudo journalctl -u leaflet-api -n 5
+   ```
+   The warning "password reset is off" is gone.
+9. **Try it**: in the app, Settings → Account → **Forgot password?** with an
+   address that has an account. The code arrives within a minute (check spam
+   the first time and mark it "not spam").
+
+Rules the server applies: a code works once, for 15 minutes, with 5 tries; 3
+reset emails per address an hour; **3 completed resets per account a year**,
+after which the email says when it can be reset again instead of carrying a
+code.
+
+After editing the script later: **Deploy → Manage deployments** → pencil →
+Version: **New version** → Deploy. The URL stays the same; a new *deployment*
+would give a new URL.
 
 ### Caddy — add one block, change nothing else
 
@@ -189,6 +286,7 @@ Then, in the installed app:
 - [ ] Reader: Pages layout turns pages; Ctrl+F finds a word; a highlight survives closing the book.
 - [ ] Settings → Backup: connect Google Drive, **Back up now** succeeds.
 - [ ] Settings → Account: sign up, sign out, sign in.
+- [ ] Settings → Account → Forgot password?: the code arrives by email and sets a new password.
 - [ ] Social → Community: the board loads (you on it once your profile is public).
 - [ ] Settings → Reminders → **Send a test**: a toast with Pip.
 - [ ] Settings → About → **Copy diagnostics**: pastes a report with version 1.0.0.

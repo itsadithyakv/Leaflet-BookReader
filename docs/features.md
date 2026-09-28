@@ -814,7 +814,15 @@ leaderboards now and for one identity across devices when the mobile app ships.
 - Deleting the account (Settings, with the password) removes the account,
   profile, synced state, sessions and community data at once.
 - The server never receives Google or Drive credentials.
-- Not yet: email verification and password reset by email.
+- **Forgot password?** on the sign-in card emails an eight-character code
+  (`ABCD-EFGH`) that sets a new password, signs every device out and this one
+  in. Codes are stored hashed, last 15 minutes, allow five wrong tries and work
+  once; the request answers the same whether or not the address has an
+  account. Three completed resets per account in any 365 days; past that the
+  email explains the limit and the date instead of carrying a code. The email is sent by a Google Apps Script web app from the owner's
+  Gmail (`server/deploy/password-reset-mailer.gs`, about 100 a day, free); the
+  server holds only a shared secret for it (`server/src/mail.js`).
+- Not yet: email verification.
 
 An earlier version had a sign-in modal that accepted any email, verified
 nothing, and stored the result in `localStorage`, plus a "premium" flag anyone

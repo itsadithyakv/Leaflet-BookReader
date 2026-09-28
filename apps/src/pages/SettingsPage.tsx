@@ -883,11 +883,16 @@ const AccountCard = ({ showToast }: { showToast: (message: string) => void }) =>
   const load = useAccountStore((state) => state.load);
   const signUp = useAccountStore((state) => state.signUp);
   const signIn = useAccountStore((state) => state.signIn);
+  const requestReset = useAccountStore((state) => state.requestReset);
+  const resetPassword = useAccountStore((state) => state.resetPassword);
   const signOut = useAccountStore((state) => state.signOut);
   const changePassword = useAccountStore((state) => state.changePassword);
   const deleteAccount = useAccountStore((state) => state.deleteAccount);
 
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [mode, setMode] = useState<"signin" | "signup" | "reset">("signin");
+  // Forgotten password: the address a code was sent to, and for how long it lasts.
+  const [codeSent, setCodeSent] = useState<{ email: string; minutes: number } | null>(null);
+  const [code, setCode] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -1053,7 +1058,137 @@ const AccountCard = ({ showToast }: { showToast: (message: string) => void }) =>
     );
   }
 
+  if (mode === "reset") {
+    const leave = () => {
+      setMode("signin");
+      setCodeSent(null);
+      setCode("");
+      reset();
+    };
+    const sendCode = () => {
+      setBusy(true);
+      setError(null);
+      requestReset(email.trim())
+        .then((minutes) => {
+          setCodeSent({ email: email.trim(), minutes });
+          setCode("");
+        })
+        .catch((cause) => setError(errorMessage(cause)))
+        .finally(() => setBusy(false));
+    };
+    const codeReady = code.replace(/[^a-z0-9]/gi, "").length === 8 && password.length >= 8;
+    return (
+      <div className="paper-surface rounded-xl p-5">
+        <p className="text-xs uppercase tracking-widest text-on-surface-variant">Account</p>
+        <p className="mt-3 font-headline text-2xl font-bold text-on-surface">Reset your password</p>
+        {!codeSent ? (
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (email.trim() && !busy) {
+                sendCode();
+              }
+            }}
+          >
+            <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
+              We'll email you a code to set a new password. Your library on this computer is not affected.
+            </p>
+            <label className={labelClass}>Email</label>
+            <input
+              type="email"
+              autoComplete="email"
+              autoCapitalize="none"
+              spellCheck={false}
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              className={fieldClass}
+            />
+            {errorBox}
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <button
+                type="submit"
+                className="tactile-button tactile-button-primary px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={busy || !email.trim()}
+              >
+                {busy ? "One moment…" : "Email me a code"}
+              </button>
+              <button type="button" className="text-xs text-on-surface-variant underline" onClick={leave}>
+                Back to sign in
+              </button>
+            </div>
+          </form>
+        ) : (
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (codeReady && !busy) {
+                attempt(async () => {
+                  await resetPassword(codeSent.email, code, password);
+                  // Signed in now; after a later sign-out the card opens on sign in.
+                  setMode("signin");
+                  setCodeSent(null);
+                  setCode("");
+                }, "Password changed. You are signed in.");
+              }
+            }}
+          >
+            <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
+              If <span className="font-semibold text-on-surface">{codeSent.email}</span> has a Leaflet account, a code
+              is on its way. It works for {codeSent.minutes} minutes. Not there after a minute? Check spam. (An
+              account can be reset three times a year.)
+            </p>
+            <label className={labelClass}>Code from the email</label>
+            <input
+              autoComplete="one-time-code"
+              autoCapitalize="characters"
+              spellCheck={false}
+              placeholder="ABCD-EFGH"
+              maxLength={12}
+              value={code}
+              onChange={(event) => setCode(event.target.value.toUpperCase())}
+              className={`${fieldClass} font-mono tracking-[0.2em]`}
+            />
+            <label className={labelClass}>New password</label>
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              className={fieldClass}
+            />
+            <p className="mt-1 text-[10px] text-on-surface-variant">
+              At least 8 characters. Every device signed in to this account is signed out.
+            </p>
+            {errorBox}
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <button
+                type="submit"
+                className="tactile-button tactile-button-primary px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={busy || !codeReady}
+              >
+                {busy ? "One moment…" : "Set password and sign in"}
+              </button>
+              <button type="button" className="text-xs text-on-surface-variant underline" disabled={busy} onClick={sendCode}>
+                Send a new code
+              </button>
+              <button type="button" className="text-xs text-on-surface-variant underline" onClick={leave}>
+                Back to sign in
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    );
+  }
+
   const signingUp = mode === "signup";
+  /** To the reset form, keeping the email already typed. */
+  const forgotPassword = () => {
+    setMode("reset");
+    setCodeSent(null);
+    setPassword("");
+    setError(null);
+  };
   const canSubmit = email.trim().length > 0 && password.length >= (signingUp ? 8 : 1);
   const submit = () =>
     attempt(
@@ -1111,9 +1246,27 @@ const AccountCard = ({ showToast }: { showToast: (message: string) => void }) =>
           onChange={(event) => setPassword(event.target.value)}
           className={fieldClass}
         />
-        {signingUp && <p className="mt-1 text-[10px] text-on-surface-variant">At least 8 characters.</p>}
+        {signingUp ? (
+          <p className="mt-1 text-[10px] text-on-surface-variant">At least 8 characters.</p>
+        ) : (
+          <div className="mt-1 flex justify-end">
+            <button type="button" className="text-[11px] font-semibold text-primary hover:underline" onClick={forgotPassword}>
+              Forgot password?
+            </button>
+          </div>
+        )}
 
-        {errorBox}
+        {error && (
+          <div className="mt-3 rounded-lg bg-error-container/40 px-3 py-2 text-xs text-on-surface">
+            <p>{error}</p>
+            {/* A failed sign-in is exactly when a reset is wanted. */}
+            {!signingUp && (
+              <button type="button" className="mt-1 font-semibold text-primary underline" onClick={forgotPassword}>
+                Reset your password with an emailed code
+              </button>
+            )}
+          </div>
+        )}
 
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <button
@@ -1133,6 +1286,7 @@ const AccountCard = ({ showToast }: { showToast: (message: string) => void }) =>
           >
             {signingUp ? "I have an account" : "Create an account"}
           </button>
+
         </div>
       </form>
       {signingUp && (PRIVACY_URL || TERMS_URL) && (

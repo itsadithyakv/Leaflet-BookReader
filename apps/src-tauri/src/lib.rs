@@ -261,6 +261,8 @@ pub fn run() {
       commands::account_status,
       commands::account_signup,
       commands::account_login,
+      commands::account_reset_request,
+      commands::account_reset_confirm,
       commands::account_set_avatar,
       commands::account_logout,
       commands::account_change_password,

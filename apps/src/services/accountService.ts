@@ -65,6 +65,16 @@ export const accountService = {
     return invoke<AccountStatus>("account_login", { email, password });
   },
 
+  /** Emails a reset code, if the address has an account. Minutes the code lasts. */
+  async requestReset(email: string): Promise<number> {
+    return invoke<number>("account_reset_request", { email });
+  },
+
+  /** A new password with the emailed code; signs this device in. */
+  async confirmReset(email: string, code: string, password: string): Promise<AccountStatus> {
+    return invoke<AccountStatus>("account_reset_confirm", { email, code, password });
+  },
+
   async signOut(): Promise<AccountStatus> {
     return invoke<AccountStatus>("account_logout");
   },

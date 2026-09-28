@@ -10,6 +10,10 @@ type AccountState = {
   signUp: (email: string, password: string, displayName?: string, avatar?: string | null) => Promise<void>;
   setAvatar: (avatar: string | null) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
+  /** Emails a reset code; resolves to how many minutes it lasts. */
+  requestReset: (email: string) => Promise<number>;
+  /** Sets a new password with the code and signs in. */
+  resetPassword: (email: string, code: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   changePassword: (current: string, next: string) => Promise<void>;
   deleteAccount: (password: string) => Promise<void>;
@@ -62,6 +66,16 @@ export const useAccountStore = create<AccountState>((set) => {
     },
 
     signIn: (email, password) => run(() => accountService.signIn(email, password)),
+
+    async requestReset(email) {
+      try {
+        return await accountService.requestReset(email);
+      } catch (cause) {
+        throw new Error(errorMessage(cause));
+      }
+    },
+
+    resetPassword: (email, code, password) => run(() => accountService.confirmReset(email, code, password)),
 
     signOut: () => run(() => accountService.signOut()),
 

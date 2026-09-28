@@ -56,6 +56,27 @@ pub async fn account_login(
     .map_err(|e| e.to_string())
 }
 
+/// Emails a reset code (if the address has an account). Minutes it lasts.
+#[tauri::command]
+pub async fn account_reset_request(email: String, state: State<'_, AppState>) -> Result<u32, String> {
+  cloud::request_password_reset(&state.db, email.trim())
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// A new password with the emailed code; signs this device in.
+#[tauri::command]
+pub async fn account_reset_confirm(
+  email: String,
+  code: String,
+  password: String,
+  state: State<'_, AppState>
+) -> Result<cloud::AccountStatus, String> {
+  cloud::reset_password(&state.db, email.trim(), &code, &password)
+    .await
+    .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn account_logout(state: State<'_, AppState>) -> Result<cloud::AccountStatus, String> {
   cloud::logout(&state.db).await.map_err(|e| e.to_string())
