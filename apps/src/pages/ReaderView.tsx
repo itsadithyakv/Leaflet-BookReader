@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { isTauri } from "@tauri-apps/api/core";
 import type { Book } from "@shared/models/book";
-import ePub from "epubjs";
+import ePub, { EpubCFI } from "epubjs";
 import { bookService } from "../services/bookService";
 import { useLibraryStore } from "../store/libraryStore";
 import { useAutoHideChrome } from "../hooks/useAutoHideChrome";
@@ -27,368 +27,25 @@ import { watchForeground } from "../services/windowService";
 import { accountService } from "../services/accountService";
 import ztNatureBoldWoff2 from "../assets/fonts/ZTNature-Bold.woff2";
 import { formatSummary, getBookExtension, isReadableExtension } from "../constants/bookFormats";
+import { buildSectionWeights, isChapterLike, spineIndexForProgress, type SectionWeights } from "../readers/progress";
+import { highlightsMarkdown, useAnnotations } from "../readers/useAnnotations";
+import { AnnotationsPanel } from "../readers/AnnotationsPanel";
+import { SelectionBar } from "../readers/SelectionBar";
+import { SearchPanel } from "../readers/SearchPanel";
+import type { SearchHit } from "../readers/searchBook";
+import { HIGHLIGHT_COLORS } from "../readers/highlightColors";
 
 type ReaderViewProps = {
   book: Book;
   onClose: () => void;
 };
-
-type TocItem = {
-  id?: string;
-  label: string;
-  href: string;
-  subitems?: TocItem[];
-};
-
-type ReaderDisplayMode = "paper" | "dark-paper" | "true-white" | "true-black" | "app";
-type ReadingMode = "standard" | "smart" | "speed";
-
-const getReaderFinish = (displayMode: ReaderDisplayMode, theme: ThemeMode) => {
-  if (displayMode === "paper") {
-    return {
-      themeName: "leaflet-light",
-      background: "#f0eadc",
-      text: "#30291f",
-      texture: PAPER_GRAIN,
-      textureOpacity: "e0"
-    };
-  }
-  if (displayMode === "dark-paper") {
-    return {
-      themeName: "leaflet-dark",
-      background: "#191b1a",
-      text: "#eeeae0",
-      texture: PAPER_GRAIN,
-      textureOpacity: "d4"
-    };
-  }
-  if (displayMode === "true-white") {
-    return {
-      themeName: "leaflet-light",
-      background: "#f8f8f4",
-      text: "#090a09",
-      texture: null,
-      textureOpacity: "ff"
-    };
-  }
-  if (displayMode === "true-black") {
-    return {
-      themeName: "leaflet-dark",
-      background: "#000000",
-      text: "#f2f1eb",
-      texture: null,
-      textureOpacity: "ff"
-    };
-  }
-  return theme === "light"
-    ? {
-        themeName: "leaflet-light",
-        background: "#edeae2",
-        text: "#16191e",
-        texture: PAPER_GRAIN,
-        textureOpacity: "e8"
-      }
-    : {
-        themeName: "leaflet-dark",
-        background: "#202227",
-        text: "#f7f9fc",
-        texture: PAPER_GRAIN,
-        textureOpacity: "e8"
-      };
-};
-
-const getReaderFinishBackground = (finish: ReturnType<typeof getReaderFinish>) =>
-  finish.texture
-    ? `linear-gradient(${finish.background}${finish.textureOpacity}, ${finish.background}${finish.textureOpacity}), ${finish.texture}`
-    : "none";
-
-type ReaderWord = {
-  text: string;
-  trailing: string;
-  node: Text;
-  start: number;
-  end: number;
-  difficulty: number;
-  rsvpPauseMultiplier: number;
-  sentenceEnd: boolean;
-  paragraphEnd: boolean;
-  iframe: HTMLIFrameElement;
-};
-
-type ReadingWordState = {
-  index: number;
-  total: number;
-  text: string;
-  /** Punctuation after the word ("," or ".”"), shown in RSVP so sentences still read as sentences. */
-  punctuation: string;
-  contextStart: number;
-  context: Array<{ text: string; trailing: string; index: number }>;
-};
-
-type SmartSession = {
-  startedAt: number;
-  activeMs: number;
-  lastTickAt: number;
-  startIndex: number;
-  furthestIndex: number;
-  difficultyTotal: number;
-  difficultySamples: number;
-  rereads: number;
-};
-
-const flattenToc = (items: TocItem[]) => {
-  const result: TocItem[] = [];
-  const walk = (list: TocItem[]) => {
-    list.forEach((item) => {
-      result.push(item);
-      if (item.subitems && item.subitems.length > 0) {
-        walk(item.subitems);
-      }
-    });
-  };
-  walk(items);
-  return result;
-};
-
-const normalizeLabel = (label: string) => label.toLowerCase().replace(/\s+/g, " ").trim();
-
-const isFrontMatter = (label: string) => {
-  const text = normalizeLabel(label);
-  const blocked = [
-    "title page",
-    "copyright",
-    "contents",
-    "table of contents",
-    "dedication",
-    "acknowledgments",
-    "acknowledgements",
-    "foreword",
-    "introduction",
-    "preface",
-    "glossary",
-    "index",
-    "about the author",
-    "maps",
-    "map"
-  ];
-  return blocked.some((entry) => text === entry || text.startsWith(`${entry} `));
-};
-
-const isChapterLike = (label: string) => {
-  const text = normalizeLabel(label);
-  if (isFrontMatter(text)) {
-    return false;
-  }
-  if (/(chapter|book|section)\b/.test(text)) {
-    return true;
-  }
-  if (/^(prologue|epilogue)\b/.test(text)) {
-    return true;
-  }
-  if (/^[ivxlcdm]+\.?$/.test(text)) {
-    return true;
-  }
-  return false;
-};
-
-/**
- * Chapter titles, drop caps and ornaments in many books are pictures: black
- * ink on a white rectangle. On a dark page that is a glaring white box; on the
- * paper finish it is a whiter patch on cream.
- *
- * Such images are recognised by their pixels: no colour, and almost nothing
- * but paper and ink (few in-between greys, which photos, shaded maps and
- * pencil drawings are full of). They are marked `data-leaflet-ink`:
- * - "title" when banner-shaped (wide and short, or small): on a dark page
- *   these are inverted to white ink, so a heading reads like the text.
- * - "art" otherwise (a line map, a full-page drawing): these only lose their
- *   white on the paper finish, and on a dark page stay exactly as drawn, so a
- *   map is never turned into its negative.
- * Clicking a marked image shows the original, and clicking again blends it.
- */
-const INK_SAMPLE = 40;
-const markInkImages = (doc: Document) => {
-  const images = Array.from(doc.querySelectorAll<HTMLImageElement | SVGImageElement>("img, image"));
-  images.forEach((node) => {
-    if (node.dataset.leafletInkChecked) {
-      return;
-    }
-    node.dataset.leafletInkChecked = "1";
-    // epub.js swaps the image's address for its own blob URL after the page
-    // is first built, so the check waits for the image itself to load, and a
-    // probe that fails (the old address) clears the flag to be tried again.
-    // Tag names, not instanceof: the book's images belong to its iframe,
-    // whose HTMLImageElement is a different class from this window's.
-    const isImg = node.tagName.toLowerCase() === "img";
-    if (isImg && !(node as HTMLImageElement).complete) {
-      delete node.dataset.leafletInkChecked;
-      node.addEventListener("load", () => markInkImages(doc), { once: true });
-      return;
-    }
-    const src =
-      isImg
-        ? (node as HTMLImageElement).currentSrc || (node as HTMLImageElement).src
-        : (node as SVGImageElement).href?.baseVal || node.getAttribute("xlink:href") || "";
-    if (!src) {
-      delete node.dataset.leafletInkChecked;
-      return;
-    }
-    const probe = new Image();
-    probe.onerror = () => {
-      delete node.dataset.leafletInkChecked;
-    };
-    probe.onload = () => {
-      try {
-        const canvas = doc.createElement("canvas");
-        canvas.width = INK_SAMPLE;
-        canvas.height = INK_SAMPLE;
-        const context = canvas.getContext("2d", { willReadFrequently: true });
-        if (!context || probe.naturalWidth < 24 || probe.naturalHeight < 12) {
-          return;
-        }
-        // Nearest-neighbour sampling: smoothing blurs thick letters into greys,
-        // and a real ink title then failed the paper-and-ink test.
-        context.imageSmoothingEnabled = false;
-        context.drawImage(probe, 0, 0, INK_SAMPLE, INK_SAMPLE);
-        const { data } = context.getImageData(0, 0, INK_SAMPLE, INK_SAMPLE);
-        let light = 0;
-        let midtone = 0;
-        let colourful = 0;
-        let counted = 0;
-        for (let i = 0; i < data.length; i += 4) {
-          if (data[i + 3] < 16) {
-            continue;
-          }
-          counted += 1;
-          const r = data[i];
-          const g = data[i + 1];
-          const b = data[i + 2];
-          const max = Math.max(r, g, b);
-          const min = Math.min(r, g, b);
-          if (max - min > 40) {
-            colourful += 1;
-          }
-          const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-          if (lum > 225) {
-            light += 1;
-          } else if (lum > 70) {
-            midtone += 1;
-          }
-        }
-        // Transparent line art (dark ink, no background) also blends well.
-        const transparentInk = counted < INK_SAMPLE * INK_SAMPLE * 0.6 && colourful / Math.max(1, counted) < 0.04;
-        // Resampling blurs ink edges into greys, so a little midtone is fine.
-        const inkOnly = counted > 0 && colourful / counted < 0.04 && midtone / counted < 0.12;
-        if (inkOnly && (light / counted > 0.55 || transparentInk)) {
-          const banner = probe.naturalHeight <= probe.naturalWidth * 0.6 || probe.naturalHeight <= 240;
-          node.dataset.leafletInk = banner ? "title" : "art";
-          node.addEventListener("click", () => {
-            node.dataset.leafletInkOff = node.dataset.leafletInkOff ? "" : "1";
-          });
-        }
-      } catch {
-        // A cross-origin (tainted) image cannot be read; leave it be.
-      }
-    };
-    probe.src = src;
-  });
-};
-
-/**
- * Where the eye should fixate in a word shown on its own (the "optimal
- * recognition point"): slightly left of centre, by word length. Leading
- * quotes and brackets are skipped so "“Hello" pivots on the e, not the quote.
- */
-const rsvpPivotIndex = (text: string) => {
-  const lead = text.match(/^[“"'‘(\[]*/)?.[0].length ?? 0;
-  const length = Math.max(1, text.length - lead);
-  const offset = length <= 1 ? 0 : length <= 5 ? 1 : length <= 9 ? 2 : length <= 13 ? 3 : 4;
-  return Math.min(text.length - 1, lead + offset);
-};
-
-/** The book's text starts this far down, below the floating toolbar. */
-const PAGE_TOP_PAD = 80;
-
-/** Turns what failed while opening a book into something a reader can act on. */
-const friendlyOpenError = (message: string) => {
-  if (/os error 2|cannot find the (file|path)|no such file|not found on disk/i.test(message)) {
-    return "The book file is missing. It may have been moved or deleted outside Leaflet. Import it again to keep reading.";
-  }
-  if (/encrypt|drm|adept/i.test(message)) {
-    return "This book is copy-protected (DRM), so Leaflet can't open it. Books bought from most stores need their DRM removed by the store's own app first.";
-  }
-  if (/no section found|not a readable epub|damaged|invalid|zip/i.test(message)) {
-    return "This book couldn't be read. The file may be damaged; importing it again sometimes helps.";
-  }
-  return message || "This book couldn't be opened.";
-};
-
-/** Auto-scroll's own default, remembered across books once the reader tunes it. */
-const AUTO_SCROLL_DEFAULT_KEY = "leaflet.reader.autoScrollSpeed";
-/** Auto-scroll steps back while the reader scrolls by hand, for this long. */
-const AUTO_SCROLL_YIELD_BACK_MS = 3000;
-const AUTO_SCROLL_YIELD_AHEAD_MS = 1200;
-/** Retuning from corrections happens at most this often. */
-const AUTO_SCROLL_TUNE_COOLDOWN_MS = 12_000;
-
-/**
- * Auto-scroll pace in lines of text per minute. The slider (0..100) sets this;
- * pixels follow from the font size, so a bigger font scrolls faster in pixels
- * and exactly as fast in reading. Lines are 1.8em tall (see the typography).
- */
-const autoScrollLinesPerMinute = (speed: number) =>
-  Math.round((3 + Math.min(100, Math.max(0, speed)) * 0.45) * 1.852);
-const autoScrollPixelsPerSecond = (speed: number, fontSize: number) =>
-  (autoScrollLinesPerMinute(speed) * 1.8 * fontSize) / 60;
-
-const readAutoScrollDefault = () => {
-  try {
-    const value = Number(localStorage.getItem(AUTO_SCROLL_DEFAULT_KEY));
-    return Number.isFinite(value) && value > 0 ? Math.min(100, value) : 35;
-  } catch {
-    return 35;
-  }
-};
-
-/** How long auto-scroll or Smart Read keeps crediting time after the last real input. */
-const HANDS_FREE_GRACE_MS = 5 * 60_000;
-
-const READER_BLOCK_SELECTOR =
-  "p, li, blockquote, pre, h1, h2, h3, h4, h5, h6, dd, dt, td, th, figcaption, div, section, article, body";
-const SENTENCE_END_PATTERN = /[.!?][”"')\]]*\s*$/;
-
-/** True when nothing but inline markup separates the end of `a` from the start of `b`. */
-const isInlineJoin = (a: Text, b: Text) => {
-  try {
-    const range = a.ownerDocument.createRange();
-    range.setStart(a, a.data.length);
-    range.setEnd(b, 0);
-    return (
-      range.toString() === "" && !range.cloneContents().querySelector("br, img, hr, svg, image")
-    );
-  } catch {
-    return false;
-  }
-};
-
-/**
- * Time a word is held for, in units of one word at the nominal WPM. Pauses are
- * relative so they shrink with speed: a fixed 620ms paragraph pause is a blink
- * at 150 WPM and ten words' worth at 1000.
- */
-const getPaceFactor = (word: ReaderWord, mode: "speed" | "smart") =>
-  (mode === "speed" ? word.rsvpPauseMultiplier : 1) +
-  (word.paragraphEnd ? 1.6 : word.sentenceEnd ? 0.9 : /[,;:—–]\s*$/.test(word.trailing) ? 0.4 : 0);
-
-/**
- * Scales the per-word factors so a section averages out at the chosen WPM. The
- * pauses used to be added on top, so "600 WPM" actually ran at about 400.
- */
-const getPaceScale = (words: ReaderWord[], mode: "speed" | "smart") => {
-  if (words.length === 0) return 1;
-  const total = words.reduce((sum, word) => sum + getPaceFactor(word, mode), 0);
-  return Math.min(1, Math.max(0.55, words.length / Math.max(1, total)));
-};
+import { LAYOUT_KEY, readLayout, type ReaderLayout, type TocItem, type ReaderDisplayMode, type ReadingMode, type ReaderWord, type ReadingWordState, type SmartSession } from "../readers/readerTypes";
+import { getReaderFinish, getReaderFinishBackground, PAGE_TOP_PAD } from "../readers/finish";
+import { flattenToc } from "../readers/toc";
+import { INK_SAMPLE, markInkImages } from "../readers/inkImages";
+import { friendlyOpenError } from "../readers/openErrors";
+import { AUTO_SCROLL_DEFAULT_KEY, AUTO_SCROLL_YIELD_BACK_MS, AUTO_SCROLL_YIELD_AHEAD_MS, AUTO_SCROLL_TUNE_COOLDOWN_MS, autoScrollLinesPerMinute, autoScrollPixelsPerSecond, readAutoScrollDefault } from "../readers/autoScroll";
+import { rsvpPivotIndex, HANDS_FREE_GRACE_MS, READER_BLOCK_SELECTOR, SENTENCE_END_PATTERN, isInlineJoin, getPaceFactor, getPaceScale } from "../readers/pacing";
 
 export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   const viewerRef = useRef<HTMLDivElement | null>(null);
@@ -625,8 +282,22 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
         return;
       }
       lastHandsOnAtRef.current = Date.now();
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        setSearchOpen(true);
+        return;
+      }
       if (event.key === "Escape") {
+        if (selectionRef.current) {
+          clearSelectionRef.current();
+          return;
+        }
         exitGuard.escape(event);
+        return;
+      }
+      if (layoutRef.current === "pages" && ["ArrowRight", "ArrowLeft", "PageDown", "PageUp", " "].includes(event.key)) {
+        event.preventDefault();
+        turnPageRef.current(event.key === "ArrowLeft" || event.key === "PageUp" || (event.key === " " && event.shiftKey) ? -1 : 1);
         return;
       }
       if (event.key === "ArrowRight") {
@@ -747,7 +418,6 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   }, []);
 
   const storageKey = useMemo(() => `leaflet.reader.${book.id}`, [book.id]);
-  const bookmarksKey = useMemo(() => `leaflet.bookmarks.${book.id}`, [book.id]);
   const readPrefs = () => {
     try {
       const raw = localStorage.getItem(storageKey);
@@ -828,28 +498,62 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   const morePanelRef = useRef<HTMLDivElement | null>(null);
   const morePanelCloseRef = useRef<number | null>(null);
   const [readerDotEnabled, setReaderDotEnabled] = useState(initialPrefs?.readerDotEnabled ?? true);
+  // Scrolling (the default) or turning pages. A preference of this device,
+  // shared by every book; changing it rebuilds the page.
+  const [layout, setLayout] = useState<ReaderLayout>(readLayout);
+  const layoutRef = useRef<ReaderLayout>(layout);
+  layoutRef.current = layout;
+  const paged = layout === "pages";
+  const chooseLayout = (next: ReaderLayout) => {
+    if (next === layout) {
+      return;
+    }
+    try {
+      localStorage.setItem(LAYOUT_KEY, next);
+    } catch {
+      // This session only.
+    }
+    if (next === "pages") {
+      // Auto-scroll, Smart Read and SpeedRead are built on scrolling.
+      setAutoScrollActive(false);
+      setReadingMode("standard");
+    }
+    setLayout(next);
+    setReloadKey((key) => key + 1);
+  };
   // Sync during render: the load effect runs before the [readerDotEnabled]
   // effect, and would otherwise create a dot the user had switched off.
-  readerDotEnabledRef.current = readerDotEnabled;
+  readerDotEnabledRef.current = readerDotEnabled && layout === "scroll";
   const [bookmarkPanelOpen, setBookmarkPanelOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   // The toolbar steps out of the way while reading. It stays put whenever one of
   // its own panels is open, which would otherwise vanish along with it. The
   // chapter list is not one of them: it opens on its own, under a hidden bar.
+  /** Text selected in the page, offered for highlighting. */
+  const [selection, setSelection] = useState<{ cfi: string; text: string } | null>(null);
+  /** A highlight whose note the notes panel opens on (tapped in the page). */
+  const [notesFocus, setNotesFocus] = useState<string | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
   const {
     visible: chromeVisible,
     reveal: revealChrome,
     hover: hoverChrome
-  } = useAutoHideChrome(fontPanelOpen || bookmarkPanelOpen || morePanelOpen || loading || loadError !== null);
+  } = useAutoHideChrome(
+    fontPanelOpen || bookmarkPanelOpen || morePanelOpen || searchOpen || selection !== null || loading || loadError !== null
+  );
   // The page renders inside an epub.js iframe, and events there do not reach
   // this document — so without binding into it, a tap on the text could never
   // bring the toolbar back on a touch screen.
   const revealChromeRef = useRef(revealChrome);
   revealChromeRef.current = revealChrome;
-  const [bookmarks, setBookmarks] = useState<
-    Array<{ id: string; cfi: string; label: string; createdAt: string }>
-  >([]);
+  // Bookmarks and highlights, kept in the database (and the backup).
+  const annotations = useAnnotations(book.id);
+  // For the key handler, which is bound once.
+  const selectionRef = useRef<{ cfi: string; text: string } | null>(null);
+  const clearSelectionRef = useRef<() => void>(() => undefined);
+  const { bookmarks, highlights } = annotations;
+
   const [toc, setToc] = useState<TocItem[]>([]);
   const [tocIndexByHref, setTocIndexByHref] = useState<Record<string, number>>({});
   const [tocLabelByHref, setTocLabelByHref] = useState<Record<string, string>>({});
@@ -897,20 +601,9 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   const updateBookProgress = useLibraryStore((state) => state.updateBookProgress);
   const spineIndexByHrefRef = useRef<Record<string, number>>({});
   const chapterSpineIndicesRef = useRef<number[]>([]);
+  /** Size-weighted progress for this book; null until known, or if unavailable. */
+  const sectionWeightsRef = useRef<SectionWeights | null>(null);
 
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(bookmarksKey);
-      if (!raw) {
-        setBookmarks([]);
-        return;
-      }
-      const parsed = JSON.parse(raw) as Array<{ id: string; cfi: string; label: string; createdAt: string }>;
-      setBookmarks(Array.isArray(parsed) ? parsed : []);
-    } catch {
-      setBookmarks([]);
-    }
-  }, [bookmarksKey]);
 
   useEffect(() => {
     setBookmarkPanelOpen(false);
@@ -966,7 +659,9 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
 
   const applyReaderInsets = () => {
     const rendition = renditionRef.current;
-    if (!rendition?.themes) {
+    // With pages, epub.js sizes and pads the columns itself; forcing a full
+    // width here would collapse them into one long page.
+    if (!rendition?.themes || layoutRef.current === "pages") {
       return;
     }
     rendition.themes.override("padding-left", "var(--reader-content-pad, 24px)");
@@ -1020,6 +715,9 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   };
 
   const ensureSingleScrollContainer = () => {
+    if (layoutRef.current === "pages") {
+      return;
+    }
     const manager = renditionRef.current?.manager as any;
     const container = manager?.container as HTMLElement | undefined;
     if (container) {
@@ -1054,6 +752,9 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   };
 
   const applyContentFlowStyles = () => {
+    if (layoutRef.current === "pages") {
+      return;
+    }
     const rendition = renditionRef.current;
     const contentsList = rendition?.getContents?.() ?? [];
     contentsList.forEach((contents: any) => {
@@ -1891,7 +1592,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   };
 
   const triggerScrollAdvance = () => {
-    if (scrollAdvanceLockRef.current || Date.now() < navigatingUntilRef.current) {
+    if (layoutRef.current === "pages" || scrollAdvanceLockRef.current || Date.now() < navigatingUntilRef.current) {
       return;
     }
     scrollAdvanceLockRef.current = true;
@@ -1932,14 +1633,6 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     }
   };
 
-  const saveBookmarks = (next: Array<{ id: string; cfi: string; label: string; createdAt: string }>) => {
-    setBookmarks(next);
-    try {
-      localStorage.setItem(bookmarksKey, JSON.stringify(next));
-    } catch {
-      // ignore
-    }
-  };
 
   const addBookmark = () => {
     const location = renditionRef.current?.location;
@@ -1949,13 +1642,183 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     }
     const href = location?.start?.href;
     const label = href ? tocLabelByHref[href] ?? chapterLabel : chapterLabel;
-    const entry = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      cfi,
-      label: label || "Bookmark",
-      createdAt: new Date().toISOString()
-    };
-    saveBookmarks([entry, ...bookmarks]);
+    void annotations
+      .addBookmark(cfi, label || null)
+      .then(() => showFocusToast("Bookmarked."))
+      .catch(() => showFocusToast("Couldn't save the bookmark."));
+  };
+
+  // ---- highlights and notes --------------------------------------------------
+
+  /** Highlights in reading order, for the notes panel and the export. */
+  /** Turns a page (layout "pages"). Through a ref, for the key handler bound once. */
+  const turnPage = (direction: 1 | -1) => {
+    const rendition = renditionRef.current;
+    if (!rendition) {
+      return;
+    }
+    lastHandsOnAtRef.current = Date.now();
+    void (direction > 0 ? rendition.next() : rendition.prev());
+  };
+  const turnPageRef = useRef(turnPage);
+  turnPageRef.current = turnPage;
+
+  const orderedHighlights = useMemo(() => {
+    const cfi = new EpubCFI();
+    return [...highlights].sort((a, b) => {
+      try {
+        return cfi.compare(a.cfi, b.cfi);
+      } catch {
+        return a.createdAt.localeCompare(b.createdAt);
+      }
+    });
+  }, [highlights]);
+
+  /**
+   * Highlights drawn over the page by epub.js, which keeps them across the
+   * sections it renders. Keyed by id and colour, so a recoloured one is
+   * redrawn; cleared when the book is reloaded.
+   */
+  const appliedHighlightsRef = useRef(new Map<string, string>());
+  useEffect(() => {
+    const rendition = renditionRef.current;
+    if (!rendition?.annotations || loading) {
+      return;
+    }
+    const applied = appliedHighlightsRef.current;
+    const wanted = new Map(highlights.map((item) => [`${item.id}|${item.color ?? "yellow"}`, item]));
+    applied.forEach((cfi, key) => {
+      if (!wanted.has(key)) {
+        try {
+          rendition.annotations.remove(cfi, "highlight");
+        } catch {
+          // Already gone with its section.
+        }
+        applied.delete(key);
+      }
+    });
+    wanted.forEach((item, key) => {
+      if (applied.has(key)) {
+        return;
+      }
+      const colour = HIGHLIGHT_COLORS[item.color ?? "yellow"] ?? HIGHLIGHT_COLORS.yellow;
+      try {
+        rendition.annotations.highlight(
+          item.cfi,
+          { id: item.id },
+          () => {
+            setNotesFocus(item.id);
+            setBookmarkPanelOpen(true);
+          },
+          "leaflet-highlight",
+          { fill: colour.fill, "fill-opacity": "0.32" }
+        );
+        applied.set(key, item.cfi);
+      } catch {
+        // A place from another edition of the book: skipped, still listed.
+      }
+    });
+  }, [highlights, loading]);
+
+  const clearSelection = () => {
+    (renditionRef.current?.getContents?.() ?? []).forEach((contents: any) => {
+      contents?.window?.getSelection?.()?.removeAllRanges?.();
+    });
+    setSelection(null);
+  };
+
+  const selectionChapter = () => {
+    const href = renditionRef.current?.location?.start?.href;
+    return (href ? tocLabelByHref[href] : null) ?? chapterLabel ?? null;
+  };
+
+  const highlightSelection = (color: string, withNote = false) => {
+    if (!selection) {
+      return;
+    }
+    const picked = selection;
+    clearSelection();
+    void annotations
+      .addHighlight(picked.cfi, picked.text, selectionChapter(), color)
+      .then((saved) => {
+        if (withNote) {
+          setNotesFocus(saved.id);
+          setBookmarkPanelOpen(true);
+        }
+      })
+      .catch(() => showFocusToast("Couldn't save the highlight."));
+  };
+
+  const copySelection = () => {
+    if (selection) {
+      void navigator.clipboard.writeText(selection.text).then(
+        () => showFocusToast("Copied."),
+        () => showFocusToast("Couldn't copy.")
+      );
+    }
+    clearSelection();
+  };
+
+  selectionRef.current = selection;
+  clearSelectionRef.current = clearSelection;
+
+  const exportHighlights = () => {
+    void navigator.clipboard.writeText(highlightsMarkdown(book.title, book.author, orderedHighlights)).then(
+      () => showFocusToast("Highlights copied as Markdown."),
+      () => showFocusToast("Couldn't copy.")
+    );
+  };
+
+  // ---- search ------------------------------------------------------------------
+
+  /** The chapter a section falls under: the last contents entry at or before it. */
+  const chapterOfSection = (section: number) => {
+    let label: string | null = null;
+    let best = -1;
+    for (const item of toc) {
+      const index = spineIndexByHrefRef.current[item.href.split("#")[0]];
+      if (typeof index === "number" && index <= section && index >= best) {
+        best = index;
+        label = item.label;
+      }
+    }
+    return label;
+  };
+
+  const searchMarkRef = useRef<{ cfi: string; timer: number } | null>(null);
+  /** Jumps to a search result and marks the words there for a few seconds. */
+  const openSearchHit = (hit: SearchHit) => {
+    const rendition = renditionRef.current;
+    if (!rendition) {
+      return;
+    }
+    releaseUserReadingAnchor();
+    markNavigating();
+    void rendition.display(hit.cfi).then(() => {
+      const previous = searchMarkRef.current;
+      if (previous) {
+        window.clearTimeout(previous.timer);
+        try {
+          rendition.annotations.remove(previous.cfi, "highlight");
+        } catch {
+          // Gone with its section.
+        }
+      }
+      try {
+        rendition.annotations.highlight(hit.cfi, {}, undefined, "leaflet-search-hit", { fill: "#f5b800", "fill-opacity": "0.55" });
+      } catch {
+        return;
+      }
+      const timer = window.setTimeout(() => {
+        try {
+          rendition.annotations.remove(hit.cfi, "highlight");
+        } catch {
+          // Gone with its section.
+        }
+        searchMarkRef.current = null;
+      }, 4000);
+      searchMarkRef.current = { cfi: hit.cfi, timer };
+    });
   };
 
   // Drops a user-placed Dotty pin so automatic tracking resumes.
@@ -2128,6 +1991,12 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
           height: "100%"
         });
         renditionRef.current = rendition;
+        // Development only: lets a console (or a test driving the reader) see epub.js's state.
+        if (import.meta.env.DEV) {
+          (window as unknown as { __leafletRendition?: unknown }).__leafletRendition = rendition;
+        }
+        appliedHighlightsRef.current.clear();
+        setSelection(null);
 
         rendition.hooks?.content?.register((contents: any) => {
           const doc = contents?.document;
@@ -2136,14 +2005,18 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
           }
           const pad = 24;
           doc.documentElement.style.setProperty("--reader-content-pad", `${pad}px`);
+          doc.documentElement.setAttribute("data-leaflet-layout", layoutRef.current);
           if (!doc.getElementById("reader-font-scale")) {
             const style = doc.createElement("style");
             style.id = "reader-font-scale";
             style.textContent = `
               @font-face { font-family: "ZT Nature"; src: url("${ztNatureBoldWoff2}") format("woff2"); font-display: swap; font-weight: 700; }
               :root { --reader-font-size: ${fontSizeRef.current}px; }
-              html { font-size: var(--reader-font-size) !important; width: 100% !important; max-width: 100% !important; transition: padding 0.25s ease; }
-              body { font-size: 1em !important; margin: 0 !important; padding-top: ${PAGE_TOP_PAD}px !important; padding-left: var(--reader-content-pad, 24px) !important; padding-right: var(--reader-content-pad, 24px) !important; text-align: justify !important; text-justify: inter-word !important; hyphens: auto; width: 100% !important; max-width: 100% !important; box-sizing: border-box; transition: padding 0.25s ease; }
+              html { font-size: var(--reader-font-size) !important; transition: padding 0.25s ease; }
+              /* Scrolling: the text fills the width. Pages: epub.js sets the
+                 body's width for its columns, which this must not override. */
+              html:not([data-leaflet-layout="pages"]), html:not([data-leaflet-layout="pages"]) body { width: 100% !important; max-width: 100% !important; }
+              body { font-size: 1em !important; margin: 0 !important; padding-top: ${PAGE_TOP_PAD}px !important; padding-left: var(--reader-content-pad, 24px) !important; padding-right: var(--reader-content-pad, 24px) !important; text-align: justify !important; text-justify: inter-word !important; hyphens: auto; box-sizing: border-box; transition: padding 0.25s ease; }
               body > *:first-child { margin-top: 0 !important; padding-top: 0 !important; }
               /* One reading size for running text, whatever the publisher
                  set; headings, footnote markers and small print keep their
@@ -2271,10 +2144,14 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
             doc.documentElement.style.setProperty("--reader-font-size", `${fontSizeRef.current}px`);
             doc.documentElement.style.setProperty("--reader-content-pad", `${pad}px`);
           }
-          doc.documentElement.style.overflow = "visible";
-          doc.body.style.overflow = "visible";
-          doc.documentElement.style.overflowX = "hidden";
-          doc.body.style.overflowX = "hidden";
+          // Scrolling only: clipping the width would hide a paginated
+          // chapter's columns from epub.js, which would then see one page.
+          if (layoutRef.current !== "pages") {
+            doc.documentElement.style.overflow = "visible";
+            doc.body.style.overflow = "visible";
+            doc.documentElement.style.overflowX = "hidden";
+            doc.body.style.overflowX = "hidden";
+          }
           const currentDisplayMode = displayModeRef.current;
           const currentReaderTheme = readerThemeRef.current;
           const finish = getReaderFinish(currentDisplayMode, currentReaderTheme);
@@ -2426,7 +2303,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
         rendition.themes.override("color", initialFinish.text);
         applyReaderTypography();
         applyReaderInsets();
-        const initialFlow = "scrolled-doc";
+        const initialFlow = layoutRef.current === "pages" ? "paginated" : "scrolled-doc";
         const initialSpread = "none";
         rendition.flow(initialFlow);
         const manager = rendition.manager as any;
@@ -2511,6 +2388,24 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
           .filter((value) => typeof value === "number")
           .sort((a, b) => (a as number) - (b as number)) as number[];
 
+        // Section sizes, for progress by how much has been read. A quick call
+        // (the archive's directory only); without it, the older estimates below.
+        sectionWeightsRef.current = null;
+        try {
+          const sections = await bookService.epubSections(book.id);
+          if (cancelled) {
+            return;
+          }
+          sectionWeightsRef.current = buildSectionWeights(
+            spineItems.map((item: any) => String(item?.href ?? "")),
+            sections,
+            flatToc,
+            (href) => spineIndexByHref[href.split("#")[0]]
+          );
+        } catch {
+          sectionWeightsRef.current = null;
+        }
+
         const onRelocated = (location: any) => {
           const resolveProgress = () => {
             const href = location?.start?.href ?? location?.end?.href;
@@ -2554,6 +2449,25 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
               }
               return 0;
             };
+
+            const weights = sectionWeightsRef.current;
+            if (weights && typeof spineIndex === "number" && spineIndex < weights.bytes.length) {
+              if (spineIndex < weights.lo) {
+                return 0;
+              }
+              // Past the story is back matter: a footnote link into it is not
+              // finishing the book, so progress stays where the reading was.
+              if (spineIndex > weights.hi) {
+                return null;
+              }
+              const within = sectionProgress();
+              if (spineIndex >= weights.last && within >= 0.98) {
+                return 1;
+              }
+              const span = weights.prefix[weights.hi + 1] - weights.prefix[weights.lo];
+              const read = weights.prefix[spineIndex] - weights.prefix[weights.lo] + within * weights.bytes[spineIndex];
+              return Math.min(1, Math.max(0, read / span));
+            }
 
             if (chapterTotal > 0 && typeof chapterIndex === "number") {
               // Past the last chapter is back matter: endnotes, acknowledgements.
@@ -2644,6 +2558,15 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
         };
         relocateHandlerRef.current = onRelocated;
         rendition.on("relocated", onRelocated);
+        // Selected text is offered for highlighting (the selection bar).
+        rendition.on("selected", (cfiRange: string, contents: any) => {
+          const text = String(contents?.window?.getSelection?.()?.toString?.() ?? "")
+            .replace(/\s+/g, " ")
+            .trim();
+          if (text) {
+            setSelection({ cfi: cfiRange, text });
+          }
+        });
         const bindChromeReveal = () => {
           (rendition.getContents?.() ?? []).forEach((contents: any) => {
             const doc = contents?.document as Document | undefined;
@@ -2751,10 +2674,14 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
           // chapter the synced progress points into, rather than page one.
           const progress = typeof book.progress === "number" ? book.progress : 0;
           const chapters = chapterSpineIndicesRef.current;
+          const weights = sectionWeightsRef.current;
+          const midway = progress > 0.01 && progress < 0.995;
           const spineIndex =
-            progress > 0.01 && progress < 0.995 && chapters.length > 1
-              ? chapters[Math.min(chapters.length - 1, Math.floor(progress * chapters.length))]
-              : null;
+            midway && weights
+              ? spineIndexForProgress(weights, progress)
+              : midway && chapters.length > 1
+                ? chapters[Math.min(chapters.length - 1, Math.floor(progress * chapters.length))]
+                : null;
           const href = spineIndex !== null ? epub.spine?.items?.[spineIndex]?.href : null;
           await (href ? rendition.display(href) : rendition.display()).catch(() => rendition.display());
           if (progress <= 0.001) {
@@ -2768,8 +2695,10 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
         setLoading(false);
         // Indexing the whole book (for progress in books without usable
         // chapters) waits until the first page is up, and runs when idle.
+        // With section sizes known, progress needs no index at all; this is
+        // for the books where they could not be read.
         const locations = epub.locations;
-        if (locations && typeof locations.generate === "function") {
+        if (!sectionWeightsRef.current && locations && typeof locations.generate === "function") {
           const start = () => {
             if (!cancelled) {
               void locations.generate(1600);
@@ -3590,7 +3519,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   }, [fontSize]);
 
   useEffect(() => {
-    readerDotEnabledRef.current = readerDotEnabled;
+    readerDotEnabledRef.current = readerDotEnabled && layout === "scroll";
     persistReaderState();
     if (!readerDotEnabled) {
       removeLastReadMarker();
@@ -3841,47 +3770,40 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
               </button>
             </div>
           )}
+          <button
+            className="reader-icon transition-colors reader-hover-accent"
+            type="button"
+            onClick={() => setSearchOpen((open) => !open)}
+            title="Search in this book (Ctrl+F)"
+            aria-label="Search in this book"
+          >
+            <UiIcon name="search" size={22} />
+          </button>
           <div className="relative">
             <button
               className="reader-icon transition-colors reader-hover-accent"
               type="button"
-              onClick={() => setBookmarkPanelOpen((prev) => !prev)}
+              onClick={() => {
+                setNotesFocus(null);
+                setBookmarkPanelOpen((prev) => !prev);
+              }}
+              title="Bookmarks and highlights"
+              aria-label="Bookmarks and highlights"
             >
               <span className="material-symbols-outlined">bookmark</span>
             </button>
             {bookmarkPanelOpen && (
-              <div className="absolute right-0 mt-3 w-64 rounded-xl border p-4 text-xs shadow-2xl reader-panel reader-border">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs uppercase tracking-widest reader-muted">Bookmarks</span>
-                  <button
-                    type="button"
-                    className="rounded-md border px-2 py-1 text-[10px] uppercase tracking-widest transition reader-border reader-icon reader-hover-accent"
-                    onClick={addBookmark}
-                  >
-                    Add
-                  </button>
-                </div>
-                <div className="mt-3 max-h-56 space-y-2 overflow-y-auto pr-1">
-                  {bookmarks.length === 0 && (
-                    <div className="rounded-lg border px-3 py-2 text-[11px] reader-border reader-muted reader-pill">
-                      No bookmarks yet.
-                    </div>
-                  )}
-                  {bookmarks.map((bookmark) => (
-                    <button
-                      key={bookmark.id}
-                      type="button"
-                      className="w-full rounded-lg border px-3 py-2 text-left text-[11px] transition reader-border reader-pill reader-icon reader-hover-accent"
-                      onClick={() => openBookmark(bookmark.cfi)}
-                    >
-                      <div className="text-xs font-semibold reader-text-color">{bookmark.label}</div>
-                      <div className="text-[10px] uppercase tracking-widest reader-muted">
-                        {new Date(bookmark.createdAt).toLocaleDateString()}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <AnnotationsPanel
+                key={notesFocus ?? "notes"}
+                bookmarks={bookmarks}
+                highlights={orderedHighlights}
+                focusId={notesFocus}
+                onAddBookmark={addBookmark}
+                onOpen={openBookmark}
+                onRemove={(id) => void annotations.remove(id)}
+                onSaveNote={(id, note) => void annotations.update(id, { note: note || null })}
+                onExport={exportHighlights}
+              />
             )}
           </div>
           <div
@@ -3929,6 +3851,23 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
                 }}
               >
                 <div className="text-xs uppercase tracking-widest reader-muted">Reader</div>
+                <div className="mt-3">
+                  <span className="text-[10px] uppercase tracking-widest reader-muted">Layout</span>
+                  <div className="mt-1.5 grid grid-cols-2 gap-1" role="radiogroup" aria-label="Layout">
+                    {(["scroll", "pages"] as const).map((option) => (
+                      <button
+                        key={option}
+                        type="button"
+                        role="radio"
+                        aria-checked={layout === option}
+                        className={`reader-notes-tab ${layout === option ? "is-active" : ""}`}
+                        onClick={() => chooseLayout(option)}
+                      >
+                        {option === "scroll" ? "Scroll" : "Pages"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <label className="mt-3 block">
                   <span className="text-[10px] uppercase tracking-widest reader-muted">Page finish</span>
                   <select
@@ -3951,8 +3890,12 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
                     onChange={(event) => requestReadingMode(event.target.value as ReadingMode)}
                   >
                     <option value="standard">Standard</option>
-                    <option value="smart">Smart Read</option>
-                    <option value="speed">SpeedRead (RSVP)</option>
+                    <option value="smart" disabled={paged}>
+                      Smart Read{paged ? " (scroll layout)" : ""}
+                    </option>
+                    <option value="speed" disabled={paged}>
+                      SpeedRead (RSVP){paged ? " (scroll layout)" : ""}
+                    </option>
                   </select>
                 </label>
                 <button
@@ -3963,7 +3906,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
                   <span>App theme</span>
                   <span className="reader-toggle" data-on={readerTheme === "light"} />
                 </button>
-                {readingMode === "standard" && (
+                {readingMode === "standard" && !paged && (
                 <div className="mt-3 rounded-lg border px-3 py-2 reader-border reader-pill">
                   <div className="text-[10px] uppercase tracking-widest reader-muted">Auto scroll</div>
                   <div className="mt-2 flex items-center gap-2">
@@ -4169,7 +4112,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
               )}
               <div
                 ref={viewerRef}
-                className="reader-container reader-scroll h-full w-full overflow-hidden overscroll-x-none"
+                className={`reader-container ${paged ? "reader-pages" : "reader-scroll"} h-full w-full overflow-hidden overscroll-x-none`}
               />
               {readingMode === "speed" && readingWord && (
                 <div
@@ -4251,13 +4194,25 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
                   </div>
                 </div>
               )}
+              {selection && (
+                <div className="absolute bottom-16 left-1/2 z-40 -translate-x-1/2">
+                  <SelectionBar
+                    text={selection.text}
+                    onHighlight={(color) => highlightSelection(color)}
+                    onNote={() => highlightSelection("yellow", true)}
+                    onCopy={copySelection}
+                    onDismiss={clearSelection}
+                  />
+                </div>
+              )}
               <div className="reader-chapter-dock pointer-events-none absolute bottom-4 left-1/2 z-30 flex -translate-x-1/2 items-center">
                 <div className="pointer-events-auto flex items-center gap-2 rounded-lg border px-2 py-1.5 text-xs uppercase tracking-widest reader-pill reader-border">
                   <button
                     type="button"
                     className="reader-mini-control"
-                    onClick={goPrevSection}
-                    title="Previous chapter"
+                    onClick={paged ? () => turnPage(-1) : goPrevSection}
+                    title={paged ? "Previous page (Left arrow)" : "Previous chapter"}
+                    aria-label={paged ? "Previous page" : "Previous chapter"}
                   >
                     <span className="material-symbols-outlined text-base">chevron_left</span>
                   </button>
@@ -4267,8 +4222,9 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
                   <button
                     type="button"
                     className="reader-mini-control"
-                    onClick={goNextSection}
-                    title="Next chapter"
+                    onClick={paged ? () => turnPage(1) : goNextSection}
+                    title={paged ? "Next page (Right arrow or Space)" : "Next chapter"}
+                    aria-label={paged ? "Next page" : "Next chapter"}
                   >
                     <span className="material-symbols-outlined text-base">chevron_right</span>
                   </button>
@@ -4278,6 +4234,10 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
           )}
         </main>
       </div>
+
+      {searchOpen && bookRef.current && (
+        <SearchPanel book={bookRef.current} chapterOf={chapterOfSection} onOpen={openSearchHit} onClose={() => setSearchOpen(false)} />
+      )}
 
       {pendingReadingMode && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 px-6">
