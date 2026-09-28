@@ -2,8 +2,11 @@
 
 ## What exists
 
-**139 Rust unit tests**, run with `cargo test` from `apps/src-tauri`. Every test
-is colocated in a `#[cfg(test)] mod tests` beside the code it covers.
+**254 Rust unit tests**, run with `cargo test` from `apps/src-tauri`. Every test
+is colocated in a `#[cfg(test)] mod tests` beside the code it covers. The table
+below is the original core; the Pip economy (`pip`, `habit::seeds`), reminders,
+the metadata matcher, EPUB package reading (`storage::epub`) and database
+upgrades have their own tests beside them too.
 
 | Module | Tests | Covers |
 | --- | --- | --- |
@@ -16,9 +19,21 @@ is colocated in a `#[cfg(test)] mod tests` beside the code it covers.
 | `comic` | 7 | CBZ page listing and natural ordering |
 
 ```bash
+cd apps && npm run typecheck && npm test && npm run build
 cd apps/src-tauri && cargo test
-cd apps && npx tsc --noEmit && npx vite build
+cd server && npm test        # needs MongoDB; TEST_MONGO_URI, default localhost
 ```
+
+**Vitest** runs the frontend's pure logic (`npm test` in `apps`): reading
+progress weighted by section size (`readers/progress.ts`), the shared
+"finished" rule, the highlights' Markdown export, and series detection and the
+smart shelves (`library/series.test.ts`). Test files sit beside the code as `*.test.ts`.
+
+**CI** (`.github/workflows/ci.yml`) runs all of it on every push and pull
+request: the Pip price catalogue check, the type-check, the unit tests, the
+production build and `cargo test` on Windows, and the server's API tests
+against a MongoDB service. `npm run build` type-checks before building, and the
+Tauri build runs it, so a type error cannot reach a release.
 
 ## The approach
 
@@ -46,12 +61,11 @@ survivable, and the lock refusing a second writer.
 
 ## What is not tested
 
-**There is no JavaScript test framework.** No Vitest, no Jest, no Testing
-Library. That is a real gap, not a considered choice: the frontend is the larger
-half of the app and none of it has automated coverage. `tsc --noEmit` and a clean
-`vite build` are the only gates.
+**Most of the frontend is untested.** Vitest is in place but covers only the
+pure helpers above; no components or stores. The frontend is the larger half of
+the app, so this is the biggest remaining gap.
 
-Highest-value things to cover first if this is addressed:
+Highest-value things to cover next:
 
 - `sync/merge`'s TypeScript counterparts — the store reducers in `libraryStore`
   and `habitStore`

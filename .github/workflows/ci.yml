@@ -1,0 +1,76 @@
+# Checks every push and pull request: the app (types, unit tests, the Pip
+# price catalogue, the production build and the Rust tests) and the server's
+# API tests against a real MongoDB. Nothing is deployed from here.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    # Windows: the app's Windows-only code (reminders, the startup dialog) is
+    # compiled and tested only there.
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: apps
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/package-lock.json
+      - run: npm ci
+      # Rust checks every purchase against a catalogue generated from the JS
+      # art; a stale one would refuse (or misprice) what the shop offers.
+      # Before the build, which regenerates it.
+      - name: Pip catalogue is current
+        run: node scripts/pip-catalogue.mjs --check
+      - name: Type-check
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+      # Also what the Rust crate embeds, so it must exist before cargo runs.
+      - name: Production build
+        run: npm run build
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/src-tauri
+      - name: Rust tests
+        working-directory: apps/src-tauri
+        run: cargo test --locked
+
+  server:
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+      - name: API tests
+        run: npm test
+        env:
+          TEST_MONGO_URI: mongodb://127.0.0.1:27017
