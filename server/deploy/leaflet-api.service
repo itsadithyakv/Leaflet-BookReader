@@ -1,0 +1,61 @@
+# /etc/systemd/system/leaflet-api.service
+#
+# Leaflet API on the Oracle VM: bound to 127.0.0.1, reached only through Caddy.
+# Sized for a 1 GB machine shared with a static site.
+
+[Unit]
+Description=Leaflet API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=leaflet
+Group=leaflet
+WorkingDirectory=/opt/leaflet-api
+EnvironmentFile=/etc/leaflet-api.env
+Environment=NODE_ENV=production
+Environment=NODE_OPTIONS=--max-old-space-size=160
+ExecStart=/usr/bin/node src/index.js
+Restart=always
+RestartSec=5
+# The server closes Mongo and exits within 10 s of SIGTERM.
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+# Memory: a hard ceiling so a leak cannot starve Caddy.
+MemoryMax=256M
+MemorySwapMax=0
+
+# CPU and disk: the website comes first. Under contention the API gets half
+# the default share and a lower priority, so a burst of sign-ups (password
+# hashing is deliberately slow) cannot make the Unifloe site sluggish. With no
+# contention it still uses whatever is idle.
+CPUWeight=50
+IOWeight=50
+Nice=5
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+ReadOnlyPaths=/opt/leaflet-api
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

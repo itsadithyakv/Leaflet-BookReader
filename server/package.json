@@ -1,0 +1,19 @@
+{
+  "name": "leaflet-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Accounts, leaderboard and opaque sync-state API for Leaflet. Holds the Mongo connection so the app never has to.",
+  "engines": {
+    "node": ">=20.6"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node --test --test-concurrency=1"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "mongodb": "^6.12.0"
+  }
+}

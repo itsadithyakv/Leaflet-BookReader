@@ -1,0 +1,26 @@
+# Add this site block to the END of /etc/caddy/Caddyfile, alongside (not
+# inside) the existing unifloe.app blocks. leafletapp.duckdns.org is a free
+# DuckDNS name pointing at the VM, so the API outlives any paid domain.
+#
+#   sudo caddy validate --config /etc/caddy/Caddyfile
+#   sudo systemctl reload caddy
+
+leafletapp.duckdns.org {
+	encode gzip
+	# Largest body the API accepts is ~3 MB (a sync state); refuse more here.
+	request_body {
+		max_size 4MB
+	}
+	reverse_proxy 127.0.0.1:8787
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		-Server
+	}
+	log {
+		output file /var/log/caddy/leaflet-api.log {
+			roll_size 10MiB
+			roll_keep 3
+		}
+	}
+}

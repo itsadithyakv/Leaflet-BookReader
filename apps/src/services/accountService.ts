@@ -1,0 +1,90 @@
+import { invoke, isTauri } from "@tauri-apps/api/core";
+
+/** A Leaflet account as the server describes it. Never includes a token. */
+export type Account = {
+  id: string;
+  email: string;
+  displayName: string | null;
+  /** The avatar picked at signup or since (`skin.move`, see `pip/avatars.ts`), or null. */
+  avatar: string | null;
+  createdAt: string | null;
+};
+
+export type AccountStatus = {
+  /** A Leaflet server is configured, so accounts can be used at all. */
+  available: boolean;
+  apiBase: string | null;
+  signedIn: boolean;
+  account: Account | null;
+  /** Signed in, but the server could not be reached to confirm it. */
+  offline: boolean;
+};
+
+export const SIGNED_OUT: AccountStatus = {
+  available: false,
+  apiBase: null,
+  signedIn: false,
+  account: null,
+  offline: false
+};
+
+/** Tauri rejects with the Rust error string; normalise to something printable. */
+export const errorMessage = (cause: unknown, fallback = "Something went wrong.") =>
+  typeof cause === "string" ? cause : cause instanceof Error ? cause.message : fallback;
+
+/**
+ * Optional email + password accounts.
+ *
+ * The session token never reaches the webview: Rust keeps it in the OS
+ * keychain and attaches it to requests itself. These calls only ever see who
+ * is signed in.
+ */
+export const accountService = {
+  async status(refresh = false): Promise<AccountStatus> {
+    if (!isTauri()) {
+      return SIGNED_OUT;
+    }
+    return invoke<AccountStatus>("account_status", { refresh });
+  },
+
+  async signUp(email: string, password: string, displayName?: string, avatar?: string | null): Promise<AccountStatus> {
+    return invoke<AccountStatus>("account_signup", {
+      email,
+      password,
+      displayName: displayName?.trim() || null,
+      avatar: avatar ?? null
+    });
+  },
+
+  /** Picks a new avatar, or clears it with null. */
+  async setAvatar(avatar: string | null): Promise<AccountStatus> {
+    return invoke<AccountStatus>("account_set_avatar", { avatar });
+  },
+
+  async signIn(email: string, password: string): Promise<AccountStatus> {
+    return invoke<AccountStatus>("account_login", { email, password });
+  },
+
+  async signOut(): Promise<AccountStatus> {
+    return invoke<AccountStatus>("account_logout");
+  },
+
+  /** Signs out every other device as well. */
+  async changePassword(current: string, next: string): Promise<void> {
+    await invoke("account_change_password", { current, next });
+  },
+
+  /** Deletes the account and everything the server holds for it. */
+  async deleteAccount(password: string): Promise<AccountStatus> {
+    return invoke<AccountStatus>("account_delete", { password });
+  },
+
+  /** Opens a public https page (privacy policy, terms) in the browser. */
+  async openLink(url: string): Promise<void> {
+    if (!isTauri()) {
+      window.open(url, "_blank", "noopener,noreferrer");
+      return;
+    }
+    await invoke("open_public_link", { url });
+  }
+};
