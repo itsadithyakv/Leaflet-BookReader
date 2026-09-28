@@ -2,41 +2,78 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { useShallow } from "zustand/react/shallow";
 import { isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Sidebar } from "./components/Sidebar";
-import { AccountBadge } from "./components/AccountBadge";
+import { AccountBadge, type SyncMode } from "./components/AccountBadge";
 import { AccountPanel } from "./components/AccountPanel";
-import { LoginModal } from "./components/LoginModal";
+import { WelcomeModal } from "./components/WelcomeModal";
+import { SessionWrapUp } from "./components/SessionWrapUp";
+import { usePipReactions } from "./hooks/usePipReactions";
+import { useCommunityPulse } from "./hooks/useCommunityPulse";
+import { PipHome } from "./components/PipHome";
+import { PipReaderPeek } from "./components/PipReaderPeek";
+import { PipWorld, type PipAction } from "./components/PipWorld";
+import { usePipStore } from "./store/pipStore";
+import { usePipWardrobeStore } from "./store/pipWardrobeStore";
+import { pickBeat } from "./pip/moments";
+import { nodFor } from "./pip/bookNods";
+import { loadBookScenes } from "./pip";
+
+/** A book untouched this long gets dusted off when it is opened again. */
+const DUSTY_BOOK_DAYS = 30;
+import { MobileNav } from "./components/MobileNav";
 import { UiIcon } from "./components/UiIcon";
 import { LibraryPage } from "./pages/LibraryPage";
-import { CollectionsPage } from "./pages/CollectionsPage";
-import { AnalyticsPage } from "./pages/AnalyticsPage";
-import { SettingsPage } from "./pages/SettingsPage";
 import { useLibraryStore } from "./store/libraryStore";
-import { useAccountStore } from "./store/accountStore";
-import { useHabitStore } from "./store/habitStore";
+import { AWAY_FREE_MS, useHabitStore } from "./store/habitStore";
+import { setAppFullscreen, watchForeground } from "./services/windowService";
+import { ConfirmDialog } from "./components/ConfirmDialog";
+import { RatePrompt, openStoreReview } from "./components/RatePrompt";
+import { ReminderOptIn } from "./components/ReminderOptIn";
+import { useReminders } from "./hooks/useReminders";
 import { useAppearanceStore, watchSystemTheme } from "./store/appearanceStore";
 import { bookService } from "./services/bookService";
 import { converterService } from "./services/converterService";
-import { getPlatform } from "./platform";
-import Logo from "./assets/logoLeaflet500x500.png";
+import { getPlatform, pickSyncFolder } from "./platform";
 import type { Book } from "@shared/models/book";
-import { getBookExtension, isImportableExtension } from "./constants/bookFormats";
+import {
+  findBookFormat,
+  getBookExtension,
+  isImportableExtension,
+  needsConversion
+} from "./constants/bookFormats";
 
-type Tab = "library" | "collections" | "analytics" | "settings";
+type Tab = "library" | "collections" | "social" | "pip" | "settings";
 
 const ReaderView = lazy(() =>
   import("./pages/ReaderView").then((module) => ({ default: module.ReaderView }))
 );
 
-const PdfReaderView = lazy(() =>
-  import("./pages/PdfReaderView").then((module) => ({ default: module.PdfReaderView }))
+const PageReaderView = lazy(() =>
+  import("./pages/PageReaderView").then((module) => ({ default: module.PageReaderView }))
 );
+
+// The Library is the start screen; the other tabs load the first time they
+// are opened, which keeps them (and the community components) out of startup.
+const CollectionsPage = lazy(() =>
+  import("./pages/CollectionsPage").then((module) => ({ default: module.CollectionsPage }))
+);
+const SocialPage = lazy(() => import("./pages/SocialPage").then((module) => ({ default: module.SocialPage })));
+const PipPage = lazy(() => import("./pages/PipPage").then((module) => ({ default: module.PipPage })));
+const SettingsPage = lazy(() =>
+  import("./pages/SettingsPage").then((module) => ({ default: module.SettingsPage }))
+);
+
+/** Books whose scene Pip has already shown once (see showBookNod). */
+const NODS_SEEN_KEY = "leaflet.pip.nodsSeen";
+
+/** Marks the first-run choice as made, so it is never asked twice. */
+const WELCOME_KEY = "leaflet.welcomed";
 
 const tabLabels: Record<Tab, string> = {
   library: "Library",
   collections: "Collections",
-  analytics: "Analytics",
+  social: "Social",
+  pip: "Pip",
   settings: "Settings"
 };
 
@@ -45,113 +82,147 @@ const App = () => {
     books,
     filters,
     syncStatus,
-    driveConnected,
+    syncError,
+    sync,
     metadataRefreshing,
     metadataTotal,
     metadataDone,
     loadBooks,
     loadStats,
-    loadDriveStatus,
+    loadSyncStatus,
     importPaths,
     openBook,
     startDriveAuth,
+    disconnectDrive,
+    setSyncFolder,
     syncNow,
+    requestBackup,
+    ensureBookFile,
     setFilter
   } = useLibraryStore(
     useShallow((state) => ({
       books: state.books,
       filters: state.filters,
       syncStatus: state.syncStatus,
-      driveConnected: state.driveConnected,
+      syncError: state.syncError,
+      sync: state.sync,
       metadataRefreshing: state.metadataRefreshing,
       metadataTotal: state.metadataTotal,
       metadataDone: state.metadataDone,
       loadBooks: state.loadBooks,
       loadStats: state.loadStats,
-      loadDriveStatus: state.loadDriveStatus,
+      loadSyncStatus: state.loadSyncStatus,
       importPaths: state.importPaths,
       openBook: state.openBook,
       startDriveAuth: state.startDriveAuth,
+      disconnectDrive: state.disconnectDrive,
+      setSyncFolder: state.setSyncFolder,
       syncNow: state.syncNow,
+      requestBackup: state.requestBackup,
+      ensureBookFile: state.ensureBookFile,
       setFilter: state.setFilter
     }))
   );
 
   const [activeTab, setActiveTab] = useState<Tab>("library");
   const [selected, setSelected] = useState<Book | null>(null);
+  // For long-lived listeners that need to know whether a book is open.
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+
+  // With a book open, the library underneath is out of reach: Tab no longer
+  // walks its hidden buttons, and Enter on one cannot reopen a book behind
+  // the reader. Focus goes back to where it was when the book closes.
+  const readingOpen = selected !== null;
+  useEffect(() => {
+    if (!readingOpen) {
+      return;
+    }
+    const previous = document.activeElement as HTMLElement | null;
+    const layers = Array.from(document.querySelectorAll<HTMLElement>(".app-header, .app-body"));
+    layers.forEach((layer) => layer.setAttribute("inert", ""));
+    previous?.blur?.();
+    return () => {
+      layers.forEach((layer) => layer.removeAttribute("inert"));
+      if (previous?.isConnected) {
+        previous.focus({ preventScroll: true });
+      }
+    };
+  }, [readingOpen]);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const [bookmarks, setBookmarks] = useState<string[]>([]);
   const [accountPanelOpen, setAccountPanelOpen] = useState(false);
-  const [loginModalOpen, setLoginModalOpen] = useState(false);
+  // Shown once, on the first launch that has no sync set up. The key is checked
+  // eagerly so the modal never flashes for someone who has already answered.
+  const [welcomeOpen, setWelcomeOpen] = useState(() => {
+    try {
+      return localStorage.getItem(WELCOME_KEY) === null;
+    } catch {
+      return false;
+    }
+  });
   const [converterPromptBook, setConverterPromptBook] = useState<Book | null>(null);
+  // The converter is compiled out of mobile builds, so the prompt must explain
+  // rather than offer a download that cannot succeed.
+  const converterSupported = getPlatform() === "desktop";
   const [converterBusy, setConverterBusy] = useState(false);
 
-  const {
-    loggedIn,
-    email,
-    premium,
-    lastSyncedAt,
-    syncState,
-    load: loadAccount,
-    signIn,
-    signOut,
-    upgradePremium,
-    restorePremium,
-    setLastSyncedAt,
-    setSyncState,
-    tier
-  } = useAccountStore(
-    useShallow((state) => ({
-      loggedIn: state.loggedIn,
-      email: state.email,
-      premium: state.premium,
-      lastSyncedAt: state.lastSyncedAt,
-      syncState: state.syncState,
-      load: state.load,
-      signIn: state.signIn,
-      signOut: state.signOut,
-      upgradePremium: state.upgradePremium,
-      restorePremium: state.restorePremium,
-      setLastSyncedAt: state.setLastSyncedAt,
-      setSyncState: state.setSyncState,
-      tier: state.tier
-    }))
-  );
+  // Which transport is carrying sync, if any. There is no account tier: sync
+  // runs against the reader's own storage, so there is nothing to sign up for.
+  const syncMode: SyncMode = sync.driveConnected ? "drive" : sync.folderPath ? "folder" : "off";
 
-  const { activeSession, focusSettings, goal, startSession, stopSession, clearSessionShelf } =
+  const { activeSession, focusSettings, goalMinutes, startSession, stopSession, loadHabit } =
     useHabitStore(
       useShallow((state) => ({
         activeSession: state.activeSession,
         focusSettings: state.focusSettings,
-        goal: state.goal,
+        goalMinutes: state.snapshot.goalMinutes,
         startSession: state.startSession,
         stopSession: state.stopSession,
-        clearSessionShelf: state.clearSessionShelf
+        loadHabit: state.load
       }))
     );
+  const loadWardrobe = usePipWardrobeStore((state) => state.load);
   const fullscreenLockRef = useRef(false);
   const theme = useAppearanceStore((state) => state.theme);
   const toggleTheme = useAppearanceStore((state) => state.toggleTheme);
 
-  const platform = getPlatform();
-
   useEffect(() => {
     loadBooks();
     loadStats();
-    loadDriveStatus();
-    loadAccount();
-  }, [loadBooks, loadStats, loadDriveStatus, loadAccount]);
+    loadSyncStatus();
+    // Lazy streak evaluation: the app may have been closed for days, so a break
+    // is discovered on open rather than by a timer that was never running.
+    void loadHabit();
+    // What Pip wears everywhere (the roaming Pip, the reader peek, the wrap-up).
+    void loadWardrobe();
+  }, [loadBooks, loadStats, loadSyncStatus, loadHabit, loadWardrobe]);
 
   useEffect(() => watchSystemTheme(), []);
 
+  usePipReactions(selected !== null);
+  // Community news (kudos, followers, duels): polled while signed in; the
+  // count becomes a dot on the Social nav item.
+  const communityUnread = useCommunityPulse();
+  const navBadge = useMemo(() => ({ Social: communityUnread }), [communityUnread]);
+
+  // Back up on launch. The app may have been closed mid-session, and on a new
+  // computer this same pass is what restores the library from Drive.
   useEffect(() => {
-    if (platform === "mobile" && driveConnected) {
+    if (sync.driveConnected) {
       syncNow().catch(() => {
-        // startup sync failure is fine; user can retry manually
+        // startup backup failure is fine; it is recorded and retried later
       });
     }
-  }, [platform, driveConnected, syncNow]);
+  }, [sync.driveConnected, syncNow]);
+
+  // Closing a book is the moment progress and the habit ledger have changed, so
+  // it is when a backup is worth taking. Imports and deletes schedule their own.
+  const closeReader = useCallback(() => {
+    setSelected(null);
+    requestBackup();
+  }, [requestBackup]);
 
   useEffect(() => {
     return () => {
@@ -190,10 +261,49 @@ const App = () => {
     return fallback;
   };
 
+  /**
+   * A famous book gets a little scene from Pip when it is opened: always the
+   * first time, then about one open in four, so it stays a surprise.
+   */
+  const showBookNod = (book: Book) => {
+    const nod = nodFor(book);
+    if (!nod) {
+      return;
+    }
+    let seen: string[] = [];
+    try {
+      seen = JSON.parse(localStorage.getItem(NODS_SEEN_KEY) ?? "[]") as string[];
+    } catch {
+      seen = [];
+    }
+    const first = !seen.includes(book.id);
+    if (!first && Math.random() > 0.25) {
+      return;
+    }
+    if (first) {
+      try {
+        localStorage.setItem(NODS_SEEN_KEY, JSON.stringify([...seen, book.id].slice(-500)));
+      } catch {
+        // Only means the first-time scene may play again.
+      }
+    }
+    // After the page has had a moment to appear.
+    const ready = loadBookScenes();
+    window.setTimeout(() => void ready.then(() => usePipStore.getState().showPeek(nod.move, nod.line, 1)), 2200);
+  };
+
   const openPreparedBook = (book: Book) => {
+    const lastOpened = book.lastOpened ? Date.parse(book.lastOpened) : NaN;
+    const idleDays = Number.isFinite(lastOpened) ? Math.floor((Date.now() - lastOpened) / 86_400_000) : 0;
+    if (idleDays >= DUSTY_BOOK_DAYS) {
+      const beat = pickBeat("dustyBook", `${book.id}:${book.lastOpened}`, { days: idleDays });
+      usePipStore.getState().showPeek(beat.move, beat.line);
+    } else {
+      showBookNod(book);
+    }
     setSelected(book);
     if (focusSettings.goalBinding && !activeSession) {
-      const duration = goal.mode === "minutes" && goal.target > 0 ? goal.target : 20;
+      const duration = goalMinutes > 0 ? goalMinutes : 20;
       startSession({
         startedAt: new Date().toISOString(),
         durationMinutes: duration,
@@ -207,23 +317,46 @@ const App = () => {
   };
 
   const handleOpenBook = (book: Book) => {
-    const extension = book.localPath.split(".").pop()?.toLowerCase() ?? "";
-    if (extension !== "azw3" && extension !== "mobi") {
+    // Sync carries the library index everywhere but leaves the files where they
+    // are, so a book can be listed on this device with nothing to open yet.
+    if (book.available === false) {
+      showToast(`Downloading ${book.title}…`);
+      ensureBookFile(book)
+        .then((ready) => {
+          // The download can finish after another book was opened; it must
+          // not swap that book out from under the reader.
+          if (selectedRef.current) {
+            showToast(`${ready.title} is downloaded and ready.`);
+            return;
+          }
+          handleOpenBookRef.current(ready);
+        })
+        .catch((error) =>
+          showToast(resolveErrorMessage(error, "Could not download that book."))
+        );
+      return;
+    }
+
+    // Every convertible format needs this gate, not just Kindle ones; and the
+    // backend answers false when a cached conversion already exists.
+    if (!needsConversion(getBookExtension(book.localPath))) {
       openPreparedBook(book);
       return;
     }
 
-    converterService
-      .status()
-      .then((installed) => {
-        if (installed) {
-          openPreparedBook(book);
-        } else {
+    bookService
+      .needsConverter(book.id)
+      .then((required) => {
+        if (required) {
           setConverterPromptBook(book);
+        } else {
+          openPreparedBook(book);
         }
       })
       .catch(() => {
-        setConverterPromptBook(book);
+        // Let the reader surface the backend's specific reason instead of
+        // guessing that the converter is the problem.
+        openPreparedBook(book);
       });
   };
 
@@ -352,133 +485,130 @@ const App = () => {
   };
 
   const handleDriveConnect = () => {
-    startDriveAuth().catch((error) => {
-      showToast(resolveErrorMessage(error, "Drive connection failed. Please retry."));
-    });
+    showToast("Finish signing in to Google in your browser.");
+    startDriveAuth()
+      .then(() => showToast("Drive connected. Your library is backed up."))
+      .catch((error) => {
+        // The backend distinguishes cancelled, timed out and refused, so the
+        // reason reaches the reader instead of a generic failure.
+        showToast(resolveErrorMessage(error, "Drive connection failed. Please retry."));
+      });
   };
 
-  useEffect(() => {
-    if (!loggedIn || !driveConnected) {
-      setSyncState("offline");
-      return;
-    }
-    if (syncStatus === "syncing") {
-      setSyncState("pending");
-    } else if (syncStatus === "success") {
-      setSyncState("synced");
-    } else if (syncStatus === "error") {
-      setSyncState("error");
-    }
-  }, [syncStatus, driveConnected, loggedIn, setSyncState]);
-
-  useEffect(() => {
-    if (!focusSettings.kioskMode) {
-      fullscreenLockRef.current = false;
-      return;
-    }
-
-    if (activeSession) {
-      fullscreenLockRef.current = true;
-      if (isTauri()) {
-        getCurrentWindow().setFullscreen(true).catch(() => {
-          // ignore fullscreen errors
-        });
-      } else if (document.documentElement.requestFullscreen) {
-        document.documentElement.requestFullscreen().catch(() => {
-          // ignore
-        });
-      }
-      return;
-    }
-
-    if (!fullscreenLockRef.current) {
-      return;
-    }
-    fullscreenLockRef.current = false;
-    if (isTauri()) {
-      getCurrentWindow().setFullscreen(false).catch(() => {
-        // ignore
-      });
-    } else if (document.fullscreenElement) {
-      document.exitFullscreen().catch(() => {
-        // ignore
-      });
-    }
-  }, [activeSession, focusSettings.kioskMode]);
-
-  useEffect(() => {
-    if (!focusSettings.kioskMode) {
-      return;
-    }
-    if (!isTauri()) {
-      const onFullscreenChange = () => {
-        if (activeSession && fullscreenLockRef.current && !document.fullscreenElement) {
-          fullscreenLockRef.current = false;
-          const confirmed = window.confirm(
-            "Exiting fullscreen will clear your sessions bookshelf progress. Continue?"
-          );
-          if (!confirmed) {
-            fullscreenLockRef.current = true;
-            document.documentElement.requestFullscreen().catch(() => {
-              // ignore
-            });
-            return;
-          }
-          stopSession({ reason: "manual_end", cleanSession: false });
-          clearSessionShelf();
-          showToast("Focus paused");
-        }
-      };
-      document.addEventListener("fullscreenchange", onFullscreenChange);
-      return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
-    }
-    const windowHandle = getCurrentWindow();
-    const onResize = () => {
-      if (!activeSession || !fullscreenLockRef.current) {
+  const handleChooseFolder = async () => {
+    try {
+      const picked = await pickSyncFolder();
+      if (!picked) {
         return;
       }
-      windowHandle
-        .isFullscreen()
-        .then((isFullscreen) => {
-          if (!isFullscreen) {
-            fullscreenLockRef.current = false;
-            const confirmed = window.confirm(
-              "Exiting fullscreen will clear your sessions bookshelf progress. Continue?"
-            );
-            if (!confirmed) {
-              fullscreenLockRef.current = true;
-              windowHandle.setFullscreen(true).catch(() => {
-                // ignore
-              });
-              return;
-            }
-            stopSession({ reason: "manual_end", cleanSession: false });
-            clearSessionShelf();
-            showToast("Focus paused");
-          }
-        })
-        .catch(() => {
-          // ignore
-        });
-    };
-    const unlistenPromise = windowHandle.onResized(onResize);
-    return () => {
-      unlistenPromise.then((unlisten) => unlisten()).catch(() => {
-        // ignore
-      });
-    };
-  }, [activeSession, focusSettings.kioskMode, stopSession]);
+      await setSyncFolder(picked);
+      showToast("Folder sync is on. Your library will follow this folder.");
+    } catch (error) {
+      showToast(resolveErrorMessage(error, "Could not use that folder."));
+    }
+  };
+
+  const handleClearFolder = () => {
+    setSyncFolder(null)
+      .then(() => showToast("Folder sync stopped. Nothing was deleted."))
+      .catch((error) => showToast(resolveErrorMessage(error, "Could not stop folder sync.")));
+  };
+
+  // The header follows the scroll on a phone: reading a long shelf should not
+  // cost a permanent strip of screen. It comes straight back on any upward
+  // scroll, and the CSS confines all of this to small or short viewports, so a
+  // desktop window keeps its fixed header.
+  const [headerHidden, setHeaderHidden] = useState(false);
+  const lastScrollRef = useRef(0);
+
+  const handleMainScroll = useCallback((event: React.UIEvent<HTMLElement>) => {
+    const top = event.currentTarget.scrollTop;
+    const previous = lastScrollRef.current;
+    // Ignore jitter, and never hide it while still near the top -- there the
+    // header is the only thing identifying where you are.
+    if (Math.abs(top - previous) > 6) {
+      // The account panel is anchored to the header, so sliding the header away
+      // would take the panel with it.
+      setHeaderHidden(!accountPanelOpen && top > previous && top > 72);
+      lastScrollRef.current = top;
+    }
+  }, [accountPanelOpen]);
+
+  const dismissWelcome = useCallback(() => {
+    setWelcomeOpen(false);
+    try {
+      localStorage.setItem(WELCOME_KEY, "1");
+    } catch {
+      // Refusing to remember the answer is better than refusing to start.
+    }
+    // First run: Pip shows the new reader around.
+    window.setTimeout(() => usePipStore.getState().startTour(), 900);
+  }, []);
+
+  // The tour points at the Library, so it starts there.
+  const tourRunning = usePipStore((state) => state.tour !== null);
+  useEffect(() => {
+    if (tourRunning) {
+      setActiveTab("library");
+    }
+  }, [tourRunning]);
+
+  const handleDisconnectDrive = () => {
+    disconnectDrive()
+      .then(() => showToast("Drive disconnected. Your books stay on this device."))
+      .catch((error) => showToast(resolveErrorMessage(error, "Could not disconnect Drive.")));
+  };
+
+  // Focus lock: the window goes fullscreen for the length of a session. Keyed
+  // on "a session is running" rather than the session object, which changes
+  // whenever it is extended or its away time is updated.
+  const sessionRunning = activeSession !== null;
+  const focusLocked = focusSettings.kioskMode && sessionRunning;
+  useEffect(() => {
+    if (fullscreenLockRef.current === focusLocked) {
+      return;
+    }
+    fullscreenLockRef.current = focusLocked;
+    void setAppFullscreen(focusLocked);
+  }, [focusLocked]);
+
+  // Switching to another app during a session. Leaflet does not try to stop
+  // it (it cannot, and should not), but the session clock stops while you are
+  // away, and Pip notices when you come back.
+  useEffect(() => {
+    if (!sessionRunning) {
+      return;
+    }
+    return watchForeground((inFront) => {
+      const stint = useHabitStore.getState().setForeground(inFront);
+      if (!inFront || stint < AWAY_FREE_MS) {
+        return;
+      }
+      const minutes = Math.max(1, Math.round(stint / 60_000));
+      const beat = pickBeat("awayReturn", Date.now(), { minutes });
+      if (selectedRef.current) {
+        usePipStore.getState().showPeek(beat.move, beat.line);
+      } else {
+        usePipStore.getState().react(beat.move, { loops: 1, line: beat.line });
+      }
+    });
+  }, [sessionRunning]);
 
   const handleSync = () => {
-    setSyncState("pending");
-    (driveConnected ? syncNow() : startDriveAuth())
+    if (syncMode === "off") {
+      showToast("Connect Google Drive in Settings to back up your library.");
+      return;
+    }
+    syncNow()
       .then(() => {
-        setLastSyncedAt(new Date().toISOString());
-        setSyncState("synced");
+        showToast("Library backed up.");
+        const beat = pickBeat("backup", Date.now());
+        usePipStore.getState().react(beat.move, { loops: 1, line: beat.line });
       })
       .catch((error) => {
-        setSyncState("error");
-        showToast(resolveErrorMessage(error, "Sync failed. Check Drive status."));
+        // The backend names the cause -- full Drive, rate limit, expired
+        // session -- rather than reporting an unexplained failure.
+        showToast(resolveErrorMessage(error, "Backup failed."));
       });
   };
 
@@ -493,6 +623,42 @@ const App = () => {
     })[0];
   }, [books]);
   const nowReading = lastOpenedBook ?? books[0] ?? null;
+
+  // A clicked reading reminder: pick up the last book, once the library has
+  // loaded (a click can be what launched the app). Never over an open book.
+  const [reminderRoute, setReminderRoute] = useState<string | null>(null);
+  useReminders(selected !== null, setReminderRoute);
+  const libraryLoading = useLibraryStore((state) => state.loading);
+  useEffect(() => {
+    if (!reminderRoute || libraryLoading) {
+      return;
+    }
+    setReminderRoute(null);
+    if (selectedRef.current) {
+      return;
+    }
+    setActiveTab("library");
+    if (reminderRoute === "continue" && nowReading) {
+      handleOpenBookRef.current(nowReading);
+    }
+  }, [reminderRoute, libraryLoading, nowReading]);
+  // The book scenes arrive in their own chunk once the app is up.
+  useEffect(() => {
+    const load = () => void loadBookScenes();
+    if (typeof window.requestIdleCallback === "function") {
+      const handle = window.requestIdleCallback(load, { timeout: 8000 });
+      return () => window.cancelIdleCallback(handle);
+    }
+    const timer = window.setTimeout(load, 3000);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  // Pip's idle time sometimes plays the current book's scene.
+  useEffect(() => {
+    usePipStore.getState().setBookNod(
+      nowReading && nodFor(nowReading) ? { title: nowReading.title, author: nowReading.author ?? null } : null
+    );
+  }, [nowReading?.id, nowReading?.title, nowReading?.author]);
   const [nowReadingFallback, setNowReadingFallback] = useState<string | null>(null);
   const nowReadingCover =
     nowReading?.coverUrl && nowReading.coverUrl.startsWith("http") ? nowReading.coverUrl : null;
@@ -509,50 +675,98 @@ const App = () => {
     if (!isTauri() || !nowReading?.coverUrl || nowReading.coverUrl.startsWith("http")) {
       return;
     }
-    void bookService.coverData(nowReading.id).then((data) => {
-      if (data) {
-        setNowReadingFallback(data);
-      }
-    });
+    void bookService
+      .coverData(nowReading.id)
+      .then((data) => {
+        if (data) {
+          setNowReadingFallback(data);
+        }
+      })
+      .catch(() => undefined);
   }, [nowReading?.id, nowReading?.coverUrl]);
 
   const handleNowReadingError = () => {
     if (!nowReading) {
       return;
     }
-    void bookService.coverData(nowReading.id).then((data) => {
-      if (data) {
-        setNowReadingFallback(data);
-      }
-    });
+    void bookService
+      .coverData(nowReading.id)
+      .then((data) => {
+        if (data) {
+          setNowReadingFallback(data);
+        }
+      })
+      .catch(() => undefined);
   };
 
   const resolvedNowReadingCover = nowReadingFallback ?? nowReadingCover;
-  const accountTier = tier();
+  // Page-image formats (PDF, comics) use the page reader; everything else is
+  // reflowable text.
+  const selectedDelivery = selected
+    ? findBookFormat(getBookExtension(selected.localPath))?.delivery
+    : undefined;
   const badgeAnimateRef = useRef<string | null>(null);
   const [badgeAnimate, setBadgeAnimate] = useState(false);
 
   useEffect(() => {
-    if (badgeAnimateRef.current === accountTier) {
+    if (badgeAnimateRef.current === syncMode) {
       return;
     }
-    badgeAnimateRef.current = accountTier;
+    badgeAnimateRef.current = syncMode;
     setBadgeAnimate(true);
     const timer = window.setTimeout(() => setBadgeAnimate(false), 320);
     return () => window.clearTimeout(timer);
-  }, [accountTier]);
+  }, [syncMode]);
+
+  // Pip's right-click menu: the few things worth a shortcut from anywhere.
+  const pipActions: PipAction[] = [];
+  if (nowReading) {
+    pipActions.push({ id: "continue", label: `Continue ${nowReading.title}`, run: () => handleOpenBook(nowReading) });
+  }
+  if (activeSession) {
+    pipActions.push({
+      id: "end-session",
+      label: "End focus session",
+      run: () => void stopSession({ reason: "manual_end", cleanSession: false })
+    });
+  } else {
+    const minutes = goalMinutes > 0 ? goalMinutes : 20;
+    pipActions.push({
+      id: "start-session",
+      label: `Start a ${minutes}-minute session`,
+      run: () => {
+        setActiveTab("library");
+        startSession({ startedAt: new Date().toISOString(), durationMinutes: minutes });
+      }
+    });
+  }
+  if (sync.driveConnected) {
+    pipActions.push({ id: "backup", label: "Back up now", run: handleSync });
+  }
+  pipActions.push({ id: "rate", label: "Rate Leaflet ★", run: () => void openStoreReview() });
 
   return (
-    <div className="app-shell min-h-screen font-body text-on-surface selection:bg-primary-container selection:text-on-primary-container">
-      <header className="paper-toolbar sticky top-0 z-50 flex w-full items-center justify-between border-x-0 border-t-0 px-4 py-3 md:px-7">
-        <div className="flex items-center gap-3">
-          <img src={Logo} alt="Leaflet Logo" className="h-10 w-10 object-contain" />
-          <span className="leaflet-wordmark text-3xl">
+    <div className="app-shell flex flex-col font-body text-on-surface selection:bg-primary-container selection:text-on-primary-container">
+      <header
+        className={`app-header paper-toolbar sticky top-0 z-50 flex w-full shrink-0 items-center justify-between gap-2 border-x-0 border-t-0 py-3 md:gap-4 ${
+          headerHidden ? "app-header-hidden" : ""
+        }`}
+      >
+        <div className="flex shrink-0 items-center gap-3">
+          {/* Pip is the logo, and the logo is Pip's home: it hops out of here
+              into the app and comes back here to rest. */}
+          <PipHome />
+          {/* Hidden only in the band where the header also carries search and
+              space is genuinely contested. Below `md` the page owns search, and
+              at `lg` there is room for both. */}
+          <span className="leaflet-wordmark text-2xl sm:text-3xl md:hidden lg:inline">
             Leaflet
           </span>
         </div>
-        <div className="hidden flex-1 px-6 md:block">
-          <div className="relative mx-auto max-w-xl">
+        {/* Below `md` the Library page carries search itself, full width and in
+            context, which is a better home for it than a squeezed header. */}
+        <div className="hidden min-w-0 flex-1 md:block md:px-6">
+          <div className="relative mx-auto max-w-xl" data-tour="search">
             <UiIcon
               name="search"
               size={19}
@@ -561,7 +775,11 @@ const App = () => {
             <input
               className="inset-field w-full py-2.5 pl-12 pr-4 text-sm text-on-surface focus:border-primary/50 focus:outline-none"
               placeholder="Search your archive..."
-              type="text"
+              type="search"
+              inputMode="search"
+              enterKeyHint="search"
+              autoCapitalize="none"
+              autoCorrect="off"
               value={filters.query}
               onChange={(event) => handleSearchChange(event.target.value)}
             />
@@ -571,10 +789,10 @@ const App = () => {
           <button
             type="button"
             className="tactile-button hidden items-center gap-2 px-3 py-2 text-xs xl:flex"
-            onClick={handleDriveConnect}
+            onClick={() => setAccountPanelOpen((prev) => !prev)}
           >
             <UiIcon name="cloud" size={17} />
-            {driveConnected ? "Drive Connected" : "Connect Drive"}
+            {syncMode === "off" ? "Set Up Sync" : "Sync Settings"}
           </button>
           <button
             type="button"
@@ -593,31 +811,35 @@ const App = () => {
           >
             <UiIcon name={theme === "dark" ? "sun" : "moon"} size={19} />
           </button>
-          <div className="relative">
+          <div className="relative" data-tour="backup">
             <AccountBadge
-              tier={accountTier}
-              syncState={loggedIn ? (driveConnected ? syncState : "offline") : "offline"}
+              mode={syncMode}
+              status={syncStatus}
+              pending={sync.booksPending}
               onClick={() => setAccountPanelOpen((prev) => !prev)}
               animate={badgeAnimate}
             />
             <AccountPanel
               open={accountPanelOpen}
-              tier={accountTier}
-              syncState={loggedIn ? (driveConnected ? syncState : "offline") : "offline"}
-              email={email}
-              lastSyncedAt={lastSyncedAt}
-              onSignIn={() => setLoginModalOpen(true)}
-              onSignOut={() => {
-                signOut();
+              mode={syncMode}
+              status={syncStatus}
+              sync={sync}
+              error={syncError}
+              onConnectDrive={() => {
                 setAccountPanelOpen(false);
+                handleDriveConnect();
               }}
-              onUpgrade={() => {
-                upgradePremium();
-                showToast("Premium unlocked — thank you for supporting Leaflet.");
+              onDisconnectDrive={() => {
+                setAccountPanelOpen(false);
+                handleDisconnectDrive();
               }}
-              onRestore={() => {
-                restorePremium();
-                showToast("Premium restored.");
+              onChooseFolder={() => {
+                setAccountPanelOpen(false);
+                void handleChooseFolder();
+              }}
+              onClearFolder={() => {
+                setAccountPanelOpen(false);
+                handleClearFolder();
               }}
               onSyncNow={handleSync}
             />
@@ -625,16 +847,26 @@ const App = () => {
         </div>
       </header>
 
-      <div className="flex h-[calc(100vh-72px)] overflow-hidden">
-        <div className="sidebar-stage relative hidden h-full w-[78px] shrink-0 md:block">
+      <div className="app-body flex min-h-0 flex-1 overflow-hidden">
+        {/* The rail carries navigation on anything but an upright phone —
+            including a phone in landscape, where a bottom bar would eat the
+            one dimension that is already scarce. */}
+        <div className="sidebar-stage relative hidden h-full w-[78px] shrink-0 md:block short:block">
           <Sidebar
             activeItem={tabLabels[activeTab]}
             onNavigate={handleSidebarNavigate}
             onStartReading={() => nowReading && handleOpenBook(nowReading)}
             startDisabled={!nowReading}
+            badge={navBadge}
           />
         </div>
-        <main className="min-w-0 flex-1 overflow-y-auto bg-transparent px-4 py-8 pb-28 md:px-8">
+        <main
+          className="app-main-scroll relative min-w-0 flex-1 overflow-y-auto overscroll-y-contain bg-transparent px-4 py-6 md:px-8 md:py-8"
+          onScroll={handleMainScroll}
+        >
+          {/* Pip stands in here while it is on a card, so it scrolls with the
+              card natively instead of chasing it a frame behind. */}
+          <div className="pip-scroll-layer" data-pip-scroll-layer />
           {activeTab === "library" && (
             <LibraryPage
               onOpenBook={openBookFromLibrary}
@@ -642,16 +874,19 @@ const App = () => {
               showToast={showToast}
             />
           )}
-          {activeTab === "collections" && (
-            <CollectionsPage onNavigate={setActiveTab} showToast={showToast} />
-          )}
-          {activeTab === "analytics" && <AnalyticsPage />}
-          {activeTab === "settings" && <SettingsPage showToast={showToast} />}
+          <Suspense fallback={null}>
+            {activeTab === "collections" && (
+              <CollectionsPage onNavigate={setActiveTab} showToast={showToast} />
+            )}
+            {activeTab === "social" && <SocialPage showToast={showToast} />}
+            {activeTab === "pip" && <PipPage showToast={showToast} />}
+            {activeTab === "settings" && <SettingsPage showToast={showToast} />}
+          </Suspense>
         </main>
       </div>
 
       {nowReading && (
-        <div className="pointer-events-none fixed bottom-6 left-1/2 z-50 hidden w-full max-w-xl -translate-x-1/2 px-4 md:block">
+        <div className="now-reading-dock pointer-events-none fixed bottom-6 left-1/2 z-50 w-full max-w-xl -translate-x-1/2 px-4">
           <div className="now-reading-bar pointer-events-auto">
             <div className="now-reading-cover">
               {resolvedNowReadingCover ? (
@@ -747,32 +982,50 @@ const App = () => {
                   Optional download
                 </p>
                 <h2 id="converter-dialog-title" className="page-title mt-1 text-2xl">
-                  Open Kindle-format books
+                  Open {getBookExtension(converterPromptBook.localPath).toUpperCase()} books
                 </h2>
               </div>
             </div>
             <p className="mt-5 text-sm leading-6 text-on-surface-variant">
-              “{converterPromptBook.title}” needs the Calibre conversion tools. Downloading them
-              uses about 200 MB plus installation space. Leaflet will keep the installer out of
-              the app package and remove the downloaded installer after setup.
+              {converterSupported ? (
+                <>
+                  “{converterPromptBook.title}” needs the Calibre conversion tools. Downloading
+                  them uses about 200 MB plus installation space. Leaflet will keep the installer
+                  out of the app package and remove the downloaded installer after setup. If
+                  Calibre is already installed on this computer, Leaflet will use it instead.
+                </>
+              ) : (
+                <>
+                  “{converterPromptBook.title}” needs Calibre, which has no version for this
+                  device — so it is not built into the app here. Open it once on a desktop and the
+                  converted book syncs back to this device like any other.
+                </>
+              )}
             </p>
             <div className="mt-6 flex justify-end gap-3">
               <button
                 type="button"
                 className="tactile-button px-4 py-2 text-sm"
-                onClick={() => setConverterPromptBook(null)}
+                onClick={() => {
+                  setConverterPromptBook(null);
+                  showToast(
+                    `“${converterPromptBook.title}” stays in your library. Open it once the converter is available.`
+                  );
+                }}
                 disabled={converterBusy}
               >
-                Not now
+                {converterSupported ? "Not now" : "Close"}
               </button>
-              <button
-                type="button"
-                className="tactile-button tactile-button-primary min-w-36 px-4 py-2 text-sm font-bold"
-                onClick={handleConverterDownload}
-                disabled={converterBusy}
-              >
-                {converterBusy ? "Downloading…" : "Download & install"}
-              </button>
+              {converterSupported && (
+                <button
+                  type="button"
+                  className="tactile-button tactile-button-primary min-w-36 px-4 py-2 text-sm font-bold"
+                  onClick={handleConverterDownload}
+                  disabled={converterBusy}
+                >
+                  {converterBusy ? "Downloading…" : "Download & install"}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -789,30 +1042,56 @@ const App = () => {
             </div>
           }
         >
-          {getBookExtension(selected.localPath) === "pdf" ? (
-            <PdfReaderView key={selected.id} book={selected} onClose={() => setSelected(null)} />
+          {selectedDelivery === "pdf" || selectedDelivery === "comic" ? (
+            <PageReaderView
+              key={selected.id}
+              book={selected}
+              kind={selectedDelivery === "comic" ? "comic" : "pdf"}
+              onClose={closeReader}
+            />
           ) : (
-            <ReaderView key={selected.id} book={selected} onClose={() => setSelected(null)} />
+            <ReaderView key={selected.id} book={selected} onClose={closeReader} />
           )}
         </Suspense>
       )}
 
-      <LoginModal
-        open={loginModalOpen}
-        onClose={() => setLoginModalOpen(false)}
-        onLogin={(value) => {
-          signIn(value);
-          setSyncState("pending");
-          setLoginModalOpen(false);
-          setAccountPanelOpen(false);
-          showToast("Your reading is now synced.");
-          handleSync();
-        }}
-        onContinueOffline={() => {
-          setLoginModalOpen(false);
-          setAccountPanelOpen(false);
-        }}
+      {/* Pip lives over the app; while a book is open it waits (hidden) and
+          celebrations come through the reader peek instead. */}
+      <PipWorld actions={pipActions} />
+      {selected && <PipReaderPeek />}
+
+      {/* After the reader, so a session that ends mid-book wraps up on top. */}
+      <SessionWrapUp />
+      <ConfirmDialog />
+      <RatePrompt />
+      <ReminderOptIn />
+
+      <MobileNav
+        activeItem={tabLabels[activeTab]}
+        onNavigate={handleSidebarNavigate}
+        onStartReading={() => nowReading && handleOpenBook(nowReading)}
+        startDisabled={!nowReading}
+        badge={navBadge}
       />
+
+      <WelcomeModal
+        open={welcomeOpen && !sync.driveConnected && !sync.folderPath}
+        driveAvailable={sync.driveAvailable}
+        onChooseFolder={() => {
+          dismissWelcome();
+          void handleChooseFolder();
+        }}
+        onConnectDrive={() => {
+          dismissWelcome();
+          handleDriveConnect();
+        }}
+        onOpenSettings={() => {
+          dismissWelcome();
+          setActiveTab("settings");
+        }}
+        onDismiss={dismissWelcome}
+      />
+
     </div>
   );
 };

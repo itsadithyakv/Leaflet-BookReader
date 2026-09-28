@@ -7,10 +7,13 @@ type Props = {
   book: Book;
   onRefresh: (id: string) => void;
   onOpen: (book: Book) => void;
+  onRemove: (book: Book) => void;
 };
 
-const BookRowComponent = ({ book, onRefresh, onOpen }: Props) => {
+const BookRowComponent = ({ book, onRefresh, onOpen, onRemove }: Props) => {
   const [fallbackSrc, setFallbackSrc] = useState<string | null>(null);
+  // Removing a book removes it from every device, so it asks once first.
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const triedFallback = useRef(false);
 
   const coverSrc = book.coverUrl
@@ -28,11 +31,15 @@ const BookRowComponent = ({ book, onRefresh, onOpen }: Props) => {
     if (!isTauri() || !book.coverUrl || book.coverUrl.startsWith("http")) {
       return;
     }
-    void bookService.coverData(book.id).then((data) => {
-      if (data) {
-        setFallbackSrc(data);
-      }
-    });
+    bookService
+      .coverData(book.id)
+      .then((data) => {
+        if (data) {
+          setFallbackSrc(data);
+        }
+      })
+      // A missing or unreadable cover just leaves the placeholder.
+      .catch(() => undefined);
   }, [book.id, book.coverUrl]);
 
   const handleCoverError = () => {
@@ -40,11 +47,15 @@ const BookRowComponent = ({ book, onRefresh, onOpen }: Props) => {
       return;
     }
     triedFallback.current = true;
-    void bookService.coverData(book.id).then((data) => {
-      if (data) {
-        setFallbackSrc(data);
-      }
-    });
+    bookService
+      .coverData(book.id)
+      .then((data) => {
+        if (data) {
+          setFallbackSrc(data);
+        }
+      })
+      // A missing or unreadable cover just leaves the placeholder.
+      .catch(() => undefined);
   };
 
   const resolvedCover = fallbackSrc ?? coverSrc;
@@ -54,8 +65,14 @@ const BookRowComponent = ({ book, onRefresh, onOpen }: Props) => {
     <div
       role="button"
       tabIndex={0}
+      aria-label={`Open ${book.title}${book.author ? ` by ${book.author}` : ""}`}
       onClick={() => onOpen(book)}
-      onKeyDown={(e) => e.key === "Enter" && onOpen(book)}
+      onKeyDown={(e) => {
+        if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
+          e.preventDefault();
+          onOpen(book);
+        }
+      }}
       className="ledger-row flex cursor-pointer items-center gap-4 p-3 transition"
     >
       <div className="book-cover-frame h-16 w-12 overflow-hidden bg-surface-container-high">
@@ -69,7 +86,11 @@ const BookRowComponent = ({ book, onRefresh, onOpen }: Props) => {
       </div>
       <div className="flex-1">
         <p className="book-title text-base text-on-surface">{book.title}</p>
-        <p className="text-xs text-on-surface-variant">{book.author ?? "Unknown author"}</p>
+        <p className="text-xs text-on-surface-variant">
+          {book.author ?? "Unknown author"}
+          {/* Listed here but not downloaded: sync moves the index, not the files. */}
+          {book.available === false && " · downloads when opened"}
+        </p>
       </div>
       <div className="w-32">
         <div className="h-1.5 w-full rounded-full bg-surface-container-highest">
@@ -91,6 +112,27 @@ const BookRowComponent = ({ book, onRefresh, onOpen }: Props) => {
         }}
       >
         Refresh
+      </button>
+      <button
+        className="tactile-button px-3 py-2 text-xs"
+        type="button"
+        title={
+          confirmRemove
+            ? "Removes this book from every synced device"
+            : "Remove from library"
+        }
+        onClick={(e) => {
+          e.stopPropagation();
+          if (!confirmRemove) {
+            setConfirmRemove(true);
+            return;
+          }
+          setConfirmRemove(false);
+          onRemove(book);
+        }}
+        onBlur={() => setConfirmRemove(false)}
+      >
+        {confirmRemove ? "Confirm" : "Remove"}
       </button>
     </div>
   );

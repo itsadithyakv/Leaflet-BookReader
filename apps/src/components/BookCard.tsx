@@ -28,11 +28,15 @@ const BookCardComponent = ({ book, onRefresh, onOpen }: Props) => {
     if (!isTauri() || !book.coverUrl || book.coverUrl.startsWith("http")) {
       return;
     }
-    void bookService.coverData(book.id).then((data) => {
-      if (data) {
-        setFallbackSrc(data);
-      }
-    });
+    bookService
+      .coverData(book.id)
+      .then((data) => {
+        if (data) {
+          setFallbackSrc(data);
+        }
+      })
+      // A missing or unreadable cover just leaves the placeholder.
+      .catch(() => undefined);
   }, [book.id, book.coverUrl]);
 
   const handleCoverError = () => {
@@ -40,21 +44,39 @@ const BookCardComponent = ({ book, onRefresh, onOpen }: Props) => {
       return;
     }
     triedFallback.current = true;
-    void bookService.coverData(book.id).then((data) => {
-      if (data) {
-        setFallbackSrc(data);
-      }
-    });
+    bookService
+      .coverData(book.id)
+      .then((data) => {
+        if (data) {
+          setFallbackSrc(data);
+        }
+      })
+      // A missing or unreadable cover just leaves the placeholder.
+      .catch(() => undefined);
   };
 
   const resolvedCover = fallbackSrc ?? coverSrc;
   const progressPercent = Math.round(Math.min(1, Math.max(0, book.progress)) * 100);
   const isFinished = progressPercent >= 100;
+  // Sync carries the library index to every device but leaves the files where
+  // they are, so a book can be listed here with nothing to open yet.
+  const needsDownload = book.available === false;
 
   return (
+    // A card is opened like a button, so it behaves like one: reachable with
+    // Tab, opened with Enter or Space, and announced with the book's name.
     <article
+      role="button"
+      tabIndex={0}
+      aria-label={`Open ${book.title}${book.author ? ` by ${book.author}` : ""}`}
       onClick={() => onOpen(book)}
-      className="group flex h-full w-full cursor-pointer flex-col text-left transition-transform duration-200 hover:-translate-y-1"
+      onKeyDown={(event) => {
+        if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+          event.preventDefault();
+          onOpen(book);
+        }
+      }}
+      className="group flex h-full w-full cursor-pointer flex-col text-left transition-transform duration-200 hover:-translate-y-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
     >
       <div className="book-cover-frame relative aspect-[2/3] w-full overflow-hidden transition-all duration-200 group-hover:border-primary/50">
         {resolvedCover ? (
@@ -69,6 +91,14 @@ const BookCardComponent = ({ book, onRefresh, onOpen }: Props) => {
             No cover yet
           </div>
         )}
+        {needsDownload && (
+          <div
+            className="absolute right-2 top-2 rounded-full bg-surface-container-highest/90 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.12em] text-on-surface-variant"
+            title="On your other device. Opening this will download it."
+          >
+            Cloud
+          </div>
+        )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/25 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
         <div className="absolute inset-0 flex items-end p-4 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
           <button
@@ -79,7 +109,7 @@ const BookCardComponent = ({ book, onRefresh, onOpen }: Props) => {
               onOpen(book);
             }}
           >
-            Resume Reading
+            {needsDownload ? "Download" : "Resume Reading"}
           </button>
         </div>
       </div>
