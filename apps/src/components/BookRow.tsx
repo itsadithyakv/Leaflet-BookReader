@@ -1,7 +1,8 @@
-import { isTauri } from "@tauri-apps/api/core";
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useState } from "react";
 import type { Book } from "@shared/models/book";
-import { bookService } from "../services/bookService";
+import { useCoverSrc } from "../hooks/useCoverSrc";
+import { useSeriesInfo } from "../library/useSeries";
+import { BookMenu } from "./BookMenu";
 
 type Props = {
   book: Book;
@@ -11,54 +12,10 @@ type Props = {
 };
 
 const BookRowComponent = ({ book, onRefresh, onOpen, onRemove }: Props) => {
-  const [fallbackSrc, setFallbackSrc] = useState<string | null>(null);
   // Removing a book removes it from every device, so it asks once first.
   const [confirmRemove, setConfirmRemove] = useState(false);
-  const triedFallback = useRef(false);
-
-  const coverSrc = book.coverUrl
-    ? !isTauri() && book.coverUrl.startsWith("http")
-      ? book.coverUrl
-      : null
-    : null;
-
-  useEffect(() => {
-    triedFallback.current = false;
-    setFallbackSrc(null);
-  }, [book.id, book.coverUrl]);
-
-  useEffect(() => {
-    if (!isTauri() || !book.coverUrl || book.coverUrl.startsWith("http")) {
-      return;
-    }
-    bookService
-      .coverData(book.id)
-      .then((data) => {
-        if (data) {
-          setFallbackSrc(data);
-        }
-      })
-      // A missing or unreadable cover just leaves the placeholder.
-      .catch(() => undefined);
-  }, [book.id, book.coverUrl]);
-
-  const handleCoverError = () => {
-    if (triedFallback.current) {
-      return;
-    }
-    triedFallback.current = true;
-    bookService
-      .coverData(book.id)
-      .then((data) => {
-        if (data) {
-          setFallbackSrc(data);
-        }
-      })
-      // A missing or unreadable cover just leaves the placeholder.
-      .catch(() => undefined);
-  };
-
-  const resolvedCover = fallbackSrc ?? coverSrc;
+  const { src: resolvedCover, onError: handleCoverError } = useCoverSrc(book, { thumb: true });
+  const series = useSeriesInfo(book.id);
   const progressPercent = Math.round(Math.min(1, Math.max(0, book.progress)) * 100);
 
   return (
@@ -88,6 +45,13 @@ const BookRowComponent = ({ book, onRefresh, onOpen, onRemove }: Props) => {
         <p className="book-title text-base text-on-surface">{book.title}</p>
         <p className="text-xs text-on-surface-variant">
           {book.author ?? "Unknown author"}
+          {series && (
+            <span className="font-semibold text-primary">
+              {" · "}
+              {series.name}
+              {series.index != null && ` ${Number(series.index.toFixed(2))}`}
+            </span>
+          )}
           {/* Listed here but not downloaded: sync moves the index, not the files. */}
           {book.available === false && " · downloads when opened"}
         </p>
@@ -103,6 +67,7 @@ const BookRowComponent = ({ book, onRefresh, onOpen, onRemove }: Props) => {
           {progressPercent}%
         </p>
       </div>
+      <BookMenu book={book} />
       <button
         className="tactile-button px-3 py-2 text-xs"
         type="button"

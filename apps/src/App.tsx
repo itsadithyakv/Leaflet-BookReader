@@ -16,7 +16,7 @@ import { usePipStore } from "./store/pipStore";
 import { usePipWardrobeStore } from "./store/pipWardrobeStore";
 import { pickBeat } from "./pip/moments";
 import { nodFor } from "./pip/bookNods";
-import { loadBookScenes } from "./pip";
+import { loadBookScenes } from "./pip/core";
 
 /** A book untouched this long gets dusted off when it is opened again. */
 const DUSTY_BOOK_DAYS = 30;
@@ -27,6 +27,7 @@ import { useLibraryStore } from "./store/libraryStore";
 import { AWAY_FREE_MS, useHabitStore } from "./store/habitStore";
 import { setAppFullscreen, watchForeground } from "./services/windowService";
 import { ConfirmDialog } from "./components/ConfirmDialog";
+import { SeriesEditorDialog } from "./components/SeriesEditor";
 import { RatePrompt, openStoreReview } from "./components/RatePrompt";
 import { ReminderOptIn } from "./components/ReminderOptIn";
 import { useReminders } from "./hooks/useReminders";
@@ -295,14 +296,22 @@ const App = () => {
   const openPreparedBook = (book: Book) => {
     const lastOpened = book.lastOpened ? Date.parse(book.lastOpened) : NaN;
     const idleDays = Number.isFinite(lastOpened) ? Math.floor((Date.now() - lastOpened) / 86_400_000) : 0;
-    if (idleDays >= DUSTY_BOOK_DAYS) {
+    // Book scenes and "welcome back" lines are chatter: Quiet keeps Pip to
+    // celebrations, so it skips them.
+    const chatty = usePipStore.getState().mode === "chatty";
+    if (!chatty) {
+      // Nothing to say on opening a book.
+    } else if (idleDays >= DUSTY_BOOK_DAYS) {
       const beat = pickBeat("dustyBook", `${book.id}:${book.lastOpened}`, { days: idleDays });
       usePipStore.getState().showPeek(beat.move, beat.line);
     } else {
       showBookNod(book);
     }
     setSelected(book);
-    if (focusSettings.goalBinding && !activeSession) {
+    // Read from the store, not this render: a caller may have started a
+    // session a moment ago (the board's "keep reading" does), and starting a
+    // second one here would replace its length with the daily goal.
+    if (focusSettings.goalBinding && !useHabitStore.getState().activeSession) {
       const duration = goalMinutes > 0 ? goalMinutes : 20;
       startSession({
         startedAt: new Date().toISOString(),
@@ -541,9 +550,16 @@ const App = () => {
     } catch {
       // Refusing to remember the answer is better than refusing to start.
     }
-    // First run: Pip shows the new reader around.
-    window.setTimeout(() => usePipStore.getState().startTour(), 900);
+    // First run: Pip shows the new reader around, once it has come out.
+    window.setTimeout(() => usePipStore.getState().startTour(), 2200);
   }, []);
+
+  // First launch shows one thing at a time: the welcome screen alone, then
+  // Pip comes out and starts the tour.
+  const welcomeShowing = welcomeOpen && !sync.driveConnected && !sync.folderPath;
+  useEffect(() => {
+    usePipStore.getState().setWaiting(welcomeShowing);
+  }, [welcomeShowing]);
 
   // The tour points at the Library, so it starts there.
   const tourRunning = usePipStore((state) => state.tour !== null);
@@ -623,6 +639,27 @@ const App = () => {
     })[0];
   }, [books]);
   const nowReading = lastOpenedBook ?? books[0] ?? null;
+
+  // The board's "keep reading": a session long enough to pass the next reader,
+  // on the book you were last reading. With no books yet, the library.
+  const readNow = useCallback(
+    (minutes: number) => {
+      if (!nowReading) {
+        setActiveTab("library");
+        return;
+      }
+      if (!useHabitStore.getState().activeSession) {
+        startSession({
+          startedAt: new Date().toISOString(),
+          durationMinutes: minutes,
+          bookId: nowReading.id,
+          title: nowReading.title
+        });
+      }
+      handleOpenBookRef.current(nowReading);
+    },
+    [nowReading, startSession]
+  );
 
   // A clicked reading reminder: pick up the last book, once the library has
   // loaded (a click can be what launched the app). Never over an open book.
@@ -774,7 +811,7 @@ const App = () => {
             />
             <input
               className="inset-field w-full py-2.5 pl-12 pr-4 text-sm text-on-surface focus:border-primary/50 focus:outline-none"
-              placeholder="Search your archive..."
+              placeholder="Search your library…"
               type="search"
               inputMode="search"
               enterKeyHint="search"
@@ -786,22 +823,19 @@ const App = () => {
           </div>
         </div>
         <div className="flex items-center gap-2 md:gap-4">
-          <button
-            type="button"
-            className="tactile-button hidden items-center gap-2 px-3 py-2 text-xs xl:flex"
-            onClick={() => setAccountPanelOpen((prev) => !prev)}
-          >
-            <UiIcon name="cloud" size={17} />
-            {syncMode === "off" ? "Set Up Sync" : "Sync Settings"}
-          </button>
-          <button
-            type="button"
-            className="tactile-button hidden items-center gap-2 px-3 py-2 text-xs xl:flex"
-            onClick={handleSync}
-          >
-            <UiIcon name="sync" size={17} />
-            {syncStatus === "syncing" ? "Syncing" : "Sync Now"}
-          </button>
+          {/* Backup, in one word: the badge opens its panel; "Back up now" appears
+              once there is somewhere to back up to. */}
+          {syncMode !== "off" && (
+            <button
+              type="button"
+              className="tactile-button hidden items-center gap-2 px-3 py-2 text-xs xl:flex"
+              onClick={handleSync}
+              disabled={syncStatus === "syncing"}
+            >
+              <UiIcon name="sync" size={17} />
+              {syncStatus === "syncing" ? "Backing up…" : "Back up now"}
+            </button>
+          )}
           <button
             type="button"
             className="key-button"
@@ -876,9 +910,11 @@ const App = () => {
           )}
           <Suspense fallback={null}>
             {activeTab === "collections" && (
-              <CollectionsPage onNavigate={setActiveTab} showToast={showToast} />
+              <CollectionsPage onNavigate={setActiveTab} onOpenBook={openBookFromLibrary} showToast={showToast} />
             )}
-            {activeTab === "social" && <SocialPage showToast={showToast} />}
+            {activeTab === "social" && (
+              <SocialPage showToast={showToast} nowReading={nowReading} onReadNow={readNow} onNavigate={setActiveTab} />
+            )}
             {activeTab === "pip" && <PipPage showToast={showToast} />}
             {activeTab === "settings" && <SettingsPage showToast={showToast} />}
           </Suspense>
@@ -1063,6 +1099,7 @@ const App = () => {
       {/* After the reader, so a session that ends mid-book wraps up on top. */}
       <SessionWrapUp />
       <ConfirmDialog />
+      <SeriesEditorDialog />
       <RatePrompt />
       <ReminderOptIn />
 
@@ -1075,7 +1112,7 @@ const App = () => {
       />
 
       <WelcomeModal
-        open={welcomeOpen && !sync.driveConnected && !sync.folderPath}
+        open={welcomeShowing}
         driveAvailable={sync.driveAvailable}
         onChooseFolder={() => {
           dismissWelcome();
@@ -1084,10 +1121,6 @@ const App = () => {
         onConnectDrive={() => {
           dismissWelcome();
           handleDriveConnect();
-        }}
-        onOpenSettings={() => {
-          dismissWelcome();
-          setActiveTab("settings");
         }}
         onDismiss={dismissWelcome}
       />

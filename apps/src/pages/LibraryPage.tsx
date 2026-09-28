@@ -6,6 +6,7 @@ import { BookGrid } from "../components/BookGrid";
 import { BookList } from "../components/BookList";
 import { isMetadataRetryDue, useLibraryStore } from "../store/libraryStore";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
+import { isFinished } from "../constants/books";
 import type { Book, BookFilter } from "@shared/models/book";
 import {
   dependencyFreeSummary,
@@ -17,11 +18,33 @@ import {
 import { getSessionProgress, sessionElapsedMs, useHabitStore } from "../store/habitStore";
 import { UiIcon } from "../components/UiIcon";
 import { MobileComingSoonBanner } from "../components/MobileComingSoonBanner";
+import { UpNextStrip } from "../components/UpNextStrip";
+import { librarySeries, type LibrarySeries } from "../library/series";
 
-const sortBooks = (books: Book[], sort: "recent" | "opened" | "author") => {
+const byTitle = (a: Book, b: Book) => a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: "base" });
+
+const sortBooks = (books: Book[], sort: BookFilter["sort"], series: LibrarySeries) => {
   const copy = [...books];
+  if (sort === "title") {
+    return copy.sort(byTitle);
+  }
   if (sort === "author") {
-    return copy.sort((a, b) => (a.author ?? "").localeCompare(b.author ?? ""));
+    return copy.sort((a, b) => (a.author ?? "").localeCompare(b.author ?? "") || byTitle(a, b));
+  }
+  if (sort === "series") {
+    // Each series together and in order, series A-Z; books in none after them.
+    return copy.sort((a, b) => {
+      const sa = series.byBook.get(a.id);
+      const sb = series.byBook.get(b.id);
+      if (!sa || !sb) {
+        return sa ? -1 : sb ? 1 : byTitle(a, b);
+      }
+      return (
+        sa.name.localeCompare(sb.name) ||
+        (sa.index ?? Number.POSITIVE_INFINITY) - (sb.index ?? Number.POSITIVE_INFINITY) ||
+        byTitle(a, b)
+      );
+    });
   }
   if (sort === "opened") {
     return copy.sort((a, b) => {
@@ -36,7 +59,9 @@ const sortBooks = (books: Book[], sort: "recent" | "opened" | "author") => {
 const sortOptions: Array<{ value: BookFilter["sort"]; label: string }> = [
   { value: "recent", label: "Recently Added" },
   { value: "opened", label: "Recently Opened" },
-  { value: "author", label: "Author (A-Z)" }
+  { value: "title", label: "Title (A-Z)" },
+  { value: "author", label: "Author (A-Z)" },
+  { value: "series", label: "Series" }
 ];
 
 export type LibraryPageProps = {
@@ -114,6 +139,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
     return Array.from(new Set(all));
   }, [books]);
 
+  const series = librarySeries(books);
   const filteredBooks = useMemo(() => {
     let result = books;
     if (filters.author !== "all") {
@@ -125,15 +151,18 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
     if (debouncedQuery.trim().length > 0) {
       const query = debouncedQuery.toLowerCase();
       result = result.filter((book) => {
-        const haystack = `${book.title} ${book.author ?? ""} ${book.genres.join(" ")}`.toLowerCase();
+        const haystack = `${book.title} ${book.author ?? ""} ${book.genres.join(" ")} ${series.byBook.get(book.id)?.name ?? ""}`.toLowerCase();
         return haystack.includes(query);
       });
     }
-    return sortBooks(result, filters.sort);
-  }, [books, filters.author, filters.genre, filters.sort, debouncedQuery]);
+    return sortBooks(result, filters.sort, series);
+  }, [books, filters.author, filters.genre, filters.sort, debouncedQuery, series]);
 
   const totalBooks = books.length;
-  const finishedBooks = books.filter((book) => book.progress >= 1).length;
+  const finishedBooks = books.filter((book) => isFinished(book.progress)).length;
+  /** No books at all (not merely none matching): the page leads with importing. */
+  const libraryEmpty = !loading && totalBooks === 0;
+  const filtersNarrowed = filters.author !== "all" || filters.genre !== "all";
   const streakTitle = stats.streakDays > 0 ? `${stats.streakDays} Day Streak!` : "Start Your Streak";
 
   const handleImport = () => {
@@ -181,7 +210,14 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
         return;
       }
       importPaths(supported)
-        .then(() => showToast(`${supported.length} book${supported.length === 1 ? "" : "s"} added.`))
+        .then((imported) => {
+          const skipped = supported.length - imported.length;
+          showToast(
+            skipped > 0
+              ? `${imported.length} of ${supported.length} added. ${skipped === 1 ? "One file" : `${skipped} files`} couldn't be read; Settings → About → Copy diagnostics has the details.`
+              : `${imported.length} book${imported.length === 1 ? "" : "s"} added.`
+          );
+        })
         .catch((error) => {
           showToast(resolveErrorMessage(error, "Import failed. Try again."));
         });
@@ -302,7 +338,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
           />
           <input
             className="inset-field w-full py-2.5 pl-12 pr-4 text-sm text-on-surface focus:border-primary/40 focus:outline-none"
-            placeholder="Search your archive..."
+            placeholder="Search your library…"
             type="text"
             value={filters.query}
             onChange={(event) => setFilter({ query: event.target.value })}
@@ -310,14 +346,15 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
         </div>
       </div>
 
-      <MobileComingSoonBanner />
+      {/* News about the phone app can wait until there is a library to carry over. */}
+      {!libraryEmpty && <MobileComingSoonBanner />}
 
       <section className="grid min-w-0 gap-6 xl:grid-cols-12">
         {/* clip, not hidden: the resting and running layers are stacked, and an
             overflow-hidden box is still scrollable, so focusing Pip's button
             scrolled the card to reveal the taller hidden layer. */}
         <div
-          className="paper-surface relative min-w-0 overflow-clip rounded-xl p-6 xl:col-span-8"
+          className={`paper-surface relative min-w-0 overflow-clip rounded-xl p-6 ${libraryEmpty ? "order-2 xl:col-span-4" : "xl:col-span-8"}`}
         >
           <div className="relative z-10">
             <div className="relative">
@@ -431,7 +468,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
           ref={importDropRef}
           data-tour="import"
           type="button"
-          className={`import-drop-zone paper-surface relative flex min-w-0 flex-col items-center justify-center p-8 xl:col-span-4 ${
+          className={`import-drop-zone paper-surface relative flex min-w-0 flex-col items-center justify-center p-8 ${libraryEmpty ? "order-1 xl:col-span-8" : "xl:col-span-4"} ${
             importing
               ? "cursor-wait opacity-90"
               : dropActive
@@ -453,7 +490,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
           <div className="import-book-icon mb-5" aria-hidden="true">
             <UiIcon name="book-add" size={30} strokeWidth={1.8} />
           </div>
-          <h3 className="page-title text-2xl">Import Books</h3>
+          <h3 className="page-title text-2xl">{libraryEmpty ? "Add your first book" : "Import Books"}</h3>
           <p className="mt-2 max-w-xs text-center text-sm text-on-surface-variant">
             Drop a book here, or click to browse
           </p>
@@ -465,11 +502,12 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
         </button>
       </section>
 
+      <UpNextStrip onOpen={onOpenBook} onSeeAll={() => onNavigate("collections")} />
 
       <section className="flex flex-1 flex-col gap-6">
         <div className="flex flex-wrap items-end justify-between gap-6">
           <div>
-            <h2 className="page-title text-4xl">The Archive</h2>
+            <h2 className="page-title text-4xl">Library</h2>
             <div className="mt-2 flex flex-wrap gap-4 text-sm text-on-surface-variant">
               <span className="flex items-center gap-2">
                 <span className="h-2 w-2 rounded-full bg-primary"></span>
@@ -545,18 +583,28 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
             <div className="flex h-full items-center justify-center text-on-surface-variant">
               Loading your library...
             </div>
+          ) : libraryEmpty ? (
+            // The import box above is the one way in; a second button here made three.
+            <div className="paper-surface flex h-full flex-col items-center justify-center gap-2 rounded-xl p-8 text-center text-on-surface-variant">
+              <p className="text-lg font-semibold text-on-surface">Your books will appear here</p>
+              <p className="max-w-md text-sm">
+                {dependencyFreeSummary()} open straight away; drop one anywhere on this page.
+              </p>
+            </div>
           ) : filteredBooks.length === 0 ? (
             <div className="paper-surface flex h-full flex-col items-center justify-center gap-3 rounded-xl p-8 text-center text-on-surface-variant">
-              <p className="text-lg font-semibold text-on-surface">No books yet</p>
+              <p className="text-lg font-semibold text-on-surface">No matches</p>
               <p className="max-w-md text-sm">
-                Import {dependencyFreeSummary()} and more to populate your library.
+                {filters.query.trim()
+                  ? `No book in your library matches “${filters.query.trim()}”${filtersNarrowed ? " with these filters" : ""}.`
+                  : "No book in your library matches these filters."}
               </p>
               <button
-                className="tactile-button tactile-button-primary px-4 py-2 text-sm font-semibold"
+                className="tactile-button px-4 py-2 text-sm font-semibold"
                 type="button"
-                onClick={handleImport}
+                onClick={() => setFilter({ query: "", author: "all", genre: "all" })}
               >
-                Import your first book
+                Clear search and filters
               </button>
             </div>
           ) : filters.view === "grid" ? (

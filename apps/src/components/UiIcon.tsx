@@ -1,4 +1,5 @@
 import {
+  ArrowLeft,
   Bean,
   BookCopy,
   BookOpenText,
@@ -7,9 +8,12 @@ import {
   ChartNoAxesCombined,
   Check,
   Cloud,
+  Copy,
+  Ellipsis,
   Cookie,
   Grid2X2,
   Hand,
+  Layers,
   Heart,
   House,
   LibraryBig,
@@ -19,6 +23,7 @@ import {
   Moon,
   Music,
   Pause,
+  Pencil,
   Play,
   Plus,
   RefreshCw,
@@ -29,32 +34,41 @@ import {
   Sparkles,
   Sprout,
   Sun,
+  Trash2,
   Upload,
   Droplet,
   Shovel,
   Gamepad2,
   Eye,
+  NotebookPen,
+  X,
   type LucideIcon,
   type LucideProps
 } from "lucide-react";
 
 export type UiIconName =
   | "analytics"
+  | "back"
   | "book-add"
   | "book-open"
   | "bookmark"
   | "check"
+  | "close"
   | "cloud"
   | "collections"
+  | "copy"
+  | "edit"
   | "grid"
   | "hand"
   | "heart"
   | "home"
   | "library"
   | "list"
+  | "more"
   | "lock"
   | "minus"
   | "moon"
+  | "note"
   | "move"
   | "outfit"
   | "pause"
@@ -63,11 +77,13 @@ export type UiIconName =
   | "plus"
   | "search"
   | "seed"
+  | "series"
   | "settings"
   | "shop"
   | "sparkle"
   | "sun"
   | "sync"
+  | "trash"
   | "treat"
   | "upload"
   | "water"
@@ -82,21 +98,27 @@ type UiIconProps = Omit<LucideProps, "ref"> & {
 
 const icons: Record<UiIconName, LucideIcon> = {
   analytics: ChartNoAxesCombined,
+  back: ArrowLeft,
   "book-add": BookPlus,
   "book-open": BookOpenText,
   bookmark: Bookmark,
   check: Check,
+  close: X,
   cloud: Cloud,
   collections: BookCopy,
+  copy: Copy,
+  edit: Pencil,
   grid: Grid2X2,
   hand: Hand,
   heart: Heart,
   home: House,
   library: LibraryBig,
   list: List,
+  more: Ellipsis,
   lock: Lock,
   minus: Minus,
   moon: Moon,
+  note: NotebookPen,
   move: Music,
   outfit: Shirt,
   pause: Pause,
@@ -107,11 +129,14 @@ const icons: Record<UiIconName, LucideIcon> = {
   search: Search,
   // Seeds, the currency earned by reading in focus.
   seed: Bean,
+  // A series: books stacked in order.
+  series: Layers,
   settings: Settings2,
   shop: ShoppingBag,
   sparkle: Sparkles,
   sun: Sun,
   sync: RefreshCw,
+  trash: Trash2,
   treat: Cookie,
   upload: Upload,
   // Garden water: minutes of focus.

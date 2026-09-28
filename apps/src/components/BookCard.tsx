@@ -1,63 +1,24 @@
-import { isTauri } from "@tauri-apps/api/core";
-import { memo, useEffect, useRef, useState } from "react";
+import { memo } from "react";
 import type { Book } from "@shared/models/book";
-import { bookService } from "../services/bookService";
+import { useCoverSrc } from "../hooks/useCoverSrc";
+import { isFinished } from "../constants/books";
+import { useSeriesInfo } from "../library/useSeries";
+import { seriesNumberLabel } from "../library/series";
+import { BookMenu, type BookMenuAction } from "./BookMenu";
 
 type Props = {
   book: Book;
   onRefresh: (id: string) => void;
   onOpen: (book: Book) => void;
+  /** More entries for the card's menu. */
+  menuActions?: BookMenuAction[];
 };
 
-const BookCardComponent = ({ book, onRefresh, onOpen }: Props) => {
-  const [fallbackSrc, setFallbackSrc] = useState<string | null>(null);
-  const triedFallback = useRef(false);
-
-  const coverSrc = book.coverUrl
-    ? !isTauri() && book.coverUrl.startsWith("http")
-      ? book.coverUrl
-      : null
-    : null;
-
-  useEffect(() => {
-    triedFallback.current = false;
-    setFallbackSrc(null);
-  }, [book.id, book.coverUrl]);
-
-  useEffect(() => {
-    if (!isTauri() || !book.coverUrl || book.coverUrl.startsWith("http")) {
-      return;
-    }
-    bookService
-      .coverData(book.id)
-      .then((data) => {
-        if (data) {
-          setFallbackSrc(data);
-        }
-      })
-      // A missing or unreadable cover just leaves the placeholder.
-      .catch(() => undefined);
-  }, [book.id, book.coverUrl]);
-
-  const handleCoverError = () => {
-    if (triedFallback.current) {
-      return;
-    }
-    triedFallback.current = true;
-    bookService
-      .coverData(book.id)
-      .then((data) => {
-        if (data) {
-          setFallbackSrc(data);
-        }
-      })
-      // A missing or unreadable cover just leaves the placeholder.
-      .catch(() => undefined);
-  };
-
-  const resolvedCover = fallbackSrc ?? coverSrc;
+const BookCardComponent = ({ book, onRefresh, onOpen, menuActions }: Props) => {
+  const { src: resolvedCover, onError: handleCoverError } = useCoverSrc(book, { thumb: true });
+  const series = useSeriesInfo(book.id);
   const progressPercent = Math.round(Math.min(1, Math.max(0, book.progress)) * 100);
-  const isFinished = progressPercent >= 100;
+  const finished = isFinished(book.progress);
   // Sync carries the library index to every device but leaves the files where
   // they are, so a book can be listed here with nothing to open yet.
   const needsDownload = book.available === false;
@@ -113,19 +74,30 @@ const BookCardComponent = ({ book, onRefresh, onOpen }: Props) => {
           </button>
         </div>
       </div>
-      <div className="flex-1 pt-4">
-        <p className="book-title truncate text-lg text-on-surface">{book.title}</p>
-        <p className="text-xs text-on-surface-variant">{book.author ?? "Unknown author"}</p>
+      <div className="flex flex-1 items-start gap-1 pt-4">
+        <div className="min-w-0 flex-1">
+          <p className="book-title truncate text-lg text-on-surface" title={book.title}>
+            {book.title}
+          </p>
+          <p className="truncate text-xs text-on-surface-variant">{book.author ?? "Unknown author"}</p>
+          {series && (
+            <p className="mt-0.5 truncate text-[11px] font-semibold text-primary" title={`${series.name}${series.index != null ? `, ${seriesNumberLabel(series.index)}` : ""}`}>
+              {series.name}
+              {series.index != null && ` · ${Number(series.index.toFixed(2))}`}
+            </p>
+          )}
+        </div>
+        <BookMenu book={book} actions={menuActions} className="-mr-1 -mt-1 shrink-0" />
       </div>
       <div>
         <div className="h-1.5 w-full rounded-full bg-surface-container-highest">
           <div
-            className={`h-1.5 rounded-full ${isFinished ? "bg-tertiary" : "bg-primary"}`}
+            className={`h-1.5 rounded-full ${finished ? "bg-tertiary" : "bg-primary"}`}
             style={{ width: `${progressPercent}%` }}
           />
         </div>
-        <p className={`mt-2 text-right text-[10px] font-bold uppercase tracking-tighter ${isFinished ? "text-tertiary" : "text-on-surface-variant"}`}>
-          {isFinished ? "Finished" : `${progressPercent}%`}
+        <p className={`mt-2 text-right text-[10px] font-bold uppercase tracking-tighter ${finished ? "text-tertiary" : "text-on-surface-variant"}`}>
+          {finished ? "Finished" : `${progressPercent}%`}
         </p>
       </div>
     </article>
