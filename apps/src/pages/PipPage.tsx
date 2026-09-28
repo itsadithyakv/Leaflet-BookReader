@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { LIB, SKINS, renderRoom, type PipAccessory, type PipRoomItem, type PipSkin, type PipTreat } from "../pip";
+// The house and arcade art load with this page, not with the app.
+import "../pip/houseArt";
+import { LIB, ROOM_ITEMS, SKINS, renderRoom, type PipAccessory, type PipRoomItem, type PipSkin, type PipTreat } from "../pip";
 import {
   EXTRA_PLOTS,
   FREE_SIGNATURES,
@@ -62,6 +64,11 @@ const LINE_MS = 4200;
 const GAME_MOOD_PER_DAY = 12;
 /** The floor the reader was last on, a preference of this device. */
 const FLOOR_KEY = "leaflet.pip.floor";
+/**
+ * Without the full house (FEATURES.fullPipHouse), the shop's decor is the
+ * bedroom's own twenty pieces; the rest of the catalogue waits for later.
+ */
+const STARTER_DECOR = new Set(ROOM_ITEMS.map((item) => item.id));
 
 type Drawer = "wardrobe" | "treats" | "moves" | "decorate" | "garden" | "me";
 const TOOLS: Array<{ id: Drawer; label: string; icon: UiIconName }> = [
@@ -189,7 +196,11 @@ export const PipPage = ({ showToast }: PipPageProps) => {
   const sessionsDone = overview?.sessionsDone ?? 0;
 
   // ---- the house ------------------------------------------------------------------
-  const levels = useMemo(() => houseLevels(), []);
+  // The bedroom and the garden, unless the whole house is switched on.
+  const levels = useMemo(
+    () => houseLevels().filter((level, index) => FEATURES.fullPipHouse || index === 0 || level.garden),
+    []
+  );
   const unlocked = (level: HouseLevel) => owns("level", level.id);
   const level = levels.find((entry) => entry.id === floorId && unlocked(entry)) ?? levels[0];
   const levelIndex = levels.indexOf(level);
@@ -702,15 +713,22 @@ export const PipPage = ({ showToast }: PipPageProps) => {
       label: "Decor",
       icon: "home",
       note: "Place what you buy from Decorate, in the spots each floor has.",
-      entries: allRoomItems.filter((item) => !item.nod).map(decorEntry).sort(byPrice)
+      entries: allRoomItems
+        .filter((item) => !item.nod && (FEATURES.fullPipHouse || STARTER_DECOR.has(item.id)))
+        .map(decorEntry)
+        .sort(byPrice)
     },
-    {
-      id: "nods",
-      label: "Book Nods",
-      icon: "book-open",
-      note: "Little tributes to famous books, original designs. A ribbon means the book is in your library.",
-      entries: nodItems.map(decorEntry).sort((a, b) => Number(b.fromLibrary) - Number(a.fromLibrary) || byPrice(a, b))
-    },
+    ...(FEATURES.fullPipHouse
+      ? [
+          {
+            id: "nods",
+            label: "Book Nods",
+            icon: "book-open" as UiIconName,
+            note: "Little tributes to famous books, original designs. A ribbon means the book is in your library.",
+            entries: nodItems.map(decorEntry).sort((a, b) => Number(b.fromLibrary) - Number(a.fromLibrary) || byPrice(a, b))
+          }
+        ]
+      : []),
     { id: "treats", label: "Treats", icon: "treat", entries: treats().map(treatEntry).sort(byPrice) },
     { id: "moves", label: "Moves", icon: "move", entries: PREMIUM_MOVES.map(moveEntry).sort(byPrice) },
     {

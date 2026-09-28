@@ -165,8 +165,16 @@ wandering.
 
 - **Click** Pip: a poke reaction. **Drag** by the leaf and **throw**: tumble,
   bounce, wall cling, splat on a hard landing.
+- **The perch.** Set Pip down anywhere over the logo, the "Leaflet" wordmark or
+  just right of it, and he hops onto a seat beside the wordmark and stays there,
+  still and silent. A seat glows under the header while he is held over that
+  corner, so you can see a drop will land. A drop counts even if you let go
+  while still moving; only a real throw (over 1,600 px/s) flies past, and a
+  hard throw up into the logo still sends him home. The perch is remembered
+  across launches; picking him up, "Hop down" or calling him home forgets it.
 - **Right-click** (or the context-menu key): shortcuts. Continue the last book,
-  start or end a focus session, back up now, take the tour, go home.
+  start or end a focus session, back up now, take the tour, sit by the logo (or
+  hop down), go home.
 - **The tour** runs once after the welcome screen and from Settings → Pip →
   Show Me Around, or Pip's menu. Pip jumps to each stop, stands on it, points,
   and the rest of the app dims around a spotlight.

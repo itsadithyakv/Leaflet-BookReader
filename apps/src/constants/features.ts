@@ -17,5 +17,13 @@ export const FEATURES = {
   /** Leaderboards and shared shelves. Needs a hosted Leaflet server. */
   community: flag(import.meta.env.VITE_ENABLE_COMMUNITY),
   /** Optional email + password accounts. Also needs a Leaflet API base. */
-  accounts: flag(import.meta.env.VITE_ENABLE_ACCOUNTS)
+  accounts: flag(import.meta.env.VITE_ENABLE_ACCOUNTS),
+  /**
+   * Pip's whole house: every floor (kitchen, library, workshop, observatory),
+   * the attic arcade, the full decor catalogue and the book-nod furniture.
+   * Off, the Pip tab is the bedroom and the garden with a starter set of
+   * decor: enough to make a home, small enough that reading stays the point.
+   * Everything bought stays owned and placed either way.
+   */
+  fullPipHouse: flag(import.meta.env.VITE_ENABLE_FULL_PIP_HOUSE)
 } as const;

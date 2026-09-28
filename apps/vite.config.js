@@ -97,7 +97,20 @@ export default defineConfig({
     // await and `??=` native instead of down-levelled helpers.
     target: "es2022",
     // Maps would ship the whole source inside the package for no one to use.
-    sourcemap: false
+    sourcemap: false,
+    rollupOptions: {
+      output: {
+        // The libraries every screen uses (React, state, icons, the list
+        // virtualiser) in a chunk of their own, apart from the app's code.
+        // epub.js and pdf.js stay with the readers, which load on demand.
+        manualChunks(id) {
+          if (/node_modules[\\/](react|react-dom|scheduler|zustand|lucide-react|@tanstack)[\\/]/.test(id)) {
+            return "vendor";
+          }
+          return undefined;
+        }
+      }
+    }
   },
   server: {
     strictPort: true,

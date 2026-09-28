@@ -1,10 +1,10 @@
 /**
  * One 12 fps clock for every Pip on screen.
  *
- * A requestAnimationFrame loop per sprite would wake the page once per sprite
- * per display frame; this wakes it twelve times a second in total, and stops
- * entirely when no sprite is mounted. The browser already pauses it in a hidden
- * window, so a minimised Leaflet costs nothing.
+ * A plain interval, not requestAnimationFrame: a frame loop wakes the page on
+ * every display refresh (60 to 144 times a second) only to act on one in five
+ * or more of them. This wakes it twelve times a second in total, stops
+ * entirely when no sprite is mounted, and pauses while the window is hidden.
  */
 const FRAME_MS = 1000 / 12;
 
@@ -12,30 +12,39 @@ type Listener = (tick: number) => void;
 
 const listeners = new Set<Listener>();
 let tick = 0;
-let last = 0;
-let raf = 0;
+let interval = 0;
 
-const loop = (time: number) => {
-  if (time - last >= FRAME_MS) {
-    last = time;
-    tick += 1;
-    listeners.forEach((listener) => listener(tick));
-  }
-  raf = requestAnimationFrame(loop);
+const fire = () => {
+  tick += 1;
+  listeners.forEach((listener) => listener(tick));
 };
+
+const start = () => {
+  if (!interval && listeners.size > 0 && !document.hidden) {
+    interval = window.setInterval(fire, FRAME_MS);
+  }
+};
+
+const stop = () => {
+  if (interval) {
+    window.clearInterval(interval);
+    interval = 0;
+  }
+};
+
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => (document.hidden ? stop() : start()));
+}
 
 export const currentTick = () => tick;
 
 export const subscribeTick = (listener: Listener) => {
   listeners.add(listener);
-  if (!raf) {
-    raf = requestAnimationFrame(loop);
-  }
+  start();
   return () => {
     listeners.delete(listener);
-    if (listeners.size === 0 && raf) {
-      cancelAnimationFrame(raf);
-      raf = 0;
+    if (listeners.size === 0) {
+      stop();
     }
   };
 };

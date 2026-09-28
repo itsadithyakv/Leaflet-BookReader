@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { LIB, SCENERY, SKINS, dress, renderFrame, resolve, type PipMove, type PipSkin } from "../pip";
+import { LIB, SCENERY, SKINS, dress, renderFrame, resolve, type PipMove, type PipSkin } from "../pip/core";
 import { currentTick, subscribeTick, TICKS_PER_SECOND } from "../pip/ticker";
 
 // Looked up by id, and re-indexed when LIB grows: the book scenes register

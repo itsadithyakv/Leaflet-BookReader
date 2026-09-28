@@ -19,6 +19,12 @@ type PipState = {
    */
   onStage: boolean;
   setOnStage: (onStage: boolean) => void;
+  /**
+   * True while something else has the reader's attention first (the welcome
+   * screen): Pip waits out of sight instead of talking over it.
+   */
+  waiting: boolean;
+  setWaiting: (waiting: boolean) => void;
   /** Pip is behind its door rather than out in the app. */
   home: boolean;
   /** The door is swinging: Pip is on the way in or out. */
@@ -88,6 +94,7 @@ export const usePipStore = create<PipState>((set, get) => ({
   mode: initialMode,
   suspended: false,
   onStage: false,
+  waiting: false,
   home: readHome(initialMode),
   doorSwinging: false,
   inside: true,
@@ -121,6 +128,10 @@ export const usePipStore = create<PipState>((set, get) => ({
 
   setOnStage(onStage) {
     set({ onStage });
+  },
+
+  setWaiting(waiting) {
+    set({ waiting });
   },
 
   setDoorSwinging(doorSwinging) {

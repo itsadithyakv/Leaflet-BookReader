@@ -7,7 +7,6 @@ type WelcomeModalProps = {
   driveAvailable: boolean;
   onChooseFolder: () => void;
   onConnectDrive: () => void;
-  onOpenSettings: () => void;
   onDismiss: () => void;
 };
 
@@ -33,7 +32,6 @@ export const WelcomeModal = ({
   driveAvailable,
   onChooseFolder,
   onConnectDrive,
-  onOpenSettings,
   onDismiss
 }: WelcomeModalProps) => {
   if (!open) {
@@ -52,9 +50,12 @@ export const WelcomeModal = ({
       ]
     : [];
 
-  const choices: Choice[] = [
-    driveAvailable
-      ? {
+  // Drive is offered only when this build can sign in to it. A first choice
+  // that answers "not in this build" is a bad first impression; without it,
+  // the screen is a plain welcome with one button, and backup waits in Settings.
+  const driveChoice: Choice[] = driveAvailable
+    ? [
+        {
           icon: "cloud",
           title: "Back up to Google Drive",
           body: "Sign in with Google and your books, progress and streak are kept safe in your own Drive. Leaflet only ever sees the files it creates there.",
@@ -62,20 +63,21 @@ export const WelcomeModal = ({
           onSelect: onConnectDrive,
           primary: true
         }
-      : {
-          icon: "cloud",
-          title: "Connect Google Drive",
-          body: "This build doesn't include a Google sign-in yet. You can add one in Settings to back up your library.",
-          action: "Set up in Settings",
-          onSelect: onOpenSettings
-        },
+      ]
+    : [];
+  const alone = driveChoice.length === 0 && folderChoice.length === 0;
+  const choices: Choice[] = [
+    ...driveChoice,
     ...folderChoice,
     {
       icon: "book-open",
-      title: "Just this device",
-      body: "Read offline with nothing else involved. You can turn on backup later without losing anything.",
+      title: alone ? "Your books, on this computer" : "Just this device",
+      body: alone
+        ? "Everything stays on this computer and works offline. Backup can be turned on any time in Settings."
+        : "Read offline with nothing else involved. You can turn on backup later without losing anything.",
       action: "Start reading",
-      onSelect: onDismiss
+      onSelect: onDismiss,
+      primary: alone
     }
   ];
 
@@ -85,8 +87,9 @@ export const WelcomeModal = ({
         <div className="text-center">
           <h2 className="page-title text-2xl text-on-surface">Welcome to Leaflet</h2>
           <p className="mt-2 text-sm text-on-surface-variant">
-            No account, no subscription. Everything below is free — pick where your reading should
-            live.
+            {alone
+              ? "No account, no subscription. Add a book and start reading; Leaflet keeps your place and your streak."
+              : "No account, no subscription. Everything below is free — pick where your reading should live."}
           </p>
         </div>
 

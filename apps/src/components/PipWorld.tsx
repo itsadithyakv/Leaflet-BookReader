@@ -6,7 +6,7 @@ import { ownedPremiumMoves, useEquippedPip, usePipWardrobeStore } from "../store
 import { useHabitStore } from "../store/habitStore";
 import { pickBeat } from "../pip/moments";
 import { nodFor } from "../pip/bookNods";
-import { hasMove } from "../pip";
+import { hasMove } from "../pip/core";
 import { TOUR, type TourStop } from "../pip/tour";
 import { usePipPresence } from "../pip/usePipPresence";
 import { PipSprite, pipCssSize } from "./PipSprite";
@@ -139,6 +139,27 @@ type Phase =
   | "waking";
 
 /**
+ * Phases in which Pip's position changes from frame to frame. Only these (and
+ * a hop in progress, or a drag) run the loop at the display's frame rate; at
+ * rest, perched, home or hidden, it checks in a few times a second instead.
+ * It used to run at 60 Hz or more whenever Pip was on, measuring the page on
+ * every frame even while he slept in the logo.
+ */
+const MOVING = new Set<Phase>([
+  "held",
+  "flying",
+  "walking",
+  "clinging",
+  "traveling",
+  "guiding",
+  "webbing",
+  "emerging",
+  "going-home"
+]);
+/** How often the loop checks in while nothing moves. */
+const REST_MS = 250;
+
+/**
  * A web: where it is stuck (read each frame, since a card can scroll), the
  * rope's length and angle from straight down, and the card to climb onto, or
  * null for a swing from the header that ends in a leap.
@@ -193,15 +214,30 @@ const readPerch = () => {
   }
   return { x: anchor.right + 26, y: anchor.bottom + 4, zone: anchor };
 };
-/** A gentle drop near the wordmark (not a throw) lands on the perch. */
-const nearPerch = (x: number, y: number) => {
+/**
+ * Whether letting go with the pointer at (x, y) sets Pip on the perch.
+ *
+ * The whole brand corner counts: the logo, the wordmark and a little to their
+ * right, from the top of the window to a finger's width below the header.
+ * Pip hangs below the pointer, so a reader aiming his body at the spot has the
+ * pointer above it; with no top edge, that always lands. It used to be a thin
+ * box around the wordmark alone, and a drop on the logo missed it entirely.
+ */
+const overPerch = (x: number, y: number) => {
   const perch = readPerch();
   if (!perch) {
     return false;
   }
-  const r = perch.zone;
-  return x >= r.left - 20 && x <= r.right + 90 && y >= r.top - 30 && y <= r.bottom + 40;
+  const home = document.querySelector("[data-pip-home]")?.getBoundingClientRect();
+  const left = Math.min(perch.zone.left, home && home.width > 0 ? home.left : perch.zone.left) - 24;
+  return x >= left && x <= perch.x + 70 && y <= perch.zone.bottom + 44;
 };
+/**
+ * Faster than this at release is a throw, not a placing. People let go while
+ * still moving (a steady drag reads 1000+ px/s), so the bar sits well above
+ * that; it was 700, which turned most real drops into throws.
+ */
+const PLACE_SPEED = 1600;
 type Say = { text: string; id: number; kind: "line" | "tour" | "menu" };
 type Perch = { x: number; y: number; pose: string; facing: number; rect: DOMRect | null };
 type Tween = { x0: number; y0: number; t0: number; dur: number; arc: number; target: () => { x: number; y: number }; done: () => void };
@@ -326,9 +362,10 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
   const { base, line } = usePipPresence();
   const wrapUpOpen = useHabitStore((state) => state.wrapUp !== null);
   const onStage = usePipStore((state) => state.onStage);
-  // Covered by a book, performing in the wrap-up, or at home in its room on
-  // the Pip tab: in each case, not out here.
-  const away = suspended || wrapUpOpen || onStage;
+  const waiting = usePipStore((state) => state.waiting);
+  // Covered by a book, performing in the wrap-up, at home in its room on the
+  // Pip tab, or waiting for the welcome screen: in each case, not out here.
+  const away = suspended || wrapUpOpen || onStage || waiting;
   // Pip wears what the reader equipped on the Pip tab, and its free time
   // includes the moves they bought.
   const equipped = useEquippedPip();
@@ -344,6 +381,9 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
 
   const [view, setView] = useState<View>({ move: "idle", key: 0, flip: false, visible: false });
   const [say, setSay] = useState<Say | null>(null);
+  /** Where the perch seat glows while Pip is held over it; null otherwise. */
+  const [perchHint, setPerchHint] = useState<{ x: number; y: number } | null>(null);
+  const perchHintOn = useRef(false);
   const bodyRef = useRef<HTMLButtonElement | null>(null);
   const worldRef = useRef<HTMLDivElement | null>(null);
   const [host, setHost] = useState<"world" | "scroll">("world");
@@ -397,6 +437,9 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
   });
   const webRef = useRef<SVGSVGElement | null>(null);
   // Latest values for the loop and handlers, without re-subscribing them.
+  /** Starts full-speed frames at once (see the loop below). */
+  const wakeRef = useRef<() => void>(() => undefined);
+  const wake = () => wakeRef.current();
   const live = useRef({ mode, away, home, base, line, reaction });
   live.current = { mode, away, home, base, line, reaction };
 
@@ -508,6 +551,44 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
     hush();
     show("idle", undefined, "perched", true);
     return true;
+  };
+
+  /** A little hop from wherever Pip is onto the perch (a drop nearby, the menu, a launch). */
+  const hopToPerch = () => {
+    const s = st.current;
+    const spot = readPerch();
+    if (!spot) {
+      return false;
+    }
+    if (Math.hypot(spot.x - s.x, spot.y - s.y) < 24) {
+      return perch();
+    }
+    s.web = null;
+    s.vx = 0;
+    s.vy = 0;
+    s.omega = 0;
+    s.angle = 0;
+    setOrigin("center");
+    s.ground = null;
+    s.phase = "traveling";
+    jumpTo(() => readPerch() ?? { x: s.x, y: s.y }, () => void perch(), false);
+    return true;
+  };
+
+  /** Off the perch: a small hop down into the app, and the perch forgotten. */
+  const leavePerch = () => {
+    const s = st.current;
+    if (s.phase !== "perched") {
+      return;
+    }
+    writePerched(false);
+    s.vx = 160;
+    s.vy = -260;
+    s.leftHome = true;
+    s.bounced = false;
+    s.phase = "flying";
+    show("fall");
+    wake();
   };
 
   /** Something to pass the time with: plays, then back to resting. */
@@ -720,6 +801,14 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
       s.x = homeSpot ? homeSpot.x : b.left + 40;
       s.y = homeSpot ? homeSpot.y : b.top;
       s.facing = 1;
+      // Left on the perch last time: straight back onto it.
+      if (!tempOut && readPerched()) {
+        setInside(false);
+        s.leftHome = true;
+        if (hopToPerch()) {
+          return;
+        }
+      }
       s.vx = 230;
       s.vy = -420;
       s.bounced = true;
@@ -729,6 +818,7 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
       s.ground = null;
       setInside(false);
       show("tumble");
+      wake();
       if (!s.greeted) {
         s.greeted = true;
         window.setTimeout(() => {
@@ -749,6 +839,7 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
     s.facing = to.x < s.x ? -1 : 1;
     s.tween = { x0: s.x, y0: s.y, t0: performance.now(), dur: Math.min(1100, 420 + dist * 0.6), arc: Math.min(170, 50 + dist * 0.3), target, done };
     show(spin && dist > 140 ? "tumble" : "fall");
+    wake();
   };
 
   const goHome = () => {
@@ -756,6 +847,7 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
     if (s.phase === "home" || s.phase === "going-home" || s.phase === "held") {
       return;
     }
+    writePerched(false);
     const homeSpot = readHome();
     if (!homeSpot) {
       hide();
@@ -1090,7 +1182,9 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
   const pastime = (now: number, minX: number, maxX: number) => {
     const s = st.current;
     const { mode: currentMode, base: rest } = live.current;
-    if (prefersReducedMotion() || rest === "read" || rest === "sleep" || rest === "bedsleep") {
+    // Quiet means celebrations only: out for one, Pip stays put and waits to
+    // go back in, rather than wandering and playing the hour's scenes.
+    if (currentMode !== "chatty" || prefersReducedMotion() || rest === "read" || rest === "sleep" || rest === "bedsleep") {
       return;
     }
     const walk = () => {
@@ -1111,7 +1205,7 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
     // Now and then, a scene from the book being read (a dragon for the
     // dragon book), with its line.
     const reading = usePipStore.getState().bookNod;
-    const nod = reading && currentMode === "chatty" && roll < 0.12 ? nodFor(reading) : null;
+    const nod = reading && roll < 0.12 ? nodFor(reading) : null;
     if (nod && hasMove(nod.move)) {
       play(nod.move, 1);
       speak(nod.line);
@@ -1121,14 +1215,6 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
     const hourly = hourlyPastime();
     if (hourly && roll < 0.33) {
       play(hourly, 1);
-      return;
-    }
-    if (currentMode !== "chatty") {
-      if (roll < 0.5) {
-        walk();
-      } else {
-        play("look", 1);
-      }
       return;
     }
     if (roll < 0.34) {
@@ -1356,12 +1442,36 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
       return;
     }
     let raf = 0;
+    let timer = 0;
     let last = performance.now();
+    // Frames while something moves; a slow check-in otherwise.
+    const schedule = () => {
+      const s = st.current;
+      const moving = MOVING.has(s.phase) || s.tween !== null || s.web !== null || drag.current !== null;
+      if (moving && !document.hidden) {
+        raf = requestAnimationFrame(loop);
+      } else {
+        timer = window.setTimeout(() => loop(performance.now()), REST_MS);
+      }
+    };
     const loop = (now: number) => {
+      raf = 0;
+      timer = 0;
       const dt = Math.min(0.033, (now - last) / 1000);
       last = now;
       step(dt, now);
       place();
+      schedule();
+    };
+    // Something just started moving (a drag, a hop, a leap out of the logo):
+    // frames now, not at the next check-in.
+    wakeRef.current = () => {
+      if (raf) {
+        return;
+      }
+      window.clearTimeout(timer);
+      timer = 0;
+      last = performance.now();
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
@@ -1382,6 +1492,8 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
     window.addEventListener("resize", onResize);
     return () => {
       cancelAnimationFrame(raf);
+      window.clearTimeout(timer);
+      wakeRef.current = () => undefined;
       window.removeEventListener("resize", onResize);
     };
     // The loop reads everything through refs.
@@ -1394,7 +1506,8 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
       return;
     }
     const s = st.current;
-    if (!home && s.phase === "home") {
+    // Held back while the welcome screen is up: out once it closes.
+    if (!home && s.phase === "home" && !waiting) {
       const timer = window.setTimeout(() => emerge(false), s.greeted ? 0 : 1400);
       return () => window.clearTimeout(timer);
     }
@@ -1402,7 +1515,7 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
       goHome();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [home, homeRequest, mode]);
+  }, [home, homeRequest, mode, waiting]);
 
   // The tour: each stop is a jump to a new perch.
   useEffect(() => {
@@ -1541,6 +1654,9 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
   const menuItems: PipAction[] = [
     ...actions,
     { id: "tour", label: "Show me around", run: () => startTour() },
+    st.current.phase === "perched"
+      ? { id: "perch", label: "Hop down", run: () => leavePerch() }
+      : { id: "perch", label: "Sit by the logo", run: () => void hopToPerch() },
     { id: "home", label: "Go home", run: () => setHome(true) }
   ];
 
@@ -1565,6 +1681,7 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
     }
     event.preventDefault();
     drag.current = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false, samples: [{ t: performance.now(), x: event.clientX, y: event.clientY }] };
+    wake();
     const move = (e: PointerEvent) => onPointerMove(e);
     const up = (e: PointerEvent) => finish(e, false);
     const cancel = (e: PointerEvent) => finish(e, true);
@@ -1598,6 +1715,9 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
       if (s.phase === "reacting") {
         finishReaction(s.reactionId);
       }
+      if (s.phase === "perched") {
+        writePerched(false);
+      }
       s.web = null;
       setOrigin("pivot");
       s.phase = "held";
@@ -1616,6 +1736,20 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
     if (d.moved) {
       s.x = event.clientX;
       s.y = event.clientY + HOLD_DROP;
+      // Letting go here would set Pip on the perch: light the seat.
+      const over = overPerch(event.clientX, event.clientY);
+      if (over !== perchHintOn.current) {
+        perchHintOn.current = over;
+        const spot = over ? readPerch() : null;
+        setPerchHint(spot ? { x: spot.x, y: spot.y } : null);
+      }
+    }
+  };
+
+  const clearPerchHint = () => {
+    if (perchHintOn.current) {
+      perchHintOn.current = false;
+      setPerchHint(null);
     }
   };
 
@@ -1626,6 +1760,7 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
     }
     drag.current = null;
     document.body.classList.remove("pip-dragging");
+    clearPerchHint();
     if (!d.moved) {
       if (!cancelled) {
         poke();
@@ -1639,7 +1774,7 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
     const clamp = (v: number) => Math.max(-MAX_THROW, Math.min(MAX_THROW, v));
     s.vx = cancelled ? 0 : clamp((lastSample.x - first.x) / dt);
     s.vy = cancelled ? 0 : clamp((lastSample.y - first.y) / dt);
-    if (!cancelled && Math.hypot(s.vx, s.vy) < 700 && nearPerch(event.clientX, event.clientY) && perch()) {
+    if (!cancelled && Math.hypot(s.vx, s.vy) < PLACE_SPEED && overPerch(event.clientX, event.clientY) && hopToPerch()) {
       return;
     }
     s.bounced = false;
@@ -1648,6 +1783,7 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
     s.omega = -s.omega;
     setOrigin("center");
     s.phase = "flying";
+    wake();
   };
 
   if (mode === "off") {
@@ -1694,7 +1830,7 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
             outfit={equipped.outfit}
             loops={view.loops}
             playKey={view.key}
-            still={view.still}
+            still={view.still || hidden}
             onDone={onSpriteDone}
           />
         </span>
@@ -1726,6 +1862,7 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
   return (
     <div ref={worldRef} className="pip-world" aria-hidden={hidden}>
       {touring && !away && <div ref={spotRef} className="pip-spotlight" aria-hidden="true" />}
+      {perchHint && <div className="pip-perch-hint" style={{ left: perchHint.x, top: perchHint.y }} aria-hidden="true" />}
       <svg ref={webRef} className="pip-web" aria-hidden="true">
         <line className="pip-web-edge" />
         <line className="pip-web-core" />

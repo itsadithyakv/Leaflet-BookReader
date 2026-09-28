@@ -1,6 +1,4 @@
 import { create } from "zustand";
-// Registers the house and game art before anything reads the catalogue.
-import "../pip/houseArt";
 import { useShallow } from "zustand/react/shallow";
 import { pipService, shopError, type PipLook, type PipOverview } from "../services/pipService";
 import { DEFAULT_SIGNATURE, DEFAULT_VARIANT, PREMIUM_MOVES } from "../pip/shop";

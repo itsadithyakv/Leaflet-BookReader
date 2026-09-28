@@ -11,7 +11,7 @@
  * offered here. Moves are ones that loop in place and read at 40px.
  */
 
-import { ACCESSORIES, LIB, SKINS } from "./index";
+import { ACCESSORIES, LIB, SKINS } from "./core";
 import { visibleOutfit } from "./shop";
 
 export type Avatar = {
