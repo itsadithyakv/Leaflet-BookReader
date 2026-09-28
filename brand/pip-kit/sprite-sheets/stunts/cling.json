@@ -1,0 +1,10 @@
+{
+  "move": "cling",
+  "name": "Wall Cling",
+  "frames": 12,
+  "fps": 12,
+  "frameSize": 256,
+  "columns": 8,
+  "rows": 2,
+  "loop": true
+}

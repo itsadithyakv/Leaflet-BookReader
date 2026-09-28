@@ -1,0 +1,10 @@
+{
+  "move": "jog",
+  "name": "Warm-up Jog",
+  "frames": 16,
+  "fps": 12,
+  "frameSize": 256,
+  "columns": 8,
+  "rows": 2,
+  "loop": true
+}

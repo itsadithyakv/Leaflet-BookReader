@@ -1,0 +1,10 @@
+{
+  "move": "bookmark",
+  "name": "Plant the Flag",
+  "frames": 40,
+  "fps": 12,
+  "frameSize": 256,
+  "columns": 8,
+  "rows": 5,
+  "loop": true
+}

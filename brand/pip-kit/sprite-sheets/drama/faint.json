@@ -1,0 +1,10 @@
+{
+  "move": "faint",
+  "name": "Dramatic Faint",
+  "frames": 84,
+  "fps": 12,
+  "frameSize": 256,
+  "columns": 8,
+  "rows": 11,
+  "loop": true
+}

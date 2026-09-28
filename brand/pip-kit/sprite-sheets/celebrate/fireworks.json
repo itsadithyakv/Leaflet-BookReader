@@ -1,0 +1,10 @@
+{
+  "move": "fireworks",
+  "name": "Fireworks",
+  "frames": 60,
+  "fps": 12,
+  "frameSize": 256,
+  "columns": 8,
+  "rows": 8,
+  "loop": true
+}

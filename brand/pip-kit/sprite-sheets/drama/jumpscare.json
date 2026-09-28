@@ -1,0 +1,10 @@
+{
+  "move": "jumpscare",
+  "name": "Out of Its Skin",
+  "frames": 52,
+  "fps": 12,
+  "frameSize": 256,
+  "columns": 8,
+  "rows": 7,
+  "loop": true
+}

@@ -1,0 +1,10 @@
+{
+  "move": "treat-cupcake",
+  "name": "Cupcake",
+  "frames": 44,
+  "fps": 12,
+  "frameSize": 256,
+  "columns": 8,
+  "rows": 6,
+  "loop": true
+}

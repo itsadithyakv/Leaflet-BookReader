@@ -1,0 +1,10 @@
+{
+  "move": "laugh",
+  "name": "Cracking Up",
+  "frames": 24,
+  "fps": 12,
+  "frameSize": 256,
+  "columns": 8,
+  "rows": 3,
+  "loop": true
+}

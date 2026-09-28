@@ -1,0 +1,10 @@
+{
+  "move": "fall",
+  "name": "Falling",
+  "frames": 8,
+  "fps": 12,
+  "frameSize": 256,
+  "columns": 8,
+  "rows": 1,
+  "loop": true
+}

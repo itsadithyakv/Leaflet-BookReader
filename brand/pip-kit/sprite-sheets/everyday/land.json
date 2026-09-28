@@ -1,0 +1,10 @@
+{
+  "move": "land",
+  "name": "Landing",
+  "frames": 6,
+  "fps": 12,
+  "frameSize": 256,
+  "columns": 6,
+  "rows": 1,
+  "loop": true
+}

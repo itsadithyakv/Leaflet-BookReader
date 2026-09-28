@@ -1,0 +1,10 @@
+{
+  "move": "treat-bubbles",
+  "name": "Bubble Wand",
+  "frames": 48,
+  "fps": 12,
+  "frameSize": 256,
+  "columns": 8,
+  "rows": 6,
+  "loop": true
+}

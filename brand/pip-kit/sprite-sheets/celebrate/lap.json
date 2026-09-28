@@ -1,0 +1,10 @@
+{
+  "move": "lap",
+  "name": "Victory Lap",
+  "frames": 32,
+  "fps": 12,
+  "frameSize": 256,
+  "columns": 8,
+  "rows": 4,
+  "loop": true
+}

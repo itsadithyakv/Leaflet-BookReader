@@ -1,0 +1,10 @@
+{
+  "move": "floss",
+  "name": "Floss",
+  "frames": 12,
+  "fps": 12,
+  "frameSize": 256,
+  "columns": 8,
+  "rows": 2,
+  "loop": true
+}

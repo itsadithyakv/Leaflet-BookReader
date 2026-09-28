@@ -1,0 +1,10 @@
+{
+  "move": "streaklost",
+  "name": "Comeback Arc",
+  "frames": 84,
+  "fps": 12,
+  "frameSize": 256,
+  "columns": 8,
+  "rows": 11,
+  "loop": true
+}

@@ -1,0 +1,10 @@
+{
+  "move": "swat",
+  "name": "Shoo",
+  "frames": 30,
+  "fps": 12,
+  "frameSize": 256,
+  "columns": 8,
+  "rows": 4,
+  "loop": true
+}

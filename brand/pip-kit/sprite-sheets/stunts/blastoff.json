@@ -1,0 +1,10 @@
+{
+  "move": "blastoff",
+  "name": "Blast Off",
+  "frames": 72,
+  "fps": 12,
+  "frameSize": 256,
+  "columns": 8,
+  "rows": 9,
+  "loop": true
+}

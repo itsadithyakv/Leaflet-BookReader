@@ -1,0 +1,10 @@
+{
+  "move": "countdown",
+  "name": "3, 2, 1, Go",
+  "frames": 48,
+  "fps": 12,
+  "frameSize": 256,
+  "columns": 8,
+  "rows": 6,
+  "loop": true
+}

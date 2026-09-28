@@ -1,0 +1,10 @@
+{
+  "move": "sob",
+  "name": "Sad Chapter",
+  "frames": 36,
+  "fps": 12,
+  "frameSize": 256,
+  "columns": 8,
+  "rows": 5,
+  "loop": true
+}
