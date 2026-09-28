@@ -40,15 +40,17 @@ Packaging and submission steps are in [release-msix.md](release-msix.md).
 
 ## What is switched off, and how it comes back
 
-Build-time switches in `apps/src/constants/features.ts`, both off unless the
-build environment sets them:
+Build-time switches in `apps/src/constants/features.ts`, all off unless the
+build environment sets them. Version 1.0 is built with:
 
-| Flag | Turns on | When |
+| Flag | Turns on | In 1.0 |
 | --- | --- | --- |
-| `VITE_ENABLE_MULTI_DEVICE` | Folder sync and "sync across devices" wording | With the mobile app |
-| `VITE_ENABLE_COMMUNITY` | Leaderboards and shared shelves UI | When the server is hosted and leagues are ready |
+| `VITE_ENABLE_ACCOUNTS` | Optional email + password accounts | **On** |
+| `VITE_ENABLE_COMMUNITY` | Leaderboards, follows, kudos, duels, shared shelves | **On** |
+| `VITE_ENABLE_MULTI_DEVICE` | Folder sync and "sync across devices" wording | Off, until the mobile app |
+| `VITE_ENABLE_FULL_PIP_HOUSE` | Every floor of Pip's house and the arcade | Off: the bedroom and garden with starter decor |
 
-The code behind both is complete. The switches exist so that the first release
+The code behind each is complete. The switches exist so that the first release
 promises only what it delivers.
 
 ## Why backup and not sync, for now
@@ -56,9 +58,10 @@ promises only what it delivers.
 Drive already carries the merged sync document, so a second desktop signed in
 to the same Google account converges with the first. The reason to call it
 "backup" is honesty about what is tested and supported: one computer, restorable.
-Several known issues only bite when two devices write at once (see the handoff
-notes and [architecture.md](architecture.md)); they are fixed before multi-device
-is advertised.
+Several known issues only bite when two devices write at once (see the known
+issues in [release-notes-1.0.md](release-notes-1.0.md) and
+[architecture.md](architecture.md)); they are fixed before multi-device is
+advertised.
 
 ## Money
 

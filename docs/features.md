@@ -24,9 +24,60 @@ site names. Results are cached with a `metadata_checked_at` stamp and a **14-day
 cooldown** — some books simply have no match upstream, and without the cooldown
 the app re-queried them on every launch forever.
 
-Covers are downloaded to `covers/<sha256>-cover.jpg`, but only after the response
-is sniffed for a real image signature — a 404 page was previously cached as a
-permanent "cover" and blocked the real one.
+Covers come **from inside the book first**: at import, the EPUB's own cover
+image (the EPUB 3 `cover-image` item, the EPUB 2 `<meta name="cover">`, or an
+image named like a cover) is saved as its cover, found through
+`META-INF/container.xml` like the rest of the package (`storage/epub.rs`). Only
+a book without one is looked up online. Covers are saved to
+`covers/<sha256>-cover.jpg`, only after the bytes are checked for a real image
+signature (a 404 page was once cached as a permanent "cover").
+
+**Large libraries.** The grid and list draw only the rows on screen once a
+library passes 60 books (`components/VirtualRows.tsx`). Cards show a small JPEG
+thumbnail (`<sha256>-thumb.jpg`, 360 px, made once) rather than the full cover,
+through one cached hook (`hooks/useCoverSrc.ts`). Metadata lookups run three at
+a time with a 15-second timeout, and write to the library in batches.
+
+### Series, shelves and collections — `pages/CollectionsPage.tsx`
+
+**Series gather by themselves** (`library/series.ts`). A book's series comes
+from, in order of trust:
+
+1. What is **stored on the book**: read from the file at import (Calibre's
+   `calibre:series` metas, EPUB 3's `belongs-to-collection`; `storage/epub.rs`),
+   or set by the reader from the book's ⋯ menu → Series. `""` means "not in a
+   series" and stops every guess. Books imported before this existed have their
+   files read once (`scan_series`).
+2. A **title that names it**: "Leviathan Wakes (The Expanse, #1)", "…: Book
+   Three of the Wheel of Time", "Discworld #4 - Mort".
+3. A **well-known series** whose title and author match
+   (`library/knownSeries.ts`: about fifty, with reading order, UK and US
+   titles). This is what makes seven Harry Potter files with no series metadata
+   one series, in order.
+4. **Weak hints**, which count only when two books agree: a bare number
+   ("Harry Potter 1 - …"), "A Jack Reacher Novel", or one author's titles
+   sharing a start ("Mistborn: …").
+
+A group needs two different books (two copies of one are a duplicate, not a
+series). Each group knows how much is read, what is next, and which books are
+missing: the titles, for a well-known series; the gaps in the numbers,
+otherwise. Nothing about groups is stored, so a correction applies at once.
+
+The library shows **"Next in your series"** above the grid when the reader has
+finished a book and the next one is waiting, or names the next one to get when
+the library lacks it (`components/UpNextStrip.tsx`). Cards carry their series
+and number, search matches series names, and the library sorts by series or
+title.
+
+**Shelves** fill themselves (`library/shelves.ts`): reading now, next in your
+series, recently added (30 days), not started, paused (untouched for 30 days
+mid-book), finished, and possible duplicates (one title and author, several
+files). Empty shelves are hidden.
+
+**Your collections** are made by the reader: from the page, or any book's ⋯
+menu (`components/BookMenu.tsx`). They are in the database (schema v3) and in
+the backup document, where the newest edit of a collection wins and a delete
+travels as a tombstone, as for highlights.
 
 ---
 
@@ -70,12 +121,45 @@ Two readers, chosen by delivery kind.
 
 ### Text reader — `pages/ReaderView.tsx`
 
-epub.js in **scrolled-doc** flow. Progress is stored as a fraction plus a CFI so
-a position survives a font-size change.
+epub.js, **scrolling** by default or **turning pages** (Reader panel → Layout;
+a preference of the device, `leaflet.reader.layout`). Progress is stored as a
+fraction plus a CFI so a position survives a font-size change.
 
 The page renders inside an **iframe**, which shapes a lot of the code: word
 indexing for Smart Read, the toolbar reveal, and typography injection all reach
 in through `rendition.getContents()` rather than the parent document.
+
+The reader's helpers live beside it in `src/readers/`: progress
+(`progress.ts`), the table of contents, page colours, ink images, auto-scroll
+and pacing, the notes panel, search and the selection bar.
+
+**Progress** is by how much of the book is behind the reader: each section
+weighs its size in the EPUB (Rust reads the sizes from the archive's directory,
+`epub_sections`), and chapter titles only mark where front and back matter
+end, when they frame the story. See `readers/progress.ts` and its tests.
+
+**Pages.** epub.js lays a chapter out as columns on the body and slides the
+frame a page at a time. Everything that forces a full width (the page CSS, the
+`.reader-scroll` rules, `applyReaderInsets`, the overflow clamps) is for
+scrolling only; with any of it applied, every chapter becomes one page. Arrow
+keys, Page Up/Down and Space turn pages; the dock's arrows become previous and
+next page. Auto-scroll, Smart Read, SpeedRead and Dotty are built on scrolling,
+so they are off with pages.
+
+**Search** (the magnifier, or Ctrl+F): every section in reading order, loaded,
+searched with epub.js's `find` and unloaded, one at a time. Results arrive
+section by section under their chapter; choosing one jumps there and marks
+the words for a few seconds. `readers/searchBook.ts`, `readers/SearchPanel.tsx`.
+
+**Highlights, notes and bookmarks.** Selecting text offers four highlight
+colours, a highlight with a note, or copy (`readers/SelectionBar.tsx`).
+Highlights are drawn by epub.js's annotation layer and open their note when
+tapped. The notes panel (the bookmark icon) lists bookmarks and highlights in
+reading order and copies every highlight and note as Markdown. They are kept in
+the database (`annotations`, schema v2) and carried in the backup document,
+where the newest edit of each wins and a delete travels as a tombstone.
+Bookmarks from before (in the webview's storage) move over the first time a
+book opens.
 
 ### Page reader — `pages/PageReaderView.tsx`
 
@@ -572,12 +656,22 @@ value they do not know.
 
 ## Social page: stats, the bookshelf, the community
 
-**Where:** `pages/SocialPage.tsx`, `components/SessionShelf.tsx`,
-`components/SocialPanel.tsx` and `components/community/`
+**Where:** `pages/SocialPage.tsx`, `components/ReadingCalendar.tsx`,
+`components/SessionShelf.tsx`, `components/SocialPanel.tsx` and
+`components/community/`
 
-Reads the habit snapshot: total time, days read, consistency, and charts. It
-used to fabricate 18 demo sessions for anyone with no history; a new profile
-now reads honest zeros and an empty state.
+Two tabs: **Stats** (your own reading) and **Community** (everyone else's).
+
+**Stats** has six figures (this week, streak, best streak, books finished,
+days read, total time), a twelve-week reading calendar (a column per week,
+Monday on top, shaded against the daily goal, today outlined) and the session
+bookshelf. A new profile reads honest zeros.
+
+These are the same numbers your public card shows, computed the same way:
+minutes from the day ledger, the week from Monday in your own time zone, and
+"finished" by one rule, `FINISHED_AT` (0.99) in `constants/books.ts`, mirrored
+in Rust. The library count, the book card label, Pip's celebration and the
+published profile all read it.
 
 ### The session bookshelf
 
@@ -601,10 +695,30 @@ The newest spine drops in when the shelf is next opened, and the wrap-up says
 
 ### Community (leaderboards)
 
-Behind `FEATURES.community`, and needs a Leaflet account. Weekly boards
-(everyone, and readers you follow) with Pip avatars, rank changes and your gap
-to the next place; reader cards with follow, kudos and weekly duels; an inbox
-that Pip reacts to. Only public profiles appear or can be interacted with.
+Behind `FEATURES.community`, and needs a Leaflet account. In order:
+
+- **You**: the one place for your Pip, name, handle and whether you are shared.
+  Settings keeps only the account itself (email, password, sign out, delete).
+  Signed out, this is a single "Join the community" card.
+- **Leaderboard**: this week's board (Everyone, or readers you follow) with Pip
+  avatars, rank changes and your gap to the next place. "Keep reading" starts
+  a session long enough to pass the next reader, on the book you were last
+  reading, and opens it.
+- **Duels**, the **Inbox** (which Pip reacts to) and **Find readers**.
+- Reader cards: follow, kudos and weekly duels (accept or decline right there).
+
+Only public profiles appear or can be interacted with. The words are fixed in
+`components/community/copy.ts` (kudos, follow, duel, a streak in days, a week
+that ends Sunday at midnight); the headers, tabs and shelf are shared
+components (`ui/SectionHeader`, `ui/SegmentedTabs`, `shelf/spine`).
+
+**Publishing your numbers.** `publish_social_stats` sends this week's minutes,
+streak, books finished and shelf for a public profile. The app calls it when a
+session is recorded, when the Social page opens (and every minute it stays
+open), and on the five-minute community pulse, at most once a minute unless a
+session just ended. It used to ride only on a Drive backup, which left readers
+without Drive frozen on the board.
+
 Server side is in `server/`; see `server/README.md`.
 
 ---
@@ -626,7 +740,8 @@ The transports below share one set of rules.
 ### The document
 
 A few kilobytes of JSON: the book index (id, extension, title, author, genres,
-progress, position, tombstones), the habit ledger, and the session shelf.
+series, progress, position, tombstones), the habit ledger, the session shelf,
+highlights and bookmarks, and the reader's collections.
 **Book files are not in it** — they are fetched on demand, so connecting a new
 device is instant rather than a multi-gigabyte download.
 
@@ -689,7 +804,7 @@ leaderboards now and for one identity across devices when the mobile app ships.
   Credential Manager, never in SQLite or `localStorage`.
 - Avatars: signing up means picking a Pip (a skin plus a signature move, stored
   as `skin.move`, e.g. `wizard.magic`) from the catalogue in `pip/avatars.ts`,
-  preselected at random; "Change avatar" on the Account card swaps it later, and
+  preselected at random; the You card on Social → Community swaps it later, and
   "Use my Pip" on the Pip tab sets the reader's own dressed-up Pip (see
   [the profile picture](#the-profile-picture)).
   The server checks ids against its own copy (`server/src/avatars.js`, kept in

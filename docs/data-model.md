@@ -21,6 +21,7 @@ SQLite so there is no system dependency on any platform.
 | `metadata_updated_at` | When title/author/genres last changed |
 | `progress_updated_at` | When `progress` last changed — *not* when opened |
 | `deleted_at` | Tombstone; the row survives so the deletion can travel |
+| `series`, `series_index` | From the book's own metadata or set by the reader; `""` means "not in a series". Part of the metadata group. Most books leave these `NULL` and the app works the series out (`src/library/series.ts`) |
 
 `list_books()` excludes tombstoned rows; `list_books_for_sync()` includes them.
 
@@ -68,9 +69,19 @@ goal bonuses − purchases.
 `room_style`, `mood`, `mood_updated_at`, `signature`, `updated_at`. See
 [features.md](features.md#seeds-and-the-pip-tab).
 
-### `collections` / `book_collections`
+### `collections`
 
-Named groups, many-to-many.
+The reader's own collections: `id`, `name`, `book_ids` (a JSON list, in the
+order added), `created_at`, `updated_at`, `deleted_at` (tombstone). One record,
+edited and synced whole. `book_collections` is an older, unused join table.
+
+Series and smart shelves are **not** stored; they are worked out from `books`.
+
+### `annotations`
+
+Bookmarks and highlights: `id`, `book_id`, `kind` (`bookmark` or `highlight`),
+`cfi` (a range for a highlight), `text`, `note`, `color`, `chapter`,
+`created_at`, `updated_at`, `deleted_at` (tombstone).
 
 ### `reading_sessions`
 
@@ -88,20 +99,23 @@ table as the fallback where no keychain exists.
 
 ## Migrations
 
-`apply_schema()` runs `CREATE TABLE IF NOT EXISTS` for everything, then issues
-best-effort `ALTER TABLE ... ADD COLUMN` for each column added since v1:
+The schema is versioned with SQLite's `PRAGMA user_version`
+(`SCHEMA_VERSION` in `db/mod.rs`, currently **3**). `apply_schema()` runs
+`CREATE TABLE IF NOT EXISTS` for everything at the latest shape, then
+`upgrade()` brings an older file forward one step at a time, in one
+transaction:
 
-```rust
-let _ = conn.execute("ALTER TABLE books ADD COLUMN metadata_checked_at TEXT", []);
-let _ = conn.execute("ALTER TABLE books ADD COLUMN metadata_updated_at TEXT", []);
-let _ = conn.execute("ALTER TABLE books ADD COLUMN progress_updated_at TEXT", []);
-let _ = conn.execute("ALTER TABLE books ADD COLUMN deleted_at TEXT", []);
-let _ = conn.execute("ALTER TABLE books ADD COLUMN position TEXT", []);
-```
+| Version | Adds |
+| --- | --- |
+| 1 | `books.metadata_checked_at`, `metadata_updated_at`, `progress_updated_at`, `deleted_at`, `position` |
+| 2 | `annotations` |
+| 3 | `books.series`, `series_index`; `collections.book_ids`, `created_at`, `updated_at`, `deleted_at` |
 
-The `let _ =` is the point: the statement fails harmlessly when the column is
-already there. New databases get it from `CREATE TABLE`, existing ones gain it
-once. There is no version number and no down-migration.
+Columns are added only if missing (`add_column`), and only that case is
+forgiven: a full disk or a locked file is an error. Before any upgrade the file
+is copied to `library.db.bak-v<old version>` with `VACUUM INTO`. There is no
+down-migration. To change the schema: bump the version, add a step, and put the
+new shape in the `CREATE TABLE`s too; never edit a step that has shipped.
 
 Rows written before the stamp columns existed have `NULL` in them; the sync
 converter falls back to `created_at`, so an un-stamped record loses to any real
@@ -123,7 +137,8 @@ Defined in `sync/merge.rs`. This is what crosses between devices — as
       "title": "…",
       "author": "…",
       "genres": [],
-      "metadataUpdatedAt": "…",   // title/author/genres move as one group
+      "series": "The Expanse",    // optional, with "seriesIndex"; "" = none
+      "metadataUpdatedAt": "…",   // title/author/genres/series move as one group
       "progress": 0.42,
       "position": "epubcfi(…)",   // optional; travels with progress
       "progressUpdatedAt": "…",   // distinct from lastOpened, on purpose
@@ -137,7 +152,9 @@ Defined in `sync/merge.rs`. This is what crosses between devices — as
   "purchases": [ /* Pip's shop: what was bought */ ],
   "plantings": [ /* Pip's garden: what was planted where */ ],
   "harvests": [ /* ...and what was picked */ ],
-  "pip":      { /* Pip's look, room and mood */ }
+  "pip":      { /* Pip's look, room and mood */ },
+  "annotations": [ /* bookmarks and highlights, with tombstones */ ],
+  "collections": [ /* the reader's collections, with tombstones */ ]
 }
 ```
 
@@ -145,7 +162,10 @@ Book files live beside it as `books/<sha256>.<ext>` and are fetched on demand.
 
 ### Merge rules
 
-- **Metadata** — newest `metadataUpdatedAt` wins, as a group.
+- **Metadata** — newest `metadataUpdatedAt` wins, as a group (title, author,
+  genres, series). On an exact tie a known series beats none: a series read from
+  the file is filled in without a new stamp, as every device reads the same
+  file to the same answer.
 - **Progress** — newest `progressUpdatedAt` wins. A tie keeps the further
   position; never lose a reader's place. `position` (the CFI) is taken from the
   same winner, even when it has none, so a percentage is never paired with
@@ -161,6 +181,8 @@ Book files live beside it as `books/<sha256>.<ext>` and are fetched on demand.
 - **Sessions** — union by id; a burn is a tombstone and sticks.
 - **Purchases, plantings, harvests** — unions by id; they never change once made.
 - **Pip's state** — newest `updatedAt` wins, whole; a tie is settled by content.
+- **Annotations, collections** — per id, newest `updatedAt` wins, whole; a delete
+  is an edit (a tombstone), dropped after the tombstone retention period.
 
 Exact timestamp ties fall back to comparing the values themselves, so the result
 cannot depend on argument order. Output is ordered by a `BTreeMap`, so two

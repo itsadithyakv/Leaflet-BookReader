@@ -1,6 +1,6 @@
 # Leaflet Privacy Policy
 
-**Effective date:** 27 September 2026
+**Effective date:** 28 September 2026
 
 **Who we are:** Leaflet is made by PaperKite ("we", "us"). Contact: [adithyakrishnan.vinod@gmail.com](mailto:adithyakrishnan.vinod@gmail.com)
 
@@ -23,14 +23,14 @@ cannot.
 
 The following is stored only on your computer and is never sent to us: your
 book files, your library (titles, authors, covers), your reading position and
-progress, your reading time, streaks and session history, your notes, and your
-settings.
+progress, your reading time, streaks and session history, your highlights,
+notes and bookmarks, your collections, and your settings.
 
 ## Google Drive backup (optional)
 
 If you connect Google Drive, Leaflet copies your book files and a small file of
-your reading progress and history into a folder called "Leaflet" in **your**
-Google Drive.
+your reading progress and history (including your highlights, notes, bookmarks
+and collections) into a folder called "Leaflet" in **your** Google Drive.
 
 - Leaflet asks Google only for the `drive.file` permission. It can see only the
   files it created itself, and nothing else in your Drive.
@@ -61,7 +61,9 @@ one, we store the following on our server:
   profile cannot be looked up by anyone.
 - **Synced reading state** (when leaderboards and cross-device features are on):
   a compressed copy of your progress and reading history, so your devices agree.
-  It does not include your book files.
+  It includes your highlights, notes, bookmarks and collections if you have
+  any, and never your book files. We cannot read it: it is stored as you send
+  it and used only to give it back to your devices.
 
 We use this information only to run your account and the features you turn on.
 We do not sell it, rent it, or use it for advertising.

@@ -159,8 +159,9 @@ ObjectId, and four small community collections that reference it.
 **`states`** — only if the device syncs through this server
 - `_id` — the account's ObjectId
 - `state` — gzipped JSON of the reader's library entries and reading history
-  (titles, authors, progress, reading-day minutes, focus sessions) — opaque to
-  the server, never book files
+  (titles, authors, series, progress, reading-day minutes, focus sessions,
+  highlights with their notes, bookmarks, collections) — opaque to the server,
+  never book files
 - `version` — integer counter; `updatedAt` — date
 
 **`follows`** — one per follow, only between public profiles when created
