@@ -93,17 +93,53 @@ fn tidy(mut profile: ReadingProfile) -> ReadingProfile {
   profile
 }
 
-/// Two devices' profiles, part by part: the newer core, the newer limits, and
-/// per book the newer entry. Commutative and idempotent, like the rest of the
-/// sync document.
+/// Minutes of reading behind one time of day's pace; anything unreadable is none.
+fn evidence(entry: &Value) -> f64 {
+  entry.get("minutes").and_then(Value::as_f64).filter(|minutes| minutes.is_finite()).unwrap_or(0.0)
+}
+
+/// The reader-wide part. Where a new reader starts is set once, and the newer
+/// copy's word on it stands. But the paces by time of day and the count of
+/// stops are learned on whichever device is being read on, and a newest-wins
+/// merge threw away one device's learning whenever both had learned since they
+/// last met. So each time of day keeps the pace with more minutes of reading
+/// behind it (the newer copy's on a tie), and the count keeps the larger.
+/// Still commutative and idempotent: each choice is a maximum.
+fn merge_core(x: &Stamped, y: &Stamped) -> Stamped {
+  let (top, other) = if wins(x, y) { (x, y) } else { (y, x) };
+  let mut merged = top.clone();
+  if let Some(Value::Object(theirs)) = other.fields.get("timeOfDay") {
+    let mut bands = match top.fields.get("timeOfDay") {
+      Some(Value::Object(ours)) => ours.clone(),
+      _ => Map::new()
+    };
+    for (band, entry) in theirs {
+      let keep_ours = bands.get(band).map(|ours| evidence(ours) >= evidence(entry)).unwrap_or(false);
+      if !keep_ours {
+        bands.insert(band.clone(), entry.clone());
+      }
+    }
+    merged.fields.insert("timeOfDay".to_string(), Value::Object(bands));
+  }
+  let stops = |part: &Stamped| part.fields.get("pausesSkipped").and_then(Value::as_i64).unwrap_or(0);
+  if top.fields.contains_key("pausesSkipped") || other.fields.contains_key("pausesSkipped") {
+    merged.fields.insert("pausesSkipped".to_string(), Value::from(stops(x).max(stops(y))));
+  }
+  merged
+}
+
+/// Two devices' profiles, part by part: the core by evidence (`merge_core`),
+/// the newer limits, and per book the newer entry. Commutative and idempotent,
+/// like the rest of the sync document.
 pub fn merge(a: &Option<ReadingProfile>, b: &Option<ReadingProfile>) -> Option<ReadingProfile> {
   let (x, y) = match (a, b) {
     (None, None) => return None,
     (Some(only), None) | (None, Some(only)) => return Some(tidy(only.clone())),
     (Some(x), Some(y)) => (x, y)
   };
-  // The version describes the core's shape, so it travels with the core.
-  let (core, version) = if wins(&x.core, &y.core) { (x.core.clone(), x.version) } else { (y.core.clone(), y.version) };
+  // The version describes the core's shape, so it travels with the newer core.
+  let version = if wins(&x.core, &y.core) { x.version } else { y.version };
+  let core = merge_core(&x.core, &y.core);
   let limits = match (&x.limits, &y.limits) {
     (Some(p), Some(q)) => Some(if wins(p, q) { p.clone() } else { q.clone() }),
     (Some(only), None) | (None, Some(only)) => Some(only.clone()),
@@ -204,6 +240,41 @@ mod tests {
     let merged = merge(&Some(learning), &Some(tuned)).expect("merged");
     assert_eq!(merged.limits.expect("kept").fields["maxWpm"], json!(420));
     assert_eq!(merged.core.updated_at, "2026-09-25T10:00:00Z");
+  }
+
+  /// Two devices learned since they last met: the laptop in the mornings, the
+  /// phone in the evenings, and both a little at night. Neither loses its
+  /// learning; the night pace with more reading behind it stands.
+  #[test]
+  fn both_devices_keep_what_they_learned_about_the_time_of_day() {
+    let core = |at: &str, bands: Value, stops: i64| {
+      stamped(at, json!({ "base": { "wpm": 215, "minutes": 2 }, "timeOfDay": bands, "pausesSkipped": stops }))
+    };
+    let laptop = ReadingProfile {
+      core: core(
+        "2026-09-22T09:00:00Z",
+        json!({ "morning": { "ratio": 1.1, "minutes": 40 }, "night": { "ratio": 0.8, "minutes": 25 } }),
+        7
+      ),
+      ..profile("2026-09-22T09:00:00Z", 215.0, vec![])
+    };
+    let phone = ReadingProfile {
+      core: core(
+        "2026-09-23T21:00:00Z",
+        json!({ "evening": { "ratio": 0.9, "minutes": 30 }, "night": { "ratio": 0.85, "minutes": 12 } }),
+        4
+      ),
+      ..profile("2026-09-23T21:00:00Z", 215.0, vec![])
+    };
+    let merged = merge(&Some(laptop.clone()), &Some(phone.clone())).expect("merged");
+    let bands = &merged.core.fields["timeOfDay"];
+    assert_eq!(bands["morning"]["minutes"], json!(40), "the laptop's mornings");
+    assert_eq!(bands["evening"]["minutes"], json!(30), "the phone's evenings");
+    assert_eq!(bands["night"]["ratio"], json!(0.8), "more reading behind it");
+    assert_eq!(merged.core.fields["pausesSkipped"], json!(7));
+    assert_eq!(merged.core.updated_at, "2026-09-23T21:00:00Z", "stamped as the newer copy");
+    assert_eq!(Some(merged.clone()), merge(&Some(phone), &Some(laptop)), "commutative");
+    assert_eq!(merge(&Some(merged.clone()), &Some(merged.clone())), Some(merged), "idempotent");
   }
 
   #[test]

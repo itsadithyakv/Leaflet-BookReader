@@ -233,6 +233,28 @@ const newer = <T extends { updatedAt: string }>(a: T, b: T) => {
   return JSON.stringify(a) >= JSON.stringify(b) ? a : b;
 };
 
+/**
+ * The reader-wide part of two copies, as `sync/reading.rs` merges it. Where a
+ * new reader starts is set once, and the newer copy's word stands; the paces by
+ * time of day and the count of stops are learned on whichever device is being
+ * read on, so each time of day keeps the pace with more minutes behind it (the
+ * newer copy's on a tie) and the count keeps the larger. Newest-wins threw
+ * away one device's learning whenever both had learned since they last met.
+ */
+const mergeCore = (a: PaceCore, b: PaceCore): PaceCore => {
+  const top = newer(a, b);
+  const other = top === a ? b : a;
+  const timeOfDay: PaceCore["timeOfDay"] = { ...top.timeOfDay };
+  (Object.keys(other.timeOfDay) as TimeBand[]).forEach((band) => {
+    const ours = timeOfDay[band];
+    const theirs = other.timeOfDay[band];
+    if (theirs && (!ours || theirs.minutes > ours.minutes)) {
+      timeOfDay[band] = theirs;
+    }
+  });
+  return { ...top, timeOfDay, pausesSkipped: Math.max(a.pausesSkipped, b.pausesSkipped) };
+};
+
 /** Two copies of the profile, merged part by part as `sync/reading.rs` does. */
 export const mergeProfiles = (a: ReadingProfile, b: ReadingProfile): ReadingProfile => {
   const books: Record<string, BookPace> = { ...a.books };
@@ -243,7 +265,7 @@ export const mergeProfiles = (a: ReadingProfile, b: ReadingProfile): ReadingProf
   const resetAt = later(a.resetAt, b.resetAt);
   return tidy({
     version: 2,
-    core: newer(a.core, b.core),
+    core: mergeCore(a.core, b.core),
     ...(limits ? { limits } : {}),
     books,
     ...(resetAt ? { resetAt } : {})

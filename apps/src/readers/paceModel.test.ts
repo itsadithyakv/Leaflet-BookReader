@@ -239,6 +239,38 @@ describe("merging copies from two devices", () => {
     expect(mergeProfiles(laptop, merged)).toEqual(merged);
   });
 
+  it("keeps what each device learned about the time of day, and the larger count of stops", () => {
+    const shared = createReadingProfile(iso(T0));
+    const laptop: ReadingProfile = {
+      ...shared,
+      core: {
+        ...shared.core,
+        updatedAt: iso(T0 + DAY),
+        timeOfDay: { morning: { ratio: 1.1, minutes: 40 }, night: { ratio: 0.8, minutes: 25 } },
+        pausesSkipped: 7
+      }
+    };
+    const phone: ReadingProfile = {
+      ...shared,
+      core: {
+        ...shared.core,
+        updatedAt: iso(T0 + 2 * DAY),
+        timeOfDay: { evening: { ratio: 0.9, minutes: 30 }, night: { ratio: 0.85, minutes: 12 } },
+        pausesSkipped: 4
+      }
+    };
+    const merged = mergeProfiles(laptop, phone);
+    expect(merged.core.timeOfDay).toEqual({
+      morning: { ratio: 1.1, minutes: 40 },
+      evening: { ratio: 0.9, minutes: 30 },
+      night: { ratio: 0.8, minutes: 25 }
+    });
+    expect(merged.core.pausesSkipped).toBe(7);
+    expect(merged.core.updatedAt).toBe(phone.core.updatedAt);
+    expect(mergeProfiles(phone, laptop)).toEqual(merged);
+    expect(mergeProfiles(merged, merged)).toEqual(merged);
+  });
+
   it("takes the newer copy of a book read on both", () => {
     const first = readFor(createReadingProfile(), "dune", 200, 8);
     const later = readFor(createReadingProfile(), "dune", 300, 8, { start: T0 + DAY });

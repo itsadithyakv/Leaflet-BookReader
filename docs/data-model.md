@@ -204,11 +204,14 @@ Book files live beside it as `books/<sha256>.<ext>` and are fetched on demand.
 - **Pip's state** — newest `updatedAt` wins, whole; a tie is settled by content.
 - **Annotations, collections** — per id, newest `updatedAt` wins, whole; a delete
   is an edit (a tombstone), dropped after the tombstone retention period.
-- **Reading profile** — part by part, newest `updatedAt` wins: the reader-wide
-  `core`, `limits` (apart, so a range set by hand is never lost to learning
-  that happened later on another device) and each book's entry on its own. A
-  reset (`resetAt`) drops book entries older than it on every device; past 400
-  books the least recently read leave. `sync/reading.rs`.
+- **Reading profile** — part by part: `limits` (apart, so a range set by hand
+  is never lost to learning that happened later on another device) and each
+  book's entry on its own, newest `updatedAt` wins; the reader-wide `core` by
+  evidence: its starting pace from the newer copy, each time of day's pace from
+  the copy with more minutes behind it, and the larger count of stops, so two
+  devices that both learned keep both. A reset (`resetAt`) drops book entries
+  older than it on every device; past 400 books the least recently read leave.
+  `sync/reading.rs` (`merge_core`), mirrored by `mergeProfiles`.
 
 Exact timestamp ties fall back to comparing the values themselves, so the result
 cannot depend on argument order. Output is ordered by a `BTreeMap`, so two
