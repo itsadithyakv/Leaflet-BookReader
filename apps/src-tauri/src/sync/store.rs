@@ -434,7 +434,9 @@ mod tests {
         ended_reason: "completed".to_string(),
         clean: true,
         style_seed: "seed".to_string(),
-        burned_at: None
+        burned_at: None,
+        flower: Some("daisy".to_string()),
+        flower_bloomed: true
       }],
       purchases: Vec::new(),
       plantings: Vec::new(),
@@ -453,6 +455,9 @@ mod tests {
     let sessions = db.focus_sessions().expect("sessions");
     assert_eq!(sessions.len(), 1);
     assert_eq!(sessions[0].notes.as_deref(), Some("a note"));
+    // A flower bloomed on another device blooms here too.
+    assert_eq!(sessions[0].flower.as_deref(), Some("daisy"));
+    assert!(sessions[0].flower_bloomed);
   }
 
   /// `snapshot` must include tombstones, or a deletion could never be published.

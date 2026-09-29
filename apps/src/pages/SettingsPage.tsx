@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useLibraryStore } from "../store/libraryStore";
 import { useShallow } from "zustand/react/shallow";
-import { useHabitStore } from "../store/habitStore";
+import { flowerGrowing, useHabitStore } from "../store/habitStore";
+import { askConfirm } from "../components/ConfirmDialog";
 import { useAppearanceStore, type ThemeMode } from "../store/appearanceStore";
 import { converterService, type ConverterInfo } from "../services/converterService";
 import { dependencyFreeSummary, externalConverterCount } from "../constants/bookFormats";
@@ -293,6 +294,25 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
         setDeleteBusy(false);
         setConfirmDelete(false);
       });
+  };
+
+  /** Turning full screen off mid-session wilts the flower it is growing: asked first. */
+  const toggleFullScreen = async () => {
+    const session = useHabitStore.getState().activeSession;
+    if (focusSettings.kioskMode && session?.flower && flowerGrowing(session)) {
+      const confirmed = await askConfirm({
+        title: "Leave full screen?",
+        body: `Your ${session.flower.kind} wilts if full screen goes off mid-session. The session carries on and still counts.`,
+        confirmLabel: "Leave full screen",
+        cancelLabel: "Stay",
+        danger: true,
+        pip: "sob"
+      });
+      if (!confirmed) {
+        return;
+      }
+    }
+    setFocusSettings({ kioskMode: !useHabitStore.getState().focusSettings.kioskMode });
   };
 
   const renderToggle = (on: boolean) => (
@@ -760,12 +780,13 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
             <button
               type="button"
               className="inset-field flex w-full items-center justify-between px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
-              onClick={() => setFocusSettings({ kioskMode: !focusSettings.kioskMode })}
+              onClick={() => void toggleFullScreen()}
             >
               <span className="text-left">
-                <span className="block">Focus lock</span>
+                <span className="block">Full screen (focus lock)</span>
                 <span className="mt-0.5 block text-[11px] opacity-75">
-                  Fullscreen during sessions. Pip guards the way out; hold Esc to leave.
+                  Sessions run full screen and grow a focus flower, which blooms if you stay to the end. Pip guards
+                  the way out; hold Esc to leave.
                 </span>
               </span>
               {renderToggle(focusSettings.kioskMode)}

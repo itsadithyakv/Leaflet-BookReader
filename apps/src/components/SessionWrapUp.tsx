@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useHabitStore, type SessionWrapUp as WrapUp } from "../store/habitStore";
 import { usePipStore } from "../store/pipStore";
@@ -8,6 +8,8 @@ import { getDateKey } from "../services/habitService";
 import { useEquippedPip } from "../store/pipWardrobeStore";
 import { CountUp } from "./community/CountUp";
 import { UiIcon } from "./UiIcon";
+import { FocusFlower, wiltReason } from "./FocusFlower";
+import { FOCUS_FLOWERS } from "../pip/focusFlower.js";
 
 /** Set once Pip has explained the garden (water, ripe plants, seeds), so it says it once. */
 const SEEDS_EXPLAINED_KEY = "leaflet.pip.seedsExplained";
@@ -22,6 +24,68 @@ const seedsExplained = () => {
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
+/** Where each petal of a bloom's burst flies to, from the flower's middle. */
+const PETALS: Array<[number, number]> = [
+  [-40, -30],
+  [-14, -48],
+  [16, -46],
+  [42, -26],
+  [-46, 4],
+  [46, 8],
+  [-26, 30],
+  [28, 32]
+];
+
+/** A session's focus flower: bloomed, with a burst of its petals, or wilted, and why. */
+const FlowerResult = ({ flower, blooms }: { flower: NonNullable<WrapUp["flower"]>; blooms: number }) => {
+  const petal = FOCUS_FLOWERS[flower.kind]?.petal ?? "#E8484F";
+  return (
+    <div
+      className={`mt-4 flex items-center gap-4 rounded-xl px-4 py-3 text-left ${
+        flower.bloomed ? "bg-primary/10" : "bg-surface-container-high/70"
+      }`}
+    >
+      <div className="relative shrink-0">
+        <FocusFlower
+          kind={flower.kind}
+          progress={flower.bloomed ? 1 : (flower.at ?? 0)}
+          state={flower.bloomed ? "bloomed" : "wilted"}
+          box={72}
+        />
+        {flower.bloomed && (
+          <span className="flower-burst" aria-hidden="true">
+            {PETALS.map(([dx, dy], index) => (
+              <span
+                key={index}
+                style={
+                  {
+                    "--dx": `${dx}px`,
+                    "--dy": `${dy}px`,
+                    "--petal": petal,
+                    animationDelay: `${160 + index * 30}ms`
+                  } as CSSProperties
+                }
+              />
+            ))}
+          </span>
+        )}
+      </div>
+      <div className="min-w-0">
+        <p className="font-headline text-base font-bold text-on-surface">
+          {flower.bloomed ? `Your ${flower.kind} bloomed` : `Your ${flower.kind} wilted`}
+        </p>
+        <p className="mt-0.5 text-xs leading-relaxed text-on-surface-variant">
+          {flower.bloomed
+            ? blooms > 1
+              ? `${plural(blooms, "focus flower")} grown so far.`
+              : "Your first focus flower. Stay in full screen to grow more."
+            : `It wilted because ${flower.wilted ? wiltReason(flower.wilted) : "the session ended early"}. The minutes you read still count.`}
+        </p>
+      </div>
+    </div>
+  );
+};
+
 /**
  * Pip's reaction to a session, strongest news first. Goal beats are seeded by
  * the day, so the move matches the one the rest of the app would pick.
@@ -30,6 +94,11 @@ const pickWrapUpMove = (wrapUp: WrapUp): PipBeat => {
   const minutes = Math.round(wrapUp.minutes);
   if (wrapUp.goalJustMet) {
     return goalBeat(wrapUp.streak, getDateKey(), wrapUp.newRecord);
+  }
+  if (wrapUp.flower) {
+    return pickBeat(wrapUp.flower.bloomed ? "flowerBloomed" : "flowerWilted", wrapUp.sessionId, {
+      name: wrapUp.flower.kind
+    });
   }
   if (minutes >= 25) {
     return pickBeat("deepRead", wrapUp.sessionId, { minutes });
@@ -180,6 +249,8 @@ export const SessionWrapUp = () => {
             {showPip && <p className="pip-line mt-2">{line}</p>}
           </div>
         </div>
+
+        {wrapUp.flower && <FlowerResult flower={wrapUp.flower} blooms={wrapUp.blooms} />}
 
         <div className="mt-5 grid grid-cols-2 gap-3">
           <div className="inset-field p-3">

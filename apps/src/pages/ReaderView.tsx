@@ -23,6 +23,7 @@ import {
 import { PAPER_GRAIN } from "../constants/textures";
 import { UiIcon } from "../components/UiIcon";
 import { PipExitGuard, useFocusLockExit } from "../hooks/useFocusLockExit";
+import { FocusFlower, flowerLook } from "../components/FocusFlower";
 import { watchForeground } from "../services/windowService";
 import { accountService } from "../services/accountService";
 import ztNatureBoldWoff2 from "../assets/fonts/ZTNature-Bold.woff2";
@@ -4300,7 +4301,12 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
         </div>
       )}
 
-      {activeSession && (
+      {activeSession?.flower ? (
+        // A session started in full screen grows its flower here instead.
+        <div className="leaflet-flower">
+          <FocusFlower kind={activeSession.flower.kind} {...flowerLook(activeSession.flower, coffeeProgress)} box={72} />
+        </div>
+      ) : activeSession && (
         <div className={`leaflet-mug ${coffeeProgress >= 0.99 ? "leaflet-mug-done" : ""}`}>
           <div className="leaflet-mug-cup">
             <div

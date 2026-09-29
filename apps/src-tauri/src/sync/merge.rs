@@ -114,7 +114,13 @@ pub struct SessionEntry {
   pub ended_reason: String,
   pub clean: bool,
   pub style_seed: String,
-  pub burned_at: Option<String>
+  pub burned_at: Option<String>,
+  /// The focus flower a full-screen session grew, and whether it bloomed.
+  /// Left out of the document for sessions without one.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub flower: Option<String>,
+  #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+  pub flower_bloomed: bool
 }
 
 /// What travels between devices. A few kilobytes: book files are not in here,
@@ -347,6 +353,10 @@ fn merge_session(a: &SessionEntry, b: &SessionEntry) -> SessionEntry {
     (None, None) => None
   };
   merged.minutes = a.minutes.max(b.minutes);
+  // A flower is set when its session is recorded and never changes after;
+  // either side's word for it will do, and a bloom is never unbloomed.
+  merged.flower = a.flower.clone().or_else(|| b.flower.clone());
+  merged.flower_bloomed = a.flower_bloomed || b.flower_bloomed;
   merged
 }
 
@@ -656,7 +666,9 @@ impl SessionEntry {
       ended_reason: session.ended_reason.clone(),
       clean: session.clean,
       style_seed: session.style_seed.clone(),
-      burned_at: session.burned_at.clone()
+      burned_at: session.burned_at.clone(),
+      flower: session.flower.clone(),
+      flower_bloomed: session.flower_bloomed
     }
   }
 
@@ -673,7 +685,9 @@ impl SessionEntry {
       ended_reason: self.ended_reason.clone(),
       clean: self.clean,
       style_seed: self.style_seed.clone(),
-      burned_at: self.burned_at.clone()
+      burned_at: self.burned_at.clone(),
+      flower: self.flower.clone(),
+      flower_bloomed: self.flower_bloomed
     }
   }
 }
@@ -1233,8 +1247,29 @@ mod tests {
       ended_reason: "completed".to_string(),
       clean: true,
       style_seed: "seed".to_string(),
-      burned_at: None
+      burned_at: None,
+      flower: None,
+      flower_bloomed: false
     }
+  }
+
+  #[test]
+  fn a_bloom_travels_and_is_never_lost() {
+    let mut bloomed = session("s1");
+    bloomed.flower = Some("rose".to_string());
+    bloomed.flower_bloomed = true;
+    let mine = SyncDoc { sessions: vec![bloomed.clone()], ..doc(vec![]) };
+    let theirs = SyncDoc { sessions: vec![session("s1")], ..doc(vec![]) };
+    for merged in [merge(&mine, &theirs, NOW), merge(&theirs, &mine, NOW)] {
+      assert_eq!(merged.sessions[0].flower.as_deref(), Some("rose"));
+      assert!(merged.sessions[0].flower_bloomed);
+    }
+    // A session without a flower leaves the fields out of the document, so an
+    // older build reads it as before.
+    let json = serde_json::to_string(&session("s2")).expect("json");
+    assert!(!json.contains("flower"), "{json}");
+    let back: SessionEntry = serde_json::from_str(&serde_json::to_string(&bloomed).expect("json")).expect("parse");
+    assert_eq!(back, bloomed);
   }
 
   #[test]

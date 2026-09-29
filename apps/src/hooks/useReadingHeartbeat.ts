@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
+import { isTauri } from "@tauri-apps/api/core";
 import { useHabitStore } from "../store/habitStore";
+import { watchForeground } from "../services/windowService";
 
 /** How often the heartbeat considers crediting time. */
 const TICK_MS = 15_000;
@@ -13,14 +15,19 @@ const IDLE_MS = 90_000;
 const FLUSH_MS = 60_000;
 
 /**
- * Credits time actually spent reading toward the daily goal.
+ * Credits time actually spent reading toward the daily goal, and runs a focus
+ * session's clock on the same time.
  *
  * This is the only source of ledger minutes. A focus session labels a span of
  * reading rather than granting time of its own, so a timer you start and walk
- * away from earns nothing, and reading without a timer still counts.
+ * away from earns nothing, and reading without a timer still counts. The
+ * session's clock counts the same moments, so a session can no longer claim
+ * 175 minutes for ten minutes of reading and a window left open.
  *
- * Each tick credits `min(elapsed, TICK_MS)` so a sleeping laptop or a
- * backgrounded window cannot bank hours it never spent.
+ * Reading is: a book open, Leaflet the app in front, and some input in the
+ * last IDLE_MS. Each tick credits `min(elapsed, TICK_MS)`, so a sleeping laptop
+ * cannot bank hours it never spent, and leaving for another app credits what
+ * was read up to that moment and nothing while away.
  */
 export const useReadingHeartbeat = (active: boolean) => {
   const creditMinutes = useHabitStore((state) => state.creditMinutes);
@@ -56,30 +63,60 @@ export const useReadingHeartbeat = (active: boolean) => {
     ];
     events.forEach((name) => window.addEventListener(name, onActivity, { passive: true }));
 
-    const onVisibility = () => {
-      // Coming back from hidden must not credit the time spent away.
-      lastTickRef.current = Date.now();
-      if (document.visibilityState === "visible") {
-        markActivity();
+    const session = () => useHabitStore.getState();
+    const idle = () => Date.now() - lastActivityRef.current > IDLE_MS;
+
+    /** Ends a beat: its time counts if it was reading, and the next one starts now. */
+    const beat = (reading: boolean) => {
+      const now = Date.now();
+      const add = Math.min(Math.max(0, now - lastTickRef.current), TICK_MS);
+      lastTickRef.current = now;
+      if (reading && add > 0) {
+        pendingMsRef.current += add;
+        session().addSessionReading(add);
+      } else {
+        session().setSessionReading(false);
       }
     };
+
+    // Leaflet in front. Inside Tauri the OS window's focus says so; the DOM's
+    // own blur cannot, since it also fires when the reader clicks into the
+    // book, which lives in an iframe. A browser has only the page's focus,
+    // which does count focus inside the iframe.
+    let inFront = true;
+    const reading = () =>
+      inFront && document.visibilityState === "visible" && (isTauri() || document.hasFocus()) && !idle();
+    const leave = () => {
+      if (!inFront) {
+        return;
+      }
+      // What was read up to this moment counts; the clock holds at once.
+      beat(!idle());
+      inFront = false;
+      session().setSessionReading(false);
+    };
+    const back = () => {
+      if (inFront) {
+        return;
+      }
+      inFront = true;
+      // The time away was not reading.
+      lastTickRef.current = Date.now();
+      markActivity();
+      session().setSessionReading(document.visibilityState === "visible");
+    };
+    const stopWatching = watchForeground((front) => (front ? back() : leave()));
+    const onVisibility = () => (document.visibilityState === "visible" ? back() : leave());
     document.addEventListener("visibilitychange", onVisibility);
 
     lastTickRef.current = Date.now();
     lastActivityRef.current = Date.now();
+    // A book just opened: the session clock runs from now.
+    session().setSessionReading(reading());
 
     const timer = window.setInterval(() => {
-      const now = Date.now();
-      const elapsed = now - lastTickRef.current;
-      lastTickRef.current = now;
-
-      const idle = now - lastActivityRef.current > IDLE_MS;
-      const hidden = document.visibilityState !== "visible";
-      if (!idle && !hidden) {
-        pendingMsRef.current += Math.min(elapsed, TICK_MS);
-      }
-
-      if (now - lastFlushRef.current >= FLUSH_MS) {
+      beat(reading());
+      if (Date.now() - lastFlushRef.current >= FLUSH_MS) {
         flush();
       }
     }, TICK_MS);
@@ -88,6 +125,13 @@ export const useReadingHeartbeat = (active: boolean) => {
       window.clearInterval(timer);
       events.forEach((name) => window.removeEventListener(name, onActivity));
       document.removeEventListener("visibilitychange", onVisibility);
+      stopWatching();
+      // The book closed: what was read since the last beat counts, and the
+      // session clock holds until a book is open again.
+      if (inFront) {
+        beat(reading());
+      }
+      session().setSessionReading(false);
       // Closing the reader must not throw away the minutes already earned.
       flush();
     };

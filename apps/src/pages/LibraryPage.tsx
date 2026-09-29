@@ -15,8 +15,10 @@ import {
   getBookExtension,
   isImportableExtension
 } from "../constants/bookFormats";
-import { getSessionProgress, sessionElapsedMs, useHabitStore } from "../store/habitStore";
+import { flowerGrowing, getSessionProgress, sessionElapsedMs, useHabitStore } from "../store/habitStore";
 import { UiIcon } from "../components/UiIcon";
+import { FocusFlower, flowerCaption, flowerLook } from "../components/FocusFlower";
+import { askConfirm } from "../components/ConfirmDialog";
 import { MobileComingSoonBanner } from "../components/MobileComingSoonBanner";
 import { UpNextStrip } from "../components/UpNextStrip";
 import { librarySeries, type LibrarySeries } from "../library/series";
@@ -106,6 +108,8 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
         setFilter: state.setFilter
       }))
     );
+  // The session clock runs only while a book is open and being read.
+  const sessionReading = useHabitStore((state) => state.readingAt !== null);
   const { activeSession, startSession, stopSession, snapshot } =
     useHabitStore(
       useShallow((state) => ({
@@ -115,6 +119,10 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
         snapshot: state.snapshot
       }))
     );
+  // Full screen for sessions (Settings calls it focus lock): chosen right
+  // where a session starts, since it is what plants a focus flower.
+  const fullScreen = useHabitStore((state) => state.focusSettings.kioskMode);
+  const setFocusSettings = useHabitStore((state) => state.setFocusSettings);
   const [sessionDuration, setSessionDuration] = useState(20);
   const todayMinutes = snapshot.todayMinutes;
   const goalMet = snapshot.todayMet;
@@ -280,7 +288,22 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
     });
   };
 
-  const handleEndSession = () => {
+  const handleEndSession = async () => {
+    // A flower still growing wilts if the session ends early: say so first.
+    const session = useHabitStore.getState().activeSession;
+    if (session?.flower && flowerGrowing(session)) {
+      const confirmed = await askConfirm({
+        title: "End the session early?",
+        body: `Your ${session.flower.kind} wilts if you stop now. The minutes you read still count.`,
+        confirmLabel: "End session",
+        cancelLabel: "Keep reading",
+        danger: true,
+        pip: "sob"
+      });
+      if (!confirmed || !useHabitStore.getState().activeSession) {
+        return;
+      }
+    }
     // The wrap-up screen (mounted in App) takes it from here, note included.
     void stopSession({ reason: "manual_end", cleanSession: false });
   };
@@ -387,6 +410,17 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
                       </select>
                       <button
                         type="button"
+                        role="switch"
+                        aria-checked={fullScreen}
+                        className="focus-fullscreen-switch"
+                        onClick={() => setFocusSettings({ kioskMode: !fullScreen })}
+                        title="Read in full screen and grow a focus flower. It blooms if you stay until the session ends."
+                      >
+                        <span className="focus-fullscreen-track" aria-hidden="true" />
+                        Full screen
+                      </button>
+                      <button
+                        type="button"
                         className="tactile-button tactile-button-primary px-4 py-2 text-xs font-semibold"
                         onClick={handleStartSession}
                       >
@@ -404,18 +438,24 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
                     : "opacity-0 translate-y-3 pointer-events-none absolute inset-0"
                 }`}
               >
-                <div className="grid min-w-0 gap-6 lg:grid-cols-[1.2fr_0.8fr] lg:items-center">
+                {/* An empty library gives this panel a third of the row: too narrow for
+                    two columns, so the ring goes under the words. */}
+                <div
+                  className={`grid min-w-0 gap-6 lg:items-center ${libraryEmpty ? "" : "lg:grid-cols-[1.2fr_0.8fr]"}`}
+                >
                   <div>
                     <p className="text-xs uppercase tracking-[0.25em] text-on-surface-variant">Focus Mode</p>
                     <h1 className="page-title mt-2 text-4xl md:text-5xl">Session Running</h1>
                     <p className="mt-3 text-sm text-on-surface-variant">
-                      Stay in the flow. Your focus session is active.
+                      {sessionReading
+                        ? "Stay in the flow. Your focus session is active."
+                        : "The timer runs while you read. Open a book to carry on."}
                     </p>
                     <div className="mt-4">
                       <button
                         type="button"
                         className="tactile-button tactile-button-primary px-5 py-2 text-xs font-semibold"
-                        onClick={handleEndSession}
+                        onClick={() => void handleEndSession()}
                       >
                         End Session
                       </button>
@@ -446,16 +486,33 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
                             strokeLinecap="round"
                           />
                         </svg>
-                        <div className="absolute inset-0 flex flex-col items-center justify-center text-sm uppercase tracking-widest text-on-surface-variant">
-                        <span className="text-2xl font-semibold text-primary">
-                          {sessionRemaining ?? sessionDuration}m
-                        </span>
-                          <span className="text-[11px] text-on-surface-variant/70">remaining</span>
-                        </div>
+                        {activeSession?.flower ? (
+                          // A session in full screen grows its flower inside the ring.
+                          <div className="absolute inset-0 flex items-center justify-center pb-1">
+                            <FocusFlower
+                              kind={activeSession.flower.kind}
+                              {...flowerLook(activeSession.flower, focusProgress)}
+                              box={72}
+                            />
+                          </div>
+                        ) : (
+                          <div className="absolute inset-0 flex flex-col items-center justify-center text-sm uppercase tracking-widest text-on-surface-variant">
+                            <span className="text-2xl font-semibold text-primary">
+                              {sessionRemaining ?? sessionDuration}m
+                            </span>
+                            <span className="text-[11px] text-on-surface-variant/70">remaining</span>
+                          </div>
+                        )}
                       </div>
                       <div className="text-[11px] uppercase tracking-widest text-on-surface-variant">
+                        {activeSession?.flower ? `${sessionRemaining ?? sessionDuration}m left · ` : ""}
                         {focusPercent}% complete
                       </div>
+                      {activeSession?.flower && (
+                        <p className="max-w-[13rem] text-[11px] leading-snug text-on-surface-variant">
+                          {flowerCaption(activeSession.flower, focusProgress)}
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>

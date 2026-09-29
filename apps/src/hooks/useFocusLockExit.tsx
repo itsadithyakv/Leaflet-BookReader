@@ -52,9 +52,14 @@ export const useFocusLockExit = (onClose: () => void) => {
         return;
       }
       guard(true);
+      // A flower still growing wilts on the way out: the one thing leaving costs.
+      const session = useHabitStore.getState().activeSession;
+      const flower = session?.flower && !session.flower.wilted ? session.flower.kind : null;
       const confirmed = await askConfirm({
         title: "Leave mid-session?",
-        body: "Your focus session is still running. Leaving ends it early. The minutes you read still count, and it goes on your shelf as ended early.",
+        body: flower
+          ? `Your focus session is still running, and your ${flower} wilts if you leave now. The minutes you read still count.`
+          : "Your focus session is still running. Leaving ends it early. The minutes you read still count, and it goes on your shelf as ended early.",
         confirmLabel: "End session",
         cancelLabel: "Keep reading",
         danger: true,

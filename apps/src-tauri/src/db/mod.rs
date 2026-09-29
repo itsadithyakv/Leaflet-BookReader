@@ -119,7 +119,13 @@ pub struct FocusSessionRecord {
   pub ended_reason: String,
   pub clean: bool,
   pub style_seed: String,
-  pub burned_at: Option<String>
+  pub burned_at: Option<String>,
+  /// The focus flower a full-screen session grew (`tulip`, `rose`, ...).
+  #[serde(default)]
+  pub flower: Option<String>,
+  /// Whether it bloomed: the session completed without leaving full screen.
+  #[serde(default)]
+  pub flower_bloomed: bool
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -510,8 +516,8 @@ impl Database {
     self.conn.execute(
       "INSERT INTO focus_sessions
         (id, started_at, ended_at, date_key, minutes, book_id, title, notes,
-         ended_reason, clean, style_seed, burned_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+         ended_reason, clean, style_seed, burned_at, flower, flower_bloomed)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
        ON CONFLICT(id) DO NOTHING",
       params![
         session.id,
@@ -525,7 +531,9 @@ impl Database {
         session.ended_reason,
         i64::from(session.clean),
         session.style_seed,
-        session.burned_at
+        session.burned_at,
+        session.flower,
+        i64::from(session.flower_bloomed)
       ]
     )?;
     Ok(())
@@ -535,7 +543,7 @@ impl Database {
   pub fn focus_sessions(&self) -> Result<Vec<FocusSessionRecord>> {
     let mut stmt = self.conn.prepare(
       "SELECT id, started_at, ended_at, date_key, minutes, book_id, title, notes,
-              ended_reason, clean, style_seed, burned_at
+              ended_reason, clean, style_seed, burned_at, flower, flower_bloomed
        FROM focus_sessions ORDER BY ended_at DESC"
     )?;
     let rows = stmt.query_map([], |row| {
@@ -551,7 +559,9 @@ impl Database {
         ended_reason: row.get(8)?,
         clean: row.get::<_, i64>(9)? != 0,
         style_seed: row.get(10)?,
-        burned_at: row.get(11)?
+        burned_at: row.get(11)?,
+        flower: row.get(12)?,
+        flower_bloomed: row.get::<_, i64>(13)? != 0
       })
     })?;
     let mut sessions = Vec::new();
@@ -568,12 +578,14 @@ impl Database {
     self.conn.execute(
       "INSERT INTO focus_sessions
         (id, started_at, ended_at, date_key, minutes, book_id, title, notes,
-         ended_reason, clean, style_seed, burned_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+         ended_reason, clean, style_seed, burned_at, flower, flower_bloomed)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
        ON CONFLICT(id) DO UPDATE SET
          minutes = excluded.minutes,
          notes = excluded.notes,
-         burned_at = excluded.burned_at",
+         burned_at = excluded.burned_at,
+         flower = COALESCE(focus_sessions.flower, excluded.flower),
+         flower_bloomed = MAX(focus_sessions.flower_bloomed, excluded.flower_bloomed)",
       params![
         session.id,
         session.started_at,
@@ -586,7 +598,9 @@ impl Database {
         session.ended_reason,
         i64::from(session.clean),
         session.style_seed,
-        session.burned_at
+        session.burned_at,
+        session.flower,
+        i64::from(session.flower_bloomed)
       ]
     )?;
     Ok(())
@@ -1100,7 +1114,9 @@ fn apply_schema(conn: &Connection) -> Result<()> {
         ended_reason TEXT NOT NULL,
         clean INTEGER NOT NULL DEFAULT 0,
         style_seed TEXT NOT NULL,
-        burned_at TEXT
+        burned_at TEXT,
+        flower TEXT,
+        flower_bloomed INTEGER NOT NULL DEFAULT 0
       );
       CREATE INDEX IF NOT EXISTS focus_sessions_date_idx ON focus_sessions (date_key);
       CREATE INDEX IF NOT EXISTS focus_sessions_burned_idx ON focus_sessions (burned_at);
@@ -1168,7 +1184,7 @@ fn apply_schema(conn: &Connection) -> Result<()> {
 /// version, and put the new shape in the `CREATE TABLE`s above too (a new
 /// library is created at the latest version directly). Never edit a step that
 /// has shipped.
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 /// Brings an older database up to `SCHEMA_VERSION`, one version at a time,
 /// all in one transaction: a step that fails leaves the database as it was.
@@ -1199,6 +1215,11 @@ fn upgrade(conn: &Connection) -> Result<()> {
     add_column(&tx, "collections", "created_at TEXT NOT NULL DEFAULT ''")?;
     add_column(&tx, "collections", "updated_at TEXT NOT NULL DEFAULT ''")?;
     add_column(&tx, "collections", "deleted_at TEXT")?;
+  }
+  if from < 4 {
+    // The focus flower a full-screen session grew, and whether it bloomed.
+    add_column(&tx, "focus_sessions", "flower TEXT")?;
+    add_column(&tx, "focus_sessions", "flower_bloomed INTEGER NOT NULL DEFAULT 0")?;
   }
   tx.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))?;
   tx.commit()?;
@@ -1425,6 +1446,36 @@ pub(crate) mod tests {
   }
 
   #[test]
+  fn version_4_adds_the_focus_flower_to_old_sessions() {
+    let conn = Connection::open_in_memory().expect("open");
+    conn
+      .execute_batch(
+        "CREATE TABLE focus_sessions (id TEXT PRIMARY KEY, started_at TEXT NOT NULL, ended_at TEXT NOT NULL,
+           date_key TEXT NOT NULL, minutes REAL NOT NULL, book_id TEXT, title TEXT, notes TEXT,
+           ended_reason TEXT NOT NULL, clean INTEGER NOT NULL DEFAULT 0, style_seed TEXT NOT NULL, burned_at TEXT);
+         INSERT INTO focus_sessions (id, started_at, ended_at, date_key, minutes, ended_reason, clean, style_seed)
+           VALUES ('s1', '2026-09-01T10:00:00Z', '2026-09-01T10:20:00Z', '2026-09-01', 20, 'completed', 1, 's1');
+         PRAGMA user_version = 3;"
+      )
+      .expect("old library");
+    apply_schema(&conn).expect("upgrade");
+    let db = Database { conn, path: PathBuf::from(":memory:") };
+    let sessions = db.focus_sessions().expect("sessions");
+    assert_eq!(sessions.len(), 1, "the old session survives");
+    assert_eq!(sessions[0].flower, None);
+    assert!(!sessions[0].flower_bloomed);
+
+    let mut bloomed = session("s2", "2026-09-02T10:20:00Z");
+    bloomed.flower = Some("tulip".to_string());
+    bloomed.flower_bloomed = true;
+    db.insert_focus_session(&bloomed).expect("insert");
+    let back = db.focus_sessions().expect("sessions");
+    let s2 = back.iter().find(|s| s.id == "s2").expect("s2");
+    assert_eq!(s2.flower.as_deref(), Some("tulip"));
+    assert!(s2.flower_bloomed);
+  }
+
+  #[test]
   fn progress_and_position_are_written_as_a_pair() {
     let db = memory_db();
     seeded_book(&db);
@@ -1531,7 +1582,9 @@ pub(crate) mod tests {
       ended_reason: "completed".to_string(),
       clean: true,
       style_seed: id.to_string(),
-      burned_at: None
+      burned_at: None,
+      flower: None,
+      flower_bloomed: false
     }
   }
 

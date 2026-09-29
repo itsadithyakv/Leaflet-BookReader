@@ -25,7 +25,7 @@ import { UiIcon } from "./components/UiIcon";
 import { LibraryPage } from "./pages/LibraryPage";
 import { useLibraryStore } from "./store/libraryStore";
 import { FEATURES } from "./constants/features";
-import { AWAY_FREE_MS, useHabitStore } from "./store/habitStore";
+import { ALIVE_EVERY_MS, AWAY_FREE_MS, flowerGrowing, useHabitStore } from "./store/habitStore";
 import { setAppFullscreen, watchForeground } from "./services/windowService";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { SeriesEditorDialog } from "./components/SeriesEditor";
@@ -196,7 +196,9 @@ const App = () => {
     loadSyncStatus();
     // Lazy streak evaluation: the app may have been closed for days, so a break
     // is discovered on open rather than by a timer that was never running.
-    void loadHabit();
+    // Then a focus session left running on an earlier day ends, with the
+    // minutes actually read (not the days it sat open).
+    void loadHabit().then(() => useHabitStore.getState().resumeSession());
     // What Pip wears everywhere (the roaming Pip, the reader peek, the wrap-up).
     void loadWardrobe();
   }, [loadBooks, loadStats, loadSyncStatus, loadHabit, loadWardrobe]);
@@ -621,12 +623,18 @@ const App = () => {
       return;
     }
     return watchForeground((inFront) => {
+      const growing = flowerGrowing(useHabitStore.getState().activeSession);
       const stint = useHabitStore.getState().setForeground(inFront);
       if (!inFront || stint < AWAY_FREE_MS) {
         return;
       }
       const minutes = Math.max(1, Math.round(stint / 60_000));
-      const beat = pickBeat("awayReturn", Date.now(), { minutes });
+      // A flower that wilted while Leaflet was away is the news; else the time.
+      const flower = useHabitStore.getState().activeSession?.flower;
+      const beat =
+        growing && flower?.wilted
+          ? pickBeat("flowerWilted", Date.now(), { name: flower.kind })
+          : pickBeat("awayReturn", Date.now(), { minutes });
       if (selectedRef.current) {
         usePipStore.getState().showPeek(beat.move, beat.line);
       } else {
@@ -634,6 +642,19 @@ const App = () => {
       }
     });
   }, [sessionRunning]);
+
+  // A session growing a flower notes that Leaflet is running, so a relaunch can
+  // tell a quick restart from a long absence (see resumeSession).
+  const flowerAlive = useHabitStore((state) => flowerGrowing(state.activeSession));
+  useEffect(() => {
+    if (!flowerAlive) {
+      return;
+    }
+    const keepAlive = () => useHabitStore.getState().keepAlive();
+    keepAlive();
+    const timer = window.setInterval(keepAlive, ALIVE_EVERY_MS);
+    return () => window.clearInterval(timer);
+  }, [flowerAlive]);
 
   const handleSync = () => {
     if (syncMode === "off") {

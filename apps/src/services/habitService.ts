@@ -23,6 +23,10 @@ export type FocusSessionRecord = {
   clean: boolean;
   styleSeed: string;
   burnedAt: string | null;
+  /** The focus flower the session grew (a full-screen session), if any. */
+  flower?: string | null;
+  /** Whether that flower bloomed: the session completed without leaving. */
+  flowerBloomed?: boolean;
 };
 
 export type HabitSnapshot = {
@@ -58,6 +62,8 @@ export type FocusSessionInput = {
   title?: string | null;
   endedReason: "completed" | "manual_end";
   clean: boolean;
+  flower?: string | null;
+  flowerBloomed?: boolean;
 };
 
 export const EMPTY_SNAPSHOT: HabitSnapshot = {

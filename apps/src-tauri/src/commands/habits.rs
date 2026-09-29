@@ -197,7 +197,16 @@ pub struct FocusSessionInput {
   pub book_id: Option<String>,
   pub title: Option<String>,
   pub ended_reason: String,
-  pub clean: bool
+  pub clean: bool,
+  #[serde(default)]
+  pub flower: Option<String>,
+  #[serde(default)]
+  pub flower_bloomed: bool
+}
+
+/// A flower's name as the shelf stores it: a short lowercase word, or none.
+fn flower_name(flower: Option<String>) -> Option<String> {
+  flower.filter(|name| !name.is_empty() && name.len() <= 24 && name.chars().all(|c| c.is_ascii_lowercase()))
 }
 
 /// Records that a focus session happened. Note this does *not* credit minutes:
@@ -209,6 +218,7 @@ pub fn record_focus_session(
   state: State<'_, AppState>
 ) -> Result<HabitSnapshot, String> {
   let db = state.db.guard();
+  let flower = flower_name(session.flower);
   let record = FocusSessionRecord {
     // The seed drives every shelf decoration, replacing the stored style blob.
     style_seed: session.id.clone(),
@@ -222,7 +232,9 @@ pub fn record_focus_session(
     notes: None,
     ended_reason: session.ended_reason,
     clean: session.clean,
-    burned_at: None
+    burned_at: None,
+    flower_bloomed: session.flower_bloomed && flower.is_some(),
+    flower
   };
   let is_new = !db.focus_session_exists(&record.id).map_err(|e| e.to_string())?;
   db.insert_focus_session(&record).map_err(|e| e.to_string())?;
@@ -291,7 +303,9 @@ pub fn import_legacy_habit(
       notes: None,
       ended_reason: session.ended_reason,
       clean: session.clean,
-      burned_at: None
+      burned_at: None,
+      flower: None,
+      flower_bloomed: false
     };
     db.insert_focus_session(&record).map_err(|e| e.to_string())?;
   }

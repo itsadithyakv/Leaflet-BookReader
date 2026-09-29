@@ -1456,6 +1456,211 @@ body::before {
 }
 /* ---- End session shelf ---- */
 
+/* ---- The focus flower: grows with a session started in full screen ----
+   Each new stage pops it up from the pot, a wilt sags it, and a bloom
+   springs open behind a warm glow. The art itself sways once bloomed. */
+.focus-flower {
+  position: relative;
+  display: inline-flex;
+  align-items: flex-end;
+  justify-content: center;
+  transform-origin: 50% 100%;
+  animation: focus-flower-grow 560ms cubic-bezier(0.3, 1.5, 0.5, 1) both;
+}
+
+.focus-flower-wilted {
+  animation: focus-flower-wilt 1100ms cubic-bezier(0.4, 0, 0.3, 1) both;
+}
+
+.focus-flower-bloomed {
+  animation: focus-flower-bloom 760ms cubic-bezier(0.25, 1.6, 0.5, 1) both;
+}
+
+.focus-flower-bloomed::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 30%;
+  width: 150%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 214, 102, 0.65) 0%, rgba(255, 214, 102, 0) 65%);
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.2);
+  animation: focus-flower-glow 1600ms ease-out 180ms both;
+  pointer-events: none;
+  z-index: -1;
+}
+
+@keyframes focus-flower-grow {
+  0% {
+    transform: scale(0.9, 0.8);
+  }
+  55% {
+    transform: scale(1.05, 1.1);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes focus-flower-wilt {
+  0% {
+    transform: none;
+  }
+  25% {
+    transform: scale(1.03, 0.92) rotate(-3deg);
+  }
+  55% {
+    transform: scale(0.99, 1.02) rotate(2deg);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes focus-flower-bloom {
+  0% {
+    transform: scale(0.8);
+  }
+  60% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes focus-flower-glow {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.2);
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.25);
+  }
+}
+
+/* A bloom's petals burst out of the flower once, on the wrap-up. */
+.flower-burst {
+  position: absolute;
+  left: 50%;
+  top: 38%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.flower-burst > span {
+  position: absolute;
+  width: 7px;
+  height: 5px;
+  margin: -2px 0 0 -3px;
+  border-radius: 60% 60% 60% 0;
+  background: var(--petal);
+  box-shadow: 0 0 0 1px rgba(42, 30, 22, 0.55);
+  opacity: 0;
+  animation: flower-petal 1150ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+@keyframes flower-petal {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) rotate(0deg) scale(0.4);
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--dx), calc(var(--dy) + 18px)) rotate(200deg) scale(1);
+  }
+}
+
+/* In the reader the flower stands where the coffee mug would. */
+.leaflet-flower {
+  position: fixed;
+  right: 28px;
+  bottom: 24px;
+  z-index: 45;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 10px 16px 8px;
+  border-radius: 18px;
+  background: rgba(22, 22, 22, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 18px 30px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+/* The switch beside Start Session: full screen, and a flower to grow. */
+.focus-fullscreen-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 6px 8px;
+  border-radius: 9999px;
+  font-size: 12px;
+  color: rgb(var(--color-on-surface-variant));
+  transition: color 0.2s ease, background-color 0.2s ease;
+}
+
+.focus-fullscreen-switch:hover,
+.focus-fullscreen-switch[aria-checked="true"] {
+  color: rgb(var(--color-primary));
+}
+
+.focus-fullscreen-track {
+  position: relative;
+  display: inline-block;
+  width: 30px;
+  height: 18px;
+  border-radius: 9999px;
+  border: 1px solid rgb(var(--color-outline-variant) / 0.4);
+  background: rgb(var(--color-surface-high));
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.focus-fullscreen-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 0.2s cubic-bezier(0.3, 1.4, 0.5, 1);
+}
+
+.focus-fullscreen-switch[aria-checked="true"] .focus-fullscreen-track {
+  background: rgb(var(--color-primary) / 0.35);
+  border-color: rgb(var(--color-primary) / 0.5);
+}
+
+.focus-fullscreen-switch[aria-checked="true"] .focus-fullscreen-track::after {
+  transform: translateX(12px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .focus-flower,
+  .focus-flower-wilted,
+  .focus-flower-bloomed,
+  .focus-flower-bloomed::before {
+    animation: none;
+  }
+
+  .flower-burst {
+    display: none;
+  }
+}
+
 .leaflet-mug {
   position: fixed;
   right: 28px;

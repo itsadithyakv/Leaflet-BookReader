@@ -26,6 +26,8 @@ export type PipMoment =
   | "poke"
   | "awayReturn"
   | "exitGuard"
+  | "flowerBloomed"
+  | "flowerWilted"
   | "kudosReceived"
   | "newFollower"
   | "duelInvite"
@@ -101,6 +103,18 @@ const POOLS: Record<PipMoment, Beat[]> = {
     { move: "steamed", line: (v) => `${plural(v.minutes ?? 1, "minute")} in another app. the clock waited. i fumed.` },
     { move: "lockin", line: () => "welcome back. timer's paused till now. lock in." },
     { move: "alarm", line: (v) => `${plural(v.minutes ?? 1, "minute")} away! back to the page.` }
+  ],
+  // A full-screen session's focus flower: it bloomed, or leaving early wilted
+  // it. `name` is the flower.
+  flowerBloomed: [
+    { move: "smitten", line: (v) => `the ${v.name ?? "flower"} bloomed. i may cry.` },
+    { move: "cheer", line: (v) => `a whole ${v.name ?? "flower"}, grown from focus alone!` },
+    { move: "fireworks", line: (v) => `${v.name ?? "flower"}: bloomed. focus: legendary.` }
+  ],
+  flowerWilted: [
+    { move: "sob", line: (v) => `the ${v.name ?? "flower"} wilted. i'll be fine. eventually.` },
+    { move: "melt", line: (v) => `rip, ${v.name ?? "flower"}. we'll grow another.` },
+    { move: "faint", line: (v) => `the ${v.name ?? "flower"}... it didn't make it.` }
   ],
   // Reaching for the exit under focus lock. Pip guards the door, but the door
   // always opens: holding Escape or confirming still leaves.
