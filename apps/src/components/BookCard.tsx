@@ -39,7 +39,11 @@ const BookCardComponent = ({ book, onRefresh, onOpen, menuActions }: Props) => {
       }}
       className="group flex h-full w-full cursor-pointer flex-col text-left transition-transform duration-200 hover:-translate-y-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
     >
-      <div className="book-cover-frame relative aspect-[2/3] w-full overflow-hidden transition-all duration-200 group-hover:border-primary/50">
+      {/* Pip can stand on a cover, and hops between them (PipWorld). */}
+      <div
+        data-pip-ledge="book"
+        className="book-cover-frame relative aspect-[2/3] w-full overflow-hidden transition-all duration-200 group-hover:border-primary/50"
+      >
         {resolvedCover ? (
           <img
             src={resolvedCover}

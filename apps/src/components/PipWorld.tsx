@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { useShallow } from "zustand/react/shallow";
 import { usePipStore } from "../store/pipStore";
@@ -180,8 +180,8 @@ type Bounds = { left: number; right: number; top: number; floor: number };
 type View = { move: string; loops?: number; key: string | number; flip: boolean; visible: boolean; still?: boolean };
 
 /**
- * The quiet perch: set Pip down beside the "Leaflet" name in the header and it
- * sits there, perfectly still and silent, until picked up again. Remembered
+ * The quiet perch: set Pip down over the logo corner of the header and it
+ * sits in its own spot in the logo, perfectly still and silent, until picked up again. Remembered
  * across launches. For readers who want Pip around but not doing anything.
  */
 const PERCH_KEY = "leaflet.pip.perched";
@@ -204,15 +204,29 @@ const writePerched = (on: boolean) => {
   }
 };
 
-/** Where Pip sits on the perch: just right of the wordmark, or of the logo when the wordmark is hidden. */
+/**
+ * Where Pip sits on the perch: its own spot in the logo, the outline it jumped
+ * out of, standing exactly where the logo draws it. (It used to sit to the
+ * right of the wordmark, which read as "somewhere else", not "back in its spot".)
+ * `zone` is the brand corner a drop counts over: the logo and the wordmark.
+ */
 const readPerch = () => {
-  const mark = document.querySelector<HTMLElement>(".leaflet-wordmark");
-  const markRect = mark && mark.offsetParent !== null ? mark.getBoundingClientRect() : null;
-  const anchor = markRect && markRect.width > 0 ? markRect : document.querySelector("[data-pip-home]")?.getBoundingClientRect();
-  if (!anchor || anchor.width === 0) {
+  const home = readHome();
+  if (!home) {
     return null;
   }
-  return { x: anchor.right + 26, y: anchor.bottom + 4, zone: anchor };
+  const mark = document.querySelector<HTMLElement>(".leaflet-wordmark");
+  const markRect = mark && mark.offsetParent !== null ? mark.getBoundingClientRect() : null;
+  const zone =
+    markRect && markRect.width > 0
+      ? new DOMRect(
+          Math.min(home.rect.left, markRect.left),
+          Math.min(home.rect.top, markRect.top),
+          Math.max(home.rect.right, markRect.right) - Math.min(home.rect.left, markRect.left),
+          Math.max(home.rect.bottom, markRect.bottom) - Math.min(home.rect.top, markRect.top)
+        )
+      : home.rect;
+  return { x: home.x, y: home.y, zone };
 };
 /**
  * Whether letting go with the pointer at (x, y) sets Pip on the perch.
@@ -228,9 +242,7 @@ const overPerch = (x: number, y: number) => {
   if (!perch) {
     return false;
   }
-  const home = document.querySelector("[data-pip-home]")?.getBoundingClientRect();
-  const left = Math.min(perch.zone.left, home && home.width > 0 ? home.left : perch.zone.left) - 24;
-  return x >= left && x <= perch.x + 70 && y <= perch.zone.bottom + 44;
+  return x >= perch.zone.left - 24 && x <= perch.zone.right + 40 && y <= perch.zone.bottom + 44;
 };
 /**
  * Faster than this at release is a throw, not a placing. People let go while
@@ -278,7 +290,26 @@ const readBounds = (): Bounds => {
 const readLedges = (b: Bounds) =>
   Array.from(document.querySelectorAll(".app-main-scroll .paper-surface, [data-pip-ledge]"))
     .map((el) => ({ el, r: el.getBoundingClientRect() }))
-    .filter(({ r }) => r.width >= 140 && r.top > b.top + HEIGHT && r.top < b.floor - 12 && r.right > b.left && r.left < b.right);
+    .filter(
+      ({ el, r }) =>
+        r.width >= (isBook(el) ? BOOK_MIN_WIDTH : 140) &&
+        r.top > b.top + HEIGHT &&
+        r.top < b.floor - 12 &&
+        r.right > b.left &&
+        r.left < b.right
+    );
+
+/**
+ * Book covers in the library grid are ledges too (`data-pip-ledge="book"`):
+ * Pip lands on them, strolls along the top, and hops from book to book. A cover
+ * is narrower than a panel, so the width it needs is only room to stand.
+ */
+const isBook = (el: Element) => (el as HTMLElement).dataset?.pipLedge === "book";
+const BOOK_MIN_WIDTH = 72;
+/** How far a hop reaches: sideways, up (negative) and down. */
+const HOP_REACH_X = 380;
+const HOP_REACH_UP = 280;
+const HOP_REACH_DOWN = 520;
 
 /** Pip's home: the logo in the header. */
 const readHome = () => {
@@ -1201,6 +1232,12 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
       show("walk");
       return true;
     };
+    // Standing on a book, Pip is often off to the next one; from the floor,
+    // now and then up onto one.
+    const onBook = s.ground?.kind === "ledge" && isBook(s.ground.el);
+    if (Math.random() < (onBook ? 0.45 : 0.18) && hopToBook()) {
+      return;
+    }
     const roll = Math.random();
     // Now and then, a scene from the book being read (a dragon for the
     // dragon book), with its line.
@@ -1230,6 +1267,51 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
     } else {
       play(pick(hobbies.current), 2);
     }
+  };
+
+  /**
+   * A hop onto a nearby book cover: one of the nearest few within reach (so
+   * mostly the neighbours on the same shelf row), landing a little off its
+   * middle. Returns false when no book is in reach.
+   */
+  const hopToBook = () => {
+    const s = st.current;
+    const b = readBounds();
+    const here = s.ground?.kind === "ledge" ? s.ground.el : null;
+    const options = readLedges(b)
+      .filter(({ el }) => isBook(el) && el !== here)
+      .map(({ el, r }) => ({ el, dx: (r.left + r.right) / 2 - s.x, dy: r.top - s.y }))
+      .filter(({ dx, dy }) => Math.abs(dx) <= HOP_REACH_X && dy >= -HOP_REACH_UP && dy <= HOP_REACH_DOWN && Math.hypot(dx, dy) > 40)
+      .sort((a, c) => Math.hypot(a.dx, a.dy) - Math.hypot(c.dx, c.dy));
+    if (options.length === 0) {
+      return false;
+    }
+    const { el } = options[Math.floor(Math.random() * Math.min(3, options.length))];
+    const along = 0.3 + Math.random() * 0.4;
+    const aim = () => {
+      const r = el.getBoundingClientRect();
+      return { x: r.left + r.width * along, y: r.top };
+    };
+    s.web = null;
+    s.vx = 0;
+    s.vy = 0;
+    s.ground = null;
+    s.phase = "traveling";
+    jumpTo(
+      aim,
+      () => {
+        // The book scrolled away or was filtered out mid-hop: just fall.
+        if (!el.isConnected) {
+          startFall();
+          return;
+        }
+        const spot = aim();
+        s.x = spot.x;
+        land({ kind: "ledge", el }, spot.y, 0);
+      },
+      false
+    );
+    return true;
   };
 
   /** Eases a leftover tilt away once Pip is standing again. */
@@ -1437,6 +1519,18 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
     }
   };
 
+  // Moving between the page's layer and a card's scrolling layer re-creates
+  // Pip's element, which starts with no transform: the browser drew it at the
+  // layer's top-left corner until the loop next placed it, a frame when picked
+  // up, up to REST_MS on landing. Place it before anything is drawn.
+  useLayoutEffect(() => {
+    if (mode !== "off") {
+      place();
+    }
+    // `place` reads everything through refs; only the host swap matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [host, mode]);
+
   useEffect(() => {
     if (mode === "off") {
       return;
@@ -1480,6 +1574,7 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
     if (import.meta.env.DEV) {
       (window as unknown as { __pipDebug?: unknown }).__pipDebug = {
         web: () => st.current.phase === "idle" && startWeb(performance.now()),
+        hop: () => (st.current.phase === "idle" || st.current.phase === "walking") && hopToBook(),
         dizzy: (amount = 1.5) => {
           st.current.dizzy = amount;
         },

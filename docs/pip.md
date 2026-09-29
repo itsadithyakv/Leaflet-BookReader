@@ -166,9 +166,9 @@ wandering.
 - **Click** Pip: a poke reaction. **Drag** by the leaf and **throw**: tumble,
   bounce, wall cling, splat on a hard landing.
 - **The perch.** Set Pip down anywhere over the logo, the "Leaflet" wordmark or
-  just right of it, and he hops onto a seat beside the wordmark and stays there,
-  still and silent. A seat glows under the header while he is held over that
-  corner, so you can see a drop will land. A drop counts even if you let go
+  just right of it, and he hops back onto his own spot in the logo (the outline
+  he jumped out of) and stays there, still and silent. The spot glows while he
+  is held over that corner, so you can see a drop will land. A drop counts even if you let go
   while still moving; only a real throw (over 1,600 px/s) flies past, and a
   hard throw up into the logo still sends him home. The perch is remembered
   across launches; picking him up, "Hop down" or calling him home forgets it.
