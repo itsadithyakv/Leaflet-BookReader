@@ -5636,3 +5636,382 @@ button.pip-shop-tile:active,
     transition: none;
   }
 }
+
+/* ---- Pip's life: goals, wishes and sound ---- */
+
+/* The first steps and the wish, over the house's top-left corner, until the
+   HUD has a place of its own for them. */
+.pip-life-dock {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 6;
+  display: flex;
+  max-width: calc(100% - 24px);
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  pointer-events: none;
+}
+
+.pip-life-dock > * {
+  pointer-events: auto;
+}
+
+/* The first steps: a small checklist card in the HUD's materials. */
+.pip-goals {
+  width: min(256px, 100%);
+  overflow: hidden;
+  border: 1px solid rgb(var(--color-outline-variant) / 0.4);
+  border-radius: 14px;
+  background: rgb(var(--color-surface-high) / 0.95);
+  color: rgb(var(--color-on-surface));
+  font-size: 12px;
+  box-shadow: var(--shadow-raised-small);
+}
+
+.pip-goals-head {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 11px;
+  color: rgb(var(--pip-accent));
+  font-weight: 800;
+  text-align: left;
+  transition: background-color 150ms ease;
+}
+
+.pip-goals-head:hover {
+  background: rgb(var(--color-primary) / 0.08);
+}
+
+.pip-goals-head:focus-visible {
+  outline: 2px solid rgb(var(--color-primary));
+  outline-offset: -2px;
+}
+
+.pip-goals-title {
+  flex: 1;
+  color: rgb(var(--color-on-surface));
+  letter-spacing: 0.02em;
+}
+
+.pip-goals-count {
+  color: rgb(var(--color-on-surface-variant));
+  font-variant-numeric: tabular-nums;
+}
+
+.pip-goals-list {
+  margin: 0;
+  padding: 0 6px 7px;
+  list-style: none;
+}
+
+.pip-goals-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 9px;
+}
+
+/* Done: ticked, quieter, crossed through. */
+.pip-goals-row[data-done] {
+  color: rgb(var(--color-on-surface-variant));
+}
+
+.pip-goals-row[data-done] .pip-goals-name {
+  text-decoration: line-through;
+  text-decoration-color: rgb(var(--color-on-surface-variant) / 0.5);
+}
+
+/* Next: picked out, with its hint. */
+.pip-goals-row[data-next] {
+  background: rgb(var(--color-primary) / 0.13);
+  box-shadow: inset 0 0 0 1px rgb(var(--color-primary) / 0.38);
+}
+
+.pip-goals-tick {
+  display: inline-flex;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid rgb(var(--color-outline-variant) / 0.85);
+  border-radius: 5px;
+  background: rgb(var(--color-surface));
+}
+
+.pip-goals-row[data-next] .pip-goals-tick {
+  border-color: rgb(var(--color-primary));
+}
+
+.pip-goals-row[data-done] .pip-goals-tick {
+  border-color: rgb(var(--pip-accent));
+  background: rgb(var(--pip-accent));
+  color: rgb(var(--color-surface));
+}
+
+/* The chest's line wears the chest instead of an empty box. */
+.pip-goals-tick:has(> svg:not(.lucide)) {
+  border: 0;
+  background: none;
+}
+
+.pip-goals-text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.pip-goals-name {
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.pip-goals-hint {
+  color: rgb(var(--color-on-surface-variant));
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.pip-goals-seeds {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgb(var(--color-primary) / 0.16);
+  color: rgb(var(--pip-accent));
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.pip-goals-row[data-done] .pip-goals-seeds {
+  background: transparent;
+  opacity: 0.7;
+}
+
+/* Folded: just the next step. */
+.pip-goals-next {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0 12px 9px;
+}
+
+.pip-goals-next .pip-goals-name {
+  flex: 1;
+}
+
+/* A step just done: a warm flash, and its tick pops in. */
+.pip-goals-row[data-fresh] {
+  animation: pip-goal-glow 1.3s ease-out both;
+}
+
+.pip-goals-row[data-fresh] .pip-goals-tick {
+  animation: pip-goal-tick 520ms cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+
+@keyframes pip-goal-glow {
+  0% {
+    background: rgb(255 210 63 / 0.55);
+  }
+}
+
+@keyframes pip-goal-tick {
+  from {
+    transform: scale(0.3) rotate(-25deg);
+  }
+  to {
+    transform: none;
+  }
+}
+
+/* Pip's wish: a pixel speech bubble like Pip's own, cream in both themes,
+   the wished-for thing framed at its left. */
+.pip-wish {
+  position: relative;
+  display: flex;
+  width: max-content;
+  max-width: min(360px, 100%);
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px 9px 8px;
+  background: #fffbf0;
+  color: #1c261f;
+  box-shadow:
+    0 -2px 0 0 #1f2a22,
+    0 2px 0 0 #1f2a22,
+    -2px 0 0 0 #1f2a22,
+    2px 0 0 0 #1f2a22,
+    0 6px 0 0 rgba(31, 42, 34, 0.16);
+  animation: pip-wish-in 420ms cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+
+/* The tail, stepped like the speech bubble's, pointing down at the house. */
+.pip-wish::after {
+  position: absolute;
+  top: 100%;
+  left: 26px;
+  width: 10px;
+  height: 8px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='8' shape-rendering='crispEdges'%3E%3Cpath fill='%231f2a22' d='M0 0h2v2H0zM8 0h2v2H8zM2 2h2v2H2zM6 2h2v2H6zM4 4h2v4H4z'/%3E%3Cpath fill='%23fffbf0' d='M2 0h6v2H2zM4 2h2v2H4z'/%3E%3C/svg%3E") no-repeat;
+  content: "";
+}
+
+.pip-wish[data-granted] {
+  background: #f1f9e6;
+  animation: pip-wish-granted 640ms cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+
+.pip-wish[data-granted]::after {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='8' shape-rendering='crispEdges'%3E%3Cpath fill='%231f2a22' d='M0 0h2v2H0zM8 0h2v2H8zM2 2h2v2H2zM6 2h2v2H6zM4 4h2v4H4z'/%3E%3Cpath fill='%23f1f9e6' d='M2 0h6v2H2zM4 2h2v2H4z'/%3E%3C/svg%3E");
+}
+
+.pip-wish-art {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  background: #efe7d2;
+  box-shadow:
+    0 -2px 0 0 #c9bb99,
+    0 2px 0 0 #c9bb99,
+    -2px 0 0 0 #c9bb99,
+    2px 0 0 0 #c9bb99;
+}
+
+.pip-wish-check {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #1f2a22;
+  border-radius: 999px;
+  background: #72ab44;
+  color: #10230f;
+}
+
+.pip-wish-text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.pip-wish-label {
+  color: #2e6136;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.pip-wish-line {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-wrap: pretty;
+}
+
+.pip-wish-note {
+  color: #4f5c52;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.pip-wish-button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+.pip-wish-button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.pip-wish-price {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes pip-wish-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes pip-wish-granted {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.06) rotate(-1.5deg);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+/* The rain barrel: a sprite on the garden floor, behind the plots in front
+   of it, dimmed after dark like them. */
+.pip-barrel {
+  position: absolute;
+  z-index: 1;
+  line-height: 0;
+}
+
+.pip-house-room[data-night] .pip-barrel canvas {
+  filter: brightness(0.5) saturate(0.85);
+}
+
+/* The bed's front over a sleeping Pip: the room's own pixels, so it matches
+   the bed exactly, lamps and all. It settles in as he does. */
+.pip-bed-front {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+  animation: pip-bed-in 180ms ease-out both;
+}
+
+@keyframes pip-bed-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pip-goals-row[data-fresh],
+  .pip-goals-row[data-fresh] .pip-goals-tick,
+  .pip-wish,
+  .pip-wish[data-granted],
+  .pip-bed-front {
+    animation: none;
+  }
+}
