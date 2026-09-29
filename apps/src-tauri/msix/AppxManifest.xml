@@ -9,9 +9,12 @@
                          schema only allows Square310x310 alongside Wide310x150)
 
   Identity values come from Partner Center (Product identity page) and must match
-  it exactly or the upload is rejected. DisplayName MUST equal the reserved app
-  name character for character: "Leaflet Book Reader" is inferred from the
-  identity name and has NOT been confirmed against the reservation.
+  it exactly or the upload is rejected. The package's DisplayName (Properties)
+  MUST equal the reserved app name character for character: "Leaflet Book
+  Reader", the official name, as in the Store and Settings -> Apps.
+
+  The app's own name (VisualElements DisplayName) is what people see day to
+  day, in Start, the taskbar, search and on notifications: just "Leaflet".
 
   See docs/release-msix.md.
 -->
@@ -51,8 +54,8 @@
       EntryPoint="Windows.FullTrustApplication">
 
       <uap:VisualElements
-        DisplayName="Leaflet Book Reader"
-        Description="Leaflet Book Reader"
+        DisplayName="Leaflet"
+        Description="Leaflet, a book reader with a reading habit"
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png">

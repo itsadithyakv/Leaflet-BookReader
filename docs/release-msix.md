@@ -182,8 +182,11 @@ trust to run at all.
 
 ### Check before submitting
 
-- **Display name.** `AppxManifest.xml` uses "Leaflet Book Reader". It must match
-  the name you reserved in Partner Center exactly, character for character.
+- **Display names.** The package's name (`<Properties><DisplayName>`) is
+  "Leaflet Book Reader", the reserved Store name, and must match it character
+  for character. The app's own name (`VisualElements DisplayName`), what Start,
+  the taskbar, search and notifications show, is just "Leaflet". If Partner
+  Center ever objects to the two differing, set the second back to the first.
 - **Google sign-in screen.** In Google Cloud's OAuth consent screen, set the
   home page to `https://itsadithyakv.github.io/Leaflet-BookReader/` and the
   privacy policy to the `/privacy/` page, and publish the app to Production
