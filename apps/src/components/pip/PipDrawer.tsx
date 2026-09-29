@@ -1,20 +1,23 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { forwardRef, useEffect, useRef, type ReactNode } from "react";
 
 type PipDrawerProps = {
   title: string;
   /** A line under the title. */
   note?: ReactNode;
+  /** "short": the low sheet decorating uses on narrow windows, so the room's pins stay in view. */
+  size?: "short";
   onClose: () => void;
   children: ReactNode;
 };
 
 /**
- * A panel that slides over the side of Pip's house: the wardrobe, the shop,
- * treats, moves, decorating. Non-modal, so the house stays live beside it
- * (Pip reacts, a placed lamp lights up at once). Escape or Close shuts it and
- * focus goes back to the button that opened it.
+ * A panel beside Pip's house (a sheet at the bottom on narrow windows): Pip's
+ * things, the garden, seeds and mood, what goes in a spot while decorating.
+ * Non-modal, so the house stays live beside it (Pip reacts, a placed lamp
+ * lights up at once). Escape or Close shuts it and focus goes back to the
+ * button that opened it.
  */
-export const PipDrawer = ({ title, note, onClose, children }: PipDrawerProps) => {
+export const PipDrawer = forwardRef<HTMLElement, PipDrawerProps>(function PipDrawer({ title, note, size, onClose, children }, ref) {
   const headingRef = useRef<HTMLHeadingElement | null>(null);
 
   useEffect(() => {
@@ -27,7 +30,9 @@ export const PipDrawer = ({ title, note, onClose, children }: PipDrawerProps) =>
 
   return (
     <aside
+      ref={ref}
       className="pip-drawer modal-surface"
+      data-size={size}
       role="dialog"
       aria-modal="false"
       aria-labelledby="pip-drawer-title"
@@ -52,4 +57,4 @@ export const PipDrawer = ({ title, note, onClose, children }: PipDrawerProps) =>
       <div className="pip-drawer-body">{children}</div>
     </aside>
   );
-};
+});

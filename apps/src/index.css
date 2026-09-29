@@ -4342,99 +4342,599 @@ button.pip-shop-tile:hover,
 .pip-house {
   position: relative;
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 8px;
 }
 
-/* The bar over the scene: seeds, the shop, mood, and the tools. */
-.pip-hud {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+/* The HUD is drawn like Pip's world: faces with a hard pixel outline and
+   notched corners (four 2px shadows, as Pip's speech bubble has), keys with
+   an under-lip that they sink into when pressed, and one leather rail of
+   tools under the room like the app's own spine. Faces are paper in the light
+   theme and slate in the dark; the outline is always darker than the face. */
+:root {
+  --hud-face: #fffbf0;
+  --hud-face-low: #f1e8d0;
+  --hud-face-hover: #fff4d6;
+  --hud-well: #f3ecda;
+  --hud-ink: #1c261f;
+  --hud-ink-soft: #55604f;
+  --hud-line: #1f2a22;
+  --hud-lip: #a89878;
+  --hud-drop: rgba(31, 42, 34, 0.18);
+  --hud-track: #d9cfb6;
 }
 
-.pip-hud-group {
+:root[data-theme="dark"] {
+  --hud-face: #30343c;
+  --hud-face-low: #262930;
+  --hud-face-hover: #3a3f48;
+  --hud-well: #25282e;
+  --hud-ink: #f3f5f8;
+  --hud-ink-soft: #b9c1cc;
+  --hud-line: #090a0c;
+  --hud-lip: #121418;
+  --hud-drop: rgba(0, 0, 0, 0.45);
+  --hud-track: #1a1c21;
+}
+
+/* A game page wants the room: it takes back some of the page's margins. */
+.pip-house-page {
+  margin-top: -12px;
+}
+
+@media (min-width: 768px) {
+  .pip-house-page {
+    margin: -16px -12px;
+  }
+}
+
+/* The top of the HUD and the rail line up with the room and its lift
+   (--frame-left and --frame-width, measured from the room). */
+.pip-hud-top,
+.pip-rail {
+  width: var(--frame-width, 100%);
+  max-width: 100%;
+  margin-left: var(--frame-left, 0);
+}
+
+.pip-hud-top {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  gap: 10px 12px;
+  padding: 0 2px 2px;
+}
+
+.pip-hud-spacer {
+  flex: 1;
+}
+
+/* Seeds and mood: one plaque, a resource to a cell. More resources (a goals
+   widget) can join it as further .pip-resource cells. */
+.pip-resources {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  background: var(--hud-face);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 6px 0 0 var(--hud-drop);
+}
+
+.pip-resource {
+  position: relative;
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  color: var(--hud-ink);
+  transition: background-color 120ms ease;
+}
+
+.pip-resource + .pip-resource {
+  border-left: 2px dashed var(--hud-track);
+}
+
+.pip-resource:hover {
+  background: var(--hud-face-hover);
+}
+
+/* The seed: a coin, green on a dark ring. */
+.pip-resource-icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 999px;
+  background: #72ab44;
+  color: #10230f;
+  box-shadow:
+    0 0 0 2px var(--hud-line),
+    inset 0 -3px 0 rgba(16, 35, 15, 0.28),
+    inset 0 2px 0 rgba(255, 255, 255, 0.35);
+}
+
+.pip-resource-value {
+  min-width: 2.5ch;
+  color: var(--hud-ink);
+  font-family: "ZT Nature", "Segoe UI", system-ui, sans-serif;
+  font-size: 22px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.pip-resource-label {
+  color: var(--hud-ink-soft);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.pip-resource-mood {
+  gap: 10px;
+}
+
+/* The goal pinned from the shop: the thing, a bar of seeds towards it. */
+.pip-goal {
+  display: inline-flex;
+  align-items: stretch;
+  background: var(--hud-face);
+  color: var(--hud-ink);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 6px 0 0 var(--hud-drop);
+}
+
+.pip-goal-main {
+  display: flex;
+  height: 44px;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 4px 6px;
+  text-align: left;
+}
+
+.pip-goal-main:hover {
+  background: var(--hud-face-hover);
+}
+
+.pip-goal-art {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  place-items: center;
+  overflow: hidden;
+}
+
+.pip-goal-body {
+  display: flex;
+  width: 150px;
+  flex-direction: column;
   gap: 6px;
 }
 
-.pip-hud-chip,
-.pip-hud-button,
-.pip-hud-shop {
-  position: relative;
+.pip-goal-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  line-height: 1.1;
+}
+
+.pip-goal-name {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pip-goal-bar {
+  display: block;
+  height: 8px;
+  margin: 0 2px;
+  overflow: hidden;
+  background: var(--hud-track);
+  box-shadow: 0 0 0 2px var(--hud-line);
+}
+
+.pip-goal-bar > span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(#94d066, #5f9a38);
+  transform-origin: 0 50%;
+  transition: transform 700ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+.pip-goal-count {
+  flex: none;
+  color: var(--hud-ink-soft);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.pip-goal-unpin {
+  display: grid;
+  width: 26px;
+  place-items: center;
+  border-left: 2px dashed var(--hud-track);
+  color: var(--hud-ink-soft);
+}
+
+.pip-goal-unpin:hover {
+  background: var(--hud-face-hover);
+  color: var(--hud-ink);
+}
+
+/* Enough seeds: the plaque turns gold and glows until it is bought. */
+.pip-goal[data-ready] {
+  background: #fff1b8;
+  color: #3b2a00;
+}
+
+.pip-goal[data-ready] .pip-goal-count {
+  color: #6b4d00;
+}
+
+.pip-goal[data-ready] .pip-goal-bar > span {
+  background: linear-gradient(#ffe36b, #e0a83e);
+}
+
+/* The floor Pip is on, over the lift. */
+.pip-floor-plate {
+  display: inline-flex;
+  max-width: 14rem;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--hud-face);
+  color: var(--hud-ink);
+  font-size: 12px;
+  font-weight: 800;
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line);
+}
+
+.pip-hud-help {
+  display: grid;
+  width: 38px;
+  height: 36px;
+  place-items: center;
+  background: var(--hud-face);
+  color: var(--hud-ink);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 5px 0 0 var(--hud-lip);
+  transition: transform 90ms ease, box-shadow 90ms ease;
+}
+
+.pip-hud-help:hover {
+  background: var(--hud-face-hover);
+}
+
+.pip-hud-help:active {
+  transform: translateY(3px);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-lip);
+}
+
+/* A key: the HUD's button, used by the confirm, the toast and the panels. */
+.pip-key {
   display: inline-flex;
   min-height: 36px;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  padding: 6px 12px;
-  border: 1px solid rgb(var(--color-outline-variant) / 0.4);
-  border-radius: 12px;
-  background: rgb(var(--color-surface-high) / 0.92);
-  color: rgb(var(--color-on-surface));
+  padding: 7px 14px 8px;
+  background: var(--hud-face);
+  color: var(--hud-ink);
   font-size: 12px;
-  font-weight: 700;
-  box-shadow: var(--shadow-raised-small);
-  transition: transform 120ms ease, border-color 150ms ease, color 150ms ease, filter 150ms ease;
+  font-weight: 800;
+  line-height: 1.2;
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 5px 0 0 var(--hud-lip);
+  transition: transform 90ms ease, box-shadow 90ms ease, background-color 120ms ease;
 }
 
-/* Pressed in, like a key. */
-button.pip-hud-chip:active,
-.pip-hud-button:active,
-.pip-hud-shop:active {
-  transform: translateY(1px) scale(0.97);
+.pip-key:hover:not(:disabled) {
+  background: var(--hud-face-hover);
 }
 
-.pip-hud-chip {
-  color: rgb(var(--pip-accent));
+.pip-key:active:not(:disabled),
+.pip-key[aria-pressed="true"] {
+  transform: translateY(3px);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-lip);
+}
+
+.pip-key:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.pip-key-primary {
+  --hud-lip: #2e5a1c;
+  background: linear-gradient(#8cc85c, #5f9a38);
+  color: #0f2410;
+}
+
+.pip-key-primary:hover:not(:disabled) {
+  background: linear-gradient(#9ad668, #6aa841);
+}
+
+.pip-key-quiet {
+  --hud-lip: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--hud-ink-soft);
+}
+
+.pip-key-quiet:hover:not(:disabled) {
+  background: var(--hud-well);
+  color: var(--hud-ink);
+}
+
+.pip-key-quiet[aria-pressed="true"] {
+  box-shadow: none;
+  transform: none;
+  color: #8a6400;
+}
+
+:root[data-theme="dark"] .pip-key-quiet[aria-pressed="true"] {
+  color: #ffd23f;
+}
+
+.pip-key-small {
+  min-height: 30px;
+  padding: 5px 11px 6px;
+  font-size: 11px;
+}
+
+/* The rail: one leather belt of tools under the room, stitched like the
+   app's spine (white leather in the dark theme, as the spine is). The belt
+   hugs its keys, centred under the room. */
+.pip-rail {
+  display: flex;
+  justify-content: center;
+  padding-top: 2px;
+  container-type: inline-size;
+}
+
+/* Decorating stays one row, so the rail's height (and the room's) holds. */
+.pip-rail-belt.pip-rail-decorate {
+  flex-wrap: nowrap;
+}
+
+@container (max-width: 640px) {
+  .pip-rail-mode-hint {
+    display: none;
+  }
+
+  .pip-rail-decorate .pip-rail-key {
+    min-width: 72px;
+    padding-inline: 8px;
+  }
+}
+
+.pip-rail-belt {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  max-width: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 10px 16px 16px;
+  border-radius: 16px;
+  background-color: #101216;
+  background-image:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 40%, rgba(0, 0, 0, 0.2)),
+    linear-gradient(var(--leather-tint), var(--leather-tint)),
+    url("./assets/leather-dark.webp");
+  background-position: center;
+  background-size: cover;
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.1),
+    0 8px 18px rgba(0, 0, 0, 0.22);
+}
+
+.pip-rail-belt::after {
+  position: absolute;
+  inset: 5px;
+  z-index: -1;
+  border: 2px dashed rgba(236, 202, 145, 0.85);
+  border-radius: 12px;
+  content: "";
+  pointer-events: none;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.9));
+}
+
+:root[data-theme="dark"] .pip-rail-belt {
+  background-color: #ebeae6;
+  background-image:
+    linear-gradient(rgba(244, 243, 239, 0.32), rgba(230, 229, 224, 0.32)),
+    url("./assets/whiteLeather.jpg");
+  background-repeat: no-repeat, repeat;
+  background-size: cover, 454px 450px;
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.8),
+    0 8px 18px rgba(0, 0, 0, 0.35);
+}
+
+:root[data-theme="dark"] .pip-rail-belt::after {
+  border-color: rgba(39, 82, 55, 0.78);
+  filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.72));
+}
+
+/* A tool: a big key, icon over its name, that sinks into the leather. */
+.pip-rail-key {
+  --hud-lip: #8e7e5e;
+  position: relative;
+  display: flex;
+  min-width: 88px;
+  min-height: 54px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 7px 12px 6px;
+  background: linear-gradient(var(--hud-face), var(--hud-face-low));
+  color: var(--hud-ink);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 7px 0 0 var(--hud-lip),
+    0 9px 0 0 var(--hud-line);
+  transition: transform 90ms ease, box-shadow 90ms ease, filter 120ms ease;
+}
+
+:root[data-theme="dark"] .pip-rail-key {
+  --hud-lip: #15171b;
+}
+
+.pip-rail-key:hover {
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+}
+
+.pip-rail-key:active,
+.pip-rail-key[aria-pressed="true"] {
+  transform: translateY(5px);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-lip),
+    0 4px 0 0 var(--hud-line);
+}
+
+/* Open now: pressed in, and lit. */
+.pip-rail-key[aria-pressed="true"] {
+  background: linear-gradient(#e7f3d8, #cfe6b6);
+  color: #1d3a16;
+}
+
+:root[data-theme="dark"] .pip-rail-key[aria-pressed="true"] {
+  background: linear-gradient(#3d5a33, #2f4827);
+  color: #e9f7df;
+}
+
+.pip-rail-label {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* The shop is the one to find at a glance: green, a little bigger. */
+.pip-rail-shop {
+  --hud-lip: #2e5a1c;
+  min-width: 96px;
+  background: linear-gradient(#8cc85c, #5f9a38);
+  color: #0f2410;
+}
+
+.pip-rail-play {
+  --hud-lip: #7a2e46;
+  background: linear-gradient(#ffc2d1, #e98aa6);
+  color: #3b0f1d;
+}
+
+/* The ripe dot on the garden key. */
+.pip-rail-key .pip-hud-dot {
+  top: -5px;
+  right: -5px;
+}
+
+/* Decorating: the rail says so, and its way out is the brightest thing on it. */
+.pip-rail-belt.pip-rail-decorate {
+  flex: 1;
+  justify-content: space-between;
+}
+
+.pip-rail-mode {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 14rem;
+  align-items: center;
+  gap: 10px;
+  color: #f6ecd6;
+}
+
+.pip-rail-mode > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.pip-rail-mode strong {
+  overflow: hidden;
   font-size: 14px;
+  font-weight: 800;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
-.pip-hud-chip.pip-hearts {
-  gap: 2px;
+.pip-rail-mode-hint {
+  font-size: 11px;
+  opacity: 0.8;
 }
 
-/* The shop is the one thing to find at a glance: the brand green, always. */
-.pip-hud-shop {
-  border-color: rgb(var(--color-primary-container) / 0.5);
-  background: linear-gradient(145deg, rgb(var(--color-primary-deep)), rgb(var(--color-primary-container)));
-  color: rgb(var(--color-on-primary-container));
-  font-size: 13px;
+:root[data-theme="dark"] .pip-rail-mode {
+  color: #1c261f;
 }
 
-.pip-hud-button:hover,
-button.pip-hud-chip:hover {
-  border-color: rgb(var(--color-primary) / 0.56);
-  color: rgb(var(--pip-accent));
-}
-
-.pip-hud-shop:hover {
-  filter: brightness(1.08);
-}
-
-.pip-hud-button[aria-pressed="true"] {
-  border-color: rgb(var(--color-primary));
-  background: rgb(var(--color-primary) / 0.16);
-  color: rgb(var(--pip-accent));
-  box-shadow: var(--shadow-inset);
-}
-
-.pip-hud-play {
-  border-color: rgb(var(--pip-heart) / 0.5);
+.pip-rail-done {
+  --hud-lip: #2e5a1c;
+  background: linear-gradient(#8cc85c, #5f9a38);
+  color: #0f2410;
 }
 
 .pip-hud-dot {
   position: absolute;
   top: -3px;
   right: -3px;
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   border-radius: 999px;
   background: rgb(var(--pip-heart));
-  box-shadow: 0 0 0 2px rgb(var(--color-surface));
+  box-shadow: 0 0 0 2px var(--hud-line);
   animation: pip-dot-pulse 1.8s ease-in-out infinite;
 }
 
@@ -4454,14 +4954,16 @@ button.pip-hud-chip:hover {
   transform-origin: 50% 60%;
 }
 
-.pip-hud button:focus-visible,
-.pip-floor-switch button:focus-visible,
+.pip-hud-top button:focus-visible,
+.pip-rail button:focus-visible,
+.pip-lift button:focus-visible,
+.pip-key:focus-visible,
 .pip-house-hotspot:focus-visible,
 .pip-house-pip-button:focus-visible,
 .pip-shop-card:focus-visible,
 .pip-arcade-pick:focus-visible {
   outline: 2px solid rgb(var(--color-primary));
-  outline-offset: 2px;
+  outline-offset: 4px;
 }
 
 .pip-house-body {
@@ -4471,32 +4973,64 @@ button.pip-hud-chip:hover {
   align-items: flex-start;
 }
 
-/* The scene: the floor's art at whole device pixels per pixel, centred. */
+/* The lift stands beside the room: the scene leaves it that much room. */
+.pip-house-body[data-lift] .pip-house-stage {
+  margin-right: 52px;
+}
+
+/* The scene: the floor's art at whole or half device pixels per pixel, centred. */
 /* Stretched and clipped, so its width is the room it is given, never the
-   width of the art inside it: the art is sized from this width. */
+   width of the art inside it: the art is sized from this width. The clip
+   keeps a margin, so the room's frame is never cut off at the edge. */
 .pip-house-stage {
   display: flex;
   min-width: 0;
   flex: 1;
   align-self: stretch;
   justify-content: center;
-  overflow: hidden;
+  overflow: clip;
+  overflow-clip-margin: 16px;
 }
 
+/* The room is a window into Pip's world, framed like one: a hard pixel
+   outline and a flat drop, not a card's soft shadow and rounded corners. */
 .pip-house-room {
   position: relative;
   flex: none;
   overflow: hidden;
-  border-radius: 14px;
+  border-radius: 3px;
   box-shadow:
-    0 0 0 1px rgb(var(--color-outline-variant) / 0.5),
-    0 10px 24px rgba(40, 36, 28, 0.18);
+    0 0 0 3px var(--hud-line),
+    0 10px 0 3px var(--hud-drop);
+  transition: box-shadow 200ms ease;
 }
 
-:root[data-theme="dark"] .pip-house-room {
+/* Decorating: the room is a plan being worked on, edged in gold. */
+.pip-house[data-decorating] .pip-house-room {
   box-shadow:
-    0 0 0 1px rgb(var(--color-outline-variant) / 0.7),
-    0 10px 24px rgba(0, 0, 0, 0.5);
+    0 0 0 3px var(--hud-line),
+    0 0 0 7px #ffd23f,
+    0 0 0 9px var(--hud-line),
+    0 14px 0 9px var(--hud-drop);
+}
+
+/* A small room (a phone) has its pins close together: smaller dots, so they
+   stay apart and the room stays visible between them. */
+.pip-house[data-small-room] .pip-slot-dot {
+  width: 22px;
+  height: 22px;
+}
+
+.pip-house[data-small-room] .pip-slot-pin[data-filled] .pip-slot-dot {
+  width: 20px;
+  height: 20px;
+}
+
+/* At a half step the room's pixels are fractional, and Pip's sprite snaps to
+   whole ones: stretched to its box, Pip stays the size of the room around it. */
+.pip-house-pip-button > .pip-sprite {
+  width: 100% !important;
+  height: 100% !important;
 }
 
 .pip-house-canvas {
@@ -4871,138 +5405,600 @@ button.pip-hud-chip:hover {
   pointer-events: none;
 }
 
-/* The floor switcher: up, the floors, down. */
-.pip-floor-switch {
-  position: relative;
-  display: inline-flex;
-  align-items: stretch;
-  gap: 4px;
-}
-
-.pip-floor-step,
-.pip-floor-current {
-  display: inline-flex;
-  min-height: 36px;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border: 1px solid rgb(var(--color-outline-variant) / 0.4);
-  border-radius: 12px;
-  background: rgb(var(--color-surface-high) / 0.92);
-  color: rgb(var(--color-on-surface));
-  font-size: 12px;
-  font-weight: 700;
-  box-shadow: var(--shadow-raised-small);
-}
-
-.pip-floor-step {
-  min-width: 34px;
-  justify-content: center;
-  font-size: 10px;
-}
-
-.pip-floor-step:disabled {
-  opacity: 0.4;
-}
-
-.pip-floor-current {
-  max-width: 13rem;
-}
-
-.pip-floor-step:not(:disabled):hover,
-.pip-floor-current:hover,
-.pip-floor-current[aria-expanded="true"] {
-  border-color: rgb(var(--color-primary) / 0.56);
-  color: rgb(var(--pip-accent));
-}
-
-.pip-floor-count {
-  color: rgb(var(--color-on-surface-variant));
-  font-size: 10px;
-  font-weight: 600;
-}
-
-.pip-floor-menu {
+/* The lift up the side of the house: a dark shaft, a numbered stop for each
+   floor (ground floor at the bottom), and a brass car that rides to the floor
+   Pip is on. Placed beside the room from script, as tall as the room. */
+.pip-lift {
   position: absolute;
-  top: calc(100% + 6px);
+  z-index: 4;
+  display: flex;
+  width: 44px;
+  flex-direction: column;
+  background: #2a211c;
+  box-shadow:
+    0 0 0 3px var(--hud-line),
+    0 10px 0 3px var(--hud-drop);
+}
+
+.pip-lift-arrow {
+  display: grid;
+  height: 30px;
+  flex: none;
+  place-items: center;
+  background: linear-gradient(var(--hud-face), var(--hud-face-low));
+  color: var(--hud-ink);
+  transition: background-color 120ms ease, transform 90ms ease;
+}
+
+.pip-lift-arrow:first-child {
+  border-bottom: 2px solid var(--hud-line);
+}
+
+.pip-lift-arrow:last-child {
+  border-top: 2px solid var(--hud-line);
+}
+
+.pip-lift-arrow:hover:not(:disabled) {
+  background: var(--hud-face-hover);
+}
+
+.pip-lift-arrow:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.pip-lift-arrow:disabled {
+  color: var(--hud-ink-soft);
+  opacity: 0.45;
+}
+
+/* The shaft: the cable runs down its middle, and the stops sit on it. */
+.pip-lift-shaft {
+  position: relative;
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  background:
+    linear-gradient(90deg, transparent calc(50% - 1px), rgba(255, 238, 200, 0.18) calc(50% - 1px), rgba(255, 238, 200, 0.18) calc(50% + 1px), transparent calc(50% + 1px)),
+    repeating-linear-gradient(180deg, #2a211c 0 6px, #251d19 6px 12px);
+}
+
+.pip-lift-shaft > li {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  place-items: center;
+}
+
+/* The car: one floor's share of the shaft, moved to the floor Pip is on. The
+   cabin itself is a brass box round that floor's stop, with a little window. */
+.pip-lift-car {
+  position: absolute;
+  top: 4px;
+  right: 3px;
+  left: 3px;
+  height: calc((100% - 8px) / var(--floors, 1));
+  transform: translateY(calc(100% * (var(--floors, 1) - 1 - var(--at, 0))));
+  transition: transform 560ms cubic-bezier(0.55, 0.05, 0.3, 1);
+  pointer-events: none;
+}
+
+.pip-lift-car::before {
+  position: absolute;
+  top: 50%;
+  right: 0;
   left: 0;
+  height: min(calc(100% - 4px), 48px);
+  border-radius: 4px;
+  background:
+    linear-gradient(90deg, transparent 5px, rgba(60, 38, 8, 0.35) 5px 7px, transparent 7px calc(100% - 7px), rgba(60, 38, 8, 0.35) calc(100% - 7px) calc(100% - 5px), transparent calc(100% - 5px)),
+    linear-gradient(90deg, #b8862e, #f1c75a 45%, #c8943a);
+  box-shadow:
+    0 0 0 2px var(--hud-line),
+    inset 0 2px 0 rgba(255, 255, 255, 0.4),
+    inset 0 -3px 0 rgba(0, 0, 0, 0.25),
+    0 0 12px 2px rgba(255, 210, 63, 0.35);
+  content: "";
+  transform: translateY(-50%);
+}
+
+.pip-lift-stop {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 999px;
+  background: #efe7d2;
+  color: #1c261f;
+  font-size: 13px;
+  font-weight: 900;
+  box-shadow:
+    0 0 0 2px #120d0a,
+    inset 0 -3px 0 rgba(0, 0, 0, 0.18);
+  transition: transform 120ms ease, background-color 160ms ease;
+}
+
+.pip-lift-stop:hover {
+  transform: scale(1.1);
+}
+
+/* The floor Pip is on: lit, like a lift's button. */
+.pip-lift-stop[aria-current="true"] {
+  background: #fff6c8;
+  color: #3b2a00;
+  box-shadow:
+    0 0 0 2px #120d0a,
+    0 0 10px 3px rgba(255, 226, 120, 0.75);
+}
+
+.pip-lift-stop[data-locked] {
+  background: #9d968a;
+  color: #3f3a32;
+}
+
+.pip-lift-lock {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  box-sizing: content-box;
+  padding: 2px;
+  border-radius: 999px;
+  background: #120d0a;
+  color: #fffbf0;
+}
+
+/* A short room: just the floor Pip is on, and every floor in a list from it. */
+.pip-lift[data-compact] .pip-lift-shaft {
+  align-items: center;
+}
+
+.pip-lift-menu {
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 10px);
   z-index: 30;
   display: flex;
-  min-width: 13rem;
+  min-width: 14rem;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
+  margin: 0;
   padding: 6px;
-  border-radius: 12px;
+  list-style: none;
+  background: var(--hud-face);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 6px 0 0 var(--hud-drop);
+  transform: translateY(-50%);
 }
 
-.pip-floor {
+.pip-lift-menu .pip-lift-stop {
   display: flex;
   width: 100%;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  padding: 6px 10px;
-  border: 1px solid rgb(var(--color-outline-variant) / 0.35);
-  border-radius: 10px;
-  background: rgb(var(--color-surface-high) / 0.8);
-  color: rgb(var(--color-on-surface));
+  height: auto;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
   font-size: 12px;
-  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
 }
 
-.pip-floor[aria-current="true"] {
-  border-color: rgb(var(--color-primary));
-  background: rgb(var(--color-primary) / 0.16);
-  color: rgb(var(--pip-accent));
+.pip-lift-menu .pip-lift-stop:hover {
+  transform: none;
+  background: var(--hud-face-hover);
 }
 
-.pip-floor[data-locked] {
-  color: rgb(var(--color-on-surface-variant));
+.pip-lift-menu .pip-lift-stop[aria-current="true"] {
+  background: #fff1b8;
+  box-shadow: none;
 }
 
-.pip-floor-price {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  font-size: 10px;
+:root[data-theme="dark"] .pip-lift-menu .pip-lift-stop[aria-current="true"] {
+  background: #4a4220;
 }
 
-.pip-house-hint {
-  font-size: 12px;
-  color: rgb(var(--color-on-surface-variant));
+.pip-lift-menu .pip-lift-stop[data-locked] .pip-lift-name {
+  color: var(--hud-ink-soft);
 }
 
+.pip-lift-menu .pip-lift-number {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 999px;
+  background: #efe7d2;
+  color: #1c261f;
+  box-shadow: 0 0 0 2px #120d0a;
+}
+
+.pip-lift-menu .pip-lift-lock {
+  position: static;
+  margin-left: auto;
+  background: var(--hud-ink-soft);
+}
+
+.pip-lift-name {
+  color: var(--hud-ink);
+  font-weight: 700;
+}
+
+/* Trying something on from the shop. */
 .pip-preview-bar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  width: var(--frame-width, 100%);
+  max-width: 100%;
+  margin-left: var(--frame-left, 0);
   padding: 8px 12px;
-  border: 1px solid rgb(var(--color-primary) / 0.5);
-  border-radius: 12px;
+  background: var(--hud-face);
+  color: var(--hud-ink);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 6px 0 0 var(--hud-drop);
+}
+
+/* The seed packets over an empty plot, pointing at it like Pip's bubble. */
+.pip-picker {
+  position: fixed;
+  z-index: 65;
+  width: min(318px, calc(100vw - 16px));
+  padding: 8px 8px 10px;
+  background: var(--hud-face);
+  color: var(--hud-ink);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 8px 0 0 var(--hud-drop);
+}
+
+.pip-picker::after {
+  position: absolute;
+  top: 100%;
+  left: calc(var(--tail-at, 50%) - 5px);
+  width: 10px;
+  height: 8px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='8' shape-rendering='crispEdges'%3E%3Cpath fill='%231f2a22' d='M0 0h2v2H0zM8 0h2v2H8zM2 2h2v2H2zM6 2h2v2H6zM4 4h2v4H4z'/%3E%3Cpath fill='%23fffbf0' d='M2 0h6v2H2zM4 2h2v2H4z'/%3E%3C/svg%3E") no-repeat;
+  content: "";
+}
+
+.pip-picker[data-side="below"]::after {
+  top: auto;
+  bottom: 100%;
+  transform: rotate(180deg);
+}
+
+:root[data-theme="dark"] .pip-picker::after {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='8' shape-rendering='crispEdges'%3E%3Cpath fill='%23090a0c' d='M0 0h2v2H0zM8 0h2v2H8zM2 2h2v2H2zM6 2h2v2H6zM4 4h2v4H4z'/%3E%3Cpath fill='%2330343c' d='M2 0h6v2H2zM4 2h2v2H4z'/%3E%3C/svg%3E");
+}
+
+.pip-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 2px 7px 4px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.pip-picker-close {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  color: var(--hud-ink-soft);
+}
+
+.pip-picker-close:hover {
+  color: var(--hud-ink);
+}
+
+.pip-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.pip-packet {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 6px 4px 7px;
+  background: var(--hud-well);
+  color: var(--hud-ink);
+  box-shadow: 0 0 0 2px var(--hud-track);
+  transition: transform 100ms ease, box-shadow 120ms ease, background-color 120ms ease;
+}
+
+.pip-packet:hover:not([aria-disabled="true"]),
+.pip-packet:focus-visible {
+  background: var(--hud-face-hover);
+  box-shadow: 0 0 0 2px #5f9a38;
+  outline: none;
+  transform: translateY(-2px);
+}
+
+.pip-packet:active:not([aria-disabled="true"]) {
+  transform: translateY(1px);
+}
+
+.pip-packet[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.pip-packet[aria-disabled="true"]:focus-visible {
+  box-shadow: 0 0 0 2px var(--hud-ink-soft);
+}
+
+.pip-packet-art {
+  display: grid;
+  height: 36px;
+  place-items: center;
+}
+
+.pip-packet-name {
+  width: 100%;
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pip-packet-deal {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--hud-ink-soft);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.pip-packet-arrow {
+  margin: 0 1px;
+  opacity: 0.7;
+}
+
+/* The walkthrough: the page dimmed, a spotlight on one thing, Pip's bubble by it.
+   Nothing under it takes a click while it runs. */
+.pip-walk {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+}
+
+.pip-walk-spot {
+  position: fixed;
+  border-radius: 14px;
+  box-shadow:
+    0 0 0 3px #ffd23f,
+    0 0 0 9999px rgba(15, 17, 14, 0.55);
+  pointer-events: none;
+  transition:
+    left 320ms cubic-bezier(0.3, 0.9, 0.35, 1),
+    top 320ms cubic-bezier(0.3, 0.9, 0.35, 1),
+    width 320ms cubic-bezier(0.3, 0.9, 0.35, 1),
+    height 320ms cubic-bezier(0.3, 0.9, 0.35, 1),
+    opacity 200ms ease;
+}
+
+.pip-walk-bubble {
+  position: fixed;
+  z-index: 1;
+  width: max-content;
+  max-width: min(300px, calc(100vw - 24px));
+}
+
+/* How much of a set is Pip's: "5/42", gold once it is all there. */
+.pip-tally {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgb(var(--color-outline-variant) / 0.28);
+  color: rgb(var(--color-on-surface-variant));
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.pip-tab[aria-selected="true"] .pip-tally {
+  background: rgb(var(--color-primary) / 0.22);
+  color: rgb(var(--pip-accent));
+}
+
+.pip-tally[data-complete] {
+  background: #ffd23f;
+  color: #3b2a00;
+}
+
+/* A rule in a few words, the rest on hover or focus. */
+.pip-hints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.pip-hint {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
   background: rgb(var(--color-primary) / 0.12);
-  color: rgb(var(--color-on-surface));
+  color: rgb(var(--pip-accent));
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.pip-hint[data-tip] {
+  cursor: help;
+}
+
+/* Not laid out until it shows: a hidden tip would still widen the panel it is in. */
+.pip-hint[data-tip]::after {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 10;
+  display: none;
+  width: max-content;
+  max-width: min(240px, 60vw);
+  padding: 6px 9px;
+  border-radius: 6px;
+  background: #1f2a22;
+  color: #fffbf0;
+  content: attr(data-tip);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+  pointer-events: none;
+  animation: pip-tip-in 120ms ease-out;
+}
+
+.pip-hint[data-tip]:hover::after,
+.pip-hint[data-tip]:focus-visible::after {
+  display: block;
+}
+
+@keyframes pip-tip-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+}
+
+.pip-hint:focus-visible {
+  outline: 2px solid rgb(var(--color-primary));
+  outline-offset: 2px;
+}
+
+/* Pip's things: tabs, and the way into the shop for more. */
+.pip-things-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.pip-things-tabs > .pip-tab {
+  flex: 1 1 0;
+  justify-content: center;
+  padding-inline: 8px;
+  white-space: nowrap;
+}
+
+.pip-get-more {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 10px 12px;
+  border: 2px dashed rgb(var(--color-primary) / 0.5);
+  border-radius: 12px;
+  color: rgb(var(--pip-accent));
+  font-size: 12px;
+  font-weight: 800;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.pip-get-more > span:nth-child(2) {
+  flex: 1;
+  text-align: left;
+}
+
+.pip-get-more:hover {
+  border-color: rgb(var(--color-primary));
+  background: rgb(var(--color-primary) / 0.1);
+}
+
+.pip-get-more:focus-visible {
+  outline: 2px solid rgb(var(--color-primary));
+  outline-offset: 2px;
 }
 
 /* A drawer beside the house, so the whole room stays in view while Pip tries
-   things on; over it on narrow windows, where side by side leaves no room. */
+   things on. It stands beside the whole house, top bar to rail, and the
+   house steps aside for it (the room shrinks), so it never pushes the rail
+   down. Below 1100 px side by side leaves the room too small: it is a sheet
+   at the bottom instead, and the room shrinks to sit above it. */
 .pip-drawer {
-  position: relative;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
   z-index: 5;
   display: flex;
   width: clamp(340px, 26vw, 440px);
-  flex: none;
-  max-height: min(80vh, 760px);
   flex-direction: column;
   border-radius: 16px;
 }
 
-@media (max-width: 1023px) {
+.pip-house[data-sheet] {
+  padding-right: calc(clamp(340px, 26vw, 440px) + 18px);
+}
+
+@media (max-width: 1099px) {
+  .pip-house[data-sheet] {
+    padding-right: 0;
+  }
+
   .pip-drawer {
-    position: absolute;
-    top: 0;
-    right: 0;
-    width: min(440px, 100%);
+    position: fixed;
+    top: auto;
+    right: max(8px, calc(50% - 380px));
+    bottom: 8px;
+    left: max(86px, calc(50% - 380px));
+    width: auto;
+    max-height: 46dvh;
+  }
+
+  /* Decorating: a low sheet, so the room and its pins stay in view above it. */
+  .pip-drawer[data-size="short"] {
+    max-height: min(34dvh, 300px);
+  }
+}
+
+/* No rail beside the page on a phone: the sheet takes the width. */
+@media (max-width: 767px) {
+  .pip-drawer {
+    right: 8px;
+    left: 8px;
+  }
+}
+
+/* Above the phone's bottom bar, not under it. */
+@media (max-width: 767px) and (min-height: 521px) {
+  .pip-drawer {
+    bottom: calc(var(--mobile-nav-height) + 8px);
   }
 }
 
@@ -5016,6 +6012,7 @@ button.pip-hud-chip:hover {
 }
 
 .pip-drawer-body {
+  overflow-x: hidden;
   overflow-y: auto;
   padding: 12px 16px 18px;
 }
@@ -5240,6 +6237,261 @@ button.pip-hud-chip:hover {
   text-align: center;
 }
 
+/* A tab's things under their headings: wallpaper, then flooring; floors, then plots. */
+.pip-shop-group + .pip-shop-group {
+  margin-top: 20px;
+}
+
+.pip-shop-group-title {
+  margin-bottom: 8px;
+  color: rgb(var(--color-on-surface-variant));
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+/* Opened from a spot being decorated: only what fits it, until "Show all". */
+.pip-shop-filter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgb(var(--color-primary) / 0.12);
+  color: rgb(var(--color-on-surface));
+  font-size: 12px;
+}
+
+.pip-shop-filter-clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: rgb(var(--pip-accent));
+  font-weight: 800;
+}
+
+/* The pinned goal, flagged on its card. */
+.pip-shop-goal-flag {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 999px;
+  background: #ffd23f;
+  color: #3b2a00;
+  box-shadow: 0 0 0 2px #1f2a22;
+}
+
+.pip-shop-card[data-goal] {
+  border-color: #d9a900;
+}
+
+.pip-tab .pip-tally {
+  margin-left: 2px;
+}
+
+/* The question before a purchase: the thing big, its price, Buy first. */
+.pip-confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.pip-confirm {
+  width: min(340px, 100%);
+  padding: 22px 22px 22px;
+  background: var(--hud-face);
+  color: var(--hud-ink);
+  text-align: center;
+  box-shadow:
+    0 -3px 0 0 var(--hud-line),
+    0 3px 0 0 var(--hud-line),
+    -3px 0 0 0 var(--hud-line),
+    3px 0 0 0 var(--hud-line),
+    0 12px 0 0 rgba(0, 0, 0, 0.22);
+}
+
+.pip-confirm-art {
+  display: grid;
+  width: 128px;
+  height: 128px;
+  margin: 0 auto 12px;
+  place-items: center;
+  background: var(--hud-well);
+  box-shadow:
+    inset 0 0 0 2px var(--hud-track),
+    inset 0 -6px 0 rgba(0, 0, 0, 0.06);
+}
+
+.pip-confirm-title {
+  font-family: "ZT Nature", "Segoe UI", system-ui, sans-serif;
+  font-size: 22px;
+  font-weight: 900;
+  line-height: 1.15;
+}
+
+.pip-confirm-note {
+  margin-top: 6px;
+  color: var(--hud-ink-soft);
+  font-size: 12px;
+}
+
+.pip-confirm-cost {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 14px;
+  color: var(--hud-ink-soft);
+  font-size: 12px;
+}
+
+.pip-confirm-price {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgb(var(--color-primary) / 0.18);
+  color: rgb(var(--pip-accent));
+  font-size: 16px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.pip-confirm-actions {
+  display: flex;
+  gap: 14px;
+  margin-top: 20px;
+}
+
+.pip-confirm-actions > .pip-key {
+  flex: 1;
+}
+
+/* Buy is the bigger of the two. */
+.pip-confirm-actions > .pip-key-primary {
+  flex: 1.5;
+  min-height: 42px;
+  font-size: 13px;
+}
+
+/* A quick purchase's few seconds: what it was, and Undo, over a running bar. */
+.pip-undo {
+  position: absolute;
+  top: var(--toast-top, 12px);
+  left: var(--toast-left, 50%);
+  z-index: 6;
+  display: flex;
+  width: max-content;
+  min-width: 260px;
+  max-width: calc(100vw - 24px);
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 14px;
+  overflow: hidden;
+  background: var(--hud-face);
+  color: var(--hud-ink);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 8px 0 0 var(--hud-drop);
+  transform: translateX(-50%);
+}
+
+.pip-undo-art {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  place-items: center;
+  overflow: hidden;
+}
+
+.pip-undo-text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.pip-undo-text strong {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pip-undo-cost {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: rgb(var(--pip-accent));
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.pip-undo-button {
+  flex: none;
+}
+
+/* The time left to take it back, running down along the bottom. */
+.pip-undo-time {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 5px;
+  background: linear-gradient(#94d066, #5f9a38);
+  transform: scaleX(var(--left, 1));
+  transform-origin: 0 50%;
+  animation-name: pip-undo-run;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+@keyframes pip-undo-run {
+  from {
+    transform: scaleX(var(--left, 1));
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+/* A phone's room is small: the toast sits at the bottom of the screen, over
+   the bottom bar rather than under it. */
+@media (max-width: 560px) {
+  .pip-undo {
+    position: fixed;
+    top: auto;
+    bottom: 16px;
+    left: 50%;
+    z-index: 75;
+  }
+}
+
+@media (max-width: 560px) and (min-height: 521px) {
+  .pip-undo {
+    bottom: calc(var(--mobile-nav-height) + 12px);
+  }
+}
+
 /* ---- The Attic Arcade ------------------------------------------------------------- */
 
 .pip-arcade {
@@ -5300,22 +6552,8 @@ button.pip-hud-chip:hover {
   pointer-events: none;
 }
 
-/* Narrow windows: the drawer as a sheet at the bottom; the shop full width. */
+/* Narrow windows: the shop full width, its detail under the grid. */
 @media (max-width: 900px) {
-  .pip-house-body {
-    flex-direction: column;
-  }
-
-  .pip-drawer {
-    position: fixed;
-    top: auto;
-    right: 8px;
-    bottom: 8px;
-    left: 8px;
-    width: auto;
-    max-height: 70dvh;
-  }
-
   .pip-shop-body {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) auto;
@@ -5328,11 +6566,80 @@ button.pip-hud-chip:hover {
   }
 }
 
-/* Where the rail is beside the page (md and up), the sheet starts past it
-   rather than under its leather. */
-@media (min-width: 768px) and (max-width: 900px) {
-  .pip-drawer {
-    left: 86px;
+/* A phone: the HUD takes the full width, and the tools share one row. */
+@media (max-width: 560px) {
+  .pip-hud-top,
+  .pip-rail,
+  .pip-preview-bar {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .pip-hud-top {
+    gap: 10px 8px;
+  }
+
+  .pip-resource {
+    padding: 6px 10px;
+  }
+
+  .pip-resource-value {
+    font-size: 19px;
+  }
+
+  .pip-rail-belt {
+    width: 100%;
+    gap: 8px;
+    padding: 9px 9px 14px;
+  }
+
+  .pip-rail-key,
+  .pip-rail-shop {
+    min-width: 0;
+    flex: 1 1 0;
+    padding: 7px 2px 6px;
+  }
+
+  .pip-rail-belt.pip-rail-decorate {
+    flex-wrap: wrap;
+  }
+
+  .pip-rail-label {
+    font-size: 10px;
+  }
+
+  .pip-rail-mode {
+    flex-basis: 100%;
+  }
+
+  .pip-rail-mode strong {
+    font-size: 13px;
+  }
+}
+
+/* A short window (a phone on its side): the tools keep their icons, and
+   their names go to the screen reader only, so the room keeps the height. */
+@media (max-height: 560px) {
+  .pip-rail-belt {
+    padding-block: 8px 12px;
+  }
+
+  .pip-rail-key {
+    min-height: 44px;
+    padding: 6px 12px;
+  }
+
+  .pip-rail-key .pip-rail-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .pip-rail-mode-hint {
+    display: none;
   }
 }
 
@@ -5343,8 +6650,8 @@ button.pip-hud-chip:hover {
   animation: pip-drawer-in 260ms cubic-bezier(0.2, 0.9, 0.3, 1) backwards;
 }
 
-/* On a narrow window the sheet rises from the bottom instead. */
-@media (max-width: 900px) {
+/* Where it is a sheet (below 1100 px), it rises from the bottom instead. */
+@media (max-width: 1099px) {
   .pip-drawer {
     animation-name: pip-sheet-in;
   }
@@ -5574,6 +6881,129 @@ button.pip-shop-tile:active,
   letter-spacing: -0.01em;
 }
 
+/* The HUD's small moments: the confirm pops up, the toast rises, the packet
+   picker springs out of its plot, and a goal within reach glows. */
+.pip-confirm-backdrop {
+  animation: pip-fade-in 160ms ease-out backwards;
+}
+
+.pip-confirm {
+  animation: confirm-pop-in 240ms cubic-bezier(0.3, 1.4, 0.5, 1) backwards;
+}
+
+.pip-undo {
+  animation: pip-toast-in 260ms cubic-bezier(0.3, 1.3, 0.5, 1) backwards;
+}
+
+@keyframes pip-toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -14px);
+  }
+}
+
+@media (max-width: 560px) {
+  .pip-undo {
+    animation-name: pip-toast-up;
+  }
+}
+
+@keyframes pip-toast-up {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 18px);
+  }
+}
+
+.pip-picker {
+  transform-origin: var(--tail-at, 50%) 100%;
+  animation: pip-picker-in 220ms cubic-bezier(0.3, 1.4, 0.5, 1) backwards;
+}
+
+.pip-picker[data-side="below"] {
+  transform-origin: var(--tail-at, 50%) 0;
+}
+
+@keyframes pip-picker-in {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+}
+
+.pip-walk-bubble {
+  animation: pip-detail-in 260ms ease-out backwards;
+}
+
+.pip-walk {
+  animation: pip-fade-in 200ms ease-out backwards;
+}
+
+.pip-goal[data-ready] {
+  animation: pip-goal-glow 1.4s ease-in-out infinite alternate;
+}
+
+@keyframes pip-goal-glow {
+  from {
+    box-shadow:
+      0 -2px 0 0 var(--hud-line),
+      0 2px 0 0 var(--hud-line),
+      -2px 0 0 0 var(--hud-line),
+      2px 0 0 0 var(--hud-line),
+      0 6px 0 0 var(--hud-drop),
+      0 0 0 0 rgba(255, 210, 63, 0);
+  }
+  to {
+    box-shadow:
+      0 -2px 0 0 var(--hud-line),
+      0 2px 0 0 var(--hud-line),
+      -2px 0 0 0 var(--hud-line),
+      2px 0 0 0 var(--hud-line),
+      0 6px 0 0 var(--hud-drop),
+      0 0 14px 4px rgba(255, 210, 63, 0.7);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pip-confirm-backdrop,
+  .pip-confirm,
+  .pip-undo,
+  .pip-picker,
+  .pip-walk,
+  .pip-walk-bubble,
+  .pip-goal[data-ready],
+  .pip-hint[data-tip]:hover::after,
+  .pip-hint[data-tip]:focus-visible::after {
+    animation: none;
+  }
+
+  /* The time left stays shown, still: the toast's few seconds are no shorter. */
+  .pip-undo-time {
+    animation: none;
+  }
+
+  .pip-lift-car,
+  .pip-walk-spot,
+  .pip-goal-bar > span,
+  .pip-house-room {
+    transition: none;
+  }
+
+  .pip-rail-key:hover,
+  .pip-rail-key:active,
+  .pip-rail-key[aria-pressed="true"],
+  .pip-key:active:not(:disabled),
+  .pip-key[aria-pressed="true"],
+  .pip-hud-help:active,
+  .pip-lift-stop:hover,
+  .pip-lift-arrow:active:not(:disabled),
+  .pip-packet:hover:not([aria-disabled="true"]),
+  .pip-packet:focus-visible,
+  .pip-packet:active:not([aria-disabled="true"]) {
+    transform: none;
+  }
+}
+
 /* ---- The app in motion: a few quiet touches outside the Pip tab ---------------- */
 
 /* Moving between the app's pages: the new page fades in, briefly. Opacity
@@ -5625,9 +7055,6 @@ button.pip-shop-tile:active,
   .pip-shop-card:hover,
   button.pip-shop-tile:active,
   .pip-shop-card:active,
-  button.pip-hud-chip:active,
-  .pip-hud-button:active,
-  .pip-hud-shop:active,
   .pip-plot[data-state="locked"]:hover .pip-plot-dig {
     transform: none;
   }
