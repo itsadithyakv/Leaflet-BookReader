@@ -16,6 +16,7 @@ pub mod cloud;
 pub mod drive;
 pub mod folder;
 pub mod merge;
+pub mod reading;
 pub mod remote_config;
 pub mod store;
 
