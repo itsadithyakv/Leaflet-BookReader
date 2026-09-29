@@ -2,9 +2,13 @@
  they sit in the house at the same pixel scale. Every draw is a pure function
  of the plant, its growth (0..1) and the frame (12 fps).
 
- A plant shows four stages: a seed in the soil, a sprout, a young plant, and
- grown; grown and ripe, it shows its fruit or flower and a little sparkle, so
- "ripe" reads from across the room.
+ A plant shows four stages: a seed just breaking the soil, a sprout, a young
+ plant, and grown; grown and ripe, it shows its fruit or flower and a little
+ sparkle, so "ripe" reads from across the room.
+
+ The house draws a plot as two sprites, the soil bed and the plant over it
+ (renderSoil, renderPlant), so the plant can pop, sway and be picked on its
+ own. renderPlot draws both together, for the seed packets.
 
  Also: a plain garden floor for when the house art has no garden floor. */
 import { Painter } from "./room.js";
@@ -124,18 +128,15 @@ const PLANT_ART = {
   }
 };
 
-/**
- * One plot as a PLOT_W x PLOT_H ImageData: empty soil, or a plant at its
- * growth (0..1), ripe or not.
- */
-export const renderPlot = (plantId, progress, ripe, f = 0) => {
-  const g = new Painter(PLOT_W, PLOT_H, f);
-  soil(g, !plantId);
-  if (!plantId) return g.toImageData();
+/** A plant at its growth (0..1), ripe or not, drawn into a PLOT_W x PLOT_H painter. */
+const drawPlant = (g, plantId, progress, ripe, f) => {
   const stage = ripe ? 3 : stageOf(progress);
   const base = PLOT_H - SOIL_H;
   if (stage === 0) {
+    // The seed's mound, with the first two leaves just out: planted reads as
+    // "something is coming" from across the room.
     g.stamp((l) => l.ell(14, base, 3, 1.5, "#8A5A34").px(14, base - 1, "#E8D6A8"), OUT);
+    g.stamp((l) => l.rect(14, base - 3, 1, 2, STEM).px(13, base - 4, LEAF_LIGHT).px(15, base - 4, LEAF), OUT);
   } else if (stage === 1) {
     stem(g, 14, base - 4, base);
     leafPair(g, 14, base - 4, 2);
@@ -154,6 +155,30 @@ export const renderPlot = (plantId, progress, ripe, f = 0) => {
       g.px(x, y - 1, "#FFFFFF").px(x, y + 1, "#FFFFFF").px(x - 1, y, "#FFFFFF").px(x + 1, y, "#FFFFFF").px(x, y, "#FFE066");
     }
   }
+};
+
+/**
+ * One plot as a PLOT_W x PLOT_H ImageData: empty soil, or a plant at its
+ * growth (0..1), ripe or not.
+ */
+export const renderPlot = (plantId, progress, ripe, f = 0) => {
+  const g = new Painter(PLOT_W, PLOT_H, f);
+  soil(g, !plantId);
+  if (plantId) drawPlant(g, plantId, progress, ripe, f);
+  return g.toImageData();
+};
+
+/** The soil bed alone, PLOT_W x PLOT_H: dug rows while it waits for a seed. */
+export const renderSoil = (dug) => {
+  const g = new Painter(PLOT_W, PLOT_H, 0);
+  soil(g, dug);
+  return g.toImageData();
+};
+
+/** The plant alone, PLOT_W x PLOT_H over nothing, to stand on its soil bed. */
+export const renderPlant = (plantId, progress, ripe, f = 0) => {
+  const g = new Painter(PLOT_W, PLOT_H, f);
+  drawPlant(g, plantId, progress, ripe, f);
   return g.toImageData();
 };
 
