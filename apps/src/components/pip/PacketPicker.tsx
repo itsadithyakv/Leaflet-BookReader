@@ -44,9 +44,17 @@ export const PacketPicker = ({ plot, packets, balance, priceOf, anchor, art, onP
       setPlace(placeNear(box, { width: root.offsetWidth, height: root.offsetHeight }, viewport, { gap: 6 }));
     };
     measure();
+    // The room may still be zooming to a new size (a drawer just closed):
+    // follow the plot for as long as that takes.
+    const until = performance.now() + 450;
+    let frame = requestAnimationFrame(function follow(now) {
+      measure();
+      if (now < until) frame = requestAnimationFrame(follow);
+    });
     window.addEventListener("resize", measure);
     window.addEventListener("scroll", measure, true);
     return () => {
+      cancelAnimationFrame(frame);
       window.removeEventListener("resize", measure);
       window.removeEventListener("scroll", measure, true);
     };
