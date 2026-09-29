@@ -5076,6 +5076,31 @@ button.pip-shop-tile:active,
   letter-spacing: -0.01em;
 }
 
+/* ---- The app in motion: a few quiet touches outside the Pip tab ---------------- */
+
+/* Moving between the app's pages: the new page fades in, briefly. Opacity
+   only, and no fill: a transform, or an animation left holding, would make
+   every fixed dialog inside the page position and stack against the page. */
+.app-main-scroll > :not(.pip-scroll-layer) {
+  animation: app-page-in 200ms ease-out;
+}
+
+@keyframes app-page-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* The rail's items press into the leather under the pointer (their
+   transition already eases transform); the phone bar's likewise. */
+.sidebar-nav-item:active {
+  transform: scale(0.96);
+}
+
+.mobile-nav-item:active {
+  transform: scale(0.94);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .pip-plot[data-state="ripe"]::before,
   .pip-plot[data-state="ripe"] .pip-plot-plant,
@@ -5089,8 +5114,14 @@ button.pip-shop-tile:active,
   .pip-shop-backdrop,
   .pip-shop,
   .pip-shop-card,
-  .pip-shop-detail > * {
+  .pip-shop-detail > *,
+  .app-main-scroll > :not(.pip-scroll-layer) {
     animation: none;
+  }
+
+  .sidebar-nav-item:active,
+  .mobile-nav-item:active {
+    transform: none;
   }
 
   .pip-shop-card:hover,
