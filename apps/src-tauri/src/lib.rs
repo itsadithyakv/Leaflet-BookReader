@@ -247,6 +247,8 @@ pub fn run() {
       commands::collections_list,
       commands::collection_save,
       commands::collection_delete,
+      commands::reading_profile_get,
+      commands::reading_profile_set,
       commands::book_set_series,
       commands::scan_series,
       commands::community_leaderboard,

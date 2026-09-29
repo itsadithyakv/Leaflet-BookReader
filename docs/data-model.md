@@ -100,7 +100,8 @@ Predates the habit ledger and carries no duration; the ledger is the real record
 
 A key/value table. Holds the habit goal and streak state (as JSON), the sync
 folder path, the last sync time, the Drive access token and expiry, the Drive
-account email, and a Drive OAuth client if the reader supplied one.
+account email, a Drive OAuth client if the reader supplied one, and the reading
+pace profile (`reading_profile`, JSON; see the sync document below).
 
 The Drive **refresh** token is not here — it goes to the OS keychain, with this
 table as the fallback where no keychain exists.
@@ -163,9 +164,20 @@ Defined in `sync/merge.rs`. This is what crosses between devices — as
   "harvests": [ /* ...and what was picked */ ],
   "pip":      { /* Pip's look, room and mood */ },
   "annotations": [ /* bookmarks and highlights, with tombstones */ ],
-  "collections": [ /* the reader's collections, with tombstones */ ]
+  "collections": [ /* the reader's collections, with tombstones */ ],
+  "readingProfile": {           // optional: left out until there is one
+    "version": 2,
+    "core":   { "updatedAt": "…", /* reader-wide: starting pace, time of day */ },
+    "limits": { "updatedAt": "…", "minWpm": 90, "maxWpm": 700 },  // Dotty's range
+    "books":  { "<sha256>": { "updatedAt": "…", "wpm": 240, "minutes": 12, "difficulty": 1.04 } },
+    "resetAt": "…"              // optional: "forget my pace"
+  }
 }
 ```
+
+What is inside each part of `readingProfile` belongs to the app
+(`readers/paceModel.ts`); Rust carries the fields as they are, so a device on an
+older build passes on what it does not know rather than dropping it.
 
 Book files live beside it as `books/<sha256>.<ext>` and are fetched on demand.
 
@@ -192,6 +204,11 @@ Book files live beside it as `books/<sha256>.<ext>` and are fetched on demand.
 - **Pip's state** — newest `updatedAt` wins, whole; a tie is settled by content.
 - **Annotations, collections** — per id, newest `updatedAt` wins, whole; a delete
   is an edit (a tombstone), dropped after the tombstone retention period.
+- **Reading profile** — part by part, newest `updatedAt` wins: the reader-wide
+  `core`, `limits` (apart, so a range set by hand is never lost to learning
+  that happened later on another device) and each book's entry on its own. A
+  reset (`resetAt`) drops book entries older than it on every device; past 400
+  books the least recently read leave. `sync/reading.rs`.
 
 Exact timestamp ties fall back to comparing the values themselves, so the result
 cannot depend on argument order. Output is ordered by a `BTreeMap`, so two

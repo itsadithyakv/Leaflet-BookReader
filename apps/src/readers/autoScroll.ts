@@ -18,6 +18,10 @@ export const autoScrollLinesPerMinute = (speed: number) =>
 export const autoScrollPixelsPerSecond = (speed: number, fontSize: number) =>
   (autoScrollLinesPerMinute(speed) * 1.8 * fontSize) / 60;
 
+/** The slider position for a pace in lines a minute: the other way from `autoScrollLinesPerMinute`. */
+export const autoScrollSpeedForLines = (linesPerMinute: number) =>
+  Math.round(Math.min(100, Math.max(0, (linesPerMinute / 1.852 - 3) / 0.45)));
+
 export const readAutoScrollDefault = () => {
   try {
     const value = Number(localStorage.getItem(AUTO_SCROLL_DEFAULT_KEY));

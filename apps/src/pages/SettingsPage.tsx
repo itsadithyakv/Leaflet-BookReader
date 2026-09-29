@@ -7,13 +7,8 @@ import { useAppearanceStore, type ThemeMode } from "../store/appearanceStore";
 import { converterService, type ConverterInfo } from "../services/converterService";
 import { dependencyFreeSummary, externalConverterCount } from "../constants/bookFormats";
 import { bookService } from "../services/bookService";
-import {
-  clearSmartReadProfiles,
-  loadSmartReadCalibration,
-  normalizeSmartReadCalibration,
-  saveSmartReadCalibration,
-  type SmartReadCalibration
-} from "../services/smartReadService";
+import { clearSmartReadProfiles } from "../services/smartReadService";
+import { ReadingPaceCard } from "../components/ReadingPaceCard";
 import { UiIcon } from "../components/UiIcon";
 import { RemindersCard } from "../components/RemindersCard";
 import { getPlatform, pickSyncFolder } from "../platform";
@@ -68,9 +63,6 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
       resetAll: state.resetAll
     }))
   );
-  // Reader calibration is keyed on the connected Google account when there is
-  // one. It used to key on whatever had been typed into a sign-in modal.
-  const accountEmail = sync.accountEmail;
   const theme = useAppearanceStore((state) => state.theme);
   const followSystem = useAppearanceStore((state) => state.followSystem);
   const followSystemTheme = useAppearanceStore((state) => state.followSystemTheme);
@@ -97,9 +89,6 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
   const [apiBase, setApiBase] = useState("");
   const [apiBusy, setApiBusy] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
-  const [smartReadCalibration, setSmartReadCalibration] = useState<SmartReadCalibration>(() =>
-    loadSmartReadCalibration(accountEmail)
-  );
 
   useEffect(() => {
     converterService
@@ -109,20 +98,8 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
   }, []);
 
   useEffect(() => {
-    setSmartReadCalibration(loadSmartReadCalibration(accountEmail));
-  }, [accountEmail]);
-
-  useEffect(() => {
     setApiBase(sync.apiBase ?? "");
   }, [sync.apiBase]);
-
-  const updateSmartReadCalibration = (next: Partial<SmartReadCalibration>) => {
-    setSmartReadCalibration((current) => {
-      const normalized = normalizeSmartReadCalibration({ ...current, ...next });
-      saveSmartReadCalibration(accountEmail, normalized);
-      return normalized;
-    });
-  };
 
   const syncHelper =
     syncStatus === "syncing"
@@ -631,58 +608,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
         </div>
         )}
 
-        <div className="paper-surface rounded-xl p-5">
-          <p className="text-xs uppercase tracking-widest text-on-surface-variant">
-            Smart Read Calibration
-          </p>
-          <h3 className="page-title mt-2 text-2xl text-on-surface">Your comfortable pace</h3>
-          <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
-            Dotty learns inside this range. A wider range lets it react more strongly when you read
-            faster or slow down for difficult material.
-          </p>
-          <div className="mt-5 space-y-5">
-            <label className="block">
-              <span className="flex items-center justify-between gap-3 text-xs text-on-surface-variant">
-                <span>Minimum pace</span>
-                <strong className="text-on-surface">{smartReadCalibration.minWpm} WPM</strong>
-              </span>
-              <input
-                className="mt-3 w-full accent-primary"
-                type="range"
-                min={70}
-                max={Math.max(70, smartReadCalibration.maxWpm - 20)}
-                step={5}
-                value={smartReadCalibration.minWpm}
-                onChange={(event) =>
-                  updateSmartReadCalibration({ minWpm: Number(event.target.value) })
-                }
-              />
-            </label>
-            <label className="block">
-              <span className="flex items-center justify-between gap-3 text-xs text-on-surface-variant">
-                <span>Maximum pace</span>
-                <strong className="text-on-surface">{smartReadCalibration.maxWpm} WPM</strong>
-              </span>
-              <input
-                className="mt-3 w-full accent-primary"
-                type="range"
-                min={Math.min(500, smartReadCalibration.minWpm + 20)}
-                max={500}
-                step={5}
-                value={smartReadCalibration.maxWpm}
-                onChange={(event) =>
-                  updateSmartReadCalibration({ maxWpm: Number(event.target.value) })
-                }
-              />
-            </label>
-          </div>
-          <div className="section-rule mt-5 flex items-center justify-between gap-3 pt-4 text-xs text-on-surface-variant">
-            <span>Adaptive range</span>
-            <span className="font-semibold text-on-surface">
-              {smartReadCalibration.minWpm}–{smartReadCalibration.maxWpm} WPM
-            </span>
-          </div>
-        </div>
+        <ReadingPaceCard showToast={showToast} renderToggle={renderToggle} />
 
         <div className="paper-surface rounded-xl p-5">
           <p className="text-xs uppercase tracking-widest text-on-surface-variant">Optional Book Converter</p>

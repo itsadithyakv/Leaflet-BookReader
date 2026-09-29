@@ -33,15 +33,18 @@ export type ReadingWordState = {
   context: Array<{ text: string; trailing: string; index: number }>;
 };
 
+/** Smart Read through one chapter. */
 export type SmartSession = {
   startedAt: number;
+  /** Time Dotty was moving: pauses, waits and time away are left out. */
   activeMs: number;
   lastTickAt: number;
-  startIndex: number;
-  furthestIndex: number;
-  difficultyTotal: number;
-  difficultySamples: number;
-  rereads: number;
+  /** Where the reader and Dotty last agreed, which the reader's own pace is measured from. */
+  anchorIndex: number;
+  anchorActiveMs: number;
+  /** Read at Dotty's pace since then with no correction: a sign the pace suits. */
+  acceptedWords: number;
+  acceptedMs: number;
 };
 
 /** Scrolling through a chapter, or turning pages. */

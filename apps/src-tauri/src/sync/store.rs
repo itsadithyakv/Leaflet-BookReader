@@ -60,7 +60,8 @@ pub fn snapshot(db: &Database, now: &str) -> Result<SyncDoc> {
     harvests: db.pip_harvests()?,
     pip: db.pip_state()?,
     annotations: db.all_annotations()?,
-    collections: db.all_collections()?
+    collections: db.all_collections()?,
+    reading_profile: crate::sync::reading::load(db)?
   })
 }
 
@@ -161,6 +162,11 @@ pub fn apply(db: &Database, doc: &SyncDoc) -> Result<Applied> {
   }
   let carried: Vec<String> = doc.collections.iter().map(|c| c.id.clone()).collect();
   db.retire_collection_tombstones(&carried)?;
+  // Merged into what is stored rather than written over it: the reader may have
+  // learned something here since the snapshot this run started from.
+  if let Some(profile) = &doc.reading_profile {
+    crate::sync::reading::absorb(db, profile)?;
+  }
 
   // Tombstones the merge has retired can finally leave the database.
   let keep: Vec<String> = doc
@@ -234,7 +240,8 @@ mod tests {
       harvests: Vec::new(),
       pip: None,
       annotations: Vec::new(),
-      collections: Vec::new()
+      collections: Vec::new(),
+      reading_profile: None
     };
 
     apply(&db, &doc).expect("apply");
@@ -265,7 +272,8 @@ mod tests {
       harvests: Vec::new(),
       pip: None,
       annotations: Vec::new(),
-      collections: Vec::new()
+      collections: Vec::new(),
+      reading_profile: None
     };
     apply(&db, &doc).expect("apply");
 
@@ -297,7 +305,8 @@ mod tests {
       harvests: Vec::new(),
       pip: None,
       annotations: Vec::new(),
-      collections: Vec::new()
+      collections: Vec::new(),
+      reading_profile: None
     };
     apply(&db, &doc).expect("apply");
 
@@ -332,7 +341,8 @@ mod tests {
       harvests: Vec::new(),
       pip: None,
       annotations: Vec::new(),
-      collections: Vec::new()
+      collections: Vec::new(),
+      reading_profile: None
     };
     let applied = apply(&db, &doc).expect("apply");
 
@@ -364,7 +374,8 @@ mod tests {
       harvests: Vec::new(),
       pip: None,
       annotations: Vec::new(),
-      collections: Vec::new()
+      collections: Vec::new(),
+      reading_profile: None
     };
     let applied = apply(&db, &doc).expect("apply");
 
@@ -394,7 +405,8 @@ mod tests {
       harvests: Vec::new(),
       pip: None,
       annotations: Vec::new(),
-      collections: Vec::new()
+      collections: Vec::new(),
+      reading_profile: None
     };
 
     apply(&db, &doc).expect("first");
@@ -443,7 +455,8 @@ mod tests {
       harvests: Vec::new(),
       pip: None,
       annotations: Vec::new(),
-      collections: Vec::new()
+      collections: Vec::new(),
+      reading_profile: None
     };
 
     apply(&db, &doc).expect("apply");
@@ -581,5 +594,32 @@ mod tests {
     apply(&to, &doc).expect("apply");
     assert_eq!(to.pip_plantings().expect("plantings").len(), 1);
     assert_eq!(to.pip_harvests().expect("harvests").len(), 1);
+  }
+
+  /// A reader's pace follows them: what one device learned reaches the other,
+  /// merged with what that one learned, rather than written over it.
+  #[test]
+  fn the_reading_profile_travels_and_merges_on_arrival() {
+    use crate::sync::reading::{self, ReadingProfile};
+    let parse = |json: &str| serde_json::from_str::<ReadingProfile>(json).expect("profile");
+    let from = memory_db();
+    reading::absorb(
+      &from,
+      &parse(r#"{"version":2,"core":{"updatedAt":"2026-09-21T10:00:00Z","base":{"wpm":250}},"books":{"dune":{"updatedAt":"2026-09-21T10:00:00Z","wpm":210}}}"#)
+    )
+    .expect("laptop learns");
+    let doc = snapshot(&from, NOW).expect("snapshot");
+    assert!(doc.reading_profile.is_some(), "the snapshot carries it");
+
+    let to = memory_db();
+    reading::absorb(
+      &to,
+      &parse(r#"{"version":2,"core":{"updatedAt":"2026-09-20T10:00:00Z","base":{"wpm":230}},"books":{"hobbit":{"updatedAt":"2026-09-20T10:00:00Z","wpm":290}}}"#)
+    )
+    .expect("phone learns");
+    apply(&to, &doc).expect("apply");
+    let arrived = reading::load(&to).expect("load").expect("present");
+    assert_eq!(arrived.books.len(), 2, "both books' paces are kept");
+    assert_eq!(arrived.core.updated_at, "2026-09-21T10:00:00Z", "the newer reader-wide part wins");
   }
 }

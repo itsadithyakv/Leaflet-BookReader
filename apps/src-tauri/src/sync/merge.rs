@@ -155,7 +155,12 @@ pub struct SyncDoc {
   /// The reader's own collections. Per id, the newest edit wins, as for
   /// annotations.
   #[serde(default)]
-  pub collections: Vec<crate::db::Collection>
+  pub collections: Vec<crate::db::Collection>,
+  /// How fast the reader reads, overall and per book, merged part by part (see
+  /// `reading`). Left out of documents without one, so older builds read them
+  /// as before.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub reading_profile: Option<crate::sync::reading::ReadingProfile>
 }
 
 impl SyncDoc {
@@ -171,7 +176,8 @@ impl SyncDoc {
       harvests: Vec::new(),
       pip: None,
       annotations: Vec::new(),
-      collections: Vec::new()
+      collections: Vec::new(),
+      reading_profile: None
     }
   }
 
@@ -185,7 +191,7 @@ impl SyncDoc {
 ///
 /// Never compare these strings directly: `2026-01-01T00:00:00+05:30` sorts after
 /// `2026-01-01T00:00:00+00:00` as text but is the earlier instant.
-fn instant(value: &str) -> i64 {
+pub(crate) fn instant(value: &str) -> i64 {
   DateTime::parse_from_rfc3339(value)
     .map(|dt| dt.with_timezone(&Utc).timestamp_millis())
     .unwrap_or(0)
@@ -536,7 +542,8 @@ pub fn merge(local: &SyncDoc, remote: &SyncDoc, now: &str) -> SyncDoc {
     days: days.into_values().collect(),
     sessions: sessions.into_values().collect(),
     purchases: purchases.into_values().collect(),
-    pip: merge_pip(&local.pip, &remote.pip)
+    pip: merge_pip(&local.pip, &remote.pip),
+    reading_profile: crate::sync::reading::merge(&local.reading_profile, &remote.reading_profile)
   }
 }
 
@@ -742,7 +749,8 @@ mod tests {
       harvests: Vec::new(),
       pip: None,
       annotations: Vec::new(),
-      collections: Vec::new()
+      collections: Vec::new(),
+      reading_profile: None
     }
   }
 

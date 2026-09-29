@@ -31,6 +31,7 @@ mod pip_shop;
 mod diagnostics;
 mod annotations;
 mod collections;
+mod reading;
 
 pub use library::*;
 pub use backup::*;
@@ -44,3 +45,4 @@ pub use pip_shop::*;
 pub use diagnostics::*;
 pub use annotations::*;
 pub use collections::*;
+pub use reading::*;
