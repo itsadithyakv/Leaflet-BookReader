@@ -34,7 +34,7 @@ import {
   type HouseSlot,
   type LevelDecor
 } from "../pip/home.js";
-import { renderPacket } from "../pip/garden.js";
+import { renderPacket, renderSoil } from "../pip/garden.js";
 import { pickBeat } from "../pip/moments";
 import { ownPipAvatar } from "../pip/avatars";
 import { ownedPremiumMoves, ownsItem, usePipWardrobeStore } from "../store/pipWardrobeStore";
@@ -748,7 +748,7 @@ export const PipPage = ({ showToast }: PipPageProps) => {
         duringAct(ms, () => {
           const mouth = scene.pipPoint("mouth");
           const pip = scene.pip();
-          if (mouth && pip) spill(mouth, pip.bottom + pip.height * 0.02, { px: Math.max(3, scene.pixel() * 1.25), count: 6, colors: [crumb] });
+          if (mouth && pip) spill(mouth, pip.bottom + pip.height * 0.02, { px: Math.max(3, scene.pixel() * 1.25), colors: [crumb] });
         })
       );
     }
@@ -1390,7 +1390,8 @@ export const PipPage = ({ showToast }: PipPageProps) => {
           return (
             <div key={plot} className="pip-garden-row" data-focus={plotFocus === plot || undefined}>
               <span className="pip-garden-art">
-                <PixelImage render={() => renderPacket(here?.plant ?? "sunflower", 0)} drawKey={`plot-${here?.plant ?? "empty"}`} box={36} />
+                {/* An empty plot is its dug bed, not somebody else's sunflower. */}
+                <PixelImage render={() => (here ? renderPacket(here.plant, 0) : renderSoil(true))} drawKey={`plot-${here?.plant ?? "empty"}`} box={36} />
               </span>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold text-on-surface">

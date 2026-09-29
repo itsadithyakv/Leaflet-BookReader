@@ -244,14 +244,20 @@ export const floatText = (from: Point, text: string, tone: "gain" | "spend" | "m
   );
 };
 
-/** Crumbs spilling from a point down to a floor line, with a little bounce, then gone. */
-export const spill = (from: Point, floor: number, { px, count = 6, colors }: { px: number; count?: number; colors: readonly string[] }) => {
+/**
+ * Crumbs spilling from a point down to a floor line, with a little bounce,
+ * then gone. Each has a dark pixel edge, so it reads against the treat it
+ * fell from and the floor it lands on.
+ */
+export const spill = (from: Point, floor: number, { px, count = 7, colors }: { px: number; count?: number; colors: readonly string[] }) => {
   if (reducedMotion()) return;
+  const edge = Math.max(1, Math.round(px / 3));
   for (let index = 0; index < count; index += 1) {
-    const dx = between(-1, 1) * 26;
-    const size = px * (Math.random() < 0.3 ? 2 : 1);
+    const dx = between(-1, 1) * 34;
+    const size = px * (Math.random() < 0.35 ? 1.6 : 1);
     const element = piece("", size, size);
     element.style.background = pick(colors);
+    element.style.boxShadow = `0 0 0 ${edge}px rgba(58, 36, 20, 0.75)`;
     const land = Math.max(from.y + 4, floor + between(-2, 4));
     const first = from.x + dx * 0.6;
     const last = from.x + dx;

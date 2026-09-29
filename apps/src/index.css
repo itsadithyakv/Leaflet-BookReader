@@ -4161,6 +4161,15 @@ button.pip-hud-chip:hover {
   transform-origin: 50% 78%;
 }
 
+/* After dark the room's art dims itself; the beds, the plants and a piece of
+   decor on its way in dim to match, a little less, so the garden still reads
+   (and a ripe plant's glow shows up all the more). */
+.pip-house-room[data-night] .pip-plot-soil,
+.pip-house-room[data-night] .pip-plot-plant,
+.pip-house-room[data-night] .pip-decor-drop {
+  filter: brightness(0.5) saturate(0.85);
+}
+
 /* The bed and the air above it that the plant grows into. */
 .pip-plot-hit {
   inset: -14% 0 0;
@@ -4852,6 +4861,14 @@ button.pip-hud-chip:hover {
     max-height: 40vh;
     border-top: 1px solid rgb(var(--color-outline-variant) / 0.35);
     border-left: 0;
+  }
+}
+
+/* Where the rail is beside the page (md and up), the sheet starts past it
+   rather than under its leather. */
+@media (min-width: 768px) and (max-width: 900px) {
+  .pip-drawer {
+    left: 86px;
   }
 }
 

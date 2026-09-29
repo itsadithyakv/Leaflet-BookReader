@@ -767,7 +767,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     sow: (plot, from) => {
       const index = plotIndex(plot);
       const shown = index < 0 ? null : onScreen(plotBoxes(live.current.level, plots?.length ?? 0)[index]);
-      if (!shown) return;
+      if (!shown || prefersReducedMotion()) return;
       const k = live.current.scale;
       const soil = { x: shown.left + shown.width / 2, y: shown.top + SOIL_TOP * k };
       const above = { x: soil.x, y: soil.y - Math.max(70, 16 * k) };
@@ -867,6 +867,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
         ref={roomRef}
         className="pip-house-room"
         data-decorating={decorating || undefined}
+        data-night={night || undefined}
         style={{ width: level.w * scale, height: level.h * scale }}
         role="group"
         aria-label={label}
@@ -883,8 +884,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
               {
                 left: entry.box.x * scale,
                 top: entry.box.y * scale,
-                "--drop": `${Math.min(DROP_FROM, entry.box.y + entry.box.h) * scale}px`,
-                filter: night ? "brightness(0.62) saturate(0.85)" : undefined
+                "--drop": `${Math.min(DROP_FROM, entry.box.y + entry.box.h) * scale}px`
               } as CSSProperties
             }
           />
