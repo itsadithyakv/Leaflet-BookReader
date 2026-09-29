@@ -34,7 +34,7 @@
      night: dim the room and let lights glow (defaults to level.night).
    renderHouseItem(itemOrId, f) -> ImageData(item.w, item.h)
    renderSwatch("wallpaper"|"floor", id, w = 32, h = 32, f) -> ImageData (shop tiles) */
-import { Painter, skyAt, flame, rnd, blend, ROOM_ITEMS, paintSky, lerpC } from "./room.js";
+import { Painter, skyAt, flame, rnd, blend, ROOM_ITEMS, paintSky, lerpC, withSkyHour } from "./room.js";
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 import { rgba, FONT } from "./engine.js";
 import { NOD_ITEMS as NODS_BOOKS } from "./house-nods.js";
@@ -836,6 +836,10 @@ export function placeAt(item, slot) {
 const ORDER = { window: 0, wall: 1, rug: 2, top: 3, stand: 3, ceiling: 4 };
 
 export function renderLevel(levelId, f = 0, opts = {}) {
+  // opts.hour: the real time of day for windows; f then only animates.
+  if (opts.hour != null) {
+    return withSkyHour(opts.hour, () => renderLevel(levelId, f, { ...opts, hour: null }));
+  }
   const L = LEVEL.get(levelId) || HOUSE_LEVELS[0];
   const g = new Painter(L.w, L.h, f);
   (WP.get(opts.wallpaper) || WP.get(L.wallpaper)).draw(g, 0, 0, L.w, FY - 3, f);

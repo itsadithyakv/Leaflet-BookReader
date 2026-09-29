@@ -285,15 +285,20 @@ export const placements = (layout) => {
 
 // ---- drawing ------------------------------------------------------------------------
 
-/** A floor with its decor, as w x h ImageData. Null for a floor another module draws (the fallback garden). */
-export const renderHouseLevel = (level, frame, decor, night) => {
+/**
+ * A floor with its decor, as w x h ImageData. Null for a floor another module
+ * draws (the fallback garden). `hour` (0-24) sets the sky in the windows to the
+ * real time; `frame` then only animates lamps, fish, clouds and stars.
+ */
+export const renderHouseLevel = (level, frame, decor, night, hour) => {
   if (!level.fallback && typeof art.renderLevel === "function") {
     return art.renderLevel(level.id, frame, {
       wallpaper: decor.wallpaper ?? undefined,
       floor: decor.floor ?? undefined,
       placed: decor.placed,
       // Always-dark floors stay dark; the rest dim in the evening and lamps glow.
-      night: level.night || Boolean(night)
+      night: level.night || Boolean(night),
+      hour
     });
   }
   if (level.garden) return null;

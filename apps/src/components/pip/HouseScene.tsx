@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
-import { renderHouseLevel, skyAt, type HouseLevel, type HouseSlot, type LevelDecor } from "../../pip/home.js";
+import { renderHouseLevel, type HouseLevel, type HouseSlot, type LevelDecor } from "../../pip/home.js";
 import { PLOT_H, PLOT_W, renderGardenFloor, renderPlot } from "../../pip/garden.js";
 import { subscribeTick } from "../../pip/ticker";
 import { PipSprite } from "../PipSprite";
@@ -7,9 +7,10 @@ import { PipSay } from "../PipSay";
 import { pixelsPerArtPixel } from "./PixelImage";
 
 /**
- * The room loops this many frames (4 s at 12 fps) from the current hour's
- * sky, so windows show the real time of day while lamps flicker and fish
- * swim. Each frame is drawn once and kept.
+ * The room loops this many frames (4 s at 12 fps) so lamps flicker and fish
+ * swim. The windows show the real time of day, fixed across the loop (they
+ * used to run 1.6 hours of sky every loop and snap back). Each frame is drawn
+ * once and kept, until the time of day moves on (every 10 minutes).
  */
 const ROOM_LOOP = 48;
 /** Pip's stroll, in floor pixels per second. */
@@ -47,6 +48,9 @@ export type ScenePlot = {
 
 /** Evenings (and nights) the house dims and its lamps glow. */
 const isEvening = (hour: number) => hour >= 19 || hour < 6;
+
+/** The time of day the windows show: the hour, to the nearest 10 minutes. */
+const clockHour = (date = new Date()) => date.getHours() + Math.floor(date.getMinutes() / 10) / 6;
 
 /** Where the garden's plots sit on a floor: spread along the floor, soil on the ground. */
 export const plotBoxes = (level: HouseLevel, count: number) => {
@@ -168,11 +172,11 @@ export const HouseScene = ({
       return out;
     };
     const boxes = plotBoxes(level, plots?.length ?? 0);
-    let hour = new Date().getHours();
+    let hour = clockHour();
     let frames = new Map<number, HTMLCanvasElement>();
     const plotFrames = new Map<string, HTMLCanvasElement>();
     const draw = (step: number) => {
-      const now = new Date().getHours();
+      const now = clockHour();
       if (now !== hour) {
         hour = now;
         frames = new Map();
@@ -180,7 +184,9 @@ export const HouseScene = ({
       let image = frames.get(step);
       if (!image) {
         try {
-          const art = renderHouseLevel(level, skyAt(hour) + step, decor, isEvening(hour)) ?? renderGardenFloor(level.w, level.h, level.floorY, step);
+          const art =
+            renderHouseLevel(level, step, decor, isEvening(Math.floor(hour)), hour) ??
+            renderGardenFloor(level.w, level.h, level.floorY, step);
           image = toCanvas(art);
         } catch {
           // Art mid-edit can throw; keep the last good frame.

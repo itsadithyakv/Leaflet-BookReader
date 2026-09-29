@@ -44,6 +44,7 @@ import { useLibraryStore } from "../store/libraryStore";
 import { FEATURES } from "../constants/features";
 import { askConfirm } from "../components/ConfirmDialog";
 import { HouseScene, type SceneAct, type ScenePlot } from "../components/pip/HouseScene";
+import { FloorSwitch } from "../components/pip/FloorSwitch";
 import { PipDrawer } from "../components/pip/PipDrawer";
 import { PipShop, type PreviewLook, type ShopCategory, type ShopEntry } from "../components/pip/PipShop";
 import { PixelImage } from "../components/pip/PixelImage";
@@ -798,7 +799,7 @@ export const PipPage = ({ showToast }: PipPageProps) => {
         name={entry.name}
         hint={entry.blurb ?? entry.unlock}
         label={`${entry.name}. ${worn ? "Wearing." : owned ? "Owned. Select to wear it." : earned ? `Earned by reading: ${entry.unlock}` : "In the shop."}`}
-        art={(hot) => <PipSprite move="idle" still={!hot && !worn} size={56} skin={entry.id} outfit={outfit} />}
+        art={(hot) => <PipSprite move="idle" still={!hot && !worn} size={72} snap="nearest" skin={entry.id} outfit={outfit} />}
         status={worn ? <Status icon="check">Wearing</Status> : owned ? <Status>Owned</Status> : earned ? <Status icon="lock">Earned</Status> : priceTag(priceOf("skin", entry.id))}
         onSelect={() => {
           if (worn) return;
@@ -818,7 +819,7 @@ export const PipPage = ({ showToast }: PipPageProps) => {
         selected={worn}
         name={entry.name}
         label={`${entry.name}. ${worn ? "Wearing. Select to take it off." : "Select to wear it."}`}
-        art={(hot) => <PipSprite move="idle" still={!hot} size={56} skin={variant} outfit={withAccessory(entry.id)} />}
+        art={(hot) => <PipSprite move="idle" still={!hot} size={72} snap="nearest" skin={variant} outfit={withAccessory(entry.id)} />}
         status={worn ? <Status icon="check">Wearing</Status> : <Status>Owned</Status>}
         onSelect={() => void change({ outfit: worn ? outfit.filter((id) => id !== entry.id) : withAccessory(entry.id) })}
       />
@@ -863,7 +864,7 @@ export const PipPage = ({ showToast }: PipPageProps) => {
         key={entry.id}
         name={entry.name}
         label={`${entry.name}. ${food ? `Feed Pip for ${price} seeds.` : owned ? "Play with Pip." : `${price} seeds.`} Cheers Pip up.`}
-        art={(hot) => <PipSprite move={entry.move} still={!hot} size={56} skin={variant} outfit={outfit} />}
+        art={(hot) => <PipSprite move={entry.move} still={!hot} size={72} snap="nearest" skin={variant} outfit={outfit} />}
         status={food ? priceTag(price) : owned ? <Status icon="heart">Play</Status> : priceTag(price)}
         onSelect={() => {
           if (food || owned) void give(entry);
@@ -900,7 +901,7 @@ export const PipPage = ({ showToast }: PipPageProps) => {
             <MoveCard
               key={entry.id}
               name={name}
-              art={(hot) => <PipSprite move={entry.id} still={!hot && !chosen} size={56} skin={variant} outfit={outfit} />}
+              art={(hot) => <PipSprite move={entry.id} still={!hot && !chosen} size={72} snap="nearest" skin={variant} outfit={outfit} />}
               selected={chosen}
               status={chosen ? <Status icon="check">Signature</Status> : owned ? <Status>{price === 0 ? "Free" : "Owned"}</Status> : priceTag(price)}
               onPreview={() => play(entry.id, 2)}
@@ -1217,6 +1218,18 @@ export const PipPage = ({ showToast }: PipPageProps) => {
               ))}
             </span>
           </div>
+          {levels.length > 1 && (
+            <FloorSwitch
+              levels={levels}
+              current={level}
+              above={above}
+              below={below}
+              unlocked={unlocked}
+              lockReason={lockReason}
+              priceOf={(entry) => priceOf("level", entry.id)}
+              onOpen={openFloor}
+            />
+          )}
           <div className="pip-hud-group pip-toolbar" role="toolbar" aria-label="Pip's things">
             {TOOLS.map((tool) => (
               <button key={tool.id} type="button" className="pip-hud-button" aria-pressed={drawer === tool.id} onClick={() => toggleDrawer(tool.id)}>
@@ -1289,58 +1302,6 @@ export const PipPage = ({ showToast }: PipPageProps) => {
             label={`The ${level.name}, with Pip in ${SKINS.find((entry) => entry.id === shownVariant)?.name ?? "its"} outfit. ${moodWord(mood)}.`}
           />
 
-          {levels.length > 1 && (
-            <nav className="pip-floors" aria-label="Floors of the house">
-              <button
-                type="button"
-                className="pip-floor-arrow"
-                onClick={() => above && openFloor(above)}
-                disabled={!above}
-                aria-label={above ? `Up to the ${above.name}${unlocked(above) ? "" : " (locked)"}` : "Top floor"}
-              >
-                ▲
-              </button>
-              <ol className="pip-floor-list">
-                {[...levels].reverse().map((entry) => {
-                  const open = unlocked(entry);
-                  const why = open ? null : lockReason(entry);
-                  return (
-                    <li key={entry.id}>
-                      <button
-                        type="button"
-                        className="pip-floor"
-                        aria-current={entry.id === level.id ? "true" : undefined}
-                        data-locked={!open || undefined}
-                        onClick={() => openFloor(entry)}
-                        title={open ? entry.name : `${entry.name}: ${why ?? `${priceOf("level", entry.id)} seeds`}`}
-                        aria-label={open ? entry.name : `${entry.name}, locked: ${why ?? `${priceOf("level", entry.id)} seeds`}`}
-                      >
-                        <span className="truncate">{entry.name}</span>
-                        {!open &&
-                          (why ? (
-                            <UiIcon name="lock" size={11} />
-                          ) : (
-                            <span className="pip-floor-price">
-                              <UiIcon name="seed" size={10} />
-                              {priceOf("level", entry.id)}
-                            </span>
-                          ))}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ol>
-              <button
-                type="button"
-                className="pip-floor-arrow"
-                onClick={() => below && openFloor(below)}
-                disabled={!below}
-                aria-label={below ? `Down to the ${below.name}` : "Ground floor"}
-              >
-                ▼
-              </button>
-            </nav>
-          )}
 
           {drawer && (
             <PipDrawer title={drawers[drawer].title} note={drawers[drawer].note} onClose={() => setDrawer(null)}>

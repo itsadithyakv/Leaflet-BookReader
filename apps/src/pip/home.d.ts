@@ -64,7 +64,7 @@ export declare const FLOOR: string;
 export declare function levelDecor(layout: Record<string, string> | null | undefined, level: HouseLevel): LevelDecor;
 export declare function withLevelDecor(layout: Record<string, string> | null | undefined, level: HouseLevel, decor: LevelDecor): Record<string, string>;
 export declare function placements(layout: Record<string, string> | null | undefined): Map<string, string>;
-export declare function renderHouseLevel(level: HouseLevel, frame: number, decor: LevelDecor, night?: boolean): ImageData | null;
+export declare function renderHouseLevel(level: HouseLevel, frame: number, decor: LevelDecor, night?: boolean, hour?: number): ImageData | null;
 export declare function renderItem(item: PipRoomItem | string, frame?: number): ImageData;
 export declare function renderFinish(type: "wallpaper" | "floor", id: string, w?: number, h?: number): ImageData | null;
 export declare function isGardenLevel(level: { id: string } | null | undefined): boolean;

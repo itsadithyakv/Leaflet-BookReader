@@ -3966,7 +3966,7 @@ button.pip-hud-chip:hover {
 }
 
 .pip-hud button:focus-visible,
-.pip-floors button:focus-visible,
+.pip-floor-switch button:focus-visible,
 .pip-house-hotspot:focus-visible,
 .pip-house-pip-button:focus-visible,
 .pip-shop-card:focus-visible,
@@ -4123,21 +4123,69 @@ button.pip-hud-chip:hover {
 }
 
 /* The floor switcher: up, the floors, down. */
-.pip-floors {
-  display: flex;
-  width: 9.5rem;
-  flex: none;
-  flex-direction: column;
+.pip-floor-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
   gap: 4px;
 }
 
-.pip-floor-list {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+.pip-floor-step,
+.pip-floor-current {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid rgb(var(--color-outline-variant) / 0.4);
+  border-radius: 12px;
+  background: rgb(var(--color-surface-high) / 0.92);
+  color: rgb(var(--color-on-surface));
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: var(--shadow-raised-small);
 }
 
-.pip-floor-arrow,
+.pip-floor-step {
+  min-width: 34px;
+  justify-content: center;
+  font-size: 10px;
+}
+
+.pip-floor-step:disabled {
+  opacity: 0.4;
+}
+
+.pip-floor-current {
+  max-width: 13rem;
+}
+
+.pip-floor-step:not(:disabled):hover,
+.pip-floor-current:hover,
+.pip-floor-current[aria-expanded="true"] {
+  border-color: rgb(var(--color-primary) / 0.56);
+  color: rgb(var(--pip-accent));
+}
+
+.pip-floor-count {
+  color: rgb(var(--color-on-surface-variant));
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.pip-floor-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  display: flex;
+  min-width: 13rem;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px;
+  border-radius: 12px;
+}
+
 .pip-floor {
   display: flex;
   width: 100%;
@@ -4151,14 +4199,6 @@ button.pip-hud-chip:hover {
   color: rgb(var(--color-on-surface));
   font-size: 12px;
   font-weight: 600;
-}
-
-.pip-floor-arrow {
-  justify-content: center;
-}
-
-.pip-floor-arrow:disabled {
-  opacity: 0.4;
 }
 
 .pip-floor[aria-current="true"] {
@@ -4195,17 +4235,26 @@ button.pip-hud-chip:hover {
   color: rgb(var(--color-on-surface));
 }
 
-/* A drawer beside the house; over it on narrow windows. */
+/* A drawer beside the house, so the whole room stays in view while Pip tries
+   things on; over it on narrow windows, where side by side leaves no room. */
 .pip-drawer {
-  position: absolute;
-  top: 0;
-  right: 0;
+  position: relative;
   z-index: 5;
   display: flex;
-  width: min(420px, 100%);
-  max-height: min(78vh, 720px);
+  width: clamp(340px, 26vw, 440px);
+  flex: none;
+  max-height: min(80vh, 760px);
   flex-direction: column;
   border-radius: 16px;
+}
+
+@media (max-width: 1023px) {
+  .pip-drawer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: min(440px, 100%);
+  }
 }
 
 .pip-drawer-head {
@@ -4502,29 +4551,10 @@ button.pip-hud-chip:hover {
   pointer-events: none;
 }
 
-/* Narrow windows: floors under the scene; drawer and shop full width. */
+/* Narrow windows: the drawer as a sheet at the bottom; the shop full width. */
 @media (max-width: 900px) {
   .pip-house-body {
     flex-direction: column;
-  }
-
-  .pip-floors {
-    width: 100%;
-    flex-direction: row;
-    overflow-x: auto;
-  }
-
-  .pip-floor-list {
-    flex-direction: row;
-  }
-
-  .pip-floor {
-    width: auto;
-    white-space: nowrap;
-  }
-
-  .pip-floor-arrow {
-    width: auto;
   }
 
   .pip-drawer {

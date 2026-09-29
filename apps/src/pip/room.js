@@ -213,8 +213,26 @@ export function flame(g, cx, by, hgt, wid, f, seed) {
   }
 }
 
+/**
+ * The hour (0-24, fractional) the sky shows while `draw` runs, when the caller
+ * knows the real time: the house scene draws a 4-second loop of frames for its
+ * lamps and fish, and the sky must stay at the real time throughout, not run
+ * 48 frames (1.6 hours) of day and snap back every loop. Without it the hour
+ * comes from the frame, as for shop previews (a window runs a day every DAY frames).
+ */
+let skyHour = null;
+export const withSkyHour = (hour, draw) => {
+  const previous = skyHour;
+  skyHour = hour;
+  try {
+    return draw();
+  } finally {
+    skyHour = previous;
+  }
+};
+
 export function skyAt(f) {
-  const hr = ((f % DAY) + DAY) % DAY / DAY * 24;
+  const hr = skyHour ?? ((f % DAY) + DAY) % DAY / DAY * 24;
   if (hr < 5 || hr >= 20) return { hr, top: "#141A3A", bot: "#2B3566", night: 1 };
   if (hr < 7) return { hr, top: "#5A6BC4", bot: "#FFB38A", night: 0.4 };
   if (hr < 17) return { hr, top: "#5AB8FF", bot: "#BFE6FF", night: 0 };
