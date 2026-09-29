@@ -239,39 +239,72 @@ body::before {
   text-shadow: 0 0 15px rgba(101, 168, 63, 0.4);
 }
 
-.leaflet-account-badge {
+/* The header's profile button: the reader's Pip in a round frame. Quiet by
+   default; a ring while a backup runs, a red dot when one failed. */
+.profile-button {
+  position: relative;
   display: inline-flex;
+  width: 46px;
+  height: 46px;
   align-items: center;
-  gap: 8px;
-  border-radius: 14px;
+  justify-content: center;
+  border-radius: 9999px;
   border: 1px solid rgb(var(--color-outline-variant) / 0.34);
-  padding: 10px 13px;
-  font-size: 11px;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
   background: rgb(var(--color-surface-high));
   box-shadow: var(--shadow-raised-small);
-  transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+  overflow: visible;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
-.leaflet-account-badge:hover {
-  color: rgb(var(--color-primary));
-  transform: translateY(-2px);
+.profile-button:hover,
+.profile-button-open {
+  border-color: rgb(var(--color-primary) / 0.45);
+  transform: translateY(-1px);
   box-shadow: var(--accent-glow), var(--shadow-raised-small);
 }
 
-.leaflet-account-pop {
-  animation: badgePop 0.28s ease;
+.profile-button:focus-visible {
+  outline: 2px solid rgb(var(--color-primary));
+  outline-offset: 3px;
 }
 
-@keyframes badgePop {
-  0% {
-    transform: scale(0.96);
-    opacity: 0.6;
+.profile-button > :first-child {
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+/* Backing up: a thin arc runs round the frame. */
+.profile-button-syncing::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  border-top-color: rgb(var(--color-primary));
+  animation: profileSpin 0.9s linear infinite;
+}
+
+@keyframes profileSpin {
+  to {
+    transform: rotate(360deg);
   }
-  100% {
-    transform: scale(1);
-    opacity: 1;
+}
+
+.profile-button-alert {
+  position: absolute;
+  right: -1px;
+  top: -1px;
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background: rgb(var(--color-error));
+  box-shadow: 0 0 0 2px rgb(var(--color-surface-high));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .profile-button-syncing::after {
+    animation: none;
+    border-color: rgb(var(--color-primary) / 0.6);
   }
 }
 
@@ -3464,8 +3497,7 @@ textarea:focus-visible,
    pointer is fine. */
 @media (hover: none) and (pointer: coarse) {
   .tactile-button,
-  .key-button,
-  .leaflet-account-badge {
+  .key-button {
     min-height: 44px;
   }
 

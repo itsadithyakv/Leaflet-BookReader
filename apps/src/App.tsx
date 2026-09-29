@@ -3,8 +3,8 @@ import { useShallow } from "zustand/react/shallow";
 import { isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Sidebar } from "./components/Sidebar";
-import { AccountBadge, type SyncMode } from "./components/AccountBadge";
-import { AccountPanel } from "./components/AccountPanel";
+import { ProfileButton, type SyncMode } from "./components/ProfileButton";
+import { AccountDialog, accountOffered, markAccountOffered, useAccountDialog } from "./components/account/AccountDialog";
 import { WelcomeModal } from "./components/WelcomeModal";
 import { SessionWrapUp } from "./components/SessionWrapUp";
 import { usePipReactions } from "./hooks/usePipReactions";
@@ -24,6 +24,7 @@ import { MobileNav } from "./components/MobileNav";
 import { UiIcon } from "./components/UiIcon";
 import { LibraryPage } from "./pages/LibraryPage";
 import { useLibraryStore } from "./store/libraryStore";
+import { FEATURES } from "./constants/features";
 import { AWAY_FREE_MS, useHabitStore } from "./store/habitStore";
 import { setAppFullscreen, watchForeground } from "./services/windowService";
 import { ConfirmDialog } from "./components/ConfirmDialog";
@@ -550,16 +551,40 @@ const App = () => {
     } catch {
       // Refusing to remember the answer is better than refusing to start.
     }
-    // First run: Pip shows the new reader around, once it has come out.
+    // First run: then, once, an account (skippable), when there is a server
+    // to have one on; Pip's tour waits for both.
+    if (FEATURES.accounts && useLibraryStore.getState().sync.apiBase && !accountOffered()) {
+      markAccountOffered();
+      useAccountDialog.getState().show("signup", true);
+      return;
+    }
+    // Pip shows the new reader around, once it has come out.
     window.setTimeout(() => usePipStore.getState().startTour(), 2200);
   }, []);
+
+  // The first-run account step closing (done or skipped) starts Pip's tour.
+  const accountStepOpen = useAccountDialog((state) => state.open && state.firstRun);
+  const accountStepWasOpen = useRef(false);
+  useEffect(() => {
+    if (accountStepOpen) {
+      accountStepWasOpen.current = true;
+      return;
+    }
+    if (accountStepWasOpen.current) {
+      accountStepWasOpen.current = false;
+      const timer = window.setTimeout(() => usePipStore.getState().startTour(), 1400);
+      return () => window.clearTimeout(timer);
+    }
+  }, [accountStepOpen]);
+
+  const closeProfile = useCallback(() => setAccountPanelOpen(false), []);
 
   // First launch shows one thing at a time: the welcome screen alone, then
   // Pip comes out and starts the tour.
   const welcomeShowing = welcomeOpen && !sync.driveConnected && !sync.folderPath;
   useEffect(() => {
-    usePipStore.getState().setWaiting(welcomeShowing);
-  }, [welcomeShowing]);
+    usePipStore.getState().setWaiting(welcomeShowing || accountStepOpen);
+  }, [welcomeShowing, accountStepOpen]);
 
   // The tour points at the Library, so it starts there.
   const tourRunning = usePipStore((state) => state.tour !== null);
@@ -742,18 +767,6 @@ const App = () => {
   const selectedDelivery = selected
     ? findBookFormat(getBookExtension(selected.localPath))?.delivery
     : undefined;
-  const badgeAnimateRef = useRef<string | null>(null);
-  const [badgeAnimate, setBadgeAnimate] = useState(false);
-
-  useEffect(() => {
-    if (badgeAnimateRef.current === syncMode) {
-      return;
-    }
-    badgeAnimateRef.current = syncMode;
-    setBadgeAnimate(true);
-    const timer = window.setTimeout(() => setBadgeAnimate(false), 320);
-    return () => window.clearTimeout(timer);
-  }, [syncMode]);
 
   // Pip's right-click menu: the few things worth a shortcut from anywhere.
   const pipActions: PipAction[] = [];
@@ -823,19 +836,6 @@ const App = () => {
           </div>
         </div>
         <div className="flex items-center gap-2 md:gap-4">
-          {/* Backup, in one word: the badge opens its panel; "Back up now" appears
-              once there is somewhere to back up to. */}
-          {syncMode !== "off" && (
-            <button
-              type="button"
-              className="tactile-button hidden items-center gap-2 px-3 py-2 text-xs xl:flex"
-              onClick={handleSync}
-              disabled={syncStatus === "syncing"}
-            >
-              <UiIcon name="sync" size={17} />
-              {syncStatus === "syncing" ? "Backing up…" : "Back up now"}
-            </button>
-          )}
           <button
             type="button"
             className="key-button"
@@ -845,39 +845,40 @@ const App = () => {
           >
             <UiIcon name={theme === "dark" ? "sun" : "moon"} size={19} />
           </button>
-          <div className="relative" data-tour="backup">
-            <AccountBadge
-              mode={syncMode}
-              status={syncStatus}
-              pending={sync.booksPending}
-              onClick={() => setAccountPanelOpen((prev) => !prev)}
-              animate={badgeAnimate}
-            />
-            <AccountPanel
-              open={accountPanelOpen}
-              mode={syncMode}
-              status={syncStatus}
-              sync={sync}
-              error={syncError}
-              onConnectDrive={() => {
-                setAccountPanelOpen(false);
-                handleDriveConnect();
-              }}
-              onDisconnectDrive={() => {
-                setAccountPanelOpen(false);
-                handleDisconnectDrive();
-              }}
-              onChooseFolder={() => {
-                setAccountPanelOpen(false);
-                void handleChooseFolder();
-              }}
-              onClearFolder={() => {
-                setAccountPanelOpen(false);
-                handleClearFolder();
-              }}
-              onSyncNow={handleSync}
-            />
-          </div>
+          <ProfileButton
+            open={accountPanelOpen}
+            onToggle={() => setAccountPanelOpen((prev) => !prev)}
+            onClose={closeProfile}
+            mode={syncMode}
+            status={syncStatus}
+            sync={sync}
+            error={syncError}
+            onConnectDrive={() => {
+              closeProfile();
+              handleDriveConnect();
+            }}
+            onDisconnectDrive={() => {
+              closeProfile();
+              handleDisconnectDrive();
+            }}
+            onChooseFolder={() => {
+              closeProfile();
+              void handleChooseFolder();
+            }}
+            onClearFolder={() => {
+              closeProfile();
+              handleClearFolder();
+            }}
+            onSyncNow={handleSync}
+            onOpenSettings={() => {
+              closeProfile();
+              setActiveTab("settings");
+            }}
+            onOpenProfile={() => {
+              closeProfile();
+              setActiveTab("social");
+            }}
+          />
         </div>
       </header>
 
@@ -1124,6 +1125,7 @@ const App = () => {
         }}
         onDismiss={dismissWelcome}
       />
+      <AccountDialog showToast={showToast} />
 
     </div>
   );

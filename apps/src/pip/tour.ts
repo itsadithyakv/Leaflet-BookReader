@@ -15,7 +15,7 @@ export const TOUR: TourStop[] = [
   { target: '[data-tour="import"]', line: "first things first: drop your books in here. epub, pdf, comics, all of it." },
   { target: '[data-tour="session"]', line: "start a focus session and i'll count your minutes. each one earns seeds to spend on me." },
   { target: '[data-tour="nav"]', line: "your collections, reading stats and my room live down this spine." },
-  { target: '[data-tour="backup"]', line: "this keeps your library backed up in your own google drive." },
+  { target: '[data-tour="backup"]', line: "that's you, up here. your profile and your backup live behind this." },
   { target: '[data-tour="search"]', line: "lost a book? search the whole archive up here." },
   { target: null, line: "that's it! grab me by the leaf and throw me, right-click me for shortcuts, and click the logo to send me home." }
 ];

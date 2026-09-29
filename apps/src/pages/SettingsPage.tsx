@@ -22,9 +22,8 @@ import { openStoreReview } from "../components/RatePrompt";
 import { useAccountStore } from "../store/accountStore";
 import { accountService, errorMessage } from "../services/accountService";
 import { diagnosticsService } from "../services/diagnosticsService";
-import { AvatarPicker } from "../components/AvatarPicker";
+import { AccountForm } from "../components/account/AccountForm";
 import { PipAvatar } from "../components/community/PipAvatar";
-import { randomAvatar } from "../pip/avatars";
 import { usePipStore, type PipMode } from "../store/pipStore";
 import { pickBeat } from "../pip/moments";
 
@@ -881,23 +880,10 @@ const AccountCard = ({ showToast }: { showToast: (message: string) => void }) =>
   const status = useAccountStore((state) => state.status);
   const loaded = useAccountStore((state) => state.loaded);
   const load = useAccountStore((state) => state.load);
-  const signUp = useAccountStore((state) => state.signUp);
-  const signIn = useAccountStore((state) => state.signIn);
-  const requestReset = useAccountStore((state) => state.requestReset);
-  const resetPassword = useAccountStore((state) => state.resetPassword);
   const signOut = useAccountStore((state) => state.signOut);
   const changePassword = useAccountStore((state) => state.changePassword);
   const deleteAccount = useAccountStore((state) => state.deleteAccount);
 
-  const [mode, setMode] = useState<"signin" | "signup" | "reset">("signin");
-  // Forgotten password: the address a code was sent to, and for how long it lasts.
-  const [codeSent, setCodeSent] = useState<{ email: string; minutes: number } | null>(null);
-  const [code, setCode] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  // Preselected at random, so a reader who skips past it still gets a Pip of their own.
-  const [avatar, setAvatar] = useState(() => randomAvatar().id);
   const [panel, setPanel] = useState<"none" | "password" | "delete">("none");
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -909,7 +895,6 @@ const AccountCard = ({ showToast }: { showToast: (message: string) => void }) =>
   }, [load]);
 
   const reset = () => {
-    setPassword("");
     setCurrent("");
     setNext("");
     setError(null);
@@ -1058,254 +1043,12 @@ const AccountCard = ({ showToast }: { showToast: (message: string) => void }) =>
     );
   }
 
-  if (mode === "reset") {
-    const leave = () => {
-      setMode("signin");
-      setCodeSent(null);
-      setCode("");
-      reset();
-    };
-    const sendCode = () => {
-      setBusy(true);
-      setError(null);
-      requestReset(email.trim())
-        .then((minutes) => {
-          setCodeSent({ email: email.trim(), minutes });
-          setCode("");
-        })
-        .catch((cause) => setError(errorMessage(cause)))
-        .finally(() => setBusy(false));
-    };
-    const codeReady = code.replace(/[^a-z0-9]/gi, "").length === 8 && password.length >= 8;
-    return (
-      <div className="paper-surface rounded-xl p-5">
-        <p className="text-xs uppercase tracking-widest text-on-surface-variant">Account</p>
-        <p className="mt-3 font-headline text-2xl font-bold text-on-surface">Reset your password</p>
-        {!codeSent ? (
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (email.trim() && !busy) {
-                sendCode();
-              }
-            }}
-          >
-            <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
-              We'll email you a code to set a new password. Your library on this computer is not affected.
-            </p>
-            <label className={labelClass}>Email</label>
-            <input
-              type="email"
-              autoComplete="email"
-              autoCapitalize="none"
-              spellCheck={false}
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              className={fieldClass}
-            />
-            {errorBox}
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <button
-                type="submit"
-                className="tactile-button tactile-button-primary px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={busy || !email.trim()}
-              >
-                {busy ? "One moment…" : "Email me a code"}
-              </button>
-              <button type="button" className="text-xs text-on-surface-variant underline" onClick={leave}>
-                Back to sign in
-              </button>
-            </div>
-          </form>
-        ) : (
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (codeReady && !busy) {
-                attempt(async () => {
-                  await resetPassword(codeSent.email, code, password);
-                  // Signed in now; after a later sign-out the card opens on sign in.
-                  setMode("signin");
-                  setCodeSent(null);
-                  setCode("");
-                }, "Password changed. You are signed in.");
-              }
-            }}
-          >
-            <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
-              If <span className="font-semibold text-on-surface">{codeSent.email}</span> has a Leaflet account, a code
-              is on its way. It works for {codeSent.minutes} minutes. Not there after a minute? Check spam. (An
-              account can be reset three times a year.)
-            </p>
-            <label className={labelClass}>Code from the email</label>
-            <input
-              autoComplete="one-time-code"
-              autoCapitalize="characters"
-              spellCheck={false}
-              placeholder="ABCD-EFGH"
-              maxLength={12}
-              value={code}
-              onChange={(event) => setCode(event.target.value.toUpperCase())}
-              className={`${fieldClass} font-mono tracking-[0.2em]`}
-            />
-            <label className={labelClass}>New password</label>
-            <input
-              type="password"
-              autoComplete="new-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className={fieldClass}
-            />
-            <p className="mt-1 text-[10px] text-on-surface-variant">
-              At least 8 characters. Every device signed in to this account is signed out.
-            </p>
-            {errorBox}
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <button
-                type="submit"
-                className="tactile-button tactile-button-primary px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={busy || !codeReady}
-              >
-                {busy ? "One moment…" : "Set password and sign in"}
-              </button>
-              <button type="button" className="text-xs text-on-surface-variant underline" disabled={busy} onClick={sendCode}>
-                Send a new code
-              </button>
-              <button type="button" className="text-xs text-on-surface-variant underline" onClick={leave}>
-                Back to sign in
-              </button>
-            </div>
-          </form>
-        )}
-      </div>
-    );
-  }
-
-  const signingUp = mode === "signup";
-  /** To the reset form, keeping the email already typed. */
-  const forgotPassword = () => {
-    setMode("reset");
-    setCodeSent(null);
-    setPassword("");
-    setError(null);
-  };
-  const canSubmit = email.trim().length > 0 && password.length >= (signingUp ? 8 : 1);
-  const submit = () =>
-    attempt(
-      () => (signingUp ? signUp(email.trim(), password, displayName, avatar) : signIn(email.trim(), password)),
-      signingUp ? "Account created. You are signed in." : "Signed in."
-    );
-
   return (
     <div className="paper-surface rounded-xl p-5">
       <p className="text-xs uppercase tracking-widest text-on-surface-variant">Account</p>
-      <p className="mt-3 font-headline text-2xl font-bold text-on-surface">
-        {signingUp ? "Create an account" : "Sign in"}
-      </p>
-      <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
-        Optional. Everything works without one. An account lets you join the leaderboard and share
-        your shelf.
-      </p>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (canSubmit && !busy) {
-            submit();
-          }
-        }}
-      >
-        <label className={labelClass}>Email</label>
-        <input
-          type="email"
-          autoComplete="email"
-          autoCapitalize="none"
-          spellCheck={false}
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          className={fieldClass}
-        />
-        {signingUp && (
-          <>
-            <label className={labelClass}>Name (optional)</label>
-            <input
-              autoComplete="nickname"
-              maxLength={40}
-              value={displayName}
-              onChange={(event) => setDisplayName(event.target.value)}
-              className={fieldClass}
-            />
-            <p className={`${labelClass} mb-2`}>Your Pip</p>
-            <AvatarPicker value={avatar} onChange={setAvatar} disabled={busy} label="Your Pip" />
-          </>
-        )}
-        <label className={labelClass}>Password</label>
-        <input
-          type="password"
-          autoComplete={signingUp ? "new-password" : "current-password"}
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          className={fieldClass}
-        />
-        {signingUp ? (
-          <p className="mt-1 text-[10px] text-on-surface-variant">At least 8 characters.</p>
-        ) : (
-          <div className="mt-1 flex justify-end">
-            <button type="button" className="text-[11px] font-semibold text-primary hover:underline" onClick={forgotPassword}>
-              Forgot password?
-            </button>
-          </div>
-        )}
-
-        {error && (
-          <div className="mt-3 rounded-lg bg-error-container/40 px-3 py-2 text-xs text-on-surface">
-            <p>{error}</p>
-            {/* A failed sign-in is exactly when a reset is wanted. */}
-            {!signingUp && (
-              <button type="button" className="mt-1 font-semibold text-primary underline" onClick={forgotPassword}>
-                Reset your password with an emailed code
-              </button>
-            )}
-          </div>
-        )}
-
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <button
-            type="submit"
-            className="tactile-button tactile-button-primary px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={busy || !canSubmit}
-          >
-            {busy ? "One moment…" : signingUp ? "Create account" : "Sign in"}
-          </button>
-          <button
-            type="button"
-            className="text-xs text-on-surface-variant underline"
-            onClick={() => {
-              setMode(signingUp ? "signin" : "signup");
-              setError(null);
-            }}
-          >
-            {signingUp ? "I have an account" : "Create an account"}
-          </button>
-
-        </div>
-      </form>
-      {signingUp && (PRIVACY_URL || TERMS_URL) && (
-        <p className="mt-3 text-[10px] leading-relaxed text-on-surface-variant">
-          By creating an account you agree to the{" "}
-          {TERMS_URL && (
-            <button type="button" className="underline" onClick={() => void accountService.openLink(TERMS_URL)}>
-              terms
-            </button>
-          )}
-          {TERMS_URL && PRIVACY_URL && " and "}
-          {PRIVACY_URL && (
-            <button type="button" className="underline" onClick={() => void accountService.openLink(PRIVACY_URL)}>
-              privacy policy
-            </button>
-          )}
-          .
-        </p>
-      )}
+      <div className="mt-3">
+        <AccountForm onDone={showToast} />
+      </div>
     </div>
   );
 };
