@@ -31,6 +31,17 @@ import { LIB } from "./anims.js";
  * about 150 a week.
  *   common thing  ~ a week      rare  ~ 3 weeks      epic ~ 6 to 8 weeks
  *   legendary     ~ 3 months    a new floor of the house ~ 3 to 6 weeks
+ *
+ * The first days are quicker, on purpose: a new reader should buy something
+ * the first evening. Beside the welcome gift (50) come the starter chest (30,
+ * with the first focus session of 5 minutes) and the first steps (100 in
+ * all, see GOALS), and the first variant costs 80. One 20-minute session
+ * after planting a radish leaves about 138 seeds: enough for a hat, the
+ * floor lamp, a snack and the gardener that same evening (the steps pay part
+ * of each back). Before, the cheapest variant alone was about 140 minutes of
+ * focused reading away. After the first days, the pace above holds: the
+ * daily wish (8) is about what the wished thing costs, and sets pay back
+ * about a tenth of what their pieces cost.
  */
 export const PACING = { perWeek: 150 };
 
