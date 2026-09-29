@@ -310,6 +310,35 @@ export const renderHouseLevel = (level, frame, decor, night, hour) => {
   return art.renderRoom(decor.wallpaper ?? "cozy", frame, placed);
 };
 
+/** The anchor the art placed a slot by (see slotBox), from its box. */
+const slotAnchor = (slot) => {
+  if (slot.fits === "ceiling") return { x: slot.x + slot.w / 2, y: slot.y };
+  if (slot.fits === "wall" || slot.fits === "window") return { x: slot.x + slot.w / 2, y: slot.y + slot.h / 2 };
+  return { x: slot.x + slot.w / 2, y: slot.y + slot.h };
+};
+
+/**
+ * Where an item is drawn when it sits in a slot of this floor: its box in the
+ * floor's pixels, exactly as renderHouseLevel puts it, so something laid over
+ * the art (an item dropping into place) lands on the art's own pixels.
+ */
+export const itemBox = (itemOrId, slot) => {
+  const item = typeof itemOrId === "string" ? houseItems().find((entry) => entry.id === itemOrId) : itemOrId;
+  if (!item || !slot) return null;
+  const w = item.w ?? slot.w;
+  const h = item.h ?? slot.h;
+  // The single room draws each item at its own spot.
+  if (slot.only && Array.isArray(item.at)) return { x: item.at[0], y: item.at[1], w, h };
+  const anchored = { ...slot, ...slotAnchor(slot) };
+  if (typeof art.placeAt === "function") {
+    const at = art.placeAt(item, anchored);
+    return { x: at.x, y: at.y, w, h };
+  }
+  if (slot.fits === "ceiling") return { x: Math.round(anchored.x - w / 2), y: anchored.y, w, h };
+  if (slot.fits === "wall" || slot.fits === "window") return { x: Math.round(anchored.x - w / 2), y: Math.round(anchored.y - h / 2), w, h };
+  return { x: Math.round(anchored.x - w / 2), y: anchored.y - h, w, h };
+};
+
 /** One house item as its own sprite. */
 export const renderItem = (item, frame = 0) =>
   typeof art.renderHouseItem === "function" ? art.renderHouseItem(item, frame) : art.renderRoomItem(item, frame);

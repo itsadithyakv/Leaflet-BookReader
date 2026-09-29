@@ -65,6 +65,8 @@ export declare function levelDecor(layout: Record<string, string> | null | undef
 export declare function withLevelDecor(layout: Record<string, string> | null | undefined, level: HouseLevel, decor: LevelDecor): Record<string, string>;
 export declare function placements(layout: Record<string, string> | null | undefined): Map<string, string>;
 export declare function renderHouseLevel(level: HouseLevel, frame: number, decor: LevelDecor, night?: boolean, hour?: number): ImageData | null;
+/** Where an item is drawn in a slot: its box in the floor's pixels, as the art places it. */
+export declare function itemBox(item: PipRoomItem | string, slot: HouseSlot): { x: number; y: number; w: number; h: number } | null;
 export declare function renderItem(item: PipRoomItem | string, frame?: number): ImageData;
 export declare function renderFinish(type: "wallpaper" | "floor", id: string, w?: number, h?: number): ImageData | null;
 export declare function isGardenLevel(level: { id: string } | null | undefined): boolean;

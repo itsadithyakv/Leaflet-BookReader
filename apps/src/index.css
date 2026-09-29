@@ -4378,6 +4378,14 @@ button.pip-shop-tile:hover,
   font-size: 12px;
   font-weight: 700;
   box-shadow: var(--shadow-raised-small);
+  transition: transform 120ms ease, border-color 150ms ease, color 150ms ease, filter 150ms ease;
+}
+
+/* Pressed in, like a key. */
+button.pip-hud-chip:active,
+.pip-hud-button:active,
+.pip-hud-shop:active {
+  transform: translateY(1px) scale(0.97);
 }
 
 .pip-hud-chip {
@@ -4427,6 +4435,23 @@ button.pip-hud-chip:hover {
   border-radius: 999px;
   background: rgb(var(--pip-heart));
   box-shadow: 0 0 0 2px rgb(var(--color-surface));
+  animation: pip-dot-pulse 1.8s ease-in-out infinite;
+}
+
+/* Something ripe in the garden: the dot breathes until it is picked. */
+@keyframes pip-dot-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.3);
+  }
+}
+
+/* The hearts meter: each heart pops as it fills (from script). */
+.pip-heart {
+  transform-origin: 50% 60%;
 }
 
 .pip-hud button:focus-visible,
@@ -4488,16 +4513,91 @@ button.pip-hud-chip:hover {
   cursor: pointer;
 }
 
-/* Decorate mode: every slot a dotted box. */
-.pip-house-slot {
-  border: 2px dashed rgba(255, 255, 255, 0.85);
-  border-radius: 6px;
-  background: rgba(114, 171, 68, 0.14);
-  box-shadow: 0 0 0 1px rgba(20, 24, 33, 0.55);
+/* Decorate mode: a pin on every slot, where its piece stands, hangs or sits.
+   A slot's whole space shows only while its pin is pointed at or chosen: the
+   spaces overlap one another, the pins do not. The button itself is a point;
+   the dot and the outline hang off it. */
+.pip-slot-pin {
+  position: absolute;
+  z-index: 3;
+  width: 0;
+  height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
 }
 
-.pip-house-slot:hover {
-  background: rgba(114, 171, 68, 0.34);
+.pip-slot-pin:focus-visible {
+  outline: none;
+}
+
+.pip-slot-dot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(255, 251, 240, 0.94);
+  color: #2e6136;
+  box-shadow:
+    0 0 0 2px rgba(46, 97, 54, 0.85),
+    0 3px 8px rgba(20, 24, 33, 0.35);
+  transform: translate(-50%, -50%);
+  transition: transform 160ms ease, background-color 160ms ease;
+  animation: pip-pin-in 340ms cubic-bezier(0.3, 1.6, 0.5, 1) backwards;
+}
+
+.pip-slot-pin[data-filled] .pip-slot-dot {
+  width: 24px;
+  height: 24px;
+  background: rgba(186, 222, 160, 0.95);
+}
+
+.pip-slot-pin:hover .pip-slot-dot,
+.pip-slot-pin:focus-visible .pip-slot-dot {
+  transform: translate(-50%, -50%) scale(1.15);
+}
+
+.pip-slot-pin:focus-visible .pip-slot-dot {
+  outline: 2px solid rgb(var(--color-primary));
+  outline-offset: 3px;
+}
+
+.pip-slot-pin[aria-pressed="true"] .pip-slot-dot {
+  background: #72ab44;
+  color: #10230f;
+  box-shadow:
+    0 0 0 3px #fffbf0,
+    0 0 0 5px #2e6136,
+    0 4px 10px rgba(20, 24, 33, 0.4);
+}
+
+.pip-slot-area {
+  position: absolute;
+  border: 2px dashed rgba(255, 251, 240, 0.92);
+  border-radius: 6px;
+  background: rgba(114, 171, 68, 0.18);
+  box-shadow: 0 0 0 1px rgba(20, 24, 33, 0.45);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+
+.pip-slot-pin:hover .pip-slot-area,
+.pip-slot-pin:focus-visible .pip-slot-area,
+.pip-slot-pin[aria-pressed="true"] .pip-slot-area {
+  opacity: 1;
+}
+
+@keyframes pip-pin-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0);
+  }
 }
 
 .pip-house-arcade:hover {
@@ -4505,54 +4605,233 @@ button.pip-hud-chip:hover {
   background: rgba(255, 210, 63, 0.18);
 }
 
+/* A garden plot: its soil bed and its plant are sprites over the floor, so
+   the plant can sway, pop off and sprout on its own. */
 .pip-plot {
-  border-radius: 6px;
+  position: absolute;
+  z-index: 1;
+  transform-origin: 50% 100%;
 }
 
-.pip-plot:hover {
-  background: rgba(255, 255, 255, 0.14);
+.pip-plot-soil,
+.pip-plot-plant {
+  position: absolute;
+  left: 0;
+  top: 0;
 }
 
-.pip-plot[data-state="ripe"] {
-  animation: pip-ripe 1.6s ease-in-out infinite;
+/* The soil line, about four fifths down the sprite: plants grow from it. */
+.pip-plot-plant {
+  transform-origin: 50% 78%;
 }
 
-@keyframes pip-ripe {
-  50% {
-    background: rgba(255, 210, 63, 0.22);
+/* After dark the room's art dims itself; the beds, the plants and a piece of
+   decor on its way in dim to match, a little less, so the garden still reads
+   (and a ripe plant's glow shows up all the more). */
+.pip-house-room[data-night] .pip-plot-soil,
+.pip-house-room[data-night] .pip-plot-plant,
+.pip-house-room[data-night] .pip-decor-drop {
+  filter: brightness(0.5) saturate(0.85);
+}
+
+/* The bed and the air above it that the plant grows into. */
+.pip-plot-hit {
+  inset: -14% 0 0;
+  border-radius: 8px;
+}
+
+.pip-plot-hit:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* Ripe: a warm glow at its feet and, every few seconds, a hop and a wiggle;
+   pointed at, it perks up. "Pick me", from across the room. */
+.pip-plot[data-state="ripe"]::before {
+  position: absolute;
+  right: 6%;
+  bottom: 16%;
+  left: 6%;
+  height: 44%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(255, 222, 99, 0.6), rgba(255, 222, 99, 0));
+  content: "";
+  pointer-events: none;
+  animation: pip-ripe-glow 1.8s ease-in-out infinite alternate;
+}
+
+.pip-plot[data-state="ripe"] .pip-plot-plant {
+  animation: pip-ripe-wiggle 2.6s ease-in-out infinite;
+  animation-delay: calc(var(--plot, 0) * -0.65s);
+}
+
+.pip-plot[data-state="ripe"]:hover .pip-plot-plant {
+  animation: pip-ripe-perk 0.7s ease-in-out infinite;
+}
+
+@keyframes pip-ripe-glow {
+  from {
+    opacity: 0.45;
+  }
+  to {
+    opacity: 1;
   }
 }
 
-.pip-plot[data-state="locked"] {
-  border: 2px dashed rgba(255, 255, 255, 0.7);
-  background: rgba(20, 24, 33, 0.18);
+@keyframes pip-ripe-wiggle {
+  0%,
+  62%,
+  100% {
+    transform: none;
+  }
+  68% {
+    transform: translateY(-5%) rotate(-5deg);
+  }
+  74% {
+    transform: translateY(0) rotate(4deg);
+  }
+  80% {
+    transform: rotate(-3deg);
+  }
+  86% {
+    transform: rotate(1.5deg);
+  }
+  92% {
+    transform: none;
+  }
 }
 
-.pip-plot-sign {
-  display: grid;
-  height: 100%;
-  place-items: center;
-  color: #fffbf0;
-  font-size: 22px;
-  font-weight: 800;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+@keyframes pip-ripe-perk {
+  0%,
+  100% {
+    transform: scale(1.06) rotate(-3deg);
+  }
+  50% {
+    transform: scale(1.09) translateY(-3%) rotate(3deg);
+  }
 }
 
+/* Just planted: the shoot pushes up out of the soil once its seed is in
+   (the delay is the seed's fall, set from script). */
+.pip-plant-sprout {
+  animation: pip-sprout 540ms cubic-bezier(0.3, 1.5, 0.5, 1) backwards;
+}
+
+@keyframes pip-sprout {
+  0% {
+    opacity: 0;
+    transform: scale(0.2, 0);
+  }
+  25% {
+    opacity: 1;
+  }
+  60% {
+    transform: scale(0.88, 1.28);
+  }
+  80% {
+    transform: scale(1.08, 0.92);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+/* Growth, on the bed's own front: water poured over water needed. */
 .pip-plot-bar {
   position: absolute;
-  top: 0;
-  left: 12%;
-  width: 76%;
-  height: 4px;
+  right: 16%;
+  bottom: 6%;
+  left: 16%;
+  height: max(3px, 5%);
   overflow: hidden;
   border-radius: 999px;
-  background: rgba(20, 24, 33, 0.45);
+  background: rgba(20, 24, 33, 0.55);
+  box-shadow: 0 0 0 1px rgba(255, 244, 214, 0.3);
+  pointer-events: none;
 }
 
 .pip-plot-bar > span {
   display: block;
   height: 100%;
-  background: #7cc8ff;
+  background: linear-gradient(90deg, #7cc8ff, #c2e8ff);
+  transform-origin: 0 50%;
+  transition: transform 600ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+/* A plot still to dig: the bed's outline, and what it costs. */
+.pip-plot-dig {
+  position: absolute;
+  right: 3%;
+  bottom: 2%;
+  left: 3%;
+  display: flex;
+  height: 30%;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 2px dashed rgba(255, 251, 240, 0.85);
+  border-radius: 6px;
+  background: rgba(20, 24, 33, 0.24);
+  color: #fffbf0;
+  font-weight: 800;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  transition: background-color 150ms ease, transform 150ms ease;
+}
+
+.pip-plot[data-state="locked"]:hover .pip-plot-dig {
+  background: rgba(20, 24, 33, 0.38);
+  transform: translateY(-2px);
+}
+
+.pip-plot-dig-plus {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.pip-plot-dig-price {
+  font-size: 11px;
+}
+
+/* A piece of decor dropping into its spot: it falls, squashes as it lands,
+   and settles; the room's art takes over the moment it is still. */
+.pip-decor-drop {
+  position: absolute;
+  transform-origin: 50% 100%;
+  pointer-events: none;
+  animation: pip-decor-drop 540ms linear both;
+}
+
+@keyframes pip-decor-drop {
+  0% {
+    opacity: 0;
+    transform: translateY(calc(var(--drop, 60px) * -1));
+    animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45);
+  }
+  14% {
+    opacity: 1;
+  }
+  61% {
+    transform: translateY(0) scale(1, 1);
+    animation-timing-function: ease-out;
+  }
+  72% {
+    transform: translateY(0) scale(1.12, 0.86);
+    animation-timing-function: ease-in-out;
+  }
+  86% {
+    transform: translateY(0) scale(0.97, 1.04);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The old wallpaper or floor, wiped away over the new. */
+.pip-house-wipe {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
 }
 
 /* Pip in the house: placed from script (transform), at the room's scale. */
@@ -4562,6 +4841,12 @@ button.pip-hud-chip:hover {
   left: 0;
   z-index: 2;
   will-change: transform;
+}
+
+/* Turns when Pip changes look (from script); apart from the flip that faces Pip. */
+.pip-house-pip-spin {
+  display: block;
+  transform-origin: 50% 70%;
 }
 
 .pip-house-pip-button {
@@ -5043,13 +5328,311 @@ button.pip-hud-chip:hover {
   }
 }
 
+/* Where the rail is beside the page (md and up), the sheet starts past it
+   rather than under its leather. */
+@media (min-width: 768px) and (max-width: 900px) {
+  .pip-drawer {
+    left: 86px;
+  }
+}
+
+/* ---- The Pip tab in motion: panels, the shop, the effects layer -------------- */
+
+/* A drawer slides in beside the house (keyed, so a new one slides in too). */
+.pip-drawer {
+  animation: pip-drawer-in 260ms cubic-bezier(0.2, 0.9, 0.3, 1) backwards;
+}
+
+/* On a narrow window the sheet rises from the bottom instead. */
+@media (max-width: 900px) {
+  .pip-drawer {
+    animation-name: pip-sheet-in;
+  }
+}
+
+@keyframes pip-drawer-in {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+}
+
+@keyframes pip-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(28px);
+  }
+}
+
+/* A drawer's tiles deal in, one after another, when a panel opens. */
+.pip-drawer-body .pip-shop-tile {
+  animation: pip-item-in 300ms cubic-bezier(0.2, 0.9, 0.3, 1.15) backwards;
+}
+
+.pip-drawer-body .pip-shop-tile:nth-child(2) { animation-delay: 25ms; }
+.pip-drawer-body .pip-shop-tile:nth-child(3) { animation-delay: 50ms; }
+.pip-drawer-body .pip-shop-tile:nth-child(4) { animation-delay: 75ms; }
+.pip-drawer-body .pip-shop-tile:nth-child(5) { animation-delay: 100ms; }
+.pip-drawer-body .pip-shop-tile:nth-child(6) { animation-delay: 125ms; }
+.pip-drawer-body .pip-shop-tile:nth-child(7) { animation-delay: 150ms; }
+.pip-drawer-body .pip-shop-tile:nth-child(8) { animation-delay: 175ms; }
+.pip-drawer-body .pip-shop-tile:nth-child(n + 9) { animation-delay: 200ms; }
+
+@keyframes pip-item-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+}
+
+/* Pressing a tile or a shop card gives a little. */
+button.pip-shop-tile:active,
+.pip-shop-card:active {
+  transform: scale(0.97);
+  transition-duration: 60ms;
+}
+
+/* The shop pops open over a fading backdrop, its cards dealt in by --i. */
+.pip-shop-backdrop {
+  animation: pip-fade-in 180ms ease-out backwards;
+}
+
+.pip-shop {
+  animation: confirm-pop-in 260ms cubic-bezier(0.3, 1.3, 0.5, 1) backwards;
+}
+
+.pip-shop-card {
+  animation: pip-item-in 320ms cubic-bezier(0.2, 0.9, 0.3, 1.15) backwards;
+  animation-delay: calc(var(--i, 0) * 22ms);
+}
+
+/* The chosen thing arrives in the detail pane rather than swapping in place. */
+.pip-shop-detail > * {
+  animation: pip-detail-in 240ms ease-out backwards;
+}
+
+@keyframes pip-detail-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@keyframes pip-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* "Within reach" / "Your next goal": what the pane suggests before a choice. */
+.pip-shop-suggest {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  margin-bottom: 10px;
+  color: rgb(var(--pip-accent));
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+/* Effects play on one layer over everything but the confirm dialog (90), so
+   a bought thing can fly out of the shop (70) to where it goes. */
+.pip-fx-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  overflow: hidden;
+  pointer-events: none;
+  contain: strict;
+}
+
+.pip-fx-piece {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+
+.pip-fx-piece > canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.pip-fx-sprite {
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  image-rendering: pixelated;
+}
+
+.pip-fx-puff {
+  border-radius: 35%;
+}
+
+.pip-fx-ring {
+  border: 3px solid;
+  border-radius: 999px;
+}
+
+.pip-fx-pop {
+  transform-origin: 50% 100%;
+}
+
+/* A bought look or move on its way to Pip, on a little card. */
+.pip-fx-card {
+  border-radius: 16px;
+  background: rgb(var(--color-surface-high));
+  box-shadow:
+    0 0 0 2px rgb(var(--color-primary) / 0.6),
+    0 10px 24px rgba(20, 24, 33, 0.3);
+}
+
+/* "+20" and "−120": chunky numbers with a hard outline, like the pixel art. */
+.pip-fx-float {
+  color: #ffd23f;
+  font-family: "ZT Nature", "Segoe UI", system-ui, sans-serif;
+  font-size: 20px;
+  font-weight: 900;
+  white-space: nowrap;
+  text-shadow:
+    0 2px 0 #5a3a1a,
+    2px 0 0 #5a3a1a,
+    -2px 0 0 #5a3a1a,
+    0 -2px 0 #5a3a1a,
+    0 5px 8px rgba(0, 0, 0, 0.25);
+}
+
+.pip-fx-float[data-tone="spend"] {
+  color: #fffbf0;
+  font-size: 15px;
+  text-shadow:
+    0 2px 0 #1f2a22,
+    2px 0 0 #1f2a22,
+    -2px 0 0 #1f2a22,
+    0 -2px 0 #1f2a22;
+}
+
+.pip-fx-float[data-tone="mood"] {
+  color: #ffc2d1;
+  text-shadow:
+    0 2px 0 #6b1a2e,
+    2px 0 0 #6b1a2e,
+    -2px 0 0 #6b1a2e,
+    0 -2px 0 #6b1a2e;
+}
+
+.pip-fx-float[data-tone="water"] {
+  color: #d6f0ff;
+  font-size: 16px;
+  text-shadow:
+    0 2px 0 #1f5f8c,
+    2px 0 0 #1f5f8c,
+    -2px 0 0 #1f5f8c,
+    0 -2px 0 #1f5f8c;
+}
+
+/* A raindrop: pale blue with a darker edge, like the garden's water. */
+.pip-fx-drop {
+  border-radius: 40% 40% 50% 50%;
+  background: #9fdcff;
+  box-shadow: 0 0 0 1px #3f8fc4;
+}
+
+/* A title card for a big moment, framed like Pip's speech bubble. */
+.pip-fx-banner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 28px 14px;
+  background: #fffbf0;
+  color: #1c261f;
+  white-space: nowrap;
+  box-shadow:
+    0 -3px 0 0 #1f2a22,
+    0 3px 0 0 #1f2a22,
+    -3px 0 0 0 #1f2a22,
+    3px 0 0 0 #1f2a22,
+    0 9px 0 0 rgba(31, 42, 34, 0.18);
+}
+
+.pip-fx-banner span {
+  color: #2e6136;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+}
+
+.pip-fx-banner strong {
+  font-family: "ZT Nature", "Segoe UI", system-ui, sans-serif;
+  font-size: 30px;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+}
+
+/* ---- The app in motion: a few quiet touches outside the Pip tab ---------------- */
+
+/* Moving between the app's pages: the new page fades in, briefly. Opacity
+   only, and no fill: a transform, or an animation left holding, would make
+   every fixed dialog inside the page position and stack against the page. */
+.app-main-scroll > :not(.pip-scroll-layer) {
+  animation: app-page-in 200ms ease-out;
+}
+
+@keyframes app-page-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* The rail's items press into the leather under the pointer (their
+   transition already eases transform); the phone bar's likewise. */
+.sidebar-nav-item:active {
+  transform: scale(0.96);
+}
+
+.mobile-nav-item:active {
+  transform: scale(0.94);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .pip-plot[data-state="ripe"] {
+  .pip-plot[data-state="ripe"]::before,
+  .pip-plot[data-state="ripe"] .pip-plot-plant,
+  .pip-plot[data-state="ripe"]:hover .pip-plot-plant,
+  .pip-plant-sprout,
+  .pip-decor-drop,
+  .pip-slot-dot,
+  .pip-hud-dot,
+  .pip-drawer,
+  .pip-drawer-body .pip-shop-tile,
+  .pip-shop-backdrop,
+  .pip-shop,
+  .pip-shop-card,
+  .pip-shop-detail > *,
+  .app-main-scroll > :not(.pip-scroll-layer) {
     animation: none;
-    background: rgba(255, 210, 63, 0.22);
   }
 
-  .pip-shop-card:hover {
+  .sidebar-nav-item:active,
+  .mobile-nav-item:active {
     transform: none;
+  }
+
+  .pip-shop-card:hover,
+  button.pip-shop-tile:active,
+  .pip-shop-card:active,
+  button.pip-hud-chip:active,
+  .pip-hud-button:active,
+  .pip-hud-shop:active,
+  .pip-plot[data-state="locked"]:hover .pip-plot-dig {
+    transform: none;
+  }
+
+  .pip-plot-bar > span {
+    transition: none;
   }
 }
