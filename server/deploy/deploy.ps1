@@ -75,8 +75,23 @@ sudo systemctl enable leaflet-api >/dev/null
 sudo systemctl restart leaflet-api
 
 rm -rf "`$STAGE" "`$ARCHIVE"
-sleep 2
-systemctl is-active --quiet leaflet-api && curl -fsS http://127.0.0.1:8787/health && echo ' leaflet-api is up'
+
+# Connecting to MongoDB and building indexes takes a few seconds, so wait for
+# the health check (up to 30 s) rather than a fixed pause. If the service
+# stops instead (it restarts itself every 5 s), show why.
+for attempt in `$(seq 1 30); do
+  if curl -fsS http://127.0.0.1:8787/health >/dev/null 2>&1; then
+    echo 'leaflet-api is up: http://127.0.0.1:8787/health answers {"ok":true}'
+    sudo journalctl -u leaflet-api -n 3 --no-pager -o cat
+    exit 0
+  fi
+  systemctl is-active --quiet leaflet-api || break
+  sleep 1
+done
+echo '' >&2
+echo 'leaflet-api did not come up. Its last log lines:' >&2
+sudo journalctl -u leaflet-api -n 25 --no-pager -o cat >&2
+exit 1
 "@
   # ssh via bash -s so the script is not mangled by quoting; strip CRs.
   Write-Host "Installing on $target"
