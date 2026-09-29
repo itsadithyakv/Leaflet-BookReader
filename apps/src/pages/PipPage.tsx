@@ -166,6 +166,28 @@ const readFloor = () => {
 const wait = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 
 /**
+ * The water each planting had when the garden was last on screen (a
+ * preference of this device), so what reading poured in since can rain down
+ * the next time it is.
+ */
+const SEEN_KEY = "leaflet.pip.gardenSeen";
+const readSeen = (): Record<string, number> => {
+  try {
+    const seen = JSON.parse(localStorage.getItem(SEEN_KEY) ?? "{}") as unknown;
+    return seen && typeof seen === "object" ? (seen as Record<string, number>) : {};
+  } catch {
+    return {};
+  }
+};
+const writeSeen = (seen: Record<string, number>) => {
+  try {
+    localStorage.setItem(SEEN_KEY, JSON.stringify(seen));
+  } catch {
+    // Remembered for this visit only.
+  }
+};
+
+/**
  * The art of what was just chosen (the tile, shop card, detail pane or garden
  * row that holds `clicked`), copied, for effects to start from. Read before
  * anything moves on (the confirm dialog opening, the shop closing).
@@ -251,6 +273,8 @@ export const PipPage = ({ showToast }: PipPageProps) => {
   // they land; hearts likewise wait for the hearts flying to them.
   const [heldSeeds, setHeldSeeds] = useState<number | null>(null);
   const [heldMood, setHeldMood] = useState<number | null>(null);
+  // Plots shown as they were until the rain on them lands: plot -> growth then.
+  const [rainHold, setRainHold] = useState<Record<number, { progress: number; ripe: boolean }> | null>(null);
   const [countMs, setCountMs] = useState(700);
   // Effects timed to Pip's current act (crumbs at each bite): a new act cancels them.
   const actTimers = useRef(new Set<number>());
@@ -622,11 +646,12 @@ export const PipPage = ({ showToast }: PipPageProps) => {
   const scenePlots: ScenePlot[] = [
     ...Array.from({ length: plotCount }, (_, index) => {
       const here = growing(index + 1);
+      const held = here ? rainHold?.[index + 1] : undefined;
       return {
         plot: index + 1,
         plant: here?.plant ?? null,
-        progress: here ? Math.min(1, here.water / Math.max(1, here.need)) : 0,
-        ripe: Boolean(here?.ripe)
+        progress: held ? held.progress : here ? Math.min(1, here.water / Math.max(1, here.need)) : 0,
+        ripe: held ? held.ripe : Boolean(here?.ripe)
       };
     }),
     ...(nextPlot ? [{ plot: plotCount + 1, plant: null, progress: 0, ripe: false, locked: true, price: priceOf("plot", nextPlot.id) }] : [])
@@ -639,6 +664,46 @@ export const PipPage = ({ showToast }: PipPageProps) => {
     const name = plantInfo(here.plant)?.name ?? here.plant;
     return here.ripe ? `Plot ${plot.plot}: ${name}, ripe! Select to pick it.` : `Plot ${plot.plot}: ${name}, ${plural(minutesLeft(here), "more minute")} of focus.`;
   };
+
+  // Reading waters the garden out of sight (in the reader, on other days).
+  // When the garden is next on screen, what it took rains down on the plots it
+  // went to, then their growth catches up: the bars fill, a plant that grew a
+  // stage stretches, one that ripened sparkles. Not while a book covers the
+  // tab: the rain waits for the reader to come back.
+  const onGarden = Boolean(level.garden);
+  useEffect(() => {
+    if (!onGarden || !garden || suspended) return;
+    const seen = readSeen();
+    const planted = garden.plants.filter((entry) => !entry.harvested);
+    const remember = () => writeSeen(Object.fromEntries(planted.map((entry) => [entry.id, entry.water])));
+    const watered = planted
+      .filter((entry) => seen[entry.id] !== undefined && entry.water - seen[entry.id] >= 1)
+      .sort((a, b) => a.plot - b.plot);
+    if (watered.length === 0 || reducedMotion()) {
+      remember();
+      return;
+    }
+    // The plots show their old growth from the start; the rain begins once a
+    // floor that slid in has settled.
+    setRainHold(
+      Object.fromEntries(
+        watered.map((entry) => [entry.plot, { progress: Math.min(1, seen[entry.id] / Math.max(1, entry.need)), ripe: seen[entry.id] >= entry.need }])
+      )
+    );
+    let current = true;
+    const timer = window.setTimeout(() => {
+      remember();
+      const falling = sceneRef.current?.rain(watered.map((entry) => ({ plot: entry.plot, gained: entry.water - seen[entry.id] })));
+      void (falling ?? Promise.resolve()).then(() => {
+        if (current) setRainHold(null);
+      });
+    }, 450);
+    return () => {
+      current = false;
+      window.clearTimeout(timer);
+      setRainHold(null);
+    };
+  }, [onGarden, garden, suspended]);
 
   const releaseSeeds = () => setHeldSeeds(null);
 

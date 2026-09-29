@@ -224,7 +224,7 @@ export const ring = (from: Point, size: number, color = "rgb(var(--pip-accent))"
  * A number or word that floats off and fades: "+20" rises from where seeds
  * came from; "−120" sinks away from the counter it left.
  */
-export const floatText = (from: Point, text: string, tone: "gain" | "spend" | "mood" = "gain") => {
+export const floatText = (from: Point, text: string, tone: "gain" | "spend" | "mood" | "water" = "gain") => {
   if (reducedMotion()) return;
   const element = document.createElement("div");
   element.className = "pip-fx-piece pip-fx-float";
@@ -417,6 +417,33 @@ export const popOff = (image: ImageData | null, box: Box, style: "pick" | "lift"
           { transform: `${base} translateY(${(-h * 0.5).toFixed(1)}px) scale(0.7)`, opacity: 0 }
         ];
   void play(element, frames, { duration: style === "pick" ? 560 : 420, easing: "cubic-bezier(0.25, 0.8, 0.4, 1)" });
+};
+
+/**
+ * Rain over a box, falling onto its soil line: what reading in focus poured
+ * into a plot while the garden was out of sight. Resolves as the last drop lands.
+ */
+export const rain = (box: Box, soilY: number, { px, count = 12, spread = 700 }: { px: number; count?: number; spread?: number }): Promise<void> => {
+  if (reducedMotion()) return Promise.resolve();
+  const drops: Array<Promise<void>> = [];
+  for (let index = 0; index < count; index += 1) {
+    const x = box.left + between(0.12, 0.88) * box.width;
+    const top = soilY - between(90, 150);
+    const element = piece("pip-fx-drop", Math.max(2, px * 0.75), Math.max(4, px * 1.75));
+    drops.push(
+      play(
+        element,
+        [
+          { transform: at(x, top, 1), opacity: 0 },
+          { transform: at(x, top + 12, 1), opacity: 0.95, offset: 0.12 },
+          { transform: at(x, soilY - px, 1), opacity: 0.95, offset: 0.9 },
+          { transform: at(x, soilY, 0.5), opacity: 0 }
+        ],
+        { duration: between(380, 480), delay: (index / count) * spread + between(0, 50), easing: "cubic-bezier(0.55, 0, 0.9, 0.65)" }
+      )
+    );
+  }
+  return Promise.all(drops).then(() => undefined);
 };
 
 /** A seed dropped from `from` onto `to`, falling faster as it goes. Resolves as it lands. */

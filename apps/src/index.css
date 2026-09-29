@@ -5060,6 +5060,23 @@ button.pip-shop-tile:active,
     0 -2px 0 #6b1a2e;
 }
 
+.pip-fx-float[data-tone="water"] {
+  color: #d6f0ff;
+  font-size: 16px;
+  text-shadow:
+    0 2px 0 #1f5f8c,
+    2px 0 0 #1f5f8c,
+    -2px 0 0 #1f5f8c,
+    0 -2px 0 #1f5f8c;
+}
+
+/* A raindrop: pale blue with a darker edge, like the garden's water. */
+.pip-fx-drop {
+  border-radius: 40% 40% 50% 50%;
+  background: #9fdcff;
+  box-shadow: 0 0 0 1px #3f8fc4;
+}
+
 /* A title card for a big moment, framed like Pip's speech bubble. */
 .pip-fx-banner {
   display: flex;

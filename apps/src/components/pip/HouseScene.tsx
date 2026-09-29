@@ -17,7 +17,7 @@ import { PipSprite } from "../PipSprite";
 import { PipSay } from "../PipSay";
 import { UiIcon } from "../UiIcon";
 import { pixelsPerArtPixel } from "./PixelImage";
-import { banner, burst, centerOf, confetti, dropSeed, popOff, puff, seedPixel, tossSeed, type Box, type Captured, type Point } from "./fx";
+import { banner, burst, centerOf, confetti, dropSeed, floatText, popOff, puff, rain, seedPixel, tossSeed, type Box, type Captured, type Point } from "./fx";
 
 /**
  * The room loops this many frames (4 s at 12 fps) so lamps flicker and fish
@@ -92,12 +92,17 @@ export type HouseSceneHandle = {
   expectSprout: (plot: number, tossed: boolean) => void;
   /** A seed flies from a packet (if given), drops into the plot, and the soil puffs. */
   sow: (plot: number, from: Captured | null) => void;
+  /** Rain on these plots, saying how much water each took. Resolves as the last drop lands. */
+  rain: (plots: Array<{ plot: number; gained: number }>) => Promise<void>;
   /** Confetti and a title over the room, for a big moment. */
   celebrate: (title: string, note: string) => void;
 };
 
 /** Evenings (and nights) the house dims and its lamps glow. */
 const isEvening = (hour: number) => hour >= 19 || hour < 6;
+
+/** A plant's drawn stage from its growth, as garden.js draws it: 0 seed, 1 sprout, 2 young, 3 grown. */
+const plantStage = (progress: number) => (progress <= 0.02 ? 0 : progress < 0.34 ? 1 : progress < 0.75 ? 2 : 3);
 
 /** The time of day the windows show: the hour, to the nearest 10 minutes. */
 const clockHour = (date = new Date()) => date.getHours() + Math.floor(date.getMinutes() / 10) / 6;
@@ -516,21 +521,33 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
   // ---- the garden's plots ------------------------------------------------------------
   const plotsKey = JSON.stringify(plots ?? []);
   const plotNodes = useRef(new Map<number, HTMLDivElement>());
-  const plotAt = useRef(new Map<number, { x: number; locked: boolean }>());
+  const plotAt = useRef(new Map<number, { x: number; locked: boolean; plant: string | null; stage: number; ripe: boolean }>());
   // Plantings on their way in: which plot, and how long its seed takes to land.
   const sprouting = useRef(new Map<number, { until: number; delay: number }>());
   const boxes = useMemo(() => plotBoxes(level, plots?.length ?? 0), [level, plots?.length]);
 
   // A plot dug: the others shuffle along to make room and the new bed pops up.
+  // A plant that grows a stage gives a little stretch; one that ripens sparkles.
   useLayoutEffect(() => {
     const reduced = prefersReducedMotion();
     (plots ?? []).forEach((plot, index) => {
       const node = plotNodes.current.get(plot.plot);
       const box = boxes[index];
       const was = plotAt.current.get(plot.plot);
-      plotAt.current.set(plot.plot, { x: box.x, locked: Boolean(plot.locked) });
+      const stage = plantStage(plot.progress);
+      plotAt.current.set(plot.plot, { x: box.x, locked: Boolean(plot.locked), plant: plot.plant, stage, ripe: plot.ripe });
       if (!node || !was || reduced) return;
       const k = live.current.scale;
+      if (plot.plant && was.plant === plot.plant && (stage > was.stage || (plot.ripe && !was.ripe))) {
+        node.querySelector(".pip-plot-plant")?.animate(
+          [{ transform: "none" }, { transform: "scale(0.9, 1.18)", offset: 0.4 }, { transform: "scale(1.06, 0.95)", offset: 0.7 }, { transform: "none" }],
+          { duration: 480, easing: "ease-out" }
+        );
+        if (plot.ripe && !was.ripe) {
+          const shown = onScreen(box);
+          if (shown) burst({ x: shown.left + shown.width / 2, y: shown.top + shown.height * 0.35 }, { px: k, count: 10, sprite: "spark", spread: shown.width, lift: 14, fall: 6 });
+        }
+      }
       if (was.x !== box.x) {
         node.animate([{ transform: `translateX(${(was.x - box.x) * k}px)` }, { transform: "none" }], {
           duration: 460,
@@ -559,7 +576,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
   }, [plotsKey, boxes]);
 
   // ---- Pip --------------------------------------------------------------------------
-  const show =(move: string, loops?: number, key: string | number = `${move}-${Date.now()}`) =>
+  const show = (move: string, loops?: number, key: string | number = `${move}-${Date.now()}`) =>
     setView({ move, loops, key, flip: st.current.facing < 0 });
 
   const place = () => {
@@ -782,6 +799,24 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
             easing: "ease-out"
           });
         });
+    },
+    rain: (watered) => {
+      const k = live.current.scale;
+      const all = plotBoxes(live.current.level, plots?.length ?? 0);
+      const falls = watered.map(({ plot, gained }, order) => {
+        const index = plotIndex(plot);
+        const shown = index < 0 ? null : onScreen(all[index]);
+        if (!shown) return Promise.resolve();
+        const soil = shown.top + SOIL_TOP * k;
+        // One plot after another, left to right, like a passing shower.
+        return new Promise<void>((done) => window.setTimeout(done, order * 220))
+          .then(() => {
+            floatText({ x: shown.left + shown.width / 2, y: shown.top - 6 * k }, `+${Math.round(gained)} water`, "water");
+            return rain(shown, soil, { px: k, count: 10 + Math.min(8, Math.round(gained / 6)) });
+          })
+          .then(() => puff({ x: shown.left + shown.width / 2, y: soil }, { px: k, count: 5, color: "#BFE6FF", edge: "#7CC8FF", spread: shown.width * 0.6, rise: 8 }));
+      });
+      return Promise.all(falls).then(() => undefined);
     },
     celebrate: (title, note) => {
       const box = roomRef.current?.getBoundingClientRect();
