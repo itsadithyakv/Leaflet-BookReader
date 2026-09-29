@@ -66,8 +66,15 @@ This is the first public release.
 
 - **A daily goal and a streak,** with freezes and a grace day so one busy day
   doesn't undo a month.
-- **Focus sessions** (10 to 45 minutes). Time spent in other apps doesn't
-  count, and an optional focus lock keeps you in the book.
+- **Focus sessions** (10 to 45 minutes). The timer runs only while you're
+  actually reading: a book open, Leaflet in front, and you turning pages.
+  A book left open behind other windows doesn't count.
+- **Full screen and a focus flower.** Switch on Full screen beside Start
+  Session and each session plants a flower (a tulip, daisy, sunflower or
+  rose) that grows as you read and blooms when the session ends. Leave early
+  (end the session, spend more than 30 seconds in another app, or close
+  Leaflet) and it wilts. Your minutes still count; the flowers you grow are
+  counted on every device.
 - **The session bookshelf:** every session becomes a book spine on your shelf.
 - **Reading reminders** as Windows notifications, even while Leaflet is closed.
   Clicking one opens your last book.

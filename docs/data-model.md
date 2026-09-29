@@ -48,11 +48,19 @@ drift from the minutes that earned it.
 
 `id`, `started_at`, `ended_at`, `date_key`, `minutes`, `book_id`, `title`,
 `notes`, `ended_reason` (`completed` | `manual_end`), `clean`, `style_seed`,
-`burned_at`.
+`burned_at`, `flower`, `flower_bloomed`.
 
 `style_seed` replaces a persisted decoration blob — the shelf's appearance is
 derived deterministically from the seed at render time. `burned_at` tombstones a
 session when a streak breaks, rather than deleting it.
+
+`flower` is the focus flower a session started in full screen grew (`tulip`,
+`daisy`, `sunflower`, `rose`; NULL for other sessions) and `flower_bloomed`
+whether it bloomed: the session completed without leaving. Both travel in the
+sync document (left out for sessions without a flower), and a merge never
+unblooms a flower. `minutes` is reading time only: the session clock counts
+what the reading heartbeat counts (a book open, Leaflet in front, recent
+input), never time since Start.
 
 ### `pip_purchases`, `pip_plantings`, `pip_harvests`, `pip_state` — Pip's shop and garden
 
@@ -100,7 +108,7 @@ table as the fallback where no keychain exists.
 ## Migrations
 
 The schema is versioned with SQLite's `PRAGMA user_version`
-(`SCHEMA_VERSION` in `db/mod.rs`, currently **3**). `apply_schema()` runs
+(`SCHEMA_VERSION` in `db/mod.rs`, currently **4**). `apply_schema()` runs
 `CREATE TABLE IF NOT EXISTS` for everything at the latest shape, then
 `upgrade()` brings an older file forward one step at a time, in one
 transaction:
@@ -110,6 +118,7 @@ transaction:
 | 1 | `books.metadata_checked_at`, `metadata_updated_at`, `progress_updated_at`, `deleted_at`, `position` |
 | 2 | `annotations` |
 | 3 | `books.series`, `series_index`; `collections.book_ids`, `created_at`, `updated_at`, `deleted_at` |
+| 4 | `focus_sessions.flower`, `flower_bloomed` |
 
 Columns are added only if missing (`add_column`), and only that case is
 forgiven: a full disk or a locked file is an error. Before any upgrade the file
