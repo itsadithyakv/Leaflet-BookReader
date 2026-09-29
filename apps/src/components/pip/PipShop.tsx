@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import type { ShopKind } from "../../pip/shop";
 import { UiIcon, type UiIconName } from "../UiIcon";
+import { CountUp } from "../community/CountUp";
 import { shortfall } from "./shopParts";
 
 /** What previewing an entry on Pip changes: the look, and a move to show it off. */
@@ -44,11 +45,25 @@ type PipShopProps = {
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
 /**
+ * What the detail pane shows before anything is chosen: the dearest thing in
+ * this tab the reader can buy now, or else the cheapest one still to save for,
+ * so the pane is a goal rather than a blank.
+ */
+const suggest = (entries: ShopEntry[], balance: number) => {
+  const open = entries.filter((entry) => !entry.owned && !entry.locked && !entry.consumable && entry.price > 0);
+  const reach = open.filter((entry) => entry.price <= balance).sort((a, b) => b.price - a.price)[0];
+  if (reach) return { entry: reach, heading: "Within reach" };
+  const goal = [...open].sort((a, b) => a.price - b.price)[0];
+  return goal ? { entry: goal, heading: "Your next goal" } : null;
+};
+
+/**
  * The shop, made to be easy to read: a tab per kind of thing, big tiles with
  * the thing drawn large, a price chip on each, "Owned" and "Equipped" badges,
  * and what is out of reach greyed with how much more reading it takes.
  * Selecting a tile opens it on the right: a big preview, what it is, and the
- * buttons (try it on Pip first, buy, wear, place).
+ * buttons (try it on Pip first, buy, wear, place). Until something is chosen
+ * the pane suggests something: within reach now, or the next thing to save for.
  *
  * A modal dialog: tabs are a tablist (arrows move between them), tiles are
  * buttons, and Escape closes.
@@ -62,6 +77,7 @@ export const PipShop = ({ categories, balance, initial, onBuy, onPreview, onClos
   const category = categories.find((entry) => entry.id === tab) ?? categories[0];
   const entries = category?.entries ?? [];
   const selected = useMemo(() => entries.find((entry) => `${entry.kind}:${entry.id}` === chosen) ?? null, [entries, chosen]);
+  const suggestion = useMemo(() => (selected ? null : suggest(entries, balance)), [selected, entries, balance]);
 
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null;
@@ -119,7 +135,9 @@ export const PipShop = ({ categories, balance, initial, onBuy, onPreview, onClos
           </div>
           <span className="pip-shop-balance" aria-label={`${plural(balance, "seed")} to spend`}>
             <UiIcon name="seed" size={18} />
-            <span className="tabular-nums">{balance}</span>
+            <span className="tabular-nums">
+              <CountUp value={balance} />
+            </span>
           </span>
           <button type="button" className="tactile-button px-3 py-1.5 text-xs" onClick={onClose}>
             Close
@@ -158,8 +176,9 @@ export const PipShop = ({ categories, balance, initial, onBuy, onPreview, onClos
             {entries.length === 0 ? (
               <p className="rounded-xl bg-surface-container-high/50 px-4 py-6 text-center text-sm text-on-surface-variant">Nothing here yet.</p>
             ) : (
-              <div className="pip-shop-grid">
-                {entries.map((entry) => {
+              // Keyed by the tab, so a new tab's cards deal in rather than swapping in place.
+              <div key={tab} className="pip-shop-grid">
+                {entries.map((entry, index) => {
                   const key = `${entry.kind}:${entry.id}`;
                   const status = statusOf(entry);
                   const isHot = hot === key || chosen === key;
@@ -168,6 +187,7 @@ export const PipShop = ({ categories, balance, initial, onBuy, onPreview, onClos
                       key={key}
                       type="button"
                       className="pip-shop-card"
+                      style={{ "--i": Math.min(index, 12) } as CSSProperties}
                       data-tone={status?.tone ?? "buy"}
                       aria-pressed={chosen === key}
                       aria-label={`${entry.name}. ${entry.owned && !entry.consumable ? entry.badge ?? "Owned" : `${entry.price} seeds`}. ${status && status.tone !== "owned" ? status.text : ""}${entry.fromLibrary ? " From your library." : ""}`}
@@ -203,7 +223,23 @@ export const PipShop = ({ categories, balance, initial, onBuy, onPreview, onClos
 
           <aside className="pip-shop-detail" aria-live="polite">
             {selected ? (
-              <Detail entry={selected} status={statusOf(selected)} balance={balance} onBuy={onBuy} onPreview={onPreview} />
+              <Detail key={chosen} entry={selected} status={statusOf(selected)} balance={balance} onBuy={onBuy} onPreview={onPreview} />
+            ) : suggestion ? (
+              <>
+                <p className="pip-shop-suggest">
+                  <UiIcon name="sparkle" size={13} />
+                  {suggestion.heading}
+                </p>
+                <Detail
+                  key={`suggest-${suggestion.entry.kind}:${suggestion.entry.id}`}
+                  entry={suggestion.entry}
+                  status={statusOf(suggestion.entry)}
+                  balance={balance}
+                  onBuy={onBuy}
+                  onPreview={onPreview}
+                />
+                <p className="mt-4 text-center text-[11px] text-on-surface-variant">Or select anything to see it here.</p>
+              </>
             ) : (
               <div className="pip-shop-detail-empty">
                 <UiIcon name="sparkle" size={22} />

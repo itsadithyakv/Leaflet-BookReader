@@ -43,7 +43,25 @@ import { useAccountStore } from "../store/accountStore";
 import { useLibraryStore } from "../store/libraryStore";
 import { FEATURES } from "../constants/features";
 import { askConfirm } from "../components/ConfirmDialog";
-import { HouseScene, type SceneAct, type ScenePlot } from "../components/pip/HouseScene";
+import { HouseScene, type HouseSceneHandle, type SceneAct, type ScenePlot } from "../components/pip/HouseScene";
+import {
+  bump,
+  burst,
+  capture,
+  centerOf,
+  clearEffects,
+  collect,
+  dip,
+  fly,
+  floatText,
+  reducedMotion,
+  ring,
+  seedPixel,
+  spill,
+  type Box,
+  type Captured,
+  type Point
+} from "../components/pip/fx";
 import { FloorSwitch } from "../components/pip/FloorSwitch";
 import { PipDrawer } from "../components/pip/PipDrawer";
 import { PipShop, type PreviewLook, type ShopCategory, type ShopEntry } from "../components/pip/PipShop";
@@ -92,14 +110,41 @@ const SLOT_NAME: Record<HouseSlot["fits"], string> = {
   ceiling: "Ceiling",
   wall: "Wall",
   window: "Window",
-  top: "Shelf top",
-  stand: "Floor spot",
+  top: "Shelf",
+  stand: "Floor",
   rug: "Rug"
+};
+
+/** Where slots of one kind sit, left to right, by how many there are. */
+const SLOT_PLACES: Record<number, string[]> = {
+  2: ["left", "right"],
+  3: ["left", "middle", "right"],
+  4: ["far left", "left", "right", "far right"]
 };
 
 const FOOD_LINES = ["yum.", "crunchy. thank you!", "om nom nom.", "delicious. more reading, more snacks?"];
 const TOY_LINES = ["again! again!", "best. toy. ever.", "wheee!", "you're the best."];
 const THANKS = ["ooh. thank you!", "for me? you shouldn't have.", "i love it."];
+const PLACED = ["perfect.", "ooh, cosy.", "that goes there.", "home sweet home."];
+
+/**
+ * Snacks eaten in three bites (treats.js, eatMove): when each bite's crumbs
+ * fall, and their colour. Drinks and noodles make no crumbs.
+ */
+const BITES_MS = [950, 1620, 2290];
+const CRUMBS: Record<string, string> = {
+  apple: "#FFF3D6",
+  cookie: "#C88A45",
+  watermelon: "#FF6F7A",
+  donut: "#FF9ACB",
+  cupcake: "#F6C9A0",
+  pizza: "#F2B84B",
+  icecream: "#FFF3E0",
+  sushi: "#FFFFFF",
+  cake: "#FFD6E0"
+};
+/** A treat's move ends with a happy flourish: the hearts rise then. */
+const TICK_MS = 1000 / 12;
 
 const moveName = (id: string) => LIB.find((move) => move.id === id)?.name ?? id;
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
@@ -116,6 +161,30 @@ const readFloor = () => {
   } catch {
     return null;
   }
+};
+
+const wait = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+
+/**
+ * The art of what was just chosen (the tile, shop card, detail pane or garden
+ * row that holds `clicked`), copied, for effects to start from. Read before
+ * anything moves on (the confirm dialog opening, the shop closing).
+ */
+const chosenArt = (clicked: Element | null): Captured | null => {
+  if (!clicked || !clicked.isConnected) return null;
+  const holder = clicked.closest(".pip-shop-tile, .pip-shop-card, .pip-shop-detail, .pip-garden-row") ?? clicked;
+  return capture(holder.querySelector(".pip-shop-art, .pip-shop-card-art, .pip-shop-detail-art, .pip-garden-art") ?? holder);
+};
+
+/** Where a bought thing goes once it is bought: it flies there, then `after` runs. */
+type Delivery = {
+  to: () => Box | Point | null;
+  /** Flies in a little card (a look, a move); bare art (decor) flies as itself. */
+  card?: boolean;
+  /** Shrinks into the target and is gone (Pip puts it on). */
+  vanish?: boolean;
+  /** What Pip says once it has arrived, instead of a thank-you. */
+  line?: string;
 };
 
 type Act = SceneAct & { reactionId?: number };
@@ -174,12 +243,37 @@ export const PipPage = ({ showToast }: PipPageProps) => {
   const [busy, setBusy] = useState(false);
   const [floorId, setFloorId] = useState<string | null>(readFloor);
   const actKey = useRef(1);
+  const sceneRef = useRef<HouseSceneHandle | null>(null);
+  const seedChipRef = useRef<HTMLButtonElement | null>(null);
+  const heartsRef = useRef<HTMLButtonElement | null>(null);
+  const decorateRef = useRef<HTMLButtonElement | null>(null);
+  // While seeds are in the air the counter shows what it had, and counts up as
+  // they land; hearts likewise wait for the hearts flying to them.
+  const [heldSeeds, setHeldSeeds] = useState<number | null>(null);
+  const [heldMood, setHeldMood] = useState<number | null>(null);
+  const [countMs, setCountMs] = useState(700);
+  // Effects timed to Pip's current act (crumbs at each bite): a new act cancels them.
+  const actTimers = useRef(new Set<number>());
+  // What was last clicked on the page (by pointer or keyboard), for effects to
+  // start from. Not the focused element: a click does not focus a button in
+  // every webview.
+  const lastClicked = useRef<Element | null>(null);
+  const clickedArt = () => chosenArt(lastClicked.current);
 
   // Pip lives here while the tab is open: the roaming Pip steps aside.
   useEffect(() => {
     setOnStage(true);
     return () => setOnStage(false);
   }, [setOnStage]);
+
+  // Leaving the tab leaves no seed mid-air.
+  useEffect(() => {
+    const timers = actTimers.current;
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer));
+      clearEffects();
+    };
+  }, []);
 
   // Water may have been poured since startup (a session, a sync).
   useEffect(() => {
@@ -217,6 +311,14 @@ export const PipPage = ({ showToast }: PipPageProps) => {
   };
   const house = hasHouse();
   const roomItemById = useMemo(() => new Map(roomItems().map((item) => [item.id, item])), []);
+  /** The floor a piece belongs on, when it belongs on one ("garden" and "greenhouse" are one floor). */
+  const homeOf = (item: PipRoomItem) =>
+    item.level && item.level !== "any"
+      ? levels.find((floor) => floor.id === item.level || (floor.garden && ["garden", "greenhouse"].includes(item.level ?? ""))) ?? null
+      : null;
+  // A piece for a floor this house does not have (the library's bookshelf,
+  // without the whole house) could be bought but never placed.
+  const placeable = (item: PipRoomItem) => !item.level || item.level === "any" || homeOf(item) !== null;
   const decor: LevelDecor = useMemo(() => {
     const found = levelDecor(layout, level);
     // The single room from before the house keeps its scheme in the old room style.
@@ -240,11 +342,26 @@ export const PipPage = ({ showToast }: PipPageProps) => {
       if (previous?.reactionId !== undefined && previous.reactionId !== reactionId) {
         finishReaction(previous.reactionId);
       }
+      // Crumbs from a snack Pip is no longer eating would fall from nowhere,
+      // and hearts that will not fly now should not keep the meter waiting.
+      if (actTimers.current.size > 0) {
+        actTimers.current.forEach((timer) => window.clearTimeout(timer));
+        actTimers.current.clear();
+        setHeldMood(null);
+      }
       setAct({ move, loops, key: actKey.current++, reactionId });
       if (text) setLine(text);
     },
     [finishReaction]
   );
+  /** Runs `run` in `ms`, unless Pip starts something else first. */
+  const duringAct = (ms: number, run: () => void) => {
+    const timer = window.setTimeout(() => {
+      actTimers.current.delete(timer);
+      run();
+    }, ms);
+    actTimers.current.add(timer);
+  };
 
   // Leaving the tab mid-celebration finishes it here rather than replaying it
   // when the roaming Pip comes back out.
@@ -285,14 +402,23 @@ export const PipPage = ({ showToast }: PipPageProps) => {
 
   const errorText = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
-  /** Asks, buys, then runs `after` (wear it, place it, play it). */
-  const purchase = async (item: ShopItem, after?: () => Promise<void> | void) => {
+  /** Where Pip is, for things that fly to Pip. */
+  const toPip = () => sceneRef.current?.pip() ?? null;
+
+  /**
+   * Asks, buys, then delivers: a burst where it was chosen, the shop steps
+   * aside, the thing flies to where it goes, and `after` runs as it lands
+   * (wear it, place it, play it).
+   */
+  const purchase = async (item: ShopItem, after?: () => Promise<void> | void, delivery?: Delivery) => {
     if (busy) return;
     const lacking = shortfall(item.price, balance);
     if (lacking) {
       showToast(`${plural(lacking.short, "more seed")} for ${item.name}: about ${plural(lacking.minutes, "minute")} of focused reading.`);
       return;
     }
+    // Where it was chosen, before the question takes the focus and the shop closes.
+    const from = clickedArt();
     const ok = await askConfirm({
       title: `Buy ${item.name}?`,
       body: `${plural(item.price, "seed")}. You'll have ${plural(balance - item.price, "seed")} left.`,
@@ -303,10 +429,26 @@ export const PipPage = ({ showToast }: PipPageProps) => {
     setBusy(true);
     try {
       await buy(item.kind, item.id);
+      if (from) {
+        const middle = centerOf(from.rect);
+        ring(middle, Math.max(from.rect.width, from.rect.height) * 1.5);
+        burst(middle, { px: 4, count: 14, sprite: "spark", spread: from.rect.width * 0.9, lift: 20, fall: 18 });
+      }
+      if (shopOpen) {
+        // A beat to see the burst, then the shop steps aside for the delivery.
+        await wait(reducedMotion() ? 0 : 200);
+        setShopOpen(null);
+      }
+      if (delivery) {
+        const target = delivery.to();
+        await fly(from, target, { card: delivery.card, vanish: delivery.vanish });
+        // Nothing flew (reduced motion, or it came from a button): sparkle where it landed.
+        if (target && "width" in target && !from?.canvas) burst(centerOf(target), { px: 4, count: 10, sprite: "spark", spread: target.width, lift: 16 });
+      }
       await after?.();
       // Moves, toys and floors show themselves off once bought; the rest get a thank-you.
       if (!["move", "treat", "level", "plot"].includes(item.kind)) {
-        play("cheer", 1, pickOne(THANKS));
+        play("cheer", 1, delivery?.line ?? pickOne(THANKS));
       }
     } catch (cause) {
       showToast(errorText(cause));
@@ -314,9 +456,9 @@ export const PipPage = ({ showToast }: PipPageProps) => {
       setBusy(false);
     }
   };
-  const buyItem = (kind: ShopKind, id: string, after?: () => Promise<void> | void) => {
+  const buyItem = (kind: ShopKind, id: string, after?: () => Promise<void> | void, delivery?: Delivery) => {
     const item = catalogueItem(kind, id);
-    if (item) void purchase(item, after);
+    if (item) void purchase(item, after, delivery);
   };
 
   const change = async (patch: Parameters<typeof setLook>[0]) => {
@@ -340,6 +482,13 @@ export const PipPage = ({ showToast }: PipPageProps) => {
     return null;
   };
 
+  /** A floor just opened: go there, and make a moment of it once it has slid in. */
+  const moveIn = (next: HouseLevel) => {
+    goToFloor(next);
+    play("welcome", 1, `a whole new floor. ${next.name.toLowerCase()}!`);
+    window.setTimeout(() => sceneRef.current?.celebrate(next.name, "A new floor!"), reducedMotion() ? 0 : 380);
+  };
+
   const openFloor = (next: HouseLevel) => {
     if (unlocked(next)) {
       goToFloor(next);
@@ -350,10 +499,7 @@ export const PipPage = ({ showToast }: PipPageProps) => {
       showToast(`${next.name}: ${why}`);
       return;
     }
-    buyItem("level", next.id, () => {
-      goToFloor(next);
-      play("welcome", 1, `a whole new floor. ${next.name.toLowerCase()}!`);
-    });
+    buyItem("level", next.id, () => moveIn(next));
   };
 
   // ---- decorating -------------------------------------------------------------------------
@@ -390,16 +536,81 @@ export const PipPage = ({ showToast }: PipPageProps) => {
   };
 
   const itemIn = (target: HouseSlot) => decor.placed.find((entry) => entry.slot === target.id)?.itemId ?? null;
-  // "Ceiling 2": the art numbers its slots (ceiling-2), which tells three ceilings apart.
+  // "Floor, far left": where it is in the room, as the reader sees it. The art
+  // numbers its slots (ceiling-2), which says nothing about where they are.
   const slotName = (target: HouseSlot) => {
     if (target.name) return target.name;
-    const number = /-(\d+)$/.exec(target.id)?.[1];
-    return `${SLOT_NAME[target.fits] ?? "Spot"}${number ? ` ${number}` : ""}`;
+    const kind = SLOT_NAME[target.fits] ?? "Spot";
+    const same = level.slots.filter((entry) => entry.fits === target.fits).sort((a, b) => a.x + a.w / 2 - (b.x + b.w / 2));
+    if (same.length <= 1) return kind;
+    const index = same.indexOf(target);
+    const places = SLOT_PLACES[same.length];
+    return places ? `${kind}, ${places[index]}` : `${kind} ${index + 1}`;
   };
   const slotLabel = (target: HouseSlot) => {
     const inside = itemIn(target);
     const name = inside ? roomItemById.get(inside)?.name ?? inside : "empty";
     return `${slotName(target)}: ${name}. Select to choose what goes here.`;
+  };
+
+  /** A piece flies from where it was chosen into its spot, then drops in (the scene animates the drop). */
+  const flyInto = async (target: HouseSlot, itemId: string, from: Captured | null, base?: Record<string, string>) => {
+    await fly(from, sceneRef.current?.dropStart(target.id, itemId) ?? null);
+    await placeIn(target, itemId, base ?? freshLayout());
+  };
+
+  /** An empty spot on this floor the item fits, for a piece bought or placed from the shop. */
+  const freeSlotFor = (itemId: string) => {
+    const item = roomItemById.get(itemId);
+    const taken = new Set(levelDecor(freshLayout(), level).placed.map((entry) => entry.slot));
+    return item ? level.slots.find((entry) => !taken.has(entry.id) && fitsSlot(item, entry, level.id)) ?? null : null;
+  };
+
+  /**
+   * A piece of decor from the shop goes straight into the room when it has an
+   * empty spot here that fits. Otherwise it flies to Decorate: which opens,
+   * to swap something out, when the piece goes on this floor; and Pip says
+   * where it lives when it belongs on another.
+   */
+  const deliverDecor = (itemId: string): { spot: HouseSlot | null; delivery: Delivery; after: () => Promise<void> | void } => {
+    const spot = freeSlotFor(itemId);
+    if (spot) {
+      return {
+        spot,
+        delivery: { to: () => sceneRef.current?.dropStart(spot.id, itemId) ?? null, line: pickOne(PLACED) },
+        after: () => placeIn(spot, itemId, freshLayout())
+      };
+    }
+    const item = roomItemById.get(itemId);
+    const home = item ? homeOf(item) : null;
+    const elsewhere = home && home.id !== level.id ? home : null;
+    return {
+      spot: null,
+      delivery: {
+        to: () => decorateRef.current?.getBoundingClientRect() ?? null,
+        card: true,
+        vanish: true,
+        line: elsewhere ? `that one lives in the ${elsewhere.name.toLowerCase()}.` : "no free spot. pick one to swap."
+      },
+      after: () => {
+        bump(decorateRef.current);
+        if (elsewhere) return;
+        setShopOpen(null);
+        setSlotFocus(null);
+        setDrawer("decorate");
+      }
+    };
+  };
+
+  /** "Place it" in the shop: an owned piece flies into a free spot here, or to Decorate. */
+  const placeFromShop = (itemId: string) => {
+    const from = clickedArt();
+    const { delivery, after } = deliverDecor(itemId);
+    setShopOpen(null);
+    void fly(from, delivery.to(), { card: delivery.card, vanish: delivery.vanish })
+      .then(after)
+      .then(() => play("idea", 1, delivery.line ?? null))
+      .catch((cause) => showToast(errorText(cause)));
   };
 
   // ---- the garden --------------------------------------------------------------------------
@@ -418,7 +629,7 @@ export const PipPage = ({ showToast }: PipPageProps) => {
         ripe: Boolean(here?.ripe)
       };
     }),
-    ...(nextPlot ? [{ plot: plotCount + 1, plant: null, progress: 0, ripe: false, locked: true }] : [])
+    ...(nextPlot ? [{ plot: plotCount + 1, plant: null, progress: 0, ripe: false, locked: true, price: priceOf("plot", nextPlot.id) }] : [])
   ];
   const minutesLeft = (here: PlantState) => Math.max(1, Math.ceil(here.need - here.water));
   const plotLabel = (plot: ScenePlot) => {
@@ -429,14 +640,51 @@ export const PipPage = ({ showToast }: PipPageProps) => {
     return here.ripe ? `Plot ${plot.plot}: ${name}, ripe! Select to pick it.` : `Plot ${plot.plot}: ${name}, ${plural(minutesLeft(here), "more minute")} of focus.`;
   };
 
+  const releaseSeeds = () => setHeldSeeds(null);
+
+  /**
+   * The seeds a harvest gave fly from where it grew to the counter, which
+   * takes each one with a bump and counts up as they land.
+   */
+  const flySeeds = (from: Box | null, seeds: number) => {
+    const chip = seedChipRef.current;
+    const icon = chip?.querySelector("svg") ?? chip;
+    const target = icon?.getBoundingClientRect();
+    if (!from || !target || seeds <= 0 || reducedMotion()) {
+      releaseSeeds();
+      return;
+    }
+    const start = { x: from.left + from.width / 2, y: from.top + from.height * 0.45 };
+    floatText({ x: start.x, y: from.top }, `+${seeds}`, "gain");
+    const count = Math.max(3, Math.min(14, Math.round(seeds / 2)));
+    // The count runs while they land: first seed to last.
+    setCountMs(count * 55 + 320);
+    void collect(start, centerOf(target), {
+      sprite: "seed",
+      count,
+      px: seedPixel(sceneRef.current?.pixel() ?? 4),
+      onLand: (index) => {
+        if (index === 0) releaseSeeds();
+        if (index === count - 1) setCountMs(700);
+        bump(chip, index === count - 1 ? 1.2 : 0.5);
+      }
+    });
+  };
+
   const pick = async (here: PlantState) => {
     if (busy) return;
+    // From the garden list, the seeds fly from the row's picture if the plot is not in view.
+    const row = clickedArt();
     setBusy(true);
+    setHeldSeeds(balance);
     try {
       const seeds = await harvest(here.id);
       const name = (plantInfo(here.plant)?.name ?? here.plant).toLowerCase();
+      const stood = sceneRef.current?.reap(here.plot, here.plant) ?? row?.rect ?? null;
       play(pickOne(["cheer", "sunbathe", "tapdance"]), 1, `fresh ${name}! +${seeds} seeds.`);
+      flySeeds(stood, seeds);
     } catch (cause) {
+      releaseSeeds();
       showToast(errorText(cause));
     } finally {
       setBusy(false);
@@ -451,10 +699,14 @@ export const PipPage = ({ showToast }: PipPageProps) => {
       showToast(`${plural(price - balance, "more seed")} for a ${info?.name ?? plantId} packet.`);
       return;
     }
+    // The packet the seed comes from; the new plant waits for it to land.
+    const from = clickedArt();
     setBusy(true);
+    sceneRef.current?.expectSprout(plot, Boolean(from?.canvas));
     try {
       await plant(plot, plantId);
       setPlotFocus(null);
+      sceneRef.current?.sow(plot, from);
       play("idea", 1, `${(info?.name ?? plantId).toLowerCase()} planted. ${info?.water ?? ""} minutes of reading and it's ripe.`);
     } catch (cause) {
       showToast(errorText(cause));
@@ -479,6 +731,49 @@ export const PipPage = ({ showToast }: PipPageProps) => {
 
   // ---- treats ---------------------------------------------------------------------------------
 
+  /**
+   * A treat, eaten or played with: crumbs fall at each bite, and as Pip
+   * finishes, hearts rise and fly to the mood meter, which fills as they
+   * land. That is what the hearts are: Pip's mood, and what cheers it.
+   */
+  const treatEffects = (treat: PipTreat) => {
+    const scene = sceneRef.current;
+    if (!scene || reducedMotion()) {
+      setHeldMood(null);
+      return;
+    }
+    const crumb = CRUMBS[treat.id];
+    if (treat.kind === "food" && crumb) {
+      BITES_MS.forEach((ms) =>
+        duringAct(ms, () => {
+          const mouth = scene.pipPoint("mouth");
+          const pip = scene.pip();
+          if (mouth && pip) spill(mouth, pip.bottom + pip.height * 0.02, { px: Math.max(3, scene.pixel() * 1.25), count: 6, colors: [crumb] });
+        })
+      );
+    }
+    // Near the end of (the first run of) the move, as its happy finish plays.
+    const frames = LIB.find((move) => move.id === treat.move)?.loop ?? 44;
+    duringAct(Math.max(600, (frames - 10) * TICK_MS), () => {
+      const head = scene.pipPoint("head");
+      const meter = heartsRef.current?.getBoundingClientRect();
+      if (!head || !meter) {
+        setHeldMood(null);
+        return;
+      }
+      void collect(head, centerOf(meter), {
+        sprite: "heart",
+        count: 3,
+        px: Math.max(3, Math.round(scene.pixel() * 0.8)),
+        stagger: 120,
+        onLand: (index) => {
+          if (index === 0) setHeldMood(null);
+          bump(heartsRef.current, 0.6);
+        }
+      });
+    });
+  };
+
   const give = async (treat: PipTreat) => {
     if (busy) return;
     const food = treat.kind === "food";
@@ -488,11 +783,18 @@ export const PipPage = ({ showToast }: PipPageProps) => {
       showToast(`${plural(lacking.short, "more seed")} for ${treat.name}: about ${plural(lacking.minutes, "minute")} of focused reading.`);
       return;
     }
+    // The hearts show the old mood until the new hearts reach them.
+    const moodBefore = heldMood ?? mood;
     setBusy(true);
+    setHeldMood(moodBefore);
     try {
       await feed(treat.id);
-      play(treat.move, 2, pickOne(food ? FOOD_LINES : TOY_LINES));
+      // One snack is one snack; a toy is played with twice.
+      play(treat.move, food ? 1 : 2, pickOne(food ? FOOD_LINES : TOY_LINES));
+      setHeldMood(moodBefore);
+      treatEffects(treat);
     } catch (cause) {
+      setHeldMood(null);
       showToast(errorText(cause));
     } finally {
       setBusy(false);
@@ -615,7 +917,11 @@ export const PipPage = ({ showToast }: PipPageProps) => {
       nod: entry.nod ?? null,
       fromLibrary: libraryHas(entry.nod),
       art: imageArt(() => renderItem(entry, 0), `item-${entry.id}`),
-      use: owned ? { label: "Place it", run: () => { setShopOpen(null); setDrawer("decorate"); } } : null
+      use: !owned
+        ? null
+        : at?.startsWith(`${level.id}/`)
+          ? { label: "Move it about", run: () => { setShopOpen(null); setDrawer("decorate"); } }
+          : { label: at ? `Bring it to the ${level.name}` : "Place it", run: () => placeFromShop(entry.id) }
     };
   };
 
@@ -713,9 +1019,9 @@ export const PipPage = ({ showToast }: PipPageProps) => {
       id: "decor",
       label: "Decor",
       icon: "home",
-      note: "Place what you buy from Decorate, in the spots each floor has.",
+      note: "Decor goes straight into a free spot on this floor that fits it. Move things about from Decorate.",
       entries: allRoomItems
-        .filter((item) => !item.nod && (FEATURES.fullPipHouse || STARTER_DECOR.has(item.id)))
+        .filter((item) => owns("room", item.id) || (!item.nod && (FEATURES.fullPipHouse || STARTER_DECOR.has(item.id)) && placeable(item)))
         .map(decorEntry)
         .sort(byPrice)
     },
@@ -746,29 +1052,47 @@ export const PipPage = ({ showToast }: PipPageProps) => {
     }
   ];
 
-  const onShopBuy = (entry: ShopEntry) => {
-    const after: Record<string, (() => Promise<void> | void) | undefined> = {
-      skin: () => setLook({ variant: entry.id }),
-      accessory: () => wearAccessory(entry.id),
-      move: () => play(entry.id, 2, `new move: ${entry.name.toLowerCase()}.`),
-      level: () => {
-        setShopOpen(null);
-        const next = levels.find((floor) => floor.id === entry.id);
-        if (next) goToFloor(next);
-        play("welcome", 1, `a whole new floor. ${entry.name.toLowerCase()}!`);
-      },
-      treat: () => {
-        const treat = treats().find((candidate) => candidate.id === entry.id);
-        if (treat) {
-          setShopOpen(null);
-          void give(treat);
-        }
-      },
-      style: () => setLook({ roomStyle: entry.id }),
-      wallpaper: () => setFinish("wallpaper", entry.id, freshLayout()),
-      flooring: () => setFinish("floor", entry.id, freshLayout())
+  /** The wall and the floor of the room on screen: where wallpaper and flooring fly to. */
+  const roomPart = (part: "wall" | "floor"): Box | null => {
+    const room = sceneRef.current?.room();
+    if (!room) return null;
+    return part === "wall"
+      ? { left: room.left + room.width * 0.35, top: room.top + room.height * 0.2, width: room.width * 0.3, height: room.height * 0.3 }
+      : { left: room.left + room.width * 0.35, top: room.top + room.height * 0.84, width: room.width * 0.3, height: room.height * 0.12 };
+  };
+
+  /**
+   * Buys from the shop, and sends the thing where it goes: a look or a move
+   * to Pip (who puts it on, or shows it off), decor into a free spot, paper to
+   * the wall, a floor to its door. `bought` runs first (a preview ending as
+   * the look it showed becomes Pip's own).
+   */
+  const onShopBuy = (entry: ShopEntry, bought?: () => void) => {
+    const toWear: Delivery = { to: toPip, card: true, vanish: true };
+    const treat = treats().find((candidate) => candidate.id === entry.id);
+    const next = levels.find((floor) => floor.id === entry.id);
+    const decorDelivery = entry.kind === "room" ? deliverDecor(entry.id) : null;
+    const plans: Partial<Record<ShopKind, { after?: () => Promise<void> | void; delivery?: Delivery }>> = {
+      skin: { after: () => setLook({ variant: entry.id }), delivery: toWear },
+      accessory: { after: () => wearAccessory(entry.id), delivery: toWear },
+      move: { after: () => play(entry.id, 2, `new move: ${entry.name.toLowerCase()}.`), delivery: toWear },
+      level: { after: () => (next ? moveIn(next) : undefined) },
+      treat: { after: () => (treat ? give(treat) : undefined), delivery: toWear },
+      room: decorDelivery ? { after: decorDelivery.after, delivery: decorDelivery.delivery } : {},
+      style: { after: () => setLook({ roomStyle: entry.id }), delivery: { to: () => roomPart("wall"), card: true, vanish: true } },
+      wallpaper: { after: () => setFinish("wallpaper", entry.id, freshLayout()), delivery: { to: () => roomPart("wall"), card: true, vanish: true } },
+      flooring: { after: () => setFinish("floor", entry.id, freshLayout()), delivery: { to: () => roomPart("floor"), card: true, vanish: true } }
     };
-    buyItem(entry.kind, entry.id, after[entry.kind]);
+    const plan = plans[entry.kind] ?? {};
+    buyItem(
+      entry.kind,
+      entry.id,
+      () => {
+        bought?.();
+        return plan.after?.();
+      },
+      plan.delivery
+    );
   };
 
   const onShopPreview = (entry: ShopEntry) => {
@@ -798,9 +1122,20 @@ export const PipPage = ({ showToast }: PipPageProps) => {
         selected={worn}
         name={entry.name}
         hint={entry.blurb ?? entry.unlock}
-        label={`${entry.name}. ${worn ? "Wearing." : owned ? "Owned. Select to wear it." : earned ? `Earned by reading: ${entry.unlock}` : "In the shop."}`}
+        label={`${entry.name}. ${worn ? "Wearing." : owned ? "Owned. Select to wear it." : earned ? `Locked. Earned by reading: ${entry.unlock}` : "In the shop."}`}
         art={(hot) => <PipSprite move="idle" still={!hot && !worn} size={72} snap="nearest" skin={entry.id} outfit={outfit} />}
-        status={worn ? <Status icon="check">Wearing</Status> : owned ? <Status>Owned</Status> : earned ? <Status icon="lock">Earned</Status> : priceTag(priceOf("skin", entry.id))}
+        status={
+          worn ? (
+            <Status icon="check">Wearing</Status>
+          ) : owned ? (
+            <Status>Owned</Status>
+          ) : earned ? (
+            // "Earned" read as if it already was; these are still to earn.
+            <Status icon="lock">Locked</Status>
+          ) : (
+            priceTag(priceOf("skin", entry.id))
+          )
+        }
         onSelect={() => {
           if (worn) return;
           if (owned) void change({ variant: entry.id });
@@ -868,7 +1203,7 @@ export const PipPage = ({ showToast }: PipPageProps) => {
         status={food ? priceTag(price) : owned ? <Status icon="heart">Play</Status> : priceTag(price)}
         onSelect={() => {
           if (food || owned) void give(entry);
-          else buyItem("treat", entry.id, () => give(entry));
+          else buyItem("treat", entry.id, () => give(entry), { to: toPip, card: true, vanish: true });
         }}
       />
     );
@@ -910,7 +1245,10 @@ export const PipPage = ({ showToast }: PipPageProps) => {
                   ? null
                   : owned
                     ? { label: "Make signature", run: () => void change({ signature: entry.id }).then(() => play(entry.id, 1, "my new signature move.")) }
-                    : { label: `Buy · ${price}`, run: () => buyItem("move", entry.id, () => play(entry.id, 2, `new move: ${name.toLowerCase()}.`)) }
+                    : {
+                        label: `Buy · ${price}`,
+                        run: () => buyItem("move", entry.id, () => play(entry.id, 2, `new move: ${name.toLowerCase()}.`), { to: toPip, card: true, vanish: true })
+                      }
               }
             />
           );
@@ -919,7 +1257,11 @@ export const PipPage = ({ showToast }: PipPageProps) => {
     </>
   );
 
-  const fitting = slot ? allRoomItems.filter((item) => fitsSlot(item, slot, level.id)) : [];
+  // What Decorate offers to buy is what the shop sells: without the whole
+  // house, the starter pieces. It used to offer the full catalogue, book nods
+  // and all, that the shop keeps back.
+  const onSale = (item: PipRoomItem) => FEATURES.fullPipHouse || (!item.nod && STARTER_DECOR.has(item.id));
+  const fitting = slot ? allRoomItems.filter((item) => fitsSlot(item, slot, level.id) && (owns("room", item.id) || onSale(item))) : [];
   const decorTile = (item: PipRoomItem, target: HouseSlot) => {
     const owned = owns("room", item.id);
     const here = itemIn(target) === item.id;
@@ -936,8 +1278,8 @@ export const PipPage = ({ showToast }: PipPageProps) => {
         status={here ? <Status icon="check">Here</Status> : owned ? <Status>{elsewhere ? `In the ${elsewhere}` : "Owned"}</Status> : priceTag(price)}
         onSelect={() => {
           if (here) void placeIn(target, null);
-          else if (owned) void placeIn(target, item.id);
-          else buyItem("room", item.id, () => placeIn(target, item.id, freshLayout()));
+          else if (owned) void flyInto(target, item.id, clickedArt()).then(() => play("kudos", 1, pickOne(PLACED)));
+          else buyItem("room", item.id, () => placeIn(target, item.id, freshLayout()), { to: () => sceneRef.current?.dropStart(target.id, item.id) ?? null });
         }}
       />
     );
@@ -964,8 +1306,10 @@ export const PipPage = ({ showToast }: PipPageProps) => {
         status={chosen ? <Status icon="check">Here</Status> : owned ? <Status>Owned</Status> : priceTag(price)}
         onSelect={() => {
           if (chosen) return;
-          if (owned) void apply();
-          else buyItem(kind, entry.id, () => apply(freshLayout()));
+          // The swatch flies to the wall (or the floor), then the room is papered over.
+          const to = () => roomPart(kind === "flooring" ? "floor" : "wall");
+          if (owned) void fly(clickedArt(), to(), { card: true, vanish: true }).then(() => apply());
+          else buyItem(kind, entry.id, () => apply(freshLayout()), { to, card: true, vanish: true });
         }}
       />
     );
@@ -1002,7 +1346,8 @@ export const PipPage = ({ showToast }: PipPageProps) => {
   ) : (
     <>
       <p className="text-xs text-on-surface-variant">
-        Select a dotted spot in the room to choose what goes there. Things snap into place, and each is in one place in the house at a time.
+        Select a pin in the room, or a spot below, to choose what goes there. Things snap into place, and each is in one place in the house at a
+        time.
       </p>
       {level.slots.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-1.5">
@@ -1029,7 +1374,7 @@ export const PipPage = ({ showToast }: PipPageProps) => {
       <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
         <span className="seed-chip water-chip">
           <UiIcon name="water" size={12} />
-          Rain barrel {barrel} / {garden?.barrelCap ?? 120}
+          Rain barrel <CountUp value={barrel} /> / {garden?.barrelCap ?? 120}
         </span>
         {gardenLevel && level.id !== gardenLevel.id && (
           <button type="button" className="tactile-button px-3 py-1 text-xs" onClick={() => goToFloor(gardenLevel)}>
@@ -1189,34 +1534,97 @@ export const PipPage = ({ showToast }: PipPageProps) => {
 
   // ---- the page -----------------------------------------------------------------------------------
 
-  const hearts = Math.round(mood / 10) / 2;
+  const shownMood = heldMood ?? mood;
+  const hearts = Math.round(shownMood / 10) / 2;
   const above = levels[levelIndex + 1];
   const below = levels[levelIndex - 1];
   const ripe = garden?.plants.filter((entry) => entry.ripe && !entry.harvested).length ?? 0;
 
+  // Seeds coming and going outside a harvest (a purchase, a reading session
+  // finishing while the tab is open): the counter dips or bumps, and says by how much.
+  const loaded = overview !== null;
+  const lastBalance = useRef<number | null>(loaded ? balance : null);
+  useEffect(() => {
+    const before = lastBalance.current;
+    lastBalance.current = loaded ? balance : null;
+    if (before === null || before === balance || heldSeeds !== null) return;
+    const chip = seedChipRef.current;
+    const box = chip?.getBoundingClientRect();
+    if (!chip || !box) return;
+    const change = balance - before;
+    if (change > 0) {
+      floatText({ x: box.left + box.width / 2, y: box.top }, `+${change}`, "gain");
+      bump(chip);
+    } else {
+      floatText({ x: box.left + box.width / 2, y: box.bottom + 4 }, `−${-change}`, "spend");
+      dip(chip);
+    }
+    // Only a new balance matters; the hold is read as it stands.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [balance, loaded]);
+
+  // A heart filling pops as it fills.
+  const heartRefs = useRef<Array<HTMLSpanElement | null>>([]);
+  const lastHearts = useRef(hearts);
+  useEffect(() => {
+    const before = lastHearts.current;
+    lastHearts.current = hearts;
+    if (hearts <= before) return;
+    heartRefs.current.forEach((node, index) => {
+      if (index + 1 > before && index < hearts) bump(node, 1.6);
+    });
+  }, [hearts]);
+
   return (
-    <div className="pip-house-page">
+    <div
+      className="pip-house-page"
+      onClickCapture={(event) => {
+        lastClicked.current = event.target instanceof Element ? event.target : null;
+      }}
+    >
       <h2 className="sr-only">Pip's house</h2>
       <section className="pip-house" aria-label={`Pip's house: the ${level.name}`}>
         <div className="pip-hud">
           <div className="pip-hud-group">
-            <button type="button" className="pip-hud-chip" onClick={() => toggleDrawer("me")} aria-label={`${plural(balance, "seed")}. Where they come from`}>
+            <button
+              ref={seedChipRef}
+              type="button"
+              className="pip-hud-chip pip-hud-seeds"
+              onClick={() => toggleDrawer("me")}
+              aria-label={`${plural(balance, "seed")}. Where they come from`}
+              title="Seeds: where they come from"
+            >
               <UiIcon name="seed" size={15} />
               <span className="tabular-nums">
-                <CountUp value={balance} />
+                <CountUp value={heldSeeds ?? balance} duration={heldSeeds === null ? countMs : 700} />
               </span>
             </button>
             <button type="button" className="pip-hud-shop" onClick={() => setShopOpen("variants")}>
               <UiIcon name="shop" size={17} />
               <span>Shop</span>
             </button>
-            <span className="pip-hud-chip pip-hearts" role="img" aria-label={`Mood: ${hearts} of 5 hearts. ${moodWord(mood)}.`}>
+            {/* The hearts are Pip's mood: they open what cheers it up. */}
+            <button
+              ref={heartsRef}
+              type="button"
+              className="pip-hud-chip pip-hearts"
+              onClick={() => toggleDrawer("me")}
+              aria-label={`Pip's mood: ${hearts} of 5 hearts. ${moodWord(shownMood)}. What cheers Pip up`}
+              title={`Pip's mood: ${moodWord(shownMood)}`}
+            >
               {[0, 1, 2, 3, 4].map((index) => (
-                <span key={index} className="pip-heart" data-fill={hearts >= index + 1 ? "full" : hearts > index ? "half" : "empty"}>
+                <span
+                  key={index}
+                  ref={(node) => {
+                    heartRefs.current[index] = node;
+                  }}
+                  className="pip-heart"
+                  data-fill={hearts >= index + 1 ? "full" : hearts > index ? "half" : "empty"}
+                >
                   <UiIcon name="heart" size={14} />
                 </span>
               ))}
-            </span>
+            </button>
           </div>
           {levels.length > 1 && (
             <FloorSwitch
@@ -1232,7 +1640,14 @@ export const PipPage = ({ showToast }: PipPageProps) => {
           )}
           <div className="pip-hud-group pip-toolbar" role="toolbar" aria-label="Pip's things">
             {TOOLS.map((tool) => (
-              <button key={tool.id} type="button" className="pip-hud-button" aria-pressed={drawer === tool.id} onClick={() => toggleDrawer(tool.id)}>
+              <button
+                key={tool.id}
+                ref={tool.id === "decorate" ? decorateRef : undefined}
+                type="button"
+                className="pip-hud-button"
+                aria-pressed={drawer === tool.id}
+                onClick={() => toggleDrawer(tool.id)}
+              >
                 <UiIcon name={tool.icon} size={16} />
                 <span>{tool.label}</span>
                 {tool.id === "garden" && ripe > 0 && <span className="pip-hud-dot" aria-label={`${ripe} ripe`} />}
@@ -1261,11 +1676,9 @@ export const PipPage = ({ showToast }: PipPageProps) => {
               <button
                 type="button"
                 className="tactile-button tactile-button-primary px-3 py-1.5 text-xs"
-                onClick={() => {
-                  const entry = preview.entry;
-                  endPreview(false);
-                  onShopBuy(entry);
-                }}
+                // The preview stays on until the look is Pip's own, so it does not
+                // spin back to the old one while the purchase is asked about.
+                onClick={() => onShopBuy(preview.entry, () => setPreview(null))}
               >
                 Buy for {preview.entry.price}
               </button>
@@ -1281,7 +1694,9 @@ export const PipPage = ({ showToast }: PipPageProps) => {
 
         <div className="pip-house-body">
           <HouseScene
+            ref={sceneRef}
             level={level}
+            floorIndex={levelIndex}
             decor={decor}
             skin={shownVariant}
             outfit={shownOutfit}
@@ -1292,6 +1707,7 @@ export const PipPage = ({ showToast }: PipPageProps) => {
             mopey={mood < MOOD_LOW}
             onPoke={poke}
             decorating={decorating}
+            selectedSlot={slotFocus}
             onSlot={(target) => setSlotFocus(target.id)}
             slotLabel={slotLabel}
             onArcade={() => setArcadeOpen(true)}
@@ -1302,9 +1718,9 @@ export const PipPage = ({ showToast }: PipPageProps) => {
             label={`The ${level.name}, with Pip in ${SKINS.find((entry) => entry.id === shownVariant)?.name ?? "its"} outfit. ${moodWord(mood)}.`}
           />
 
-
           {drawer && (
-            <PipDrawer title={drawers[drawer].title} note={drawers[drawer].note} onClose={() => setDrawer(null)}>
+            // Keyed, so switching drawers slides the new one in.
+            <PipDrawer key={drawer} title={drawers[drawer].title} note={drawers[drawer].note} onClose={() => setDrawer(null)}>
               {overview === null ? <Empty>Pip is getting dressed…</Empty> : drawers[drawer].body}
             </PipDrawer>
           )}
@@ -1312,7 +1728,7 @@ export const PipPage = ({ showToast }: PipPageProps) => {
 
         <p className="pip-house-hint">
           {decorating
-            ? "Decorating: select a dotted spot to choose what goes there."
+            ? "Decorating: select a pin in the room to choose what goes there."
             : level.garden
               ? "Select a plot to plant or pick. Reading in focus waters the garden."
               : level.arcade
