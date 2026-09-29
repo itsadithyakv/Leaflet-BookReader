@@ -6514,6 +6514,17 @@ button.pip-shop-tile:hover,
   }
 }
 
+/* With a sheet open, the bottom of a phone's screen is the sheet, and the toast
+   covered what was being chosen for its few seconds: it waits at the top
+   instead, over the header, which nothing needs while a sheet is up. */
+@media (max-width: 560px) {
+  .pip-house[data-sheet="open"] .pip-undo {
+    top: calc(env(safe-area-inset-top, 0px) + 10px);
+    bottom: auto;
+    animation-name: pip-toast-in;
+  }
+}
+
 /* ---- The Attic Arcade ------------------------------------------------------------- */
 
 .pip-arcade {

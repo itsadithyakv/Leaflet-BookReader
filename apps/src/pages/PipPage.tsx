@@ -1776,6 +1776,15 @@ export const PipPage = ({ showToast }: PipPageProps) => {
       bump(goalRef.current, 1.2);
       play("cheer", 1, `enough seeds for the ${goalItem.name.toLowerCase()}!`);
     }
+    // Saved up for and bought: the goal's own moment, once the purchase has
+    // played out (the thing flying home), rather than a quiet unpinning.
+    if (event === "reached" && !suspended) {
+      const name = goalEntry?.name ?? goalItem.name;
+      window.setTimeout(() => {
+        sceneRef.current?.celebrate(name, "Goal reached!");
+        play("fireworks", 1, `the ${name.toLowerCase()}! we saved up for that.`);
+      }, reducedMotion() ? 0 : 900);
+    }
     // The goal's own fields and the wallet are what move it on.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [goal, balance, overview, goalLock, suspended]);
