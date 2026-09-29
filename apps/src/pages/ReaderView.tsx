@@ -4079,8 +4079,9 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     scheduleReaderDotUpdate();
   }, [readerDotEnabled]);
 
-  // The first book opened on this device gets the walkthrough. After that, a
-  // reader who asked for it has books open in Smart Read, paused at their line.
+  // The first book opened on this device gets the walkthrough. After that,
+  // books open in Smart Read, paused at the reader's line, unless they turned
+  // that off.
   const openingHandledRef = useRef(false);
   useEffect(() => {
     if (loading || loadError || openingHandledRef.current) {

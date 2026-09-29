@@ -273,8 +273,9 @@ large type alike, and Dotty holds its word while the page moves.
 
 **The tour.** The first book opened on a device shows a short walkthrough:
 Dotty, starting Smart Read, making it your pace, and pausing. The ··· menu
-("How Dotty works") and Settings bring it back. Its last step (and Settings)
-can make books open in Smart Read, paused at the reader's line.
+("How Dotty works") and Settings bring it back. After it, books open in Smart
+Read by default (in the scrolling layout), paused at the reader's line so
+nothing moves until Space; its last step and Settings turn that off.
 
 Behaviours worth knowing (from the pre-release review):
 

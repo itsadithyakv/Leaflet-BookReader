@@ -34,11 +34,15 @@ export const setReaderTourSeen = (seen: boolean) => {
 
 export type StartMode = "standard" | "smart";
 
+/**
+ * How books open. Smart Read unless the reader turned it off: it opens paused
+ * at their line, so nothing moves until Space sets Dotty off.
+ */
 export const readStartMode = (): StartMode => {
   try {
-    return localStorage.getItem(START_MODE_KEY) === "smart" ? "smart" : "standard";
+    return localStorage.getItem(START_MODE_KEY) === "standard" ? "standard" : "smart";
   } catch {
-    return "standard";
+    return "smart";
   }
 };
 
