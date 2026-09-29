@@ -52,8 +52,10 @@ This is the first public release.
 - **Progress that means something:** measured by how much of the book is
   behind you, not how many chapters, so a long chapter no longer jumps the
   percentage.
-- **Make the page yours:** text size, and a page finish: warm paper, dark
-  paper, true white, true black, or the app's own light or dark theme.
+- **Make the page yours:** text size, line length (the text sits in a
+  comfortable column on wide screens, or runs the full width if you prefer),
+  and a page finish: warm paper, dark paper, true white, true black, or the
+  app's own light or dark theme.
 - **Smart Read** paces your reading with a gentle guide dot.
 - **SpeedRead** shows one word at a time at the pace you set, holding your eye
   on one spot.

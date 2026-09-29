@@ -33,7 +33,8 @@ type ReaderViewProps = {
   book: Book;
   onClose: () => void;
 };
-import { LAYOUT_KEY, readLayout, type ReaderLayout, type TocItem, type ReaderDisplayMode, type ReadingMode, type ReaderWord, type ReadingWordState, type SmartSession } from "../readers/readerTypes";
+import { LAYOUT_KEY, MEASURE_KEY, MEASURE_PADDING, measureCss, pagesViewerMaxWidth, readLayout, readMeasure, type ReaderLayout, type ReaderMeasure, type TocItem, type ReaderDisplayMode, type ReadingMode, type ReaderWord, type ReadingWordState, type SmartSession } from "../readers/readerTypes";
+import { MeasureControl } from "../readers/MeasureControl";
 import { getReaderFinish, getReaderFinishBackground, PAGE_TOP_PAD } from "../readers/finish";
 import { flattenToc } from "../readers/toc";
 import { INK_SAMPLE, markInkImages } from "../readers/inkImages";
@@ -579,6 +580,21 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   const layoutRef = useRef<ReaderLayout>(layout);
   layoutRef.current = layout;
   const paged = layout === "pages";
+  // How long a line may run (readers/readerTypes.ts): the text in a column on
+  // a wide window. A preference of this device, like the layout.
+  const [measure, setMeasure] = useState<ReaderMeasure>(readMeasure);
+  const measureRef = useRef<ReaderMeasure>(measure);
+  measureRef.current = measure;
+  const chooseMeasure = (next: ReaderMeasure) => {
+    try {
+      localStorage.setItem(MEASURE_KEY, next);
+    } catch {
+      // This session only.
+    }
+    setMeasure(next);
+  };
+  /** The column for the book's stylesheet. Pages narrow the viewer instead: their frame spans every column. */
+  const bookMeasureCss = () => measureCss(layoutRef.current === "pages" ? "full" : measureRef.current);
   const chooseLayout = (next: ReaderLayout) => {
     if (next === layout) {
       return;
@@ -774,8 +790,8 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     if (!rendition?.themes || layoutRef.current === "pages") {
       return;
     }
-    rendition.themes.override("padding-left", "var(--reader-content-pad, 24px)");
-    rendition.themes.override("padding-right", "var(--reader-content-pad, 24px)");
+    rendition.themes.override("padding-left", MEASURE_PADDING);
+    rendition.themes.override("padding-right", MEASURE_PADDING);
     rendition.themes.override("margin-left", "0px");
     rendition.themes.override("margin-right", "0px");
     rendition.themes.override("max-width", "100%");
@@ -858,6 +874,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
         return;
       }
       doc.documentElement.style.setProperty("--reader-font-size", `${fontSizeRef.current}px`);
+      doc.documentElement.style.setProperty("--reader-measure", bookMeasureCss());
     });
   };
 
@@ -2079,6 +2096,33 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     return container;
   };
 
+  /**
+   * The text moved under Dotty (a resize, a new type size or line length):
+   * Dotty follows it. RSVP has no Dotty (repositioning here used to recreate
+   * it), and an unpinned Dotty in standard mode follows the last visible line,
+   * not a word. That follow waits for scrolling to settle; `now` is for a
+   * change the reader just made, which should not leave Dotty stranded for
+   * two seconds.
+   */
+  const refreshReaderDot = (now = false) => {
+    const mode = readingModeRef.current;
+    if (!readerDotEnabledRef.current || readerWordsRef.current.length === 0 || mode === "speed") {
+      return;
+    }
+    const pinned = Date.now() < readerDotUserAnchorUntilRef.current;
+    if (mode === "smart" || pinned) {
+      positionReaderDotAtWord(readerDotAnchorIndexRef.current ?? activeWordIndexRef.current);
+      return;
+    }
+    const location = renditionRef.current?.location;
+    const cfi = location?.end?.cfi ?? location?.start?.cfi;
+    if (now && mode === "standard" && cfi) {
+      updateLastReadMarker(cfi);
+    } else {
+      scheduleReaderDotUpdate();
+    }
+  };
+
   const scheduleReaderDotUpdate = () => {
     if (!readerDotEnabledRef.current || readingModeRef.current !== "standard") {
       return;
@@ -2515,6 +2559,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
           }
           const pad = 24;
           doc.documentElement.style.setProperty("--reader-content-pad", `${pad}px`);
+          doc.documentElement.style.setProperty("--reader-measure", bookMeasureCss());
           doc.documentElement.setAttribute("data-leaflet-layout", layoutRef.current);
           if (!doc.getElementById("reader-font-scale")) {
             const style = doc.createElement("style");
@@ -2526,7 +2571,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
               /* Scrolling: the text fills the width. Pages: epub.js sets the
                  body's width for its columns, which this must not override. */
               html:not([data-leaflet-layout="pages"]), html:not([data-leaflet-layout="pages"]) body { width: 100% !important; max-width: 100% !important; }
-              body { font-size: 1em !important; margin: 0 !important; padding-top: ${PAGE_TOP_PAD}px !important; padding-left: var(--reader-content-pad, 24px) !important; padding-right: var(--reader-content-pad, 24px) !important; text-align: justify !important; text-justify: inter-word !important; hyphens: auto; box-sizing: border-box; transition: padding 0.25s ease; }
+              body { font-size: 1em !important; margin: 0 !important; padding-top: ${PAGE_TOP_PAD}px !important; padding-left: ${MEASURE_PADDING} !important; padding-right: ${MEASURE_PADDING} !important; text-align: justify !important; text-justify: inter-word !important; hyphens: auto; box-sizing: border-box; transition: padding 0.25s ease; }
               body > *:first-child { margin-top: 0 !important; padding-top: 0 !important; }
               /* One reading size for running text, whatever the publisher
                  set; headings, footnote markers and small print keep their
@@ -3265,18 +3310,8 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
         const height = Math.max(1, Math.round(viewer.clientHeight));
         rendition.resize(width, height);
         ensureSingleScrollContainer();
-        // Reflow moves the anchored word; the marker has to follow it. RSVP has
-        // no Dotty (repositioning here used to recreate it), and an unpinned
-        // Dotty in standard mode follows the last visible line, not a word.
-        const mode = readingModeRef.current;
-        if (readerDotEnabledRef.current && readerWordsRef.current.length > 0 && mode !== "speed") {
-          const pinned = Date.now() < readerDotUserAnchorUntilRef.current;
-          if (mode === "smart" || pinned) {
-            positionReaderDotAtWord(readerDotAnchorIndexRef.current ?? activeWordIndexRef.current);
-          } else {
-            scheduleReaderDotUpdate();
-          }
-        }
+        // Reflow moves the anchored word; the marker has to follow it.
+        refreshReaderDot();
       });
     };
     const observer = new ResizeObserver(syncViewport);
@@ -4023,17 +4058,20 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   }, [fontSize, sidebarOpen, displayMode, autoScrollSpeed, speedReadWpm, storageKey]);
 
   const appliedFontSizeRef = useRef(fontSize);
+  const appliedMeasureRef = useRef(measure);
   useEffect(() => {
     if (!renditionRef.current?.themes?.fontSize) {
       applyReaderTypography();
       return;
     }
-    // Bigger or smaller text changes the chapter's height while the scroll
-    // position stays put, so the page jumped by hundreds of pixels. Note the
-    // line in view first, and return to it once the text has reflowed.
+    // Bigger or smaller text, or a longer or shorter line, changes the
+    // chapter's height while the scroll position stays put, so the page jumped
+    // by hundreds of pixels. Note the line in view first, and return to it once
+    // the text has reflowed.
     const rendition = renditionRef.current;
-    const changed = appliedFontSizeRef.current !== fontSize;
+    const changed = appliedFontSizeRef.current !== fontSize || appliedMeasureRef.current !== measure;
     appliedFontSizeRef.current = fontSize;
+    appliedMeasureRef.current = measure;
     const anchor: string | undefined = changed ? rendition.location?.start?.cfi : undefined;
     fontSizeRef.current = fontSize;
     applyReaderTypography();
@@ -4054,7 +4092,12 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     }
     scheduleReaderWordIndex(true);
     persistReaderState();
-  }, [fontSize]);
+    // The column's padding eases over a quarter of a second (see the book's
+    // stylesheet), and Dotty was placed against where it started: place it
+    // again once the text has settled.
+    const settle = window.setTimeout(() => refreshReaderDot(true), 400);
+    return () => window.clearTimeout(settle);
+  }, [fontSize, measure]);
 
   useEffect(() => {
     readerDotEnabledRef.current = readerDotEnabled && layout === "scroll";
@@ -4188,8 +4231,11 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   // The page's own colours, for everything around the book text (its gutters,
   // the scrollbar, the frame), which otherwise followed the app's theme and
   // showed as pale strips beside a dark page.
+  // The paper's grain too: with lines capped, the room either side of a
+  // centred page shows, and a flat frame beside grained paper read as a seam.
   const pageStyle = {
     "--reader-page-bg": rsvpFinish.background,
+    "--reader-page-texture": getReaderFinishBackground(rsvpFinish),
     "--reader-page-ink": rsvpFinish.text,
     colorScheme: rsvpDark ? "dark" : "light"
   } as CSSProperties;
@@ -4337,6 +4383,9 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
             className="reader-icon transition-colors reader-hover-accent"
             type="button"
             onClick={() => setFontPanelOpen((prev) => !prev)}
+            title="Text size and line length"
+            aria-label="Text size and line length"
+            aria-expanded={fontPanelOpen}
           >
             <span className="material-symbols-outlined">text_fields</span>
           </button>
@@ -4357,6 +4406,8 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
               >
                 A+
               </button>
+              <span className="mx-1 h-5 w-px reader-border border-l" aria-hidden="true" />
+              <MeasureControl value={measure} onChange={chooseMeasure} />
             </div>
           )}
           <button
@@ -4735,6 +4786,11 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
               <div
                 ref={viewerRef}
                 className={`reader-container ${paged ? "reader-pages" : "reader-scroll"} h-full w-full overflow-hidden overscroll-x-none`}
+                style={
+                  paged && pagesViewerMaxWidth(measure, fontSize) !== null
+                    ? { maxWidth: pagesViewerMaxWidth(measure, fontSize) ?? undefined, marginInline: "auto" }
+                    : undefined
+                }
               />
               {readingMode === "speed" && readingWord && (
                 <div

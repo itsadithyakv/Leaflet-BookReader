@@ -196,10 +196,30 @@ bar and reaches the top of the window.
 ### Page colours
 
 The reader root publishes the page's own finish as `--reader-page-bg`,
-`--reader-page-ink` and `color-scheme`, and everything around the book text
-(the frame, the scroll gutters, the scrollbar) uses them. These used to follow
-the app theme, so a dark page under a light app showed pale strips and a white
-scrollbar track down the sides.
+`--reader-page-texture` (the paper's grain), `--reader-page-ink` and
+`color-scheme`, and everything around the book text (the frame, the scroll
+gutters, the scrollbar) uses them. These used to follow the app theme, so a
+dark page under a light app showed pale strips and a white scrollbar track down
+the sides.
+
+### Line length
+
+Lines no longer run the whole window: the text sits in a centred column,
+**Medium** by default (34 em of the reading size, about 72 characters),
+with Narrow (28 em), Wide (42 em) and Full beside the text size in the type
+panel. It is a device preference (`leaflet.reader.measure`, in
+`readers/readerTypes.ts`), like the layout. The column is measured in em, so
+bigger type keeps its characters a line.
+
+- **Scrolling:** each side's padding in the book is
+  `max(gutter, (100vw - measure) / 2)` (`MEASURE_PADDING`), so a window
+  narrower than the column keeps its 24 px gutter. Dotty and the page steps
+  read the computed padding, so they follow the column.
+- **Pages:** epub.js lays its columns across the viewer, so the viewer itself
+  is narrowed and centred (`pagesViewerMaxWidth`), and the book's own padding
+  is left alone.
+- A new line length reflows the text like a new type size: the line in view is
+  kept, and Dotty is placed again once the padding has eased into place.
 
 **Ink-on-white pictures** (`markInkImages`): chapter titles, drop caps and
 ornaments are often black ink on a white rectangle. Images with no colour and

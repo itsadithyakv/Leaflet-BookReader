@@ -421,6 +421,25 @@ body::before {
   background: var(--reader-hover-bg);
 }
 
+/* Line length in the type panel: the chosen column is lit in the accent. */
+.reader-measure {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.reader-measure-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 5px;
+}
+
+.reader-measure-option.is-on {
+  color: var(--reader-accent);
+  border-color: var(--reader-accent);
+}
+
 .reader-hover-accent:hover {
   color: var(--reader-accent);
 }
@@ -667,6 +686,7 @@ body::before {
 
 .reader-container {
   background: var(--reader-page-bg, var(--reader-shell-bg, #000));
+  background-image: var(--reader-page-texture, none);
   scrollbar-gutter: stable both-edges;
   transition: opacity 0.24s ease, filter 0.24s ease;
 }
@@ -676,6 +696,7 @@ body::before {
    pale strips down both sides. */
 .reader-scope .reader-page-frame {
   background: var(--reader-page-bg, var(--reader-shell-bg));
+  background-image: var(--reader-page-texture, none);
 }
 
 .reader-scope .reader-container,
@@ -946,6 +967,7 @@ body::before {
    screen (as scrolling does) leaves every chapter a single page. */
 .reader-container.reader-pages .epub-container {
   background: var(--reader-page-bg, var(--reader-shell-bg, #000)) !important;
+  background-image: var(--reader-page-texture, none) !important;
   overflow: hidden !important;
 }
 
