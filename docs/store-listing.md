@@ -25,19 +25,22 @@ name must match the reserved name exactly ("Leaflet Book Reader", as in
 >
 > **Reading the way you like it**
 > Scroll or turn pages. Search the whole book. Highlight in four colours, add
-> notes, and copy them all out as Markdown. Pick your text size and a page from
-> warm paper to true black. Try Smart Read's guide dot or SpeedRead's one word
-> at a time, or let auto-scroll carry you.
+> notes, and copy them all out as Markdown. Pick your text size, a comfortable
+> line length, and a page from warm paper to true black. Smart Read's guide dot
+> learns how fast you read, book by book, and waits while you stop to think; or
+> try SpeedRead's one word at a time, or let auto-scroll carry you.
 >
 > **A habit, not a chore**
 > Set a daily goal and build a streak, with freezes and a grace day for busy
 > weeks. Start a focus session and watch your finished sessions line up on your
-> bookshelf. Gentle reminders arrive as Windows notifications.
+> bookshelf. Read in full screen and grow a focus flower: it blooms if you stay
+> to the end. Gentle reminders arrive as Windows notifications.
 >
 > **Meet Pip**
 > Pip lives in the app, perched on the Leaflet logo. It celebrates your
 > finished books, naps at night, and grows a garden from the time you spend
-> reading. Spend the seeds on decor and outfits.
+> reading. Its house is a little game of its own: pick what your reading grew,
+> fill the rooms, dress Pip up, and grant its wish of the day.
 >
 > **Yours, privately**
 > Back up your library, progress and highlights to your own Google Drive.
@@ -51,9 +54,9 @@ name must match the reserved name exactly ("Leaflet Book Reader", as in
 ## What's new in this version
 
 > The first release of Leaflet: your library, series and shelves that organise
-> themselves, a reader with page turning, search, highlights and notes, daily
-> streaks and focus sessions, Pip, Google Drive backup, and optional
-> leaderboards.
+> themselves, a reader with page turning, search, highlights and notes, Smart
+> Read that learns your pace, daily streaks and full-screen focus sessions, Pip
+> and its house, Google Drive backup, and optional leaderboards.
 
 ## Product features (up to 20, 200 characters each)
 
@@ -66,15 +69,17 @@ name must match the reserved name exactly ("Leaflet Book Reader", as in
 7. Highlights in four colours, with notes and bookmarks
 8. Copy all your highlights and notes as Markdown
 9. Page finishes: warm paper, dark paper, true white and true black
-10. Smart Read guide dot, SpeedRead one word at a time, and auto-scroll
+10. Smart Read guide dot that learns your pace, SpeedRead, and auto-scroll
 11. Daily reading goal and streak, with freezes and a grace day
 12. Focus sessions that fill a bookshelf with your reading
 13. Reading reminders as Windows notifications
-14. Pip, a pixel-art companion with a garden, a room and outfits
+14. Pip, a pixel-art companion with a house, a garden, outfits and a daily wish
 15. Backup to your own Google Drive
 16. Optional weekly leaderboards, kudos and duels; private by default
 17. Works offline; your books never leave your computer
 18. Free, with nothing locked
+19. Full-screen focus sessions that grow a flower as you read
+20. A comfortable line length on wide screens, or the full width if you prefer
 
 ## Search terms (up to 7)
 
@@ -90,5 +95,5 @@ ebook reader · epub reader · pdf reader · book reader · reading tracker · c
 | Support contact | `adithyakrishnan.vinod@gmail.com` |
 | Pricing | Free |
 | Age rating | Questionnaire: yes to user interaction (handles and names on leaderboards) |
-| Screenshots | At least one, 1366×768 or larger. Good ones: Library with "Next in your series", Collections → Series, the reader with a highlight and the notes panel, the Pip tab, Social → Community |
+| Screenshots | At least one, 1366×768 or larger, taken from the new build (the Pip tab, the reader and focus sessions changed). Good ones: Library with "Next in your series", Collections → Series, the reader with a highlight and the notes panel, Smart Read with Dotty, a focus session with its flower, the Pip tab's house, Social → Community |
 | `runFullTrust` justification | Leaflet is a Win32 desktop app (Tauri) packaged for the Store; it needs full trust to run at all |
