@@ -1,7 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { getDateKey } from "./habitService";
 import type { ShopKind } from "../pip/shop";
-import { DEFAULT_SIGNATURE, DEFAULT_VARIANT, catalogue, roomItems } from "../pip/shop";
+import { DEFAULT_SIGNATURE, DEFAULT_VARIANT, GOALS, SETS, STARTER_CHEST, catalogue, roomItems } from "../pip/shop";
 
 /** Where a reader's seeds came from (see `habit/seeds.rs`). */
 export type SeedEarnings = {
@@ -12,8 +12,30 @@ export type SeedEarnings = {
   welcome: number;
   /** Paid straight from minutes, before the garden. */
   earlier: number;
+  /** Pip's rewards (pip/rewards.rs): first steps done... */
+  goals: number;
+  /** ...the starter chest... */
+  chest: number;
+  /** ...sets finished... */
+  sets: number;
+  /** ...and daily wishes granted. */
+  wishes: number;
   total: number;
 };
+
+/** One of a new reader's first steps (shop.js GOALS has its name and hint). */
+export type GoalStatus = { id: string; done: boolean; seeds: number };
+/** The starter chest: opens with the first focus session of `minutes`. */
+export type ChestStatus = { open: boolean; seeds: number; minutes: number };
+/** A set (shop.js SETS has its name and pieces): `have` of its `of` pieces owned. */
+export type SetStatus = { id: string; kind: ShopKind; have: number; of: number; done: boolean; seeds: number; level: string | null };
+/** Owned out of all there are, for one kind of thing. */
+export type CollectionCount = { owned: number; total: number };
+/**
+ * Today's wish: a thing (`kind` "treat" | "plant" | "room" | "move", and its
+ * id), whether it was granted today, and what granting it gives.
+ */
+export type WishStatus = { day: string; kind: "treat" | "plant" | "room" | "move"; id: string; granted: boolean; seeds: number; mood: number };
 
 /** One planting in Pip's garden, grown by reading (replayed in Rust). */
 export type PlantState = {
@@ -60,6 +82,15 @@ export type PipOverview = {
   /** Focus sessions done, for floors that open after so many. */
   sessionsDone: number;
   arcade: PipArcade;
+  /** A new reader's first steps, in the order Pip suggests them. */
+  goals: GoalStatus[];
+  chest: ChestStatus;
+  /** Every set, and how far along it is. */
+  sets: SetStatus[];
+  /** Owned out of all there are, by catalogue kind: `collection.accessory` is "Wardrobe 5/42". */
+  collection: Partial<Record<ShopKind, CollectionCount>>;
+  /** Today's wish (the reader's local day); null before the first wish list's day. */
+  wish: WishStatus | null;
 };
 
 /**
@@ -68,15 +99,25 @@ export type PipOverview = {
  */
 const browserOverview = (): PipOverview => {
   const now = new Date().toISOString();
+  const items = catalogue();
+  // Free things, and the starter pieces of the floors everyone has.
+  const freeFloors = new Set(items.filter((item) => item.kind === "level" && item.price === 0).map((item) => item.id));
+  const owned = items
+    .filter((item) => (item.price === 0 && !item.earnedOnly && !item.consumable && !item.freeWith) || (item.freeWith && freeFloors.has(item.freeWith)))
+    .map((item) => ({ kind: item.kind, id: item.id }));
+  const collection: Partial<Record<ShopKind, CollectionCount>> = {};
+  for (const item of items.filter((entry) => !entry.consumable)) {
+    const count = (collection[item.kind] ??= { owned: 0, total: 0 });
+    count.total += 1;
+    if (owned.some((entry) => entry.kind === item.kind && entry.id === item.id)) count.owned += 1;
+  }
   return {
     wallet: {
       balance: 50,
       spent: 0,
-      earned: { harvests: 0, goalDays: 0, streakBonus: 0, welcome: 50, earlier: 0, total: 50 }
+      earned: { harvests: 0, goalDays: 0, streakBonus: 0, welcome: 50, earlier: 0, goals: 0, chest: 0, sets: 0, wishes: 0, total: 50 }
     },
-    owned: catalogue()
-      .filter((item) => item.price === 0 && !item.earnedOnly && !item.consumable)
-      .map((item) => ({ kind: item.kind, id: item.id })),
+    owned,
     state: {
       variant: DEFAULT_VARIANT,
       outfit: [],
@@ -90,7 +131,16 @@ const browserOverview = (): PipOverview => {
     },
     garden: { plots: 3, plants: [], barrel: 0, barrelCap: 120, water: 0 },
     sessionsDone: 0,
-    arcade: { best: {}, day: "", moodToday: 0 }
+    arcade: { best: {}, day: "", moodToday: 0 },
+    goals: GOALS.map((goal) => ({ id: goal.id, done: false, seeds: goal.seeds })),
+    chest: { open: false, seeds: STARTER_CHEST.seeds, minutes: STARTER_CHEST.minutes },
+    sets: SETS.map((set) => {
+      const have = set.items.filter((id) => owned.some((entry) => entry.kind === set.kind && entry.id === id)).length;
+      return { id: set.id, kind: set.kind, have, of: set.items.length, done: have === set.items.length, seeds: set.seeds, level: set.level ?? null };
+    }),
+    collection,
+    // Rust chooses the wish (pip/rewards.rs); with no Rust there is none.
+    wish: null
   };
 };
 

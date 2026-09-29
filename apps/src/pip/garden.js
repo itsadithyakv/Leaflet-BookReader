@@ -185,6 +185,75 @@ export const renderPlant = (plantId, progress, ripe, f = 0) => {
 /** A plant's packet picture for a shop tile: the plant grown and ripe. */
 export const renderPacket = (plantId, f = 0) => renderPlot(plantId, 1, true, f);
 
+// ---- the rain barrel -------------------------------------------------------------
+
+export const BARREL_W = 18;
+export const BARREL_H = 24;
+
+const IRON = "#5A606E";
+const IRON_LIGHT = "#8C97A6";
+const WATER = "#5AB8FF";
+const WATER_LIGHT = "#9FDCFF";
+const WATER_DARK = "#3F8FC4";
+
+/**
+ * The rain barrel: the water reading poured while nothing was growing,
+ * waiting for the next planting (habit/seeds.rs, BARREL_CAP). A wooden
+ * barrel with two iron hoops and an open top, and a glass strip down its
+ * front that shows how full it is: `fill` 0..1. Full, it brims and drips.
+ */
+export const renderBarrel = (fill, f = 0) => {
+  const level = Math.max(0, Math.min(1, fill));
+  const g = new Painter(BARREL_W, BARREL_H, f);
+  const top = 4;
+  const bottom = BARREL_H - 2;
+  g.shadow(9, 8, BARREL_H - 1);
+  g.stamp((l) => {
+    // The staves, bulging a pixel at the middle, lit from the left.
+    for (let y = top; y <= bottom; y++) {
+      const t = (y - top) / (bottom - top);
+      const bulge = Math.round(Math.sin(t * Math.PI));
+      const x0 = 2 - bulge;
+      const x1 = BARREL_W - 3 + bulge;
+      for (let x = x0; x <= x1; x++) {
+        const seam = (x - x0) % 4 === 3;
+        l.px(x, y, seam ? "#6B4226" : x - x0 < 3 ? "#B07A4A" : x1 - x < 3 ? "#7A4A26" : "#8A5A34");
+      }
+    }
+    // Two iron hoops.
+    for (const y of [top + 3, bottom - 3]) {
+      const t = (y - top) / (bottom - top);
+      const bulge = Math.round(Math.sin(t * Math.PI));
+      l.rect(2 - bulge, y, BARREL_W - 4 + bulge * 2, 1, IRON).px(3 - bulge, y, IRON_LIGHT);
+    }
+    // The rim: an open top seen from a little above.
+    l.ell(BARREL_W / 2, top, BARREL_W / 2 - 1, 2.6, (nx, ny) => (nx * nx + ny * ny > 0.55 ? (ny < 0 ? "#B07A4A" : "#6B4226") : "#3A2616"));
+  });
+  // Water at the top when there is any: a surface inside the rim, brighter
+  // the fuller the barrel.
+  if (level > 0.02) {
+    g.ell(BARREL_W / 2, top + 0.3, BARREL_W / 2 - 2.6, 1.3, (nx) => (nx < -0.3 ? WATER_LIGHT : level > 0.5 ? WATER : WATER_DARK));
+    if (level > 0.5) g.px(BARREL_W / 2 - 3, top, "#FFFFFF");
+  }
+  // The sight glass: a strip down the front, filled from the bottom.
+  const glassTop = top + 5;
+  const glassBottom = bottom - 5;
+  const rows = glassBottom - glassTop + 1;
+  const wet = Math.round(level * rows);
+  g.stamp((l) => {
+    for (let y = glassTop; y <= glassBottom; y++) {
+      const filled = glassBottom - y < wet;
+      l.px(10, y, filled ? WATER : "#1F2A33").px(11, y, filled ? WATER_LIGHT : "#2B3A45");
+    }
+  }, "#3A2616");
+  // A drip down the side when it brims over.
+  if (level >= 0.999) {
+    const k = f % 36;
+    if (k < 24) g.px(BARREL_W - 3, top + 2 + Math.floor(k / 3), WATER_LIGHT);
+  }
+  return g.toImageData();
+};
+
 /** A plain garden floor (sky, a fence, grass) for when the house art has none. */
 export const renderGardenFloor = (w, h, floorY, f = 0) => {
   const g = new Painter(w, h, f);

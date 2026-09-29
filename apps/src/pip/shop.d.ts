@@ -25,9 +25,28 @@ export type ShopItem = {
   yield?: number;
   /** The book a house item nods to. */
   nod?: string;
+  /** A room item that lights a room (a lamp, fairy lights, a lantern). */
+  light?: boolean;
+  /** A floor's starter piece: Pip's once that floor (a level id) is, never sold on its own. */
+  freeWith?: string;
 };
 
 export type Plant = { id: string; name: string; water: number; yield: number; price: number; blurb: string };
+
+/** One of a new reader's first steps. `id` is Rust's (pip/rewards.rs). */
+export type GoalDef = { id: string; name: string; hint: string; seeds: number };
+/** A set: own every piece for `seeds`. `level` marks a floor's decor set. */
+export type SetDef = { id: string; name: string; kind: ShopKind; items: string[]; seeds: number; level?: string };
+/** One era of Pip's wishes: the lists a day's wish is chosen from, from `since` on. */
+export type WishEra = { since: string; treat: string[]; plant: string[]; room: string[]; move: string[] };
+
+export declare const FIRST_VARIANT: { id: string; price: number };
+export declare const STARTER_PIECES: Record<string, string[]>;
+export declare function comesWith(itemId: string, floors?: Set<string>): string | null;
+export declare const STARTER_CHEST: { seeds: number; minutes: number };
+export declare const GOALS: GoalDef[];
+export declare const SETS: SetDef[];
+export declare const WISH: { seeds: number; mood: number; eras: WishEra[] };
 
 export declare const PREMIUM_MOVES: { id: string; price: number }[];
 export declare const FREE_SIGNATURES: string[];

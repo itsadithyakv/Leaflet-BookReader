@@ -13,7 +13,12 @@
  * Under reduced motion nothing here plays: the change itself (the new plant,
  * the new number) is the feedback, and anything waiting on an effect (the
  * counter waiting for its seeds) is told at once.
+ *
+ * The moments have sounds too, when the reader turns them on (pip/sound.ts):
+ * a pick, a pop into the soil, coins into the counter, a chime, a splash of
+ * rain. Those play under reduced motion as well: stillness is not silence.
  */
+import { playSound } from "../../pip/sound";
 
 export type Point = { x: number; y: number };
 export type Box = { left: number; top: number; width: number; height: number };
@@ -207,6 +212,7 @@ export const puff = (from: Point, { px, count = 7, color = "#B08050", edge = "#8
 
 /** A ring that swells and fades: the moment a purchase goes through. */
 export const ring = (from: Point, size: number, color = "rgb(var(--pip-accent))") => {
+  playSound("coin", { pitch: 0.9 });
   if (reducedMotion()) return;
   const element = piece("pip-fx-ring", size, size);
   element.style.borderColor = color;
@@ -250,6 +256,8 @@ export const floatText = (from: Point, text: string, tone: "gain" | "spend" | "m
  * fell from and the floor it lands on.
  */
 export const spill = (from: Point, floor: number, { px, count = 7, colors }: { px: number; count?: number; colors: readonly string[] }) => {
+  // A bite: a low, soft pop.
+  playSound("pop", { pitch: 0.7, volume: 0.4 });
   if (reducedMotion()) return;
   const edge = Math.max(1, Math.round(px / 3));
   for (let index = 0; index < count; index += 1) {
@@ -297,9 +305,15 @@ type CollectOptions = {
  * Seeds (or hearts) that burst out of `from`, hang for a beat, then zip home
  * to `to` one after another. Resolves when the last has landed.
  */
-export const collect = (from: Point, to: Point, { sprite, count, px, onLand, stagger = 55 }: CollectOptions): Promise<void> => {
+export const collect = (from: Point, to: Point, { sprite, count, px, onLand: landed, stagger = 55 }: CollectOptions): Promise<void> => {
+  // Seeds tick into the counter, a little higher each; the first heart home chimes.
+  const onLand = (index: number) => {
+    if (sprite === "seed") playSound("coin", { pitch: 1 + Math.min(index, 12) * 0.035, volume: 0.6 });
+    else if (sprite === "heart" && index === 0) playSound("chime", { pitch: 1.25, volume: 0.45 });
+    landed?.(index);
+  };
   if (reducedMotion() || count <= 0) {
-    for (let index = 0; index < count; index += 1) onLand?.(index);
+    for (let index = 0; index < count; index += 1) onLand(index);
     return Promise.resolve();
   }
   const flights: Array<Promise<void>> = [];
@@ -327,7 +341,7 @@ export const collect = (from: Point, to: Point, { sprite, count, px, onLand, sta
     }
     const element = spritePiece(sprite, px);
     const duration = Math.min(1350, 780 + Math.hypot(dx, dy) * 0.3);
-    flights.push(play(element, frames, { duration, delay: index * stagger, easing: "linear" }).then(() => onLand?.(index)));
+    flights.push(play(element, frames, { duration, delay: index * stagger, easing: "linear" }).then(() => onLand(index)));
   }
   return Promise.all(flights).then(() => undefined);
 };
@@ -394,6 +408,8 @@ export const fly = (art: Captured | null, to: Box | Point | null, { card = false
  * `dim` after dark, to match the room it leaves.
  */
 export const popOff = (image: ImageData | null, box: Box, style: "pick" | "lift", dim = false) => {
+  if (style === "pick") playSound("pick");
+  else playSound("place", { pitch: 1.35, volume: 0.45 });
   if (!image || reducedMotion()) return;
   const canvas = document.createElement("canvas");
   canvas.width = image.width;
@@ -426,6 +442,7 @@ export const popOff = (image: ImageData | null, box: Box, style: "pick" | "lift"
  * into a plot while the garden was out of sight. Resolves as the last drop lands.
  */
 export const rain = (box: Box, soilY: number, { px, count = 12, spread = 700 }: { px: number; count?: number; spread?: number }): Promise<void> => {
+  playSound("splash", { delay: reducedMotion() ? 0 : 300 });
   if (reducedMotion()) return Promise.resolve();
   const drops: Array<Promise<void>> = [];
   for (let index = 0; index < count; index += 1) {
@@ -450,7 +467,10 @@ export const rain = (box: Box, soilY: number, { px, count = 12, spread = 700 }: 
 
 /** A seed dropped from `from` onto `to`, falling faster as it goes. Resolves as it lands. */
 export const dropSeed = (from: Point, to: Point, px: number): Promise<void> => {
-  if (reducedMotion()) return Promise.resolve();
+  if (reducedMotion()) {
+    playSound("pop");
+    return Promise.resolve();
+  }
   const element = spritePiece("seed", px);
   return play(
     element,
@@ -460,7 +480,7 @@ export const dropSeed = (from: Point, to: Point, px: number): Promise<void> => {
       { transform: at(to.x, to.y + px * 2, 0.5, 10), opacity: 0 }
     ],
     { duration: 330, easing: "cubic-bezier(0.5, 0, 0.9, 0.6)" }
-  );
+  ).then(() => playSound("pop"));
 };
 
 /** A seed that arcs from one point to another (a packet to the plot). Resolves on arrival. */
@@ -483,6 +503,7 @@ const CONFETTI = ["#FFD23F", "#FF6F8A", "#7CC8FF", "#8FD66A", "#FFFFFF", "#C79BF
 
 /** Pixel confetti drifting down over a box: a floor opened, a plot dug. */
 export const confetti = (box: Box, { px, count = 36 }: { px: number; count?: number }) => {
+  playSound("chime", { pitch: 0.85 });
   if (reducedMotion()) return;
   for (let index = 0; index < count; index += 1) {
     const x = box.left + between(0.05, 0.95) * box.width;

@@ -13,6 +13,8 @@
 //!   writing a record.
 //! * Days the goal was met add a small bonus, more on a streak.
 //! * Everyone starts with a welcome gift.
+//! * Pip gives a few back for first steps, the starter chest, finished sets
+//!   and a granted wish (`pip::rewards`, worked out from the same records).
 //!
 //! Seeds earned before the garden existed (`GARDEN_SINCE`) were paid straight
 //! from minutes; they are kept, as if already harvested.
@@ -79,7 +81,35 @@ pub struct SeedEarnings {
   pub welcome: i64,
   /// Everything earned before the garden, when minutes paid seeds directly.
   pub earlier: i64,
+  /// Pip's rewards (`pip::rewards`): a new reader's first steps...
+  pub goals: i64,
+  /// ...the starter chest, opened by the first focus session...
+  pub chest: i64,
+  /// ...sets finished...
+  pub sets: i64,
+  /// ...and daily wishes granted.
+  pub wishes: i64,
   pub total: i64
+}
+
+impl SeedEarnings {
+  /// Adds Pip's rewards to what the reading earned, and totals it all again.
+  pub fn with_rewards(mut self, goals: i64, chest: i64, sets: i64, wishes: i64) -> Self {
+    self.goals = goals.max(0);
+    self.chest = chest.max(0);
+    self.sets = sets.max(0);
+    self.wishes = wishes.max(0);
+    self.total = self.harvests
+      + self.goal_days
+      + self.streak_bonus
+      + self.welcome
+      + self.earlier
+      + self.goals
+      + self.chest
+      + self.sets
+      + self.wishes;
+    self
+  }
 }
 
 fn parse_day(key: &str) -> Option<NaiveDate> {
@@ -116,6 +146,15 @@ fn counted_minutes<'a>(days: &HashMap<String, DayRecord>, sessions: &'a [Session
     out.push((session, counted));
   }
   out
+}
+
+/// The most minutes any one focus session counted: its own, up to what the
+/// heartbeat recorded that day, as for water. The starter chest opens on it.
+pub fn longest_focus(days: &HashMap<String, DayRecord>, sessions: &[SessionSeeds<'_>]) -> f64 {
+  counted_minutes(days, sessions)
+    .into_iter()
+    .map(|(_, counted)| counted)
+    .fold(0.0, f64::max)
 }
 
 /// The water each session poured, in the order it poured: `(ended_at_ms, water)`.
@@ -454,6 +493,23 @@ mod tests {
   #[test]
   fn harvests_are_part_of_the_total() {
     assert_eq!(earnings(&HashMap::new(), &[], 20).total, WELCOME_GIFT + 20);
+  }
+
+  #[test]
+  fn pips_rewards_join_the_total() {
+    let result = earnings(&HashMap::new(), &[], 4).with_rewards(10, 30, 0, 8);
+    assert_eq!((result.goals, result.chest, result.sets, result.wishes), (10, 30, 0, 8));
+    assert_eq!(result.total, WELCOME_GIFT + 4 + 10 + 30 + 8);
+  }
+
+  #[test]
+  fn the_longest_session_counts_only_what_was_read() {
+    let days = ledger(vec![day("2026-10-01", 8.0, 20)]);
+    let sessions = [session("a", "2026-10-01", 5, 30.0, true), session("b", "2026-10-02", 9, 6.0, false)];
+    // Thirty minutes on the timer, eight read (and the minute of flush slack);
+    // nothing on the ledger the next day.
+    assert_eq!(longest_focus(&days, &sessions), 9.0);
+    assert_eq!(longest_focus(&HashMap::new(), &[]), 0.0);
   }
 
   // ---- water ---------------------------------------------------------------
