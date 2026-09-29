@@ -11,14 +11,7 @@ import { useAppearanceStore, type ThemeMode } from "../store/appearanceStore";
 import {
   estimateWordDifficulty,
   estimateRsvpPauseMultiplier,
-  getAdaptiveWpm,
-  getReadingTimeBand,
-  loadSmartReadCalibration,
-  loadSmartReadProfile,
-  recordSmartReadSample,
-  saveSmartReadProfile,
-  type SmartReadCalibration,
-  type SmartReadProfile
+  getReadingTimeBand
 } from "../services/smartReadService";
 import { PAPER_GRAIN } from "../constants/textures";
 import { UiIcon } from "../components/UiIcon";
@@ -46,9 +39,37 @@ import { INK_SAMPLE, markInkImages } from "../readers/inkImages";
 import { friendlyOpenError } from "../readers/openErrors";
 import { AUTO_SCROLL_DEFAULT_KEY, AUTO_SCROLL_YIELD_BACK_MS, AUTO_SCROLL_YIELD_AHEAD_MS, AUTO_SCROLL_TUNE_COOLDOWN_MS, autoScrollLinesPerMinute, autoScrollPixelsPerSecond, readAutoScrollDefault } from "../readers/autoScroll";
 import { rsvpPivotIndex, HANDS_FREE_GRACE_MS, READER_BLOCK_SELECTOR, SENTENCE_END_PATTERN, isInlineJoin, getPaceFactor, getPaceScale } from "../readers/pacing";
+import {
+  createReadingProfile,
+  estimateTextDifficulty,
+  mergeProfiles,
+  notePause,
+  paceLimits,
+  plainFromWpm,
+  predictPlainWpm,
+  predictWpm,
+  recordSample,
+  setBookPace,
+  wpmFromPlain,
+  type OutlierStreak,
+  type PaceSource,
+  type ReadingProfile
+} from "../readers/paceModel";
+import { judgeCatchUp, PagePaceTracker, ScrollPaceTracker } from "../readers/paceTracker";
+import { easeInOutCubic, planScrollStep, readingBand, stepDuration, type ReadingArea } from "../readers/smartScroll";
+import { ReaderTour, readerTourSeen, readStartMode } from "../readers/ReaderTour";
+import { readingProfileService } from "../services/readingProfileService";
+
+/** One press of Smart Read's faster or slower: eight percent. */
+const SMART_NUDGE = 1.08;
 
 export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   const viewerRef = useRef<HTMLDivElement | null>(null);
+  // What covers the page's edges (the toolbar, Smart Read's controls, the
+  // chapter bar), which Smart Read keeps Dotty's line clear of.
+  const toolbarRef = useRef<HTMLElement | null>(null);
+  const pacePillRef = useRef<HTMLDivElement | null>(null);
+  const chapterDockRef = useRef<HTMLDivElement | null>(null);
   const renditionRef = useRef<any>(null);
   const bookRef = useRef<ReturnType<typeof ePub> | null>(null);
   const relocateHandlerRef = useRef<((location: { start?: { percentage?: number } }) => void) | null>(null);
@@ -108,11 +129,33 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   const requestedStartIndexRef = useRef<number | null>(null);
   const programmaticScrollUntilRef = useRef(0);
   const smartManualOverrideUntilRef = useRef(0);
-  const smartPaceBiasRef = useRef(1);
-  const smartAheadTimerRef = useRef<number | null>(null);
-  const smartAheadTargetIndexRef = useRef<number | null>(null);
+  /** Smart Read's pace as a plain pace (see paceModel). It carries on across chapters. */
+  const smartPlainRef = useRef(0);
+  /** The reader scrolled back above Dotty to reread: Dotty waits for them. */
+  const smartRereadRef = useRef(false);
+  /** The reader scrolled on past Dotty: a catch-up is due once the scrolling settles. */
+  const smartReaderAheadRef = useRef(false);
+  const smartCatchUpTimerRef = useRef<number | null>(null);
+  /** Dotty holds its word while a page step scrolls, and for a beat after. */
+  const smartStepHoldUntilRef = useRef(0);
+  const smartScrollFrameRef = useRef<number | null>(null);
   const smartSessionRef = useRef<SmartSession | null>(null);
-  const manualReadingRef = useRef<{ index: number; at: number } | null>(null);
+  /** Something covers the page (a panel, a selection, the tour): hands-free reading waits. */
+  const interruptedRef = useRef(false);
+  /** Leaflet is not the app in front. */
+  const awayRef = useRef(false);
+  /** What to tell the reader when they come back, if reading was paused while they were away. */
+  const pausedWhileAwayRef = useRef<string | null>(null);
+  /** Smart Read starts paused (opening a book in it), for the reader to set off. */
+  const startPausedRef = useRef(false);
+  /** How hard the chapter on screen reads (see paceModel), and its words' average difficulty. */
+  const sectionDifficultyRef = useRef(1.06);
+  const sectionWordDifficultyRef = useRef(1);
+  // Free reading teaches the pace too: words passing the reading line as the
+  // reader scrolls, or the words on each page they turn.
+  const scrollPaceRef = useRef(new ScrollPaceTracker());
+  const pagePaceRef = useRef(new PagePaceTracker());
+  const pageShownRef = useRef<{ href: string; page: number; total: number } | null>(null);
   const activeSession = useHabitStore((state) => state.activeSession);
   const focusSettings = useHabitStore((state) => state.focusSettings);
   const stopSession = useHabitStore((state) => state.stopSession);
@@ -142,7 +185,14 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     () => undefined
   );
   // The key handler is bound once; this keeps it calling the current toast.
-  const showFocusToastRef = useRef<(message: string) => void>(() => undefined);
+  const showFocusToastRef = useRef<(message: string, ms?: number) => void>(() => undefined);
+  const nudgeSmartPaceRef = useRef<(factor: number) => void>(() => undefined);
+  const toggleSmartPlayRef = useRef<() => void>(() => undefined);
+  // Called from epub.js's relocation handler, which is bound once per book.
+  const notePageShownRef = useRef<(location: any) => void>(() => undefined);
+  // Called from the foreground watcher, bound once.
+  const stopFreeReadingRef = useRef<() => void>(() => undefined);
+  const savePaceProfileRef = useRef<() => void>(() => undefined);
   const checkpointRef = useRef(0);
   const sessionStartRef = useRef<string | null>(null);
 
@@ -327,6 +377,8 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
           const next = Math.min(1000, Math.max(120, speedReadWpmRef.current + (faster ? 20 : -20)));
           setSpeedReadWpm(next);
           showFocusToastRef.current(`${next} words/min`);
+        } else {
+          nudgeSmartPaceRef.current(faster ? SMART_NUDGE : 1 / SMART_NUDGE);
         }
         return;
       }
@@ -356,6 +408,8 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
         event.preventDefault();
         if (readingModeRef.current === "standard") {
           setAutoScrollActive((prev) => !prev);
+        } else if (readingModeRef.current === "smart") {
+          toggleSmartPlayRef.current();
         } else {
           setReadingPaused((prev) => !prev);
         }
@@ -397,8 +451,11 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
       if (readerDotOffscreenTimerRef.current) {
         window.clearTimeout(readerDotOffscreenTimerRef.current);
       }
-      if (smartAheadTimerRef.current) {
-        window.clearTimeout(smartAheadTimerRef.current);
+      if (smartCatchUpTimerRef.current) {
+        window.clearTimeout(smartCatchUpTimerRef.current);
+      }
+      if (smartScrollFrameRef.current) {
+        window.cancelAnimationFrame(smartScrollFrameRef.current);
       }
       if (checkpointTimerRef.current) {
         window.clearTimeout(checkpointTimerRef.current);
@@ -473,7 +530,10 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     Math.min(1000, Math.max(120, initialPrefs?.speedReadWpm ?? 260))
   );
   const [readingWord, setReadingWord] = useState<ReadingWordState | null>(null);
-  const [adaptiveWpm, setAdaptiveWpm] = useState(185);
+  /** Dotty's pace in Smart Read, for its controls. */
+  const [smartWpm, setSmartWpm] = useState(0);
+  /** Smart Read is waiting for a reader who went back to reread. */
+  const [smartWaiting, setSmartWaiting] = useState(false);
   const readerTheme = useAppearanceStore((state) => state.theme);
   const displayModeRef = useRef<ReaderDisplayMode>(displayMode);
   const readerThemeRef = useRef(readerTheme);
@@ -486,14 +546,17 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   autoScrollActiveRef.current = autoScrollActive;
   speedReadWpmRef.current = speedReadWpm;
   const toggleTheme = useAppearanceStore((state) => state.toggleTheme);
-  // Calibration is per reader. It keys off the connected Google account when
-  // there is one, and is device-local otherwise -- it used to key off whatever
-  // had been typed into a sign-in modal that verified nothing.
+  // The old, device-only Smart Read profile keyed off the connected Google
+  // account; that is where it is looked for when bringing it over.
   const accountEmail = useLibraryStore((state) => state.sync.accountEmail);
-  const smartProfileRef = useRef<SmartReadProfile>(loadSmartReadProfile(accountEmail));
-  const smartCalibrationRef = useRef<SmartReadCalibration>(
-    loadSmartReadCalibration(accountEmail)
-  );
+  // What Leaflet has learned about this reader's pace (readers/paceModel.ts).
+  // It comes from the library, and so from every device the reader syncs;
+  // learning here is saved back a few seconds after it changes, and on close.
+  const paceProfileRef = useRef<ReadingProfile>(createReadingProfile());
+  const paceSaveTimerRef = useRef<number | null>(null);
+  const paceStreakRef = useRef<OutlierStreak>(null);
+  /** Smart Read's pace is still the model's own guess: the reader has not corrected it this time. */
+  const smartPaceFromModelRef = useRef(true);
   const [morePanelOpen, setMorePanelOpen] = useState(false);
   const morePanelRef = useRef<HTMLDivElement | null>(null);
   const morePanelCloseRef = useRef<number | null>(null);
@@ -535,12 +598,21 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   /** A highlight whose note the notes panel opens on (tapped in the page). */
   const [notesFocus, setNotesFocus] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  /** The walkthrough of Dotty, Smart Read and pausing (first open, or from the ··· menu). */
+  const [tourOpen, setTourOpen] = useState(false);
   const {
     visible: chromeVisible,
     reveal: revealChrome,
     hover: hoverChrome
   } = useAutoHideChrome(
-    fontPanelOpen || bookmarkPanelOpen || morePanelOpen || searchOpen || selection !== null || loading || loadError !== null
+    fontPanelOpen ||
+      bookmarkPanelOpen ||
+      morePanelOpen ||
+      searchOpen ||
+      tourOpen ||
+      selection !== null ||
+      loading ||
+      loadError !== null
   );
   // The page renders inside an epub.js iframe, and events there do not reach
   // this document — so without binding into it, a tap on the text could never
@@ -620,19 +692,45 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
       readerDotOffscreenTimerRef.current = null;
     }
     requestedStartIndexRef.current = null;
-    smartPaceBiasRef.current = 1;
-    smartAheadTargetIndexRef.current = null;
-    if (smartAheadTimerRef.current) {
-      window.clearTimeout(smartAheadTimerRef.current);
-      smartAheadTimerRef.current = null;
-    }
+    cancelSmartCatchUp();
+    smartRereadRef.current = false;
     setMorePanelOpen(false);
   }, [book.id]);
 
   useEffect(() => {
-    smartProfileRef.current = loadSmartReadProfile(accountEmail);
-    smartCalibrationRef.current = loadSmartReadCalibration(accountEmail);
+    let cancelled = false;
+    readingProfileService
+      .load(accountEmail)
+      .then((loaded) => {
+        if (cancelled) {
+          return;
+        }
+        // Anything learned in the moment before it arrived is kept.
+        paceProfileRef.current = mergeProfiles(loaded, paceProfileRef.current);
+        // Smart Read may have started on the first guess; the reader's own pace replaces it.
+        if (readingModeRef.current === "smart" && smartPaceFromModelRef.current) {
+          smartPlainRef.current = predictPlainWpm(paceProfileRef.current, paceContext());
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
   }, [accountEmail]);
+
+  // Closing the book keeps what this visit taught, and hands it to sync.
+  useEffect(
+    () => () => {
+      stopFreeReadingRef.current();
+      finishSmartSession();
+      if (paceSaveTimerRef.current) {
+        window.clearTimeout(paceSaveTimerRef.current);
+        paceSaveTimerRef.current = null;
+      }
+      void readingProfileService.save(paceProfileRef.current).catch(() => undefined);
+    },
+    []
+  );
 
   useEffect(() => {
     if (!morePanelOpen) {
@@ -864,17 +962,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     // the gesture started rather than from the previous animation frame.
     const paceOrigin = options?.commitPaceFrom;
     if (paceOrigin !== undefined && readingModeRef.current === "smart") {
-      const delta = clampedIndex - paceOrigin;
-      if (Math.abs(delta) >= 8) {
-        const adjustment = Math.min(0.08, Math.max(0.012, Math.abs(delta) / 1400));
-        smartPaceBiasRef.current = Math.min(
-          1.3,
-          Math.max(0.72, smartPaceBiasRef.current + (delta > 0 ? adjustment : -adjustment))
-        );
-        if (delta < 0 && smartSessionRef.current) {
-          smartSessionRef.current.rereads += Math.max(1, Math.round(Math.abs(delta) / 80));
-        }
-      }
+      noteSmartDrag(paceOrigin, clampedIndex);
     }
 
     if (readingModeRef.current !== "standard") {
@@ -1098,12 +1186,81 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     return true;
   };
 
+  /**
+   * The part of the page Smart Read reads in: below the toolbar when it is
+   * showing, above Smart Read's own controls (or the chapter bar), in lines of
+   * the current type. Measured every time, so a resized window, a new font
+   * size or the toolbar coming back are all simply taken into account.
+   */
+  const readingArea = (container: HTMLElement): ReadingArea => {
+    const box = container.getBoundingClientRect();
+    const toolbar = toolbarRef.current?.getBoundingClientRect();
+    const controls = (pacePillRef.current ?? chapterDockRef.current)?.getBoundingClientRect();
+    return {
+      height: container.clientHeight,
+      lineHeight: fontSizeRef.current * 1.8,
+      topInset: Math.max(8, toolbar ? toolbar.bottom - box.top : 0),
+      bottomInset: Math.max(12, controls ? box.bottom - controls.top + 8 : 0)
+    };
+  };
+
+  /**
+   * Smart Read turns the page: one smooth step that brings Dotty's line up to
+   * the top (see readers/smartScroll.ts). Dotty holds its word while the page
+   * moves, and a moment after, so the eye can find the line again.
+   */
+  const turnSmartPage = (container: HTMLElement, delta: number) => {
+    const start = container.scrollTop;
+    const target = Math.min(Math.max(0, start + delta), Math.max(0, container.scrollHeight - container.clientHeight));
+    const distance = target - start;
+    if (Math.abs(distance) < 2) {
+      // The end of the chapter: nothing further to scroll to.
+      return;
+    }
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    const duration = stepDuration(distance, reduced);
+    const now = Date.now();
+    programmaticScrollUntilRef.current = now + duration + 250;
+    smartStepHoldUntilRef.current = now + duration + 350;
+    if (smartScrollFrameRef.current) {
+      window.cancelAnimationFrame(smartScrollFrameRef.current);
+      smartScrollFrameRef.current = null;
+    }
+    if (duration === 0) {
+      container.scrollTop = target;
+      return;
+    }
+    let startedAt: number | null = null;
+    const frame = (time: number) => {
+      startedAt ??= time;
+      const progress = Math.min(1, (time - startedAt) / duration);
+      container.scrollTop = start + distance * easeInOutCubic(progress);
+      smartScrollFrameRef.current = progress < 1 ? window.requestAnimationFrame(frame) : null;
+    };
+    smartScrollFrameRef.current = window.requestAnimationFrame(frame);
+  };
+
+  /**
+   * The reader's own scrolling wins over a page step on its way. The step used
+   * to go on setting the page every frame and undo the reader's scroll, which
+   * hid the very reading-ahead that Dotty should catch up with.
+   */
+  const cancelSmartPageTurn = () => {
+    if (smartScrollFrameRef.current) {
+      window.cancelAnimationFrame(smartScrollFrameRef.current);
+      smartScrollFrameRef.current = null;
+      programmaticScrollUntilRef.current = 0;
+      smartStepHoldUntilRef.current = 0;
+    }
+  };
+
   const scrollWordIntoReadingBand = (index: number) => {
+    const mode = readingModeRef.current;
+    // The reader is scrolling, is ahead of Dotty, or went back to reread: the
+    // page is theirs until that settles.
     if (
-      readingModeRef.current === "smart" &&
-      (Date.now() < smartManualOverrideUntilRef.current ||
-        (smartAheadTargetIndexRef.current !== null &&
-          index < smartAheadTargetIndexRef.current - 6))
+      mode === "smart" &&
+      (Date.now() < smartManualOverrideUntilRef.current || smartReaderAheadRef.current || smartRereadRef.current)
     ) {
       return;
     }
@@ -1114,7 +1271,15 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     if (!rect) return;
     const containerRect = container.getBoundingClientRect();
     const relativeTop = rect.top - containerRect.top;
-    const lowerBand = container.clientHeight * (readingModeRef.current === "speed" ? 0.7 : 0.64);
+    if (mode === "smart") {
+      const delta = planScrollStep(relativeTop, relativeTop + rect.height, readingArea(container));
+      if (delta !== null) {
+        turnSmartPage(container, delta);
+      }
+      return;
+    }
+    // SpeedRead keeps the page behind it roughly in step, for when it stops.
+    const lowerBand = container.clientHeight * 0.7;
     if (relativeTop > lowerBand) {
       programmaticScrollUntilRef.current = Date.now() + 850;
       container.scrollTo({
@@ -1226,19 +1391,27 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
         localFrequency.get(word.text.toLocaleLowerCase()) ?? 1
       );
     });
+    const sameSection = previousWordCount > 0 && words.length > 0 && previousDocument === words[0].node.ownerDocument;
+    const smartSession = readingModeRef.current === "smart" && !sameSection ? smartSessionRef.current : null;
+    if (smartSession && smartSession.acceptedMs > 0) {
+      // Smart Read went on to another chapter by some other way than reading
+      // to its end: what was read at Dotty's pace is kept (at the old
+      // chapter's difficulty), and the pace is measured afresh below.
+      learnPace(smartSession.acceptedWords, smartSession.acceptedMs, "guided");
+    }
+    // How hard this chapter reads sets its pace (easy text faster, dense text
+    // slower); each word's own difficulty then spreads the time within it.
+    sectionDifficultyRef.current = estimateTextDifficulty(words);
+    sectionWordDifficultyRef.current =
+      words.length > 0 ? words.reduce((sum, word) => sum + word.difficulty, 0) / words.length : 1;
     readingPaceScaleRef.current = {
       speed: getPaceScale(words, "speed"),
-      smart: getPaceScale(words, "smart")
+      smart: getPaceScale(words, "smart", sectionWordDifficultyRef.current)
     };
     readerWordsRef.current = words;
-    manualReadingRef.current = null;
     // Re-indexing the same section (font size, re-render) must not move an
     // RSVP or Smart Read position; only a new section starts over.
-    const keepReadingPosition =
-      readingModeRef.current !== "standard" &&
-      previousWordCount > 0 &&
-      words.length > 0 &&
-      previousDocument === words[0].node.ownerDocument;
+    const keepReadingPosition = readingModeRef.current !== "standard" && sameSection;
     const nextIndex = keepReadingPosition
       ? Math.round(
           (activeWordIndexRef.current / Math.max(1, previousWordCount - 1)) *
@@ -1251,6 +1424,9 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
         : Math.min(activeWordIndexRef.current, Math.max(0, words.length - 1));
     activeWordIndexRef.current = Math.min(Math.max(0, nextIndex), Math.max(0, words.length - 1));
     readerDotAnchorIndexRef.current = activeWordIndexRef.current;
+    if (smartSession) {
+      agreeWithReader(activeWordIndexRef.current);
+    }
     if (readingModeRef.current !== "standard" && words.length > 0) {
       setReadingWord(buildReadingWordState(activeWordIndexRef.current));
     } else if (readerDotEnabledRef.current && words.length > 0) {
@@ -1272,122 +1448,389 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     }, delay);
   };
 
-  // A gap longer than this between scroll observations means the reader was
-  // left open, not that the page took that long to read.
-  const MAX_OBSERVED_READING_GAP_MS = 4 * 60 * 1000;
+  // ---- reading pace ------------------------------------------------------------
 
-  const saveObservedReading = (fromIndex: number, toIndex: number, elapsedMs: number, rereads = 0) => {
-    const words = readerWordsRef.current;
-    const count = Math.abs(toIndex - fromIndex);
-    if (count < 18 || elapsedMs < 5000 || words.length === 0) return;
-    if (elapsedMs > MAX_OBSERVED_READING_GAP_MS) return;
-    const start = Math.min(fromIndex, toIndex);
-    const end = Math.min(words.length, Math.max(fromIndex, toIndex));
-    const sampleWords = words.slice(start, end);
-    const difficulty =
-      sampleWords.reduce((sum, word) => sum + word.difficulty, 0) / Math.max(1, sampleWords.length);
-    const next = recordSmartReadSample(smartProfileRef.current, {
-      words: count,
-      elapsedMs,
-      genres: book.genres,
-      timeBand: getReadingTimeBand(),
-      difficulty,
-      rereads
-    });
-    smartProfileRef.current = next;
-    saveSmartReadProfile(accountEmail, next);
-  };
+  /** What the pace model needs to know about where the reader is. */
+  const paceContext = () => ({
+    bookId: book.id,
+    genres: book.genres,
+    difficulty: sectionDifficultyRef.current,
+    timeBand: getReadingTimeBand(),
+    now: Date.now()
+  });
 
-  const cancelSmartAheadTracking = () => {
-    if (smartAheadTimerRef.current) {
-      window.clearTimeout(smartAheadTimerRef.current);
-      smartAheadTimerRef.current = null;
+  const savePaceProfile = () => {
+    if (paceSaveTimerRef.current) {
+      window.clearTimeout(paceSaveTimerRef.current);
+      paceSaveTimerRef.current = null;
     }
-    smartAheadTargetIndexRef.current = null;
-    smartManualOverrideUntilRef.current = Date.now() + 650;
+    void readingProfileService
+      .save(paceProfileRef.current)
+      .then((stored) => {
+        // What was learned while the save was on its way is kept too.
+        paceProfileRef.current = mergeProfiles(stored, paceProfileRef.current);
+      })
+      .catch(() => undefined);
+  };
+  savePaceProfileRef.current = savePaceProfile;
+
+  const updatePaceProfile = (next: ReadingProfile) => {
+    paceProfileRef.current = next;
+    // Coalesced: an hour in Smart Read learns something every few minutes.
+    paceSaveTimerRef.current ??= window.setTimeout(savePaceProfile, 5000);
   };
 
-  const scheduleSmartAheadBoost = (viewportIndex: number) => {
-    smartAheadTargetIndexRef.current = Math.max(
-      smartAheadTargetIndexRef.current ?? viewportIndex,
-      viewportIndex
+  /** Learns from a stretch of reading; pauses and skimming are left out (see paceModel). */
+  const learnPace = (words: number, activeMs: number, source: PaceSource) => {
+    const result = recordSample(
+      paceProfileRef.current,
+      {
+        bookId: book.id,
+        genres: book.genres,
+        words,
+        activeMs,
+        difficulty: sectionDifficultyRef.current,
+        timeBand: getReadingTimeBand(),
+        at: new Date().toISOString(),
+        source
+      },
+      paceStreakRef.current
     );
-    smartManualOverrideUntilRef.current = Number.POSITIVE_INFINITY;
-    if (smartAheadTimerRef.current) {
+    paceStreakRef.current = result.streak;
+    if (result.profile !== paceProfileRef.current) {
+      updatePaceProfile(result.profile);
+    }
+  };
+
+  /** The pace the model expects here, for telling a stop to think from reading. */
+  const expectedWpm = () => predictWpm(paceProfileRef.current, paceContext(), { limited: false });
+
+  /** A stop to think the trackers left out, counted for the pace card in Settings. */
+  const countPause = () => updatePaceProfile(notePause(paceProfileRef.current, new Date().toISOString()));
+
+  /** Free reading stopped (auto-scroll, another mode, another app, the book closing): keep what it taught. */
+  const stopFreeReading = () => {
+    const scrolled = scrollPaceRef.current.stop();
+    if (scrolled) {
+      learnPace(scrolled.words, scrolled.ms, "scroll");
+    }
+    const paged = pagePaceRef.current.stop();
+    if (paged) {
+      learnPace(paged.words, paged.ms, "pages");
+    }
+    pageShownRef.current = null;
+  };
+  stopFreeReadingRef.current = stopFreeReading;
+
+  /** Words on the page showing now (layout "pages"), from where they sit on screen. */
+  const countWordsOnPage = () => {
+    const words = readerWordsRef.current;
+    const view = viewerRef.current?.getBoundingClientRect();
+    if (!view || words.length === 0) {
+      return 0;
+    }
+    // Pages are columns laid side by side, so the words run left to right a
+    // page at a time: the first word at or past each edge is found by halving.
+    const firstFrom = (x: number) => {
+      let low = 0;
+      let high = words.length;
+      while (low < high) {
+        const middle = (low + high) >> 1;
+        const rect = getReaderWordRect(words[middle]);
+        if (rect && rect.left + rect.width / 2 >= x) {
+          high = middle;
+        } else {
+          low = middle + 1;
+        }
+      }
+      return low;
+    };
+    return Math.max(0, firstFrom(view.right) - firstFrom(view.left));
+  };
+
+  /**
+   * A page came up (layout "pages"). When it is the page after the last one,
+   * the last one was read: its words over the time it was up. Going back, or
+   * jumping from the chapter list, starts the count over.
+   */
+  const notePageShown = (location: any) => {
+    const href = String(location?.start?.href ?? "");
+    const page = Number(location?.start?.displayed?.page) || 0;
+    const total = Number(location?.start?.displayed?.total) || 0;
+    const previous = pageShownRef.current;
+    pageShownRef.current = { href, page, total };
+    if (!href || !page || awayRef.current) {
       return;
     }
-    smartAheadTimerRef.current = window.setTimeout(() => {
-      smartAheadTimerRef.current = null;
-      if (readingModeRef.current !== "smart") {
-        smartAheadTargetIndexRef.current = null;
-        return;
+    const now = Date.now();
+    const forward =
+      previous !== null &&
+      now >= navigatingUntilRef.current &&
+      ((previous.href === href && page === previous.page + 1) ||
+        (previous.href !== href && page === 1 && previous.page >= previous.total));
+    const key = `${href}#${page}`;
+    const result = pagePaceRef.current.show(key, now, forward, expectedWpm());
+    if (result.paused) {
+      countPause();
+    }
+    if (result.sample) {
+      learnPace(result.sample.words, result.sample.ms, "pages");
+    }
+    // Counted once the page's words are indexed (a new chapter is re-indexed).
+    // A page of a picture or a title has too few to say anything.
+    window.setTimeout(() => {
+      const words = countWordsOnPage();
+      if (words >= 20) {
+        pagePaceRef.current.count(key, words);
       }
-      const currentViewportIndex = findNearestWordIndex();
-      const currentDotIndex = activeWordIndexRef.current;
-      const lead = currentViewportIndex - currentDotIndex;
-      if (lead < 12) {
-        cancelSmartAheadTracking();
-        return;
+    }, 450);
+  };
+  notePageShownRef.current = notePageShown;
+
+  // ---- Smart Read: the reader's own say ------------------------------------------
+
+  const cancelSmartCatchUp = () => {
+    if (smartCatchUpTimerRef.current) {
+      window.clearTimeout(smartCatchUpTimerRef.current);
+      smartCatchUpTimerRef.current = null;
+    }
+    smartReaderAheadRef.current = false;
+  };
+
+  /** Dotty's pace now, in words a minute through the chapter on screen. */
+  const smartWpmNow = () => wpmFromPlain(paceProfileRef.current, smartPlainRef.current, paceContext());
+
+  /**
+   * The reader and Dotty agree on where the reading is: the reader's own pace
+   * is measured from here, and the stretch read at Dotty's pace without a
+   * correction starts over.
+   */
+  const agreeWithReader = (index: number) => {
+    const session = smartSessionRef.current;
+    if (!session) {
+      return;
+    }
+    session.anchorIndex = index;
+    session.anchorActiveMs = session.activeMs;
+    session.acceptedWords = 0;
+    session.acceptedMs = 0;
+  };
+
+  const moveSmartDotty = (index: number) => {
+    const words = readerWordsRef.current;
+    if (words.length === 0) {
+      return;
+    }
+    const clamped = Math.min(words.length - 1, Math.max(0, index));
+    activeWordIndexRef.current = clamped;
+    readerDotAnchorIndexRef.current = clamped;
+    agreeWithReader(clamped);
+    positionReaderDotAtWord(clamped);
+  };
+
+  const stopWaitingForReread = () => {
+    if (smartRereadRef.current) {
+      smartRereadRef.current = false;
+      setSmartWaiting(false);
+    }
+  };
+
+  /**
+   * The reader set Dotty's pace (the − and + controls, or a drag). It is used
+   * at once and remembered as this book's pace, on every device.
+   */
+  const setSmartPace = (wpm: number) => {
+    const profile = paceProfileRef.current;
+    const context = paceContext();
+    const limits = paceLimits(profile);
+    const next = Math.round(Math.min(limits.maxWpm, Math.max(limits.minWpm, wpm)));
+    smartPlainRef.current = plainFromWpm(profile, next, context);
+    smartPaceFromModelRef.current = false;
+    updatePaceProfile(
+      setBookPace(profile, {
+        bookId: book.id,
+        genres: book.genres,
+        wpm: next,
+        difficulty: context.difficulty,
+        timeBand: context.timeBand,
+        at: new Date().toISOString()
+      })
+    );
+    setSmartWpm(next);
+    agreeWithReader(activeWordIndexRef.current);
+    showFocusToast(
+      wpm > limits.maxWpm + 1
+        ? `That's Dotty's top speed, ${next} wpm. Raise it in Settings.`
+        : wpm < limits.minWpm - 1
+          ? `That's Dotty's slowest, ${next} wpm. Lower it in Settings.`
+          : `Dotty: ${next} words a minute`
+    );
+  };
+
+  const nudgeSmartPace = (factor: number) => {
+    if (readingModeRef.current === "smart") {
+      setSmartPace(smartWpmNow() * factor);
+    }
+  };
+  nudgeSmartPaceRef.current = nudgeSmartPace;
+
+  /** Space, or the play button: go on after a reread, otherwise pause or carry on. */
+  const toggleSmartPlay = () => {
+    if (smartRereadRef.current) {
+      stopWaitingForReread();
+      smartManualOverrideUntilRef.current = 0;
+      readingPausedRef.current = false;
+      setReadingPaused(false);
+      return;
+    }
+    setReadingPaused((paused) => !paused);
+  };
+  toggleSmartPlayRef.current = toggleSmartPlay;
+
+  /**
+   * The reader read on past Dotty (it went off the top of the page). Dotty moves
+   * to them, and when they were reading faster than it was going, takes up most
+   * of their pace, which is learned too. Dotty used to crawl after them, capped
+   * at a speed they had already passed, and never caught up.
+   */
+  const catchUpToReader = () => {
+    smartCatchUpTimerRef.current = null;
+    smartReaderAheadRef.current = false;
+    const container = ensureScrollContainer();
+    const session = smartSessionRef.current;
+    if (!container || !session || readingModeRef.current !== "smart") {
+      return;
+    }
+    // Dotty may have walked back into view by now, but the reader is still
+    // further on. (Scrolling back to Dotty cancels this: see noteSmartScroll.)
+    const area = readingArea(container);
+    // A reader who scrolled on picks up near the top of what came into view.
+    // It is a guess; dragging Dotty to the line puts it exactly.
+    const line = readingBand(area).top + area.lineHeight / 2;
+    const readerIndex = findNearestWordIndex(line / Math.max(1, container.clientHeight));
+    if (readerIndex <= activeWordIndexRef.current) {
+      return;
+    }
+    const dottyWpm = smartWpmNow();
+    const read = readerIndex - session.anchorIndex;
+    const activeMs = session.activeMs - session.anchorActiveMs;
+    const verdict = judgeCatchUp({ words: read, activeMs, dottyWpm });
+    if (verdict.kind === "faster") {
+      // Most of the way; if that is still too slow, the next catch-up closes the rest.
+      const reached = dottyWpm + (verdict.wpm - dottyWpm) * 0.8;
+      smartPlainRef.current = plainFromWpm(paceProfileRef.current, reached, paceContext());
+      smartPaceFromModelRef.current = false;
+      learnPace(read, activeMs, "caught-up");
+      const pace = Math.round(smartWpmNow());
+      setSmartWpm(pace);
+      showFocusToast(`You're ahead of Dotty. Speeding up to ${pace} wpm.`);
+    } else {
+      showFocusToast("Dotty caught up with you.");
+    }
+    moveSmartDotty(readerIndex);
+  };
+
+  /**
+   * The reader scrolled in Smart Read. Dotty gone off the top means they read
+   * on ahead of it: once the scrolling settles, Dotty catches up. Dotty gone
+   * off the bottom means they went back to reread: Dotty waits for them, and
+   * the wait is not counted as reading slowly.
+   */
+  const noteSmartScroll = () => {
+    const container = ensureScrollContainer();
+    const word = readerWordsRef.current[activeWordIndexRef.current];
+    const rect = word ? getReaderWordRect(word) : null;
+    if (!container || !rect || !smartSessionRef.current) {
+      return;
+    }
+    const area = readingArea(container);
+    const lineTop = rect.top - container.getBoundingClientRect().top;
+    // Dotty's line not wholly in view at the top is behind the reader: the same
+    // test the page steps use, so the two never pull the page opposite ways.
+    if (lineTop < area.topInset) {
+      stopWaitingForReread();
+      smartReaderAheadRef.current = true;
+      if (smartCatchUpTimerRef.current) {
+        window.clearTimeout(smartCatchUpTimerRef.current);
       }
-      smartAheadTargetIndexRef.current = currentViewportIndex;
-      const words = readerWordsRef.current;
-      const calibration = smartCalibrationRef.current;
-      const difficulty = words[currentDotIndex]?.difficulty ?? 1;
-      const baseWpm = getAdaptiveWpm(
-        smartProfileRef.current,
-        book.genres,
-        getReadingTimeBand(),
-        difficulty,
-        calibration
-      );
-      const catchUpWpm = Math.min(
-        calibration.maxWpm,
-        Math.max(baseWpm * 1.3, baseWpm + Math.min(150, lead * 0.85))
-      );
-      smartPaceBiasRef.current = Math.max(
-        1,
-        Math.min(2.2, catchUpWpm / Math.max(1, baseWpm))
-      );
-      setAdaptiveWpm(Math.round(catchUpWpm));
-    }, 2200);
+      smartCatchUpTimerRef.current = window.setTimeout(catchUpToReader, 1500);
+      return;
+    }
+    cancelSmartCatchUp();
+    if (lineTop > area.height - area.bottomInset) {
+      if (!smartRereadRef.current) {
+        smartRereadRef.current = true;
+        setSmartWaiting(true);
+      }
+    } else if (smartRereadRef.current) {
+      // Back at Dotty: carry on, after a moment to find the line.
+      stopWaitingForReread();
+      smartStepHoldUntilRef.current = Date.now() + 700;
+    }
+  };
+
+  /**
+   * The reader dragged Dotty in Smart Read. Ahead: they are further on than
+   * Dotty, and it takes up their pace if they were faster. Back a line or two:
+   * Dotty was a little fast. Back further: rereading, or picking up after a
+   * pause, which says nothing about the pace.
+   */
+  const noteSmartDrag = (from: number, to: number) => {
+    const session = smartSessionRef.current;
+    if (!session) {
+      return;
+    }
+    cancelSmartCatchUp();
+    stopWaitingForReread();
+    const delta = to - from;
+    if (delta >= 10) {
+      const dottyWpm = smartWpmNow();
+      const verdict = judgeCatchUp({
+        words: to - session.anchorIndex,
+        activeMs: session.activeMs - session.anchorActiveMs,
+        dottyWpm
+      });
+      if (verdict.kind === "faster") {
+        setSmartPace(dottyWpm + (verdict.wpm - dottyWpm) * 0.6);
+      }
+    } else if (delta <= -10 && delta >= -40) {
+      setSmartPace(smartWpmNow() / 1.06);
+    }
+    agreeWithReader(to);
   };
 
   const observeManualReadingPosition = () => {
     if (Date.now() < programmaticScrollUntilRef.current || readerWordsRef.current.length === 0) {
       return;
     }
-    const now = Date.now();
-    const index = findNearestWordIndex();
-    const previous = manualReadingRef.current;
-    if (previous && now - previous.at >= 4500) {
-      if (index >= previous.index) {
-        saveObservedReading(previous.index, index, now - previous.at);
-      } else {
-        const session = smartSessionRef.current;
-        if (session) {
-          session.rereads += Math.max(1, Math.round((previous.index - index) / 80));
-          activeWordIndexRef.current = index;
-        }
-      }
+    const mode = readingModeRef.current;
+    if (mode === "smart") {
+      noteSmartScroll();
+      return;
     }
-    if (readingModeRef.current === "smart") {
-      const lead = index - activeWordIndexRef.current;
-      if (lead >= 12) {
-        scheduleSmartAheadBoost(index);
-      } else if (
-        smartAheadTargetIndexRef.current !== null &&
-        lead <= 6
-      ) {
-        cancelSmartAheadTracking();
-      } else if (lead <= -12) {
-        cancelSmartAheadTracking();
-        smartPaceBiasRef.current = Math.max(0.72, smartPaceBiasRef.current * 0.9);
-      }
-    } else if (readingModeRef.current === "speed") {
+    const index = findNearestWordIndex();
+    if (mode === "speed") {
       activeWordIndexRef.current = index;
       setReadingWord(buildReadingWordState(index));
+      return;
     }
-    manualReadingRef.current = { index, at: now };
+    // Free reading teaches the pace. Not while auto-scroll moves the page (that
+    // is its pace, not the reader's), and a jump elsewhere starts over.
+    if (autoScrollActiveRef.current || awayRef.current || layoutRef.current === "pages") {
+      return;
+    }
+    if (Date.now() < navigatingUntilRef.current) {
+      stopFreeReading();
+      return;
+    }
+    const section = readerWordsRef.current[0]?.node.ownerDocument ?? null;
+    const result = scrollPaceRef.current.observe(index, Date.now(), section, expectedWpm());
+    if (result.paused) {
+      countPause();
+    }
+    if (result.sample) {
+      learnPace(result.sample.words, result.sample.ms, "scroll");
+    }
   };
 
   const updateLastReadMarker = (cfi: string) => {
@@ -1527,6 +1970,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   };
 
   const smoothScrollBy = (element: HTMLElement, delta: number) => {
+    cancelSmartPageTurn();
     const start = element.scrollTop;
     const target = start + delta;
     const duration = 220;
@@ -1761,6 +2205,11 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
 
   selectionRef.current = selection;
   clearSelectionRef.current = clearSelection;
+  // Anything over the text (a selection, search, notes, the chapter list, a
+  // dialog) makes auto-scroll and Smart Read wait; they carry on by themselves
+  // once it is gone.
+  interruptedRef.current =
+    selection !== null || searchOpen || bookmarkPanelOpen || sidebarOpen || tourOpen || pendingReadingMode !== null;
 
   const exportHighlights = () => {
     void navigator.clipboard.writeText(highlightsMarkdown(book.title, book.author, orderedHighlights)).then(
@@ -2554,7 +3003,10 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
 
           scheduleReaderDotUpdate();
           scrollAdvanceLockRef.current = false;
-
+          // Turning pages is reading too, and teaches the pace.
+          if (layoutRef.current === "pages") {
+            notePageShownRef.current(location);
+          }
         };
         relocateHandlerRef.current = onRelocated;
         rendition.on("relocated", onRelocated);
@@ -2837,6 +3289,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     const handleWheel = (target: HTMLElement, deltaY: number) => {
       markReadingActivity();
       lastHandsOnAtRef.current = Date.now();
+      cancelSmartPageTurn();
       programmaticScrollUntilRef.current = 0;
       if (autoScrollActiveRef.current) {
         noteAutoScrollCorrectionRef.current(target, deltaY);
@@ -2867,7 +3320,9 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
       const last = lastScrollTopRef.current ?? target.scrollTop;
       const delta = target.scrollTop - last;
       lastScrollTopRef.current = target.scrollTop;
-      if (delta > 0) {
+      // Only the reader's own scrolling heads for the next chapter: a Smart
+      // Read page step that lands at the bottom still has lines left to read.
+      if (delta > 0 && now >= programmaticScrollUntilRef.current) {
         lastWheelDownAtRef.current = now;
       }
       if (isAtScrollBottom(target, 2) && now - lastWheelDownAtRef.current < 700) {
@@ -2966,6 +3421,8 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     autoScrollLastTimeRef.current = null;
     // Starting (or retuning) is deliberate, so the hands-free window restarts.
     lastHandsOnAtRef.current = Date.now();
+    // What the reader read by hand until now is theirs; from here the page moves at auto-scroll's pace.
+    stopFreeReadingRef.current();
 
     const tick = (time: number) => {
       if (!autoScrollActive) {
@@ -2979,7 +3436,8 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
         showFocusToastRef.current("Auto-scroll paused. Still reading? Press Space.");
         return;
       }
-      if (autoScrollHeldRef.current || now < autoScrollYieldUntilRef.current) {
+      // A hand on the page, a correction settling, or a panel or selection over the text: wait.
+      if (autoScrollHeldRef.current || now < autoScrollYieldUntilRef.current || interruptedRef.current) {
         autoScrollLastTimeRef.current = time;
         autoScrollCarryRef.current = 0;
         autoScrollRafRef.current = requestAnimationFrame(tick);
@@ -3019,20 +3477,13 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   const finishSmartSession = () => {
     const session = smartSessionRef.current;
     smartSessionRef.current = null;
+    cancelSmartCatchUp();
     if (!session) return;
-    const wordsRead = Math.max(0, session.furthestIndex - session.startIndex);
-    const averageDifficulty =
-      session.difficultyTotal / Math.max(1, session.difficultySamples);
-    const next = recordSmartReadSample(smartProfileRef.current, {
-      words: wordsRead,
-      elapsedMs: session.activeMs,
-      genres: book.genres,
-      timeBand: getReadingTimeBand(new Date(session.startedAt)),
-      difficulty: averageDifficulty || 1,
-      rereads: session.rereads
-    });
-    smartProfileRef.current = next;
-    saveSmartReadProfile(accountEmail, next);
+    // A stretch read at Dotty's pace without correcting it says the pace suits.
+    // It is Dotty's pace rather than a measurement, so it counts for less.
+    if (session.acceptedMs > 0) {
+      learnPace(session.acceptedWords, session.acceptedMs, "guided");
+    }
   };
 
   // The speed a reader settles on becomes the starting speed for other books.
@@ -3068,19 +3519,30 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   // Nothing moves on its own while Leaflet is in the background: coming back
   // to find auto-scroll three pages on, or RSVP a chapter ahead, loses the
   // place. Resuming is left to the reader, who needs a moment to find the line.
+  // The note saying so waits for them to come back: shown as they left, it
+  // was gone before they could see it.
   useEffect(
     () =>
       watchForeground((inFront) => {
+        awayRef.current = !inFront;
         if (inFront) {
+          const note = pausedWhileAwayRef.current;
+          pausedWhileAwayRef.current = null;
+          if (note) {
+            showFocusToastRef.current(note, 5000);
+          }
           return;
         }
+        // Time away is not reading: what was read until now is kept, and saved.
+        stopFreeReadingRef.current();
+        savePaceProfileRef.current();
         if (autoScrollActiveRef.current) {
           setAutoScrollActive(false);
-          showFocusToastRef.current("Auto-scroll paused while you were away. Space to carry on.");
+          pausedWhileAwayRef.current = "Auto-scroll paused while you were away. Space to carry on.";
         } else if (readingModeRef.current !== "standard" && !readingPausedRef.current) {
           readingPausedRef.current = true;
           setReadingPaused(true);
-          showFocusToastRef.current("Paused while you were away. Space to carry on.");
+          pausedWhileAwayRef.current = "Paused while you were away. Space to carry on.";
         }
       }),
     []
@@ -3104,20 +3566,23 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   useEffect(() => {
     readingModeRef.current = readingMode;
     if (readingMode !== "smart") {
-      if (smartAheadTimerRef.current) {
-        window.clearTimeout(smartAheadTimerRef.current);
-        smartAheadTimerRef.current = null;
-      }
-      smartAheadTargetIndexRef.current = null;
+      cancelSmartCatchUp();
+      stopWaitingForReread();
       smartManualOverrideUntilRef.current = 0;
     }
-    if (readingMode !== "standard" && readerDotOffscreenTimerRef.current) {
-      window.clearTimeout(readerDotOffscreenTimerRef.current);
-      readerDotOffscreenTimerRef.current = null;
+    if (readingMode !== "standard") {
+      // Hands-free from here: what was read by hand until now is kept.
+      stopFreeReading();
+      if (readerDotOffscreenTimerRef.current) {
+        window.clearTimeout(readerDotOffscreenTimerRef.current);
+        readerDotOffscreenTimerRef.current = null;
+      }
     }
     setAutoScrollActive(false);
-    setReadingPaused(false);
-    readingPausedRef.current = false;
+    const startPaused = startPausedRef.current;
+    startPausedRef.current = false;
+    setReadingPaused(startPaused);
+    readingPausedRef.current = startPaused;
     if (readingEngineTimerRef.current) {
       window.clearTimeout(readingEngineTimerRef.current);
       readingEngineTimerRef.current = null;
@@ -3129,6 +3594,19 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
       if (readerDotEnabled && cfi) updateLastReadMarker(cfi);
       return;
     }
+
+    const startSmartSessionAt = (index: number) => {
+      const startedAt = Date.now();
+      smartSessionRef.current = {
+        startedAt,
+        activeMs: 0,
+        lastTickAt: startedAt,
+        anchorIndex: index,
+        anchorActiveMs: 0,
+        acceptedWords: 0,
+        acceptedMs: 0
+      };
+    };
 
     prepareReaderWords(false);
     const requestedStart = requestedStartIndexRef.current;
@@ -3145,19 +3623,12 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     readerDotAnchorIndexRef.current = activeWordIndexRef.current;
     setReadingWord(buildReadingWordState(activeWordIndexRef.current));
     if (readingMode === "smart") {
-      smartPaceBiasRef.current = 1;
-      smartAheadTargetIndexRef.current = null;
-      const now = Date.now();
-      smartSessionRef.current = {
-        startedAt: now,
-        activeMs: 0,
-        lastTickAt: now,
-        startIndex: activeWordIndexRef.current,
-        furthestIndex: activeWordIndexRef.current,
-        difficultyTotal: 0,
-        difficultySamples: 0,
-        rereads: 0
-      };
+      // Dotty sets off at this reader's pace for this book, as learned on
+      // every device; the reader's corrections change it as they go.
+      smartPaceFromModelRef.current = true;
+      smartPlainRef.current = predictPlainWpm(paceProfileRef.current, paceContext());
+      setSmartWpm(Math.round(smartWpmNow()));
+      startSmartSessionAt(activeWordIndexRef.current);
     } else {
       finishSmartSession();
       removeLastReadMarker();
@@ -3168,7 +3639,16 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
       if (stopped) return;
       readingEngineTimerRef.current = window.setTimeout(() => {
         if (stopped || readingModeRef.current === "standard") return;
-        if (readingPausedRef.current) {
+        // Smart Read waits, without counting the time, while a hand is on the
+        // page, the reader went back to reread, a panel or selection covers
+        // the text, or a page step is settling.
+        const waiting =
+          readingModeRef.current === "smart" &&
+          (autoScrollHeldRef.current ||
+            smartRereadRef.current ||
+            interruptedRef.current ||
+            Date.now() < smartStepHoldUntilRef.current);
+        if (readingPausedRef.current || waiting) {
           if (smartSessionRef.current) {
             smartSessionRef.current.lastTickAt = Date.now();
           }
@@ -3204,34 +3684,23 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
         markReadingActivity();
         let wpm = speedReadWpmRef.current;
         if (mode === "smart") {
-          const calibration = smartCalibrationRef.current;
-          const baseWpm = getAdaptiveWpm(
-            smartProfileRef.current,
-            book.genres,
-            getReadingTimeBand(),
-            word.difficulty,
-            calibration
-          );
-          wpm = Math.min(
-            calibration.maxWpm,
-            Math.max(calibration.minWpm, baseWpm * smartPaceBiasRef.current)
-          );
-          const aheadTarget = smartAheadTargetIndexRef.current;
-          if (aheadTarget !== null && index >= aheadTarget - 6) {
-            cancelSmartAheadTracking();
-            smartPaceBiasRef.current = Math.max(1, smartPaceBiasRef.current * 0.82);
-          } else if (aheadTarget === null && smartPaceBiasRef.current > 1) {
-            smartPaceBiasRef.current =
-              1 + (smartPaceBiasRef.current - 1) * 0.985;
-          }
-          if (index % 8 === 0) setAdaptiveWpm(Math.round(wpm));
+          wpm = smartWpmNow();
+          if (index % 8 === 0) setSmartWpm(Math.round(wpm));
           const session = smartSessionRef.current;
           if (session) {
-            session.activeMs += Math.min(2500, Math.max(0, now - session.lastTickAt));
+            // The first word's wait is Smart Read setting off, not reading.
+            const first = session.activeMs === 0 && session.acceptedWords === 0;
+            const step = first ? 0 : Math.min(2500, Math.max(0, now - session.lastTickAt));
+            session.activeMs += step;
+            session.acceptedMs += step;
+            session.acceptedWords += 1;
             session.lastTickAt = now;
-            session.furthestIndex = Math.max(session.furthestIndex, index);
-            session.difficultyTotal += word.difficulty;
-            session.difficultySamples += 1;
+            // A long stretch at Dotty's pace is learned as it goes, not only at the end.
+            if (session.acceptedMs >= 4 * 60_000) {
+              learnPace(session.acceptedWords, session.acceptedMs, "guided");
+              session.acceptedWords = 0;
+              session.acceptedMs = 0;
+            }
           }
           positionReaderDotAtWord(index);
         } else {
@@ -3245,24 +3714,10 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
         const paceMode = mode === "speed" ? "speed" : "smart";
         const paceDelay =
           (60000 / Math.max(70, wpm)) *
-          getPaceFactor(word, paceMode) *
+          getPaceFactor(word, paceMode, sectionWordDifficultyRef.current) *
           readingPaceScaleRef.current[paceMode];
         schedule(Math.round(paceDelay));
       }, delay);
-    };
-
-    const startSmartSessionAt = (index: number) => {
-      const startedAt = Date.now();
-      smartSessionRef.current = {
-        startedAt,
-        activeMs: 0,
-        lastTickAt: startedAt,
-        startIndex: index,
-        furthestIndex: index,
-        difficultyTotal: 0,
-        difficultySamples: 0,
-        rereads: 0
-      };
     };
 
     // Advances to the next section and resumes at its first word once it has
@@ -3541,6 +3996,41 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     scheduleReaderDotUpdate();
   }, [readerDotEnabled]);
 
+  // The first book opened on this device gets the walkthrough. After that, a
+  // reader who asked for it has books open in Smart Read, paused at their line.
+  const openingHandledRef = useRef(false);
+  useEffect(() => {
+    if (loading || loadError || openingHandledRef.current) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      openingHandledRef.current = true;
+      if (!readerTourSeen()) {
+        setTourOpen(true);
+      } else if (readStartMode() === "smart" && layoutRef.current === "scroll" && readingModeRef.current === "standard") {
+        beginReadingMode("smart", "top", { paused: true });
+      }
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [loading, loadError]);
+
+  /** Lights up the real Dotty while the walkthrough introduces it. */
+  const tourStepRef = useRef(-1);
+  const spotlightDotty = (step: number) => {
+    tourStepRef.current = step;
+    if (step === 0 && !readerDotElementRef.current && readingModeRef.current === "standard") {
+      const location = renditionRef.current?.location;
+      const cfi = location?.end?.cfi ?? location?.start?.cfi;
+      if (cfi) {
+        updateLastReadMarker(cfi);
+      }
+    }
+    const apply = () => readerDotElementRef.current?.classList.toggle("reader-dot-spotlight", tourStepRef.current === 0);
+    apply();
+    // Dotty may take a moment to find its line on a page that has just opened.
+    window.setTimeout(apply, 600);
+  };
+
   const resolvedCover = coverFallback ?? coverSrc;
   const requestReadingMode = (nextMode: ReadingMode) => {
     if (nextMode === "standard") {
@@ -3562,7 +4052,8 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
 
   const beginReadingMode = (
     mode: Exclude<ReadingMode, "standard">,
-    source: "dot" | "viewport" | "chapter"
+    source: "dot" | "viewport" | "chapter" | "top",
+    options?: { paused?: boolean }
   ) => {
     prepareReaderWords(false);
     const wordCount = readerWordsRef.current.length;
@@ -3571,7 +4062,12 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
       startIndex = readerDotAnchorIndexRef.current ?? findNearestWordIndex();
     } else if (source === "viewport") {
       startIndex = findNearestWordIndex();
+    } else if (source === "top") {
+      // A reopened book puts the reader's line at the top, just under the toolbar.
+      const height = ensureScrollContainer()?.clientHeight ?? 0;
+      startIndex = findNearestWordIndex(height > 0 ? (PAGE_TOP_PAD + fontSizeRef.current) / height : 0.1);
     }
+    startPausedRef.current = options?.paused ?? false;
     startIndex = Math.min(Math.max(0, startIndex), Math.max(0, wordCount - 1));
     requestedStartIndexRef.current = startIndex;
     activeWordIndexRef.current = startIndex;
@@ -3621,19 +4117,21 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   const rsvpWordsLeft = readingWord ? Math.max(0, readingWord.total - readingWord.index - 1) : 0;
   const rsvpMinutesLeft = Math.max(1, Math.round(rsvpWordsLeft / Math.max(60, speedReadWpm)));
   const rsvpProgress = readingWord ? (readingWord.index + 1) / Math.max(1, readingWord.total) : 0;
-  const showFocusToast = (message: string) => {
+  const showFocusToast = (message: string, ms = 2400) => {
     setFocusToast(message);
     if (focusToastTimerRef.current) {
       window.clearTimeout(focusToastTimerRef.current);
     }
     focusToastTimerRef.current = window.setTimeout(() => {
       setFocusToast(null);
-    }, 2400);
+    }, ms);
   };
   showFocusToastRef.current = showFocusToast;
 
+  // Hold to wait: a finger or the mouse held down on the text stops auto-scroll
+  // and Smart Read's Dotty alike (a stop to think), until it lets go.
   holdAutoScrollRef.current = (held: boolean) => {
-    if (held && !autoScrollActiveRef.current) {
+    if (held && !autoScrollActiveRef.current && readingModeRef.current !== "smart") {
       return;
     }
     if (autoScrollHeldRef.current === held) {
@@ -3641,9 +4139,13 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     }
     autoScrollHeldRef.current = held;
     setAutoScrollHeld(held);
-    if (!held) {
+    if (held) {
+      // A hand on the page stops a page step too, where it is.
+      cancelSmartPageTurn();
+    } else {
       // A short breath after letting go, so the line being read stays put.
       autoScrollYieldUntilRef.current = Math.max(autoScrollYieldUntilRef.current, Date.now() + 400);
+      smartStepHoldUntilRef.current = Math.max(smartStepHoldUntilRef.current, Date.now() + 400);
     }
   };
 
@@ -3702,6 +4204,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
       style={pageStyle}
     >
       <header
+        ref={toolbarRef}
         className="reader-toolbar fixed left-0 right-0 top-0 z-50 flex w-full items-center justify-between px-6 py-5 md:px-8"
         onPointerEnter={() => hoverChrome(true)}
         onPointerLeave={() => hoverChrome(false)}
@@ -3940,21 +4443,44 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
                   <div className="mt-3 rounded-lg border px-3 py-3 reader-border reader-pill">
                     <div className="flex items-center justify-between">
                       <div>
-                        <div className="text-[10px] uppercase tracking-widest reader-muted">Adaptive pace</div>
-                        <div className="mt-1 text-sm font-semibold reader-text-color">~{adaptiveWpm} WPM</div>
+                        <div className="text-[10px] uppercase tracking-widest reader-muted">Dotty's pace</div>
+                        <div className="mt-1 text-sm font-semibold tabular-nums reader-text-color">~{smartWpm} wpm</div>
                       </div>
-                      <button
-                        type="button"
-                        className="reader-mini-control"
-                        onClick={() => setReadingPaused((paused) => !paused)}
-                      >
-                        <span className="material-symbols-outlined text-base">
-                          {readingPaused ? "play_arrow" : "pause"}
-                        </span>
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          className="reader-mini-control"
+                          onClick={() => nudgeSmartPace(1 / SMART_NUDGE)}
+                          title="Slower (-)"
+                          aria-label="Slower"
+                        >
+                          <UiIcon name="minus" size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          className="reader-mini-control"
+                          onClick={toggleSmartPlay}
+                          title={readingPaused || smartWaiting ? "Carry on (Space)" : "Pause (Space)"}
+                          aria-label={readingPaused || smartWaiting ? "Carry on" : "Pause"}
+                        >
+                          <span className="material-symbols-outlined text-base">
+                            {readingPaused || smartWaiting ? "play_arrow" : "pause"}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className="reader-mini-control"
+                          onClick={() => nudgeSmartPace(SMART_NUDGE)}
+                          title="Faster (+)"
+                          aria-label="Faster"
+                        >
+                          <UiIcon name="plus" size={14} />
+                        </button>
+                      </div>
                     </div>
                     <p className="mt-2 text-[10px] leading-relaxed reader-muted">
-                      Learns from page timing, pauses, rereading, genre, time of day and word difficulty.
+                      Your pace for this book, learned from all your reading on every device: how hard the text is,
+                      the time of day, and each correction you make. Stops to think are left out.
                     </p>
                   </div>
                 )}
@@ -3995,6 +4521,16 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
                 >
                   <span>Dotty</span>
                   <span className="reader-toggle" data-on={readerDotEnabled} />
+                </button>
+                <button
+                  type="button"
+                  className="mt-2 w-full py-1.5 text-center text-[10px] uppercase tracking-widest transition reader-muted reader-hover-accent"
+                  onClick={() => {
+                    setMorePanelOpen(false);
+                    setTourOpen(true);
+                  }}
+                >
+                  How Dotty works
                 </button>
               </div>
             )}
@@ -4205,7 +4741,10 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
                   />
                 </div>
               )}
-              <div className="reader-chapter-dock pointer-events-none absolute bottom-4 left-1/2 z-30 flex -translate-x-1/2 items-center">
+              <div
+                ref={chapterDockRef}
+                className="reader-chapter-dock pointer-events-none absolute bottom-4 left-1/2 z-30 flex -translate-x-1/2 items-center"
+              >
                 <div className="pointer-events-auto flex items-center gap-2 rounded-lg border px-2 py-1.5 text-xs uppercase tracking-widest reader-pill reader-border">
                   <button
                     type="button"
@@ -4237,6 +4776,18 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
 
       {searchOpen && bookRef.current && (
         <SearchPanel book={bookRef.current} chapterOf={chapterOfSection} onOpen={openSearchHit} onClose={() => setSearchOpen(false)} />
+      )}
+
+      {tourOpen && (
+        <ReaderTour
+          paged={paged}
+          onStep={spotlightDotty}
+          onClose={() => {
+            spotlightDotty(-1);
+            setTourOpen(false);
+          }}
+          onTrySmartRead={() => requestReadingMode("smart")}
+        />
       )}
 
       {pendingReadingMode && (
@@ -4428,6 +4979,62 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
             <UiIcon name="plus" size={16} />
           </button>
           <span className="reader-autoscroll-hint reader-muted">Space pauses · hold the page to wait</span>
+        </div>
+      )}
+
+      {/* Smart Read's own controls, for the same reason: pausing, and Dotty's
+          pace, should never mean hunting for a menu. */}
+      {readingMode === "smart" && !pendingReadingMode && (
+        <div
+          ref={pacePillRef}
+          className={`reader-autoscroll-pill reader-panel reader-border ${
+            chromeVisible || autoScrollHeld || readingPaused || smartWaiting ? "is-awake" : ""
+          }`}
+          role="group"
+          aria-label="Smart Read"
+        >
+          <button
+            type="button"
+            className="reader-autoscroll-button reader-icon reader-hover-accent"
+            onClick={() => nudgeSmartPace(1 / SMART_NUDGE)}
+            title="Slower (-)"
+            aria-label="Slower"
+          >
+            <UiIcon name="minus" size={16} />
+          </button>
+          <button
+            type="button"
+            className="reader-autoscroll-main reader-accent"
+            onClick={toggleSmartPlay}
+            title={readingPaused || smartWaiting ? "Carry on (Space)" : "Pause (Space)"}
+          >
+            <UiIcon name={readingPaused || smartWaiting ? "play" : autoScrollHeld ? "hand" : "pause"} size={16} />
+            <span className="tabular-nums">
+              {readingPaused
+                ? "Paused"
+                : smartWaiting
+                  ? "Waiting for you"
+                  : autoScrollHeld
+                    ? "Holding"
+                    : `${smartWpm} wpm`}
+            </span>
+          </button>
+          <button
+            type="button"
+            className="reader-autoscroll-button reader-icon reader-hover-accent"
+            onClick={() => nudgeSmartPace(SMART_NUDGE)}
+            title="Faster (+)"
+            aria-label="Faster"
+          >
+            <UiIcon name="plus" size={16} />
+          </button>
+          <span className="reader-autoscroll-hint reader-muted">
+            {readingPaused
+              ? "Space to carry on"
+              : smartWaiting
+                ? "Scroll back to Dotty, or Space to go on"
+                : "Space pauses · read ahead and Dotty catches up"}
+          </span>
         </div>
       )}
 

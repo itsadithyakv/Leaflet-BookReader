@@ -214,29 +214,67 @@ image toggles the original.
 
 ## Smart Read ("Dotty")
 
-**Where:** `services/smartReadService.ts`, plus the RSVP overlay in `ReaderView.tsx`
+**Where:** `readers/paceModel.ts` (the pace), `readers/paceTracker.ts` (turning
+reading into samples), `readers/smartScroll.ts` (page steps),
+`readers/ReaderTour.tsx`, `services/readingProfileService.ts`,
+`sync/reading.rs`, `components/ReadingPaceCard.tsx`, and `ReaderView.tsx`
 
-An adaptive speed-reading mode. A dot paces the reader through the text, and an
-RSVP overlay can present one word at a time.
+A dot, **Dotty**, paces the reader through the text at their own pace; an RSVP
+overlay (SpeedRead) can present one word at a time. With no pin Dotty follows
+the reading; drag it, or move it with the arrow keys, to pin a start line. In
+Smart Read it walks through the text word by word.
 
-What makes it adaptive:
+**The pace is learned from all reading**, not only Smart Read:
 
-- **Per-word difficulty** (`estimateWordDifficulty`) from length, syllable
-  estimate and rarity, so a long unfamiliar word gets more time.
-- **Pause multipliers** (`estimateRsvpPauseMultiplier`) at sentence and paragraph
-  ends.
-- **A learned profile** — samples of actual pace are recorded per genre and per
-  **time-of-day band** (morning / afternoon / evening / night), because the same
-  reader is not the same at 7am and 11pm.
-- **A calibration range** the reader sets in Settings (default 120–320 WPM);
-  the engine only adapts inside it.
+- **Free reading** teaches it: the words passing the reading line as the reader
+  scrolls (`ScrollPaceTracker`), or the words on each page they turn in the
+  pages layout (`PagePaceTracker`). Auto-scroll's own pace is not taken for the
+  reader's.
+- **Each book keeps its own pace.** A new book starts from the reader's overall
+  pace (recent books counting most), adjusted by how they read books of the same
+  difficulty band and genre.
+- **Difficulty**: a chapter's text difficulty (`estimateTextDifficulty`: word
+  length and rarity, and sentence length, so dialogue and children's books read
+  as easy) sets its pace, so easy books are predicted faster than demanding ones
+  before either has taught anything. Paces are stored "plain" (as if on text of
+  difficulty 1) and divided by the difficulty of what is on screen. Within a
+  chapter, each word's own difficulty spreads the time.
+- **Time of day**: how much faster or slower than their usual pace a reader is
+  in the morning, afternoon, evening and night, learned once a book's own pace
+  is trustworthy.
+- **Pauses are not slow reading.** A stretch far slower than expected (a stop to
+  think, a reader who looked away) is left out, words and time alike; one far
+  faster is skimming. Only when they keep coming the same way (three in a row)
+  are they learned, as how this book reads. Time with Leaflet not in front is
+  never counted.
+- **The reader's own say.** − and + (the pill, the ··· menu, or the - and +
+  keys) set Dotty's pace for this book at once, and it is remembered. Reading
+  on ahead of Dotty is measured: once the scrolling settles and Dotty is off the
+  top of the page, Dotty jumps to the reader and takes up most of their pace.
+  Dragging Dotty ahead does the same; back a line or two slows it a little;
+  back further is rereading and says nothing about the pace.
+- **Dotty waits.** Holding a finger or the mouse on the text, a selection, a
+  panel over the page, or scrolling back above Dotty to reread all make it wait
+  without counting the time; scrolling back to Dotty (or Space) carries on.
+- **Dotty's range** (Settings, default 90–700 WPM) bounds Smart Read. The old
+  default ceiling of 320 was why Dotty could never catch a fast reader.
 
-The profile is keyed on the connected Google account when there is one, and is
-device-local otherwise.
+The profile is kept in the library database and travels in the sync document
+(`readingProfile`), merged part by part, so every device reads at the reader's
+pace. The old device-only Smart Read profile is brought over once.
 
-**Dotty** is the movable reading dot: with no pin it follows the last visible
-line; drag it, or move it with the arrow keys, to pin a start line. In Smart Read
-it tracks the current word.
+**Page steps.** Dotty reads down to near the bottom of what is visible, then
+the page moves up in one smooth step that brings its line to near the top: a
+page turn rather than a nudge every few lines (it used to keep Dotty around the
+middle). The step is worked out from the reading area actually on screen (below
+the toolbar when it shows, above Smart Read's controls) in lines of the current
+type, so it suits a small laptop, a tall portrait monitor, a wide window and
+large type alike, and Dotty holds its word while the page moves.
+
+**The tour.** The first book opened on a device shows a short walkthrough:
+Dotty, starting Smart Read, making it your pace, and pausing. The ··· menu
+("How Dotty works") and Settings bring it back. Its last step (and Settings)
+can make books open in Smart Read, paused at the reader's line.
 
 Behaviours worth knowing (from the pre-release review):
 
@@ -254,7 +292,9 @@ Behaviours worth knowing (from the pre-release review):
 - Keys keep working after clicking into the book text: the epub iframe forwards
   them to the reader's shortcut handler.
 - Nothing plays on while Leaflet is in the background: switching apps pauses
-  auto-scroll and RSVP, and the reader resumes with Space.
+  auto-scroll, Smart Read and RSVP (the OS window's focus, not the page's
+  `blur`, which fires when the book's iframe is clicked). Coming back says so,
+  and the reader resumes with Space.
 
 ### The RSVP stage
 
