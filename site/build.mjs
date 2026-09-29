@@ -180,11 +180,13 @@ for (const [slug, file, title] of [
 
 write("404.html", page({ title: "Page not found · Leaflet", description: "That page isn't here.", path: "missing", body: `<section class="hero"><img class="pip" src="/Leaflet-BookReader/assets/pip-sleeping.png" width="160" height="160" alt=""><div><h1>Nothing here</h1><p class="lede">Pip looked everywhere. <a href="/Leaflet-BookReader/">Back to the start</a>.</p></div></section>`, depth: 0 }));
 
-// The signed config: produced locally by sign-config.mjs, published as-is.
+// site/public is published as-is: the signed config (made by sign-config.mjs)
+// and files others ask the site to carry, such as Google Search Console's
+// googleXXXX.html ownership check.
 const config = join(here, "public", "config.json");
 if (!existsSync(config)) {
   throw new Error("site/public/config.json is missing. Run: node site/sign-config.mjs");
 }
-cpSync(config, join(dist, "config.json"));
+cpSync(join(here, "public"), dist, { recursive: true });
 writeFileSync(join(dist, ".nojekyll"), "");
 console.log(`Built ${dist}`);
