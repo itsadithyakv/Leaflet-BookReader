@@ -606,36 +606,50 @@ the garden, sessions done, arcade scores) and `pip_game_played`.
 
 ### The tab: Pip's house
 
-The whole tab is the house. The current floor fills the page, drawn by the
-house art (`house.js`, 240 x 120) at a whole number of device pixels per
-pixel; windows show the real hour's sky, and in the evening the rooms dim and
-lamps glow. Pip lives in it: it strolls, fills free moments with its signature
-move or a hobby, can be dragged about and dropped, and reacts when poked. A
-switcher beside the scene moves between floors: the **Bedroom** and the
-**Garden** are free; the Kitchen, Library, Attic Arcade, Basement Workshop and
-Rooftop Observatory open in order, each after the one below and some focus
-sessions, for seeds.
+The whole tab is the house, played like a game. The current floor fills the
+page, drawn by the house art (`house.js`, 240 x 120) at a whole or half number
+of device pixels per pixel (`sceneFit.ts`: half steps let it fill narrow
+windows); windows show the real hour's sky, and in the evening the rooms dim
+and lamps glow. Pip lives in it: it strolls, fills free moments with its
+signature move or a hobby, can be dragged about and dropped, and reacts when
+poked. A **lift** up the side of the room rides between floors, a numbered
+stop for each: the **Bedroom** and the **Garden** are free; the Kitchen,
+Library, Attic Arcade, Basement Workshop and Rooftop Observatory open in
+order, each after the one below and some focus sessions, for seeds.
 
-A bar over the scene holds the seed balance, the **Shop** button (always
-there, in the brand green), mood hearts, and the tools, each opening a drawer
-beside the scene:
+Over the room, the **seeds** and Pip's **mood** (five hearts) share one plaque,
+with a **goal** beside them when one is pinned from the shop: its progress in
+seeds, a cheer once it is affordable (kept in `localStorage`). Under the room,
+one leather rail of tools:
 
-- **Wardrobe**: owned variants and accessories by slot, earned skins as goals.
-- **Garden**: plots, their water and minutes to go, planting, picking, more plots.
-- **Treats**: snacks (bought as given) and toys; Pip plays the treat's move.
-- **Moves**: preview any move, buy one, pick the signature.
-- **Decorate**: every slot on the floor becomes a dotted box; select one to
-  choose what goes there (only items that fit that slot), plus the floor's
-  wallpaper and flooring. Items snap to slots and are in one place at a time.
+- **Shop**: the one place seeds are spent (below).
+- **Pip's things**: what Pip owns, to use. Looks (variants and accessories by
+  slot, earned skins as goals), treats (snacks, bought as they are given, and
+  toys), moves (do one, make it the signature). Each tab counts the set
+  ("Moves 8/22") and ends with a way into the shop for more.
+- **Garden**: plots, their water and minutes to go, picking; rules as short
+  hints. Selecting an empty plot in the garden opens its seed packets right
+  there.
+- **Decorate**: a mode. A pin on every slot of the floor, a gold edge round the
+  room, and a rail of its own with Wallpaper, Flooring and **Done**. A pin opens
+  a low sheet of what Pip owns that fits there, and a link to the shop filtered
+  to that spot. Items snap to slots and are in one place at a time.
+
+A first visit gets a four-step walkthrough (seeds and mood, the shop,
+decorating, a plot), shown once; "?" in the HUD plays it again.
 
 **The shop** is a large dialog with a tab per kind of thing (Variants,
-Wardrobe, Decor, Book Nods, Treats, Moves, Floors & walls): big tiles with the
-thing drawn large, a price chip, "Owned" and "Equipped" badges, and what is out
-of reach greyed with "N more seeds · ~M min of reading". Selecting a tile opens
-it on the right: a big preview, what it is, **Preview on Pip** (the house's Pip
-wears it or does it, with a bar to buy, go back to the shop, or stop), and Buy
-or Wear / Place / Use. Every purchase confirms (`askConfirm`), except snacks
-and seed packets, whose price is on the button.
+Wardrobe, Decor, Book Nods, Treats, Moves, Walls & flooring, House: floors and
+plots), each counting how much of it Pip has: big tiles with the thing drawn
+large, a price chip, "Owned" and "Equipped" badges, and what is out of reach
+greyed with "N more seeds · ~M min of reading". Selecting a tile opens it on
+the right: a big preview, what it is, **Try it on Pip** (the house's Pip wears
+it or does it, with a bar to buy, go back to the shop, or stop), Buy or Wear /
+Place / Use, and **Pin as my goal**. A purchase of 30 seeds or more asks first,
+with the thing and its price and Buy as the main button. Below 30 nothing is
+asked: it happens at once (Pip eats the snack, wears the hat, the seed goes in)
+with an **Undo** toast for a few seconds, and is bought only when they are up
+(Rust keeps no refunds, so an undone purchase was never made; `quickBuy.ts`).
 
 **Book Nods** are original house items that tip their hat to famous books
 (each with a `nod`, the book). If a book in the reader's library matches
