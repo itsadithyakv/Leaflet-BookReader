@@ -22,6 +22,7 @@ import { AccountForm } from "../components/account/AccountForm";
 import { PipAvatar } from "../components/community/PipAvatar";
 import { usePipStore, type PipMode } from "../store/pipStore";
 import { pickBeat } from "../pip/moments";
+import { playSound, useSoundOn } from "../pip/sound";
 
 const PIP_MODES: Array<{ mode: PipMode; label: string; detail: string; preview: string }> = [
   { mode: "chatty", label: "Chatty", detail: "Pip lives out in the app: it wanders, naps, celebrates, and can be picked up and thrown. Select the logo to call it home.", preview: "look" },
@@ -70,6 +71,12 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
   const resetAppearance = useAppearanceStore((state) => state.resetTheme);
   const pipMode = usePipStore((state) => state.mode);
   const setPipMode = usePipStore((state) => state.setMode);
+  const [pipSounds, setPipSounds] = useSoundOn();
+  const togglePipSounds = () => {
+    setPipSounds(!pipSounds);
+    // A taste of what was switched on.
+    if (!pipSounds) playSound("chime");
+  };
   const startPipTour = usePipStore((state) => state.startTour);
   const pipChoice = PIP_MODES.find((item) => item.mode === pipMode) ?? PIP_MODES[0];
   const [converter, setConverter] = useState<ConverterInfo>({
@@ -383,6 +390,21 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                   </button>
                 )}
               </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={pipSounds}
+                className="inset-field mt-4 flex w-full items-center justify-between gap-3 px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
+                onClick={togglePipSounds}
+              >
+                <span className="text-left">
+                  <span className="block">Sounds in Pip's house</span>
+                  <span className="mt-0.5 block text-[11px] opacity-75">
+                    Soft little sounds when you pick, plant, buy and place things. They follow your computer's volume.
+                  </span>
+                </span>
+                {renderToggle(pipSounds)}
+              </button>
             </div>
           </div>
         </section>
