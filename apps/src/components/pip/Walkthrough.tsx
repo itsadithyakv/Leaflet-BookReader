@@ -98,7 +98,9 @@ export const Walkthrough = ({ steps, find, prepare, onClose }: WalkthroughProps)
     if (bubble) nextRef.current?.focus();
   }, [bubble]);
 
+  // Escape leaves; the focus goes back where it was when the walk began.
   useEffect(() => {
+    const before = document.activeElement as HTMLElement | null;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -107,7 +109,10 @@ export const Walkthrough = ({ steps, find, prepare, onClose }: WalkthroughProps)
       }
     };
     window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      if (before && document.contains(before) && before !== document.body) before.focus();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

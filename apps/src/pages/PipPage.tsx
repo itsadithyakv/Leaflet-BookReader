@@ -917,12 +917,16 @@ export const PipPage = ({ showToast }: PipPageProps) => {
     setFinishPanel((current) => (current === which ? null : which));
   };
 
-  // Escape leaves decorating (a sheet open in it closes first, on its own Escape).
+  // Escape steps back out of decorating: an open sheet closes first, then the
+  // mode ends. (The shop, a question or the sheet itself, holding the focus,
+  // take their own Escape before it gets here.)
   useEffect(() => {
     if (!decorating) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented || shopOpen || slotFocus || finishPanel) return;
-      stopDecorating();
+      if (event.key !== "Escape" || event.defaultPrevented || shopOpen) return;
+      if (slotFocus) setSlotFocus(null);
+      else if (finishPanel) setFinishPanel(null);
+      else stopDecorating();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
