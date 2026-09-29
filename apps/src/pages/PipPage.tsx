@@ -66,6 +66,9 @@ import {
 import { FloorSwitch } from "../components/pip/FloorSwitch";
 import { PipDrawer } from "../components/pip/PipDrawer";
 import { PipShop, type PreviewLook, type ShopCategory, type ShopEntry, type ShopRequest } from "../components/pip/PipShop";
+import { PipGoals } from "../components/pip/PipGoals";
+import { PipWish } from "../components/pip/PipWish";
+import type { WishView } from "../pip/wish";
 import { PixelImage } from "../components/pip/PixelImage";
 import { Empty, Group, Hint, Hints, MoveCard, PriceTag, Status, Tile, shortfall } from "../components/pip/shopParts";
 import { PurchaseConfirm, askPurchase } from "../components/pip/PurchaseConfirm";
@@ -751,6 +754,32 @@ export const PipPage = ({ showToast }: PipPageProps) => {
   const closeShop = () => {
     setShopOpen(null);
     setShopSlot(null);
+  };
+
+  /**
+   * Pip's wish, granted from its plaque the way the page does each thing: the
+   * snack given (by the shop's rules), the packet planted in a free plot (from
+   * the garden, which the house rides to first), or the shop open at the piece
+   * or the move.
+   */
+  const grantWish = (wish: WishView) => {
+    if (wish.kind === "treat") {
+      const treat = treats().find((entry) => entry.id === wish.id);
+      if (treat) void give(treat);
+      return;
+    }
+    if (wish.kind === "plant") {
+      const free = Array.from({ length: plotCount }, (_, index) => index + 1).find((plot) => !growing(plot));
+      if (!free) return;
+      if (gardenLevel && level.id !== gardenLevel.id) {
+        goToFloor(gardenLevel);
+        window.setTimeout(() => sow(free, wish.id), 600);
+      } else {
+        sow(free, wish.id);
+      }
+      return;
+    }
+    openShop({ tab: wish.kind === "room" ? "decor" : "moves", item: wish.id });
   };
 
   // ---- floors -------------------------------------------------------------------------------
@@ -1532,6 +1561,7 @@ export const PipPage = ({ showToast }: PipPageProps) => {
       price: priceOf("room", entry.id),
       owned,
       badge: at ? `In the ${home ?? "house"}` : "Owned",
+      locked: !owned && catalogueItem("room", entry.id)?.freeWith ? `Comes with the ${levels.find((floor) => floor.id === catalogueItem("room", entry.id)?.freeWith)?.name ?? "floor"}` : null,
       nod: entry.nod ?? null,
       fromLibrary: libraryHas(entry.nod),
       art: imageArt(() => renderItem(entry, 0), `item-${entry.id}`),
@@ -2109,6 +2139,30 @@ export const PipPage = ({ showToast }: PipPageProps) => {
           <dd>{earned.streakBonus}</dd>
           <dt>Welcome gift</dt>
           <dd>{earned.welcome}</dd>
+          {earned.chest > 0 && (
+            <>
+              <dt>Starter chest</dt>
+              <dd>{earned.chest}</dd>
+            </>
+          )}
+          {earned.goals > 0 && (
+            <>
+              <dt>First steps</dt>
+              <dd>{earned.goals}</dd>
+            </>
+          )}
+          {earned.sets > 0 && (
+            <>
+              <dt>Sets finished</dt>
+              <dd>{earned.sets}</dd>
+            </>
+          )}
+          {earned.wishes > 0 && (
+            <>
+              <dt>Wishes granted</dt>
+              <dd>{earned.wishes}</dd>
+            </>
+          )}
           {earned.earlier > 0 && (
             <>
               <dt>Earned before the garden</dt>
@@ -2374,6 +2428,21 @@ export const PipPage = ({ showToast }: PipPageProps) => {
                 ))}
               </span>
             </button>
+            {/* First steps (its own resource until they are all done): a reward's
+                seeds fly to the counter, which holds its old number meanwhile,
+                as it does for a harvest. */}
+            <PipGoals
+              dropdown
+              className="pip-resource pip-resource-goals"
+              counter={() => seedChipRef.current}
+              onFlight={(phase, seeds) => {
+                if (phase === "start") {
+                  setHeldSeeds((held) => held ?? Math.max(0, spendable - seeds));
+                } else {
+                  releaseSeeds();
+                }
+              }}
+            />
           </div>
           {goal && goalEntry && goalItem && progress && (
             <GoalChip
@@ -2389,6 +2458,7 @@ export const PipPage = ({ showToast }: PipPageProps) => {
               onUnpin={() => setGoal(null)}
             />
           )}
+          <PipWish compact onGrant={grantWish} counter={() => seedChipRef.current} />
           <span className="pip-hud-spacer" />
           <span className="pip-floor-plate" title={`You're in the ${level.name}`}>
             <UiIcon name="home" size={14} />

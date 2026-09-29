@@ -36,12 +36,13 @@ const defaultHearts = () => document.querySelector(".pip-hearts");
 const ACTION_LABEL: Record<WishView["action"], string> = { give: "Give it", plant: "Plant it", shop: "Find it" };
 
 /** The wished-for thing, small: a packet, a piece of decor, or Pip with the snack or the move. */
-const WishArt = ({ wish }: { wish: WishView }) => {
+const WishArt = ({ wish, small = false }: { wish: WishView; small?: boolean }) => {
   const { skin, outfit } = useEquippedPip();
-  if (wish.kind === "plant") return <PixelImage render={() => renderPacket(wish.id, 0)} drawKey={`wish-plant-${wish.id}`} box={36} />;
-  if (wish.kind === "room") return <PixelImage render={() => renderItem(wish.id, 0)} drawKey={`wish-room-${wish.id}`} box={36} />;
+  const box = small ? 28 : 36;
+  if (wish.kind === "plant") return <PixelImage render={() => renderPacket(wish.id, 0)} drawKey={`wish-plant-${wish.id}`} box={box} />;
+  if (wish.kind === "room") return <PixelImage render={() => renderItem(wish.id, 0)} drawKey={`wish-room-${wish.id}`} box={box} />;
   const move = wish.kind === "treat" ? catalogueItem("treat", wish.id)?.move ?? "idle" : wish.id;
-  return <PipSprite move={move} still size={40} skin={skin} outfit={outfit} snap="nearest" />;
+  return <PipSprite move={move} still size={small ? 32 : 40} skin={skin} outfit={outfit} snap="nearest" />;
 };
 
 export type PipWishProps = {
@@ -53,6 +54,12 @@ export type PipWishProps = {
   /** The seed counter and the hearts meter the reward flies to. Default: the Pip tab's. */
   counter?: () => Element | null;
   hearts?: () => Element | null;
+  /**
+   * One plaque in the HUD's top bar, as tall as the resources: a smaller
+   * picture, and the note (what granting gives, or what is missing) as its
+   * tooltip and for screen readers.
+   */
+  compact?: boolean;
   className?: string;
 };
 
@@ -66,7 +73,7 @@ export type PipWishProps = {
  *
  * Reads the overview from the wardrobe store; needs nothing else.
  */
-export const PipWish = ({ onGrant, counter = defaultCounter, hearts = defaultHearts, className }: PipWishProps) => {
+export const PipWish = ({ onGrant, counter = defaultCounter, hearts = defaultHearts, compact = false, className }: PipWishProps) => {
   const overview = usePipWardrobeStore((state) => state.overview);
   const view = wishView(overview?.wish, overview?.wallet.balance ?? 0, overview?.garden);
   const bubbleRef = useRef<HTMLDivElement | null>(null);
@@ -119,9 +126,16 @@ export const PipWish = ({ onGrant, counter = defaultCounter, hearts = defaultHea
         : `Grant it today: +${view.seeds} seeds, and a happy Pip.`;
 
   return (
-    <div ref={bubbleRef} className={`pip-wish ${className ?? ""}`} data-granted={view.granted || undefined} role="group" aria-label="Pip's wish for today">
+    <div
+      ref={bubbleRef}
+      className={`pip-wish ${compact ? "is-compact" : ""} ${className ?? ""}`}
+      data-granted={view.granted || undefined}
+      role="group"
+      aria-label="Pip's wish for today"
+      title={compact ? note : undefined}
+    >
       <span className="pip-wish-art" aria-hidden="true">
-        <WishArt wish={view} />
+        <WishArt wish={view} small={compact} />
         {view.granted && (
           <span className="pip-wish-check">
             <UiIcon name="check" size={11} strokeWidth={3} />
@@ -131,7 +145,7 @@ export const PipWish = ({ onGrant, counter = defaultCounter, hearts = defaultHea
       <span className="pip-wish-text">
         <span className="pip-wish-label">{view.granted ? "Wish granted" : "Pip's wish today"}</span>
         <span className="pip-wish-line">{view.granted ? grantedLine(view.day) : view.line}</span>
-        <span className="pip-wish-note">{note}</span>
+        <span className={compact ? "sr-only" : "pip-wish-note"}>{note}</span>
       </span>
       {!view.granted && onGrant && (
         <button

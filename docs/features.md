@@ -560,7 +560,8 @@ brings in another device's sessions) can only bring plants closer to ripe.
 ### Seeds
 
 There is no balance column: balance = the welcome gift + harvests + goal
-bonuses − purchases (seed packets included), recomputed from the records.
+bonuses + rewards − purchases (seed packets included), recomputed from the
+records.
 
 | Source | Seeds |
 | --- | --- |
@@ -568,6 +569,36 @@ bonuses − purchases (seed packets included), recomputed from the records.
 | A day the goal was met by reading | +4 |
 | ...its streak bonus | +1 per day of the streak, up to +6 |
 | Welcome gift | +50, once |
+| Starter chest | +30, with the first focus session of 5 minutes or more |
+| First steps | 10 to 25 each, 100 in all (below) |
+| A finished set | about a tenth of its pieces' cost (15 to 110) |
+| Pip's daily wish, granted | +8, and mood |
+
+**Rewards** (`pip/rewards.rs`) are never stored either: each is a pure
+function of records every device syncs (purchases, plantings, the garden
+replayed from the reading, the ledger), so there is no "claimed" flag to
+disagree about and a sync can never pay twice. Each rule asks for records that
+are never unmade, so a reward once earned stays earned. Reward amounts may only
+go up, and a set's pieces and the wish lists are frozen once shipped (a new
+list is a new dated "era"), or a change would take seeds back.
+
+- **First steps:** plant a seed (any planting), water it by reading (a planting
+  with water in the replay), meet your reading goal (a goal day), pick a plant
+  (a harvest), give Pip a treat (a treat bought), buy Pip a hat (an accessory
+  worn on the head, bought), place a lamp (a light bought). Shown as a
+  checklist in the top bar (`PipGoals`) until all are done and celebrated.
+- **Sets:** own every piece of a fixed list: 8 outfits, 2 bedroom corners, 6
+  floors' decor.
+- **The daily wish:** chosen in Rust from the local date and what Pip owned
+  before that day began; granted by buying, giving or planting that thing the
+  same day (`PipWish`, a plaque in the top bar).
+- **Starter pieces:** a window, a poster and a book tower in every bedroom and
+  a watering can in the garden are free; each paid floor comes with one piece
+  (`freeWith`: kettle, ladder, arcade cabinet, pegboard, star chart), owned
+  with the floor and never sold alone.
+
+Purchases and plantings are stamped in local time with the offset, so a
+record's day is the reader's own (older records keep their UTC day).
 
 A day covered by a freeze or grace keeps the streak going but earns nothing.
 Seeds are never taken back: a broken streak burns books on the shelf, not
@@ -578,7 +609,10 @@ harvested.
 
 **Pacing**, for a reader doing a 20-minute goal most days (about 30 water a
 day): the garden gives 10 to 12 seeds a day, the goal and streak bonuses about
-10, so roughly 150 a week. Prices are set for that (`PACING` in `shop.js`):
+10, so roughly 150 a week. Prices are set for that (`PACING` in `shop.js`).
+The first days are gentler: the welcome gift, the chest and the first steps
+come to 180, and the first variant (the gardener) costs 80, so a reader's
+first evening can buy a cap, the floor lamp, an apple and the gardener.
 
 | Thing | Seeds | Reading |
 | --- | --- | --- |

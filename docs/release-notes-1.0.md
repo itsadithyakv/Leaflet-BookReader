@@ -88,7 +88,16 @@ This is the first public release.
   a book or keep a streak, naps at night, and has a few surprises for some
   famous books.
 - **Seeds** earned by reading in focus grow Pip's garden and buy decor and
-  outfits for its room.
+  outfits for its room. Harvests, planting, buying and treats all play out on
+  screen, and the water your reading pours rains onto the garden.
+- **Pip's house plays like a game:** one shop, Pip's things, a lift between
+  floors, quick buys you can undo, a goal you can pin, and planting straight
+  from the garden. A short walkthrough the first time.
+- **First steps and a daily wish:** a new reader's first steps each pay
+  seeds, a starter chest opens with the first session, finished sets pay a
+  bonus, and Pip wishes for one thing a day. Pip sleeps in his bed at night,
+  admires what you place, and points out ripe plants. Optional sounds, in
+  Settings.
 - A short tour on first run. Drag Pip anywhere; click the logo to send him
   home; right-click him for shortcuts.
 

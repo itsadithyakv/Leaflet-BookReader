@@ -26,11 +26,12 @@ const writeSeen = (keys: string[]) => {
     // Celebrated again next time, at worst.
   }
 };
-const readOpen = () => {
+const readOpen = (fallback: boolean) => {
   try {
-    return localStorage.getItem(OPEN_KEY) !== "0";
+    const value = localStorage.getItem(OPEN_KEY);
+    return value === null ? fallback : value !== "0";
   } catch {
-    return true;
+    return fallback;
   }
 };
 
@@ -57,6 +58,12 @@ export type PipGoalsProps = {
    * can hold its counter at the old number meanwhile (as it does for a harvest).
    */
   onFlight?: (phase: "start" | "end", seeds: number) => void;
+  /**
+   * In the HUD's top bar the list drops over the room, so it starts folded (to
+   * its next step, which still says what to do) and folds again at a click
+   * elsewhere or Escape, like any menu.
+   */
+  dropdown?: boolean;
   className?: string;
 };
 
@@ -73,12 +80,13 @@ export type PipGoalsProps = {
  *
  * Reads the overview from the wardrobe store; needs nothing else.
  */
-export const PipGoals = ({ counter = defaultCounter, stage = defaultStage, onFlight, className }: PipGoalsProps) => {
+export const PipGoals = ({ counter = defaultCounter, stage = defaultStage, onFlight, dropdown = false, className }: PipGoalsProps) => {
   const overview = usePipWardrobeStore((state) => state.overview);
   const rows = useMemo(() => goalRows(overview), [overview]);
   const progress = goalProgress(rows);
   const next = rows.find((row) => row.next) ?? null;
-  const [open, setOpen] = useState(readOpen);
+  // A dropdown opens only when asked; its folding is not remembered either.
+  const [open, setOpen] = useState(() => (dropdown ? false : readOpen(true)));
   const [fresh, setFresh] = useState<Set<string>>(() => new Set());
   // Rewards arriving: the checklist stays up to show them, even the last step
   // ticked, and goes a moment after.
@@ -103,14 +111,36 @@ export const PipGoals = ({ counter = defaultCounter, stage = defaultStage, onFli
 
   const toggle = () => {
     setOpen((current) => {
-      try {
-        localStorage.setItem(OPEN_KEY, current ? "0" : "1");
-      } catch {
-        // Remembered for this visit only.
+      if (!dropdown) {
+        try {
+          localStorage.setItem(OPEN_KEY, current ? "0" : "1");
+        } catch {
+          // Remembered for this visit only.
+        }
       }
       return !current;
     });
   };
+
+  // Open as a dropdown: a click anywhere else, or Escape, folds it.
+  useEffect(() => {
+    if (!dropdown || !open) return;
+    const onPointer = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        setOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", onPointer, true);
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("pointerdown", onPointer, true);
+      window.removeEventListener("keydown", onKey, true);
+    };
+  }, [dropdown, open]);
 
   /** Where a reward was earned, on screen: its line, or the checklist, or the room. */
   const originOf = (reward: RewardMoment): Box | null => {

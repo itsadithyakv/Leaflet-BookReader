@@ -7090,21 +7090,86 @@ button.pip-shop-tile:active,
 
 /* The first steps and the wish, over the house's top-left corner, until the
    HUD has a place of its own for them. */
-.pip-life-dock {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  z-index: 6;
-  display: flex;
-  max-width: calc(100% - 24px);
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 12px;
-  pointer-events: none;
+/* In the HUD, the first steps are one more part of the resources plaque: its
+   name and count, the next step beside them while folded, and the whole list
+   dropping over the room when opened. */
+.pip-resources .pip-goals {
+  width: auto;
+  overflow: visible;
+  flex-direction: row;
+  align-items: center;
+  gap: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
 }
 
-.pip-life-dock > * {
-  pointer-events: auto;
+.pip-resources .pip-goals-head {
+  width: auto;
+  min-height: 44px;
+  padding: 6px 12px;
+  color: var(--hud-ink);
+}
+
+.pip-resources .pip-goals-title {
+  flex: none;
+  color: var(--hud-ink);
+}
+
+.pip-resources .pip-goals-next {
+  padding: 0 14px 0 0;
+  color: var(--hud-ink);
+  white-space: nowrap;
+}
+
+.pip-resources .pip-goals-list {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  z-index: 40;
+  width: 300px;
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
+  padding: 8px 6px;
+  background: var(--hud-face);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 6px 0 0 var(--hud-drop);
+}
+
+/* Pip's wish as one plaque in the top bar, as tall as the resources: no tail,
+   a smaller picture, and one line of what Pip says. */
+.pip-wish.is-compact {
+  min-height: 44px;
+  max-width: min(460px, 100%);
+  gap: 8px;
+  padding: 4px 10px 4px 6px;
+}
+
+.pip-wish.is-compact::after {
+  display: none;
+}
+
+.pip-wish.is-compact .pip-wish-art {
+  width: 34px;
+  height: 34px;
+}
+
+.pip-wish.is-compact .pip-wish-label {
+  font-size: 9px;
+}
+
+.pip-wish.is-compact .pip-wish-line {
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* The first steps: a small checklist card in the HUD's materials. */
