@@ -158,6 +158,8 @@ const MOVING = new Set<Phase>([
 ]);
 /** How often the loop checks in while nothing moves. */
 const REST_MS = 250;
+/** A step shorter than this (in seconds) has no time in it to move anything. */
+const MIN_STEP_S = 0.001;
 
 /**
  * A web: where it is stuck (read each frame, since a card can scroll), the
@@ -1405,6 +1407,41 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
     }
   };
 
+  /**
+   * A number gone bad (NaN or infinite) must never stick. CSS drops a
+   * transform it cannot read, so Pip froze where it last stood while its
+   * bubble, placed without the angle, went on following the hand. Checked
+   * every frame: a bad spin is dropped, and a Pip whose place is lost falls in
+   * from where it can be seen.
+   */
+  const heal = () => {
+    const s = st.current;
+    if (!Number.isFinite(s.angle) || !Number.isFinite(s.omega)) {
+      s.angle = 0;
+      s.omega = 0;
+    }
+    if (!Number.isFinite(s.dizzy)) {
+      s.dizzy = 0;
+    }
+    if (!Number.isFinite(s.x) || !Number.isFinite(s.y) || !Number.isFinite(s.vx) || !Number.isFinite(s.vy)) {
+      const b = readBounds();
+      s.x = Number.isFinite(s.x) ? s.x : (b.left + b.right) / 2;
+      s.y = Number.isFinite(s.y) ? s.y : b.top + HEIGHT;
+      s.vx = 0;
+      s.vy = 0;
+      s.web = null;
+      s.tween = null;
+      if (s.phase !== "held" && s.phase !== "home" && s.phase !== "perched") {
+        setOrigin("center");
+        startFall();
+      }
+    }
+    const p = s.pivot;
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.vx) || !Number.isFinite(p.vy)) {
+      s.pivot = { x: s.x, y: s.y - HOLD_DROP, vx: 0, vy: 0 };
+    }
+  };
+
   /** Offset from window coordinates to the element's own layer. */
   const layerOffset = (el: HTMLElement) => {
     const layer = el.parentElement;
@@ -1522,14 +1559,15 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
   // Moving between the page's layer and a card's scrolling layer re-creates
   // Pip's element, which starts with no transform: the browser drew it at the
   // layer's top-left corner until the loop next placed it, a frame when picked
-  // up, up to REST_MS on landing. Place it before anything is drawn.
+  // up, up to REST_MS on landing. Place it before anything is drawn. A new
+  // bubble likewise waited off screen for the loop, so a line came late.
   useLayoutEffect(() => {
     if (mode !== "off") {
       place();
     }
-    // `place` reads everything through refs; only the host swap matters here.
+    // `place` reads everything through refs; only what re-creates an element matters here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [host, mode]);
+  }, [host, mode, say?.id, view.visible, away]);
 
   useEffect(() => {
     if (mode === "off") {
@@ -1538,8 +1576,16 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
     let raf = 0;
     let timer = 0;
     let last = performance.now();
-    // Frames while something moves; a slow check-in otherwise.
+    // Frames while something moves; a slow check-in otherwise. Only one of
+    // either is ever pending. `wake` also runs mid-frame (a jump the step
+    // itself starts), and scheduling on top of it ran two loops every frame
+    // from then on, the second with no time passed.
     const schedule = () => {
+      if (raf) {
+        return;
+      }
+      window.clearTimeout(timer);
+      timer = 0;
       const s = st.current;
       const moving = MOVING.has(s.phase) || s.tween !== null || s.web !== null || drag.current !== null;
       if (moving && !document.hidden) {
@@ -1551,9 +1597,16 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
     const loop = (now: number) => {
       raf = 0;
       timer = 0;
+      // A frame is stamped when it starts, which can fall before a clock read
+      // a moment earlier, so time never runs backwards here, and a step with
+      // no time in it is skipped: the swings divide by dt, and 0/0 once froze
+      // Pip (see `heal`).
       const dt = Math.min(0.033, (now - last) / 1000);
-      last = now;
-      step(dt, now);
+      last = Math.max(last, now);
+      if (dt >= MIN_STEP_S) {
+        step(dt, now);
+      }
+      heal();
       place();
       schedule();
     };
@@ -1578,7 +1631,11 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
         dizzy: (amount = 1.5) => {
           st.current.dizzy = amount;
         },
-        state: () => ({ ...st.current, web: Boolean(st.current.web) })
+        state: () => ({ ...st.current, web: Boolean(st.current.web) }),
+        // Spoils a value, to check that Pip heals rather than freezes.
+        spoil: (field: "angle" | "x" | "y") => {
+          st.current[field] = Number.NaN;
+        }
       };
     }
     const onResize = () => {
