@@ -19,6 +19,11 @@ Environment=NODE_OPTIONS=--max-old-space-size=160
 ExecStart=/usr/bin/node src/index.js
 Restart=always
 RestartSec=5
+# A setup mistake (a wrong MONGO_URI, say) fails every start. Back off from
+# 5 s to one try a minute, so it cannot keep a 1-CPU machine busy; a fixed
+# file and `systemctl restart` start it at once.
+RestartSteps=5
+RestartMaxDelaySec=60
 # The server closes Mongo and exits within 10 s of SIGTERM.
 KillSignal=SIGTERM
 TimeoutStopSec=15

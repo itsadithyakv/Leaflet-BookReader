@@ -32,6 +32,18 @@ if (!uri) {
   console.error("MONGO_URI is not set. See server/.env.example.");
   process.exit(1);
 }
+// The template's placeholders, pasted as they are, fail with a DNS error that
+// does not say so.
+if (/CLUSTER\.mongodb\.net|USER:PASSWORD/.test(uri)) {
+  console.error(
+    "MONGO_URI still has the example values (USER, PASSWORD, CLUSTER). Paste the real string from " +
+      "Atlas -> Connect -> Drivers into /etc/leaflet-api.env, then restart."
+  );
+  process.exit(1);
+}
+if (/RESET_MAIL_SECRET|same-long-random-string|YOUR-SCRIPT-SECRET/.test(process.env.RESET_MAIL_SECRET ?? "")) {
+  console.warn("[leaflet] RESET_MAIL_SECRET still has the example value; password reset will be refused.");
+}
 
 // Password reset sends through a Google Apps Script web app; without its
 // address and secret the reset endpoints say it is not set up.
@@ -40,7 +52,23 @@ if (!mailer) {
   console.warn("[leaflet] RESET_MAIL_URL / RESET_MAIL_SECRET not set: password reset is off.");
 }
 
-const db = await connect(uri, dbName);
+let db;
+try {
+  db = await connect(uri, dbName);
+} catch (error) {
+  // Said plainly, with where to look; the raw driver error follows.
+  const hint =
+    error?.code === "ENOTFOUND" || /querySrv/.test(error?.message ?? "")
+      ? "the cluster address in MONGO_URI could not be found (check the part after the @)"
+      : /auth/i.test(error?.message ?? "")
+        ? "MongoDB refused the user or password in MONGO_URI"
+        : /selection|timed out|ETIMEDOUT/i.test(error?.message ?? "")
+          ? "MongoDB did not answer: in Atlas -> Network Access, allow this server's IP address"
+          : "see the error below";
+  console.error(`Could not connect to MongoDB: ${hint}.`);
+  console.error(error?.message ?? error);
+  process.exit(1);
+}
 const app = createApp(db, { corsOrigin: process.env.CORS_ORIGIN || "", mailer });
 
 const server = app.listen(port, host, () => {
