@@ -219,7 +219,10 @@ file, below the existing blocks. Then:
 
 ```bash
 sudo mkdir -p /var/log/caddy && sudo chown caddy:caddy /var/log/caddy
-sudo caddy validate --config /etc/caddy/Caddyfile
+# As the caddy user: checking the config opens the log file, and a file root
+# creates here is one the running Caddy may not write, which fails the reload
+# with "permission denied".
+sudo -u caddy caddy validate --config /etc/caddy/Caddyfile
 sudo systemctl reload caddy
 ```
 

@@ -280,7 +280,7 @@ terminates HTTPS on a subdomain and proxies to it. Files are in `deploy/`.
    `/etc/caddy/Caddyfile` as a **new** site block (do not edit the existing
    static-site block), with your subdomain in place of the placeholder. Then:
    ```bash
-   sudo caddy validate --config /etc/caddy/Caddyfile
+   sudo -u caddy caddy validate --config /etc/caddy/Caddyfile
    sudo systemctl reload caddy
    curl https://api.example.com/health
    ```

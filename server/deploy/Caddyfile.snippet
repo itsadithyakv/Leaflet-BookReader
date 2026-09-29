@@ -2,7 +2,8 @@
 # inside) the existing unifloe.app blocks. leafletapp.duckdns.org is a free
 # DuckDNS name pointing at the VM, so the API outlives any paid domain.
 #
-#   sudo caddy validate --config /etc/caddy/Caddyfile
+#   sudo mkdir -p /var/log/caddy && sudo chown caddy:caddy /var/log/caddy
+#   sudo -u caddy caddy validate --config /etc/caddy/Caddyfile   (as caddy: it creates the log file)
 #   sudo systemctl reload caddy
 
 leafletapp.duckdns.org {

@@ -92,7 +92,7 @@ of `/etc/caddy/Caddyfile`, check it, and reload:
 
 ```bash
 sudo nano /etc/caddy/Caddyfile
-sudo caddy validate --config /etc/caddy/Caddyfile
+sudo -u caddy caddy validate --config /etc/caddy/Caddyfile
 sudo systemctl reload caddy
 ```
 
