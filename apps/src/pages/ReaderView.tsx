@@ -37,7 +37,7 @@ import { getReaderFinish, getReaderFinishBackground, PAGE_TOP_PAD } from "../rea
 import { flattenToc } from "../readers/toc";
 import { INK_SAMPLE, markInkImages } from "../readers/inkImages";
 import { friendlyOpenError } from "../readers/openErrors";
-import { AUTO_SCROLL_DEFAULT_KEY, AUTO_SCROLL_YIELD_BACK_MS, AUTO_SCROLL_YIELD_AHEAD_MS, AUTO_SCROLL_TUNE_COOLDOWN_MS, autoScrollLinesPerMinute, autoScrollPixelsPerSecond, readAutoScrollDefault } from "../readers/autoScroll";
+import { AUTO_SCROLL_DEFAULT_KEY, AUTO_SCROLL_YIELD_BACK_MS, AUTO_SCROLL_YIELD_AHEAD_MS, AUTO_SCROLL_TUNE_COOLDOWN_MS, autoScrollLinesPerMinute, autoScrollPixelsPerSecond, autoScrollSpeedForLines, readAutoScrollDefault } from "../readers/autoScroll";
 import { rsvpPivotIndex, HANDS_FREE_GRACE_MS, READER_BLOCK_SELECTOR, SENTENCE_END_PATTERN, isInlineJoin, getPaceFactor, getPaceScale } from "../readers/pacing";
 import {
   createReadingProfile,
@@ -48,6 +48,7 @@ import {
   plainFromWpm,
   predictPlainWpm,
   predictWpm,
+  readerPace,
   recordSample,
   setBookPace,
   wpmFromPlain,
@@ -371,7 +372,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
         event.preventDefault();
         if (readingModeRef.current === "standard") {
           const next = Math.min(100, Math.max(0, autoScrollSpeedRef.current + (faster ? 5 : -5)));
-          setAutoScrollSpeed(next);
+          tuneAutoScroll(next);
           showFocusToastRef.current(`Auto-scroll ${autoScrollLinesPerMinute(next)} lines/min`);
         } else if (readingModeRef.current === "speed") {
           const next = Math.min(1000, Math.max(120, speedReadWpmRef.current + (faster ? 20 : -20)));
@@ -486,6 +487,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
         sidebarOpen?: boolean;
         displayMode?: ReaderDisplayMode;
         autoScrollSpeed?: number;
+        autoScrollTuned?: boolean;
         speedReadWpm?: number;
         readerDotEnabled?: boolean;
         cfi?: string;
@@ -507,6 +509,15 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   const [autoScrollSpeed, setAutoScrollSpeed] = useState(
     () => initialPrefs?.autoScrollSpeed ?? readAutoScrollDefault()
   );
+  // Whether the reader has set auto-scroll's speed in this book. Until they
+  // do, it starts at their own reading pace (see autoScrollSpeedForPace). A
+  // book opened before this was remembered keeps the speed it had.
+  const autoScrollTunedRef = useRef(
+    initialPrefs ? (initialPrefs.autoScrollTuned ?? initialPrefs.autoScrollSpeed !== undefined) : false
+  );
+  const autoScrollPacedRef = useRef(false);
+  /** Auto-scroll running with no correction: a pace the reader keeps up with. */
+  const autoScrollRunRef = useRef({ ms: 0, px: 0 });
   // Auto-scroll steps aside, without stopping, while a hand is on the page:
   // held down (hold to pause), or scrolling by hand (it yields, then resumes
   // from wherever the reader left it).
@@ -1522,6 +1533,54 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
   };
   stopFreeReadingRef.current = stopFreeReading;
 
+  /**
+   * Words per line of scrolling in this chapter: all its words over all its
+   * height in lines, headings, pictures and paragraph gaps included, since
+   * auto-scroll moves through those too. A screenful was a poor guide: the
+   * top of a chapter is mostly heading. A wide window fits far more words on
+   * a line than a narrow one.
+   */
+  const measureWordsPerLine = () => {
+    const words = readerWordsRef.current;
+    const container = ensureScrollContainer();
+    if (!container || words.length < 50) {
+      return null;
+    }
+    const lines = Math.max(0, container.scrollHeight - PAGE_TOP_PAD) / (fontSizeRef.current * 1.8);
+    const perLine = lines >= 4 ? words.length / lines : 0;
+    return perLine >= 2 && perLine <= 60 ? perLine : null;
+  };
+
+  /** Auto-scroll's slider position for this reader's pace here, or null while that is unknown. */
+  const autoScrollSpeedForPace = () => {
+    const profile = paceProfileRef.current;
+    if (readerPace(profile, Date.now()).minutes < 5 && !profile.books[book.id]) {
+      return null;
+    }
+    const perLine = measureWordsPerLine();
+    return perLine ? autoScrollSpeedForLines(predictWpm(profile, paceContext()) / perLine) : null;
+  };
+
+  /** The reader's own change to auto-scroll's speed: kept for this book, not overridden by the pace. */
+  const tuneAutoScroll = (next: number | ((value: number) => number)) => {
+    autoScrollTunedRef.current = true;
+    autoScrollRunRef.current = { ms: 0, px: 0 };
+    setAutoScrollSpeed(next);
+  };
+
+  /**
+   * Auto-scroll left to run without a correction is a pace the reader keeps
+   * up with: learned as Smart Read's is, counting for less than a measurement.
+   */
+  const commitAutoScrollRun = () => {
+    const run = autoScrollRunRef.current;
+    autoScrollRunRef.current = { ms: 0, px: 0 };
+    const perLine = run.ms >= 60_000 ? measureWordsPerLine() : null;
+    if (perLine) {
+      learnPace(Math.round((run.px / (fontSizeRef.current * 1.8)) * perLine), run.ms, "guided");
+    }
+  };
+
   /** Words on the page showing now (layout "pages"), from where they sit on screen. */
   const countWordsOnPage = () => {
     const words = readerWordsRef.current;
@@ -2065,6 +2124,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
           sidebarOpen: sidebarRef.current,
           displayMode: displayModeRef.current,
           autoScrollSpeed: autoScrollSpeedRef.current,
+          autoScrollTuned: autoScrollTunedRef.current,
           speedReadWpm: speedReadWpmRef.current,
           readerDotEnabled: readerDotEnabledRef.current,
           cfi: override?.cfi ?? lastCfiRef.current ?? undefined,
@@ -3410,6 +3470,8 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
       }
       autoScrollLastTimeRef.current = null;
       autoScrollCarryRef.current = 0;
+      autoScrollPacedRef.current = false;
+      commitAutoScrollRun();
       return;
     }
 
@@ -3423,6 +3485,19 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     lastHandsOnAtRef.current = Date.now();
     // What the reader read by hand until now is theirs; from here the page moves at auto-scroll's pace.
     stopFreeReadingRef.current();
+    // In a book where the reader never set its speed, auto-scroll starts at
+    // their own pace, in lines by what a line holds on this screen. A fixed
+    // lines-a-minute default ran far too fast on a wide window.
+    if (!autoScrollTunedRef.current && !autoScrollPacedRef.current) {
+      autoScrollPacedRef.current = true;
+      const paced = autoScrollSpeedForPace();
+      if (paced !== null && paced !== autoScrollSpeed) {
+        // This runs again at the new speed.
+        setAutoScrollSpeed(paced);
+        showFocusToastRef.current(`Auto-scroll at your pace: ${autoScrollLinesPerMinute(paced)} lines/min`);
+        return;
+      }
+    }
 
     const tick = (time: number) => {
       if (!autoScrollActive) {
@@ -3432,6 +3507,8 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
       // Nobody has touched the page for a while: stop rather than scroll a
       // chapter past an empty chair (and stop crediting minutes for it).
       if (now - lastHandsOnAtRef.current >= HANDS_FREE_GRACE_MS) {
+        // The last stretch was probably an empty chair, not a pace kept up with.
+        autoScrollRunRef.current = { ms: 0, px: 0 };
         setAutoScrollActive(false);
         showFocusToastRef.current("Auto-scroll paused. Still reading? Press Space.");
         return;
@@ -3455,6 +3532,11 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
       if (move > 0) {
         autoScrollCarryRef.current -= move;
         container.scrollTop = before + move;
+        autoScrollRunRef.current.px += move;
+      }
+      autoScrollRunRef.current.ms += deltaSeconds * 1000;
+      if (autoScrollRunRef.current.ms >= 3 * 60_000) {
+        commitAutoScrollRun();
       }
       if (container.scrollTop === before && isAtScrollBottom(container, 2)) {
         triggerScrollAdvance();
@@ -4157,6 +4239,8 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     const now = Date.now();
     autoScrollYieldUntilRef.current =
       now + (deltaY < 0 ? AUTO_SCROLL_YIELD_BACK_MS : AUTO_SCROLL_YIELD_AHEAD_MS);
+    // A correction: the pace so far was not quite the reader's.
+    autoScrollRunRef.current = { ms: 0, px: 0 };
     const correction = autoScrollCorrectionRef.current;
     if (now - correction.lastAt > 1500) {
       correction.net = 0;
@@ -4177,7 +4261,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
     if (next === autoScrollSpeedRef.current) {
       return;
     }
-    setAutoScrollSpeed(next);
+    tuneAutoScroll(next);
     showFocusToast(
       step > 0
         ? `Reading ahead? Sped up to ${autoScrollLinesPerMinute(next)} lines/min`
@@ -4429,7 +4513,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
                       max={100}
                       step={1}
                       value={autoScrollSpeed}
-                      onChange={(event) => setAutoScrollSpeed(Number(event.target.value))}
+                      onChange={(event) => tuneAutoScroll(Number(event.target.value))}
                       className="h-1 w-24 cursor-pointer accent-current"
                       title={`Auto scroll: ${autoScrollLinesPerMinute(autoScrollSpeed)} lines a minute (+ and - to adjust)`}
                     />
@@ -4952,7 +5036,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
           <button
             type="button"
             className="reader-autoscroll-button reader-icon reader-hover-accent"
-            onClick={() => setAutoScrollSpeed((value) => Math.max(0, value - 5))}
+            onClick={() => tuneAutoScroll((value) => Math.max(0, value - 5))}
             title="Slower (-)"
             aria-label="Slower"
           >
@@ -4972,7 +5056,7 @@ export const ReaderView = ({ book, onClose }: ReaderViewProps) => {
           <button
             type="button"
             className="reader-autoscroll-button reader-icon reader-hover-accent"
-            onClick={() => setAutoScrollSpeed((value) => Math.min(100, value + 5))}
+            onClick={() => tuneAutoScroll((value) => Math.min(100, value + 5))}
             title="Faster (+)"
             aria-label="Faster"
           >

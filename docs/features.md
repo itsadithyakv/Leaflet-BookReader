@@ -228,8 +228,8 @@ Smart Read it walks through the text word by word.
 
 - **Free reading** teaches it: the words passing the reading line as the reader
   scrolls (`ScrollPaceTracker`), or the words on each page they turn in the
-  pages layout (`PagePaceTracker`). Auto-scroll's own pace is not taken for the
-  reader's.
+  pages layout (`PagePaceTracker`). Auto-scroll's scrolling is not taken for the
+  reader's; a run of it left uncorrected counts as a pace kept up with.
 - **Each book keeps its own pace.** A new book starts from the reader's overall
   pace (recent books counting most), adjusted by how they read books of the same
   difficulty band and genre.
@@ -333,6 +333,14 @@ in one burst means it is too slow (+4), scrolling back more than a third of a
 screen means too fast (-5), at most once every 12 s, with a toast saying so.
 The speed a reader settles on is saved for the book and becomes the starting
 speed for every other book.
+
+**At the reader's pace.** In a book where the reader has not set its speed,
+auto-scroll starts at their learned reading pace (see Smart Read), turned into
+lines by how many words a line holds on this screen: a wide window fits far
+more on a line, and a fixed lines-a-minute default ran far too fast there.
+Books opened before this keep the speed they had. A run left without a
+correction for a few minutes is learned as a pace the reader keeps up with,
+counting for less than a measurement, as Smart Read's is.
 
 ---
 
