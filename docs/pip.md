@@ -41,7 +41,7 @@ There is exactly one Pip on screen at any time. Its home is the **header logo**:
 | `src/hooks/usePipReactions.ts` | Which reading events make Pip react. |
 | `src/store/pipStore.ts` | Mode (Chatty / Quiet / Off), home, reaction queue, peek, tour, and `onStage` (the Pip tab is open). |
 | `src/store/pipWardrobeStore.ts` | What Pip wears and owns, the seed wallet, the room: a view over the Rust side, loaded at startup. |
-| `src/pages/PipPage.tsx`, `src/components/pip/` | The Pip tab: Pip's house (floors, decorating, the garden), the shop, drawers for the wardrobe, garden, treats and moves, and the arcade. |
+| `src/pages/PipPage.tsx`, `src/components/pip/` | The Pip tab: Pip's house (floors and the lift, decorating, the garden), the HUD (seeds, mood, a pinned goal, the tool rail), the shop, Pip's things, and the arcade. |
 | `src/pip/house.js`, `house-nods.js`, `games-art.js` | The house's floors, decor, wallpapers and floors, the book-nod items, and the arcade's art. |
 | `src/pip/home.js`, `src/pip/garden.js` | The house as the app sees it (normalised from the art), and the garden's plots and plants. |
 

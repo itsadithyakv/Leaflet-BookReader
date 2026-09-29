@@ -20,7 +20,7 @@ import { usePipStore } from "../../store/pipStore";
 import { PipSprite } from "../PipSprite";
 import { PipSay } from "../PipSay";
 import { UiIcon } from "../UiIcon";
-import { pixelsPerArtPixel } from "./PixelImage";
+import { sceneScale } from "./sceneFit";
 import { banner, burst, centerOf, confetti, dropSeed, floatText, popOff, puff, rain, seedPixel, tossSeed, type Box, type Captured, type Point } from "./fx";
 
 /**
@@ -173,6 +173,8 @@ export type HouseSceneHandle = {
   sow: (plot: number, from: Captured | null) => void;
   /** Rain on these plots, saying how much water each took. Resolves as the last drop lands. */
   rain: (plots: Array<{ plot: number; gained: number }>) => Promise<void>;
+  /** A plot's bed on screen (for the packet picker to sit over), or null when it is not on this floor. */
+  plotBox: (plot: number) => Box | null;
   /** Confetti and a title over the room, for a big moment. */
   celebrate: (title: string, note: string) => void;
 };
@@ -330,7 +332,11 @@ export type HouseSceneProps = {
   /** The garden's plots, on a garden floor. */
   plots?: ScenePlot[];
   onPlot?: (plot: ScenePlot) => void;
+  /** An empty plot was selected: the page opens its packet picker there (instead of `onPlot`). */
+  onEmptyPlot?: (plot: ScenePlot) => void;
   plotLabel?: (plot: ScenePlot) => string;
+  /** Room kept below the scene (the page's tool rail), in CSS pixels. */
+  reserveBelow?: number;
   label: string;
 };
 
@@ -345,9 +351,8 @@ type Look = { skin: string; outfit: readonly string[]; key: string };
 let arrivalKey = 1;
 
 /**
- * One floor of Pip's house, big: the floor's art at a whole number of device
- * pixels per pixel (so the pixels stay square at any display scaling), and
- * Pip living in it at the same scale. Pip strolls, fills free moments, can be
+ * One floor of Pip's house, big: the floor's art at a whole or half number of
+ * device pixels per pixel (sceneFit.ts), and Pip living in it at the same scale. Pip strolls, fills free moments, can be
  * picked up and dropped, and reacts when poked. In Decorate mode, each slot
  * of the floor gets a pin to choose what goes there.
  *
@@ -382,7 +387,9 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     hidePip = false,
     plots,
     onPlot,
+    onEmptyPlot,
     plotLabel,
+    reserveBelow = 28,
     label
   },
   ref
@@ -405,9 +412,9 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     const measure = () => {
       const width = stage.clientWidth;
       const top = stage.getBoundingClientRect().top;
-      const height = Math.max(220, window.innerHeight - Math.max(0, top) - 28);
+      const height = Math.max(220, window.innerHeight - Math.max(0, top) - reserveBelow);
       lastRoomBox.current = roomRef.current?.getBoundingClientRect() ?? null;
-      if (width > 0) setPer(pixelsPerArtPixel(level.w, level.h, width, height));
+      if (width > 0) setPer(sceneScale(level.w, level.h, width, height, window.devicePixelRatio || 1));
     };
     measure();
     const observer = new ResizeObserver(measure);
@@ -417,7 +424,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       observer.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, [level.w, level.h]);
+  }, [level.w, level.h, reserveBelow]);
 
   const ratio = window.devicePixelRatio || 1;
   const scale = per / ratio;
@@ -1251,6 +1258,10 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       });
       return Promise.all(falls).then(() => undefined);
     },
+    plotBox: (plot) => {
+      const index = plotIndex(plot);
+      return index < 0 ? null : onScreen(plotBoxes(live.current.level, plots?.length ?? 0)[index]);
+    },
     celebrate: (title, note) => {
       const box = roomRef.current?.getBoundingClientRect();
       if (!box) return;
@@ -1423,7 +1434,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
                   <button
                     type="button"
                     className="pip-house-hotspot pip-plot-hit"
-                    onClick={() => onPlot(plot)}
+                    onClick={() => (onEmptyPlot && state === "empty" ? onEmptyPlot(plot) : onPlot(plot))}
+                    aria-haspopup={onEmptyPlot && state === "empty" ? "dialog" : undefined}
                     aria-label={plotLabel?.(plot) ?? `Plot ${plot.plot}`}
                     title={plotLabel?.(plot)}
                   />

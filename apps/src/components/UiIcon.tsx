@@ -1,5 +1,7 @@
 import {
+  Armchair,
   ArrowLeft,
+  Backpack,
   Bean,
   BookCopy,
   BookOpenText,
@@ -7,6 +9,9 @@ import {
   Bookmark,
   ChartNoAxesCombined,
   Check,
+  ChevronDown,
+  ChevronUp,
+  CircleHelp,
   Cloud,
   Copy,
   Ellipsis,
@@ -34,7 +39,9 @@ import {
   Sparkles,
   Sprout,
   Sun,
+  Target,
   Trash2,
+  Undo2,
   Upload,
   Droplet,
   Shovel,
@@ -89,7 +96,14 @@ export type UiIconName =
   | "water"
   | "garden"
   | "game"
-  | "preview";
+  | "preview"
+  | "things"
+  | "decorate"
+  | "help"
+  | "goal"
+  | "undo"
+  | "up"
+  | "down";
 
 type UiIconProps = Omit<LucideProps, "ref"> & {
   name: UiIconName;
@@ -143,7 +157,16 @@ const icons: Record<UiIconName, LucideIcon> = {
   water: Droplet,
   garden: Shovel,
   game: Gamepad2,
-  preview: Eye
+  preview: Eye,
+  // Pip's tab: what Pip owns, carried in a backpack; furnishing the house.
+  things: Backpack,
+  decorate: Armchair,
+  help: CircleHelp,
+  // A thing in the shop pinned as the reader's goal.
+  goal: Target,
+  undo: Undo2,
+  up: ChevronUp,
+  down: ChevronDown
 };
 
 export const UiIcon = ({ name, size = 20, ...props }: UiIconProps) => {
