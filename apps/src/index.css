@@ -1250,6 +1250,34 @@ body::before {
   clip-path: polygon(0 0, 50% 28%, 100% 0, 100% 100%, 0 100%);
 }
 
+/* A focus flower that bloomed: pressed in the book, its head out of the top */
+.ss-flower {
+  position: absolute;
+  top: -9px;
+  left: 16%;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--middle) 0 28%, var(--petal) 32%);
+  box-shadow: 0 0 0 1px rgba(42, 30, 22, 0.6);
+}
+
+.ss-flower::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 7px;
+  width: 1px;
+  height: 3px;
+  background: #3e8a3a;
+}
+
+.ss-tip-flower {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #3e8a3a;
+}
+
 /* Lost to a broken streak: charred in place */
 .ss-spine.is-burned .ss-cloth {
   color: #9b9088;

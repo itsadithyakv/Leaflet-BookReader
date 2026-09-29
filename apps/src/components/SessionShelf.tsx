@@ -14,6 +14,7 @@ import { useHabitStore } from "../store/habitStore";
 import { useLibraryStore } from "../store/libraryStore";
 import { getDateKey, type DayRecord, type FocusSessionRecord } from "../services/habitService";
 import { CLOTH, clamp, hash, inkFor, spineHeight, spineWidth } from "./shelf/spine";
+import { FOCUS_FLOWERS, type FocusFlowerKind } from "../pip/focusFlower.js";
 
 /**
  * The Session Bookshelf. Every visual property of a spine is read from the
@@ -24,6 +25,7 @@ import { CLOTH, clamp, hash, inkFor, spineHeight, spineWidth } from "./shelf/spi
  * - colour is the book; runs of one colour are runs on one book
  * - a gold band means the session ran to the end, cleanly
  * - a ribbon means the reader left a note
+ * - a flower peeking out of the head is a focus flower that bloomed
  * - a charred spine was lost when a streak broke; it stays where it stood
  * - a gold bookend closes a week where the goal was met every day
  * - the wood itself levels up with the number of spines still standing
@@ -116,6 +118,8 @@ type Spine = {
   completed: boolean;
   burned: boolean;
   start: Date;
+  /** The focus flower that bloomed in this session, if one did. */
+  bloomed: string | null;
   label: string;
 };
 
@@ -192,6 +196,10 @@ const buildRows = (
     if (session.notes) {
       parts.push("has a note");
     }
+    const bloomed = session.flower && session.flowerBloomed ? session.flower : null;
+    if (bloomed) {
+      parts.push(`a ${bloomed} bloomed`);
+    }
     const spine: Spine = {
       session,
       title,
@@ -203,6 +211,7 @@ const buildRows = (
       completed,
       burned,
       start,
+      bloomed,
       label: parts.join(", ")
     };
     const list = weeks.get(weekKey);
@@ -310,6 +319,7 @@ const TipCard = ({ tip }: { tip: Tip }) => {
           {spine.completed ? "Completed" : "Ended early"}
         </span>
       </p>
+      {spine.bloomed && <p className="ss-tip-flower">A {spine.bloomed} bloomed: read to the end in full screen</p>}
       {session.notes && <p className="ss-tip-note">{session.notes}</p>}
       {spine.burned && <p className="ss-tip-burned">Lost when a streak broke · {burnedOn}</p>}
     </div>
@@ -393,6 +403,17 @@ const WeekShelf = memo(({ row, dropId, showTip, hideTip }: WeekProps) => {
                 {tall && <span className="ss-day">{spine.start.getDate()}</span>}
               </span>
               {session.notes && !spine.burned && <span className="ss-ribbon" />}
+              {spine.bloomed && !spine.burned && (
+                <span
+                  className="ss-flower"
+                  style={
+                    {
+                      "--petal": FOCUS_FLOWERS[spine.bloomed as FocusFlowerKind]?.petal ?? "#E8484F",
+                      "--middle": FOCUS_FLOWERS[spine.bloomed as FocusFlowerKind]?.middle ?? "#FFD23F"
+                    } as CSSProperties
+                  }
+                />
+              )}
               {spine.burned && <span className="ss-ember" />}
             </button>
           );
