@@ -40,7 +40,7 @@ const HOLD_DROP = 26;
 const DROP_MS = 540;
 const DROP_LAND_MS = 330;
 /** How far above its spot a piece of decor starts its drop, in floor pixels. */
-export const DROP_FROM = 26;
+const DROP_FROM = 26;
 /** A seed tossed from a packet to above its plot, then dropped in. */
 const TOSS_MS = 480;
 const SEED_FALL_MS = 300;
@@ -83,7 +83,6 @@ export type HouseSceneHandle = {
   pip: () => DOMRect | null;
   /** A point on Pip: the mouth (for food) or the top of the head (hearts rise from it). */
   pipPoint: (part: "mouth" | "head") => Point | null;
-  plot: (plot: number) => Box | null;
   /** Where an item will sit in a slot of this floor, lifted by the drop it lands with. */
   dropStart: (slotId: string, itemId: string) => Box | null;
   /** A just-picked plant springs off its plot. Returns where it stood. */
@@ -100,6 +99,9 @@ export type HouseSceneHandle = {
 
 /** Evenings (and nights) the house dims and its lamps glow. */
 const isEvening = (hour: number) => hour >= 19 || hour < 6;
+
+/** Whether this floor is dark now: always-dark floors, and every floor in the evening. */
+const nightNow = (level: HouseLevel) => level.night || isEvening(new Date().getHours());
 
 /** A plant's drawn stage from its growth, as garden.js draws it: 0 seed, 1 sprout, 2 young, 3 grown. */
 const plantStage = (progress: number) => (progress <= 0.02 ? 0 : progress < 0.34 ? 1 : progress < 0.75 ? 2 : 3);
@@ -228,7 +230,8 @@ export type HouseSceneProps = {
 };
 
 type Phase = "rest" | "walk" | "act" | "pastime" | "held" | "fall" | "land";
-type Arrival = { key: number; slot: string; fits: HouseSlot["fits"]; image: ImageData; box: { x: number; y: number; w: number; h: number } };
+/** A piece of decor on its way into a slot: dropping in over the art, which leaves it out until it lands. */
+type Arrival = { key: number; slot: string; image: ImageData; box: { x: number; y: number; w: number; h: number } };
 type Look = { skin: string; outfit: readonly string[]; key: string };
 
 let arrivalKey = 1;
@@ -368,7 +371,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
   const arriving = useRef(new Map<string, number>());
   const [arrivals, setArrivals] = useState<Arrival[]>([]);
   const redraw = useRef<(() => void) | null>(null);
-  const seen = useRef<{ level: string; placed: Map<string, string>; wallpaper: string | null; floor: string | null } | null>(null);
+  // The decor as it was last drawn, to tell what arrived and what left.
+  const drawn = useRef<{ level: string; placed: Map<string, string>; wallpaper: string | null; floor: string | null } | null>(null);
   const timers = useRef(new Set<number>());
   const later = (ms: number, run: () => void) => {
     const timer = window.setTimeout(() => {
@@ -398,8 +402,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
 
     // What changed since the last draw of this floor: pieces to drop in or lift out.
     const placed = new Map(decor.placed.map((entry) => [entry.slot, entry.itemId]));
-    const before = seen.current;
-    seen.current = { level: level.id, placed, wallpaper: decor.wallpaper, floor: decor.floor };
+    const before = drawn.current;
+    drawn.current = { level: level.id, placed, wallpaper: decor.wallpaper, floor: decor.floor };
     if (before && before.level !== level.id) {
       arriving.current.clear();
       setArrivals([]);
@@ -413,7 +417,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
         const shown = box ? onScreen(box) : null;
         if (!shown) continue;
         try {
-          popOff(renderItem(itemId, 0), shown, "lift");
+          popOff(renderItem(itemId, 0), shown, "lift", nightNow(level));
         } catch {
           // Art mid-edit: no ghost.
         }
@@ -433,7 +437,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
         }
         const key = arrivalKey++;
         arriving.current.set(slotId, key);
-        fresh.push({ key, slot: slotId, fits: slot.fits, image, box });
+        fresh.push({ key, slot: slotId, image, box });
         later(DROP_LAND_MS, () => {
           const shown = onScreen(box);
           if (!shown) return;
@@ -654,8 +658,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     const middle = { x: box.left + box.width / 2, y: box.top + box.height * 0.6 };
     puff(middle, { px: k, count: 10, color: "#FFFFFF", edge: "#DCD6C8", spread: box.width * 0.55, rise: box.height * 0.25, duration: 620 });
     burst(middle, { px: k, count: 6, sprite: "spark", spread: box.width * 0.7, lift: box.height * 0.2, fall: 4 });
-    // Edge-on at a quarter turn: the moment to swap.
-    const timer = window.setTimeout(() => setLook(next), 110);
+    // Edge-on at a quarter turn (about 150 ms in, on that curve): the moment to swap.
+    const timer = window.setTimeout(() => setLook(next), 150);
     return () => window.clearTimeout(timer);
     // look.key is read, not watched: only a new look starts a spin.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -751,10 +755,6 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
         ? { x: box.left + box.width * (0.5 + (3 / 32) * forward), y: box.top + box.height * (18 / 32) }
         : { x: box.left + box.width / 2, y: box.top + box.height * (8 / 32) };
     },
-    plot: (plot) => {
-      const index = plotIndex(plot);
-      return index < 0 ? null : onScreen(plotBoxes(live.current.level, plots?.length ?? 0)[index]);
-    },
     dropStart: (slotId, itemId) => {
       const slot = live.current.level.slots.find((entry) => entry.id === slotId);
       const box = slot ? itemBox(itemId, slot) : null;
@@ -767,7 +767,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       if (!shown) return null;
       const k = live.current.scale;
       try {
-        popOff(renderPlant(plantId, 1, true, 0), shown, "pick");
+        popOff(renderPlant(plantId, 1, true, 0), shown, "pick", nightNow(live.current.level));
       } catch {
         // Art mid-edit: the seeds still fly.
       }
@@ -824,7 +824,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       confetti(box, { px: live.current.scale, count: 48 });
       banner(box, title, note);
     }
-    // Everything it reads is on refs.
+    // The floor, the scale and Pip are read from refs; the plots are the one
+    // prop it closes over, and plotsKey says when they change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [plotsKey]);
 
@@ -893,7 +894,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     : undefined;
   const arcadeBox = arcadeSlot ? level.slots.find((slot) => slot.id === arcadeSlot.slot) : undefined;
   const pipSize = 32 * scale;
-  const night = level.night || isEvening(new Date().getHours());
+  const night = nightNow(level);
   const now = performance.now();
 
   return (

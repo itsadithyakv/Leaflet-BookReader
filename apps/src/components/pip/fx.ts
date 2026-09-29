@@ -390,9 +390,10 @@ export const fly = (art: Captured | null, to: Box | Point | null, { card = false
 
 /**
  * A picture that pops off its spot and is gone: a picked plant springs up,
- * or a piece of decor lifts away. Anchored at its bottom edge, as it stood.
+ * or a piece of decor lifts away. Anchored at its bottom edge, as it stood;
+ * `dim` after dark, to match the room it leaves.
  */
-export const popOff = (image: ImageData | null, box: Box, style: "pick" | "lift") => {
+export const popOff = (image: ImageData | null, box: Box, style: "pick" | "lift", dim = false) => {
   if (!image || reducedMotion()) return;
   const canvas = document.createElement("canvas");
   canvas.width = image.width;
@@ -400,6 +401,7 @@ export const popOff = (image: ImageData | null, box: Box, style: "pick" | "lift"
   canvas.className = "pip-sprite";
   canvas.getContext("2d")?.putImageData(image, 0, 0);
   const element = piece("pip-fx-pop", box.width, box.height);
+  if (dim) element.style.filter = "brightness(0.5) saturate(0.85)";
   element.appendChild(canvas);
   const base = `translate(${box.left.toFixed(1)}px, ${box.top.toFixed(1)}px)`;
   const h = box.height;
