@@ -136,7 +136,7 @@ The script builds the release exe with `tauri build --no-bundle`, stages it with
 the Pip logos and `AppxManifest.xml`, fills in the version from `tauri.conf.json`
 (as `x.y.z.0`, which the Store requires), indexes the logos into
 `resources.pri` with `makepri` (without it Windows ignores the unplated taskbar
-icons, `Square44x44Logo.targetsize-*`, made by `msix\taskbar-icons.py`), and packs
+icons, `Square44x44Logo.targetsize-*`, made by `msix\windows-icons.py`), and packs
 `apps\src-tauri\target\msix\Leaflet_x.y.z.0_x64.msix` with the Windows SDK's
 `makeappx`. It also sets `LEAFLET_STORE_BUILD`, which compiles out the Calibre
 auto-installer (see below). `-SkipBuild` repackages an existing exe.

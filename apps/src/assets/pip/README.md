@@ -13,7 +13,9 @@ Every size is a whole-number multiple of the 32-pixel sprite, so none of them bl
 
 When scaling up in CSS, keep the pixels square with `image-rendering: pixelated`.
 
-The desktop app icons in `src-tauri/icons` come from the same sprite. Regenerate
-them from `pip-1024.png` with `npx tauri icon src/assets/pip/pip-1024.png`. That
-does not make the MSIX taskbar icons (`Square44x44Logo.targetsize-*`); rerun
-`python src-tauri/msix/taskbar-icons.py` for those.
+The Windows app icons in `src-tauri/icons` are Pip on the cream tile, drawn
+afresh at every size Windows uses (Start, the taskbar, Explorer, the `.exe`)
+so none of them is a stretched 32-pixel sprite. Regenerate them with
+`python src-tauri/msix/windows-icons.py`. The other platforms' icons (`icon.icns`,
+`ios/`, `android/`) came from `npx tauri icon src/assets/pip/pip-1024.png`;
+that command also overwrites the Windows ones, so run `windows-icons.py` after it.

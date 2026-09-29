@@ -86,10 +86,10 @@ $icons = Join-Path $tauriDir "icons"
 foreach ($logo in "StoreLogo.png", "Square44x44Logo.png", "Square150x150Logo.png", "Square310x310Logo.png", "Wide310x150Logo.png") {
   Copy-Item (Join-Path $icons $logo) (Join-Path $stage "Assets\$logo")
 }
-# Taskbar, Start and Explorer icons (from msix\taskbar-icons.py). Without the
+# Taskbar, Start and Explorer icons (from msix\windows-icons.py). Without the
 # unplated variants Windows draws the 44x44 logo shrunk onto an accent plate.
 $targetSizes = @(Get-ChildItem (Join-Path $icons "Square44x44Logo.targetsize-*.png"))
-if ($targetSizes.Count -eq 0) { throw "No Square44x44Logo.targetsize-* icons in $icons. Run msix\taskbar-icons.py." }
+if ($targetSizes.Count -eq 0) { throw "No Square44x44Logo.targetsize-* icons in $icons. Run msix\windows-icons.py." }
 $targetSizes | Copy-Item -Destination (Join-Path $stage "Assets")
 # Pip on reading-reminder toasts (ms-appx:///Assets/PipToast.png, used by
 # src\reminders\toast.rs). A packaged app's AppData is virtualised, so the toast
