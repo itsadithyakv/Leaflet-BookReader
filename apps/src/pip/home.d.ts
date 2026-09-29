@@ -51,6 +51,10 @@ export type LevelDecor = { wallpaper: string | null; floor: string | null; place
 export type HouseFinish = { id: string; name?: string; price?: number };
 
 export declare function registerHouseArt(...namespaces: Array<Record<string, unknown> | null | undefined>): void;
+/** Registers the decor each floor comes with (shop.js does, on load). */
+export declare function setStarterPieces(byLevel: Record<string, string[]>): void;
+/** The decor a floor comes with, in the order it is put out. */
+export declare function starterPiecesFor(levelId: string): string[];
 export declare function houseArt(name: string): unknown;
 export declare function hasHouse(): boolean;
 export declare function houseItems(): PipRoomItem[];

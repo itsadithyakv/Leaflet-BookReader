@@ -104,11 +104,34 @@ const normaliseSlot = (slot, index) => {
   return { id: String(slot.id ?? `slot-${index}`), fits, name: slot.name ?? null, ...box, only: slot.only ?? null };
 };
 
-/** Starter things (free, `starter`) go in the first slot on their floor that fits. */
+// ---- starter pieces --------------------------------------------------------------
+//
+// The shop (shop.js, the price authority) names the decor that comes with each
+// floor and hands the list over here, so a floor nobody has decorated yet
+// opens with its pieces out. A registration rather than an import: shop.js
+// imports this module.
+
+let starterPieces = {};
+
+/** Registers the pieces each floor comes with: `{ levelId: [itemId, ...] }`. */
+export const setStarterPieces = (byLevel) => {
+  starterPieces = byLevel && typeof byLevel === "object" ? byLevel : {};
+};
+
+/** The pieces a floor comes with, in the order they are put out. */
+export const starterPiecesFor = (levelId) => list(starterPieces[levelId]);
+
+/**
+ * Starter things go in the first slot on their floor that fits: the art's own
+ * (`starter`, the bed and the rug) first, then the floor's starter pieces.
+ */
 const starterPlacements = (level, slots) => {
   const taken = new Set();
   const out = [];
-  for (const item of houseItems().filter((entry) => entry.starter)) {
+  const byId = new Map(houseItems().map((entry) => [entry.id, entry]));
+  const pieces = starterPiecesFor(level.id).map((id) => byId.get(id)).filter(Boolean);
+  for (const item of [...houseItems().filter((entry) => entry.starter), ...pieces]) {
+    if (out.some((entry) => entry.itemId === item.id)) continue;
     const target = slots.find((slot) => !taken.has(slot.id) && fitsSlot(item, slot, level.id));
     if (target) {
       taken.add(target.id);
@@ -181,7 +204,7 @@ const fallbackBedroom = () => {
     arcade: false,
     garden: false,
     defaults: list(art.ROOM_ITEMS)
-      .filter((item) => item.starter || item.price === 0)
+      .filter((item) => item.starter || item.price === 0 || starterPiecesFor("bedroom").includes(item.id))
       .map((item) => ({ slot: item.id, itemId: item.id })),
     fallback: true
   };

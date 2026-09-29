@@ -14,7 +14,11 @@ use super::*;
 pub(crate) struct PipLedger {
   purchases: Vec<pip::Purchase>,
   garden: habit::seeds::Garden,
+  /// Seeds earned, Pip's rewards included.
   earned: habit::seeds::SeedEarnings,
+  /// First steps, the chest, sets and wishes, as they stand.
+  rewards: pip::rewards::Earned,
+  owned: std::collections::BTreeSet<(String, String)>,
   /// Focus sessions done, for floors that open after so many.
   sessions_done: i64
 }
@@ -23,6 +27,20 @@ impl PipLedger {
   fn balance(&self) -> i64 {
     self.earned.total - pip::spent(pip::Catalogue::bundled(), &self.purchases)
   }
+}
+
+/// The reader's day, for Pip's daily wish. The webview's local date (which the
+/// streak uses) is this machine's too.
+fn local_today() -> String {
+  chrono::Local::now().format("%Y-%m-%d").to_string()
+}
+
+/// When something is bought or planted: the local time with its offset, so
+/// the record says which of the reader's days it happened on (a wish is
+/// granted on its own day; see `pip::rewards::record_day`) and still compares
+/// as an instant everywhere else.
+fn local_stamp() -> String {
+  chrono::Local::now().to_rfc3339()
 }
 
 pub(crate) fn session_inputs(sessions: &[FocusSessionRecord]) -> Vec<habit::seeds::SessionSeeds<'_>> {
@@ -72,24 +90,46 @@ pub(crate) fn grow_garden(
   habit::seeds::grow(&drops, &plants, &picked)
 }
 
+/// The whole economy from its records: the garden replayed, what the reading
+/// earned, Pip's rewards, what is owned. Pure, so the same records (one
+/// device's, or a merged sync document's) always give the same answer.
+pub(crate) fn ledger_from(
+  days: &std::collections::HashMap<String, habit::DayRecord>,
+  sessions: &[FocusSessionRecord],
+  plantings: &[pip::Planting],
+  harvests: &[pip::Harvest],
+  purchases: Vec<pip::Purchase>
+) -> PipLedger {
+  let catalogue = pip::Catalogue::bundled();
+  let garden = grow_garden(days, sessions, plantings, harvests);
+  let inputs = session_inputs(sessions);
+  let owned = pip::owned(catalogue, &purchases);
+  let facts = pip::rewards::Facts {
+    purchases: &purchases,
+    plantings: plantings.len(),
+    garden: &garden,
+    days,
+    longest_focus: habit::seeds::longest_focus(days, &inputs)
+  };
+  let rewards = pip::rewards::earned(catalogue, &facts, &owned);
+  let paid = rewards.seeds;
+  let earned = habit::seeds::earnings(days, &inputs, garden.harvested).with_rewards(paid.goals, paid.chest, paid.sets, paid.wishes);
+  let sessions_done = sessions.iter().filter(|session| session.minutes >= 1.0).count() as i64;
+  PipLedger { purchases, garden, earned, rewards, owned, sessions_done }
+}
+
 pub(crate) fn pip_ledger(db: &db::Database) -> Result<PipLedger, String> {
   let days = db.reading_days().map_err(|e| e.to_string())?;
   let sessions = db.focus_sessions().map_err(|e| e.to_string())?;
   let plantings = db.pip_plantings().map_err(|e| e.to_string())?;
   let harvests = db.pip_harvests().map_err(|e| e.to_string())?;
-  let garden = grow_garden(&days, &sessions, &plantings, &harvests);
-  let earned = habit::seeds::earnings(&days, &session_inputs(&sessions), garden.harvested);
-  let sessions_done = sessions.iter().filter(|session| session.minutes >= 1.0).count() as i64;
-  Ok(PipLedger {
-    purchases: db.pip_purchases().map_err(|e| e.to_string())?,
-    garden,
-    earned,
-    sessions_done
-  })
+  let purchases = db.pip_purchases().map_err(|e| e.to_string())?;
+  Ok(ledger_from(&days, &sessions, &plantings, &harvests, purchases))
 }
 
 /// The garden's headline numbers, for the habit snapshot (the wrap-up shows
-/// the water a session poured and what ripened).
+/// the water a session poured, what ripened, and the seeds it earned: a first
+/// step or the starter chest included).
 pub(crate) fn garden_totals(
   db: &db::Database,
   days: &std::collections::HashMap<String, habit::DayRecord>,
@@ -97,9 +137,9 @@ pub(crate) fn garden_totals(
 ) -> Result<(habit::seeds::Garden, i64), String> {
   let plantings = db.pip_plantings().map_err(|e| e.to_string())?;
   let harvests = db.pip_harvests().map_err(|e| e.to_string())?;
-  let garden = grow_garden(days, sessions, &plantings, &harvests);
-  let earned = habit::seeds::earnings(days, &session_inputs(sessions), garden.harvested);
-  Ok((garden, earned.total))
+  let purchases = db.pip_purchases().map_err(|e| e.to_string())?;
+  let ledger = ledger_from(days, sessions, &plantings, &harvests, purchases);
+  Ok((ledger.garden, ledger.earned.total))
 }
 
 #[derive(Serialize)]
@@ -144,7 +184,18 @@ pub struct PipOverview {
   /// Focus sessions done, for floors that open after so many.
   pub sessions_done: i64,
   /// Best arcade scores, and how much mood games gave today.
-  pub arcade: pip::Arcade
+  pub arcade: pip::Arcade,
+  /// A new reader's first steps, in the order Pip suggests them: done or
+  /// not, and the seeds each pays (already in `wallet.earned.goals`).
+  pub goals: Vec<pip::rewards::GoalStatus>,
+  /// The starter chest: open once a focus session counted its minutes.
+  pub chest: pip::rewards::ChestStatus,
+  /// Every set, and how far along it is.
+  pub sets: Vec<pip::rewards::SetStatus>,
+  /// Owned out of all there are, by catalogue kind ("accessory": 5 of 42).
+  pub collection: std::collections::BTreeMap<String, pip::rewards::Count>,
+  /// Today's wish (the reader's local day), and whether it was granted.
+  pub wish: Option<pip::rewards::WishView>
 }
 
 /// Arcade scores are this device's alone (a settings row, not the backup):
@@ -188,10 +239,11 @@ pub(crate) fn cheer_pip(db: &db::Database, gain: f64) -> Result<(), String> {
 }
 
 pub(crate) fn pip_overview(db: &db::Database) -> Result<PipOverview, String> {
+  let catalogue = pip::Catalogue::bundled();
   let ledger = pip_ledger(db)?;
-  let owned_set = pip::owned(pip::Catalogue::bundled(), &ledger.purchases);
-  let plots = pip::plot_count(&owned_set);
-  let owned = owned_set.into_iter().map(|(kind, id)| PipOwned { kind, id }).collect();
+  let plots = pip::plot_count(&ledger.owned);
+  let collection = pip::rewards::collection(catalogue, &ledger.owned);
+  let wish = pip::rewards::wish_today(catalogue, &ledger.purchases, &local_today());
   let mut state = stored_pip_state(db)?;
   // Reported as of now; stored only when something changes it.
   state.mood = habit::seeds::mood_at(
@@ -200,10 +252,10 @@ pub(crate) fn pip_overview(db: &db::Database) -> Result<PipOverview, String> {
     chrono::Utc::now().timestamp_millis()
   );
   let balance = ledger.balance();
-  let spent = pip::spent(pip::Catalogue::bundled(), &ledger.purchases);
+  let spent = pip::spent(catalogue, &ledger.purchases);
   Ok(PipOverview {
     wallet: PipWallet { balance: balance.max(0), earned: ledger.earned, spent },
-    owned,
+    owned: ledger.owned.into_iter().map(|(kind, id)| PipOwned { kind, id }).collect(),
     state,
     garden: GardenView {
       plots,
@@ -213,8 +265,24 @@ pub(crate) fn pip_overview(db: &db::Database) -> Result<PipOverview, String> {
       plants: ledger.garden.plants
     },
     sessions_done: ledger.sessions_done,
-    arcade: read_arcade(db)
+    arcade: read_arcade(db),
+    goals: ledger.rewards.goals,
+    chest: ledger.rewards.chest,
+    sets: ledger.rewards.sets,
+    collection,
+    wish
   })
+}
+
+/// Records a purchase; if it grants today's wish (the first to), Pip cheers up.
+fn record_purchase(db: &db::Database, ledger: &PipLedger, purchase: &pip::Purchase) -> Result<(), String> {
+  let catalogue = pip::Catalogue::bundled();
+  let wished = pip::rewards::grants_wish_now(catalogue, &ledger.purchases, purchase, &local_today());
+  db.insert_pip_purchase(purchase).map_err(|e| e.to_string())?;
+  if wished {
+    cheer_pip(db, catalogue.rewards().wish.mood)?;
+  }
+  Ok(())
 }
 
 /// Seeds: the balance and where it came from.
@@ -243,17 +311,16 @@ pub fn pip_buy(kind: String, id: String, state: State<'_, AppState>) -> Result<P
   let db = state.db.guard();
   let catalogue = pip::Catalogue::bundled();
   let ledger = pip_ledger(&db)?;
-  let owned = pip::owned(catalogue, &ledger.purchases);
-  let item = pip::check_buy(catalogue, &owned, ledger.balance(), ledger.sessions_done, &kind, &id)
+  let item = pip::check_buy(catalogue, &ledger.owned, ledger.balance(), ledger.sessions_done, &kind, &id)
     .map_err(|e| e.to_string())?;
-  db.insert_pip_purchase(&pip::Purchase {
+  let purchase = pip::Purchase {
     id: pip::new_purchase_id(),
     item_kind: item.kind.clone(),
     item_id: item.id.clone(),
     price: item.price,
-    bought_at: db::now_iso()
-  })
-  .map_err(|e| e.to_string())?;
+    bought_at: local_stamp()
+  };
+  record_purchase(&db, &ledger, &purchase)?;
   pip_overview(&db)
 }
 
@@ -283,18 +350,17 @@ pub fn pip_feed(treat_id: String, state: State<'_, AppState>) -> Result<PipOverv
   let db = state.db.guard();
   let catalogue = pip::Catalogue::bundled();
   let ledger = pip_ledger(&db)?;
-  let owned = pip::owned(catalogue, &ledger.purchases);
   let (treat, cost) =
-    pip::check_give(catalogue, &owned, ledger.balance(), &treat_id).map_err(|e| e.to_string())?;
+    pip::check_give(catalogue, &ledger.owned, ledger.balance(), &treat_id).map_err(|e| e.to_string())?;
   if cost > 0 {
-    db.insert_pip_purchase(&pip::Purchase {
+    let purchase = pip::Purchase {
       id: pip::new_purchase_id(),
       item_kind: "treat".to_string(),
       item_id: treat.id.clone(),
       price: cost,
-      bought_at: db::now_iso()
-    })
-    .map_err(|e| e.to_string())?;
+      bought_at: local_stamp()
+    };
+    record_purchase(&db, &ledger, &purchase)?;
   }
   cheer_pip(&db, treat.mood)?;
   pip_overview(&db)
@@ -308,8 +374,7 @@ pub fn pip_plant(plot: i64, plant: String, state: State<'_, AppState>) -> Result
   let db = state.db.guard();
   let catalogue = pip::Catalogue::bundled();
   let ledger = pip_ledger(&db)?;
-  let owned = pip::owned(catalogue, &ledger.purchases);
-  if plot < 1 || plot > pip::plot_count(&owned) {
+  if plot < 1 || plot > pip::plot_count(&ledger.owned) {
     return Err("That plot isn't dug yet.".to_string());
   }
   if ledger.garden.occupied(plot) {
@@ -323,15 +388,15 @@ pub fn pip_plant(plot: i64, plant: String, state: State<'_, AppState>) -> Result
     return Err(pip::ShopError::CannotAfford { short: item.price - balance }.to_string());
   }
   let id = pip::new_purchase_id();
-  let now = db::now_iso();
-  db.insert_pip_purchase(&pip::Purchase {
+  let now = local_stamp();
+  let purchase = pip::Purchase {
     id: id.clone(),
     item_kind: "plant".to_string(),
     item_id: item.id.clone(),
     price: item.price,
     bought_at: now.clone()
-  })
-  .map_err(|e| e.to_string())?;
+  };
+  record_purchase(&db, &ledger, &purchase)?;
   db.insert_pip_planting(&pip::Planting { id, plot, plant: item.id.clone(), planted_at: now })
     .map_err(|e| e.to_string())?;
   pip_overview(&db)
@@ -389,4 +454,141 @@ pub fn pip_game_played(
     cheer_pip(&db, result.mood)?;
   }
   pip_overview(&db)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::sync::merge::{merge, DayEntry, SessionEntry, SyncDoc};
+
+  const NOW: &str = "2026-10-06T12:00:00+00:00";
+
+  /// The economy a device holding this document works out.
+  fn ledger_of(doc: &SyncDoc) -> PipLedger {
+    let days = doc.days.iter().map(|day| (day.date_key.clone(), day.to_record())).collect();
+    let sessions: Vec<FocusSessionRecord> = doc.sessions.iter().map(SessionEntry::to_record).collect();
+    ledger_from(&days, &sessions, &doc.plantings, &doc.harvests, doc.purchases.clone())
+  }
+
+  fn purchase(id: &str, kind: &str, item: &str, price: i64, at: &str) -> pip::Purchase {
+    pip::Purchase { id: id.into(), item_kind: kind.into(), item_id: item.into(), price, bought_at: at.into() }
+  }
+
+  /// A seed packet bought and planted: one purchase, one planting, one id.
+  fn sow(doc: &mut SyncDoc, id: &str, plot: i64, at: &str) {
+    doc.purchases.push(purchase(id, "plant", "radish", 1, at));
+    doc.plantings.push(pip::Planting { id: id.into(), plot, plant: "radish".into(), planted_at: at.into() });
+  }
+
+  fn read(doc: &mut SyncDoc, id: &str, day: &str, ended_at: &str, minutes: f64) {
+    doc.days.push(DayEntry { date_key: day.into(), minutes, goal_minutes: 20, freeze_used: false, grace_used: false });
+    doc.sessions.push(SessionEntry {
+      id: id.into(),
+      started_at: ended_at.into(),
+      ended_at: ended_at.into(),
+      date_key: day.into(),
+      minutes,
+      book_id: None,
+      title: None,
+      notes: None,
+      ended_reason: "completed".into(),
+      clean: true,
+      style_seed: id.into(),
+      burned_at: None,
+      flower: None,
+      flower_bloomed: false
+    });
+  }
+
+  /// The first day in October when Pip wishes for a snack, and the snack.
+  fn snack_day() -> (String, String) {
+    let catalogue = pip::Catalogue::bundled();
+    (1..=31)
+      .map(|n| format!("2026-10-{n:02}"))
+      .filter_map(|day| pip::rewards::wish_today(catalogue, &[], &day).map(|wish| (day, wish)))
+      .find(|(_, wish)| wish.kind == "treat")
+      .map(|(day, wish)| (day, wish.id))
+      .expect("a day wishing for a snack")
+  }
+
+  /// One reader, a laptop and a phone, each busy before they synced: both
+  /// planted, both read, both granted the day's wish, each bought half of a
+  /// set. After the merge every reward is paid once, the set neither
+  /// finished alone is finished, and the kitchen's starter piece is owned
+  /// wherever the kitchen is.
+  #[test]
+  fn rewards_pay_once_across_a_sync() {
+    // Everything on a day Pip wishes for a snack, so only the snack grants it.
+    let (day, snack) = snack_day();
+    let at = |time: &str| format!("{day}T{time}");
+    let mut laptop = SyncDoc::empty(NOW);
+    sow(&mut laptop, "buy-a1", 1, &at("08:00:00+05:30"));
+    read(&mut laptop, "s-a", &day, &at("09:00:00+00:00"), 25.0);
+    laptop.harvests.push(pip::Harvest { id: "pick-a1".into(), planting_id: "buy-a1".into(), seeds: 4, harvested_at: at("09:30:00+00:00") });
+    laptop.purchases.push(purchase("buy-a2", "accessory", "roundglasses", 35, &at("16:00:00+05:30")));
+    laptop.purchases.push(purchase("buy-a3", "accessory", "scarf", 40, &at("16:01:00+05:30")));
+    laptop.purchases.push(purchase("buy-a4", "level", "kitchen", 450, &at("16:02:00+05:30")));
+    laptop.purchases.push(purchase("buy-a5", "treat", &snack, 8, &at("16:03:00+05:30")));
+
+    let mut phone = SyncDoc::empty(NOW);
+    sow(&mut phone, "buy-b1", 2, &at("07:00:00+05:30"));
+    read(&mut phone, "s-b", &day, &at("08:00:00+00:00"), 22.0);
+    phone.purchases.push(purchase("buy-b2", "accessory", "bookbag", 60, &at("17:00:00+05:30")));
+    phone.purchases.push(purchase("buy-b3", "accessory", "book", 20, &at("17:01:00+05:30")));
+    phone.purchases.push(purchase("buy-b5", "treat", &snack, 8, &at("21:00:00+05:30")));
+
+    let alone = ledger_of(&laptop);
+    assert_eq!(alone.earned.goals, 10 + 10 + 15 + 15 + 5, "planted, watered, goal met, picked, a treat");
+    assert_eq!((alone.earned.chest, alone.earned.sets, alone.earned.wishes), (30, 0, 8));
+    assert!(alone.owned.contains(&("room".to_string(), "kettle".to_string())), "the kettle came with the kitchen");
+    assert!(!ledger_of(&phone).owned.contains(&("room".to_string(), "kettle".to_string())));
+
+    let merged = merge(&laptop, &phone, NOW);
+    let both = ledger_of(&merged);
+    // Both devices planted, read, fed Pip and granted the wish: each paid once.
+    assert_eq!(both.earned.goals, alone.earned.goals);
+    assert_eq!(both.earned.chest, 30);
+    assert_eq!(both.earned.wishes, 8, "one wish a day, however many devices granted it");
+    // Half a set on each device is a whole set together.
+    assert_eq!(both.earned.sets, 20);
+    assert!(both.rewards.sets.iter().any(|set| set.id == "bookworm" && set.done));
+    assert!(both.owned.contains(&("room".to_string(), "kettle".to_string())));
+
+    // Every device works out the same, and syncing again changes nothing.
+    let other_way = ledger_of(&merge(&phone, &laptop, NOW));
+    assert_eq!(other_way.earned, both.earned);
+    assert_eq!(other_way.rewards, both.rewards);
+    assert_eq!(ledger_of(&merge(&laptop, &merged, NOW)).earned, both.earned);
+  }
+
+  /// The starter chest opens on either device's first session, and a second
+  /// device's first session does not open a second chest.
+  #[test]
+  fn the_starter_chest_opens_once() {
+    let mut laptop = SyncDoc::empty(NOW);
+    read(&mut laptop, "s-a", "2026-10-01", "2026-10-01T09:00:00+00:00", 6.0);
+    let mut phone = SyncDoc::empty(NOW);
+    read(&mut phone, "s-b", "2026-10-02", "2026-10-02T09:00:00+00:00", 30.0);
+    assert_eq!(ledger_of(&laptop).earned.chest, 30);
+    assert_eq!(ledger_of(&merge(&laptop, &phone, NOW)).earned.chest, 30);
+    // A timer left running is not reading: two minutes read opens nothing.
+    let mut idle = SyncDoc::empty(NOW);
+    read(&mut idle, "s-c", "2026-10-03", "2026-10-03T09:00:00+00:00", 2.0);
+    idle.sessions[0].minutes = 45.0;
+    assert_eq!(ledger_of(&idle).earned.chest, 0);
+  }
+
+  /// Rewards are in every seed total: the balance, and what the habit
+  /// snapshot tells the session wrap-up.
+  #[test]
+  fn rewards_are_in_the_balance() {
+    // Planted on a day Pip wished for a snack: the packet grants no wish.
+    let (day, _) = snack_day();
+    let mut doc = SyncDoc::empty(NOW);
+    sow(&mut doc, "buy-1", 1, &format!("{day}T08:00:00+05:30"));
+    let ledger = ledger_of(&doc);
+    // The welcome gift and the first step's ten, less the packet.
+    assert_eq!(ledger.earned.total, habit::seeds::WELCOME_GIFT + 10);
+    assert_eq!(ledger.balance(), habit::seeds::WELCOME_GIFT + 10 - 1);
+  }
 }

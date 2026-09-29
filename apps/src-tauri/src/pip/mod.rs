@@ -18,6 +18,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::sync::OnceLock;
 
+/// Seeds Pip gives back: first steps, the starter chest, sets, the daily wish.
+pub mod rewards;
+
 /// Most accessories worn at once: one per slot.
 pub const MAX_OUTFIT: usize = 5;
 /// Most entries a house layout may hold (every floor's slots, wallpapers and
@@ -57,23 +60,34 @@ pub struct Item {
   pub water: f64,
   /// ...and the seeds a harvest gives.
   #[serde(default, rename = "yield")]
-  pub yield_seeds: i64
+  pub yield_seeds: i64,
+  /// A room item that lights a room: the "place a lamp" first step counts it.
+  #[serde(default)]
+  pub light: bool,
+  /// A floor's starter piece: owned once that floor (a "level") is, and
+  /// never sold on its own. Its price says what it is worth.
+  #[serde(default)]
+  pub free_with: Option<String>
 }
 
 impl Item {
   /// Owned from the start without buying.
   fn free(&self) -> bool {
-    self.price == 0 && !self.earned_only && !self.consumable
+    self.price == 0 && !self.earned_only && !self.consumable && self.free_with.is_none()
   }
 }
 
 #[derive(Deserialize)]
 struct CatalogueFile {
-  items: Vec<Item>
+  items: Vec<Item>,
+  #[serde(flatten)]
+  rewards: rewards::Rewards
 }
 
 pub struct Catalogue {
-  items: HashMap<(String, String), Item>
+  items: HashMap<(String, String), Item>,
+  /// What rewards pay (the rules are in `rewards`).
+  rewards: rewards::Rewards
 }
 
 impl Catalogue {
@@ -89,7 +103,12 @@ impl Catalogue {
         return Err("Pip catalogue: an item is listed twice".to_string());
       }
     }
-    Ok(Self { items })
+    Ok(Self { items, rewards: file.rewards })
+  }
+
+  /// What the first steps, the chest, sets and the daily wish pay.
+  pub fn rewards(&self) -> &rewards::Rewards {
+    &self.rewards
   }
 
   /// The catalogue compiled into this build.
@@ -141,24 +160,52 @@ pub fn spent(catalogue: &Catalogue, purchases: &[Purchase]) -> i64 {
 }
 
 /// What the reader owns: everything free, plus everything bought except food,
-/// which was eaten. Something bought and later dropped from the catalogue
-/// stays owned; it simply has nowhere to show.
+/// which was eaten, plus each owned floor's starter pieces. Something bought
+/// and later dropped from the catalogue stays owned; it simply has nowhere to
+/// show.
 pub fn owned(catalogue: &Catalogue, purchases: &[Purchase]) -> BTreeSet<(String, String)> {
+  let mut owned = owned_free(catalogue);
+  for purchase in purchases {
+    own(catalogue, &mut owned, purchase);
+  }
+  owned
+}
+
+/// What every reader owns before buying anything: the free things, and the
+/// starter pieces of the free floors (the bedroom, the garden).
+pub(crate) fn owned_free(catalogue: &Catalogue) -> BTreeSet<(String, String)> {
   let mut owned: BTreeSet<(String, String)> = catalogue
     .items()
     .filter(|item| item.free())
     .map(|item| (item.kind.clone(), item.id.clone()))
     .collect();
-  for purchase in purchases {
-    let consumable = catalogue
-      .get(&purchase.item_kind, &purchase.item_id)
-      .map(|item| item.consumable)
-      .unwrap_or(false);
-    if !consumable {
-      owned.insert((purchase.item_kind.clone(), purchase.item_id.clone()));
-    }
+  let floors: Vec<String> = owned.iter().filter(|(kind, _)| kind == "level").map(|(_, id)| id.clone()).collect();
+  for floor in floors {
+    add_starter_pieces(catalogue, &mut owned, &floor);
   }
   owned
+}
+
+/// Adds one purchase to what is owned: food is eaten, and a floor brings its
+/// starter pieces with it.
+pub(crate) fn own(catalogue: &Catalogue, owned: &mut BTreeSet<(String, String)>, purchase: &Purchase) {
+  let consumable = catalogue
+    .get(&purchase.item_kind, &purchase.item_id)
+    .map(|item| item.consumable)
+    .unwrap_or(false);
+  if consumable {
+    return;
+  }
+  owned.insert((purchase.item_kind.clone(), purchase.item_id.clone()));
+  if purchase.item_kind == "level" {
+    add_starter_pieces(catalogue, owned, &purchase.item_id);
+  }
+}
+
+fn add_starter_pieces(catalogue: &Catalogue, owned: &mut BTreeSet<(String, String)>, floor: &str) {
+  for item in catalogue.items().filter(|item| item.free_with.as_deref() == Some(floor)) {
+    owned.insert((item.kind.clone(), item.id.clone()));
+  }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -173,7 +220,9 @@ pub enum ShopError {
   /// The floor below (or the plot before) comes first.
   NeedsFirst,
   /// So many focus sessions come first.
-  NeedsSessions { left: i64 }
+  NeedsSessions { left: i64 },
+  /// A floor's starter piece: it comes with the floor, not from the shop.
+  ComesWithFloor
 }
 
 impl fmt::Display for ShopError {
@@ -188,7 +237,8 @@ impl fmt::Display for ShopError {
         write!(f, "That opens after {left} more focus session{}.", if *left == 1 { "" } else { "s" })
       }
       ShopError::NotOwned => write!(f, "Pip doesn't have that yet."),
-      ShopError::CannotAfford { short } => write!(f, "{short} more seeds needed. Read in focus to earn them.")
+      ShopError::CannotAfford { short } => write!(f, "{short} more seeds needed. Read in focus to earn them."),
+      ShopError::ComesWithFloor => write!(f, "That one comes free with its floor of the house.")
     }
   }
 }
@@ -211,6 +261,10 @@ pub fn check_buy<'a>(
   }
   if item.free() || owned.contains(&(kind.to_string(), id.to_string())) {
     return Err(ShopError::AlreadyOwned);
+  }
+  // Buying it now would be paying for what the floor will bring anyway.
+  if item.free_with.is_some() {
+    return Err(ShopError::ComesWithFloor);
   }
   if let Some(first) = &item.requires {
     if !owned.contains(&(kind.to_string(), first.clone())) {
@@ -770,6 +824,56 @@ mod tests {
     assert_eq!(plot_count(&none), FREE_PLOTS);
     let more = owned(&catalogue, &[bought("plot", "plot-4", 200)]);
     assert_eq!(plot_count(&more), FREE_PLOTS + 1);
+  }
+
+  fn starters() -> Catalogue {
+    Catalogue::parse(
+      r#"{ "items": [
+        {"kind":"skin","id":"sprout","price":0},
+        {"kind":"move","id":"read","price":0},
+        {"kind":"level","id":"bedroom","price":0},
+        {"kind":"level","id":"kitchen","price":450,"requires":"bedroom"},
+        {"kind":"room","id":"bed","price":0},
+        {"kind":"room","id":"window","price":120,"freeWith":"bedroom"},
+        {"kind":"room","id":"kettle","price":50,"freeWith":"kitchen"},
+        {"kind":"room","id":"stove","price":240}
+      ] }"#
+    )
+    .expect("parses")
+  }
+
+  /// A floor's starter pieces are owned with the floor: the bedroom's from
+  /// the start, a new floor's the moment it is bought, on every device that
+  /// has the purchase.
+  #[test]
+  fn starter_pieces_come_with_their_floor() {
+    let catalogue = starters();
+    let none = owned(&catalogue, &[]);
+    assert!(none.contains(&("room".into(), "window".into())), "the bedroom's are everyone's");
+    assert!(!none.contains(&("room".into(), "kettle".into())));
+    let kitchen = owned(&catalogue, &[bought("level", "kitchen", 450)]);
+    assert!(kitchen.contains(&("room".into(), "kettle".into())), "the kitchen brings its kettle");
+    assert!(!kitchen.contains(&("room".into(), "stove".into())));
+  }
+
+  #[test]
+  fn a_starter_piece_is_never_sold_on_its_own() {
+    let catalogue = starters();
+    let none = owned(&catalogue, &[]);
+    assert_eq!(check_buy(&catalogue, &none, 999, 0, "room", "kettle"), Err(ShopError::ComesWithFloor));
+    assert_eq!(check_buy(&catalogue, &none, 999, 0, "room", "window"), Err(ShopError::AlreadyOwned));
+    assert_eq!(spent(&catalogue, &[bought("level", "kitchen", 450)]), 450, "the kettle costs nothing more");
+  }
+
+  #[test]
+  fn a_starter_piece_can_go_out_on_its_floor() {
+    let catalogue = starters();
+    let mut layout = look("sprout", &[], "read");
+    layout.room.insert("bedroom/window-1".into(), "window".into());
+    assert!(check_look(&catalogue, &owned(&catalogue, &[]), &layout).is_ok());
+    layout.room.insert("kitchen/top-1".into(), "kettle".into());
+    assert!(check_look(&catalogue, &owned(&catalogue, &[]), &layout).is_err(), "no kitchen yet");
+    assert!(check_look(&catalogue, &owned(&catalogue, &[bought("level", "kitchen", 450)]), &layout).is_ok());
   }
 
   #[test]
