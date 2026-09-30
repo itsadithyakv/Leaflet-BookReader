@@ -2,38 +2,30 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { useShallow } from "zustand/react/shallow";
 // The house and arcade art load with this page, not with the app.
 import "../pip/houseArt";
-import { SKINS, renderRoom, type PipRoomItem } from "../pip";
+import { SKINS } from "../pip";
 import { PLANTS, treats, type ShopKind } from "../pip/shop";
-import { fitsSlot, floorings, renderFinish, renderItem, type HouseSlot } from "../pip/home.js";
-import { renderPacket, renderSoil } from "../pip/garden.js";
+import { renderPacket } from "../pip/garden.js";
 import { ownsItem, usePipWardrobeStore } from "../store/pipWardrobeStore";
 import { usePipStore } from "../store/pipStore";
 import { useLibraryStore } from "../store/libraryStore";
-import { FEATURES } from "../constants/features";
 import type { PipLook } from "../services/pipService";
 import type { WishView } from "../pip/wish";
 import { HouseScene, type HouseSceneHandle } from "../components/pip/HouseScene";
-import { capture, clearEffects, fly, reducedMotion, type Captured } from "../components/pip/fx";
+import { capture, clearEffects, reducedMotion, type Captured } from "../components/pip/fx";
 import { FloorSwitch } from "../components/pip/FloorSwitch";
 import { PipDrawer } from "../components/pip/PipDrawer";
 import { PipShop, type PreviewLook, type ShopEntry, type ShopRequest } from "../components/pip/PipShop";
-import { PipGoals } from "../components/pip/PipGoals";
-import { PipWish } from "../components/pip/PipWish";
 import { PipThings } from "../components/pip/PipThings";
 import { PixelImage } from "../components/pip/PixelImage";
-import { Empty, Group, Hint, Hints, Status, Tile, shortfall } from "../components/pip/shopParts";
+import { Empty } from "../components/pip/shopParts";
 import { PurchaseConfirm } from "../components/pip/PurchaseConfirm";
 import { UndoToast } from "../components/pip/UndoToast";
-import { GoalChip } from "../components/pip/GoalChip";
 import { PacketPicker } from "../components/pip/PacketPicker";
 import { Walkthrough } from "../components/pip/Walkthrough";
 import { WALK, markWalkSeen, walkSeen, type WalkStep, type WalkTarget } from "../components/pip/walkSteps";
 import { ArcadeOverlay } from "../components/pip/arcade/ArcadeOverlay";
 import type { GameId } from "../components/pip/arcade/games";
-import { PipAvatar } from "../components/community/PipAvatar";
-import { CountUp } from "../components/community/CountUp";
-import { UiIcon } from "../components/UiIcon";
-import { MOOD_LOW, PLACED, STARTER_DECOR, errorText, moodWord, pickOne, plantInfo, plural, priceOf, storage, wait, type Drawer, type FinishPanel } from "./pip/common";
+import { MOOD_LOW, errorText, moodWord, pickOne, priceOf, storage, wait, type Drawer, type FinishPanel } from "./pip/common";
 import { usePipActs } from "./pip/usePipActs";
 import { usePipLook } from "./pip/usePipLook";
 import { purchaseFlow, useGrace, useStandIns } from "./pip/purchaseFlow";
@@ -47,6 +39,12 @@ import { usePinnedGoal } from "./pip/usePinnedGoal";
 import { pipThingsTabs } from "./pip/thingsTabs";
 import { useResourceBumps } from "./pip/useResourceBumps";
 import { useRoomFrame } from "./pip/useRoomFrame";
+import { PipHud } from "./pip/PipHud";
+import { PreviewBar } from "./pip/PreviewBar";
+import { PipRail } from "./pip/PipRail";
+import { GardenPanel } from "./pip/GardenPanel";
+import { SeedsPanel } from "./pip/SeedsPanel";
+import { FinishSheet, SlotSheet } from "./pip/DecorSheets";
 
 /** Mirrors GAME_MOOD_PER_DAY in pip/mod.rs, for the arcade's note. */
 const GAME_MOOD_PER_DAY = 12;
@@ -92,7 +90,8 @@ export type PipPageProps = {
  *
  * This file puts the tab together; its parts are in pages/pip/: Pip's acts,
  * the look, the purchase flow, the house, decorating, the garden, what buying
- * each thing does, the shop's entries and the tabs of Pip's things.
+ * each thing does, the shop's entries, the tabs of Pip's things, the HUD, the
+ * rail and the drawers.
  */
 export const PipPage = ({ showToast }: PipPageProps) => {
   const { overview, load, buy, setLook, feed, plant, harvest, gamePlayed } = usePipWardrobeStore(
@@ -425,18 +424,8 @@ export const PipPage = ({ showToast }: PipPageProps) => {
 
   const onShopBuy = (entry: ShopEntry) => buyThing(entry.kind, entry.id);
 
-  const { goal, setGoal, goalEntry, goalItem, goalLock, progress, pinGoal, openGoal } = usePinnedGoal({
-    overview,
-    owns,
-    balance,
-    suspended,
-    entryFor,
-    shopCategories,
-    goalRef,
-    sceneRef,
-    play,
-    openShop
-  });
+  const pinned = usePinnedGoal({ overview, owns, balance, suspended, entryFor, shopCategories, goalRef, sceneRef, play, openShop });
+  const { goal, pinGoal } = pinned;
 
   const thingsTabs = pipThingsTabs({
     owns,
@@ -492,279 +481,7 @@ export const PipPage = ({ showToast }: PipPageProps) => {
     await wait(reducedMotion() ? 80 : 520);
   };
 
-  // ---- decorating's sheets -----------------------------------------------------------------------
-
-  // What Decorate offers is what Pip owns; the shop has the rest. It used to
-  // sell the whole catalogue here too, book nods and all, that the shop keeps back.
-  const onSale = (item: PipRoomItem) => FEATURES.fullPipHouse || (!item.nod && STARTER_DECOR.has(item.id));
-  const fitting = slot ? allRoomItems.filter((item) => fitsSlot(item, slot, level.id)) : [];
-  // The shop's Decor tab, which a spot's link opens filtered: book nods have a tab of their own.
-  const fittingInShop = fitting.filter((item) => !owns("room", item.id) && onSale(item) && !item.nod);
-  const decorTile = (item: PipRoomItem, target: HouseSlot) => {
-    const here = itemIn(target) === item.id;
-    const at = where.get(item.id);
-    const elsewhere = at && !here ? levels.find((floor) => at.startsWith(`${floor.id}/`))?.name ?? "the house" : null;
-    return (
-      <Tile
-        key={item.id}
-        selected={here}
-        name={item.name}
-        label={`${item.name}. ${here ? "Here. Select to take it out." : elsewhere ? `In the ${elsewhere}. Select to move it here.` : "Select to put it here."}`}
-        art={() => <PixelImage render={() => renderItem(item, 0)} drawKey={item.id} box={56} />}
-        status={here ? <Status icon="check">Here</Status> : <Status>{elsewhere ? `In the ${elsewhere}` : "Put here"}</Status>}
-        onSelect={() => {
-          if (here) void placeIn(target, null);
-          else void flyInto(target, item.id, clickedArt()).then(() => play("kudos", 1, pickOne(PLACED)));
-        }}
-      />
-    );
-  };
-  const finishTile = (kind: "wallpaper" | "flooring" | "style", entry: { id: string; name?: string }) => {
-    const chosen = kind === "flooring" ? decor.floor === entry.id : decor.wallpaper === entry.id;
-    const apply = () => (kind === "style" ? setLook({ roomStyle: entry.id }) : setFinish(kind === "wallpaper" ? "wallpaper" : "floor", entry.id));
-    return (
-      <Tile
-        key={`${kind}-${entry.id}`}
-        selected={chosen}
-        name={entry.name ?? entry.id}
-        label={`${entry.name ?? entry.id}. ${chosen ? "On this floor." : "Select to use it here."}`}
-        art={() =>
-          kind === "style" ? (
-            <PixelImage render={() => renderRoom(entry.id, 0)} drawKey={`style-${entry.id}`} box={56} />
-          ) : (
-            <PixelImage render={() => renderFinish(kind === "wallpaper" ? "wallpaper" : "floor", entry.id, 40, 40)} drawKey={`${kind}-${entry.id}`} box={48} />
-          )
-        }
-        status={chosen ? <Status icon="check">Here</Status> : <Status>Use</Status>}
-        onSelect={() => {
-          if (chosen) return;
-          // The swatch flies to the wall (or the floor), then the room is papered over.
-          void fly(clickedArt(), roomPart(kind === "flooring" ? "floor" : "wall"), { card: true, vanish: true }).then(() => apply());
-        }}
-      />
-    );
-  };
-
-  const shopLink = (count: number, what: string, open: () => void) =>
-    count > 0 ? (
-      <button type="button" className="pip-get-more" onClick={open}>
-        <UiIcon name="shop" size={15} />
-        <span>
-          {count} more {what} in the shop
-        </span>
-        <span aria-hidden="true">→</span>
-      </button>
-    ) : null;
-
-  const slotSheet = slot ? (
-    <>
-      {itemIn(slot) && (
-        <button type="button" className="pip-key mb-3" onClick={() => void placeIn(slot, null)}>
-          Leave it empty
-        </button>
-      )}
-      {fitting.some((item) => owns("room", item.id)) ? (
-        <Group title="Yours">{fitting.filter((item) => owns("room", item.id)).map((item) => decorTile(item, slot))}</Group>
-      ) : (
-        <Empty>Nothing of Pip's fits here yet.</Empty>
-      )}
-      {shopLink(fittingInShop.length, "fit here", () =>
-        openShop({ tab: "decor", fits: { label: slotName(slot), keys: fittingInShop.map((item) => `room:${item.id}`) } }, slot.id)
-      )}
-    </>
-  ) : null;
-
-  const ownedWalls = walls.filter((entry) => owns(wallKind, entry.id));
-  const ownedFloors = floorings().filter((entry) => owns("flooring", entry.id));
-  const finishSheet =
-    finishPanel === "wallpaper" ? (
-      <>
-        <Group title={house ? "Your wallpaper" : "Your room styles"}>{ownedWalls.map((entry) => finishTile(wallKind, entry))}</Group>
-        {shopLink(walls.length - ownedWalls.length, house ? "wallpapers" : "room styles", () => openShop({ tab: "walls" }))}
-      </>
-    ) : finishPanel === "flooring" ? (
-      <>
-        <Group title="Your flooring">{ownedFloors.map((entry) => finishTile("flooring", entry))}</Group>
-        {shopLink(floorings().length - ownedFloors.length, "floorings", () => openShop({ tab: "walls" }))}
-      </>
-    ) : null;
-
-  // ---- the garden's and the wallet's drawers ----------------------------------------------------
-
-  const barrel = garden ? Math.round(garden.barrel) : 0;
-  const gardenPanel = (
-    <>
-      <Hints>
-        <Hint icon="water" more="Reading in focus is water: a minute each, half as much again when a session runs to the end.">
-          1 focus minute = 1 water
-        </Hint>
-        <Hint icon="garden" more="Water flows to the oldest planting first.">
-          Oldest plant drinks first
-        </Hint>
-        <Hint icon="heart" more="Plants wait for you, however long you're away.">
-          Nothing withers
-        </Hint>
-        <span className="seed-chip water-chip" title="Water waiting for a plant to drink it">
-          <UiIcon name="water" size={12} />
-          Barrel <CountUp value={barrel} /> / {garden?.barrelCap ?? 120}
-        </span>
-      </Hints>
-      {gardenLevel && level.id !== gardenLevel.id && (
-        <button type="button" className="pip-key mt-3" onClick={() => goToFloor(gardenLevel)}>
-          <UiIcon name="up" size={15} />
-          Ride up to the garden
-        </button>
-      )}
-      <div className="mt-3 grid gap-2">
-        {Array.from({ length: plotCount }, (_, index) => {
-          const plot = index + 1;
-          const here = growing(plot);
-          const info = here ? plantInfo(here.plant) : null;
-          return (
-            <div key={plot} className="pip-garden-row">
-              <span className="pip-garden-art">
-                {/* An empty plot is its dug bed, not somebody else's sunflower. */}
-                <PixelImage render={() => (here ? renderPacket(here.plant, 0) : renderSoil(true))} drawKey={`plot-${here?.plant ?? "empty"}`} box={36} />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-on-surface">
-                  Plot {plot}: {here ? info?.name ?? here.plant : "empty"}
-                </p>
-                {here && !here.ripe && (
-                  <>
-                    <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-outline-variant/30" aria-hidden="true">
-                      <div className="h-full rounded-full bg-primary" style={{ width: `${Math.min(100, (here.water / here.need) * 100)}%` }} />
-                    </div>
-                    <p className="mt-0.5 text-[11px] text-on-surface-variant">
-                      {Math.floor(here.water)} / {here.need} water · {plural(minutesLeft(here), "more minute")} of focus
-                    </p>
-                  </>
-                )}
-                {here?.ripe && <p className="text-[11px] font-semibold text-on-surface">Ripe! {info ? `${info.yield} seeds` : ""}</p>}
-              </div>
-              {here?.ripe ? (
-                <button type="button" className="pip-key pip-key-primary pip-key-small" onClick={() => void pick(here)}>
-                  Pick
-                </button>
-              ) : !here ? (
-                <button type="button" className="pip-key pip-key-small" aria-haspopup="dialog" onClick={() => plantAt(plot)}>
-                  Plant
-                </button>
-              ) : null}
-            </div>
-          );
-        })}
-      </div>
-      {nextPlot && (
-        <p className="mt-3 text-xs text-on-surface-variant">
-          <UiIcon name="plus" size={12} className="mr-1 inline" />
-          Dig more plots from the dashed bed in the garden ({priceOf("plot", nextPlot.id)} seeds).
-        </p>
-      )}
-    </>
-  );
-
-  const earned = overview?.wallet.earned;
-  const mePanel = (
-    <>
-      <p className="flex items-center gap-2 font-headline text-4xl font-bold tabular-nums text-on-surface">
-        <UiIcon name="seed" size={26} className="text-primary" />
-        <CountUp value={spendable} />
-      </p>
-      <Hints>
-        <Hint icon="garden" more="Reading in focus waters Pip's garden; ripe plants are picked for seeds.">
-          Seeds grow in the garden
-        </Hint>
-        <Hint icon="sparkle" more="Goal days add a few more seeds, and a few more still on a streak.">
-          Goal days add more
-        </Hint>
-        <Hint icon="game" more="Games cheer Pip up a little each day, but never pay seeds.">
-          Games never pay seeds
-        </Hint>
-      </Hints>
-      {earned && (
-        <dl className="mt-3 grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 text-xs tabular-nums text-on-surface-variant">
-          <dt>Harvests</dt>
-          <dd>{earned.harvests}</dd>
-          <dt>Goal days</dt>
-          <dd>{earned.goalDays}</dd>
-          <dt>Streak bonus</dt>
-          <dd>{earned.streakBonus}</dd>
-          <dt>Welcome gift</dt>
-          <dd>{earned.welcome}</dd>
-          {earned.chest > 0 && (
-            <>
-              <dt>Starter chest</dt>
-              <dd>{earned.chest}</dd>
-            </>
-          )}
-          {earned.goals > 0 && (
-            <>
-              <dt>First steps</dt>
-              <dd>{earned.goals}</dd>
-            </>
-          )}
-          {earned.sets > 0 && (
-            <>
-              <dt>Sets finished</dt>
-              <dd>{earned.sets}</dd>
-            </>
-          )}
-          {earned.wishes > 0 && (
-            <>
-              <dt>Wishes granted</dt>
-              <dd>{earned.wishes}</dd>
-            </>
-          )}
-          {earned.earlier > 0 && (
-            <>
-              <dt>Earned before the garden</dt>
-              <dd>{earned.earlier}</dd>
-            </>
-          )}
-          <dt>Spent on Pip</dt>
-          <dd>−{(overview?.wallet.spent ?? 0) + standIns.ahead}</dd>
-          <dt>Water poured, all told</dt>
-          <dd>{Math.round(garden?.water ?? 0)}</dd>
-        </dl>
-      )}
-      <div className="section-rule mt-4 pt-3">
-        <p className="text-xs uppercase tracking-[0.2em] text-on-surface-variant">Mood: {moodWord(shownMood)}</p>
-        <Hints>
-          <Hint icon="heart" more="Reading sessions, treats and harvests cheer Pip up; so do games, a little each day.">
-            Reading and treats cheer Pip
-          </Hint>
-          <Hint icon="moon" more="Pip's mood drifts down slowly on days away, and only ever mopes.">
-            Drifts slowly when away
-          </Hint>
-        </Hints>
-      </div>
-      <button type="button" className="pip-key mt-4" onClick={() => startWalk()}>
-        <UiIcon name="help" size={15} />
-        Show me around again
-      </button>
-      {FEATURES.accounts && (
-        <div className="section-rule mt-4 flex items-center gap-3 pt-3">
-          <PipAvatar seed={null} avatar={myAvatar} size={56} play label="Your Pip as a profile picture" />
-          <div className="min-w-0">
-            <p className="text-xs uppercase tracking-[0.2em] text-on-surface-variant">Profile picture</p>
-            {signedIn ? (
-              <button
-                type="button"
-                className="tactile-button mt-1 px-3 py-1.5 text-xs disabled:cursor-default disabled:opacity-60"
-                onClick={() => void useMyPip()}
-                disabled={avatarInUse}
-              >
-                {avatarInUse ? "In use" : "Use my Pip"}
-              </button>
-            ) : (
-              <p className="mt-1 text-xs text-on-surface-variant">Sign in (Settings, Account) to wear your Pip on the leaderboard.</p>
-            )}
-          </div>
-        </div>
-      )}
-    </>
-  );
+  // ---- the drawers ------------------------------------------------------------------------------
 
   const openDrawer = (id: Drawer) => {
     setPickerPlot(null);
@@ -774,23 +491,98 @@ export const PipPage = ({ showToast }: PipPageProps) => {
   // The sheet on screen: a drawer, or while decorating, what goes in a spot.
   const sheet: { key: string; title: string; note?: ReactNode; size?: "short"; body: ReactNode; close: () => void } | null = decorating
     ? slot
-      ? { key: `slot-${slot.id}`, title: slotName(slot), note: "Select a piece to put it here.", size: "short", body: slotSheet, close: () => setSlotFocus(null) }
+      ? {
+          key: `slot-${slot.id}`,
+          title: slotName(slot),
+          note: "Select a piece to put it here.",
+          size: "short",
+          body: (
+            <SlotSheet
+              slot={slot}
+              level={level}
+              levels={levels}
+              allRoomItems={allRoomItems}
+              owns={owns}
+              where={where}
+              itemIn={itemIn}
+              slotName={slotName}
+              placeIn={placeIn}
+              flyInto={flyInto}
+              clickedArt={clickedArt}
+              play={play}
+              openShop={openShop}
+            />
+          ),
+          close: () => setSlotFocus(null)
+        }
       : finishPanel
         ? {
             key: finishPanel,
             title: finishPanel === "wallpaper" ? (house ? "Wallpaper" : "Room style") : "Flooring",
             note: `For the ${level.name}.`,
             size: "short",
-            body: finishSheet,
+            body: (
+              <FinishSheet
+                panel={finishPanel}
+                house={house}
+                walls={walls}
+                wallKind={wallKind}
+                owns={owns}
+                decor={decor}
+                setLook={setLook}
+                setFinish={setFinish}
+                clickedArt={clickedArt}
+                roomPart={roomPart}
+                openShop={openShop}
+              />
+            ),
             close: () => setFinishPanel(null)
           }
         : null
     : drawer === "things"
       ? { key: "things", title: "Pip's things", note: "What Pip has: wear it, give it, do it.", body: <PipThings tabs={thingsTabs} initial={thingsTab} onTab={(id) => setThingsTab(id as ThingsTabId)} />, close: () => setDrawer(null) }
       : drawer === "garden"
-        ? { key: "garden", title: "Garden", note: "Where seeds come from.", body: gardenPanel, close: () => setDrawer(null) }
+        ? {
+            key: "garden",
+            title: "Garden",
+            note: "Where seeds come from.",
+            body: (
+              <GardenPanel
+                garden={garden}
+                level={level}
+                gardenLevel={gardenLevel}
+                goToFloor={goToFloor}
+                plotCount={plotCount}
+                growing={growing}
+                minutesLeft={minutesLeft}
+                nextPlot={nextPlot}
+                pick={pick}
+                plantAt={plantAt}
+              />
+            ),
+            close: () => setDrawer(null)
+          }
         : drawer === "me"
-          ? { key: "me", title: "Seeds and mood", body: mePanel, close: () => setDrawer(null) }
+          ? {
+              key: "me",
+              title: "Seeds and mood",
+              body: (
+                <SeedsPanel
+                  spendable={spendable}
+                  earned={overview?.wallet.earned}
+                  spent={overview?.wallet.spent}
+                  ahead={standIns.ahead}
+                  water={garden?.water}
+                  mood={shownMood}
+                  onWalk={startWalk}
+                  myAvatar={myAvatar}
+                  signedIn={signedIn}
+                  avatarInUse={avatarInUse}
+                  onUseMyPip={useMyPip}
+                />
+              ),
+              close: () => setDrawer(null)
+            }
           : null;
 
   // ---- the page -----------------------------------------------------------------------------------
@@ -827,118 +619,40 @@ export const PipPage = ({ showToast }: PipPageProps) => {
         data-sheet={sheet ? "open" : undefined}
         data-small-room={(roomBox && roomBox.width < 420) || undefined}
       >
-        <div className="pip-hud-top">
-          {/* Seeds and mood, the house's resources. The cluster takes more (a goals widget) as another .pip-resource. */}
-          <div className="pip-resources" data-walk="resources" role="group" aria-label="Seeds and mood">
-            <button
-              ref={seedChipRef}
-              type="button"
-              className="pip-resource pip-resource-seeds"
-              onClick={() => openDrawer("me")}
-              aria-label={`${plural(spendable, "seed")}. Where they come from`}
-              title="Seeds: where they come from"
-            >
-              <span className="pip-resource-icon">
-                <UiIcon name="seed" size={16} />
-              </span>
-              <span className="pip-resource-value tabular-nums">
-                <CountUp value={heldSeeds ?? spendable} duration={heldSeeds === null ? countMs : 700} />
-              </span>
-            </button>
-            {/* The hearts are Pip's mood: they open what cheers it up. */}
-            <button
-              ref={heartsRef}
-              type="button"
-              className="pip-resource pip-resource-mood"
-              onClick={() => openDrawer("me")}
-              aria-label={`Pip's mood: ${hearts} of 5 hearts. ${moodWord(shownMood)}. What cheers Pip up`}
-              title={`Pip's mood: ${moodWord(shownMood)}`}
-            >
-              <span className="pip-resource-label">Mood</span>
-              <span className="pip-hearts">
-                {[0, 1, 2, 3, 4].map((index) => (
-                  <span
-                    key={index}
-                    ref={(node) => {
-                      heartRefs.current[index] = node;
-                    }}
-                    className="pip-heart"
-                    data-fill={hearts >= index + 1 ? "full" : hearts > index ? "half" : "empty"}
-                  >
-                    <UiIcon name="heart" size={14} />
-                  </span>
-                ))}
-              </span>
-            </button>
-            {/* First steps (its own resource until they are all done): a reward's
-                seeds fly to the counter, which holds its old number meanwhile,
-                as it does for a harvest. */}
-            <PipGoals
-              dropdown
-              className="pip-resource pip-resource-goals"
-              counter={() => seedChipRef.current}
-              onFlight={(phase, seeds) => {
-                if (phase === "start") {
-                  setHeldSeeds((held) => held ?? Math.max(0, spendable - seeds));
-                } else {
-                  releaseSeeds();
-                }
-              }}
-            />
-          </div>
-          {goal && goalEntry && goalItem && progress && (
-            <GoalChip
-              ref={goalRef}
-              name={goalEntry.name}
-              art={artFor(goal.kind, goal.id, 32)}
-              have={progress.have}
-              price={progress.price}
-              fraction={progress.fraction}
-              ready={progress.ready}
-              locked={goalLock}
-              onOpen={openGoal}
-              onUnpin={() => setGoal(null)}
-            />
-          )}
-          <PipWish compact onGrant={grantWish} counter={() => seedChipRef.current} />
-          <span className="pip-hud-spacer" />
-          <span className="pip-floor-plate" title={`You're in the ${level.name}`}>
-            <UiIcon name="home" size={14} />
-            <span className="truncate">{level.name}</span>
-          </span>
-          <button type="button" className="pip-hud-help" onClick={startWalk} aria-label="Show me around" title="Show me around">
-            <UiIcon name="help" size={18} />
-          </button>
-        </div>
+        <PipHud
+          seedChipRef={seedChipRef}
+          heartsRef={heartsRef}
+          heartRefs={heartRefs}
+          goalRef={goalRef}
+          spendable={spendable}
+          heldSeeds={heldSeeds}
+          countMs={countMs}
+          hearts={hearts}
+          shownMood={shownMood}
+          openMe={() => openDrawer("me")}
+          onGoalsFlight={(phase, seeds) => {
+            if (phase === "start") {
+              setHeldSeeds((held) => held ?? Math.max(0, spendable - seeds));
+            } else {
+              releaseSeeds();
+            }
+          }}
+          pinned={pinned}
+          artFor={artFor}
+          grantWish={grantWish}
+          floorName={level.name}
+          startWalk={startWalk}
+        />
 
         {preview && (
-          <div className="pip-preview-bar" role="status">
-            <span className="text-sm">
-              Trying on <strong>{preview.entry.name}</strong>
-            </span>
-            {!preview.entry.owned && spendable < preview.entry.price && (
-              <span className="text-xs text-on-surface-variant">
-                {plural(preview.entry.price - spendable, "more seed")} · ~{shortfall(preview.entry.price, spendable)?.minutes} min of reading
-              </span>
-            )}
-            {!preview.entry.owned && spendable >= preview.entry.price && !preview.entry.locked && (
-              <button
-                type="button"
-                className="pip-key pip-key-primary pip-key-small"
-                // The preview stays on until the look is Pip's own, so it does not
-                // spin back to the old one while the purchase is asked about.
-                onClick={() => buyThing(preview.entry.kind, preview.entry.id, () => setPreview(null))}
-              >
-                Buy for {preview.entry.price}
-              </button>
-            )}
-            <button type="button" className="pip-key pip-key-small" onClick={() => endPreview(true)}>
-              Back to the shop
-            </button>
-            <button type="button" className="pip-key pip-key-small" onClick={() => endPreview(false)}>
-              Done
-            </button>
-          </div>
+          <PreviewBar
+            entry={preview.entry}
+            spendable={spendable}
+            // The preview stays on until the look is Pip's own, so it does not
+            // spin back to the old one while the purchase is asked about.
+            onBuy={() => buyThing(preview.entry.kind, preview.entry.id, () => setPreview(null))}
+            endPreview={endPreview}
+          />
         )}
 
         <div ref={bodyRef} className="pip-house-body" data-lift={levels.length > 1 || undefined}>
@@ -993,61 +707,23 @@ export const PipPage = ({ showToast }: PipPageProps) => {
 
         </div>
 
-        {decorating ? (
-          <nav ref={railRef} className="pip-rail" aria-label="Decorating">
-            <div className="pip-rail-belt pip-rail-decorate">
-              <p className="pip-rail-mode">
-                <UiIcon name="decorate" size={20} />
-                <span>
-                  <strong>Decorating the {level.name}</strong>
-                  <span className="pip-rail-mode-hint">Select a pin to choose what goes there.</span>
-                </span>
-              </p>
-              <button type="button" className="pip-rail-key" aria-pressed={finishPanel === "wallpaper"} onClick={() => toggleFinish("wallpaper")}>
-                <UiIcon name="grid" size={20} />
-                <span className="pip-rail-label">{house ? "Wallpaper" : "Room style"}</span>
-              </button>
-              {house && (
-                <button type="button" className="pip-rail-key" aria-pressed={finishPanel === "flooring"} onClick={() => toggleFinish("flooring")}>
-                  <UiIcon name="home" size={20} />
-                  <span className="pip-rail-label">Flooring</span>
-                </button>
-              )}
-              <button type="button" className="pip-rail-key pip-rail-done" onClick={stopDecorating}>
-                <UiIcon name="check" size={20} />
-                <span className="pip-rail-label">Done</span>
-              </button>
-            </div>
-          </nav>
-        ) : (
-          <nav ref={railRef} className="pip-rail" aria-label="Pip's tools">
-            <div className="pip-rail-belt">
-              <button type="button" className="pip-rail-key pip-rail-shop" data-walk="shop" onClick={() => openShop({ tab: "variants" })}>
-                <UiIcon name="shop" size={22} />
-                <span className="pip-rail-label">Shop</span>
-              </button>
-              <button type="button" className="pip-rail-key" aria-pressed={drawer === "things"} onClick={() => openDrawer("things")}>
-                <UiIcon name="things" size={22} />
-                <span className="pip-rail-label">Pip's things</span>
-              </button>
-              <button type="button" className="pip-rail-key" aria-pressed={drawer === "garden"} onClick={() => openDrawer("garden")}>
-                <UiIcon name="garden" size={22} />
-                <span className="pip-rail-label">Garden</span>
-                {ripe > 0 && <span className="pip-hud-dot" aria-label={`${ripe} ripe`} />}
-              </button>
-              <button ref={decorateRef} type="button" className="pip-rail-key" data-walk="decorate" onClick={startDecorating}>
-                <UiIcon name="decorate" size={22} />
-                <span className="pip-rail-label">Decorate</span>
-              </button>
-              {level.arcade && (
-                <button type="button" className="pip-rail-key pip-rail-play" onClick={() => setArcadeOpen(true)}>
-                  <UiIcon name="game" size={22} />
-                  <span className="pip-rail-label">Arcade</span>
-                </button>
-              )}
-            </div>
-          </nav>
-        )}
+        <PipRail
+          railRef={railRef}
+          decorateRef={decorateRef}
+          decorating={decorating}
+          floorName={level.name}
+          house={house}
+          arcade={level.arcade}
+          drawer={drawer}
+          finishPanel={finishPanel}
+          ripe={ripe}
+          openShop={openShop}
+          openDrawer={openDrawer}
+          startDecorating={startDecorating}
+          stopDecorating={stopDecorating}
+          toggleFinish={toggleFinish}
+          openArcade={() => setArcadeOpen(true)}
+        />
 
         {sheet && (
           // Keyed, so switching drawers slides the new one in. Beside the whole
