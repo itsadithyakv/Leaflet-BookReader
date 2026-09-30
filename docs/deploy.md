@@ -289,7 +289,8 @@ Leave `VITE_ENABLE_MULTI_DEVICE` and `VITE_ENABLE_FULL_PIP_HOUSE` unset for 1.0.
 The script warns about any required value that is missing; a warning here is a
 feature missing from the release, so stop and set it.
 
-Output: `D:\Leaflet\apps\src-tauri\target\msix\Leaflet_1.0.0.0_x64.msix`.
+Output: `D:\Leaflet\apps\src-tauri\target\msix\Leaflet_<version>.0_x64.msix`
+(`Leaflet_1.1.0.0_x64.msix` for 1.1.0).
 
 ## 8. Try the package on this PC first (recommended)
 
@@ -305,7 +306,7 @@ Then, in the installed app:
 - [ ] Settings → Account → Forgot password?: the code arrives by email and sets a new password.
 - [ ] Social → Community: the board loads (you on it once your profile is public).
 - [ ] Settings → Reminders → **Send a test**: a toast with Pip.
-- [ ] Settings → About → **Copy diagnostics**: pastes a report with version 1.0.0.
+- [ ] Settings → About → **Copy diagnostics**: pastes a report with the version you built.
 
 Uninstall afterwards: `Get-AppxPackage *LeafletBookReader* | Remove-AppxPackage`
 (it removes the test library too).
@@ -324,5 +325,5 @@ text, features and "what's new" are ready in
 | Update the API | Re-run `deploy.ps1` (step 5) |
 | Watch the API | `sudo journalctl -u leaflet-api -f` on the VM |
 | Move the API to another address | Edit `site/config.source.json`, `node site/sign-config.mjs`, commit and push. Installed apps follow; no Store update |
-| Release 1.0.1 | Bump the version in `apps/package.json`, `apps/src-tauri/Cargo.toml` and `apps/src-tauri/tauri.conf.json`, repeat steps 7–9 |
+| Release an update (e.g. 1.1.0) | Bump the version in `apps/package.json` and both places in `apps/package-lock.json`, in `apps/src-tauri/Cargo.toml` and the `leaflet` entry of `Cargo.lock`, and in `apps/src-tauri/tauri.conf.json`; repeat steps 7–9 (each upload needs a higher version than the last); then `git tag v<version>` and push the tag |
 | Back up the database | Atlas M0 has no automatic backups: `mongodump --uri "<the string>" --out leaflet-$(date +%F)` from a machine on the Atlas allowlist |
