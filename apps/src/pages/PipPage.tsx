@@ -2,23 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { useShallow } from "zustand/react/shallow";
 // The house and arcade art load with this page, not with the app.
 import "../pip/houseArt";
-import { SKINS, renderRoom, type PipAccessory, type PipRoomItem, type PipSkin, type PipTreat } from "../pip";
-import {
-  EXTRA_PLOTS,
-  FREE_SIGNATURES,
-  PLANTS,
-  PREMIUM_MOVES,
-  accessories,
-  catalogueItem,
-  isEarnedOnly,
-  nodMatches,
-  roomItems,
-  roomStyles,
-  slotCovered,
-  treats,
-  type ShopKind
-} from "../pip/shop";
-import { fitsSlot, floorings, renderFinish, renderItem, wallpapers, type HouseLevel, type HouseSlot } from "../pip/home.js";
+import { SKINS, renderRoom, type PipRoomItem } from "../pip";
+import { PLANTS, treats, type ShopKind } from "../pip/shop";
+import { fitsSlot, floorings, renderFinish, renderItem, type HouseSlot } from "../pip/home.js";
 import { renderPacket, renderSoil } from "../pip/garden.js";
 import { ownsItem, usePipWardrobeStore } from "../store/pipWardrobeStore";
 import { usePipStore } from "../store/pipStore";
@@ -30,12 +16,12 @@ import { HouseScene, type HouseSceneHandle } from "../components/pip/HouseScene"
 import { capture, clearEffects, fly, reducedMotion, type Captured } from "../components/pip/fx";
 import { FloorSwitch } from "../components/pip/FloorSwitch";
 import { PipDrawer } from "../components/pip/PipDrawer";
-import { PipShop, type PreviewLook, type ShopCategory, type ShopEntry, type ShopRequest } from "../components/pip/PipShop";
+import { PipShop, type PreviewLook, type ShopEntry, type ShopRequest } from "../components/pip/PipShop";
 import { PipGoals } from "../components/pip/PipGoals";
 import { PipWish } from "../components/pip/PipWish";
-import { PipThings, type ThingsTab } from "../components/pip/PipThings";
+import { PipThings } from "../components/pip/PipThings";
 import { PixelImage } from "../components/pip/PixelImage";
-import { Empty, Group, Hint, Hints, MoveCard, PriceTag, Status, Tile, shortfall } from "../components/pip/shopParts";
+import { Empty, Group, Hint, Hints, Status, Tile, shortfall } from "../components/pip/shopParts";
 import { PurchaseConfirm } from "../components/pip/PurchaseConfirm";
 import { UndoToast } from "../components/pip/UndoToast";
 import { GoalChip } from "../components/pip/GoalChip";
@@ -46,10 +32,8 @@ import { ArcadeOverlay } from "../components/pip/arcade/ArcadeOverlay";
 import type { GameId } from "../components/pip/arcade/games";
 import { PipAvatar } from "../components/community/PipAvatar";
 import { CountUp } from "../components/community/CountUp";
-import { tally, type Tally } from "../components/pip/collection";
-import { PipSprite } from "../components/PipSprite";
-import { UiIcon, type UiIconName } from "../components/UiIcon";
-import { MOOD_LOW, PLACED, STARTER_DECOR, errorText, moodWord, moveName, pickOne, plantInfo, plural, priceOf, storage, wait, type Drawer, type FinishPanel } from "./pip/common";
+import { UiIcon } from "../components/UiIcon";
+import { MOOD_LOW, PLACED, STARTER_DECOR, errorText, moodWord, pickOne, plantInfo, plural, priceOf, storage, wait, type Drawer, type FinishPanel } from "./pip/common";
 import { usePipActs } from "./pip/usePipActs";
 import { usePipLook } from "./pip/usePipLook";
 import { purchaseFlow, useGrace, useStandIns } from "./pip/purchaseFlow";
@@ -58,7 +42,9 @@ import { useDecorating } from "./pip/useDecorating";
 import { usePipGarden } from "./pip/usePipGarden";
 import { useBuyThing } from "./pip/useBuyThing";
 import { useProfilePicture } from "./pip/useProfilePicture";
+import { shopEntries } from "./pip/shopEntries";
 import { usePinnedGoal } from "./pip/usePinnedGoal";
+import { pipThingsTabs } from "./pip/thingsTabs";
 import { useResourceBumps } from "./pip/useResourceBumps";
 import { useRoomFrame } from "./pip/useRoomFrame";
 
@@ -69,14 +55,6 @@ const LIFT_GAP = 8;
 
 type ThingsTabId = "looks" | "treats" | "moves";
 type Preview = { entry: ShopEntry; look: PreviewLook };
-
-const SLOTS: Array<{ slot: PipAccessory["slot"]; label: string; covered: string }> = [
-  { slot: "head", label: "Head", covered: "has its own hat" },
-  { slot: "face", label: "Face", covered: "already covers the face" },
-  { slot: "neck", label: "Neck", covered: "already has something round the neck" },
-  { slot: "back", label: "Back", covered: "already wears something on the back" },
-  { slot: "hand", label: "Hand", covered: "has its hands full" }
-];
 
 /**
  * The art of what was just chosen (the tile, shop card, detail pane, garden
@@ -112,9 +90,9 @@ export type PipPageProps = {
  * guilts: nothing withers, prices say how much reading they are, Pip's mood
  * drifts slowly and only ever mopes, and games cheer Pip up but pay nothing.
  *
- * This file puts the tab together; its state and handlers are hooks in
- * pages/pip/: Pip's acts, the look, the purchase flow, the house, decorating,
- * the garden and what buying each thing does.
+ * This file puts the tab together; its parts are in pages/pip/: Pip's acts,
+ * the look, the purchase flow, the house, decorating, the garden, what buying
+ * each thing does, the shop's entries and the tabs of Pip's things.
  */
 export const PipPage = ({ showToast }: PipPageProps) => {
   const { overview, load, buy, setLook, feed, plant, harvest, gamePlayed } = usePipWardrobeStore(
@@ -418,258 +396,32 @@ export const PipPage = ({ showToast }: PipPageProps) => {
 
   const { myAvatar, signedIn, avatarInUse, useMyPip } = useProfilePicture({ variant, signature, outfit, play, showToast });
 
-  // ---- the shop's entries -----------------------------------------------------------------------
-
-  const priceTag = (price: number) => <PriceTag price={price} balance={spendable} />;
-  const pipArt = (move: string, skinId: string, worn: readonly string[]) => (size: number, hot: boolean) => (
-    <PipSprite move={move} still={!hot} size={size} skin={skinId} outfit={worn} snap="nearest" />
-  );
-  const imageArt = (render: () => ImageData | null, key: string) => (size: number) => (
-    <PixelImage render={render} drawKey={`${key}-${size}`} box={size} />
-  );
-
-  const skinEntry = (entry: PipSkin): ShopEntry => {
-    const owned = owns("skin", entry.id);
-    const earned = isEarnedOnly(entry);
-    return {
-      kind: "skin",
-      id: entry.id,
-      name: entry.name,
-      blurb: entry.blurb ?? (earned ? entry.unlock : null),
-      price: priceOf("skin", entry.id),
-      owned,
-      badge: entry.id === variant ? "Equipped" : "Owned",
-      locked: earned && !owned ? `Earned by reading: ${entry.unlock}` : null,
-      art: pipArt("idle", entry.id, outfit),
-      preview: { variant: entry.id, move: "cheer" },
-      use: owned ? (entry.id === variant ? null : { label: "Wear it", run: () => void change({ variant: entry.id }) }) : null
-    };
-  };
-
-  const accessoryEntry = (entry: PipAccessory): ShopEntry => {
-    const owned = owns("accessory", entry.id);
-    const worn = wearing(entry.id);
-    const covered = slotCovered(skin, entry.slot);
-    return {
-      kind: "accessory",
-      id: entry.id,
-      name: entry.name,
-      blurb: covered ? `${skin?.name ?? "This variant"} covers the ${entry.slot} already, so it won't show on this look.` : `Worn on the ${entry.slot}.`,
-      price: priceOf("accessory", entry.id),
-      owned,
-      badge: worn ? "Equipped" : "Owned",
-      art: pipArt("idle", variant, withAccessory(entry.id)),
-      preview: { outfit: withAccessory(entry.id), move: "cheer" },
-      use: owned
-        ? { label: worn ? "Take it off" : "Wear it", run: () => void change({ outfit: worn ? outfit.filter((id) => id !== entry.id) : withAccessory(entry.id) }) }
-        : null
-    };
-  };
-
-  const libraryHas = (nod: string | undefined) => Boolean(nod) && books.some((book) => nodMatches(nod, book));
-
-  const decorEntry = (entry: PipRoomItem): ShopEntry => {
-    const owned = owns("room", entry.id);
-    const at = where.get(entry.id);
-    const home = at ? levels.find((floor) => at.startsWith(`${floor.id}/`))?.name : null;
-    return {
-      kind: "room",
-      id: entry.id,
-      name: entry.name,
-      blurb: entry.level && entry.level !== "any" ? `For the ${levels.find((floor) => floor.id === entry.level || (floor.garden && entry.level === "garden"))?.name ?? entry.level}.` : "Goes on any floor.",
-      price: priceOf("room", entry.id),
-      owned,
-      badge: at ? `In the ${home ?? "house"}` : "Owned",
-      locked: !owned && catalogueItem("room", entry.id)?.freeWith ? `Comes with the ${levels.find((floor) => floor.id === catalogueItem("room", entry.id)?.freeWith)?.name ?? "floor"}` : null,
-      nod: entry.nod ?? null,
-      fromLibrary: libraryHas(entry.nod),
-      art: imageArt(() => renderItem(entry, 0), `item-${entry.id}`),
-      use: !owned
-        ? null
-        : at?.startsWith(`${level.id}/`)
-          ? { label: "Move it about", run: () => { closeShop(); startDecorating(); } }
-          : { label: at ? `Bring it to the ${level.name}` : "Place it", run: () => placeFromShop(entry.id) }
-    };
-  };
-
-  const finishEntry = (kind: "wallpaper" | "flooring", entry: { id: string; name?: string }): ShopEntry => {
-    const owned = owns(kind, entry.id);
-    const here = kind === "wallpaper" ? decor.wallpaper === entry.id : decor.floor === entry.id;
-    return {
-      kind,
-      id: entry.id,
-      name: entry.name ?? entry.id,
-      blurb: kind === "wallpaper" ? "Wallpaper, for one floor at a time." : "Flooring, for one floor at a time.",
-      price: priceOf(kind, entry.id),
-      owned,
-      badge: here ? "On this floor" : "Owned",
-      group: kind === "wallpaper" ? "Wallpaper" : "Flooring",
-      art: imageArt(() => renderFinish(kind === "wallpaper" ? "wallpaper" : "floor", entry.id, 48, 48), `${kind}-${entry.id}`),
-      use: owned && !here ? { label: `Use on the ${level.name}`, run: () => void setFinish(kind === "wallpaper" ? "wallpaper" : "floor", entry.id) } : null
-    };
-  };
-
-  const styleEntry = (entry: { id: string; name?: string; price?: number }): ShopEntry => {
-    const owned = owns("style", entry.id);
-    return {
-      kind: "style",
-      id: entry.id,
-      name: entry.name ?? entry.id,
-      price: priceOf("style", entry.id),
-      owned,
-      badge: decor.wallpaper === entry.id ? "In use" : "Owned",
-      art: imageArt(() => renderRoom(entry.id, 0), `style-${entry.id}`),
-      use: owned && decor.wallpaper !== entry.id ? { label: "Use it", run: () => void change({ roomStyle: entry.id }) } : null
-    };
-  };
-
-  const levelEntry = (entry: HouseLevel): ShopEntry => {
-    const open = unlocked(entry);
-    return {
-      kind: "level",
-      id: entry.id,
-      name: entry.name,
-      blurb: entry.blurb ?? entry.unlock,
-      price: priceOf("level", entry.id),
-      owned: open,
-      badge: entry.id === level.id ? "You're here" : "Open",
-      locked: open ? null : lockReason(entry),
-      group: "Floors of the house",
-      art: () => <UiIcon name={open ? "home" : "lock"} size={40} />,
-      use: open && entry.id !== level.id ? { label: "Go there", run: () => { closeShop(); goToFloor(entry); } } : null
-    };
-  };
-
-  const plotEntry = (entry: { id: string; name: string }, index: number): ShopEntry => {
-    const owned = owns("plot", entry.id);
-    const before = index > 0 ? EXTRA_PLOTS[index - 1] : null;
-    return {
-      kind: "plot",
-      id: entry.id,
-      name: entry.name,
-      blurb: "Room for one more planting in the garden.",
-      price: priceOf("plot", entry.id),
-      owned,
-      badge: "Dug",
-      locked: !owned && before && !owns("plot", before.id) ? `Dig the ${before.name.toLowerCase()} first.` : null,
-      group: "Garden plots",
-      art: imageArt(() => renderSoil(true), "soil")
-    };
-  };
-
-  const treatEntry = (entry: PipTreat): ShopEntry => {
-    const food = entry.kind === "food";
-    const owned = !food && owns("treat", entry.id);
-    const price = priceOf("treat", entry.id);
-    return {
-      kind: "treat",
-      id: entry.id,
-      name: entry.name,
-      blurb: food ? "A snack, bought as you give it. Cheers Pip up." : "A toy: bought once, played with forever.",
-      price,
-      owned,
-      consumable: food,
-      group: food ? "Snacks" : "Toys",
-      art: pipArt(entry.move, variant, outfit),
-      preview: { move: entry.move },
-      use: food
-        ? { label: spendable >= price ? `Give Pip one · ${price}` : "Keep reading", run: () => { closeShop(); void give(entry); } }
-        : owned
-          ? { label: "Play", run: () => { closeShop(); void give(entry); } }
-          : null
-    };
-  };
-
-  const moveEntry = (entry: { id: string; price: number }): ShopEntry => {
-    const owned = owns("move", entry.id);
-    return {
-      kind: "move",
-      id: entry.id,
-      name: moveName(entry.id),
-      blurb: "A move for Pip's free time, and a possible signature for your profile picture.",
-      price: entry.price === 0 ? 0 : priceOf("move", entry.id),
-      owned,
-      badge: entry.id === signature ? "Signature" : "Owned",
-      art: pipArt(entry.id, variant, outfit),
-      preview: { move: entry.id },
-      use: owned && entry.id !== signature ? { label: "Make it my signature", run: () => void change({ signature: entry.id }) } : null
-    };
-  };
-
-  const byPrice = (a: ShopEntry, b: ShopEntry) => Number(a.owned) - Number(b.owned) || a.price - b.price;
-  const allRoomItems = roomItems();
-  const nodItems = allRoomItems.filter((item) => item.nod);
-  const decorForSale = allRoomItems.filter((item) => owns("room", item.id) || (!item.nod && (FEATURES.fullPipHouse || STARTER_DECOR.has(item.id)) && placeable(item)));
-  const paidFloors = levels.filter((entry) => !entry.garden && entry.price >= 0 && entry !== levels[0]);
-  const moveList = [...FREE_SIGNATURES.map((id) => ({ id, price: 0 })), ...PREMIUM_MOVES];
-  const walls = house ? wallpapers() : roomStyles();
-  const wallKind = house ? "wallpaper" : "style";
-
-  // How much of each kind is Pip's: on the shop's tabs and in Pip's things.
-  const ownsRoom = (item: { id: string }) => owns("room", item.id);
-  const tallies: Record<string, Tally> = {
-    variants: tally(SKINS, (entry) => owns("skin", entry.id)),
-    wardrobe: tally(accessories(), (entry) => owns("accessory", entry.id)),
-    decor: tally(decorForSale, ownsRoom),
-    nods: tally(nodItems, ownsRoom),
-    treats: tally(treats(), (entry) => owns("treat", entry.id), (entry) => entry.kind === "toy"),
-    moves: tally(moveList, (entry) => owns("move", entry.id)),
-    walls: house
-      ? tally([...wallpapers().map((entry) => ({ kind: "wallpaper" as const, id: entry.id })), ...floorings().map((entry) => ({ kind: "flooring" as const, id: entry.id }))], (entry) =>
-          owns(entry.kind, entry.id)
-        )
-      : tally(roomStyles(), (entry) => owns("style", entry.id)),
-    house: tally([...paidFloors.map((entry) => ({ kind: "level" as const, id: entry.id })), ...EXTRA_PLOTS.map((entry) => ({ kind: "plot" as const, id: entry.id }))], (entry) =>
-      owns(entry.kind, entry.id)
-    )
-  };
-
-  const shopCategories: ShopCategory[] = [
-    { id: "variants", label: "Variants", icon: "pip", tally: tallies.variants, entries: SKINS.filter((entry) => !isEarnedOnly(entry)).map(skinEntry).sort(byPrice) },
-    { id: "wardrobe", label: "Wardrobe", icon: "outfit", tally: tallies.wardrobe, entries: accessories().map(accessoryEntry).sort(byPrice) },
-    {
-      id: "decor",
-      label: "Decor",
-      icon: "decorate",
-      tally: tallies.decor,
-      note: "Decor goes straight into a free spot on this floor that fits it. Move things about from Decorate.",
-      entries: decorForSale.map(decorEntry).sort(byPrice)
-    },
-    ...(FEATURES.fullPipHouse
-      ? [
-          {
-            id: "nods",
-            label: "Book Nods",
-            icon: "book-open" as UiIconName,
-            tally: tallies.nods,
-            note: "Little tributes to famous books, original designs. A ribbon means the book is in your library.",
-            entries: nodItems.map(decorEntry).sort((a, b) => Number(b.fromLibrary) - Number(a.fromLibrary) || byPrice(a, b))
-          }
-        ]
-      : []),
-    { id: "treats", label: "Treats", icon: "treat", tally: tallies.treats, entries: treats().map(treatEntry).sort(byPrice) },
-    { id: "moves", label: "Moves", icon: "move", tally: tallies.moves, entries: PREMIUM_MOVES.map(moveEntry).sort(byPrice) },
-    {
-      id: "walls",
-      label: house ? "Walls & flooring" : "Room styles",
-      icon: "grid",
-      tally: tallies.walls,
-      note: house ? "Wallpaper and flooring dress one floor at a time." : undefined,
-      entries: house
-        ? [...wallpapers().map((entry) => finishEntry("wallpaper", entry)).sort(byPrice), ...floorings().map((entry) => finishEntry("flooring", entry)).sort(byPrice)]
-        : roomStyles().map(styleEntry)
-    },
-    {
-      id: "house",
-      label: "House",
-      icon: "home",
-      tally: tallies.house,
-      note: paidFloors.length > 0 ? "New floors open in order, after enough focus sessions. Plots are dug one after another." : "Plots are dug one after another.",
-      entries: [...paidFloors.map(levelEntry), ...EXTRA_PLOTS.map(plotEntry)]
-    }
-  ];
-  const allEntries = shopCategories.flatMap((category) => category.entries);
-  const entryFor = (kind: ShopKind, id: string) => allEntries.find((entry) => entry.kind === kind && entry.id === id) ?? null;
+  const { shopCategories, tallies, entryFor, allRoomItems, moveList, walls, wallKind } = shopEntries({
+    owns,
+    variant,
+    outfit,
+    skin,
+    signature,
+    wearing,
+    withAccessory,
+    spendable,
+    books,
+    where,
+    level,
+    levels,
+    decor,
+    house,
+    placeable,
+    unlocked,
+    lockReason,
+    change,
+    setFinish,
+    closeShop,
+    startDecorating,
+    placeFromShop,
+    goToFloor,
+    give
+  });
 
   const onShopBuy = (entry: ShopEntry) => buyThing(entry.kind, entry.id);
 
@@ -686,148 +438,24 @@ export const PipPage = ({ showToast }: PipPageProps) => {
     openShop
   });
 
-  // ---- Pip's things -----------------------------------------------------------------------------
-
-  const wardrobeTile = (entry: PipSkin) => {
-    const owned = owns("skin", entry.id);
-    const worn = entry.id === shownVariant;
-    const earned = isEarnedOnly(entry);
-    return (
-      <Tile
-        key={entry.id}
-        selected={worn}
-        name={entry.name}
-        hint={entry.blurb ?? entry.unlock}
-        label={`${entry.name}. ${worn ? "Wearing." : owned ? "Select to wear it." : `Locked. Earned by reading: ${entry.unlock}`}`}
-        art={(hot) => <PipSprite move="idle" still={!hot && !worn} size={72} snap="nearest" skin={entry.id} outfit={outfit} />}
-        status={worn ? <Status icon="check">Wearing</Status> : owned ? <Status>Wear</Status> : <Status icon="lock">Locked</Status>}
-        onSelect={() => {
-          if (worn) return;
-          if (owned) void change({ variant: entry.id });
-          else if (earned) showToast(`${entry.name} is earned, not bought: ${entry.unlock}`);
-        }}
-      />
-    );
-  };
-
-  const accessoryTile = (entry: PipAccessory) => {
-    const worn = wearing(entry.id);
-    return (
-      <Tile
-        key={entry.id}
-        selected={worn}
-        name={entry.name}
-        label={`${entry.name}. ${worn ? "Wearing. Select to take it off." : "Select to wear it."}`}
-        art={(hot) => <PipSprite move="idle" still={!hot} size={72} snap="nearest" skin={variant} outfit={withAccessory(entry.id)} />}
-        status={worn ? <Status icon="check">Wearing</Status> : <Status>Wear</Status>}
-        onSelect={() => void change({ outfit: worn ? outfit.filter((id) => id !== entry.id) : withAccessory(entry.id) })}
-      />
-    );
-  };
-
-  const ownedAccessories = accessories().filter((entry) => owns("accessory", entry.id));
-  const looksBody = (
-    <>
-      <Group title="Variants" tally={tallies.variants}>
-        {SKINS.filter((entry) => owns("skin", entry.id)).map(wardrobeTile)}
-      </Group>
-      {ownedAccessories.length > 0 ? (
-        SLOTS.map(({ slot: which, label, covered }) => {
-          const items = ownedAccessories.filter((entry) => entry.slot === which);
-          if (items.length === 0) return null;
-          const hidden = slotCovered(skin, which);
-          return (
-            <Group key={which} title={label} note={hidden ? `${skin?.name ?? "This variant"} ${covered}: ${label.toLowerCase()} pieces stay off for now.` : undefined}>
-              {items.map(accessoryTile)}
-            </Group>
-          );
-        })
-      ) : (
-        <Empty>No accessories yet: hats, glasses and capes are in the shop.</Empty>
-      )}
-      <Group title="Earned by reading" note="Never sold, only earned.">
-        {SKINS.filter((entry) => isEarnedOnly(entry) && !owns("skin", entry.id)).map(wardrobeTile)}
-      </Group>
-    </>
-  );
-
-  const treatTile = (entry: PipTreat) => {
-    const food = entry.kind === "food";
-    const price = priceOf("treat", entry.id);
-    return (
-      <Tile
-        key={entry.id}
-        name={entry.name}
-        label={`${entry.name}. ${food ? `Give Pip one for ${price} seeds.` : "Play with Pip."} Cheers Pip up.`}
-        art={(hot) => <PipSprite move={entry.move} still={!hot} size={72} snap="nearest" skin={variant} outfit={outfit} />}
-        status={food ? priceTag(price) : <Status icon="heart">Play</Status>}
-        onSelect={() => void give(entry)}
-      />
-    );
-  };
-  const ownedToys = treats().filter((entry) => entry.kind === "toy" && owns("treat", entry.id));
-  const treatsBody = (
-    <>
-      <Hints>
-        <Hint icon="heart" more="Every treat cheers Pip up: the hearts fill.">
-          Treats cheer Pip up
-        </Hint>
-        <Hint icon="seed" more="A snack is bought each time you give it; a toy is bought once.">
-          Snacks cost each time
-        </Hint>
-      </Hints>
-      <Group title="Snacks">{treats().filter((entry) => entry.kind === "food").map(treatTile)}</Group>
-      <Group title="Toys" tally={tallies.treats}>
-        {ownedToys.length > 0 ? ownedToys.map(treatTile) : <p className="col-span-full text-xs text-on-surface-variant">No toys yet.</p>}
-      </Group>
-    </>
-  );
-
-  const movesBody = (
-    <>
-      <Hints>
-        <Hint icon="sparkle" more="Your signature is Pip's idle flourish and your profile picture's move.">
-          Signature: Pip's idle move
-        </Hint>
-        <Hint icon="heart" more="Celebrations stay free: Pip cheers your goals with every move it knows.">
-          Cheers are always free
-        </Hint>
-      </Hints>
-      <div className="mt-3 grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(9.5rem, 1fr))" }}>
-        {moveList
-          .filter((entry) => owns("move", entry.id))
-          .map((entry) => {
-            const chosen = entry.id === signature;
-            const name = moveName(entry.id);
-            return (
-              <MoveCard
-                key={entry.id}
-                name={name}
-                art={(hot) => <PipSprite move={entry.id} still={!hot && !chosen} size={72} snap="nearest" skin={variant} outfit={outfit} />}
-                selected={chosen}
-                status={chosen ? <Status icon="check">Signature</Status> : <Status>{entry.price === 0 ? "Free" : "Yours"}</Status>}
-                previewLabel="Do it"
-                onPreview={() => play(entry.id, 2)}
-                action={chosen ? null : { label: "Signature", run: () => void change({ signature: entry.id }).then(() => play(entry.id, 1, "my new signature move.")) }}
-              />
-            );
-          })}
-      </div>
-    </>
-  );
-
-  const thingsTabs: ThingsTab[] = [
-    {
-      id: "looks",
-      label: "Looks",
-      icon: "outfit",
-      tally: { owned: tallies.variants.owned + tallies.wardrobe.owned, total: tallies.variants.total + tallies.wardrobe.total },
-      body: looksBody,
-      more: { label: "More looks in the shop", open: () => openShop({ tab: ownedAccessories.length < accessories().length ? "wardrobe" : "variants" }) }
-    },
-    { id: "treats", label: "Treats", icon: "treat", tally: tallies.treats, body: treatsBody, more: { label: "More toys in the shop", open: () => openShop({ tab: "treats" }) } },
-    { id: "moves", label: "Moves", icon: "move", tally: tallies.moves, body: movesBody, more: { label: "More moves in the shop", open: () => openShop({ tab: "moves" }) } }
-  ];
+  const thingsTabs = pipThingsTabs({
+    owns,
+    variant,
+    outfit,
+    skin,
+    shownVariant,
+    signature,
+    wearing,
+    withAccessory,
+    tallies,
+    moveList,
+    spendable,
+    change,
+    give,
+    play,
+    openShop,
+    showToast
+  });
 
   // ---- the walkthrough ---------------------------------------------------------------------------
 
