@@ -103,7 +103,8 @@ export const AvatarPicker = ({ value, onChange, disabled = false, label = "Avata
                   : "bg-surface-container-high/50 ring-1 ring-outline-variant/40 hover:bg-surface-container-high"
               }`}
             >
-              <PipSprite move={avatar.move} skin={avatar.skin} size={34} snap="nearest" still={!(checked || hot === avatar.id)} />
+              {/* A portrait, like the profile picture it becomes: Pip fills the tile (48px at its narrowest). */}
+              <PipSprite move={avatar.move} skin={avatar.skin} size={44} portrait still={!(checked || hot === avatar.id)} />
             </button>
           );
         })}

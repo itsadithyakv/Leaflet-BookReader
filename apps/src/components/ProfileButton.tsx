@@ -32,14 +32,21 @@ type Props = {
   onOpenProfile: () => void;
 };
 
-/** The reader's face in the header: their account's Pip, or the Pip they dress on the Pip tab. */
+/**
+ * The reader's face in the header: their account's Pip, or the Pip they dress
+ * on the Pip tab. A portrait either way: Pip fills the round frame.
+ */
 const Face = ({ size }: { size: number }) => {
   const account = useAccountStore((state) => (state.status.signedIn ? state.status.account : null));
   const equipped = useEquippedPip();
   if (account?.avatar) {
     return <PipAvatar seed={null} avatar={account.avatar} size={size} />;
   }
-  return <PipSprite move="idle" still size={Math.round(size * 0.86)} skin={equipped.skin} outfit={equipped.outfit} />;
+  return (
+    <span className="inline-flex shrink-0 overflow-hidden rounded-full" style={{ width: size, height: size }}>
+      <PipSprite move="idle" still portrait size={size} skin={equipped.skin} outfit={equipped.outfit} />
+    </span>
+  );
 };
 
 /**
@@ -134,7 +141,8 @@ export const ProfileButton = ({
         aria-haspopup="dialog"
         aria-expanded={open}
       >
-        <Face size={40} />
+        {/* The whole button inside its 1px border (46px in index.css). */}
+        <Face size={44} />
         {failed && <span className="profile-button-alert" aria-hidden="true" />}
       </button>
 

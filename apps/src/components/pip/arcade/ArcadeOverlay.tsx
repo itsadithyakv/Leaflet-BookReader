@@ -30,6 +30,8 @@ const readLocalBest = (): Record<string, number> => {
 };
 
 export type ArcadeOverlayProps = {
+  /** The game to open on (the machine that was selected), or the list of them all. */
+  initial?: GameId | null;
   skin: string;
   outfit: readonly string[];
   /** Best scores from Rust (per device). */
@@ -53,8 +55,8 @@ export type ArcadeOverlayProps = {
  * Games never earn seeds (those come only from reading in focus). A finished
  * game cheers Pip up a little, up to a daily cap, and keeps a best score.
  */
-export const ArcadeOverlay = ({ skin, outfit, best, moodToday, moodCap, onFinished, onClose }: ArcadeOverlayProps) => {
-  const [chosen, setChosen] = useState<GameInfo | null>(null);
+export const ArcadeOverlay = ({ initial = null, skin, outfit, best, moodToday, moodCap, onFinished, onClose }: ArcadeOverlayProps) => {
+  const [chosen, setChosen] = useState<GameInfo | null>(() => GAMES.find((game) => game.id === initial) ?? null);
   const [localBest, setLocalBest] = useState(readLocalBest);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const bestOf = (id: string) => Math.max(best[id] ?? 0, localBest[id] ?? 0);
@@ -139,7 +141,7 @@ export const ArcadeOverlay = ({ skin, outfit, best, moodToday, moodCap, onFinish
 
         <p className="mt-4 text-xs text-on-surface-variant">
           Games don't earn seeds: those come only from reading in focus. Playing cheers Pip up a little
-          {moodToday >= moodCap ? " (that's all the cheering games can do today)." : ` (up to +${moodCap} mood a day).`}
+          {moodToday >= moodCap ? " (that's all the cheering games and play can do today)." : ` (games and play together, up to +${moodCap} mood a day).`}
         </p>
       </div>
     </div>
@@ -164,6 +166,8 @@ const GameScreen = ({ game, skin, outfit, best, onFinished, onExit }: GameScreen
   const [result, setResult] = useState<{ score: number; mood: number; newBest: boolean } | null>(null);
   const runs = useRef(0);
   const [run, setRun] = useState(0);
+  // The running game's pause switch, for the Pause key (a pointer has no Esc).
+  const pauseSwitch = useRef<(() => void) | null>(null);
 
   // Crisp: a whole number of device pixels per game pixel that fits the box.
   useLayoutEffect(() => {
@@ -259,6 +263,8 @@ const GameScreen = ({ game, skin, outfit, best, onFinished, onExit }: GameScreen
       start();
     };
 
+    pauseSwitch.current = () => (isPaused ? resume() : pause());
+
     const JUMP = new Set([" ", "Spacebar", "ArrowUp", "w", "W"]);
     const onKey = (event: KeyboardEvent, down: boolean) => {
       if (event.key === "Escape") {
@@ -350,6 +356,7 @@ const GameScreen = ({ game, skin, outfit, best, onFinished, onExit }: GameScreen
 
     return () => {
       cancelAnimationFrame(raf);
+      pauseSwitch.current = null;
       window.removeEventListener("keydown", keyDown, true);
       window.removeEventListener("keyup", keyUp, true);
       window.removeEventListener("blur", onBlur);
@@ -381,7 +388,15 @@ const GameScreen = ({ game, skin, outfit, best, onFinished, onExit }: GameScreen
           Score {hud.score}
           {hud.lives !== null && <span className="ml-3 text-on-surface-variant">Lives {"●".repeat(hud.lives)}{"○".repeat(Math.max(0, 3 - hud.lives))}</span>}
         </p>
-        <p className="text-xs text-on-surface-variant tabular-nums">Best {Math.max(best, result?.score ?? 0)}</p>
+        <p className="flex items-center gap-3 text-xs text-on-surface-variant tabular-nums">
+          Best {Math.max(best, result?.score ?? 0)}
+          {/* While a run is on: pause it, or carry on. */}
+          {!hud.ready && !hud.over && (
+            <button type="button" className="tactile-button px-2.5 py-1 text-xs" aria-pressed={paused} onClick={() => pauseSwitch.current?.()}>
+              {paused ? "Resume" : "Pause"}
+            </button>
+          )}
+        </p>
       </div>
       <div ref={wrapRef} className="pip-arcade-screen mt-2">
         <canvas

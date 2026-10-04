@@ -1,11 +1,13 @@
 /**
- * The Pip tab's first-visit walkthrough: Pip points out the four things to
- * know, in the scene itself, in four short lines. Shown once (a preference
- * of this device); "Show me around" in the HUD plays it again.
+ * The Pip tab's first-visit walkthrough: Pip points out the things to know,
+ * in the scene itself, a short line each: the seeds and her mood, herself
+ * (she can be poked, stroked and picked up), Play, the shop, decorating and
+ * a plot. Shown once (a preference of this device); "Show me around" in the
+ * HUD plays it again.
  */
 export const WALK_KEY = "leaflet.pip.houseTour";
 
-export type WalkTarget = "resources" | "shop" | "decorate" | "plot";
+export type WalkTarget = "resources" | "pip" | "play" | "shop" | "decorate" | "plot";
 
 export type WalkStep = {
   /** What it points at: the element marked data-walk with this name. */
@@ -16,7 +18,9 @@ export type WalkStep = {
 };
 
 export const WALK: WalkStep[] = [
-  { target: "resources", line: "these are your seeds. reading in focus grows them. the hearts are my mood.", side: "below" },
+  { target: "resources", line: "these are your seeds. reading in focus grows them. the hearts are my mood: select them to see why.", side: "below" },
+  { target: "pip", line: "this is me! poke me, stroke me, or pick me up by my leaf and let go.", side: "above" },
+  { target: "play", line: "play has more: a ball to fetch, a tickle, a dance. it cheers me up.", side: "above" },
   { target: "shop", line: "spend seeds in the shop: looks, decor, treats, moves.", side: "above" },
   { target: "decorate", line: "decorate to move things about. make it cosy!", side: "above" },
   { target: "plot", line: "plant a seed in a plot up here. your reading waters it; pick it when it's ripe.", side: "above" }

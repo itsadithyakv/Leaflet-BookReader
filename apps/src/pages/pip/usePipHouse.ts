@@ -8,6 +8,26 @@ import { reducedMotion } from "../../components/pip/fx";
 import type { PendingDecor, purchaseFlow } from "./purchaseFlow";
 import { plural } from "./common";
 
+/**
+ * The Attic Arcade as the house keeps it, for a reader who does not own the
+ * floor: without the whole house (FEATURES.fullPipHouse) the arcade is open
+ * to visit, furnished like this, and not theirs to rearrange. The pieces are
+ * the art's own (house.js); nothing here is owned, bought or saved.
+ */
+const ARCADE_FURNISHED: LevelDecor = {
+  wallpaper: null,
+  floor: null,
+  placed: [
+    { slot: "floor-1", itemId: "arcadecabinet" },
+    { slot: "floor-2", itemId: "tvconsole" },
+    { slot: "floor-3", itemId: "clawmachine" },
+    { slot: "floor-4", itemId: "jukebox" },
+    { slot: "ceiling-1", itemId: "discoball" },
+    { slot: "wall-1", itemId: "neonread" },
+    { slot: "top-1", itemId: "controller" }
+  ]
+};
+
 /** The floor the reader was last on, a preference of this device. */
 const FLOOR_KEY = "leaflet.pip.floor";
 
@@ -41,12 +61,20 @@ type PipHouseOptions = {
 export const usePipHouse = ({ owns, layout, roomStyle, pendingDecor, sessionsDone, setSlotFocus, setPickerPlot, purchase, play, sceneRef, showToast }: PipHouseOptions) => {
   const [floorId, setFloorId] = useState<string | null>(readFloor);
 
-  // The bedroom and the garden, unless the whole house is switched on.
+  // The bedroom, the garden and the arcade, unless the whole house is switched on.
   const levels = useMemo(
-    () => houseLevels().filter((level, index) => FEATURES.fullPipHouse || index === 0 || level.garden),
+    () => houseLevels().filter((level, index) => FEATURES.fullPipHouse || index === 0 || level.garden || level.arcade),
     []
   );
-  const unlocked = (level: HouseLevel) => owns("level", level.id);
+  /**
+   * A floor open to visit without being owned: the arcade, in a house without
+   * the floors that lead up to it (it could never be bought there: the floor
+   * below it is not for sale). Its games were never the floor's to sell: they
+   * pay nothing and Rust records them for anyone. With the whole house on,
+   * the arcade is bought in its turn, as before.
+   */
+  const visiting = (level: HouseLevel) => level.arcade && !FEATURES.fullPipHouse && !owns("level", level.id);
+  const unlocked = (level: HouseLevel) => owns("level", level.id) || visiting(level);
   const level = levels.find((entry) => entry.id === floorId && unlocked(entry)) ?? levels[0];
   const levelIndex = levels.indexOf(level);
   const gardenLevel = levels.find((entry) => entry.garden) ?? null;
@@ -67,16 +95,19 @@ export const usePipHouse = ({ owns, layout, roomStyle, pendingDecor, sessionsDon
   /** The floor a piece belongs on, when it belongs on one ("garden" and "greenhouse" are one floor). */
   const homeOf = (item: PipRoomItem) =>
     item.level && item.level !== "any"
-      ? levels.find((floor) => floor.id === item.level || (floor.garden && ["garden", "greenhouse"].includes(item.level ?? ""))) ?? null
+      ? levels.find((floor) => !visiting(floor) && (floor.id === item.level || (floor.garden && ["garden", "greenhouse"].includes(item.level ?? "")))) ?? null
       : null;
   // A piece for a floor this house does not have (the library's bookshelf,
   // without the whole house) could be bought but never placed.
   const placeable = (item: PipRoomItem) => !item.level || item.level === "any" || homeOf(item) !== null;
+  const visitingNow = visiting(level);
   const decor: LevelDecor = useMemo(() => {
+    // A floor only visited shows as the house furnished it.
+    if (visitingNow) return ARCADE_FURNISHED;
     const found = levelDecor(layout, level);
     // The single room from before the house keeps its scheme in the old room style.
     return level.fallback && !level.garden ? { ...found, wallpaper: roomStyle || roomStyles()[0]?.id || null } : found;
-  }, [layout, level, roomStyle]);
+  }, [layout, level, roomStyle, visitingNow]);
   // A piece in its grace period stands in its spot already.
   const shownDecor: LevelDecor = useMemo(
     () =>
@@ -120,5 +151,5 @@ export const usePipHouse = ({ owns, layout, roomStyle, pendingDecor, sessionsDon
     if (item) void purchase(item, { title: `Open the ${next.name}?`, verb: "Open", note: next.blurb ?? next.unlock, after: () => moveIn(next) });
   };
 
-  return { levels, level, levelIndex, levelRef, gardenLevel, unlocked, goToFloor, house, roomItemById, homeOf, placeable, decor, shownDecor, lockReason, openFloor };
+  return { levels, level, levelIndex, levelRef, gardenLevel, unlocked, visiting, goToFloor, house, roomItemById, homeOf, placeable, decor, shownDecor, lockReason, openFloor };
 };

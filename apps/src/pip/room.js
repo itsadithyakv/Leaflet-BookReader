@@ -302,6 +302,8 @@ const ITEMS = [
   },
   {
     id: "lamp", name: "Floor Lamp", kind: "light", price: 120, w: 16, h: 36, at: [128, 50], mount: "stand",
+    // The light it casts after dark (house.js pools it; switched off, it casts none).
+    glow: [[8, 8, 30, "#FFE08A"]],
     draw(g, f) {
       const flick = f % 48 === 0 ? 0 : 1;
       if (flick) for (let y = 11; y < 20; y++) for (let x = 8 - (y - 10); x <= 8 + (y - 10) - 1; x++) if ((x + y) % 2 === 0) g.px(x, y, "#FFE9A022");

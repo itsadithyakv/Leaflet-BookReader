@@ -2,7 +2,11 @@
  * Pip's house, heard: a handful of small sounds made on the spot with Web
  * Audio, no files, for the moments the effects layer draws. A plant picked,
  * a seed popping into the soil, seeds dropping into the counter, a chime for
- * a first step or a wish, a piece of decor set down, rain on the garden.
+ * a first step or a wish, a piece of decor set down, rain on the garden; and
+ * Pip herself under the reader's hand: a squeak when poked, a giggle when
+ * tickled, a purr when stroked, a whee when tossed, the ball's bounce; and
+ * the room under the hand: the swish of a curtain, the fridge's hum while
+ * its door is open and the click and thud of it shutting.
  *
  * Off unless the reader turns it on (Settings, Pip), and quiet on purpose:
  * every sound is short and soft, well under the system's other sounds, and
@@ -15,7 +19,7 @@
  */
 import { useSyncExternalStore } from "react";
 
-export type PipSound = "pick" | "pop" | "chime" | "coin" | "place" | "splash";
+export type PipSound = "pick" | "pop" | "chime" | "coin" | "place" | "splash" | "squeak" | "giggle" | "purr" | "whee" | "bounce" | "swish" | "click" | "hum" | "shut";
 
 const KEY = "leaflet.pip.sound";
 /** The loudest any voice gets, before the per-sound levels below. */
@@ -146,6 +150,39 @@ const RECIPES: Record<PipSound, (ctx: AudioContext, out: AudioNode, at: number, 
   splash: (ctx, out, at, pitch) => {
     hiss(ctx, out, { at, length: 0.38, peak: 0.3, freq: 1500 * pitch, q: 0.7 });
     tone(ctx, out, { type: "sine", from: 720 * pitch, to: 1150 * pitch, at: at + 0.03, length: 0.07, peak: 0.1 });
+  },
+  // Poked: a short chirp that jumps up.
+  squeak: (ctx, out, at, pitch) => tone(ctx, out, { type: "triangle", from: 700 * pitch, to: 1250 * pitch, at, length: 0.09, peak: 0.42 }),
+  // Tickled: four quick chirps, each a little higher.
+  giggle: (ctx, out, at, pitch) => {
+    for (let index = 0; index < 4; index += 1) {
+      tone(ctx, out, { type: "triangle", from: (820 + index * 70) * pitch, to: (1040 + index * 70) * pitch, at: at + index * 0.075, length: 0.055, peak: 0.3 });
+    }
+  },
+  // Stroked: a low, soft rumble that wavers.
+  purr: (ctx, out, at, pitch) => {
+    for (let index = 0; index < 5; index += 1) {
+      tone(ctx, out, { type: "sine", from: 150 * pitch, to: 128 * pitch, at: at + index * 0.07, length: 0.065, peak: 0.34, attack: 0.012 });
+    }
+  },
+  // Tossed: a note sliding up and away.
+  whee: (ctx, out, at, pitch) => tone(ctx, out, { type: "sine", from: 520 * pitch, to: 1320 * pitch, at, length: 0.3, peak: 0.26, attack: 0.02 }),
+  // The ball on the floor: a round, short thump.
+  bounce: (ctx, out, at, pitch) => tone(ctx, out, { type: "sine", from: 300 * pitch, to: 140 * pitch, at, length: 0.09, peak: 0.5 }),
+  // Curtains drawn along their rail: a soft breath of cloth.
+  swish: (ctx, out, at, pitch) => hiss(ctx, out, { at, length: 0.26, peak: 0.24, freq: 2100 * pitch, q: 0.8 }),
+  // A lamp's switch: a small dry tick.
+  click: (ctx, out, at, pitch) => tone(ctx, out, { type: "square", from: 1500 * pitch, to: 700 * pitch, at, length: 0.03, peak: 0.16, attack: 0.002 }),
+  // An open fridge: a low drone and its octave, swelling in slowly. Played again while the door is open, so it carries on.
+  hum: (ctx, out, at, pitch) => {
+    tone(ctx, out, { type: "sine", from: 62 * pitch, at, length: 1.4, peak: 0.3, attack: 0.4 });
+    tone(ctx, out, { type: "sine", from: 124 * pitch, to: 122 * pitch, at, length: 1.4, peak: 0.12, attack: 0.4 });
+  },
+  // A fridge door pushed to: the latch's click, then the soft thud of the seal.
+  shut: (ctx, out, at, pitch) => {
+    tone(ctx, out, { type: "square", from: 1100 * pitch, to: 600 * pitch, at, length: 0.025, peak: 0.1, attack: 0.002 });
+    tone(ctx, out, { type: "sine", from: 120 * pitch, to: 60 * pitch, at: at + 0.04, length: 0.16, peak: 0.6 });
+    hiss(ctx, out, { at: at + 0.04, length: 0.06, peak: 0.1, freq: 500, q: 0.8 });
   }
 };
 
@@ -153,7 +190,7 @@ const RECIPES: Record<PipSound, (ctx: AudioContext, out: AudioNode, at: number, 
  * The same sound again this soon is dropped: a dozen seeds landing are a
  * patter, not a dozen coins at once.
  */
-const GAP_MS: Record<PipSound, number> = { pick: 90, pop: 60, chime: 280, coin: 50, place: 90, splash: 220 };
+const GAP_MS: Record<PipSound, number> = { pick: 90, pop: 60, chime: 280, coin: 50, place: 90, splash: 220, squeak: 70, giggle: 320, purr: 380, whee: 260, bounce: 70, swish: 200, click: 80, hum: 1000, shut: 200 };
 const lastPlayed = new Map<PipSound, number>();
 
 /** Whether a sound may play at `now`, given when it last did. Pure, for the tests. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LIFT_ARROW, LIFT_STOP, liftShowsAll, placeNear } from "./layout";
+import { LIFT_ARROW, LIFT_STOP, floorPoint, liftShowsAll, placeNear } from "./layout";
 
 const screen = { left: 0, top: 0, width: 1000, height: 800 };
 const size = { width: 300, height: 150 };
@@ -49,5 +49,21 @@ describe("the lift", () => {
     expect(liftShowsAll(7, 180)).toBe(false);
     // A phone's room, 120 px tall: up, the floor, down.
     expect(liftShowsAll(2, 120)).toBe(false);
+  });
+});
+
+describe("the pointer in the room", () => {
+  it("is measured from the room, at the scale the room is drawn at", () => {
+    // A room of 240 floor pixels drawn 960 wide, centred in a wider stage: 140 in from the stage.
+    const room = { left: 240, top: 150, width: 960 };
+    expect(floorPoint({ clientX: 240, clientY: 150 }, room, 240)).toEqual({ x: 0, y: 0 });
+    expect(floorPoint({ clientX: 720, clientY: 390 }, room, 240)).toEqual({ x: 120, y: 60 });
+    // A half step of scale (3.5 CSS pixels a pixel).
+    expect(floorPoint({ clientX: 105 + 35, clientY: 148 + 70 }, { left: 105, top: 148, width: 840 }, 240)).toEqual({ x: 10, y: 20 });
+  });
+
+  it("can be outside the room (the hand has left it), and is nowhere in a room with no size", () => {
+    expect(floorPoint({ clientX: 0, clientY: 0 }, { left: 240, top: 150, width: 960 }, 240)).toEqual({ x: -60, y: -37.5 });
+    expect(floorPoint({ clientX: 10, clientY: 10 }, { left: 0, top: 0, width: 0 }, 240)).toBeNull();
   });
 });

@@ -13,3 +13,12 @@ export declare const BARREL_H: number;
 /** The rain barrel, `fill` 0..1 full: the water waiting for the next planting. */
 export declare function renderBarrel(fill: number, frame?: number): ImageData;
 export declare function renderGardenFloor(w: number, h: number, floorY: number, frame?: number): ImageData;
+
+/** The bed's picture is this tall, from the top of the lawn. */
+export declare const BED_H: number;
+/** The garden's rows: furrows, stakes and the dug marks of empty plots, `w` wide and BED_H tall. */
+export declare function renderGardenBed(
+  w: number,
+  rows: ReadonlyArray<{ y: number; depth: number; x0: number; x1: number }>,
+  holes?: ReadonlyArray<{ x: number; y: number }>
+): ImageData;

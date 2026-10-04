@@ -19,7 +19,10 @@
    renderLevel(levelId, f, { wallpaper, floor, placed: [{ slot, itemId }], night })
    ALL_ITEMS / HOUSE_ITEMS  { id, name, kind, fits: [slot types], level, price, w, h, nod? }
    WALLPAPERS, FLOORS  [{ id, name, price }]; renderSwatch(type, id, w, h, f)
-   renderHouseItem(item, f) */
+   renderHouseItem(item, f)
+   FIXTURES  [{ id, w, h, draw }]: what a floor has that is not decor (the
+     bedroom's mini fridge, shut and open); a level's `fridgeAt` lists the
+     places it may stand. */
 import * as roomArt from "./room.js";
 
 let art = { ...roomArt };
@@ -167,6 +170,8 @@ const normaliseLevel = (level) => {
     slots,
     arcade: Boolean(level.arcade || /arcade/i.test(level.id)),
     garden,
+    // Where this floor's mini fridge may stand, best first (left edges); none on most floors.
+    fridgeAt: garden ? [] : list(level.fridgeAt).filter((x) => Number.isFinite(x)),
     defaults: [],
     fallback: false
   };
@@ -203,6 +208,7 @@ const fallbackBedroom = () => {
     slots,
     arcade: false,
     garden: false,
+    fridgeAt: [],
     defaults: list(art.ROOM_ITEMS)
       .filter((item) => item.starter || item.price === 0 || starterPiecesFor("bedroom").includes(item.id))
       .map((item) => ({ slot: item.id, itemId: item.id })),
@@ -306,22 +312,78 @@ export const placements = (layout) => {
   return out;
 };
 
+// ---- fixtures -----------------------------------------------------------------------
+//
+// The bedroom's mini fridge is every Pip's, and not decor: it is not in the
+// shop, a slot or the saved layout, so a house saved before there was one has
+// it too and no layout changes. It stands in the first of the floor's places
+// for it (`fridgeAt`, the gaps between the floor spots) that the reader's own
+// pieces leave free, and moves aside when a wide piece is put there.
+
+/**
+ * The first of `candidates` (left edges) where something `w` wide overlaps
+ * nothing in `taken`; failing that, the one that overlaps least (the earlier
+ * of two as bad as each other).
+ */
+export const freeSpot = (candidates, w, taken) => {
+  let best = null;
+  let least = Infinity;
+  for (const x of candidates) {
+    const over = taken.reduce((sum, box) => sum + Math.max(0, Math.min(x + w, box.x + box.w) - Math.max(x, box.x)), 0);
+    if (over < least) {
+      best = x;
+      least = over;
+    }
+  }
+  return best;
+};
+
+const fixture = (id) => list(art.FIXTURES).find((entry) => entry.id === id) ?? null;
+
+/** Where this floor's fridge stands with this decor, as its box (shut) in floor pixels; null on a floor without one. */
+export const fridgeBox = (level, decor) => {
+  const item = fixture("minifridge");
+  if (!item || !level || level.fallback || list(level.fridgeAt).length === 0) return null;
+  // Only what stands on the floor can be in its way.
+  const taken = list(decor?.placed).flatMap(({ slot: slotId, itemId }) => {
+    const slot = level.slots.find((entry) => entry.id === slotId);
+    const box = slot && slot.fits === "stand" ? itemBox(itemId, slot) : null;
+    return box ? [box] : [];
+  });
+  const x = freeSpot(level.fridgeAt, item.w, taken);
+  // It stands where the floor pieces do: on the line their slots are anchored to.
+  const stand = level.slots.find((slot) => slot.fits === "stand");
+  const foot = stand ? stand.y + stand.h : level.floorY + 16;
+  return { x, y: foot - item.h, w: item.w, h: item.h };
+};
+
+/** A floor's fixtures as renderHouseLevel draws them: the fridge, shut or `open`. */
+export const levelFixtures = (level, decor, open = false) => {
+  const box = fridgeBox(level, decor);
+  return box ? [{ itemId: open ? "minifridge-open" : "minifridge", x: box.x, y: box.y }] : [];
+};
+
 // ---- drawing ------------------------------------------------------------------------
 
 /**
  * A floor with its decor, as w x h ImageData. Null for a floor another module
  * draws (the fallback garden). `hour` (0-24) sets the sky in the windows to the
  * real time; `frame` then only animates lamps, fish, clouds and stars.
+ * The floor's fixtures are drawn as `decor.fixtures` says, or shut and where
+ * `decor.placed` leaves room when it does not say. `openSky` leaves the garden's glass wall transparent (see pip/sky.js).
  */
-export const renderHouseLevel = (level, frame, decor, night, hour) => {
+export const renderHouseLevel = (level, frame, decor, night, hour, openSky = false) => {
   if (!level.fallback && typeof art.renderLevel === "function") {
     return art.renderLevel(level.id, frame, {
       wallpaper: decor.wallpaper ?? undefined,
       floor: decor.floor ?? undefined,
-      placed: decor.placed,
+      // The floor's fixtures (the fridge) after the decor, so an open door swings out over a neighbour.
+      placed: [...decor.placed, ...(decor.fixtures ?? levelFixtures(level, decor))],
       // Always-dark floors stay dark; the rest dim in the evening and lamps glow.
       night: level.night || Boolean(night),
-      hour
+      hour,
+      // The garden's glass left clear, for the scene's living sky underneath.
+      ...(openSky ? { sky: false } : {})
     });
   }
   if (level.garden) return null;

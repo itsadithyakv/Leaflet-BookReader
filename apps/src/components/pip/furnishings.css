@@ -1,0 +1,51 @@
+/* Furnishings that can be used (components/pip/furnishings.tsx): a button over
+   each, the art of what is not as the room drew it, and the shade drawn
+   curtains cast. Beside index.css's house rules, which place the room. */
+
+/* The button over a usable furnishing. It says it can be used: a gold edge
+   when pointed at or focused, and a cursor for what the hand does to it. */
+.pip-furnish {
+  border-radius: 2px;
+  touch-action: none;
+}
+
+.pip-furnish[data-cursor="ew-resize"] {
+  cursor: ew-resize;
+}
+
+.pip-furnish[data-cursor="grab"] {
+  cursor: grab;
+}
+
+.pip-furnish[data-cursor="grab"]:active {
+  cursor: grabbing;
+}
+
+.pip-furnish:hover,
+.pip-furnish:focus-visible {
+  box-shadow:
+    0 0 0 2px #ffd23f,
+    0 0 0 4px var(--hud-line);
+}
+
+/* A furnishing's own art, over the room's picture, placed from script. */
+.pip-furnish-art {
+  position: absolute;
+  pointer-events: none;
+}
+
+/* A picture turns about its nail, at the top of its frame. */
+.pip-furnish-art[data-furnish="picture"] {
+  transform-origin: 50% 4%;
+}
+
+/* Drawn curtains dim the room a little: a shade over all of it, as strong as
+   the curtains are drawn (set from script). */
+.pip-room-shade {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  background: #1a1430;
+  opacity: 0;
+  pointer-events: none;
+}

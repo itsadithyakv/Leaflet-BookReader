@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import { pickBeat } from "../../pip/moments";
-import { ownedPremiumMoves } from "../../store/pipWardrobeStore";
+import { LIB } from "../../pip";
+import { treats } from "../../pip/shop";
+import { ownedPremiumMoves, ownsItem } from "../../store/pipWardrobeStore";
 import type { PipReaction } from "../../store/pipStore";
 import type { PipOverview } from "../../services/pipService";
-import type { SceneAct } from "../../components/pip/HouseScene";
-import { MOOD_LOW, pickOne } from "./common";
+import type { Repertoire, SceneAct } from "../../components/pip/HouseScene";
 
 /** How long a line stays up after Pip says it. */
 const LINE_MS = 4200;
@@ -16,7 +17,6 @@ type PipActsOptions = {
   suspended: boolean;
   finishReaction: (id: number) => void;
   overview: PipOverview | null;
-  mood: number;
   signature: string;
   /** Effects timed to Pip's current act (crumbs at each bite): a new act cancels them. */
   actTimers: MutableRefObject<Set<number>>;
@@ -26,9 +26,9 @@ type PipActsOptions = {
 /**
  * Pip's lines and moves in the house: what Pip is doing and saying, the
  * celebrations queued for the roaming Pip (played here while the tab is
- * open), a poke, and what fills a free moment.
+ * open), a poke, and what she has to fill her own time with.
  */
-export const usePipActs = ({ reaction, suspended, finishReaction, overview, mood, signature, actTimers, setHeldMood }: PipActsOptions) => {
+export const usePipActs = ({ reaction, suspended, finishReaction, overview, signature, actTimers, setHeldMood }: PipActsOptions) => {
   const [act, setAct] = useState<Act | null>(null);
   const [line, setLine] = useState<string | null>(null);
   const actKey = useRef(1);
@@ -93,17 +93,26 @@ export const usePipActs = ({ reaction, suspended, finishReaction, overview, mood
     setAct(null);
   };
 
-  // A free moment: the signature move, or one of Pip's hobbies (the free ones
-  // plus the moves the reader bought). Not while moping.
-  const hobbies = useMemo(() => ["jog", "rope", "tree", "read", ...ownedPremiumMoves(overview)], [overview]);
-  const pastimeRef = useRef<() => string | null>(() => null);
-  pastimeRef.current = () => (mood < MOOD_LOW ? null : Math.random() < 0.5 ? signature : pickOne(hobbies));
-  const pastime = useCallback(() => pastimeRef.current(), []);
+  // What Pip has to keep herself busy with (pip/behaviour.ts chooses among
+  // it): her signature move, her hobbies (the free ones plus the moves the
+  // reader bought, the dances among them apart), and the toys she owns.
+  const repertoire: Repertoire = useMemo(() => {
+    const bought = ownedPremiumMoves(overview);
+    const dances = bought.filter((id) => LIB.find((move) => move.id === id)?.cat === "Dance");
+    return {
+      signature,
+      hobbies: ["jog", "rope", "tree", ...bought.filter((id) => !dances.includes(id))],
+      dances,
+      toys: treats()
+        .filter((treat) => treat.kind === "toy" && ownsItem(overview, "treat", treat.id))
+        .map((treat) => treat.move)
+    };
+  }, [overview, signature]);
 
   const poke = useCallback(() => {
     const beat = pickBeat("poke", `${Date.now()}`);
     play(beat.move, 1, beat.line);
   }, [play]);
 
-  return { act, line, play, duringAct, onActDone, pastime, poke };
+  return { act, line, play, duringAct, onActDone, repertoire, poke };
 };

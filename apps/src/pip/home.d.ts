@@ -40,14 +40,20 @@ export type HouseLevel = {
   arcade: boolean;
   /** Pip's garden: plots watered by reading. */
   garden: boolean;
+  /** Where its mini fridge may stand (left edges, best first); empty on a floor without one. */
+  fridgeAt: number[];
   /** How the art furnished it, before the reader decorates. */
   defaults: Placement[];
   /** The single room from before the house art, standing in for the house. */
   fallback: boolean;
 };
 
-export type Placement = { slot: string; itemId: string };
-export type LevelDecor = { wallpaper: string | null; floor: string | null; placed: Placement[]; decorated?: boolean };
+/** `off`: a light drawn switched off (for the scene only; the saved layout has no such thing). */
+export type Placement = { slot: string; itemId: string; off?: boolean };
+/** A fixture as the floor's picture draws it: which art (the fridge shut, or open), and its top-left in floor pixels. */
+export type Fixture = { itemId: string; x: number; y: number };
+/** `fixtures`: how the floor's fixtures are drawn (for the scene only; left out, they are drawn shut where `placed` leaves room). */
+export type LevelDecor = { wallpaper: string | null; floor: string | null; placed: Placement[]; decorated?: boolean; fixtures?: Fixture[] };
 export type HouseFinish = { id: string; name?: string; price?: number };
 
 export declare function registerHouseArt(...namespaces: Array<Record<string, unknown> | null | undefined>): void;
@@ -68,7 +74,13 @@ export declare const FLOOR: string;
 export declare function levelDecor(layout: Record<string, string> | null | undefined, level: HouseLevel): LevelDecor;
 export declare function withLevelDecor(layout: Record<string, string> | null | undefined, level: HouseLevel, decor: LevelDecor): Record<string, string>;
 export declare function placements(layout: Record<string, string> | null | undefined): Map<string, string>;
-export declare function renderHouseLevel(level: HouseLevel, frame: number, decor: LevelDecor, night?: boolean, hour?: number): ImageData | null;
+/** The first of `candidates` (left edges) where something `w` wide overlaps nothing in `taken`, or the one that overlaps least; null with no candidates. */
+export declare function freeSpot(candidates: readonly number[], w: number, taken: ReadonlyArray<{ x: number; w: number }>): number | null;
+/** Where this floor's mini fridge stands with this decor (its box, shut); null on a floor without one. */
+export declare function fridgeBox(level: HouseLevel, decor: Pick<LevelDecor, "placed"> | null | undefined): { x: number; y: number; w: number; h: number } | null;
+/** The floor's fixtures as its picture draws them: the fridge, shut or open. */
+export declare function levelFixtures(level: HouseLevel, decor: Pick<LevelDecor, "placed"> | null | undefined, open?: boolean): Fixture[];
+export declare function renderHouseLevel(level: HouseLevel, frame: number, decor: LevelDecor, night?: boolean, hour?: number, openSky?: boolean): ImageData | null;
 /** Where an item is drawn in a slot: its box in the floor's pixels, as the art places it. */
 export declare function itemBox(item: PipRoomItem | string, slot: HouseSlot): { x: number; y: number; w: number; h: number } | null;
 export declare function renderItem(item: PipRoomItem | string, frame?: number): ImageData;

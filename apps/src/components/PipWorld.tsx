@@ -9,6 +9,7 @@ import { nodFor } from "../pip/bookNods";
 import { hasMove } from "../pip/core";
 import { TOUR, type TourStop } from "../pip/tour";
 import { usePipPresence } from "../pip/usePipPresence";
+import { CLING_MS, HALF_W, clingX, meetWall } from "../pip/wall";
 import { PipSprite, pipCssSize } from "./PipSprite";
 import { PipSay, type PipSayTail } from "./PipSay";
 
@@ -44,8 +45,7 @@ export type PipAction = { id: string; label: string; run: () => void };
 const SPRITE = 64;
 const GRAVITY = 2600;
 const WALK_SPEED = 46;
-/** Collision half-width and height of Pip's body at 64px, in CSS pixels. */
-const HALF_W = 18;
+/** Collision height of Pip's body at 64px, in CSS pixels (its half-width is HALF_W, in pip/wall). */
 const HEIGHT = 50;
 /** Where the hand holds Pip: by the leaf, so Pip dangles below the cursor. */
 const HOLD_DROP = 44;
@@ -54,7 +54,6 @@ const SIDEBAR_COLLAPSED = 78;
 const MAX_THROW = 2800;
 const SPLAT_SPEED = 1300;
 const BOUNCE_SPEED = 520;
-const CLING_SPEED = 950;
 /**
  * Held by the leaf, Pip is a pendulum hanging from the cursor. This is the
  * effective length in CSS pixels: longer than the sprite, so the swing has
@@ -1056,11 +1055,14 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
       // Pinned to the wall every frame: the window's edges can shift by a
       // scrollbar's width mid-slide, which used to leave Pip hovering or
       // twitching beside the wall.
-      s.x = s.clingSide < 0 ? b.left + HALF_W * 0.7 : b.right - HALF_W * 0.7;
+      s.x = clingX(s.clingSide, b);
       s.y += 34 * dt;
       if (s.y >= b.floor) {
         land({ kind: "floor" }, b.floor, 0);
       } else if (now > s.clingUntil) {
+        // Letting go is Pip's own doing, so it lands on its feet however far
+        // down the floor is: only a throw splats.
+        s.softLanding = true;
         startFall();
       }
       return;
@@ -1080,31 +1082,20 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
         s.leftHome = true;
       }
 
-      if (s.leftHome && s.x - HALF_W < b.left) {
-        if (Math.abs(s.vx) > CLING_SPEED && s.y < b.floor - 60) {
-          s.x = b.left + HALF_W * 0.7;
-          s.facing = -1;
-          s.clingSide = -1;
-          s.clingUntil = now + 1400;
-          s.phase = "clinging";
-          show("cling");
-          return;
-        }
-        s.x = b.left + HALF_W;
-        s.vx = Math.abs(s.vx) * 0.45;
-      }
-      if (s.x + HALF_W > b.right) {
-        if (Math.abs(s.vx) > CLING_SPEED && s.y < b.floor - 60) {
-          s.x = b.right - HALF_W * 0.7;
-          s.facing = 1;
-          s.clingSide = 1;
-          s.clingUntil = now + 1400;
-          s.phase = "clinging";
-          show("cling");
-          return;
-        }
-        s.x = b.right - HALF_W;
-        s.vx = -Math.abs(s.vx) * 0.45;
+      // Thrown hard at a wall, Pip grabs it; otherwise it bounces off. The
+      // grab takes the throw with it, so letting go is a plain drop (see
+      // meetWall: it used to grab again a frame later, all the way down).
+      const wall = meetWall(s.x, s.y, s.vx, b, s.leftHome);
+      s.x = wall.x;
+      s.vx = wall.vx;
+      if (wall.cling !== 0) {
+        s.vy = 0;
+        s.facing = wall.cling;
+        s.clingSide = wall.cling;
+        s.clingUntil = now + CLING_MS;
+        s.phase = "clinging";
+        show("cling");
+        return;
       }
       // The header is the ceiling, except over the logo: thrown up into its
       // home, Pip goes in.

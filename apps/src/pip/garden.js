@@ -185,6 +185,42 @@ export const renderPlant = (plantId, progress, ripe, f = 0) => {
 /** A plant's packet picture for a shop tile: the plant grown and ripe. */
 export const renderPacket = (plantId, f = 0) => renderPlot(plantId, 1, true, f);
 
+// ---- the rows ---------------------------------------------------------------------
+//
+// The garden is planted in rows (gardenRows.ts says where): two furrows of
+// tilled soil across the lawn, a stake with a tag at the head of each, and a
+// dug mark where a plot is waiting for a seed. One picture for the whole bed,
+// `w` wide and BED_H tall, to lay over the lawn from where it starts.
+
+export const BED_H = 16;
+
+/**
+ * The bed: `rows` are the furrows ({ y, depth, x0, x1 }, y measured from the
+ * top of the lawn) and `holes` the empty plots ({ x, y }: the middle of the
+ * mark, in the same pixels).
+ */
+export const renderGardenBed = (w, rows, holes = []) => {
+  const g = new Painter(w, BED_H, 0);
+  // Back row first, so the front one is drawn over whatever of it it covers.
+  for (const row of [...rows].sort((a, b) => a.y - b.y)) {
+    const { y, depth, x0, x1 } = row;
+    g.stamp((l) => {
+      // A ridge of soil with rounded ends: its top catches the light, its foot is in its own shadow.
+      l.rect(x0, y + 1, x1 - x0, depth - 1, "#6B4226");
+      l.rect(x0 + 1, y, x1 - x0 - 2, 1, "#8A5A34");
+      l.rect(x0 + 1, y + depth - 1, x1 - x0 - 2, 1, "#4A2C16");
+      // Clods, and the hoe's marks across the ridge.
+      for (let x = x0 + 3; x < x1 - 2; x += 5) l.px(x, y + 1 + (x % 2), "#4A2C16");
+      for (let x = x0 + 6; x < x1 - 3; x += 9) l.px(x, y, "#A06A40");
+    }, OUT);
+    // A stake at the head of the row, with a tag on it.
+    g.stamp((l) => l.rect(x0 - 4, y - 4, 1, depth + 3, "#A06A40").rect(x0 - 6, y - 5, 5, 3, "#F2EAD6").px(x0 - 5, y - 4, "#4FA84A"), OUT);
+  }
+  // Dug and waiting: three short dashes where the seed goes.
+  for (const hole of holes) for (const dx of [-4, -1, 2]) g.rect(hole.x + dx, hole.y, 2, 1, "#3A2616");
+  return g.toImageData();
+};
+
 // ---- the rain barrel -------------------------------------------------------------
 
 export const BARREL_W = 18;

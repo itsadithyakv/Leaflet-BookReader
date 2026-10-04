@@ -4,7 +4,7 @@
 
  LEVELS
    HOUSE_LEVELS: [{ id, name, w, h, floorY, price, unlock, unlockText, night,
-                    wallpaper, floor, blurb, slots, decor(g, f) }]
+                    wallpaper, floor, blurb, slots, decor(g, f), fridgeAt? }]
      w x h is 240 x 120 for every level (draw it scaled up, pixelated).
      price is seeds; unlock = { after: <level id>|null, sessions: n } — the
      level before it must be owned and n focus sessions completed.
@@ -29,9 +29,12 @@
  WALLPAPERS / FLOORS: [{ id, name, price, draw(g, x, y, w, h, f) }]
 
  RENDER
-   renderLevel(levelId, f, { wallpaper?, floor?, placed?, night? }) -> ImageData
-     placed: [{ slot, itemId }] (snapped) or [{ itemId, x, y }] (free, top-left)
+   renderLevel(levelId, f, { wallpaper?, floor?, placed?, night?, sky? }) -> ImageData
+     placed: [{ slot, itemId }] (snapped) or [{ itemId, x, y }] (free, top-left);
+       `off: true` on one draws a light switched off: unlit, casting no glow.
      night: dim the room and let lights glow (defaults to level.night).
+     sky: false leaves the garden's glass clear (transparent), for the living
+     sky (sky.js) to be laid under the floor's picture.
    renderHouseItem(itemOrId, f) -> ImageData(item.w, item.h)
    renderSwatch("wallpaper"|"floor", id, w = 32, h = 32, f) -> ImageData (shop tiles) */
 import { Painter, skyAt, flame, rnd, blend, ROOM_ITEMS, paintSky, lerpC, withSkyHour } from "./room.js";
@@ -102,6 +105,8 @@ export const HOUSE_LEVELS = [
       ...stand([34, 56], [92, 34], [150, 36], [206, 50]),
       { id: "rug-1", fits: "rug", x: 120, y: 118, w: 64, h: 18 }
     ],
+    // Where the mini fridge may stand (its left edge), best first: in the gaps the floor spots leave between them.
+    fridgeAt: [169, 115, 63],
     decor(g) { shelf(g, 172, 228, 68); }
   },
   {
@@ -162,8 +167,11 @@ export const HOUSE_LEVELS = [
       { id: "rug-1", fits: "rug", x: 136, y: 119, w: 70, h: 18 }
     ],
     decor(g, f) {
-      // Glass walls and roof on a low brick base.
-      paintSky(g, 0, 0, W, 60, f);
+      // Glass walls and roof on a low brick base. The sky through them is
+      // painted here, or left clear for the scene's own living sky (sky.js)
+      // to show through: only the glazing bars and the glints are drawn then.
+      if (openSky) { for (let y = 0; y < 60; y++) for (let x = 0; x < W; x++) g.C.d[y * W + x] = null; }
+      else paintSky(g, 0, 0, W, 60, f);
       for (let y = 0; y < 60; y++) for (let x = 0; x < W; x++) if (x % 30 === 0 || y % 20 === 0) g.px(x, y, "#E8F1EC"); else if ((x + y) % 23 === 0) g.px(x, y, "#FFFFFF66");
       g.rect(0, 60, W, 2, "#E8F1EC").rect(0, 62, W, 1, "#B8C8BE");
       g.stamp((l) => {
@@ -820,7 +828,58 @@ const NEW_ITEMS = [
 
 export const HOUSE_ITEMS = [...NEW_ITEMS, ...NOD_ITEMS];
 export const ALL_ITEMS = [...ROOM_ITEMS, ...HOUSE_ITEMS];
-const ITEM = new Map(ALL_ITEMS.map((i) => [i.id, i]));
+
+// ============================================================ FIXTURES
+// What a floor has that is not decor: never in the shop, a slot or the saved
+// layout. home.js stands each where there is room (a level's `fridgeAt`) and
+// hands it to renderLevel as a piece placed free. The bedroom's mini fridge,
+// shut and open: the door is hinged on the right and swings out past the
+// cabinet, and the light inside is a glow, so after dark it pools on the floor.
+const FRIDGE = { body: "#8FD3C8", light: "#C6EEE6", shade: "#5FB3A8", edge: "#1F4A4A", chrome: "#E6EDF2", foot: "#3A3F4B", glass: "#BFE6FF" };
+const fridgeCabinet = (l) => {
+  const c = FRIDGE;
+  l.rect(1, 2, 10, 16, c.body).rect(2, 1, 8, 1, c.light).rect(1, 2, 1, 15, c.light);
+  l.rect(10, 2, 1, 16, c.shade).rect(1, 17, 10, 1, c.shade);
+  l.rect(2, 18, 2, 1, c.foot).rect(8, 18, 2, 1, c.foot);
+};
+export const FIXTURES = [
+  it("minifridge", "Mini Fridge", "furniture", ["stand"], "bedroom", 0, 12, 20, (g) => {
+    const c = FRIDGE;
+    g.shadow(6, 6, 19);
+    g.stamp((l) => {
+      fridgeCabinet(l);
+      // The freezer's seam, a handle for each door, and what is stuck to the front: a magnet and a note.
+      l.rect(1, 6, 10, 1, c.shade);
+      l.rect(3, 3, 1, 2, c.chrome).rect(3, 8, 1, 5, c.chrome).px(3, 8, "#FFFFFF");
+      l.px(8, 9, "#E0584E").rect(6, 11, 3, 3, "#FFE36B").px(7, 12, "#C9A227").px(6, 13, "#F2CF4A");
+    }, c.edge);
+  }),
+  it("minifridge-open", "Mini Fridge, open", "furniture", ["stand"], "bedroom", 0, 17, 20, (g, f) => {
+    const c = FRIDGE;
+    g.shadow(8, 8, 19);
+    g.stamp((l) => {
+      fridgeCabinet(l);
+      // Inside, lit from the top: two glass shelves and a few things to stare at.
+      l.rect(2, 3, 8, 14, "#FFF6D8").rect(2, 3, 8, 1, "#FFFFFF").rect(2, 16, 8, 1, "#F2E2B0");
+      l.rect(2, 7, 8, 1, c.glass).rect(2, 12, 8, 1, c.glass);
+      // Milk and a jar of jam; cheese and an apple; carrots and a bottle of something green.
+      l.rect(3, 4, 2, 3, "#FFFFFF").rect(3, 4, 2, 1, "#5AB8FF").rect(6, 5, 2, 2, "#C8453B").rect(6, 4, 2, 1, "#FFD23F");
+      l.rect(3, 10, 3, 2, "#FFD23F").px(3, 10, "#FFF6D8").px(4, 11, "#E0A800").rect(7, 10, 2, 2, "#E0584E").px(8, 9, "#3FA35E");
+      l.rect(3, 15, 3, 1, "#FF8A2A").px(4, 14, "#3FA35E").px(5, 14, "#3FA35E").rect(8, 13, 1, 3, "#6FDCC7").px(8, 13, "#FFFFFF");
+      // The door, swung wide: its pale inside, nearer (and so lower) at its free edge, with a rack and a bottle in it.
+      const tops = [2, 2, 2, 3, 3];
+      const ends = [17, 17, 18, 18, 18];
+      for (let i = 0; i < 5; i++) l.rect(11 + i, tops[i], 1, ends[i] - tops[i] + 1, i === 4 ? c.body : i === 0 ? "#C9D6DE" : "#EAF3F8");
+      l.rect(12, 12, 3, 1, c.glass).rect(13, 9, 1, 3, "#FF9ACB").px(13, 9, "#FFFFFF");
+    }, c.edge);
+    // The bulb, with the faintest flicker.
+    if (f % 48 !== 7) g.px(5, 3, "#FFE36B").px(6, 3, "#FFE36B");
+  }, { glow: [[6, 10, 36, "#E4F3FF"]] }),
+  // The light of Pip's phone, late, in bed: nothing to draw (she holds the phone), only what it throws on the pillow and the wall after dark.
+  it("phoneglow", "Phone glow", "furniture", ["stand"], "bedroom", 0, 1, 1, () => {}, { glow: [[0, 0, 12, "#BFDFFF"]] })
+];
+
+const ITEM = new Map([...ALL_ITEMS, ...FIXTURES].map((i) => [i.id, i]));
 const LEVEL = new Map(HOUSE_LEVELS.map((l) => [l.id, l]));
 const WP = new Map(WALLPAPERS.map((w) => [w.id, w]));
 const FL = new Map(FLOORS.map((w) => [w.id, w]));
@@ -835,10 +894,17 @@ export function placeAt(item, slot) {
 
 const ORDER = { window: 0, wall: 1, rug: 2, top: 3, stand: 3, ceiling: 4 };
 
+/** While a level is drawn with `sky: false`: its glass shows nothing, for a sky laid under it. */
+let openSky = false;
+
 export function renderLevel(levelId, f = 0, opts = {}) {
   // opts.hour: the real time of day for windows; f then only animates.
   if (opts.hour != null) {
     return withSkyHour(opts.hour, () => renderLevel(levelId, f, { ...opts, hour: null }));
+  }
+  if (opts.sky === false && !openSky) {
+    openSky = true;
+    try { return renderLevel(levelId, f, opts); } finally { openSky = false; }
   }
   const L = LEVEL.get(levelId) || HOUSE_LEVELS[0];
   const g = new Painter(L.w, L.h, f);
@@ -858,20 +924,35 @@ export function renderLevel(levelId, f = 0, opts = {}) {
     if (slot) { pos = placeAt(item, slot); type = slot.fits; }
     else if (p.x != null) { pos = { x: Math.round(p.x), y: Math.round(p.y) }; type = (item.fits && item.fits[0]) || "stand"; }
     else continue;
-    list.push({ item, pos, type });
+    list.push({ item, pos, type, off: Boolean(p.off) });
   }
   list.sort((a, b) => ORDER[a.type] - ORDER[b.type] || (a.pos.y + a.item.h) - (b.pos.y + b.item.h));
   const glows = [];
-  for (const { item, pos } of list) {
+  for (const { item, pos, off } of list) {
     const s = new Painter(item.w, item.h, f);
     item.draw(s, f);
+    if (off) unlight(s.C.d);
     g.C.blit(s.C, pos.x, pos.y);
-    const gl = typeof item.glow === "function" ? item.glow(f) : item.glow;
+    const gl = off ? null : typeof item.glow === "function" ? item.glow(f) : item.glow;
     if (gl) for (const [x, y, r, c] of gl) glows.push([pos.x + x, pos.y + y, r, rgba(c)]);
   }
   if (L.glow) for (const [x, y, r, c] of L.glow) glows.push([x, y, r, rgba(c)]);
   if (opts.night ?? L.night) nightLight(g, glows);
   return g.toImageData();
+}
+
+/**
+ * A light switched off: its warm, bright pixels (bulb, shade, flame) go dull,
+ * and the see-through ones (the light it throws) go altogether.
+ */
+function unlight(d) {
+  for (let i = 0; i < d.length; i++) {
+    const c = d[i];
+    if (!c) continue;
+    const [r, g0, b, a] = rgba(c);
+    if (a < 255) { if (r > 200 && g0 > 150) d[i] = null; continue; }
+    if (r > 215 && g0 > 150 && b < 215 && r >= b + 30) d[i] = lerpC(c, "#6E6248", 0.72);
+  }
 }
 
 /** Darken the room to night and let each light pool its glow around it. */

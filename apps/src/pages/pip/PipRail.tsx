@@ -13,6 +13,8 @@ type PipRailProps = {
   house: boolean;
   /** The floor has the arcade cabinet. */
   arcade: boolean;
+  /** The floor is the reader's to decorate (a floor only visited is not). */
+  canDecorate: boolean;
   drawer: Drawer | null;
   finishPanel: FinishPanel | null;
   /** Garden plots ripe to pick. */
@@ -23,12 +25,21 @@ type PipRailProps = {
   stopDecorating: () => void;
   toggleFinish: (which: FinishPanel) => void;
   openArcade: () => void;
+  /** The rail is showing the ways to play with Pip. */
+  playing: boolean;
+  startPlaying: () => void;
+  stopPlaying: () => void;
+  /** Plays with Pip as a hand would: every way has a key, so none needs a pointer. */
+  playWith: (how: "pet" | "tickle" | "ball" | "toss" | "dance" | "bed") => void;
+  /** Pip's snacks, to give her one. */
+  openSnacks: () => void;
 };
 
 /**
  * The rail of tools under the house: the shop, Pip's things, the garden,
- * Decorate (and the arcade, on its floor). Decorating turns it into the
- * mode's own rail: wallpaper, flooring and Done.
+ * Play, Decorate (and the arcade, on its floor). Decorating turns it into the
+ * mode's own rail: wallpaper, flooring and Done. Play does the same: a key
+ * for each way of playing with Pip, which the hand can also do on Pip herself.
  */
 export const PipRail = ({
   railRef,
@@ -37,6 +48,7 @@ export const PipRail = ({
   floorName,
   house,
   arcade,
+  canDecorate,
   drawer,
   finishPanel,
   ripe,
@@ -45,9 +57,58 @@ export const PipRail = ({
   startDecorating,
   stopDecorating,
   toggleFinish,
-  openArcade
+  openArcade,
+  playing,
+  startPlaying,
+  stopPlaying,
+  playWith,
+  openSnacks
 }: PipRailProps) =>
-  decorating ? (
+  playing && !decorating ? (
+    <nav ref={railRef} className="pip-rail" aria-label="Playing with Pip">
+      <div className="pip-rail-belt pip-rail-decorate pip-rail-playing">
+        <p className="pip-rail-mode">
+          <UiIcon name="hand" size={20} />
+          <span>
+            <strong>Playing with Pip</strong>
+            <span className="pip-rail-mode-hint">Or use your hand: poke her, stroke her, pick her up by the leaf.</span>
+          </span>
+        </p>
+        <button type="button" className="pip-rail-key" onClick={() => playWith("pet")} title="Stroke Pip">
+          <UiIcon name="heart" size={20} />
+          <span className="pip-rail-label">Pet</span>
+        </button>
+        <button type="button" className="pip-rail-key" onClick={() => playWith("tickle")} title="Tickle Pip">
+          <UiIcon name="sparkle" size={20} />
+          <span className="pip-rail-label">Tickle</span>
+        </button>
+        <button type="button" className="pip-rail-key" onClick={() => playWith("toss")} title="Toss Pip into the air">
+          <UiIcon name="up" size={20} />
+          <span className="pip-rail-label">Toss</span>
+        </button>
+        <button type="button" className="pip-rail-key" onClick={() => playWith("ball")} title="Throw the ball for Pip to fetch">
+          <UiIcon name="goal" size={20} />
+          <span className="pip-rail-label">Ball</span>
+        </button>
+        <button type="button" className="pip-rail-key" onClick={() => playWith("dance")} title="Dance with Pip">
+          <UiIcon name="move" size={20} />
+          <span className="pip-rail-label">Dance</span>
+        </button>
+        <button type="button" className="pip-rail-key" onClick={() => playWith("bed")} title="Send Pip to bed, or get her up">
+          <UiIcon name="moon" size={20} />
+          <span className="pip-rail-label">Bed</span>
+        </button>
+        <button type="button" className="pip-rail-key" onClick={openSnacks} title="Give Pip a snack or a toy">
+          <UiIcon name="treat" size={20} />
+          <span className="pip-rail-label">Snack</span>
+        </button>
+        <button type="button" className="pip-rail-key pip-rail-done" onClick={stopPlaying}>
+          <UiIcon name="check" size={20} />
+          <span className="pip-rail-label">Done</span>
+        </button>
+      </div>
+    </nav>
+  ) : decorating ? (
     <nav ref={railRef} className="pip-rail" aria-label="Decorating">
       <div className="pip-rail-belt pip-rail-decorate">
         <p className="pip-rail-mode">
@@ -89,10 +150,16 @@ export const PipRail = ({
           <span className="pip-rail-label">Garden</span>
           {ripe > 0 && <span className="pip-hud-dot" aria-label={`${ripe} ripe`} />}
         </button>
-        <button ref={decorateRef} type="button" className="pip-rail-key" data-walk="decorate" onClick={startDecorating}>
-          <UiIcon name="decorate" size={22} />
-          <span className="pip-rail-label">Decorate</span>
+        <button type="button" className="pip-rail-key" data-walk="play" onClick={startPlaying}>
+          <UiIcon name="hand" size={22} />
+          <span className="pip-rail-label">Play</span>
         </button>
+        {canDecorate && (
+          <button ref={decorateRef} type="button" className="pip-rail-key" data-walk="decorate" onClick={startDecorating}>
+            <UiIcon name="decorate" size={22} />
+            <span className="pip-rail-label">Decorate</span>
+          </button>
+        )}
         {arcade && (
           <button type="button" className="pip-rail-key pip-rail-play" onClick={() => openArcade()}>
             <UiIcon name="game" size={22} />

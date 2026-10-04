@@ -43,3 +43,15 @@ export const LIFT_ARROW = 30;
  * just the floor it is on, and a list opens from it.
  */
 export const liftShowsAll = (floors: number, height: number) => floors * LIFT_STOP + LIFT_ARROW * 2 + 12 <= height;
+
+/**
+ * Where a pointer is in the room, in floor pixels: measured from the room's
+ * own box (not the stage it is centred in, which is wider by whatever the
+ * whole-pixel scale leaves over), at the scale the room is drawn at now. Null
+ * while the room has no size.
+ */
+export const floorPoint = (pointer: { clientX: number; clientY: number }, room: Pick<Rect, "left" | "top" | "width">, floorWidth: number) => {
+  if (room.width <= 0 || floorWidth <= 0) return null;
+  const scale = room.width / floorWidth;
+  return { x: (pointer.clientX - room.left) / scale, y: (pointer.clientY - room.top) / scale };
+};

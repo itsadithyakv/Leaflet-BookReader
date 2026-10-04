@@ -148,6 +148,8 @@ export declare const FLOORS: PipFinish[];
 export declare const HOUSE_ITEMS: PipRoomItem[];
 export declare const NOD_ITEMS: PipRoomItem[];
 export declare const ALL_ITEMS: PipRoomItem[];
+/** What a floor has that is not decor (the bedroom's mini fridge, shut and open): never in the shop or the layout. */
+export declare const FIXTURES: PipRoomItem[];
 export declare function placeAt(item: PipRoomItem, slot: { fits: string; x: number; y: number }): { x: number; y: number };
 export declare function renderLevel(
   levelId: string,

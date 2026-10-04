@@ -7,7 +7,11 @@ import { PLANTS, catalogueItem, type ShopKind } from "../../pip/shop";
  * panels live beside this file.
  */
 
-/** Below this Pip mopes (a droopy leaf, a sigh). Nothing more: no nagging. */
+/**
+ * Below this Pip mopes (a droopy leaf, a sigh). Nothing more: no nagging.
+ * The mood's drift stops at 40 (habit/seeds.rs `MOOD_DRIFT_FLOOR`), so time
+ * alone never brings her here: only a mood that was already this low.
+ */
 export const MOOD_LOW = 20;
 /**
  * Without the full house (FEATURES.fullPipHouse), the shop's decor is the
@@ -15,7 +19,7 @@ export const MOOD_LOW = 20;
  */
 export const STARTER_DECOR = new Set(ROOM_ITEMS.map((item) => item.id));
 
-export type Drawer = "things" | "garden" | "me";
+export type Drawer = "things" | "garden" | "me" | "mood";
 export type FinishPanel = "wallpaper" | "flooring";
 
 export const THANKS = ["ooh. thank you!", "for me? you shouldn't have.", "i love it."];
@@ -29,8 +33,8 @@ export const priceOf = (kind: ShopKind, id: string) => catalogueItem(kind, id)?.
 /** "a Cookie", "an Oak". */
 export const aOrAn = (name: string) => `${/^[aeiou]/i.test(name) ? "an" : "a"} ${name}`;
 
-export const moodWord = (mood: number) =>
-  mood >= 80 ? "Blissful" : mood >= 60 ? "Happy" : mood >= 40 ? "Content" : mood >= MOOD_LOW ? "Wistful" : "Missing you";
+/** The mood in a word (pip/mood.ts, which also says why). */
+export { moodWord } from "../../pip/mood";
 
 export const storage = () => {
   try {

@@ -1,0 +1,141 @@
+/* Pip alive in the house: turning to face the way she goes, being played
+   with, the ball, and the garden's sky. Beside index.css's Pip rules, which
+   place her and the room; these are what moves. */
+
+/* The turn to face the other way (from script): between the look-change spin
+   and the mirror flip, so each keeps its own transform. */
+.pip-house-pip-turn {
+  display: block;
+  transform-origin: 50% 50%;
+}
+
+/* The ball: placed from script like Pip, at the room's scale. Its button is a
+   little bigger than the ball; the sprite (a whole 32-pixel frame with the
+   ball in its middle) is centred on it. */
+.pip-house-ball {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  cursor: grab;
+  touch-action: none;
+  will-change: transform;
+}
+
+.pip-house-ball:active {
+  cursor: grabbing;
+}
+
+.pip-house-ball > .pip-sprite {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--ball-sprite) !important;
+  height: var(--ball-sprite) !important;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.pip-house-ball:focus-visible {
+  outline: 2px solid rgb(var(--color-primary));
+  outline-offset: 2px;
+}
+
+.pip-house-room[data-night] .pip-house-ball > .pip-sprite {
+  filter: brightness(0.72);
+}
+
+/* Pip's mood, explained (pages/pip/MoodPanel.tsx): the word and the hearts,
+   a meter, then the reasons as short lines with an arrow for which way each
+   pulls. */
+.pip-mood-now {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.pip-mood-meter {
+  overflow: hidden;
+  height: 8px;
+  margin-top: 8px;
+  border-radius: 2px;
+  background: rgb(var(--color-outline-variant) / 0.35);
+  box-shadow: 0 0 0 2px var(--hud-line);
+}
+
+.pip-mood-meter > span {
+  display: block;
+  height: 100%;
+  background: #e0567a;
+}
+
+.pip-mood-heading {
+  margin-top: 16px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: rgb(var(--color-on-surface-variant));
+}
+
+.pip-mood-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 0;
+  list-style: none;
+}
+
+.pip-mood-list li {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 13px;
+  line-height: 1.4;
+  color: rgb(var(--color-on-surface));
+}
+
+.pip-mood-list li > svg {
+  flex: none;
+  margin-top: 2px;
+  color: rgb(var(--color-on-surface-variant));
+}
+
+.pip-mood-list li[data-tone="up"] > svg {
+  color: #c2476a;
+}
+
+.pip-mood-text {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: rgb(var(--color-on-surface));
+}
+
+.pip-mood-rule {
+  margin-top: 16px;
+  padding-top: 10px;
+  border-top: 1px solid rgb(var(--color-outline-variant) / 0.4);
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgb(var(--color-on-surface-variant));
+}
+
+/* The garden's sky, behind the floor's picture: the glass wall is left clear
+   there (house.js, `sky: false`) and the sky shows through it. The floor's
+   canvas is lifted over it; everything else in the room is already above. */
+.pip-garden-sky {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+}
+
+.pip-house-canvas[data-open-sky] {
+  position: relative;
+}

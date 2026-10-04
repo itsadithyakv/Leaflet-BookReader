@@ -25,8 +25,10 @@ type PipHudProps = {
   hearts: number;
   /** Pip's mood as the hearts show it. */
   shownMood: number;
-  /** Seeds and mood: where seeds come from, and what cheers Pip up. */
+  /** Seeds: where they come from. */
   openMe: () => void;
+  /** Pip's mood: why it is what it is, and what would lift it. */
+  openMood: () => void;
   onGoalsFlight: PipGoalsProps["onFlight"];
   pinned: ReturnType<typeof usePinnedGoal>;
   artFor: (kind: ShopKind, id: string, size: number) => ReactNode;
@@ -52,6 +54,7 @@ export const PipHud = ({
   hearts,
   shownMood,
   openMe,
+  openMood,
   onGoalsFlight,
   pinned,
   artFor,
@@ -79,14 +82,14 @@ export const PipHud = ({
             <CountUp value={heldSeeds ?? spendable} duration={heldSeeds === null ? countMs : 700} />
           </span>
         </button>
-        {/* The hearts are Pip's mood: they open what cheers it up. */}
+        {/* The hearts are Pip's mood: they open why it is what it is. */}
         <button
           ref={heartsRef}
           type="button"
           className="pip-resource pip-resource-mood"
-          onClick={() => openMe()}
-          aria-label={`Pip's mood: ${hearts} of 5 hearts. ${moodWord(shownMood)}. What cheers Pip up`}
-          title={`Pip's mood: ${moodWord(shownMood)}`}
+          onClick={() => openMood()}
+          aria-label={`Pip's mood: ${hearts} of 5 hearts. ${moodWord(shownMood)}. Why, and what would lift it`}
+          title={`Pip's mood: ${moodWord(shownMood)}. Select to see why`}
         >
           <span className="pip-resource-label">Mood</span>
           <span className="pip-hearts">

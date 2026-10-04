@@ -11,9 +11,13 @@ export {
   HOUSE_ITEMS,
   NOD_ITEMS,
   ALL_ITEMS,
+  FIXTURES,
   placeAt,
   renderLevel,
   renderHouseItem,
   renderSwatch
 } from "./house.js";
 export { GAME_SPRITES, GAME_POSES, renderGameSprite } from "./games-art.js";
+// Pip's moves for life in the house (watching the pointer, being petted,
+// fetching the ball): registered into LIB as this loads, with the Pip tab.
+import "./house-moves.js";

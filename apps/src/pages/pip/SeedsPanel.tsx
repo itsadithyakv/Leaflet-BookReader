@@ -4,7 +4,6 @@ import { Hint, Hints } from "../../components/pip/shopParts";
 import { PipAvatar } from "../../components/community/PipAvatar";
 import { CountUp } from "../../components/community/CountUp";
 import { UiIcon } from "../../components/UiIcon";
-import { moodWord } from "./common";
 
 type SeedsPanelProps = {
   /** Seeds to spend now. */
@@ -17,8 +16,8 @@ type SeedsPanelProps = {
   ahead: number;
   /** Water poured into the garden, all told. */
   water: number | undefined;
-  /** Pip's mood as the hearts show it. */
-  mood: number;
+  /** Opens Pip's mood: why it is what it is. */
+  onMood: () => void;
   onWalk: () => void;
   /** Pip as a profile picture, for a reader with an account. */
   myAvatar: string;
@@ -27,8 +26,8 @@ type SeedsPanelProps = {
   onUseMyPip: () => Promise<void>;
 };
 
-/** Seeds and mood: the wallet, where its seeds came from, and what cheers Pip up. */
-export const SeedsPanel = ({ spendable, earned, spent, ahead, water, mood, onWalk, myAvatar, signedIn, avatarInUse, onUseMyPip }: SeedsPanelProps) => (
+/** Seeds: the wallet and where its seeds came from. (Pip's mood has a panel of its own.) */
+export const SeedsPanel = ({ spendable, earned, spent, ahead, water, onMood, onWalk, myAvatar, signedIn, avatarInUse, onUseMyPip }: SeedsPanelProps) => (
   <>
     <p className="flex items-center gap-2 font-headline text-4xl font-bold tabular-nums text-on-surface">
       <UiIcon name="seed" size={26} className="text-primary" />
@@ -91,18 +90,13 @@ export const SeedsPanel = ({ spendable, earned, spent, ahead, water, mood, onWal
         <dd>{Math.round(water ?? 0)}</dd>
       </dl>
     )}
-    <div className="section-rule mt-4 pt-3">
-      <p className="text-xs uppercase tracking-[0.2em] text-on-surface-variant">Mood: {moodWord(mood)}</p>
-      <Hints>
-        <Hint icon="heart" more="Reading sessions, treats and harvests cheer Pip up; so do games, a little each day.">
-          Reading and treats cheer Pip
-        </Hint>
-        <Hint icon="moon" more="Pip's mood drifts down slowly on days away, and only ever mopes.">
-          Drifts slowly when away
-        </Hint>
-      </Hints>
+    <div className="section-rule mt-4 flex flex-wrap gap-2 pt-3">
+      <button type="button" className="pip-key" onClick={() => onMood()}>
+        <UiIcon name="heart" size={15} />
+        Why Pip's mood is what it is
+      </button>
     </div>
-    <button type="button" className="pip-key mt-4" onClick={() => onWalk()}>
+    <button type="button" className="pip-key mt-3" onClick={() => onWalk()}>
       <UiIcon name="help" size={15} />
       Show me around again
     </button>

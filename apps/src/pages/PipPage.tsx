@@ -11,7 +11,9 @@ import { useLibraryStore } from "../store/libraryStore";
 import type { PipLook } from "../services/pipService";
 import type { WishView } from "../pip/wish";
 import { HouseScene, type HouseSceneHandle } from "../components/pip/HouseScene";
-import { capture, clearEffects, reducedMotion, type Captured } from "../components/pip/fx";
+import { bump, capture, centerOf, clearEffects, collect, floatText, reducedMotion, seedPixel, type Captured } from "../components/pip/fx";
+import { playSound } from "../pip/sound";
+import type { PlayKind } from "../pip/play";
 import { FloorSwitch } from "../components/pip/FloorSwitch";
 import { PipDrawer } from "../components/pip/PipDrawer";
 import { PipShop, type PreviewLook, type ShopEntry, type ShopRequest } from "../components/pip/PipShop";
@@ -25,7 +27,7 @@ import { Walkthrough } from "../components/pip/Walkthrough";
 import { WALK, markWalkSeen, walkSeen, type WalkStep, type WalkTarget } from "../components/pip/walkSteps";
 import { ArcadeOverlay } from "../components/pip/arcade/ArcadeOverlay";
 import type { GameId } from "../components/pip/arcade/games";
-import { MOOD_LOW, errorText, moodWord, pickOne, priceOf, storage, wait, type Drawer, type FinishPanel } from "./pip/common";
+import { MOOD_LOW, aOrAn, errorText, moodWord, pickOne, priceOf, storage, wait, type Drawer, type FinishPanel } from "./pip/common";
 import { usePipActs } from "./pip/usePipActs";
 import { usePipLook } from "./pip/usePipLook";
 import { purchaseFlow, useGrace, useStandIns } from "./pip/purchaseFlow";
@@ -44,10 +46,13 @@ import { PreviewBar } from "./pip/PreviewBar";
 import { PipRail } from "./pip/PipRail";
 import { GardenPanel } from "./pip/GardenPanel";
 import { SeedsPanel } from "./pip/SeedsPanel";
+import { MoodPanel } from "./pip/MoodPanel";
+import { explainMood } from "../pip/mood";
+import { GAMES } from "../components/pip/arcade/games";
+import { useHabitStore } from "../store/habitStore";
+import { getDateKey } from "../services/habitService";
 import { FinishSheet, SlotSheet } from "./pip/DecorSheets";
 
-/** Mirrors GAME_MOOD_PER_DAY in pip/mod.rs, for the arcade's note. */
-const GAME_MOOD_PER_DAY = 12;
 /** Between the room and the lift beside it; the lift is 44 wide (index.css keeps the two in step). */
 const LIFT_GAP = 8;
 
@@ -86,7 +91,8 @@ export type PipPageProps = {
  * ripe plants are picked for seeds (habit/seeds.rs). So this page is the other
  * half of focus mode, a reason to start the timer. It rewards and never
  * guilts: nothing withers, prices say how much reading they are, Pip's mood
- * drifts slowly and only ever mopes, and games cheer Pip up but pay nothing.
+ * drifts slowly and stops while she is still content, any reading cheers her
+ * up, and games cheer Pip up but pay nothing.
  *
  * This file puts the tab together; its parts are in pages/pip/: Pip's acts,
  * the look, the purchase flow, the house, decorating, the garden, what buying
@@ -94,7 +100,7 @@ export type PipPageProps = {
  * rail and the drawers.
  */
 export const PipPage = ({ showToast }: PipPageProps) => {
-  const { overview, load, buy, setLook, feed, plant, harvest, gamePlayed } = usePipWardrobeStore(
+  const { overview, load, buy, setLook, feed, plant, harvest, gamePlayed, played } = usePipWardrobeStore(
     useShallow((state) => ({
       overview: state.overview,
       load: state.load,
@@ -103,7 +109,8 @@ export const PipPage = ({ showToast }: PipPageProps) => {
       feed: state.feed,
       plant: state.plant,
       harvest: state.harvest,
-      gamePlayed: state.gamePlayed
+      gamePlayed: state.gamePlayed,
+      played: state.played
     }))
   );
   const { reaction, suspended, finishReaction, setOnStage, tour } = usePipStore(
@@ -116,10 +123,14 @@ export const PipPage = ({ showToast }: PipPageProps) => {
     }))
   );
   const books = useLibraryStore((state) => state.books);
+  // Today's reading, for the mood's reasons (read only: the streak engine owns it).
+  const habit = useHabitStore((state) => state.snapshot);
   const [drawer, setDrawer] = useState<Drawer | null>(null);
   // The tab of Pip's things last looked at, which it opens on again.
   const [thingsTab, setThingsTab] = useState<ThingsTabId>("looks");
   const [decorating, setDecorating] = useState(false);
+  // The rail is showing the ways to play with Pip.
+  const [playing, setPlaying] = useState(false);
   const [finishPanel, setFinishPanel] = useState<FinishPanel | null>(null);
   const [shopOpen, setShopOpen] = useState<ShopRequest | null>(null);
   // The spot being decorated when the shop was opened for it: a piece bought then goes there.
@@ -127,7 +138,13 @@ export const PipPage = ({ showToast }: PipPageProps) => {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [slotFocus, setSlotFocus] = useState<string | null>(null);
   const [pickerPlot, setPickerPlot] = useState<number | null>(null);
+  // The arcade's games, open; and the game a machine opened it at, if one did.
   const [arcadeOpen, setArcadeOpen] = useState(false);
+  const [arcadeGame, setArcadeGame] = useState<GameId | null>(null);
+  const openArcade = (game: GameId | null = null) => {
+    setArcadeGame(game);
+    setArcadeOpen(true);
+  };
   const [busy, setBusy] = useState(false);
   const [walking, setWalking] = useState(false);
   // What a quick purchase shows before it is made (purchaseFlow.ts).
@@ -192,8 +209,9 @@ export const PipPage = ({ showToast }: PipPageProps) => {
   const layout = useMemo(() => state?.room ?? {}, [state?.room]);
   const owns = useCallback((kind: ShopKind, id: string) => ownsItem(overview, kind, id), [overview]);
   const sessionsDone = overview?.sessionsDone ?? 0;
+  const ripe = overview?.garden.plants.filter((entry) => entry.ripe && !entry.harvested).length ?? 0;
 
-  const { act, line, play, duringAct, onActDone, pastime, poke } = usePipActs({ reaction, suspended, finishReaction, overview, mood, signature, actTimers, setHeldMood });
+  const { act, line, play, duringAct, onActDone, repertoire, poke } = usePipActs({ reaction, suspended, finishReaction, overview, signature, actTimers, setHeldMood });
 
   const { skin, wearing, withAccessory, wearAccessory, shownVariant, shownOutfit, artFor } = usePipLook({
     variant,
@@ -230,7 +248,7 @@ export const PipPage = ({ showToast }: PipPageProps) => {
 
   // ---- the house, decorating and the garden ------------------------------------------------
 
-  const { levels, level, levelIndex, levelRef, gardenLevel, unlocked, goToFloor, house, roomItemById, homeOf, placeable, decor, shownDecor, lockReason, openFloor } =
+  const { levels, level, levelIndex, levelRef, gardenLevel, unlocked, visiting, goToFloor, house, roomItemById, homeOf, placeable, decor, shownDecor, lockReason, openFloor } =
     usePipHouse({
       owns,
       layout,
@@ -391,6 +409,39 @@ export const PipPage = ({ showToast }: PipPageProps) => {
     play("cheer", 1, "that was fun. back to the books?");
   };
 
+  // ---- playing with Pip ------------------------------------------------------------------------
+
+  /**
+   * A bout of play that counted (the scene says so: stroked a while, the ball
+   * brought back): Rust cheers Pip up a little, out of the day's allowance it
+   * shares with the games, and a heart flies from her to the meter for it.
+   */
+  const onPlayed = useCallback(
+    async (kind: PlayKind) => {
+      const gained = await played(kind);
+      const head = sceneRef.current?.pipPoint("head");
+      const meter = heartsRef.current?.getBoundingClientRect();
+      if (gained <= 0 || !head) return;
+      floatText({ x: head.x, y: head.y - 14 }, `+${Math.round(gained)}`, "mood");
+      playSound("chime", { pitch: 1.3, volume: 0.5 });
+      if (!meter || reducedMotion()) return;
+      void collect(head, centerOf(meter), { sprite: "heart", count: 1, px: seedPixel(sceneRef.current?.pixel() ?? 4), onLand: () => bump(heartsRef.current, 0.6) });
+    },
+    [played]
+  );
+
+  /** A dance together: a move she owns if she has one, a little bop if not. Counts as play. */
+  const danceWithPip = () => {
+    const move = repertoire.dances.length > 0 ? pickOne([...repertoire.dances]) : "bop";
+    play(move, move === "bop" ? 3 : 4, pickOne(["dance with me!", "this is my song.", "one, two, three!"]));
+    void onPlayed("dance");
+  };
+
+  const playWith = (how: "pet" | "tickle" | "ball" | "toss" | "dance" | "bed") => {
+    if (how === "dance") danceWithPip();
+    else sceneRef.current?.playWith(how);
+  };
+
   // ---- the profile picture, the shop, the goal and Pip's things ------------------------------
 
   const { myAvatar, signedIn, avatarInUse, useMyPip } = useProfilePicture({ variant, signature, outfit, play, showToast });
@@ -454,6 +505,7 @@ export const PipPage = ({ showToast }: PipPageProps) => {
     closeShop();
     setPickerPlot(null);
     setPreview(null);
+    setPlaying(false);
     setWalking(true);
   };
 
@@ -479,6 +531,35 @@ export const PipPage = ({ showToast }: PipPageProps) => {
     if (step.target !== "plot" || !gardenLevel || levelRef.current.id === gardenLevel.id) return;
     goToFloor(gardenLevel);
     await wait(reducedMotion() ? 80 : 520);
+  };
+
+  // ---- the mood, explained ---------------------------------------------------------------------
+
+  /** Why Pip feels as she does: Rust's numbers, in words (pip/mood.ts). Worked out when its panel opens. */
+  const moodReport = () => {
+    const today = getDateKey();
+    const upper = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+    const treatName = (id: string) => upper(aOrAn(treats().find((treat) => treat.id === id)?.name ?? "treat"));
+    // The snack that cheers her most among those the reader can pay for now.
+    const snack = treats()
+      .filter((treat) => treat.kind === "food" && priceOf("treat", treat.id) <= spendable)
+      .sort((a, b) => b.mood - a.mood)[0];
+    return explainMood({
+      mood: shownMood,
+      moodUpdatedAt: state?.moodUpdatedAt ?? new Date().toISOString(),
+      now: Date.now(),
+      rules: overview?.moodRules ?? { driftPerDay: 0, driftFloor: 0, perReadingMinute: 0, readingPerDay: 0, perSession: 0, perHarvest: 0, perGame: 0, perPlay: 0, playPerDay: 0, perWish: 0, start: 70 },
+      log: overview?.moodLog ?? [],
+      playToday: overview?.arcade.day === today ? overview.arcade.moodToday : 0,
+      readingToday: overview?.readingMood.days[today] ?? 0,
+      sessionsToday: habit.sessions.filter((session) => session.dateKey === today && session.minutes >= 1).length,
+      minutesToday: habit.todayMinutes,
+      wish: overview?.wish ? { granted: overview.wish.granted, mood: overview.wish.mood } : null,
+      ripe,
+      snack: snack ? { name: aOrAn(snack.name), price: priceOf("treat", snack.id), mood: snack.mood } : null,
+      treatName,
+      gameName: (id) => GAMES.find((game) => game.id === id)?.name ?? "the arcade"
+    });
   };
 
   // ---- the drawers ------------------------------------------------------------------------------
@@ -565,7 +646,7 @@ export const PipPage = ({ showToast }: PipPageProps) => {
         : drawer === "me"
           ? {
               key: "me",
-              title: "Seeds and mood",
+              title: "Seeds",
               body: (
                 <SeedsPanel
                   spendable={spendable}
@@ -573,7 +654,7 @@ export const PipPage = ({ showToast }: PipPageProps) => {
                   spent={overview?.wallet.spent}
                   ahead={standIns.ahead}
                   water={garden?.water}
-                  mood={shownMood}
+                  onMood={() => setDrawer("mood")}
                   onWalk={startWalk}
                   myAvatar={myAvatar}
                   signedIn={signedIn}
@@ -583,11 +664,30 @@ export const PipPage = ({ showToast }: PipPageProps) => {
               ),
               close: () => setDrawer(null)
             }
-          : null;
+          : drawer === "mood"
+            ? {
+                key: "mood",
+                title: "Pip's mood",
+                note: "Why it is what it is, and what would lift it.",
+                body: (
+                  <MoodPanel
+                    report={moodReport()}
+                    hearts={hearts}
+                    onPlay={() => {
+                      setDrawer(null);
+                      setPlaying(true);
+                    }}
+                    onSnacks={() => {
+                      setThingsTab("treats");
+                      setDrawer("things");
+                    }}
+                  />
+                ),
+                close: () => setDrawer(null)
+              }
+            : null;
 
   // ---- the page -----------------------------------------------------------------------------------
-
-  const ripe = garden?.plants.filter((entry) => entry.ripe && !entry.harvested).length ?? 0;
 
   const heartRefs = useResourceBumps({ loaded, spendable, heldSeeds, seedChipRef, hearts });
 
@@ -630,6 +730,7 @@ export const PipPage = ({ showToast }: PipPageProps) => {
           hearts={hearts}
           shownMood={shownMood}
           openMe={() => openDrawer("me")}
+          openMood={() => openDrawer("mood")}
           onGoalsFlight={(phase, seeds) => {
             if (phase === "start") {
               setHeldSeeds((held) => held ?? Math.max(0, spendable - seeds));
@@ -666,9 +767,13 @@ export const PipPage = ({ showToast }: PipPageProps) => {
             act={act}
             onActDone={onActDone}
             line={line}
-            pastime={pastime}
+            repertoire={repertoire}
+            mood={mood}
             mopey={mood < MOOD_LOW}
             onPoke={poke}
+            onPlayed={onPlayed}
+            ownBall={owns("treat", "ball")}
+            attentive={walking}
             decorating={decorating}
             selectedSlot={slotFocus}
             onSlot={(target) => {
@@ -676,7 +781,8 @@ export const PipPage = ({ showToast }: PipPageProps) => {
               setSlotFocus(target.id);
             }}
             slotLabel={slotLabel}
-            onArcade={() => setArcadeOpen(true)}
+            onArcade={openArcade}
+            onJukebox={danceWithPip}
             hidePip={arcadeOpen}
             plots={plots}
             onPlot={level.garden ? onPlot : undefined}
@@ -714,6 +820,7 @@ export const PipPage = ({ showToast }: PipPageProps) => {
           floorName={level.name}
           house={house}
           arcade={level.arcade}
+          canDecorate={!visiting(level)}
           drawer={drawer}
           finishPanel={finishPanel}
           ripe={ripe}
@@ -722,7 +829,21 @@ export const PipPage = ({ showToast }: PipPageProps) => {
           startDecorating={startDecorating}
           stopDecorating={stopDecorating}
           toggleFinish={toggleFinish}
-          openArcade={() => setArcadeOpen(true)}
+          openArcade={() => openArcade()}
+          playing={playing}
+          startPlaying={() => {
+            setDrawer(null);
+            setPickerPlot(null);
+            setPlaying(true);
+          }}
+          stopPlaying={() => setPlaying(false)}
+          playWith={playWith}
+          openSnacks={() => {
+            setThingsTab("treats");
+            setDrawer("things");
+            // Where there is a fridge she is off to it, and has it open by the time a snack is chosen.
+            sceneRef.current?.playWith("snack");
+          }}
         />
 
         {sheet && (
@@ -763,11 +884,12 @@ export const PipPage = ({ showToast }: PipPageProps) => {
 
       {arcadeOpen && (
         <ArcadeOverlay
+          initial={arcadeGame}
           skin={variant}
           outfit={outfit}
           best={overview?.arcade.best ?? {}}
           moodToday={overview?.arcade.moodToday ?? 0}
-          moodCap={GAME_MOOD_PER_DAY}
+          moodCap={overview?.moodRules.playPerDay ?? 12}
           onFinished={onGameFinished}
           onClose={closeArcade}
         />
