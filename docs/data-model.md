@@ -50,6 +50,11 @@ drift from the minutes that earned it.
 `notes`, `ended_reason` (`completed` | `manual_end`), `clean`, `style_seed`,
 `burned_at`, `flower`, `flower_bloomed`.
 
+Reading outside a focus session has no row here. It is not stored at all:
+`habit::free_reads` derives it from `reading_days` and this table (a day's
+ledger minutes less its sessions'; a session takes from its end day, then its
+start day) and the habit snapshot carries it as `freeReads`.
+
 `style_seed` replaces a persisted decoration blob — the shelf's appearance is
 derived deterministically from the seed at render time. `burned_at` tombstones a
 session when a streak breaks, rather than deleting it.
@@ -91,6 +96,30 @@ Bookmarks and highlights: `id`, `book_id`, `kind` (`bookmark` or `highlight`),
 `cfi` (a range for a highlight), `text`, `note`, `color`, `chapter`,
 `created_at`, `updated_at`, `deleted_at` (tombstone).
 
+Character sheets are rows here too, under six kinds of their own, so they are
+in the backup and merge row by row with no rule of their own (and a build that
+does not know the kinds carries them untouched): `person`, `person.alias`,
+`person.note`, `person.member` (the group from a place on), `person.link`,
+`person.group` (a group's colour; its id is `people-group:<book>:<name>`, so
+two devices make one). In these rows `cfi` and `chapter` are the place the
+entry was written at (`cfi` is empty for an entry with no exact place), `note`
+holds the reader's words (the name, the note, the link's label, the group),
+`color` a group's colour, and `text` a small JSON object: `p` (fraction of the
+book, 0..1), `who` (the person it is about), for a link `to`, `type` (`child`,
+`spouse`, `sibling`, `kin`, `serves`, `ward`, `friend`, `enemy`, `killedBy`,
+`other`) and `end` (`{p, cfi, chapter}`, where it stopped being true), `main`
+and `x` flags, `from` (the book it was carried from).
+`readers/people/rows.ts` is the only code that knows this shape.
+
+They are written only through `people_save` / `people_delete`
+(`commands/people.rs`), which accept only those kinds, refuse an id that
+belongs to a highlight or bookmark, require `text` to be a JSON object under
+2,000 bytes (never clipped) with `p` in 0..1, clip `note` at 4,000 characters,
+and write a batch all or nothing. Every reader of annotations filters by kind,
+so highlights, bookmarks and their counts never see these rows. Removing a
+book from the library leaves its sheet rows, as it leaves its highlights;
+Delete All Data takes them.
+
 ### `reading_sessions`
 
 `UNIQUE(book_id, date_key)`, written as a side effect of `update_progress`.
@@ -101,7 +130,10 @@ Predates the habit ledger and carries no duration; the ledger is the real record
 A key/value table. Holds the habit goal and streak state (as JSON), the sync
 folder path, the last sync time, the Drive access token and expiry, the Drive
 account email, a Drive OAuth client if the reader supplied one, and the reading
-pace profile (`reading_profile`, JSON; see the sync document below).
+pace profile (`reading_profile`, JSON; see the sync document below), and the
+book copies folder (`library_copy_enabled`, `library_copy_folder`,
+`library_copy_index`, `library_copy_problem`), which is this device's alone:
+never in the sync document or the backup.
 
 The Drive **refresh** token is not here — it goes to the OS keychain, with this
 table as the fallback where no keychain exists.
@@ -163,7 +195,7 @@ Defined in `sync/merge.rs`. This is what crosses between devices — as
   "plantings": [ /* Pip's garden: what was planted where */ ],
   "harvests": [ /* ...and what was picked */ ],
   "pip":      { /* Pip's look, room and mood */ },
-  "annotations": [ /* bookmarks and highlights, with tombstones */ ],
+  "annotations": [ /* bookmarks, highlights and character sheets, with tombstones */ ],
   "collections": [ /* the reader's collections, with tombstones */ ],
   "readingProfile": {           // optional: left out until there is one
     "version": 2,

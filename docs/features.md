@@ -15,7 +15,48 @@ Books are picked through the dialog plugin, hashed, copied into
 chunks, and both hashing and import run on `spawn_blocking` so a large file does
 not block the UI thread.
 
-Re-importing the same file is a no-op: the hash is the primary key.
+Re-importing the same file is a no-op: the hash is the primary key. The one
+exception: a book the library lists but has no file for (restored from a
+backup, never downloaded) takes its bytes from the file being opened.
+
+Reading never depends on the original file, for any format: `local_path` is the
+library's own copy, and a Calibre format is converted from that copy.
+
+An empty file or a folder is refused in plain words (an empty file used to
+import as a book that would not open, and every later empty file was "that
+book"). Two imports of one file at once are taken in turn, a staging file left
+by an interrupted import no longer blocks the book, and a book fetched from
+the sync folder is staged and renamed like any other, so an interrupted copy
+is never taken for the book.
+
+**Delete All Data** (Settings, About) removes the library, covers, history and
+settings, vacuums the database (deleted rows used to stay readable in the
+file), removes the copies of the database made before upgrades
+(`library.db.bak-v*`), forgets what the webview kept about each book (its
+place, bookmarks and reader settings: `services/deviceData.ts`) and signs the
+device out. It keeps the signed server address. Left as they are: a Drive
+backup, a sync folder's contents, the book copies folder, the Leaflet account
+on the server, Calibre, `logs/` and any `library.db.broken-*` set aside by a
+failed start. "Confirm Delete" disarms after eight seconds.
+
+**Book copies** (Settings, off by default; `storage/library_copy.rs`,
+`commands/library_copy.rs`, `components/LibraryCopyCard.tsx`). Each book added
+to the library, by any route, is also saved as `Title - Author.ext` in a folder
+the reader chooses, and "Copy My Library There Now" does the same for the
+books already there. It is a second copy with a name a person can read, for
+other apps and for peace of mind. Names are made safe for Windows, a file is
+never overwritten (the same book, by hash, counts as already there; a different
+one with the same name gets `(2)`), and Leaflet never deletes a copy. Copies
+are made in the background after the import, so a missing folder or an
+unplugged drive never blocks importing or reading; the card shows what went
+wrong. A book already in the folder under any name (the same contents)
+counts as already there, so picking the folder the books came from does not
+double them; names shrink in a deep folder so the whole path stays within 259
+characters; a run stops between books if copies are switched off or the folder
+changes; a book removed before its copy is made is skipped. The folder is a setting of this device (`library_copy_*` in the
+`settings` table) and is never in the sync document or the backup. Folders
+under AppData are refused: Windows redirects a packaged app's writes there
+into the package.
 
 **Metadata enrichment** (`metadata/`) fills in missing title, author, genres and
 cover from **Open Library**, falling back to **Wikipedia**. Titles are normalised
@@ -107,6 +148,16 @@ locations first, so a user who already has it is not asked to download a second
 copy; on Windows it can fetch a portable build if asked, and removes the
 installer afterwards.
 
+**In Settings** (`components/ConverterCard.tsx`) the card always offers
+something to do when Calibre is missing: **Get Calibre** opens
+calibre-ebook.com/download in the browser, and **Check Again** looks for it
+(as does coming back to the window), so installing it needs no restart. Windows
+builds from outside the Store also keep **Install It for Me**, the in-app
+portable install; the Store build cannot download and run an installer, and
+used to show no action at all. The prompt on opening a book that needs
+Calibre follows the same rule: "Download & install" only where the build may
+install it, "Get Calibre" elsewhere.
+
 **It is compiled out of mobile builds entirely** — there is no Calibre for
 Android, and the download-and-unpack path cannot run there. The Settings card and
 the open-book prompt both say so rather than offering a dead-end install. A
@@ -131,7 +182,62 @@ in through `rendition.getContents()` rather than the parent document.
 
 The reader's helpers live beside it in `src/readers/`: progress
 (`progress.ts`), the table of contents, page colours, ink images, auto-scroll
-and pacing, the notes panel, search and the selection bar.
+and pacing, page turns (`pageTurn.ts`), the notes panel, search and the
+selection bar.
+
+**Scrolling is one continuous book** (epub.js's `continuous` manager, flow
+`scrolled`). The chapters follow each other down the page: the next one is
+fetched as its neighbour's end comes within 500 px, the one before as its top
+does, and chapters left far behind are let go (their place is kept until
+trimmed, and the scroll position is corrected so the text never moves). It
+used to be a chapter at a time, swapped for the next the moment its last line
+reached the bottom of the window, before that line had been read. The chapter
+list, the dock's arrows and Left/Right now jump within the one scroll, like
+bookmarks; Down at the end just fetches more. What this needs:
+
+- **Words are found again by identity.** Smart Read, a pinned Dotty and the
+  pace trackers number the words on the page, and those numbers change
+  whenever a chapter loads or leaves above. `prepareReaderWords` finds the word
+  being read again by its text node, not by proportion; `readerWordsStale`
+  notices when a chapter has gone; the free-reading tracker counts within a
+  chapter (`sectionSpan`).
+- **A place is resolved in its own chapter** (`contentsForCfi`): asked of the
+  wrong chapter, a CFI lands on an unrelated line rather than nowhere.
+- **epub.js is told where the page is** before it decides what to fetch (its
+  `check` is wrapped): it reads a scroll position remembered from the last
+  scroll event, a frame late, and just after a chapter loaded in above it
+  fetched the one before that too.
+- **The opening size is not re-sent.** epub.js measures the scrolling layout a
+  scrollbar narrower than the viewer; telling it the viewer's size again made
+  it clear the page before any place was known to restore, and the book
+  opened blank.
+- `overflow-anchor: none` on the scroller: epub.js corrects the scroll
+  position itself, and the browser doing so too would move the text twice.
+- **A chapter is measured again once it is dressed.** epub.js sizes a
+  chapter's frame before the theme and the reader's stylesheet go in, and they
+  make it two to three times as long; it then went to the place asked for
+  before measuring again. A saved place, bookmark, highlight or search result
+  deep in a chapter opened at the wrong line (and that wrong line was saved
+  back), or on a blank page. The content hook now ends with `view.expand()`,
+  and the line-length easing applies only once a chapter has settled
+  (`data-leaflet-settled`), so chapters do not reflow for a quarter of a
+  second after the place has been gone to.
+- **What leaves with a chapter**: a `MutationObserver` on the scroller lets a
+  text selection go with the chapter it was in (the bar used to stay, holding
+  hands-free reading), and tucks Dotty away when the chapters under it have
+  left (it used to hold thousands of pixels of blank page open below a short
+  chapter).
+- Sections marked `linear="no"` (a cover, often) lead on to the reading order
+  around them; epub.js gives them no next or previous, which made them dead
+  ends.
+- After a resize, when epub.js draws the chapters afresh, the word being read
+  is found by its place in its chapter (`readers/wordPlace.ts`).
+
+**Links, not anchors, take the accent.** On a dark page links are coloured by
+`a:any-link`. It used to be every `a`: books mark page breaks with empty
+anchors (`<a id="page12"/>`), epub.js parses `.html` chapters as HTML, where
+such an anchor never closes, and the browser then wraps the rest of the
+paragraph in it. Every paragraph holding a page break came out green.
 
 **Progress** is by how much of the book is behind the reader: each section
 weighs its size in the EPUB (Rust reads the sizes from the archive's directory,
@@ -146,16 +252,242 @@ keys, Page Up/Down and Space turn pages; the dock's arrows become previous and
 next page. Auto-scroll, Smart Read, SpeedRead and Dotty are built on scrolling,
 so they are off with pages.
 
+**Turning a page** (`turnPage`, `readers/pageTurn.ts`). The page to turn to is
+counted from the chapter's columns, and the turn goes to that page's exact
+place. epub.js's own `next` adds a page's width to wherever the scroll position
+is and first asks whether a whole further page fits; on a display scaled to
+125% or 150% the position drifts a fraction of a pixel a turn, the test fails a
+page early, and the last page of a chapter was skipped. Within a chapter the
+page slides across (280 ms, eased; the place is reported once it has arrived);
+into another chapter the new page comes in from the side it was turned from
+(`data-turn` on the viewer). A turn made mid-slide starts from where that one
+was going. Neither animates under `prefers-reduced-motion`.
+
+Confirmed in the preview at 150% scaling with a page 647 px wide: epub.js's
+own `next` skipped the last page of all six chapters tried, the position
+having drifted 6 px after 24 turns; with an even page width it did not, which
+is why it was only "sometimes". The same walks through `turnPage` (window and
+in-book key presses, Page Down, Space, the dock) showed every page once. A
+held key turns a page every 150 ms (`keyTurns`), as the page reader does: it
+used to turn one on every repeat, about thirty a second, so a press held a
+moment too long turned two. Turns made while another chapter is loading are
+dropped, a slide stops if its chapter is swapped under it, and `+` / `-` do
+nothing with pages.
+
 **Search** (the magnifier, or Ctrl+F): every section in reading order, loaded,
 searched with epub.js's `find` and unloaded, one at a time. Results arrive
 section by section under their chapter; choosing one jumps there and marks
 the words for a few seconds. `readers/searchBook.ts`, `readers/SearchPanel.tsx`.
 
+**Openings.** A book's drop caps, raised initials and opening small capitals
+are kept (`readers/dropCaps.ts`): found from the publisher's own styles before
+the reader's stylesheet goes in (an inline element of one to three characters
+at the start of a paragraph that is 1.4 times its paragraph or more, floated,
+or named for it), marked (`data-leaflet-dropcap`, `data-leaflet-smallcaps`),
+left out of the one-size and one-spacing rules, and sized as a multiple of the
+reading size. `::first-letter` caps were never affected. A cap and the rest of
+its word are one word to Smart Read and SpeedRead (`isInlineJoin`).
+
+**Time left.** The chapter dock (`readers/ChapterDock.tsx`) shows the
+percentage, and under the pointer, with focus or when the percentage is
+pressed, the time left in the chapter and the book at the reader's pace for
+this book (`readers/timeLeft.ts`): words counted in the chapters on the page,
+the rest estimated from section sizes (the words-per-byte ratio is remembered
+per book in `leaflet.reader.<id>`); rounded in spoken steps and held steady as
+chapters load; silent until there is a pace. Section sizes fall back to
+epub.js's own copy of the archive directory (`readers/archiveSections.ts`)
+when the backend gives none, as in the browser preview.
+
+**Back.** After a jump (a link, the chapter list, next/previous chapter, a
+search result, a bookmark or highlight, the progress bar) the dock offers Back,
+and Forward after it (Alt+Left / Alt+Right; `readers/jumpHistory.ts`, 20
+places, this visit only). Scrolling and page turns add nothing. The place kept
+is the first line clear of the toolbar (`readers/readingPlace.ts`). In-book
+links go through the reader's own jump, not epub.js's handler. With pages, a
+place is shown on the page holding its first word (`settleOnPage`): a place at
+a page that starts mid-paragraph used to come back one page early.
+
+**Footnotes.** A note reference shows its note in a popup above the chapter
+dock instead of leaving the page (`readers/footnotes.ts`, `NotePopover.tsx`):
+marked references (`noteref`, `doc-noteref`), links to marked notes, and
+unmarked superscript or bracketed numbers that lead to the start of a small
+block (1,500 characters or fewer). The note is read from its chapter (through
+epub.js when it is in another file) as plain text with italics and bold; the
+book's HTML is never put in the app. Long notes are cut at 700 characters;
+**Go to note** jumps, and Back returns. Backlinks and every other link stay
+jumps. The popup shares the selection bar's dock, and counts as an
+interruption to hands-free reading.
+
+**Pictures.** A click on a picture opens it large (`readers/ImageViewer.tsx`,
+geometry in `imageZoom.ts`): fitted, zoomed with the wheel about the pointer,
+a pinch or + and -, dragged or moved with the arrows, closed with Escape or a
+click beside it, always as drawn. Ornaments under 48 px and pictures that are
+links do not open. The viewer holds "Show as drawn" / "Blend with page" for
+ink pictures (it used to be the click itself), applied to every copy of that
+picture on the page.
+
+**The progress bar** (`readers/ProgressBar.tsx`, `seek.ts`) runs along the
+bottom edge and shows with the chapter dock. Dragging names the chapter and
+percentage under the handle; letting go goes there by the section weights.
+Arrows move 1%, Page Up/Down 10%, Home/End the ends; a burst of keys is one
+jump. It is a jump: Back returns. The dock's percentage comes from the reading
+line and the same weights, so the handle sits where the jump went.
+
+**Keys.** `?` (or ··· → Keyboard shortcuts) shows the reader's keys for the
+layout and mode in use (`readers/ShortcutsSheet.tsx`). The sheet and the key
+handler read one table (`readers/readerKeys.ts`), so they cannot disagree. B
+or Ctrl+D bookmarks the line under the toolbar. Space and Enter press a button
+the keyboard is on, and arrows move a focused slider; a button only clicked
+with the mouse leaves Space to reading.
+
+**Escape** closes the nearest thing (`readers/escapeOrder.ts`, with tests): a
+picture, the shortcuts sheet, the start dialog, the walkthrough, a held
+progress-bar handle, a character's card, the look-up card, a footnote, search,
+the type panel, the notes, the ··· menu, the characters panel, the chapter
+list; then lets a selection go; then leaves SpeedRead or stops auto-scroll /
+pauses Smart Read; and only then leaves the book. One press, one thing; a held
+key stops at the first.
+
+**Outside the story.** Front matter and back matter do not move progress or
+the saved place unless that is where the reading is (the very start; after the
+end) (`outsideStory` in `readers/progress.ts`). Opening the map from chapter
+20 used to save 0%.
+
+**The place saved** is the reading line, the first line clear of the toolbar
+(`readers/readingPlace.ts`), so open, close, open lands on the same line; it
+used to creep back about 70 px each time. A type change keeps that same line
+(it used to drift about 47 px over ten changes). With pages a restored place
+is shown on the page holding its first word.
+
 **Highlights, notes and bookmarks.** Selecting text offers four highlight
-colours, a highlight with a note, or copy (`readers/SelectionBar.tsx`).
+colours, a highlight with a note, or copy (`readers/SelectionBar.tsx`). The bar
+sits above the chapter dock, and above auto-scroll's or Smart Read's controls
+when they are showing: it used to sit in exactly their place, underneath them,
+so in Smart Read (which most books open in) a selection could not be
+highlighted. A selection let go by clicking elsewhere in the text takes the bar
+with it (`selectionchange` in the book's documents).
 Highlights are drawn by epub.js's annotation layer and open their note when
 tapped. The notes panel (the bookmark icon) lists bookmarks and highlights in
-reading order and copies every highlight and note as Markdown. They are kept in
+reading order, opens or removes each, and copies every highlight and note as
+Markdown; a toast says where a new highlight went.
+
+**Look up** (the book-with-a-letter button on the selection bar). A selected
+word or short phrase (six words, 80 characters; a longer selection is refused
+before anything is sent) is looked up in one call, `lookup_term`: its meaning
+from Wiktionary and a short summary from Wikipedia, both at once, 7 seconds
+each. It goes through Rust (`src-tauri/src/lookup/`) because the release
+build's Content-Security-Policy keeps the webview off the internet. Only the
+English Wiktionary answers the definitions API, so meanings come from there,
+from the section for the book's language or else English; the summary comes
+from the Wikipedia in the book's language, then the English one. A word is
+tried as selected, lower-cased, without a possessive and without a plural
+ending, and a form ("houses", "ran") is followed one hop so its root's meaning
+shows too. Definitions arrive as HTML and leave Rust as plain text. A name, a
+capitalised word or a phrase leads with the summary, a plain word with its
+meaning (so a capitalised common word at the start of a sentence gets the
+name's entry: lower-casing first would break "German" and "Polish"). A
+disambiguation page is reported as ambiguous with a link. Finding nothing is
+an answer (with "Search the web"); an error means neither source could be
+asked, and one source failing does not hide the other. The card
+(`readers/LookupCard.tsx`, `readers/lookupPlacement.ts`) is a dialog above the
+selection bar, in the bar's own dock (beside it, **Search in this book** opens
+search on the selected words), a fixed height so nothing jumps when the answer arrives, kept
+off the selected words where there is room; Escape or a click elsewhere closes
+it. Answers are cached in memory for the session. What is sent is the selected
+words and nothing else; the card says so the first time it is used on a
+device, and behind its "i" after that. Every call Leaflet makes to Wikipedia,
+Wiktionary and Open Library names the app (`src-tauri/src/http.rs`), as their
+API policy asks; the cover look-ups used to send no name.
+
+**Highlights outside the reader** (`components/highlights/`). The Library's
+**Highlights** button lists every book that has highlights, with a count
+(`annotations_highlight_counts`), and a book's menu has a **Highlights** item
+for that book alone. A book's highlights are shown in reading order under their
+chapters, each with its colour, full text, note and date, and a second tab
+lists its bookmarks. **Open in book** opens the book at that place (the
+reader's `openAt`; the next ordinary open resumes where the reading stopped),
+**Copy** copies one, **Copy all as Markdown** the lot, and **Remove** deletes
+one at once, with Undo. PDFs and comics cannot be highlighted and have no item.
+A highlight whose place cannot be read (one damaged CFI used to scramble the
+order of all the rest) is listed last, oldest first; chapter labels are
+compared with their whitespace collapsed, here and in the Markdown export,
+which also escapes a highlighted line that starts like a heading, a list item,
+a quote or a rule. A book opened at a highlight is a look for its first two
+minutes (`readers/openAt.ts`): the saved place and the progress do not move,
+so the next ordinary open resumes where the reading stopped. Search results,
+bookmarks and highlights open 80 px down, clear of the toolbar, and one mark
+is drawn per place (`readers/highlightDraws.ts`): two highlights of exactly
+the same words used to leave a mark that could not be removed.
+
+**Characters** (`readers/people/`, off until switched on in Settings,
+Reading; `leaflet.reader.characters`). Keeps track of who is who without
+spoiling: everything the reader writes about a person (a name, a note, a
+group, a tie to someone else) is stamped with the place in the book it was
+written at, and a card only ever shows what is stamped at or before the place
+being read (`model.ts`, `castAt`). Later notes are counted ("2 later notes
+hidden", shown only if asked for); later people, names, ties and endings are
+neither shown nor counted, bar "N more later in the book". Places in this
+edition are compared by CFI, which is exact; an entry without one (imported,
+or from an earlier book) by its fraction of the book. "Here" is the foot of
+the screen; what is written is stamped at the name asked about, or the top of
+the screen.
+
+Select a name and press **Who is this?** on the selection bar. For a name not
+on the sheet the card shows the book's own answer, spoiler-free by
+construction (`mentions.ts`, `bookText.ts`): where it first appeared, how often
+since, and its last mentions before this place, each a jump (through the
+reader's own jump, so Back returns); chapters are read from the file one at a
+time, never past the current one, and in the current one nothing after the
+place, not even the tail of a line. One line typed there ("Son of Ned, the
+bastard boy", Enter) makes the character. A line that names someone already
+met suggests a tie ("child of Ned Stark"), added with one tap, never by itself
+(`relations.ts`).
+
+Names learned so far are marked in the text with a dotted underline and open
+their card on a plain click (`marks.ts`). The book's DOM is not touched (Smart
+Read numbers its text nodes): the underline is the CSS Custom Highlight API
+with an adopted stylesheet, and a click is matched against the ranges. A click
+that selects, is on a link or a footnote reference, or was taken by another
+handler is left alone, and a single click waits 220 ms so a double-click still
+selects the word; chapters are searched once, when idle, and let go when they
+leave the page; nothing runs on scroll. A name written with a capital matches
+as written or in capitals, one written small in any case; a given name
+("Sansa" for "Sansa Stark") is matched while no one else met so far shares it.
+Underlined names cannot be reached by keyboard in the text; the selection
+bar's button and the panel are the keyboard paths.
+
+The **Characters** panel (toolbar) lists everyone met so far by group, offers
+"People so far" (names the book has kept using up to here, counted with
+SpeedRead's rule for a name and thinned of places, things and ideas;
+`suggest.ts`; the thinning leans on English verbs, so other languages get more
+false names), and draws the relations: families as trees, other ties as
+labelled lines, a large cast a neighbourhood at a time (`graphLayout.ts`,
+`RelationsGraph.tsx`, plain SVG). The editor renames, adds a name learned here
+(optionally "call them this from here on"), sets a group and its colour, adds
+or ends a tie, rewords notes, joins two entries that are one person
+(`mergePeople`), and deletes.
+
+A sheet can be saved as a file and brought in from one (`sheet.ts`;
+`people_export` writes only a `.json` of its own format): what arrives keeps
+its stamps and shows only as the reader gets there, so a friend's sheet does
+not spoil; from another edition the exact places are dropped. The sheet of the
+book before this one in its series can be brought in as known from the first
+page. Nothing leaves the device. Turning the switch off stops all of it and
+deletes nothing. Storage: [data-model.md](data-model.md#annotations).
+
+In the reader, ReaderView mounts `usePeopleReader` and gives it the book, the
+rendition, the reader's place and its own jump. The card shares the selection
+bar's dock (above the chapter dock and the pace pill); the panel sits beside
+search, and opening one closes the other. A card or the panel pins the
+toolbar, holds hands-free reading ("Characters are open") and has its place in
+the Escape order. Clicks on links, note references and pictures stay the
+reader's (it takes them in the capture phase). A chapter that comes back after
+being let go is marked again within about a second, and a name is marked only
+below the place it was learned at, so scrolling above that place shows it
+unmarked: that is the no-spoilers rule, not a fault. Reading keys still act
+under an open card or panel, as they do under the notes panel.
+
+Highlights and bookmarks are kept in
 the database (`annotations`, schema v2) and carried in the backup document,
 where the newest edit of each wins and a delete travels as a tombstone.
 Bookmarks from before (in the webview's storage) move over the first time a
@@ -170,6 +502,136 @@ so `page10` follows `page9`.
 
 Both readers share `.reader-*` styling, the slide-over chapter/page list, and the
 auto-hiding toolbar.
+
+**The page finish reaches a PDF's page** (`readers/pageTone.ts`). pdf.js draws
+a page black on white whatever finish is chosen, so Dark paper and True black
+used to change everything around the page and leave the page a white
+rectangle. The drawn page is now re-toned: its white becomes the finish's page
+colour and its black the finish's text colour; True white shows it as drawn,
+and comics are never toned.
+
+- **Dark finishes turn lightness over and keep hue**: the same amount is added
+  to all three channels, so a blue link stays blue and a red heading red,
+  where a plain negative would make them yellow and cyan.
+- **Photographs are left as drawn.** While pdf.js paints, the page source
+  notes where pictures go by standing in for the canvas's `drawImage` (asking
+  pdf.js for the page's operations instead would parse the page, and decode
+  every scan, twice). Afterwards each picture is judged by its pixels
+  (`looksLikePhoto`): paper and ink, however yellow the paper or soft the
+  letters, is a scan of text and turns with the page, as does a chart of a few
+  flat colours; a picture whose lightness is spread over many levels is a
+  photograph and is put back as it was. Pictures under 40 pixels a side
+  (bullets, rules, icons) turn with the page. A picture inside a transparency
+  group arrives as the group and is judged as a whole.
+- **The page is drawn out of sight** and shown when finished, so there is no
+  flash of white before a dark page and no blank between pages; the page
+  before stays up, dimmed, until the next is ready.
+- **A picture kept as drawn loses the white it stands on** (`clearWhiteGround`):
+  white connected to its edge becomes the page colour, white inside the
+  drawing stays. A coloured initial or an illustration on white used to sit in
+  a white box on a dark page.
+
+**What the page reader does** (`pages/PageReaderView.tsx`; pure parts in
+`readers/pdf*.ts` and `readers/page*.ts`, each with tests):
+
+- **Contents.** A PDF's own outline is listed in the sidebar above the page
+  list (Contents | Pages), each entry with its page and the current one
+  marked (`pdfOutline.ts`). It is the only thing read from the whole document
+  on opening.
+- **Go to a page.** The dock's "Page 12 of 300 · 4%" is a button: click it, or
+  press G, to type a page number or a percentage. Home and End go to the first
+  and last page.
+- **Search (PDF).** Ctrl+F. Text is read a page at a time as the search
+  reaches it and kept for 80 pages, so results arrive while a long document
+  is still being read; a phrase is found across runs, line breaks and
+  end-of-line hyphens. Results are marked on the page as rectangles that are
+  fractions of the page, so they hold at any zoom and finish. A scan says it
+  has no text to search (`pdfText.ts`, `pdfSearch.ts`, `PdfSearchPanel.tsx`).
+- **Selecting text (PDF).** pdf.js's text layer lies transparent over the
+  canvas, rebuilt on every page turn and zoom and cancelled when superseded;
+  its CSS is `pdfTextLayer.css`, to be kept in step with pdfjs-dist.
+- **Drop caps.** A large initial is joined to the word beside it for search
+  and selection (`mendDropCaps`): "The" is found and copied whole, with the
+  big letter's mark matching the big glyph.
+- **Size.** Fit width, fit page, actual size, or free zoom from 25% to 400% of
+  actual size (a PDF at 100% is its printed size; `pageZoom.ts`). Ctrl+wheel
+  zooms about the pointer: the page is stretched at once and redrawn sharp.
+  Remembered per book in `leaflet.reader.<book id>`. A canvas is capped at
+  16.7 million pixels, so a page zoomed far in on a dense screen is drawn a
+  little softer.
+- **Reading keys.** Space, Page Down and the arrows scroll a page larger than
+  the window and turn it only at its end (`pageKeys.ts`); a new page appears
+  at its top at once.
+- **Bookmarks.** B (or Ctrl+D) toggles one on the page in view; the list is in
+  page order, says the chapter and how far through, marks the current page,
+  and each can be removed.
+- **Comics.** Per book: read right to left (swaps the arrows, the dock's
+  arrows and a click on the page's left or right third) and two pages side by
+  side on a wide window, with a cover or a double-page picture shown alone
+  (`pageSpread.ts`). Pairs are worked out from pages already read, so a jump
+  far ahead can be one page off until it is read through.
+
+Keys: Space / Page Down and Shift+Space / Page Up scroll then turn; Left /
+Right turn; Home / End; G go to a page; Ctrl+F search, Enter / Shift+Enter
+next / previous match; B bookmark; + / -, Ctrl +/-, Ctrl+wheel zoom; Ctrl+0
+actual size, Ctrl+1 fit width, Ctrl+2 fit page; Escape closes an open panel
+before it leaves the book.
+
+**Continuous scrolling (PDF)** — `readers/PdfScrollPages.tsx`, arithmetic in
+`readers/pageScroll.ts` (with tests). All the pages in one column in the
+reader's stage; "Continuous scrolling" in Reader settings switches between this
+and one page at a time. A PDF opened for the first time scrolls; one with
+preferences from before the choice existed keeps pages; comics are always
+paged, and two pages side by side is not offered in Scroll.
+
+- **Only the pages near the window are in the document**, about a screen
+  above and below. A page not yet drawn is the finish's page colour with its
+  number, faint.
+- **Sizes are not read on opening.** A page not yet seen is given the first
+  page's size and takes its own when it comes near. The reader's place is kept
+  as a page and a share of its height, not as a scroll position, and put back
+  in the same commit whenever the layout changes; the stage has
+  `overflow-anchor: none` because the column does this itself. A jump or a
+  reopening holds its target the same way until the pages round it have their
+  sizes.
+- **One scale for the document**, from the first page. Under fit width or fit
+  page, a page wider than the window at that scale is drawn at the scale that
+  fits it (a landscape page in a portrait book is shown whole, with no
+  sideways scrollbar); a chosen zoom is the same for every page and may scroll
+  sideways. Fit page means one first-page-sized page fits the window.
+- **Drawing** is one page at a time, nearest the reader first, each on its own
+  canvas with its own cancel (`pageSize`, `draw`, `layTextOn` in
+  `pageSources.ts`; the paged `render()` is untouched). A page is drawn only
+  once its size is known. A page that scrolls away before it is drawn is given
+  up. A move of more than a window at once is a jump, and nothing is drawn
+  until it settles, so dragging the scrollbar across a book starts no renders
+  on the way.
+- **Memory**: 33.5 M pixels in all, the page being drawn counted twice (the
+  off-screen sheet and the toning read-back); 8.4 M per page, half the paged
+  cap, so a page zoomed far in is a little softer here than in Pages. The
+  furthest pages are let go first, never a nearer one for a further.
+- **The current page** is the one across a line a third of the way down the
+  window; it drives progress, the outline, bookmarks and the dock. The top of
+  the window is stored as `place` in `leaflet.reader.<book id>` (with `layout`)
+  and the book reopens there when that is within a page of the saved progress;
+  otherwise at the top of the page the progress names, so progress from
+  another device wins.
+- Search marks (a hit is centred, clear of the toolbar), text selection
+  (within a page, and across a page boundary with a line break between),
+  drop caps, the finishes and zoom about the pointer work as in the paged
+  layout; a finish change blanks the pages in the new colour before redrawing
+  them.
+
+Keys in Scroll: Space / Page Down and Shift+Space / Page Up scroll a screen;
+Up / Down a line; Left / Right go to the previous or next page; the rest as
+above.
+
+**Keyboard shortcuts sheet.** `?` or "Keyboard shortcuts (?)" in Reader
+settings opens the same sheet the text reader has
+(`readers/ShortcutsSheet.tsx`), listing what the keys do for what is open: a
+PDF in Pages or Scroll, or a comic in either reading direction. The rows and
+the key handler both read one table, `readers/pageReaderKeys.ts`, so the sheet
+cannot drift from the keys; Escape closes the sheet before anything else.
 
 ### The auto-hiding toolbar
 
@@ -192,6 +654,12 @@ Moving the mouse over the text, clicking it, scrolling and the reading keys
 never bring it back: that is reading. It is **pinned** while one of its own
 panels is open. The chapter list is not one of them: it opens under a hidden
 bar and reaches the top of the window.
+
+**The chapter list** slides wholly out of sight, and only a 6 px hover strip
+said it was there. A tab now stays on the left edge, half way down (faint,
+plain under the pointer; a click or a rest of the pointer opens the list), and
+the toolbar's chapters button shows on every screen, not only narrow and touch
+ones.
 
 ### Page colours
 
@@ -304,8 +772,18 @@ Behaviours worth knowing (from the pre-release review):
   ran at about 400.
 - Only real paragraph ends pause; an italic or bold word no longer does. Words
   split by inline formatting (a drop cap) read as one word.
-- RSVP crosses chapters at the next chapter's first word, skips image-only
-  chapters, and stops at the end of the book instead of replaying the last page.
+- Smart Read and RSVP read on into the next chapter, which is already on the
+  page below (see the text reader): the words are re-indexed and the word
+  being read is found again. They scroll past image-only chapters, and stop
+  at the end of the book instead of replaying the last page.
+- Their controls never show a pace while nothing is moving. Anything over the
+  text (a selection, search, the notes or the chapter list) makes hands-free
+  reading wait, and the control then says "On hold" and why. A selection left
+  behind used to hold Smart Read for good while it went on showing its pace.
+- Dotty is a small flat dot (7 px, no ring or pulse) that glides from line to
+  line, and jumps without a streak when it has far to go. The ring, the bounce
+  and the sparks are for when a hand reaches for it; what a pointer can catch
+  is larger than the dot.
 - Hands-free reading (auto-scroll, Smart Read, RSVP) earns time for 5 minutes
   after the last real input (`HANDS_FREE_GRACE_MS`). Past that, playback pauses
   with "Still reading? Press Space to carry on." so playback and credited time
@@ -320,10 +798,53 @@ Behaviours worth knowing (from the pre-release review):
 ### The RSVP stage
 
 One word at a time, in a reticle whose tick marks the fixation letter (the
-"optimal recognition point", `rsvpPivotIndex`): a little left of centre by word
-length, skipping leading quotes. That letter stays on the same spot of the
-screen while the word flows around it, so the eye never moves. Trailing
-punctuation is shown faintly, so sentences still read as sentences.
+"optimal recognition point", `rsvpPivotIndex`). That letter stays on the same
+spot of the screen while the word flows around it, so the eye never moves.
+Trailing punctuation is shown faintly, so sentences still read as sentences.
+
+Where the word sits (`readers/rsvpWord.ts`, with tests):
+
+- **The pivot is about 36% of the way through the word as drawn**, by the
+  letters' approximate widths, skipping leading quotes and never on a hyphen
+  or apostrophe; a word of up to five letters pivots on its second. It used to
+  be counted in letters (the 5th of a 15-letter word), which left three
+  quarters of a long word hanging to the right.
+- **The spot is 0.55 em of the stage's type left of the stage's middle**
+  (`RSVP_ANCHOR_EM`), not the middle itself: the pivot is left of a word's
+  middle, so a spot at the middle put every word off to the right. It is a
+  distance in letters, not a percentage of the stage, because the type scales
+  with the window while the stage stops at 720 px. Measured on 1,817 words of
+  one chapter: ordinary 5 to 9 letter words sit a median 0.00 em from the
+  middle, 99.5% within a letter, at 1280×800, 1024×768, 800×600 and 375×812;
+  the pivot is on the tick within 0.02 px.
+- **A word too long for the room either side of the spot is set smaller**
+  (`--rsvp-fit`) instead of being cut off, by its measured width in the
+  stage's face (canvas `measureText`, `readers/rsvpMeasure.ts`) against the
+  stage's real width; `rsvpFit`'s estimate by letter widths is the fallback.
+  The line's height is taken from the full size, so the guides and the passage
+  below do not move when it happens.
+
+How long a word is held (`readers/rsvpHold.ts`, with tests; on top of the
+rarity estimate in `smartReadService.ts` and the punctuation pauses in
+`pacing.ts`):
+
+- **A name is held longer when it is introduced**: 0.9 of a word's time more
+  on its first appearance, 0.45 on its second, 0.2 on its third, then like any
+  word. A name is a word capitalised in the middle of a sentence at least once
+  and never written in lower case; a word that only ever starts sentences or
+  speech is not taken for one, nor is a heading in capitals, nor I'm, I'll,
+  I'd and I've. "Vin's" counts with "Vin". A world's capitalised terms
+  (Ministry, Empire) count too, which is right: they are new to the reader.
+- **A long uncommon word** gets 0.3 the first time and 0.12 the second; a
+  shorter one 0.1 the first time; **a figure** ("1984", "1,200", "3.5", kept
+  whole by `READER_WORD_PATTERN`) 0.35 every time. Everyday words get nothing.
+- "First" means first in the text on the page (the chapter being read and its
+  loaded neighbours). The chapter is still scaled to average the chosen words
+  a minute (`getPaceScale`), so this moves time towards new words; it does not
+  slow the whole.
+- **Setting off**: the first six words after Play or a resume are held longer,
+  easing from 1.8 times to the chosen pace (`rsvpRamp`), so the eye has found
+  the spot before words pass at full speed.
 
 Below it: the pace, a progress line for the chapter and the time left in it,
 then the passage with the current word underlined. These stay faint while it
@@ -347,7 +868,10 @@ size, so a bigger font reads at the same pace. Controls:
   fights the scroll.
 - **Scrolling by hand** makes it step aside and resume from wherever the reader
   left it: 3 s after scrolling back (re-reading), 1.2 s after scrolling ahead.
-- **A new chapter** holds for a beat at the top, so its heading is seen.
+- **The end of a chapter** is not an event: the next one is already below, and
+  the scroll carries on into it. (It used to jump to the next chapter the
+  moment the last line reached the bottom of the window.) At the end of the
+  book it stops and says so.
 
 It learns from those corrections: scrolling ahead by more than half a screen
 in one burst means it is too slow (+4), scrolling back more than a third of a
@@ -392,6 +916,35 @@ Rules worth knowing:
   from timers. It credits `min(elapsed, tick)` only while a book is open, the
   window is visible and there has been recent interaction — so a sleeping laptop
   banks nothing, and reading without a timer still counts.
+- **Reading outside a focus session shows on the shelf too.** It always counted
+  toward the day, the goal and the streak, but only a stopped session made an
+  entry, so a day read with no session looked like nothing had happened. Each
+  day's free reading (`habit::free_reads`: the day's ledger minutes less its
+  sessions', a minute or more) is now an entry of its own, derived and never
+  stored, so past days appear too. It earns the goal and streak bonuses but
+  no water: only focus sessions water the garden.
+- **Time counted between flushes is kept** in localStorage
+  (`leaflet.habit.pendingReading`) with its day, so closing Leaflet mid-read
+  credits the last minute on the next launch, to the day it was read. It is
+  credited before the streak is judged on launch, and before a session is
+  recorded, so a session as long as the goal no longer ends "1 min to go".
+- **A goal change applies to today at once, lower or higher, unless today has
+  already met its goal**; a met day keeps the goal it met. Lowering the goal
+  to what has been read meets today on the change itself, and raising it after
+  meeting it cannot unmeet today (that used to read as a broken streak and
+  burn the shelf). Earlier days are never re-stamped. `commands::goal_for_day`
+  is the one place that decides.
+- **A sync cannot un-meet a day.** For the same day on two devices the minutes
+  take the maximum, and the goal kept is the hardest one a device actually met
+  (its own minutes at or over its own goal); if neither met its goal, the goal
+  of the device that read more. A day met on any device stays met.
+- **A clock set back is not a broken streak**: an evaluation as of a day
+  earlier than the last one evaluated (a corrected clock, the date line
+  crossed eastward) never finds a break.
+- **A break is announced whenever it is found**: on launch, by a credit, by a
+  recorded session, or by the once-a-minute check that notices a new day in
+  an app left open overnight (which also stops yesterday's minutes showing as
+  today's).
 - **Breaking a streak burns the most recent books**, scaled to its length and
   capped. Burned sessions are **tombstoned, never deleted**, so Analytics can say
   "42 books · 7 lost to broken streaks" honestly.
@@ -526,9 +1079,14 @@ Minutes do not pay seeds directly (that made everything too easy). Instead:
 
 - **Water.** Each whole minute of a focus session is one water, half as much
   again for a session completed without leaving the book. Session minutes
-  count only up to the reading the **heartbeat** recorded that day (plus a
-  minute of slack for a flush in flight), so a timer left running waters
-  nothing, as it earns nothing towards the goal.
+  count only up to the reading the **heartbeat** recorded on the day the
+  session ended, then the day it started (read across midnight, or left
+  running and ended the next day), plus a minute of slack for a flush in
+  flight, so a timer left running waters nothing, as it earns nothing towards
+  the goal. Each day's minutes are handed out once, in the order sessions
+  ended. Known limit: after a sync the counted minutes never fall, but water
+  can, since sessions from two devices share one day's merged minutes and an
+  earlier unclean session can take a later clean one's bonus.
 - **Plots.** Three to start; a fourth, fifth and sixth for 200, 350 and 500
   seeds, each after the one before.
 - **Planting** costs a seed packet (a few seeds). Water flows to the growing
@@ -536,6 +1094,17 @@ Minutes do not pay seeds directly (that made everything too easy). Instead:
   waits in a **rain barrel** (up to 120), which pours into the next planting.
 - **Ripening.** A plant ripens when it has had its minutes of water. Tap it to
   **harvest** its seeds (Pip cheers, and it cheers Pip up a little).
+- **Rows.** The garden is planted in two furrows (`pip/gardenRows.ts`): plots
+  1 to 3 along the front, 4 to 6 along the back, the bed one sprite
+  (`renderGardenBed`). They used to be scattered pots. A plot is still its
+  number, so saved gardens load as they are.
+- **The sky** behind the garden's glass (`pip/sky.js`,
+  `components/pip/GardenSky.tsx`) follows the real clock: the hour's colours,
+  three depths of cloud, the sun's arc or the moon and stars, birds by day.
+  Every two and a half minutes there is a chance of something rare: a balloon
+  or a dragon by day, a shooting star or a dragon by night (a dragon about
+  every half hour). It is a pure function of the clock, redrawn only when
+  something moved, and a still picture under reduced motion.
 
 | Plant | Water (minutes) | Seeds | Packet |
 | --- | --- | --- | --- |
@@ -664,12 +1233,108 @@ The whole tab is the house, played like a game. The current floor fills the
 page, drawn by the house art (`house.js`, 240 x 120) at a whole or half number
 of device pixels per pixel (`sceneFit.ts`: half steps let it fill narrow
 windows); windows show the real hour's sky, and in the evening the rooms dim
-and lamps glow. Pip lives in it: it strolls, fills free moments with its
-signature move or a hobby, can be dragged about and dropped, and reacts when
-poked. A **lift** up the side of the room rides between floors, a numbered
-stop for each: the **Bedroom** and the **Garden** are free; the Kitchen,
-Library, Attic Arcade, Basement Workshop and Rooftop Observatory open in
-order, each after the one below and some focus sessions, for seeds.
+and lamps glow. Pip lives in it (below). A **lift** up the side of the room
+rides between floors, a numbered stop for each: the **Bedroom** and the
+**Garden** are free; the Kitchen, Library, Attic Arcade, Basement Workshop and
+Rooftop Observatory open in order, each after the one below and some focus
+sessions, for seeds. Without `VITE_ENABLE_FULL_PIP_HOUSE` (the shipped
+setting) the house is three floors: Bedroom, Garden and the **Attic Arcade**,
+which is open to visit, furnished by the house (`usePipHouse.ts`) and cannot
+be decorated or bought.
+
+**Pip does activities, not clips** (`pip/behaviour.ts`, pure and seeded;
+`HouseScene` walks the plan). It used to play an unrelated clip at random and
+cut it short. A free moment now starts an activity, a plan of steps (walk
+there, face the right way, do a move for so many seconds): read (to the books,
+take one, read for 20 to 40 seconds, yawn or bookmark, put it back), nap, look
+out of the window, water a houseplant, check a growing plot, play with a toy
+it owns, dance, exercise, play at an arcade cabinet, sunbathe, stroll. The
+choice is weighted by mood, the hour, what is on the floor, what Pip owns and
+what the reader just did (fed: sleepy; back from a game: a book, not a
+cabinet), never the same twice running, and only quiet ones under mood 20.
+Between activities Pip fidgets, its eyes follow the pointer, and it turns to
+face where it is going (edge-on half way, not a mirror flip). Under reduced
+motion: standing activities only, a pose about every 14 seconds, no walking.
+
+**Playing with Pip** (`pip/play.ts`, pure). A poke climbs a ladder (boop, a
+giggle, a laugh, dizzy, a huff, then one of the old surprises) and is
+forgotten after five seconds. The pointer rubbed over Pip is petting (it leans
+in, hearts, a purr), rubbed fast a tickle. Picked up, Pip swings from its leaf
+like a pendulum; let go while moving it is tossed, spins, bounces off the walls
+and lands. A ball (scrap paper, or the Bouncy Ball if owned) is thrown and
+fetched, three times before Pip is puffed. The rail's **Play** key turns it
+into a play rail (Pet, Tickle, Toss, Ball, Dance, Snack, Done), so every way
+has a key; the up arrow tosses. The first hover invites it, and the
+walkthrough has two more steps (Pip, Play). Play cheers Pip up by 1 a bout
+(`pip_played`), from the same allowance of 12 a day as the arcade games, and
+never pays seeds.
+
+**Carrying Pip** (`pip/play.ts`, `holdStep`). Picked up, Pip hangs from the
+hand by its leaf and swings with it; let go from a still hand it drops, from a
+moving one it is thrown with that speed and its swing's, turns, bounces off
+the walls, the ceiling and the floor, and lands. It used to hang as one rigid
+pose and fall straight down, and the pointer was measured from the stage, not
+the room the stage centres: on a wide window Pip jumped 59 to 142 floor pixels
+to the right of the cursor and sat pinned against the wall. A press that ends
+any way at all (cancel, blur, another floor) puts Pip down. Under reduced
+motion Pip is carried and put down with no swing or flight.
+
+**Things in the room can be used** (`pip/furnish.ts` for the rules,
+`components/pip/furnishings.tsx` for the layer). A kind of furnishing declares
+what the hand does with it, what Pip makes of it and what is remembered; each
+usable piece gets a button with a gold edge on hover or focus, a label saying
+what it does, and a key that does the same.
+
+- **Curtains** (the Window): select to draw or open, or drag across to pull
+  them; drawn, they hide the sky and dim the room. Pip squints by day and
+  heads for bed at night.
+- **Pictures**: select to nudge one (it swings on its nail, by the same
+  pendulum as Pip, and hangs crooked); drag, or use the arrow keys, to slide
+  it along the free wall. Pip straightens a crooked one as an activity
+  (`tidy`).
+- **The bed**: select it, use the Play rail's Bed key, or carry Pip over and
+  put it down. By day Pip naps 30 to 45 seconds and gets up; after dark it
+  stays until day. Tapping Pip, or opening the curtains in the morning, wakes
+  it. Pip's own nap uses the bed when it is out.
+- **Windows without curtains**: select and Pip comes to look out. **Books**:
+  select and Pip comes and reads one. **Lights**: select to switch off or on;
+  off, a light is drawn unlit and casts no glow after dark (the floor lamp
+  now casts one when lit).
+- **The fridge** (the Bedroom's mini fridge): select to open it, and again to
+  shut it; left open it shuts itself after 8 seconds. Lit shelves, a hum while
+  open, a click and thud as it shuts, and after dark its light pools on the
+  floor. Pip hears it and comes over hopefully. The Play rail's **Snack** key
+  sends her to it: she opens it, waits while a snack is chosen and eats it
+  there. Opening it gives nothing; snacks are still bought as they are given.
+  It is a fixture, not decor (`home.js`, `fridgeBox`; id `minifridge`, since
+  `fridge` is the unshipped Kitchen's decor item): every Pip has one, it is in
+  no slot, shop, catalogue or saved layout, it cannot be moved in Decorate,
+  and it stands in whichever of three gaps between the floor spots the
+  reader's pieces leave free.
+
+**Pip has habits** (`pip/behaviour.ts`: `fridgeVisit`, `scrollSession`,
+`nightStir`; moves in `house-moves.js`; tests in `pip/habits.test.ts` and
+`pip/fridge.test.ts`). After dark (19:00 to 06:00) she raids the fridge: over
+on tiptoe, a long stare into the light, something small or nothing, and back
+to bed; one time in four she shuts it, wanders off and comes back to look
+again. Curtains opened or a light switched on catches her. Late (21:00 to
+05:00) she takes her phone to bed about every other night: scrolling, a laugh,
+a frown, "one more", the phone on her nose, asleep with it on her chest; the
+later the hour the longer. Tap her and she hides it ("i was reading."); draw
+the curtains or put the light out and she winds down. By day the phone is a
+glance, the fridge a short look; one read in five drifts to the phone and the
+book wins. In the morning she hits snooze once, and about every other morning
+looks in the fridge on getting up. Asleep for the night she stirs now and then
+(a 0.3 chance each half minute, at least 3 minutes apart), but not within 20
+minutes of the reader putting her to bed (`TUCKED_QUIET_MIN`). All of it is
+for show: no seeds, no mood, nothing bought. Under reduced motion: still poses
+with the lines.
+
+Drawn curtains, a picture's place and tilt, and lights switched off are kept
+in `localStorage` (`leaflet.pip.furnish`) on this device only, outside the
+backup. The saved layout is unchanged: Decorate still decides which piece is
+in which slot, and the hand only tilts, slides, draws and switches. Nothing
+here earns seeds or mood.
 
 Over the room, the **seeds** and Pip's **mood** (five hearts) share one plaque,
 with a **goal** beside them when one is pinned from the shop: its progress in
@@ -689,8 +1354,8 @@ one leather rail of tools:
   a low sheet of what Pip owns that fits there, and a link to the shop filtered
   to that spot. Items snap to slots and are in one place at a time.
 
-A first visit gets a four-step walkthrough (seeds and mood, the shop,
-decorating, a plot), shown once; "?" in the HUD plays it again.
+A first visit gets a six-step walkthrough (seeds and mood, Pip, playing, the
+shop, decorating, a plot), shown once; "?" in the HUD plays it again.
 
 **The shop** is a large dialog with a tab per kind of thing (Variants,
 Wardrobe, Decor, Book Nods, Treats, Moves, Walls & flooring, House: floors and
@@ -712,7 +1377,12 @@ your library" ribbon.
 
 ### The Attic Arcade
 
-Three mini-games, on the Attic Arcade floor (select the cabinet, or Arcade):
+Floor 3 in the lift, in every build. Each machine opens its game (the cabinet
+Pip Dash, the television Page Flap, the claw machine Leaf Catch; the jukebox
+is a dance), and Pip walks over and plays in its own time. A Pause button is
+there for pointer users.
+
+Three mini-games, on the Attic Arcade floor (select a machine, or Arcade):
 **Pip Dash** (an endless run: jump book stacks, duck bats and pages),
 **Leaf Catch** (catch leaves, seeds and letters, dodge ink) and **Page Flap**
 (leaf-copter between towers of book spines). They play in a crisp pixel
@@ -730,10 +1400,36 @@ scores).
 
 ### Mood
 
-0 to 100 in `pip_state`, starting at 70 and drifting down about 8 a day
-(`mood_at`, computed when read). A recorded session of a minute or more adds 5,
-a treat its `mood`, a harvest 2, a game 3 (capped). Five hearts on the Pip tab;
-under 20, Pip mopes. Nothing else: no notifications, no guilt.
+Pip's mood runs 0 to 100 in `pip_state` and starts at 70. It drifts down 8 a
+day from the last time it was cheered up (`mood_at`, computed when read),
+whether or not Leaflet is open, and the drift stops at 40 ("Content"): time
+alone never makes Pip mope. A mood already under 40 (a reader who was away
+before 1.2, when it drifted to 0) stays where it is, neither lifted nor
+lowered, until something cheers Pip up. Under 20 Pip mopes; nothing is lost and
+nothing withers. No notifications, no guilt.
+
+What cheers Pip up:
+
+- **Any reading**: +0.25 for each minute the ledger credits, in a focus
+  session or not, up to +10 a day (40 minutes), by the day the minutes are
+  credited to (`pip::record_reading`, hooked into `credit_reading`). It used
+  to be focus sessions only, so a reader who never started one watched the
+  mood fall however much they read.
+- A recorded focus session of a minute or more: +5, on top of its minutes.
+- A game +3 and a bout of play +1, sharing +12 a day; a ripe plant picked +2;
+  the day's wish +10; each snack or toy its own amount.
+
+The reading and play allowances and the last twelve things that cheered Pip up
+are this device's alone (settings rows `pip.readingMood`, `pip.arcade`,
+`pip.moodLog`): never in sync or the backup. Only the mood itself travels,
+with Pip's state. A late minute for yesterday draws on what yesterday had
+left, so going back and forth between days cannot hand out a second allowance.
+
+**The hearts open "Pip's mood"** (`pages/pip/MoodPanel.tsx`, `pip/mood.ts`):
+the mood in a word and out of 100, what the drift took, today's reading and
+what more would add, what changed it last, and the rule. The numbers come
+from Rust with the overview (`moodRules`, `moodLog`, `readingMood`), so the
+panel cannot disagree with what is counted.
 
 ### Earning feedback
 
@@ -768,6 +1464,14 @@ catalogue's skins and moves plus `pipParts.json`; accessories one per slot) and
 still accepts every older `skin.move`. It is cosmetic: the server does not
 check purchases. Builds from before this fall back to the handle's skin for a
 value they do not know.
+
+**Drawn as a portrait** (`pip/portrait.ts`, `PipSprite`'s `portrait`). An
+avatar used to be the whole 32 px sprite at a whole number of device pixels,
+of which a standing Pip fills 22 by 27: in the header at 125% scaling that was
+a 32 px sprite in a 57 px button. A portrait is scaled to the largest whole
+number at which a standing Pip fits the frame and centred on the art, so wide
+poses (a sparkle, a cape's corners) are cropped by the circle;
+`PORTRAIT_PX` is the knob.
 
 ---
 
@@ -804,6 +1508,7 @@ something:
 | Gold band | Completed cleanly |
 | Ribbon | The session has a note |
 | Charred spine | Lost when a streak broke, left in place so the cost is visible |
+| Loose pages, "Free read" | A day's reading outside any focus session. Not a spine: it does not level the wood and cannot burn. A running session's reading is not shown as free |
 | Golden bookend | A perfect week: goal met all seven days |
 | Wood | Levels with the spine count: Pine, Oak, Walnut, Mahogany, Ebony, Gilded |
 
@@ -824,6 +1529,37 @@ Behind `FEATURES.community`, and needs a Leaflet account. In order:
 - **Duels**, the **Inbox** (which Pip reacts to) and **Find readers**.
 - Reader cards: follow, kudos and weekly duels (accept or decline right there).
 
+The board lists only readers whose profile is shared. A profile created at
+sign-up (1.2 and later) is public unless the reader turned the switch off on
+the form; accounts from before 1.2 stay private until their owner shares, and
+are never switched by Leaflet. "Make private" under Social, You, hides the
+reader everywhere and (on the 1.2 server) removes the stored figures. A signed-in reader always sees **their own row** for the week, built
+on the device from the same minutes as the Stats tile
+(`components/community/ownRow.ts`). While the profile is private the row is
+marked "Only you", is sent to nobody, and carries a "Share my profile" button.
+The board ranks all reading in the local Monday–Sunday week, in or out of a
+focus session. An empty board says why: nobody shares yet, nobody who shares
+has read this week, or the board could not be loaded (with "Try again"); it
+used to say "Nobody's on the board yet" for all three. The own row claims a
+rank only against rows of the same ISO week (`weekKeyOf`, the week Rust
+names), and is matched to the server's row by handle when the board was
+fetched without the session, so it is never drawn twice.
+
+Signing out forgets everything personal in the community store, including
+answers still on their way and who "you" were on the Everyone board it keeps.
+A session ended on the server (a password changed elsewhere, the account
+deleted) is noticed at the first refused call, and the page goes to its
+signed-out state. The inbox is fetched whole on each poll, so a reader who
+goes private or deletes their account leaves it within one poll. An emptied
+Name removes the profile's name.
+
+**On the server** (`server/`; needs a redeploy to take effect): reading
+figures are held only while a profile is public (sent for a private one they
+are dropped, and going private removes them); a board being read while a
+profile goes private can no longer put it back in the cache; public profiles
+without a handle take no place on the board; the limit of three duels holds
+for challenges sent at the same moment; names are one line of visible text.
+
 Only public profiles appear or can be interacted with. The words are fixed in
 `components/community/copy.ts` (kudos, follow, duel, a streak in days, a week
 that ends Sunday at midnight); the headers, tabs and shelf are shared
@@ -833,8 +1569,12 @@ components (`ui/SectionHeader`, `ui/SegmentedTabs`, `shelf/spine`).
 streak, books finished and shelf for a public profile. The app calls it when a
 session is recorded, when the Social page opens (and every minute it stays
 open), and on the five-minute community pulse, at most once a minute unless a
-session just ended. It used to ride only on a Drive backup, which left readers
-without Drive frozen on the board.
+session just ended, and when today's minutes change. It used to ride only on a
+Drive backup, which left readers without Drive frozen on the board. Whether
+the profile is shared is asked of the server once a run and after each sign-in:
+it used to be a setting of the device, so a reader who shared on another
+device, or reinstalled, showed as shared and never published. A failed publish
+is shown on the board with "Send again".
 
 Server side is in `server/`; see `server/README.md`.
 
@@ -906,6 +1646,17 @@ of feeding an error body to the JSON decoder.
 
 ## Accounts
 
+**Signing up** (`components/account/AccountForm.tsx`,
+`components/account/signUpFlow.ts`). The form asks for a handle, shown and
+entered with an "@" that is never stored (`community/HandleField.tsx`, rules
+in `community/handle.ts`, display through `at()`), and has a "Share my
+profile" switch, on by default, with a sentence listing what other readers
+will see. The account is created first, then the profile is saved public. If
+the second step fails (the handle is taken, the connection dropped) the reader
+is signed in with a private profile and the form offers another handle or
+"Keep it private for now": a sign-up is never lost half way. Builds without
+the community create a private account, as before.
+
 **Where:** `server/` (API), `sync/cloud.rs` and the `account_*` commands (Rust),
 `services/accountService.ts`, `store/accountStore.ts`, the Account card in
 Settings.
@@ -952,6 +1703,17 @@ verifies it with a public key compiled into `sync/remote_config.rs`, and keeps
 the last good address if the file is missing or tampered with. See
 [release-msix.md](release-msix.md).
 
+The address must be a bare one (a `?` or `#` in it used to send every call,
+sign-in included, to the host's front page), and "Connected" means `/health`
+answered `{"ok":true}`, not just any 200.
+
+A reader never needs the address. The Settings card
+(`components/LeaderboardsCard.tsx`) shows status only: Connected, Can't reach
+it (with the reason, a note that school or work Wi-Fi may block it, and Try
+Again) or Off. The address field and the note on running your own server are
+under a closed "Advanced"; `SyncStatus.apiBaseCustom` says whether this device
+overrides the signed address.
+
 ---
 
 ## Pip
@@ -960,6 +1722,11 @@ The reading companion who lives in the app: the header logo is Pip's home, and
 Pip hops out to walk the app, celebrate goals, give the tour, and be thrown
 around. It has its own tab too: see [Seeds and the Pip tab](#seeds-and-the-pip-tab).
 Everything else is in [pip.md](pip.md).
+
+Thrown hard at a wall, Pip grabs it and slides down to the floor
+(`pip/wall.ts`). A grab now takes all of the throw's sideways speed: it used
+to keep it, let go after 1.4 seconds and grab again on the next frame, which
+showed one frame of falling every 1.4 seconds all the way down.
 
 ---
 
@@ -974,6 +1741,28 @@ Colours are design tokens in `index.css` as space-separated RGB triples
 `tailwind.config.cjs`. `:root` is light; `:root[data-theme="dark"]` overrides.
 
 The reader has its own finishes on top: paper, dark paper, true white, true black.
+
+---
+
+## Settings
+
+`pages/SettingsPage.tsx`. A few short sections behind tabs (**General**,
+**Reading**, **Library**, **Account**, **About**), each of which fits a
+1366×768 window without scrolling. It used to be one page about three screens
+long. Each section is two columns of cards from `lg` up, every card as tall as
+what is in it.
+
+| Section | Cards |
+| --- | --- |
+| General | Appearance; Pip (how much it moves, the tour, sounds) |
+| Reading | Reading pace; Daily goal and focus; Reminders |
+| Library | Backup; Book copies; Optional book converter |
+| Account | Account; Leaderboards (only in builds with accounts or the community) |
+| About | Rate, policies, diagnostics; Danger zone |
+
+The section is remembered for the session (`pages/settingsSection.ts`, kept
+apart from the page so that asking for a section does not load it), and another
+page can ask for one: "Sign in" on the Social page opens Account.
 
 ---
 

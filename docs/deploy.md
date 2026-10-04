@@ -290,7 +290,7 @@ The script warns about any required value that is missing; a warning here is a
 feature missing from the release, so stop and set it.
 
 Output: `D:\Leaflet\apps\src-tauri\target\msix\Leaflet_<version>.0_x64.msix`
-(`Leaflet_1.1.0.0_x64.msix` for 1.1.0).
+(`Leaflet_1.2.0.0_x64.msix` for 1.2.0).
 
 ## 8. Try the package on this PC first (recommended)
 

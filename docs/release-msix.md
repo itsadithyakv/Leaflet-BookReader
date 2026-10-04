@@ -155,7 +155,7 @@ $password = ConvertTo-SecureString -String "leaflet-test" -Force -AsPlainText
 Export-PfxCertificate -Cert $cert -FilePath "$env:TEMP\leaflet-test.pfx" -Password $password
 Import-PfxCertificate -FilePath "$env:TEMP\leaflet-test.pfx" -CertStoreLocation Cert:\LocalMachine\TrustedPeople -Password $password
 .\build-msix.ps1 -SkipBuild -CertificatePath "$env:TEMP\leaflet-test.pfx" -CertificatePassword "leaflet-test"
-Add-AppxPackage ..\target\msix\Leaflet_1.1.0.0_x64.msix
+Add-AppxPackage ..\target\msix\Leaflet_1.2.0.0_x64.msix
 ```
 
 (The TrustedPeople import needs an administrator PowerShell.) Uninstall with
@@ -204,7 +204,13 @@ trust to run at all.
   Credential Manager as before.
 - **Calibre.** Store policy does not let an app download and run executable
   code, so Store builds cannot install Calibre themselves. They still use a
-  Calibre the reader installed from calibre-ebook.com; the Settings card says so.
+  Calibre the reader installed from calibre-ebook.com; the Settings card says
+  so, opens that page ("Get Calibre") and looks again on "Check Again" or when
+  the window comes back, so no restart is needed.
+- **Book copies** (the optional folder of readable copies) work in the Store
+  build: full trust can write to folders the reader picks. Folders under
+  AppData are refused, because Windows redirects a packaged app's writes there
+  into the package.
 - **Reading reminders.** Only the MSIX gets reminders with Leaflet closed; see
   [Reading reminders](#reading-reminders-toasts) below.
 - **Updates.** The Store updates the app; there is no in-app updater.

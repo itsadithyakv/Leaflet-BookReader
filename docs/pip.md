@@ -67,6 +67,15 @@ Pip side.
   falls back to the floor), walks with the arrow keys when focused, and is
   poked by a click. One requestAnimationFrame loop on refs, stopped when the
   tab is hidden.
+- **The fridge and the phone.** The Bedroom has a mini fridge (a fixture of
+  the floor: `FIXTURES` in `house.js`, placed by `home.js`, used through
+  `furnish.ts` like the other furnishings). Pip's night life is planned in
+  `behaviour.ts` and walked by `HouseScene`: the midnight snack, the phone in
+  bed (its light is a glow in the room's own picture), snooze in the morning.
+  The moves are in `house-moves.js`: tiptoe, fridge-stare, nibble, caught,
+  scroll-* / phone-* (the phone, in bed and standing), innocent, snooze. A Pip
+  the reader tucked in is left asleep for 20 minutes. None of it touches mood,
+  seeds or the shop.
 - **Decorating** snaps items into each floor's slots (`fits`: ceiling, wall,
   window, top, stand, rug); an item goes where its `fits` includes the slot's,
   on its own floor (`level`) or anywhere (`"any"`).
@@ -187,6 +196,9 @@ summaries still appear). Reduced motion swaps every move for its still pose.
 
 ## Assets
 
-Logo files rendered from the engine are in `apps/src/assets/pip/` (PNG at every
-32-multiple, SVG, a cream tile, and sticker poses); see the README there. The
-Windows app icons in `src-tauri/icons` come from `pip-1024.png`.
+The logo is Pip sitting with an open book, on a transparent background
+(`apps/scripts/pip-logo.mjs` draws it with the engine). Its files are in
+`apps/src/assets/pip/` (PNG at every 32-multiple, SVG, a cream tile for places
+that need a square badge, and sticker poses); see the README there. The Windows
+app icons in `src-tauri/icons` are drawn from `pip-32.png` by
+`src-tauri/msix/windows-icons.py`, with no tile behind Pip.

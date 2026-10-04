@@ -93,6 +93,33 @@ The routine that has caught the most:
    44 px. Both have found real bugs that looked fine in a screenshot.
 3. **Both themes**, since per-theme rules drift apart.
 
+**The text reader in the browser.** The preview has no library, so a book is
+put there by hand: copy an EPUB somewhere the dev server serves (a folder under
+`apps/node_modules/` is ignored by git), import the running
+`/src/store/libraryStore.ts` module from the page (use the URL the page loaded
+it by, from `performance.getEntriesByType("resource")`; a bare import makes a
+second copy of the store) and `setState({ books: [...] })` with a book whose
+`localPath` is that file's URL. The reader publishes its epub.js rendition as
+`window.__leafletRendition` in development, for reading its state, and
+`window.__leafletReader` (`words()`, `active()`, `paceScale()`) for Smart Read
+and SpeedRead's.
+
+Aids kept out of git in `apps/node_modules/.leaflet-test/` (they go when
+`node_modules` is cleaned; none is needed to build): `boot.txt` loads the
+harnesses; `__bootBook('fixture' | 'mistborn', prefs, bookPrefs)` opens a
+book; `fixture.epub` has drop caps, every kind of note reference, pictures and
+eight sections; `rsvp-run.txt`, `rsvp-geometry.txt` and `rsvp-holds.txt` re-run
+the SpeedRead measurements; `people-harness.txt` seeds a character sheet;
+`long.pdf`, `scanbook.pdf` and `dropcaps.pdf` (each with its generator) are
+for the page reader.
+
+In a hidden pane the reader does not run at all without help: epub.js queues
+its work on `requestAnimationFrame`, which never fires there, and no scroll
+events are sent either. Replace `requestAnimationFrame` with a timer before
+opening the book, and dispatch `scroll` on the scrolling container
+(`rendition.manager.container`) after setting its position. Check places and
+sizes by measuring; transitions sit at their first frame.
+
 One caveat worth knowing when measuring animation: if the browser pane is
 hidden, the document timeline is frozen, so a CSS transition sits pinned at its
 start value and a transform will look like it is not applying at all. Bypass the
