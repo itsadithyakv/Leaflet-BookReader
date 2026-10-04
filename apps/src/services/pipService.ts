@@ -71,8 +71,43 @@ export type PipState = {
 /** The part of the state the reader chooses. */
 export type PipLook = Pick<PipState, "variant" | "outfit" | "room" | "roomStyle" | "signature">;
 
-/** The arcade's record on this device: best scores, and today's mood from games. */
+/** The arcade's record on this device: best scores, and today's mood from games and play. */
 export type PipArcade = { best: Record<string, number>; day: string; moodToday: number };
+
+/**
+ * How much mood reading has given on this device, by local day
+ * ("2026-10-03"): the two latest days read on (pip/mod.rs `record_reading`).
+ */
+export type PipReadingMood = { days: Record<string, number> };
+
+/**
+ * Something that cheered Pip up: when, what ("reading", "session",
+ * "treat:<id>", "harvest", "game:<id>", "play:<kind>", "wish"), by how much
+ * (reading's is a fraction, a minute at a time), and the mood after it. Kept
+ * by Rust on this device, to explain the mood.
+ */
+export type MoodEvent = { at: string; cause: string; gain: number; mood: number };
+
+/** What moves the mood and by how much, as Rust has it (habit/seeds.rs, pip/mod.rs). */
+export type MoodRules = {
+  /** Mood lost per day since Pip was last cheered up. */
+  driftPerDay: number;
+  /** Where the drift stops: time alone never takes the mood below this. */
+  driftFloor: number;
+  /** What a minute of reading adds, in a focus session or not... */
+  perReadingMinute: number;
+  /** ...and the most reading can add in a day. */
+  readingPerDay: number;
+  /** What a recorded focus session adds, on top of its minutes. */
+  perSession: number;
+  perHarvest: number;
+  perGame: number;
+  perPlay: number;
+  /** The most games and play can add in a day, together. */
+  playPerDay: number;
+  perWish: number;
+  start: number;
+};
 
 export type PipOverview = {
   wallet: PipWallet;
@@ -82,6 +117,8 @@ export type PipOverview = {
   /** Focus sessions done, for floors that open after so many. */
   sessionsDone: number;
   arcade: PipArcade;
+  /** What reading has added to the mood, by day (this device's). */
+  readingMood: PipReadingMood;
   /** A new reader's first steps, in the order Pip suggests them. */
   goals: GoalStatus[];
   chest: ChestStatus;
@@ -91,6 +128,69 @@ export type PipOverview = {
   collection: Partial<Record<ShopKind, CollectionCount>>;
   /** Today's wish (the reader's local day); null before the first wish list's day. */
   wish: WishStatus | null;
+  /** The last few things that cheered Pip up, oldest first. */
+  moodLog: MoodEvent[];
+  moodRules: MoodRules;
+};
+
+/**
+ * The mood's rules for the browser preview, copied from Rust (MOOD_* in
+ * habit/seeds.rs and pip/mod.rs). The desktop app never reads these: there
+ * the rules come with the overview.
+ */
+const PREVIEW_RULES: MoodRules = {
+  driftPerDay: 8,
+  driftFloor: 40,
+  perReadingMinute: 0.25,
+  readingPerDay: 10,
+  perSession: 5,
+  perHarvest: 2,
+  perGame: 3,
+  perPlay: 1,
+  playPerDay: 12,
+  perWish: 10,
+  start: 70
+};
+
+/**
+ * The browser preview's Pip: a mood that play and games can move, kept in
+ * memory, so the Pip tab can be tried without the desktop app. Gone on reload.
+ */
+const preview = {
+  mood: PREVIEW_RULES.start,
+  moodUpdatedAt: new Date().toISOString(),
+  arcade: { best: {}, day: "", moodToday: 0 } as PipArcade,
+  log: [] as MoodEvent[]
+};
+
+/**
+ * The preview's mood now: drifted down from when it was last raised, as Rust
+ * drifts it (`mood_at`): never below the floor, and a mood already under the
+ * floor stays where it is.
+ */
+const previewMoodNow = () => {
+  const stored = Math.max(0, Math.min(100, preview.mood));
+  if (stored <= PREVIEW_RULES.driftFloor) return stored;
+  const days = Math.max(0, Date.now() - Date.parse(preview.moodUpdatedAt)) / 86_400_000;
+  return Math.max(PREVIEW_RULES.driftFloor, stored - days * PREVIEW_RULES.driftPerDay);
+};
+
+/** Cheers the preview's Pip up out of the day's allowance for games and play, as pip/mod.rs does. */
+const previewCheer = (amount: number, cause: string) => {
+  const today = getDateKey();
+  if (preview.arcade.day !== today) preview.arcade = { ...preview.arcade, day: today, moodToday: 0 };
+  const allowed = Math.max(0, Math.min(amount, PREVIEW_RULES.playPerDay - preview.arcade.moodToday));
+  preview.arcade = { ...preview.arcade, moodToday: preview.arcade.moodToday + allowed };
+  const before = previewMoodNow();
+  const after = Math.min(100, before + allowed);
+  const at = new Date().toISOString();
+  preview.mood = after;
+  preview.moodUpdatedAt = at;
+  if (after > before) {
+    const last = preview.log[preview.log.length - 1];
+    if (last && last.cause === cause) preview.log = [...preview.log.slice(0, -1), { at, cause, gain: last.gain + (after - before), mood: after }];
+    else preview.log = [...preview.log, { at, cause, gain: after - before, mood: after }].slice(-12);
+  }
 };
 
 /**
@@ -124,14 +224,16 @@ const browserOverview = (): PipOverview => {
       // The starter things are out, as Rust does for a new room.
       room: Object.fromEntries(roomItems().filter((item) => item.price === 0).map((item) => [item.id, item.id])),
       roomStyle: "",
-      mood: 70,
-      moodUpdatedAt: now,
+      mood: previewMoodNow(),
+      moodUpdatedAt: preview.moodUpdatedAt,
       signature: DEFAULT_SIGNATURE,
       updatedAt: now
     },
     garden: { plots: 3, plants: [], barrel: 0, barrelCap: 120, water: 0 },
     sessionsDone: 0,
-    arcade: { best: {}, day: "", moodToday: 0 },
+    arcade: preview.arcade,
+    // Reading cheers Pip up through Rust's ledger; with no ledger there is none to count.
+    readingMood: { days: {} },
     goals: GOALS.map((goal) => ({ id: goal.id, done: false, seeds: goal.seeds })),
     chest: { open: false, seeds: STARTER_CHEST.seeds, minutes: STARTER_CHEST.minutes },
     sets: SETS.map((set) => {
@@ -140,7 +242,9 @@ const browserOverview = (): PipOverview => {
     }),
     collection,
     // Rust chooses the wish (pip/rewards.rs); with no Rust there is none.
-    wish: null
+    wish: null,
+    moodLog: preview.log,
+    moodRules: PREVIEW_RULES
   };
 };
 
@@ -184,9 +288,21 @@ export const pipService = {
   /** A finished arcade game: best score, and a little mood (capped a day). Never seeds. */
   async gamePlayed(game: string, score: number): Promise<PipOverview> {
     if (!isTauri()) {
-      throw new Error("Scores are kept in the desktop app.");
+      // The preview keeps the best score and the cheer in memory.
+      const best = Math.max(preview.arcade.best[game] ?? 0, Math.floor(score));
+      preview.arcade = { ...preview.arcade, best: { ...preview.arcade.best, [game]: best } };
+      if (score > 0) previewCheer(PREVIEW_RULES.perGame, `game:${game}`);
+      return browserOverview();
     }
     return invoke<PipOverview>("pip_game_played", { game, score: Math.floor(score), todayKey: getDateKey() });
+  },
+  /** A bout of play by hand (a stroke, a tickle, the ball fetched): a little mood, from the games' daily allowance. Never seeds. */
+  async played(kind: string): Promise<PipOverview> {
+    if (!isTauri()) {
+      previewCheer(PREVIEW_RULES.perPlay, `play:${kind}`);
+      return browserOverview();
+    }
+    return invoke<PipOverview>("pip_played", { kind, todayKey: getDateKey() });
   },
   async feed(treatId: string): Promise<PipOverview> {
     if (!isTauri()) {

@@ -9,6 +9,12 @@ export const PRIVACY_URL = `${SITE}/privacy/`;
 export const TERMS_URL = `${SITE}/terms/`;
 export const SUPPORT_EMAIL = "adithyakrishnan.vinod@gmail.com";
 
+/**
+ * Calibre's own download page, opened in the browser. Leaflet links to it
+ * rather than fetching Calibre itself wherever that is not allowed (the Store).
+ */
+export const CALIBRE_DOWNLOAD_URL = "https://calibre-ebook.com/download";
+
 /** Leaflet on the Microsoft Store: the rating prompt and "Rate Leaflet" links. */
 export const STORE_PRODUCT_ID = "9PH0NLGJFF9W";
 /** The web listing; opened in the browser, it hands over to the Store app. */

@@ -28,6 +28,8 @@ export type SyncStatus = {
   folderPath: string | null;
   /** The Leaflet API, when cloud sync and the social features are in use. */
   apiBase: string | null;
+  /** The address was entered on this device, rather than being Leaflet's own. */
+  apiBaseCustom: boolean;
   lastSyncedAt: string | null;
   /** Books in the library whose file is not on this device yet. */
   booksPending: number;
@@ -50,6 +52,7 @@ export const EMPTY_SYNC_STATUS: SyncStatus = {
   accountEmail: null,
   folderPath: null,
   apiBase: null,
+  apiBaseCustom: false,
   lastSyncedAt: null,
   booksPending: 0
 };

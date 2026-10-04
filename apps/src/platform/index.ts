@@ -32,6 +32,19 @@ export async function pickSyncFolder(): Promise<string | null> {
   return module.pickSyncFolder();
 }
 
+/**
+ * Picks the folder for "keep a copy of my books".
+ *
+ * Desktop only: a phone's files are not laid out as folders a reader browses.
+ */
+export async function pickLibraryCopyFolder(): Promise<string | null> {
+  if (getPlatform() === "mobile") {
+    return null;
+  }
+  const module = await import("./desktop/file");
+  return module.pickLibraryCopyFolder();
+}
+
 export async function ensureBookPermissions(): Promise<boolean> {
   if (getPlatform() === "mobile") {
     const module = await import("./mobile/permissions");

@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import type { Book } from "@shared/models/book";
 import type { SocialProfile } from "@shared/sync/types";
@@ -10,6 +10,7 @@ import { PipSprite } from "./PipSprite";
 import { SectionHeader } from "./ui/SectionHeader";
 import { useCommunityStore } from "./community/communityStore";
 import { COPY } from "./community/copy";
+import { errorText } from "./community/format";
 import { Leaderboard } from "./community/Leaderboard";
 import { DuelCards } from "./community/DuelCards";
 import { Inbox } from "./community/Inbox";
@@ -36,23 +37,31 @@ const LIVE_MS = 60_000;
  * The community, in the order a reader comes for it: who you are, the board,
  * your duels, your news, and finding readers.
  *
- * Friendly competition, strictly opt-in. Private is the default and is
- * enforced on the server — a private profile is not merely hidden from the
- * board, it is unreadable by handle and cannot follow, send kudos or duel.
+ * Friendly competition, and the reader's choice. A profile made at sign-up
+ * is shared unless the form's switch is turned off (accounts from before 1.2
+ * stay private until their owner shares them), and "Make private" is always
+ * there. Private is enforced on the server — a private profile is not merely
+ * hidden from the board, it is unreadable by handle and cannot follow, send
+ * kudos or duel.
  * Anyone can look at the public board, signed in or not.
  */
 export const SocialPanel = ({ configured, showToast, nowReading, onReadNow, onNavigate }: SocialPanelProps) => {
   const signedIn = useAccountStore((state) => state.status.signedIn);
   const loadAccount = useAccountStore((state) => state.load);
-  const { me, setMe, scope, loadBoard, loadDuels } = useCommunityStore(
+  const { me, meError, setMe, loadMe, scope, loadBoard, loadDuels, publish } = useCommunityStore(
     useShallow((state) => ({
       me: state.me,
+      meError: state.meError,
       setMe: state.setMe,
+      loadMe: state.loadMe,
       scope: state.scope,
       loadBoard: state.loadBoard,
-      loadDuels: state.loadDuels
+      loadDuels: state.loadDuels,
+      publish: state.publish
     }))
   );
+  const [shareBusy, setShareBusy] = useState(false);
+  const [handleNudge, setHandleNudge] = useState(0);
   const { goalMinutes, activeSession } = useHabitStore(
     useShallow((state) => ({
       goalMinutes: state.snapshot.goalMinutes,
@@ -73,11 +82,9 @@ export const SocialPanel = ({ configured, showToast, nowReading, onReadNow, onNa
       setMe(null);
       return;
     }
-    socialService
-      .profile()
-      .then(setMe)
-      .catch(() => setMe(null));
-  }, [live, signedIn, setMe]);
+    // A failed read is kept as a failure (`meError`), not shown as "private".
+    void loadMe();
+  }, [live, signedIn, setMe, loadMe]);
 
   // Live-ish: refresh while this page is visible, pause while it is hidden.
   // Your own minutes go up first, so your row is current when the board lands.
@@ -91,7 +98,7 @@ export const SocialPanel = ({ configured, showToast, nowReading, onReadNow, onNa
         return;
       }
       if (signedIn) {
-        await socialService.publishStats();
+        await publish();
       }
       if (stopped) {
         return;
@@ -110,7 +117,7 @@ export const SocialPanel = ({ configured, showToast, nowReading, onReadNow, onNa
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [live, scope, signedIn, loadBoard, loadDuels]);
+  }, [live, scope, signedIn, loadBoard, loadDuels, publish]);
 
   const refreshAll = useCallback(() => {
     void loadBoard("everyone");
@@ -128,6 +135,32 @@ export const SocialPanel = ({ configured, showToast, nowReading, onReadNow, onNa
     [setMe, refreshAll]
   );
 
+  // "Share my profile" on the reader's own board row: the profile card's
+  // switch, pressed from where they are looking. A profile is shared under a
+  // handle, so without one this opens the card's fields instead.
+  const shareFromBoard = useCallback(() => {
+    if (!me?.handle) {
+      setHandleNudge((count) => count + 1);
+      showToast(COPY.pickHandleFirst);
+      return;
+    }
+    setShareBusy(true);
+    socialService
+      .saveProfile({
+        handle: me.handle,
+        // The profile's own name, or none. The sign-up name is not put in its
+        // place here: this button shows no field for the reader to see it in.
+        displayName: me.displayName,
+        visibility: "public"
+      })
+      .then((saved) => {
+        onProfileSaved(saved);
+        showToast(COPY.sharedToast);
+      })
+      .catch((cause) => showToast(errorText(cause)))
+      .finally(() => setShareBusy(false));
+  }, [me, onProfileSaved, showToast]);
+
   if (!live) {
     return (
       <section className="paper-surface rounded-xl p-6">
@@ -142,7 +175,15 @@ export const SocialPanel = ({ configured, showToast, nowReading, onReadNow, onNa
   return (
     <>
       {signedIn ? (
-        <ProfileCard profile={me} onSaved={onProfileSaved} showToast={showToast} onOpenPip={() => onNavigate("pip")} />
+        <ProfileCard
+          profile={me}
+          loadError={meError}
+          onRetry={() => void loadMe()}
+          handleNudge={handleNudge}
+          onSaved={onProfileSaved}
+          showToast={showToast}
+          onOpenPip={() => onNavigate("pip")}
+        />
       ) : (
         <section className="paper-surface flex flex-wrap items-center gap-5 rounded-xl p-6">
           <PipSprite move="welcome" size={64} still />
@@ -163,6 +204,8 @@ export const SocialPanel = ({ configured, showToast, nowReading, onReadNow, onNa
         sessionActive={Boolean(activeSession)}
         nowReading={nowReading}
         onReadNow={onReadNow}
+        onShare={shareFromBoard}
+        shareBusy={shareBusy}
       />
 
       {signedIn && <DuelCards showToast={showToast} />}

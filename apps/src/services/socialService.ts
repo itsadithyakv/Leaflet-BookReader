@@ -5,6 +5,12 @@ import { EMPTY_PROFILE, type SocialProfile, type SyncStatus } from "@shared/sync
 const PUBLISH_EVERY_MS = 60_000;
 let lastPublish = 0;
 let publishing: Promise<boolean> | null = null;
+/** Why the last publish failed, or null when it went through (or had nothing to send). */
+let publishError: string | null = null;
+/** Counts `forgetPublish` calls, so a publish that outlives a sign-out reports to nobody. */
+let publishEpoch = 0;
+/** Told whenever a call to the server fails. See `onCallFailed`. */
+let callFailed: (() => void) | null = null;
 
 // ---- community types --------------------------------------------------------
 //
@@ -34,8 +40,17 @@ export type CommunityBoard = {
   weekKey: string;
   scope: BoardScope;
   entries: BoardEntry[];
-  /** The reader's own row when signed in and public, even outside the top 100. */
+  /**
+   * The reader's own row when signed in and public, even outside the top 100.
+   * Null for a private reader: their own row is drawn from this device's
+   * minutes instead (see `community/ownRow.ts`).
+   */
   you: BoardEntry | null;
+  /**
+   * How many readers share a profile at all, read this week or not (Everyone
+   * only). Lets an empty board say why it is empty. Absent from older servers.
+   */
+  sharedReaders?: number | null;
 };
 
 export type DuelSide = CommunityPerson & { minutes: number };
@@ -100,6 +115,7 @@ const call = async <T>(command: string, args?: Record<string, unknown>): Promise
   try {
     return await invoke<T>(command, args);
   } catch (cause) {
+    callFailed?.();
     throw cause instanceof Error ? cause : new Error(String(cause));
   }
 };
@@ -108,8 +124,9 @@ const call = async <T>(command: string, args?: Record<string, unknown>): Promise
  * The social half: profiles, the weekly board, and shared shelves.
  *
  * All of it runs through Leaflet's own API, which is the only part of the app
- * with a server behind it. Everything here is opt-in — a profile publishes
- * nothing until its owner makes it public.
+ * with a server behind it. A profile publishes nothing unless it is public:
+ * one created at sign-up is, unless the reader switched that off on the form,
+ * and any profile can be made private again.
  *
  * Profile calls need a signed-in Leaflet account (see accountService); Rust
  * attaches the session from the OS keychain and rejects with "Sign in to your
@@ -125,16 +142,29 @@ export const socialService = {
     return invoke<SyncStatus>("set_cloud_api", { url });
   },
 
+  /**
+   * Asks the server whether it is there. Resolves when it answers; rejects
+   * with the reason when it cannot be reached.
+   */
+  async checkServer(): Promise<void> {
+    if (!isTauri()) {
+      return;
+    }
+    await call<void>("cloud_reachable");
+  },
+
   async profile(): Promise<SocialProfile> {
     if (!isTauri()) {
       return EMPTY_PROFILE;
     }
-    return invoke<SocialProfile>("social_profile");
+    return call<SocialProfile>("social_profile");
   },
 
   /**
    * Saves the parts a reader controls. Switching to public also publishes the
    * ranked figures, so the board is not a week behind the switch.
+   *
+   * A field left out (or null) is left as it is; an empty name removes it.
    */
   async saveProfile(update: {
     handle?: string | null;
@@ -144,7 +174,7 @@ export const socialService = {
     if (!isTauri()) {
       return EMPTY_PROFILE;
     }
-    return invoke<SocialProfile>("save_social_profile", {
+    return call<SocialProfile>("save_social_profile", {
       handle: update.handle ?? null,
       displayName: update.displayName ?? null,
       visibility: update.visibility ?? null
@@ -155,7 +185,9 @@ export const socialService = {
    * Publishes this week's minutes, streak and shelf, when the profile is
    * public. Called when a session ends, when the Social page opens and on the
    * community pulse, at most once a minute unless `force`d. Never throws: a
-   * board a minute stale is not worth an error.
+   * board a minute stale is not worth an error. But a failure is kept (see
+   * `publishProblem`), because a reader whose minutes are being refused is
+   * otherwise just missing from the board with nothing to say why.
    */
   async publishStats(options: { force?: boolean } = {}): Promise<boolean> {
     if (!isTauri()) {
@@ -164,16 +196,57 @@ export const socialService = {
     if (publishing) {
       return publishing;
     }
-    if (!options.force && Date.now() - lastPublish < PUBLISH_EVERY_MS) {
+    // A clock that was set back makes the last publish look like the future.
+    // Without the first test nothing was sent until the clock caught up.
+    const sinceLast = Date.now() - lastPublish;
+    if (!options.force && sinceLast >= 0 && sinceLast < PUBLISH_EVERY_MS) {
       return false;
     }
     lastPublish = Date.now();
+    const epoch = publishEpoch;
     publishing = call<boolean>("publish_social_stats")
-      .catch(() => false)
+      .then((published) => {
+        if (epoch === publishEpoch) {
+          publishError = null;
+        }
+        return published;
+      })
+      .catch((cause) => {
+        if (epoch === publishEpoch) {
+          publishError = cause instanceof Error ? cause.message : String(cause);
+        }
+        return false;
+      })
       .finally(() => {
         publishing = null;
       });
     return publishing;
+  },
+
+  /** Why the last publish failed (offline, signed out, refused), or null. */
+  publishProblem(): string | null {
+    return publishError;
+  },
+
+  /**
+   * Signed out: the last publish, and why it failed, were that reader's. Kept,
+   * the next reader to sign in here waited out the last one's minute and was
+   * shown the last one's error.
+   */
+  forgetPublish() {
+    publishEpoch += 1;
+    lastPublish = 0;
+    publishError = null;
+  },
+
+  /**
+   * Names who to tell when a call to the server fails. A session that ended
+   * on the server (a password changed elsewhere, the account deleted) is only
+   * found out by a call failing, and Rust forgets it there and then; this is
+   * how the page hears, instead of going on as if still signed in.
+   */
+  onCallFailed(listener: (() => void) | null) {
+    callFailed = listener;
   },
 
   // ---- community ------------------------------------------------------------

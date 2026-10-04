@@ -39,6 +39,8 @@ export const ReadingPaceCard = ({ showToast, renderToggle }: ReadingPaceCardProp
   const [startMode, setStartMode] = useState<StartMode>(readStartMode);
   const [confirmForget, setConfirmForget] = useState(false);
   const saveTimerRef = useRef<number | null>(null);
+  // The range a slider was left at, while its save is still waiting.
+  const unsavedRef = useRef<ReadingProfile | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -55,6 +57,16 @@ export const ReadingPaceCard = ({ showToast, renderToggle }: ReadingPaceCardProp
     () => () => {
       if (saveTimerRef.current) {
         window.clearTimeout(saveTimerRef.current);
+      }
+      // Leaving Settings within half a second of moving a slider used to
+      // drop the change: the card showed the new range and never saved it.
+      const unsaved = unsavedRef.current;
+      unsavedRef.current = null;
+      if (unsaved) {
+        void readingProfileService
+          .save(unsaved)
+          .then(() => useLibraryStore.getState().requestBackup())
+          .catch(() => undefined);
       }
     },
     []
@@ -79,11 +91,13 @@ export const ReadingPaceCard = ({ showToast, renderToggle }: ReadingPaceCardProp
     }
     const next = setLimits(profile, { ...paceLimits(profile), ...change }, new Date().toISOString());
     setProfile(next);
+    unsavedRef.current = next;
     if (saveTimerRef.current) {
       window.clearTimeout(saveTimerRef.current);
     }
     saveTimerRef.current = window.setTimeout(() => {
       saveTimerRef.current = null;
+      unsavedRef.current = null;
       void save(next);
     }, 500);
   };

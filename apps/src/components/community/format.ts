@@ -35,6 +35,19 @@ export const nameOf = (person: Pick<CommunityPerson, "handle" | "displayName"> |
 
 export const at = (handle: string | null | undefined) => (handle ? `@${handle}` : "a reader");
 
+/**
+ * What the profile's Name field starts with. The name given at sign-up fills
+ * it for a reader setting their profile up (no handle yet), so there is one
+ * name to type, not two. Once the profile has a handle its name is its own,
+ * and an empty one stays empty: a reader who removed their name had the
+ * sign-up one put back in the field, and published by the next press of
+ * "Share my profile".
+ */
+export const nameToEdit = (
+  profile: { handle: string | null; displayName: string | null } | null,
+  accountName: string | null | undefined
+) => profile?.displayName ?? (profile?.handle ? "" : accountName ?? "");
+
 export const minutesText = (minutes: number) => {
   const whole = Math.max(0, Math.round(minutes));
   if (whole < 60) {

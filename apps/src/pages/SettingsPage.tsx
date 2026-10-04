@@ -4,25 +4,30 @@ import { useShallow } from "zustand/react/shallow";
 import { flowerGrowing, useHabitStore } from "../store/habitStore";
 import { askConfirm } from "../components/ConfirmDialog";
 import { useAppearanceStore, type ThemeMode } from "../store/appearanceStore";
-import { converterService, type ConverterInfo } from "../services/converterService";
-import { dependencyFreeSummary, externalConverterCount } from "../constants/bookFormats";
 import { bookService } from "../services/bookService";
 import { clearSmartReadProfiles } from "../services/smartReadService";
 import { ReadingPaceCard } from "../components/ReadingPaceCard";
+import { CharactersSetting } from "../readers/people/CharactersSetting";
 import { UiIcon } from "../components/UiIcon";
 import { RemindersCard } from "../components/RemindersCard";
-import { getPlatform, pickSyncFolder } from "../platform";
+import { ConverterCard } from "../components/ConverterCard";
+import { LeaderboardsCard } from "../components/LeaderboardsCard";
+import { LibraryCopyCard } from "../components/LibraryCopyCard";
+import { pickSyncFolder } from "../platform";
 import { FEATURES } from "../constants/features";
 import { PRIVACY_URL, SUPPORT_EMAIL, TERMS_URL } from "../constants/links";
 import { openStoreReview } from "../components/RatePrompt";
 import { useAccountStore } from "../store/accountStore";
 import { accountService, errorMessage } from "../services/accountService";
 import { diagnosticsService } from "../services/diagnosticsService";
+import { forgetBooksOnThisDevice } from "../services/deviceData";
 import { AccountForm } from "../components/account/AccountForm";
 import { PipAvatar } from "../components/community/PipAvatar";
 import { usePipStore, type PipMode } from "../store/pipStore";
 import { pickBeat } from "../pip/moments";
 import { playSound, useSoundOn } from "../pip/sound";
+import { SegmentedTabs, panelId, tabId, type SegmentedTab } from "../components/ui/SegmentedTabs";
+import { readSettingsSection, rememberSettingsSection, type SettingsSection } from "./settingsSection";
 
 const PIP_MODES: Array<{ mode: PipMode; label: string; detail: string; preview: string }> = [
   { mode: "chatty", label: "Chatty", detail: "Pip lives out in the app: it wanders, naps, celebrates, and can be picked up and thrown. Select the logo to call it home.", preview: "look" },
@@ -42,7 +47,6 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
     startDriveAuth,
     disconnectDrive,
     setSyncFolder,
-    setCloudApi,
     setDriveCredentials,
     clearDriveCredentials,
     syncNow,
@@ -79,34 +83,31 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
   };
   const startPipTour = usePipStore((state) => state.startTour);
   const pipChoice = PIP_MODES.find((item) => item.mode === pipMode) ?? PIP_MODES[0];
-  const [converter, setConverter] = useState<ConverterInfo>({
-    installed: false,
-    path: null,
-    canAutoInstall: false
-  });
-  const [converterBusy, setConverterBusy] = useState(false);
-  // The converter is compiled out of mobile builds entirely -- there is no
-  // Calibre for Android -- so the card must not offer something unreachable.
-  const converterSupported = getPlatform() === "desktop";
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showDriveSetup, setShowDriveSetup] = useState(false);
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [credentialBusy, setCredentialBusy] = useState(false);
-  const [apiBase, setApiBase] = useState("");
-  const [apiBusy, setApiBusy] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  // Bumped after "Delete All Data": the cards that load their own state
+  // (book copies, reminders, the reading pace) start over, rather than go on
+  // showing what was deleted and saving it back at the next touch.
+  const [wiped, setWiped] = useState(0);
 
-  useEffect(() => {
-    converterService
-      .status()
-      .then(setConverter)
-      .catch(() => setConverter({ installed: false, path: null, canAutoInstall: false }));
-  }, []);
+  // The backend's own reason, where it gave one. It rejects with a plain
+  // string, which `instanceof Error` never matched, so every failure here
+  // used to show the generic line instead of what went wrong.
+  const reason = (error: unknown, fallback: string) => errorMessage(error, fallback).trim() || fallback;
 
+  // "Confirm Delete" does not stay armed: a click minutes later, on a button
+  // that has changed under the pointer, must not delete everything.
   useEffect(() => {
-    setApiBase(sync.apiBase ?? "");
-  }, [sync.apiBase]);
+    if (!confirmDelete || deleteBusy) {
+      return;
+    }
+    const disarm = window.setTimeout(() => setConfirmDelete(false), 8000);
+    return () => window.clearTimeout(disarm);
+  }, [confirmDelete, deleteBusy]);
 
   const syncHelper =
     syncStatus === "syncing"
@@ -127,15 +128,23 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
   const showClientSetup = sync.driveCredentialSource !== "built-in";
 
   const handleChooseFolder = async () => {
+    let picked: string | null = null;
     try {
-      const picked = await pickSyncFolder();
+      picked = await pickSyncFolder();
       if (!picked) {
         return;
       }
       await setSyncFolder(picked);
       showToast("Folder sync is on.");
     } catch (error) {
-      showToast(error instanceof Error ? error.message : "Could not use that folder.");
+      // The folder can be taken and the first sync into it still fail: then
+      // the card shows the folder in use, and the toast must not deny it.
+      const inUse = picked !== null && useLibraryStore.getState().sync.folderPath === picked;
+      showToast(
+        inUse
+          ? `Folder sync is on, but the first sync failed: ${reason(error, "try Back Up Now.")}`
+          : reason(error, "Could not use that folder.")
+      );
     }
   };
 
@@ -157,9 +166,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
         setShowDriveSetup(false);
         showToast("Google client saved. You can connect Drive now.");
       })
-      .catch((error) =>
-        showToast(error instanceof Error ? error.message : "Could not save those credentials.")
-      )
+      .catch((error) => showToast(reason(error, "Could not save those credentials.")))
       .finally(() => setCredentialBusy(false));
   };
 
@@ -173,22 +180,6 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
       .catch(() => showToast("Could not remove those credentials."));
   };
 
-  const handleSaveApiBase = () => {
-    setApiBusy(true);
-    setCloudApi(apiBase.trim())
-      .then(() =>
-        showToast(
-          apiBase.trim()
-            ? "Connected to your Leaflet server."
-            : "Leaderboards and shared shelves are off. Sync is unaffected."
-        )
-      )
-      .catch((error) =>
-        showToast(error instanceof Error ? error.message : "Could not use that address.")
-      )
-      .finally(() => setApiBusy(false));
-  };
-
   const handleDisconnectDrive = () => {
     disconnectDrive()
       .then(() => showToast("Drive disconnected. Your books stay on this device, and your backup stays in Drive."))
@@ -197,13 +188,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
 
   const handleDriveAuth = () => {
     showToast("Finish signing in to Google in your browser.");
-    startDriveAuth().catch((error) => {
-      if (error instanceof Error && error.message.trim().length > 0) {
-        showToast(error.message);
-        return;
-      }
-      showToast("Drive connection failed. Please retry.");
-    });
+    startDriveAuth().catch((error) => showToast(reason(error, "Drive connection failed. Please retry.")));
   };
 
   const handleSync = () => {
@@ -212,37 +197,11 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
         const beat = pickBeat("backup", Date.now());
         usePipStore.getState().react(beat.move, { loops: 1, line: beat.line });
       })
-      .catch((error) => {
-      if (error instanceof Error && error.message.trim().length > 0) {
-        showToast(error.message);
-        return;
-      }
-      showToast("Backup failed. Check your Drive connection.");
-    });
-  };
-
-  const handleConverterToggle = () => {
-    if (converter.installed || converterBusy || !converter.canAutoInstall) {
-      return;
-    }
-    setConverterBusy(true);
-    converterService
-      .install()
-      .then(() => converterService.status())
-      .then((info) => {
-        setConverter(info);
-        showToast("Converter ready. Every supported format can now be opened.");
-      })
-      .catch((error) => {
-        if (error instanceof Error && error.message.trim().length > 0) {
-          showToast(error.message);
-        } else {
-          showToast("Converter install failed. Please retry.");
-        }
-      })
-      .finally(() => {
-        setConverterBusy(false);
-      });
+      .catch((error) =>
+        showToast(
+          reason(error, sync.driveConnected ? "Backup failed. Check your Drive connection." : "Backup failed. Check the sync folder.")
+        )
+      );
   };
 
   const handleDeleteAll = () => {
@@ -265,15 +224,16 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
         // it rather than assuming what it now says.
         void loadSyncStatus();
         clearSmartReadProfiles();
+        // What the webview kept about the books (each one's place, bookmarks
+        // and reader settings): left behind, a book imported again opened at
+        // its old place.
+        forgetBooksOnThisDevice();
+        // The delete signed this device out; the account card says so.
+        void useAccountStore.getState().load(true);
+        setWiped((count) => count + 1);
         showToast("All data removed.");
       })
-      .catch((error) => {
-        if (error instanceof Error && error.message.trim().length > 0) {
-          showToast(error.message);
-        } else {
-          showToast("Delete failed. Please retry.");
-        }
-      })
+      .catch((error) => showToast(reason(error, "Delete failed. Please retry.")))
       .finally(() => {
         setDeleteBusy(false);
         setConfirmDelete(false);
@@ -299,6 +259,25 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
     setFocusSettings({ kioskMode: !useHabitStore.getState().focusSettings.kioskMode });
   };
 
+  // Account is offered only where this build has accounts or the community.
+  const showAccount = (FEATURES.accounts && Boolean(sync.apiBase)) || FEATURES.community;
+  const sections: SegmentedTab<SettingsSection>[] = [
+    { id: "general", label: "General" },
+    { id: "reading", label: "Reading" },
+    { id: "library", label: "Library" },
+    ...(showAccount ? [{ id: "account" as const, label: "Account" }] : []),
+    { id: "about", label: "About" }
+  ];
+  const offered = sections.map((item) => item.id);
+  const [chosen, setChosen] = useState<SettingsSection>(() => readSettingsSection(offered));
+  // The address of the server arrives a moment after the page: a section that
+  // is not offered yet (or any more) falls back to the first.
+  const section = offered.includes(chosen) ? chosen : offered[0];
+  const chooseSection = (next: SettingsSection) => {
+    rememberSettingsSection(next);
+    setChosen(next);
+  };
+
   const renderToggle = (on: boolean) => (
     <span
       className={`relative inline-flex h-7 w-12 items-center rounded-full border transition ${
@@ -313,527 +292,446 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
     </span>
   );
 
+  const panel = (id: SettingsSection) => ({
+    role: "tabpanel" as const,
+    id: panelId("settings", id),
+    "aria-labelledby": tabId("settings", id),
+    // Two columns from `lg` up, one below it. Each card is as tall as what is
+    // in it, and each column stacks its own, so opening something in one never
+    // moves a card in the other. `min-w-0` lets a column shrink below a long
+    // unbroken line (a path, a truncated email) instead of pushing the page wide.
+    className: "grid items-start gap-4 [&>*]:min-w-0 lg:grid-cols-2"
+  });
+  const column = "flex flex-col gap-4 [&>*]:min-w-0";
+
   return (
-    <div className="flex min-h-full flex-col gap-6">
-      <div>
+    <div className="flex min-h-full flex-col gap-5">
+      {/* A few short sections behind tabs. It used to be one page several
+          screens long, most of it explanation, with what you came for
+          somewhere down it. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
         <h2 className="page-title text-4xl">Settings</h2>
-        <p className="mt-2 text-sm text-on-surface-variant">
-          Appearance, Pip, backup, your reading goal and your account.
-        </p>
+        <div className="max-w-full overflow-x-auto">
+          <SegmentedTabs label="Settings" idPrefix="settings" tabs={sections} value={section} onChange={chooseSection} size="md" />
+        </div>
       </div>
 
-      {/* Grid items default to `min-width: auto`, so a `truncate` inside one
-          (which sets `white-space: nowrap`) makes the whole track as wide as
-          that unbroken sentence — on a phone that pushed every card past the
-          right edge. `min-w-0` lets the track shrink and the ellipsis work. */}
-      <div className="grid gap-4 [&>*]:min-w-0 lg:grid-cols-2">
-        <section className="paper-surface rounded-xl p-5 lg:col-span-2">
-          <p className="text-xs uppercase tracking-widest text-on-surface-variant">Appearance</p>
-          <h3 className="page-title mt-2 text-2xl text-on-surface">Choose your reading room</h3>
-          <p className="mt-1 text-xs text-on-surface-variant">
-            Your choice applies to the library and the reader, and is remembered on this device.
-          </p>
-          <div className="mt-4 flex gap-4">
-            {(["light", "dark"] as ThemeMode[]).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                className={`theme-choice ${
-                  mode === "light"
-                    ? "bg-[#eee5d3] text-[#302a21]"
-                    : "bg-[#1b1a17] text-[#eee6d8]"
-                }`}
-                aria-pressed={theme === mode}
-                onClick={() => setTheme(mode)}
-              >
-                <UiIcon name={mode === "light" ? "sun" : "moon"} size={23} />
-                <span className="text-sm font-semibold capitalize">{mode} mode</span>
-              </button>
-            ))}
-          </div>
-          <div className="section-rule mt-5 flex flex-wrap items-center justify-between gap-3 pt-4">
-            <span className="text-xs text-on-surface-variant">
-              {followSystem ? "Following the Windows appearance setting." : "Leaflet opens in the mode you pick here. Light is the default."}
-            </span>
-            <button
-              type="button"
-              className="tactile-button px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-45"
-              onClick={followSystemTheme}
-              disabled={followSystem}
-            >
-              Use Windows Theme
-            </button>
-          </div>
-        </section>
-
-        <section className="paper-surface rounded-xl p-5 lg:col-span-2">
-          <p className="text-xs uppercase tracking-widest text-on-surface-variant">Pip</p>
-          <div className="mt-2 flex flex-wrap items-center gap-5">
-            <div className="min-w-0 flex-1">
-              <h3 className="page-title text-2xl text-on-surface">Your reading companion</h3>
-              <p className="mt-1 text-xs text-on-surface-variant">{pipChoice.detail}</p>
-              <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="How much Pip moves">
-                {PIP_MODES.map((item) => (
-                  <button
-                    key={item.mode}
-                    type="button"
-                    className={`tactile-button px-4 py-2 text-xs ${pipMode === item.mode ? "tactile-button-primary" : ""}`}
-                    aria-pressed={pipMode === item.mode}
-                    onClick={() => setPipMode(item.mode)}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-                {pipMode !== "off" && (
-                  <button type="button" className="tactile-button px-4 py-2 text-xs" onClick={startPipTour}>
-                    Show Me Around
-                  </button>
-                )}
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={pipSounds}
-                className="inset-field mt-4 flex w-full items-center justify-between gap-3 px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
-                onClick={togglePipSounds}
-              >
-                <span className="text-left">
-                  <span className="block">Sounds in Pip's house</span>
-                  <span className="mt-0.5 block text-[11px] opacity-75">
-                    Soft little sounds when you pick, plant, buy and place things. They follow your computer's volume.
-                  </span>
-                </span>
-                {renderToggle(pipSounds)}
-              </button>
+      {section === "general" && (
+        <div {...panel("general")}>
+          <section className="paper-surface rounded-xl p-5">
+            <p className="text-xs uppercase tracking-widest text-on-surface-variant">Appearance</p>
+            <div className="mt-3 flex gap-3">
+              {(["light", "dark"] as ThemeMode[]).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={`theme-choice !min-h-0 !flex-row items-center !justify-start gap-3 !py-3 ${
+                    mode === "light"
+                      ? "bg-[#eee5d3] text-[#302a21]"
+                      : "bg-[#1b1a17] text-[#eee6d8]"
+                  }`}
+                  aria-pressed={theme === mode}
+                  onClick={() => setTheme(mode)}
+                >
+                  <UiIcon name={mode === "light" ? "sun" : "moon"} size={20} />
+                  <span className="text-sm font-semibold capitalize">{mode} mode</span>
+                </button>
+              ))}
             </div>
-          </div>
-        </section>
-
-        <div className="paper-surface rounded-xl p-5">
-          <p className="text-xs uppercase tracking-widest text-on-surface-variant">Backup</p>
-          <p className="mt-3 font-headline text-2xl font-bold text-on-surface">
-            {sync.driveConnected
-              ? sync.accountEmail ?? "Google Drive"
-              : sync.folderPath
-                ? "Sync folder"
-                : "Not backed up"}
-          </p>
-          <p className="mt-2 text-xs text-on-surface-variant">{syncHelper}</p>
-          {sync.booksPending > 0 && (
-            <p className="mt-1 text-xs text-on-surface-variant">
-              {sync.booksPending} {sync.booksPending === 1 ? "book" : "books"} in your library
-              will download the first time you open them.
-            </p>
-          )}
-
-          {showFolderSync && (
-          <div className="mt-5 border-t border-outline-variant/40 pt-4">
-            <p className="text-xs font-semibold text-on-surface">Sync folder</p>
-            <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">
-              Point Leaflet at a folder your Google Drive, Dropbox, OneDrive or iCloud app
-              already keeps in step. No account, no setup.
-            </p>
-            {sync.folderPath && (
-              <p className="mt-2 break-all text-xs text-on-surface-variant">{sync.folderPath}</p>
-            )}
-            <div className="mt-3 flex flex-wrap gap-3">
-              <button
-                type="button"
-                className="tactile-button px-4 py-2 text-xs"
-                onClick={() => void handleChooseFolder()}
-              >
-                {sync.folderPath ? "Change Folder" : "Choose Folder"}
-              </button>
-              {sync.folderPath && (
-                <button
-                  type="button"
-                  className="tactile-button px-4 py-2 text-xs"
-                  onClick={handleClearFolder}
-                >
-                  Stop Folder Sync
-                </button>
-              )}
-            </div>
-          </div>
-          )}
-
-          <div className="mt-5 border-t border-outline-variant/40 pt-4">
-            <p className="text-xs font-semibold text-on-surface">Google Drive</p>
-            <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">
-              {sync.driveAvailable
-                ? "Your books, reading progress and streak are copied to a Leaflet folder in your own Drive. Connect the same account on a new computer to restore them. Leaflet only ever sees the files it creates."
-                : "This build has no Google client, so Drive backup is unavailable. Set one up below to enable it."}
-            </p>
-
-            <div className="mt-3 flex flex-wrap gap-3">
-              <button
-                type="button"
-                className="tactile-button px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
-                onClick={handleDriveAuth}
-                disabled={!sync.driveAvailable}
-              >
-                {sync.driveConnected ? "Reconnect Drive" : "Connect Drive"}
-              </button>
-              {sync.driveConnected && (
-                <button
-                  type="button"
-                  className="tactile-button px-4 py-2 text-xs"
-                  onClick={handleDisconnectDrive}
-                >
-                  Disconnect
-                </button>
-              )}
-              {showClientSetup && (
-                <button
-                  type="button"
-                  className="tactile-button px-4 py-2 text-xs"
-                  onClick={() => setShowDriveSetup((open) => !open)}
-                >
-                  {showDriveSetup ? "Hide Setup" : sync.driveAvailable ? "Change Client" : "Set Up Drive"}
-                </button>
-              )}
-            </div>
-
-            {sync.driveCredentialSource === "custom" && !showDriveSetup && (
-              <p className="mt-2 text-[11px] text-on-surface-variant">
-                Using a Google client you provided.{" "}
-                <button
-                  type="button"
-                  className="underline decoration-dotted underline-offset-2"
-                  onClick={handleClearCredentials}
-                >
-                  Remove it
-                </button>
-              </p>
-            )}
-
-            {showClientSetup && showDriveSetup && (
-              <div className="mt-3 rounded-lg border border-outline-variant/40 p-3">
-                <p className="text-[11px] leading-relaxed text-on-surface-variant">
-                  In the Google Cloud console, create an OAuth client of type{" "}
-                  <span className="font-semibold text-on-surface">Desktop app</span>, then paste
-                  it below. Leaflet requests only the <code>drive.file</code> scope, which lets it
-                  see the files it creates and nothing else in your Drive.
-                </p>
-                <label className="mt-3 block text-[10px] uppercase tracking-[0.2em] text-on-surface-variant">
-                  Client ID
-                </label>
-                <input
-                  value={clientId}
-                  onChange={(event) => setClientId(event.target.value)}
-                  placeholder="…apps.googleusercontent.com"
-                  spellCheck={false}
-                  autoComplete="off"
-                  className="inset-field mt-1 w-full px-3 py-2 text-xs text-on-surface"
-                />
-                <label className="mt-3 block text-[10px] uppercase tracking-[0.2em] text-on-surface-variant">
-                  Client secret
-                </label>
-                <input
-                  value={clientSecret}
-                  onChange={(event) => setClientSecret(event.target.value)}
-                  placeholder="Optional for desktop clients"
-                  spellCheck={false}
-                  autoComplete="off"
-                  className="inset-field mt-1 w-full px-3 py-2 text-xs text-on-surface"
-                />
-                <p className="mt-2 text-[10px] leading-relaxed text-on-surface-variant">
-                  Google treats desktop clients as public, so this secret is not confidential —
-                  the sign-in is protected by PKCE either way.
-                </p>
-                <button
-                  type="button"
-                  className="tactile-button tactile-button-primary mt-3 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
-                  onClick={handleSaveCredentials}
-                  disabled={credentialBusy || clientId.trim().length === 0}
-                >
-                  {credentialBusy ? "Saving…" : "Save Client"}
-                </button>
-              </div>
-            )}
-          </div>
-
-          <button
-            type="button"
-            className="tactile-button tactile-button-primary mt-5 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
-            onClick={handleSync}
-            disabled={!syncConfigured || syncing}
-          >
-            {syncing ? "Backing up…" : "Back Up Now"}
-          </button>
-          {!FEATURES.multiDeviceSync && (
-            <p className="mt-3 text-[11px] leading-relaxed text-on-surface-variant">
-              Reading across your phone and computer arrives with the Leaflet mobile app — coming
-              soon.
-            </p>
-          )}
-        </div>
-
-        {/* Keyed on the server, so switching servers re-reads who is signed in. */}
-        {FEATURES.accounts && sync.apiBase && (
-          <AccountCard key={sync.apiBase} showToast={showToast} />
-        )}
-
-        {FEATURES.community && (
-        <div className="paper-surface rounded-xl p-5">
-          <p className="text-xs uppercase tracking-widest text-on-surface-variant">
-            Leaderboards &amp; Shared Shelves
-          </p>
-          <p className="mt-3 font-headline text-2xl font-bold text-on-surface">
-            {sync.apiBase ? "Connected" : "Off"}
-          </p>
-          <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
-            The only part of Leaflet with a server. It carries your reading stats — never your
-            book files — so a weekly leaderboard and a shareable shelf are possible. Sync works
-            without it, and your profile stays private until you choose otherwise.
-          </p>
-          <label className="mt-4 block text-[10px] uppercase tracking-[0.2em] text-on-surface-variant">
-            Server address
-          </label>
-          <input
-            value={apiBase}
-            onChange={(event) => setApiBase(event.target.value)}
-            placeholder="https://your-leaflet-server.example"
-            spellCheck={false}
-            autoCapitalize="none"
-            autoCorrect="off"
-            className="inset-field mt-1 w-full px-3 py-2 text-xs text-on-surface"
-          />
-          <div className="mt-3 flex flex-wrap gap-3">
-            <button
-              type="button"
-              className="tactile-button px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
-              onClick={handleSaveApiBase}
-              disabled={apiBusy}
-            >
-              {apiBusy ? "Saving…" : "Save"}
-            </button>
-            {sync.apiBase && (
-              <button
-                type="button"
-                className="tactile-button px-4 py-2 text-xs"
-                onClick={() => {
-                  setApiBase("");
-                  setCloudApi("")
-                    .then(() => showToast("Disconnected."))
-                    .catch(() => showToast("Could not disconnect from that server."));
-                }}
-              >
-                Disconnect
-              </button>
-            )}
-          </div>
-          <p className="mt-2 text-[10px] leading-relaxed text-on-surface-variant">
-            Run your own with <code>server/</code> in the repo. Sharing a profile needs a
-            Leaflet account on that server.
-          </p>
-        </div>
-        )}
-
-        <ReadingPaceCard showToast={showToast} renderToggle={renderToggle} />
-
-        <div className="paper-surface rounded-xl p-5">
-          <p className="text-xs uppercase tracking-widest text-on-surface-variant">Optional Book Converter</p>
-          <p className="mt-2 text-xs leading-5 text-on-surface-variant">
-            <span className="text-on-surface">{dependencyFreeSummary()}</span> open with no
-            converter at all — Leaflet reads them itself.{" "}
-            {converterSupported ? (
-              <>
-                The remaining {externalConverterCount()} formats, including Kindle and Word files,
-                are converted by Calibre, which Leaflet never bundles: an existing Calibre on this
-                computer is used automatically, and otherwise Leaflet asks before downloading
-                anything.
-              </>
-            ) : (
-              <>
-                The remaining {externalConverterCount()} formats need Calibre, which has no version
-                for this device. Open one on a desktop once and the converted book syncs here like
-                any other.
-              </>
-            )}
-          </p>
-          <div className="mt-4 flex items-center justify-between gap-4">
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-on-surface">
-                {converter.installed
-                  ? "Ready"
-                  : converterSupported
-                    ? "Not installed"
-                    : "Desktop only"}
-              </p>
-              <p className="truncate text-xs text-on-surface-variant" title={converter.path ?? undefined}>
-                {converterBusy
-                  ? "Downloading and installing..."
-                  : converter.installed
-                    ? `Using ${converter.path ?? "the installed converter"}`
-                    : !converterSupported
-                      ? "Not available on this device."
-                      : converter.canAutoInstall
-                        ? "About 200 MB. The installer is removed after setup."
-                        : "Install Calibre from calibre-ebook.com and Leaflet will detect it."}
-              </p>
-            </div>
-            {!converter.installed && converter.canAutoInstall && (
-              <button
-                type="button"
-                className="tactile-button shrink-0 px-4 py-2 text-xs font-semibold disabled:cursor-default disabled:opacity-70"
-                onClick={handleConverterToggle}
-                disabled={converterBusy}
-              >
-                {converterBusy ? "Installing" : "Download now"}
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div className="paper-surface rounded-xl p-5">
-          <p className="text-xs uppercase tracking-widest text-on-surface-variant">Focus Mode</p>
-          <p className="mt-2 text-xs text-on-surface-variant">
-            Read this much in a day to keep your streak alive. Time counts whenever a book is
-            open, whether or not a focus session is running.
-          </p>
-          <div className="mt-4 space-y-3">
-            <div className="inset-field flex w-full items-center justify-between gap-4 px-4 py-3">
-              <span className="text-xs text-on-surface-variant">Daily reading goal</span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  className="tactile-button h-8 w-8 text-sm"
-                  onClick={() => void setGoalMinutes(Math.max(5, goalMinutes - 5))}
-                  aria-label="Decrease daily goal"
-                >
-                  -
-                </button>
-                <span className="min-w-20 text-center text-sm font-semibold text-on-surface tabular-nums">
-                  {goalMinutes} min
-                </span>
-                <button
-                  type="button"
-                  className="tactile-button h-8 w-8 text-sm"
-                  onClick={() => void setGoalMinutes(Math.min(240, goalMinutes + 5))}
-                  aria-label="Increase daily goal"
-                >
-                  +
-                </button>
-              </div>
-            </div>
-            <button
-              type="button"
-              className="inset-field flex w-full items-center justify-between px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
-              onClick={() => setFocusSettings({ goalBinding: !focusSettings.goalBinding })}
-            >
-              <span>Auto-start focus when opening a book</span>
-              {renderToggle(focusSettings.goalBinding)}
-            </button>
-            <button
-              type="button"
-              className="inset-field flex w-full items-center justify-between px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
-              onClick={() => void toggleFullScreen()}
-            >
-              <span className="text-left">
-                <span className="block">Full screen (focus lock)</span>
-                <span className="mt-0.5 block text-[11px] opacity-75">
-                  Sessions run full screen and grow a focus flower, which blooms if you stay to the end. Pip guards
-                  the way out; hold Esc to leave.
-                </span>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <span className="text-xs text-on-surface-variant">
+                {followSystem
+                  ? "Following the Windows appearance setting."
+                  : "For the library and the reader, on this device."}
               </span>
-              {renderToggle(focusSettings.kioskMode)}
-            </button>
+              <button
+                type="button"
+                className="tactile-button px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-45"
+                onClick={followSystemTheme}
+                disabled={followSystem}
+              >
+                Use Windows Theme
+              </button>
+            </div>
+          </section>
+
+          <section className="paper-surface rounded-xl p-5">
+            <p className="text-xs uppercase tracking-widest text-on-surface-variant">Pip, your reading companion</p>
+            <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="How much Pip moves">
+              {PIP_MODES.map((item) => (
+                <button
+                  key={item.mode}
+                  type="button"
+                  className={`tactile-button px-4 py-2 text-xs ${pipMode === item.mode ? "tactile-button-primary" : ""}`}
+                  aria-pressed={pipMode === item.mode}
+                  onClick={() => setPipMode(item.mode)}
+                >
+                  {item.label}
+                </button>
+              ))}
+              {pipMode !== "off" && (
+                <button type="button" className="tactile-button px-4 py-2 text-xs" onClick={startPipTour}>
+                  Show Me Around
+                </button>
+              )}
+            </div>
+            <p className="mt-2 text-xs text-on-surface-variant">{pipChoice.detail}</p>
             <button
               type="button"
-              className="inset-field flex w-full items-center justify-between px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
-              onClick={() => setFocusSettings({ checkpointPrompts: !focusSettings.checkpointPrompts })}
+              role="switch"
+              aria-checked={pipSounds}
+              className="inset-field mt-3 flex w-full items-center justify-between gap-3 px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
+              onClick={togglePipSounds}
+              title="Soft little sounds when you pick, plant, buy and place things. They follow your computer's volume."
             >
-              <span>Checkpoint prompts at 50/90/100%</span>
-              {renderToggle(focusSettings.checkpointPrompts)}
+              <span>Sounds in Pip's house</span>
+              {renderToggle(pipSounds)}
             </button>
-            <button
-              type="button"
-              className="inset-field flex w-full items-center justify-between px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
-              onClick={() => setFocusSettings({ sessionNotes: !focusSettings.sessionNotes })}
-            >
-              <span>Prompt for session notes on finish</span>
-              {renderToggle(focusSettings.sessionNotes)}
-            </button>
+          </section>
+        </div>
+      )}
+
+      {section === "reading" && (
+        <div {...panel("reading")}>
+          <div className={column}>
+            <ReadingPaceCard key={wiped} showToast={showToast} renderToggle={renderToggle} />
+            <CharactersSetting key={`characters-${wiped}`} renderToggle={renderToggle} />
+          </div>
+          <div className={column}>
+              <div className="paper-surface rounded-xl p-5">
+                <p className="text-xs uppercase tracking-widest text-on-surface-variant">Daily goal and focus</p>
+                <p className="mt-2 text-xs text-on-surface-variant">
+                  Read this much in a day to keep your streak alive. Time counts whenever a book is
+                  open, whether or not a focus session is running.
+                </p>
+                <div className="mt-4 space-y-3">
+                  <div className="inset-field flex w-full items-center justify-between gap-4 px-4 py-3">
+                    <span className="text-xs text-on-surface-variant">Daily reading goal</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="tactile-button h-8 w-8 text-sm"
+                        onClick={() => void setGoalMinutes(Math.max(5, goalMinutes - 5))}
+                        aria-label="Decrease daily goal"
+                      >
+                        -
+                      </button>
+                      <span className="min-w-20 text-center text-sm font-semibold text-on-surface tabular-nums">
+                        {goalMinutes} min
+                      </span>
+                      <button
+                        type="button"
+                        className="tactile-button h-8 w-8 text-sm"
+                        onClick={() => void setGoalMinutes(Math.min(240, goalMinutes + 5))}
+                        aria-label="Increase daily goal"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="inset-field flex w-full items-center justify-between px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
+                    onClick={() => setFocusSettings({ goalBinding: !focusSettings.goalBinding })}
+                  >
+                    <span>Auto-start focus when opening a book</span>
+                    {renderToggle(focusSettings.goalBinding)}
+                  </button>
+                  <button
+                    type="button"
+                    className="inset-field flex w-full items-center justify-between px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
+                    onClick={() => void toggleFullScreen()}
+                  >
+                    <span className="text-left">
+                      <span className="block">Full screen (focus lock)</span>
+                      <span className="mt-0.5 block text-[11px] opacity-75">
+                        Sessions run full screen and grow a focus flower, which blooms if you stay to the end. Pip guards
+                        the way out; hold Esc to leave.
+                      </span>
+                    </span>
+                    {renderToggle(focusSettings.kioskMode)}
+                  </button>
+                  <button
+                    type="button"
+                    className="inset-field flex w-full items-center justify-between px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
+                    onClick={() => setFocusSettings({ checkpointPrompts: !focusSettings.checkpointPrompts })}
+                  >
+                    <span>Check in halfway, near the end and at the end of a session</span>
+                    {renderToggle(focusSettings.checkpointPrompts)}
+                  </button>
+                  <button
+                    type="button"
+                    className="inset-field flex w-full items-center justify-between px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
+                    onClick={() => setFocusSettings({ sessionNotes: !focusSettings.sessionNotes })}
+                  >
+                    <span>Prompt for session notes on finish</span>
+                    {renderToggle(focusSettings.sessionNotes)}
+                  </button>
+                </div>
+              </div>
+
+            <RemindersCard key={wiped} showToast={showToast} />
           </div>
         </div>
+      )}
 
-        <RemindersCard showToast={showToast} />
+      {section === "library" && (
+        <div {...panel("library")}>
+          <div className={column}>
+            <div className="paper-surface rounded-xl p-5">
+              <p className="text-xs uppercase tracking-widest text-on-surface-variant">Backup</p>
+              <p className="mt-3 font-headline text-2xl font-bold text-on-surface">
+                {sync.driveConnected
+                  ? sync.accountEmail ?? "Google Drive"
+                  : sync.folderPath
+                    ? "Sync folder"
+                    : "Not backed up"}
+              </p>
+              <p className="mt-2 text-xs text-on-surface-variant">{syncHelper}</p>
+              {sync.booksPending > 0 && (
+                <p className="mt-1 text-xs text-on-surface-variant">
+                  {sync.booksPending} {sync.booksPending === 1 ? "book" : "books"} in your library
+                  will download the first time you open them.
+                </p>
+              )}
 
-        <div className="paper-surface rounded-xl p-5">
-          <p className="text-xs uppercase tracking-widest text-on-surface-variant">Danger Zone</p>
-          <p className="mt-2 text-xs text-on-surface-variant">
-            This clears your local library, covers, sessions, and settings.
-          </p>
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              className="tactile-button border-error/50 bg-error/10 px-4 py-2 text-xs text-error hover:bg-error/20"
-              onClick={handleDeleteAll}
-              disabled={deleteBusy}
-            >
-              {confirmDelete ? "Confirm Delete" : "Delete All Data"}
-            </button>
-            {confirmDelete && !deleteBusy && (
+              {showFolderSync && (
+              <div className="mt-5 border-t border-outline-variant/40 pt-4">
+                <p className="text-xs font-semibold text-on-surface">Sync folder</p>
+                <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">
+                  Point Leaflet at a folder your Google Drive, Dropbox, OneDrive or iCloud app
+                  already keeps in step. No account, no setup.
+                </p>
+                {sync.folderPath && (
+                  <p className="mt-2 break-all text-xs text-on-surface-variant">{sync.folderPath}</p>
+                )}
+                <div className="mt-3 flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    className="tactile-button px-4 py-2 text-xs"
+                    onClick={() => void handleChooseFolder()}
+                  >
+                    {sync.folderPath ? "Change Folder" : "Choose Folder"}
+                  </button>
+                  {sync.folderPath && (
+                    <button
+                      type="button"
+                      className="tactile-button px-4 py-2 text-xs"
+                      onClick={handleClearFolder}
+                    >
+                      Stop Folder Sync
+                    </button>
+                  )}
+                </div>
+              </div>
+              )}
+
+              <div className="mt-5 border-t border-outline-variant/40 pt-4">
+                <p className="text-xs font-semibold text-on-surface">Google Drive</p>
+                <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">
+                  {sync.driveAvailable
+                    ? "Your books, reading progress and streak are copied to a Leaflet folder in your own Drive. Connect the same account on a new computer to restore them. Leaflet only ever sees the files it creates."
+                    : "Drive backup isn't set up in this copy of Leaflet. \"Set Up Drive\" lets you connect a Google sign-in of your own."}
+                </p>
+
+                <div className="mt-3 flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    className="tactile-button px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
+                    onClick={handleDriveAuth}
+                    disabled={!sync.driveAvailable}
+                  >
+                    {sync.driveConnected ? "Reconnect Drive" : "Connect Drive"}
+                  </button>
+                  {sync.driveConnected && (
+                    <button
+                      type="button"
+                      className="tactile-button px-4 py-2 text-xs"
+                      onClick={handleDisconnectDrive}
+                    >
+                      Disconnect
+                    </button>
+                  )}
+                  {showClientSetup && (
+                    <button
+                      type="button"
+                      className="tactile-button px-4 py-2 text-xs"
+                      onClick={() => setShowDriveSetup((open) => !open)}
+                    >
+                      {showDriveSetup ? "Hide Setup" : sync.driveAvailable ? "Change Client" : "Set Up Drive"}
+                    </button>
+                  )}
+                </div>
+
+                {sync.driveCredentialSource === "custom" && !showDriveSetup && (
+                  <p className="mt-2 text-[11px] text-on-surface-variant">
+                    Using a Google client you provided.{" "}
+                    <button
+                      type="button"
+                      className="underline decoration-dotted underline-offset-2"
+                      onClick={handleClearCredentials}
+                    >
+                      Remove it
+                    </button>
+                  </p>
+                )}
+
+                {showClientSetup && showDriveSetup && (
+                  <div className="mt-3 rounded-lg border border-outline-variant/40 p-3">
+                    <p className="text-[11px] leading-relaxed text-on-surface-variant">
+                      In the Google Cloud console, create an OAuth client of type{" "}
+                      <span className="font-semibold text-on-surface">Desktop app</span>, then paste
+                      it below. Leaflet requests only the <code>drive.file</code> scope, which lets it
+                      see the files it creates and nothing else in your Drive.
+                    </p>
+                    <label className="mt-3 block text-[10px] uppercase tracking-[0.2em] text-on-surface-variant">
+                      Client ID
+                    </label>
+                    <input
+                      value={clientId}
+                      onChange={(event) => setClientId(event.target.value)}
+                      placeholder="…apps.googleusercontent.com"
+                      spellCheck={false}
+                      autoComplete="off"
+                      className="inset-field mt-1 w-full px-3 py-2 text-xs text-on-surface"
+                    />
+                    <label className="mt-3 block text-[10px] uppercase tracking-[0.2em] text-on-surface-variant">
+                      Client secret
+                    </label>
+                    <input
+                      value={clientSecret}
+                      onChange={(event) => setClientSecret(event.target.value)}
+                      placeholder="Optional for desktop clients"
+                      spellCheck={false}
+                      autoComplete="off"
+                      className="inset-field mt-1 w-full px-3 py-2 text-xs text-on-surface"
+                    />
+                    <p className="mt-2 text-[10px] leading-relaxed text-on-surface-variant">
+                      Google treats desktop clients as public, so this secret is not confidential —
+                      the sign-in is protected by PKCE either way.
+                    </p>
+                    <button
+                      type="button"
+                      className="tactile-button tactile-button-primary mt-3 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
+                      onClick={handleSaveCredentials}
+                      disabled={credentialBusy || clientId.trim().length === 0}
+                    >
+                      {credentialBusy ? "Saving…" : "Save Client"}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <button
+                type="button"
+                className="tactile-button tactile-button-primary mt-5 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={handleSync}
+                disabled={!syncConfigured || syncing}
+              >
+                {syncing ? "Backing up…" : "Back Up Now"}
+              </button>
+              {!FEATURES.multiDeviceSync && (
+                <p className="mt-3 text-[11px] leading-relaxed text-on-surface-variant">
+                  Reading across your phone and computer arrives with the Leaflet mobile app — coming
+                  soon.
+                </p>
+              )}
+            </div>
+          </div>
+          <div className={column}>
+            <LibraryCopyCard key={wiped} showToast={showToast} renderToggle={renderToggle} />
+
+            <ConverterCard showToast={showToast} />
+          </div>
+        </div>
+      )}
+
+      {section === "account" && (
+        <div {...panel("account")}>
+          {/* Keyed on the server, so switching servers re-reads who is signed in. */}
+          {FEATURES.accounts && sync.apiBase && <AccountCard key={sync.apiBase} showToast={showToast} />}
+
+          {FEATURES.community && <LeaderboardsCard showToast={showToast} />}
+        </div>
+      )}
+
+      {section === "about" && (
+        <div {...panel("about")}>
+          <section className="paper-surface rounded-xl p-5" aria-labelledby="about-title">
+            <p className="text-xs uppercase tracking-widest text-on-surface-variant">About</p>
+            <h3 id="about-title" className="mt-2 font-headline text-lg font-bold text-on-surface">
+              Enjoying Leaflet?
+            </h3>
+            <p className="mt-1 text-xs text-on-surface-variant">
+              A rating on the Microsoft Store helps other readers find it. Questions, bugs or ideas:{" "}
+              <span className="selectable font-semibold text-on-surface">{SUPPORT_EMAIL}</span>
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="tactile-button tactile-button-primary px-4 py-2 text-xs"
+                onClick={() => void openStoreReview()}
+              >
+                Rate Leaflet ★
+              </button>
+              {PRIVACY_URL && (
+                <button type="button" className="tactile-button px-4 py-2 text-xs" onClick={() => void accountService.openLink(PRIVACY_URL)}>
+                  Privacy policy
+                </button>
+              )}
+              {TERMS_URL && (
+                <button type="button" className="tactile-button px-4 py-2 text-xs" onClick={() => void accountService.openLink(TERMS_URL)}>
+                  Terms of use
+                </button>
+              )}
               <button
                 type="button"
                 className="tactile-button px-4 py-2 text-xs"
-                onClick={() => setConfirmDelete(false)}
+                title="Copies versions, settings and the recent log (no passwords or book contents) to paste into an email"
+                onClick={() =>
+                  void diagnosticsService
+                    .report()
+                    .then((report) => navigator.clipboard.writeText(report))
+                    .then(() => showToast(`Diagnostics copied. Paste them into an email to ${SUPPORT_EMAIL}.`))
+                    .catch(() => showToast("Couldn't copy diagnostics."))
+                }
               >
-                Cancel
+                Copy diagnostics
               </button>
-            )}
-          </div>
-        </div>
+            </div>
+          </section>
 
-        <section className="paper-surface rounded-xl p-5 lg:col-span-2" aria-labelledby="about-title">
-          <p className="text-xs uppercase tracking-widest text-on-surface-variant">About</p>
-          <div className="mt-2 flex flex-wrap items-center gap-5">
-            <div className="min-w-0 flex-1">
-              <h3 id="about-title" className="page-title text-2xl text-on-surface">
-                Enjoying Leaflet?
-              </h3>
-              <p className="mt-1 text-xs text-on-surface-variant">
-                A rating on the Microsoft Store helps other readers find it. Questions, bugs or ideas:{" "}
-                <span className="selectable font-semibold text-on-surface">{SUPPORT_EMAIL}</span>
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
+            <div className="paper-surface flex flex-wrap items-center justify-between gap-4 rounded-xl p-5">
+              <div className="min-w-0 flex-1 basis-64">
+                <p className="text-xs uppercase tracking-widest text-on-surface-variant">Danger Zone</p>
+                <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
+                  Removes your library, covers, reading history, places and settings from this computer, and signs
+                  it out. Left as they are: a Drive backup, a sync folder's contents, any folder of book copies, your
+                  Leaflet account on the server, and Calibre.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
                 <button
                   type="button"
-                  className="tactile-button tactile-button-primary px-4 py-2 text-xs"
-                  onClick={() => void openStoreReview()}
+                  className="tactile-button border-error/50 bg-error/10 px-4 py-2 text-xs text-error hover:bg-error/20"
+                  onClick={handleDeleteAll}
+                  disabled={deleteBusy}
                 >
-                  Rate Leaflet ★
+                  {confirmDelete ? "Confirm Delete" : "Delete All Data"}
                 </button>
-                {PRIVACY_URL && (
-                  <button type="button" className="tactile-button px-4 py-2 text-xs" onClick={() => void accountService.openLink(PRIVACY_URL)}>
-                    Privacy policy
+                {confirmDelete && !deleteBusy && (
+                  <button
+                    type="button"
+                    className="tactile-button px-4 py-2 text-xs"
+                    onClick={() => setConfirmDelete(false)}
+                  >
+                    Cancel
                   </button>
                 )}
-                {TERMS_URL && (
-                  <button type="button" className="tactile-button px-4 py-2 text-xs" onClick={() => void accountService.openLink(TERMS_URL)}>
-                    Terms of use
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="tactile-button px-4 py-2 text-xs"
-                  title="Copies versions, settings and the recent log (no passwords or book contents) to paste into an email"
-                  onClick={() =>
-                    void diagnosticsService
-                      .report()
-                      .then((report) => navigator.clipboard.writeText(report))
-                      .then(() => showToast(`Diagnostics copied. Paste them into an email to ${SUPPORT_EMAIL}.`))
-                      .catch(() => showToast("Couldn't copy diagnostics."))
-                  }
-                >
-                  Copy diagnostics
-                </button>
               </div>
             </div>
-          </div>
-        </section>
-      </div>
+        </div>
+      )}
     </div>
   );
 };

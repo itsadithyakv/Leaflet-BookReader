@@ -10,11 +10,22 @@ import {
   type KeyboardEvent,
   type MouseEvent
 } from "react";
-import { useHabitStore } from "../store/habitStore";
+import { sessionElapsedMs, useHabitStore } from "../store/habitStore";
 import { useLibraryStore } from "../store/libraryStore";
-import { getDateKey, type DayRecord, type FocusSessionRecord } from "../services/habitService";
-import { CLOTH, clamp, hash, inkFor, spineHeight, spineWidth } from "./shelf/spine";
+import type { FocusSessionRecord } from "../services/habitService";
+import { clamp } from "./shelf/spine";
+import {
+  WEEKDAYS,
+  buildRows,
+  freeReadsBesides,
+  minutesText,
+  shortDate,
+  type Row,
+  type Spine,
+  type WeekRow
+} from "./shelf/rows";
 import { FOCUS_FLOWERS, type FocusFlowerKind } from "../pip/focusFlower.js";
+import "./SessionShelf.css";
 
 /**
  * The Session Bookshelf. Every visual property of a spine is read from the
@@ -27,18 +38,17 @@ import { FOCUS_FLOWERS, type FocusFlowerKind } from "../pip/focusFlower.js";
  * - a ribbon means the reader left a note
  * - a flower peeking out of the head is a focus flower that bloomed
  * - a charred spine was lost when a streak broke; it stays where it stood
+ * - loose pages are a day's reading outside any focus session (a free read)
  * - a gold bookend closes a week where the goal was met every day
  * - the wood itself levels up with the number of spines still standing
+ *
+ * What stands where is worked out in `shelf/rows.ts`.
  */
 
 // ---- Constants -------------------------------------------------------------
 
 const VISIBLE_WEEKS = 8;
 const LAST_SEEN_KEY = "leaflet.shelf.lastSeen";
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-const PARCHMENT = "#eadfc4";
 
 type Wood = { id: string; name: string; at: number };
 const WOODS: Wood[] = [
@@ -52,20 +62,6 @@ const WOODS: Wood[] = [
 
 // ---- Helpers ---------------------------------------------------------------
 
-const parseDateKey = (key: string) => {
-  const [y, m, d] = key.split("-").map(Number);
-  return new Date(y, (m || 1) - 1, d || 1);
-};
-const addDays = (date: Date, days: number) => {
-  const next = new Date(date);
-  next.setDate(next.getDate() + days);
-  return next;
-};
-const mondayOf = (date: Date) => addDays(date, -((date.getDay() + 6) % 7));
-
-const shortDate = (date: Date, withYear = false) =>
-  `${date.getDate()} ${MONTHS[date.getMonth()]}${withYear ? ` ${date.getFullYear()}` : ""}`;
-
 const formatDuration = (minutes: number) => {
   const total = Math.round(minutes);
   if (total < 60) {
@@ -74,10 +70,6 @@ const formatDuration = (minutes: number) => {
   const h = Math.floor(total / 60);
   const m = total % 60;
   return m ? `${h}h ${m}m` : `${h}h`;
-};
-const minutesText = (minutes: number) => {
-  const rounded = Math.round(minutes);
-  return rounded < 1 ? "under a minute" : `${rounded} min`;
 };
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
@@ -105,185 +97,6 @@ const prefersReducedMotion = () => {
   }
 };
 
-// ---- Model -----------------------------------------------------------------
-
-type Spine = {
-  session: FocusSessionRecord;
-  title: string;
-  freeRead: boolean;
-  cloth: string;
-  ink: string;
-  height: number;
-  width: number;
-  completed: boolean;
-  burned: boolean;
-  start: Date;
-  /** The focus flower that bloomed in this session, if one did. */
-  bloomed: string | null;
-  label: string;
-};
-
-type WeekRow = {
-  kind: "week";
-  key: string;
-  label: string;
-  spines: Spine[];
-  minutes: number;
-  lost: number;
-  perfect: boolean;
-};
-type GapRow = { kind: "gap"; key: string; weeks: number };
-type Row = WeekRow | GapRow;
-
-const isMet = (day: DayRecord) =>
-  day.freezeUsed || day.graceUsed || (day.goalMinutes > 0 && day.minutes >= day.goalMinutes);
-
-/**
- * Colours go to books in order of first appearance: each book starts at its
- * hashed slot and takes the next free one, so the first twelve books never
- * collide and a book keeps its colour for as long as its first session exists.
- */
-const assignColours = (sessions: FocusSessionRecord[]) => {
-  const byBook = new Map<string, string>();
-  const used = new Set<number>();
-  for (const session of sessions) {
-    const key = session.bookId ?? (session.title ? `title:${session.title.trim().toLowerCase()}` : null);
-    if (!key || byBook.has(key)) {
-      continue;
-    }
-    const start = hash(key) % CLOTH.length;
-    let slot = start;
-    if (used.size < CLOTH.length) {
-      while (used.has(slot)) {
-        slot = (slot + 1) % CLOTH.length;
-      }
-      used.add(slot);
-    }
-    byBook.set(key, CLOTH[slot]);
-  }
-  return byBook;
-};
-
-const buildRows = (
-  sessions: FocusSessionRecord[],
-  days: DayRecord[],
-  bookTitles: Map<string, string>,
-  today: Date
-): Row[] => {
-  const sorted = [...sessions].sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
-  const colours = assignColours(sorted);
-  const dayMap = new Map(days.map((day) => [day.dateKey, day]));
-
-  const weeks = new Map<string, Spine[]>();
-  for (const session of sorted) {
-    const weekKey = getDateKey(mondayOf(parseDateKey(session.dateKey)));
-    const bookKey = session.bookId ?? (session.title ? `title:${session.title.trim().toLowerCase()}` : null);
-    const freeRead = !bookKey;
-    const cloth = freeRead ? PARCHMENT : colours.get(bookKey) ?? CLOTH[0];
-    const title = (session.bookId && bookTitles.get(session.bookId)) || session.title || "Free read";
-    const start = new Date(session.startedAt);
-    const completed = session.endedReason === "completed" && session.clean;
-    const burned = Boolean(session.burnedAt);
-    const parts = [
-      title,
-      minutesText(session.minutes),
-      `${WEEKDAYS[start.getDay()]} ${shortDate(start)}`,
-      completed ? "completed" : "ended early"
-    ];
-    if (burned) {
-      parts.push(`lost when a streak broke on ${shortDate(new Date(session.burnedAt as string), true)}`);
-    }
-    if (session.notes) {
-      parts.push("has a note");
-    }
-    const bloomed = session.flower && session.flowerBloomed ? session.flower : null;
-    if (bloomed) {
-      parts.push(`a ${bloomed} bloomed`);
-    }
-    const spine: Spine = {
-      session,
-      title,
-      freeRead,
-      cloth,
-      ink: inkFor(cloth),
-      height: spineHeight(session.minutes),
-      width: spineWidth(session.minutes),
-      completed,
-      burned,
-      start,
-      bloomed,
-      label: parts.join(", ")
-    };
-    const list = weeks.get(weekKey);
-    if (list) {
-      list.push(spine);
-    } else {
-      weeks.set(weekKey, [spine]);
-    }
-  }
-
-  const weekMinutes = new Map<string, number>();
-  let earliest = mondayOf(today);
-  for (const day of days) {
-    const monday = mondayOf(parseDateKey(day.dateKey));
-    const key = getDateKey(monday);
-    weekMinutes.set(key, (weekMinutes.get(key) ?? 0) + day.minutes);
-    if (monday < earliest) {
-      earliest = monday;
-    }
-  }
-  for (const key of weeks.keys()) {
-    const monday = parseDateKey(key);
-    if (monday < earliest) {
-      earliest = monday;
-    }
-  }
-
-  const todayKey = getDateKey(today);
-  const thisMonday = mondayOf(today);
-  const rows: Row[] = [];
-  let gap = 0;
-  let gapKey = "";
-  for (let monday = thisMonday, index = 0; monday >= earliest; monday = addDays(monday, -7), index += 1) {
-    const key = getDateKey(monday);
-    const spines = weeks.get(key) ?? [];
-    const minutes = weekMinutes.get(key) ?? 0;
-    if (index > 0 && spines.length === 0 && minutes <= 0) {
-      if (gap === 0) {
-        gapKey = key;
-      }
-      gap += 1;
-      continue;
-    }
-    if (gap > 0) {
-      rows.push({ kind: "gap", key: `gap-${gapKey}`, weeks: gap });
-      gap = 0;
-    }
-    const sunday = addDays(monday, 6);
-    const finished = getDateKey(sunday) < todayKey;
-    let perfect = finished;
-    for (let d = 0; perfect && d < 7; d += 1) {
-      const day = dayMap.get(getDateKey(addDays(monday, d)));
-      perfect = Boolean(day && isMet(day));
-    }
-    rows.push({
-      kind: "week",
-      key,
-      label:
-        index === 0
-          ? "This week"
-          : index === 1
-            ? "Last week"
-            : `Week of ${shortDate(monday, monday.getFullYear() !== today.getFullYear())}`,
-      spines,
-      minutes,
-      lost: spines.filter((spine) => spine.burned).length,
-      perfect
-    });
-  }
-  return rows;
-};
-
 // ---- Popover ---------------------------------------------------------------
 
 type Tip =
@@ -305,6 +118,18 @@ const TipCard = ({ tip }: { tip: Tip }) => {
   }
   const { spine } = tip;
   const { session } = spine;
+  if (!session) {
+    // A day's free reading: there is no start time or ending to report.
+    return (
+      <div className={className} style={style} aria-hidden="true">
+        <p className="ss-tip-title">{spine.title}</p>
+        <p className="ss-tip-meta">
+          {WEEKDAYS[spine.start.getDay()]} {shortDate(spine.start, true)}
+        </p>
+        <p className="ss-tip-meta">{minutesText(spine.minutes)} · Read outside a focus session</p>
+      </div>
+    );
+  }
   const burnedOn = session.burnedAt ? shortDate(new Date(session.burnedAt), true) : "";
   return (
     <div className={className} style={style} aria-hidden="true">
@@ -364,21 +189,29 @@ const WeekShelf = memo(({ row, dropId, showTip, hideTip }: WeekProps) => {
       <div className="ss-row-head">
         <span className="ss-row-label">{row.label}</span>
         <span className="ss-row-stats">
-          {formatDuration(row.minutes)} read · {plural(row.spines.length, "spine")}
+          {formatDuration(row.minutes)} read · {plural(row.sessions, "spine")}
+          {row.freeMinutes > 0 && ` · ${formatDuration(row.freeMinutes)} free reading`}
           {row.lost > 0 && <span className="ss-row-lost"> · {row.lost} lost</span>}
         </span>
       </div>
-      <div className="ss-books" role="group" aria-label={`${row.label}: ${plural(row.spines.length, "session")}`}>
+      <div
+        className="ss-books"
+        role="group"
+        aria-label={`${row.label}: ${plural(row.sessions, "session")}${
+          row.freeMinutes > 0 ? `, ${formatDuration(row.freeMinutes)} of free reading` : ""
+        }`}
+      >
         {row.spines.map((spine, index) => {
           const { session } = spine;
           const classes = ["ss-spine"];
           if (spine.burned) classes.push("is-burned");
           if (spine.freeRead) classes.push("is-free");
-          if (session.id === dropId) classes.push("is-dropping");
+          if (spine.loose) classes.push("is-loose");
+          if (spine.id === dropId) classes.push("is-dropping");
           const tall = spine.height >= 84;
           return (
             <button
-              key={session.id}
+              key={spine.id}
               type="button"
               className={classes.join(" ")}
               style={
@@ -402,7 +235,7 @@ const WeekShelf = memo(({ row, dropId, showTip, hideTip }: WeekProps) => {
                 <span className="ss-title">{spine.title}</span>
                 {tall && <span className="ss-day">{spine.start.getDate()}</span>}
               </span>
-              {session.notes && !spine.burned && <span className="ss-ribbon" />}
+              {session?.notes && !spine.burned && <span className="ss-ribbon" />}
               {spine.bloomed && !spine.burned && (
                 <span
                   className="ss-flower"
@@ -442,14 +275,33 @@ WeekShelf.displayName = "WeekShelf";
 export const SessionShelf = () => {
   const sessions = useHabitStore((state) => state.snapshot.sessions);
   const days = useHabitStore((state) => state.snapshot.days);
+  const ledgerFreeReads = useHabitStore((state) => state.snapshot.freeReads);
+  const running = useHabitStore((state) => state.activeSession);
   const books = useLibraryStore((state) => state.books);
   const [showAll, setShowAll] = useState(false);
   const [tip, setTip] = useState<Tip | null>(null);
   const [dropId, setDropId] = useState<string | null>(null);
   const rootRef = useRef<HTMLElement>(null);
 
+  // What a running session has read is not free reading: it is shelved as a
+  // spine when the session ends.
+  const freeReads = useMemo(
+    () =>
+      freeReadsBesides(
+        ledgerFreeReads ?? [],
+        running ? { startedAt: running.startedAt, minutes: sessionElapsedMs(running) / 60000 } : null,
+        new Date()
+      ),
+    [ledgerFreeReads, running]
+  );
   const bookTitles = useMemo(() => new Map(books.map((book) => [book.id, book.title])), [books]);
-  const rows = useMemo(() => buildRows(sessions, days, bookTitles, new Date()), [sessions, days, bookTitles]);
+  const rows = useMemo(
+    () => buildRows(sessions, days, bookTitles, new Date(), freeReads),
+    [sessions, days, bookTitles, freeReads]
+  );
+  // Reading outside a focus session: on the shelf as loose pages, not counted
+  // among the spines (the wood, and what a broken streak burns, are sessions).
+  const freeMinutes = useMemo(() => (freeReads ?? []).reduce((sum, free) => sum + free.minutes, 0), [freeReads]);
 
   const stats = useMemo(() => {
     let standing = 0;
@@ -529,7 +381,7 @@ export const SessionShelf = () => {
     return out;
   }, [rows, showAll]);
   const hiddenWeeks = rows.filter((row) => row.kind === "week").length - visibleRows.filter((row) => row.kind === "week").length;
-  const empty = sessions.length === 0;
+  const empty = sessions.length === 0 && freeMinutes <= 0;
 
   return (
     <section ref={rootRef} className="ss paper-surface rounded-xl p-6" data-wood={wood.id} onScrollCapture={hideTip}>
@@ -565,6 +417,12 @@ export const SessionShelf = () => {
           <dt>Longest session</dt>
           <dd>{stats.longest > 0 ? minutesText(stats.longest) : "None yet"}</dd>
         </div>
+        {freeMinutes > 0 && (
+          <div>
+            <dt>Free reading</dt>
+            <dd>{formatDuration(freeMinutes)}</dd>
+          </div>
+        )}
         {stats.lost > 0 && (
           <div className="is-lost">
             <dt>Lost to broken streaks</dt>
@@ -609,6 +467,7 @@ export const SessionShelf = () => {
           <li><span className="ss-key ss-key-band" />Gold band: completed</li>
           <li><span className="ss-key ss-key-ribbon" />Ribbon: has a note</li>
           <li><span className="ss-key ss-key-burned" />Charred: lost to a broken streak</li>
+          <li><span className="ss-key ss-key-loose" />Loose pages: a free read, outside a focus session</li>
           <li><span className="ss-key ss-key-bookend" />Bookend: perfect week</li>
         </ul>
       )}

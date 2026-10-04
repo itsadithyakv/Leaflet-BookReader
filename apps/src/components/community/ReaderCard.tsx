@@ -291,7 +291,7 @@ export const ReaderCard = ({ signedIn, canJoin, showToast, onChanged }: ReaderCa
             </div>
 
             <div>
-              <p className={EYEBROW}>Their shelf</p>
+              <p className={EYEBROW}>{at(reader.handle)}'s shelf</p>
               <div className="mt-3">
                 <SharedShelf shelf={reader.shelf} emptyText="Nothing on the shelf yet — they're just getting started." />
               </div>

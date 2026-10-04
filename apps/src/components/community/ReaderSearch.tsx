@@ -4,6 +4,7 @@ import { socialService, type SearchResult } from "../../services/socialService";
 import { useCommunityStore } from "./communityStore";
 import { PipAvatar } from "./PipAvatar";
 import { at, errorText, minutesText, nameOf } from "./format";
+import { HandleField } from "./HandleField";
 import { SectionHeader } from "../ui/SectionHeader";
 
 const DEBOUNCE_MS = 300;
@@ -16,7 +17,7 @@ export const ReaderSearch = () => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const q = query.trim().replace(/^@/, "");
+    const q = query;
     if (!q) {
       setResults(null);
       setError(null);
@@ -44,22 +45,21 @@ export const ReaderSearch = () => {
     <section className="paper-surface rounded-xl p-6" aria-labelledby="find-title">
       <SectionHeader eyebrow="Visit a shelf" title="Find readers" id="find-title" />
       <div className="relative mt-4">
-        <UiIcon name="search" size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant" />
-        <input
+        <UiIcon name="search" size={17} className="absolute left-3 top-1/2 z-10 -translate-y-1/2 text-on-surface-variant" />
+        {/* The "@" is drawn in the field (typing one is fine too): what is searched is the handle. */}
+        <HandleField
           value={query}
-          onChange={(event) => setQuery(event.target.value.toLowerCase())}
-          placeholder="Search by handle"
-          aria-label="Search readers by handle"
-          autoCapitalize="none"
-          autoCorrect="off"
-          spellCheck={false}
-          maxLength={25}
-          className="inset-field w-full py-2 pl-10 pr-3 text-sm text-on-surface"
+          onChange={setQuery}
+          ariaLabel="Search readers by handle"
+          placeholder="handle"
+          indent="pl-[3.25rem]"
+          atClassName="left-9"
+          wrapperClassName=""
         />
       </div>
       {error && <p className="mt-3 text-xs text-on-surface-variant">{error}</p>}
       {results && results.length === 0 && !error && (
-        <p className="mt-3 text-xs text-on-surface-variant">No public reader starts with “{query.trim()}”. Private profiles don't show up.</p>
+        <p className="mt-3 text-xs text-on-surface-variant">No shared profile starts with {at(query)}. Private profiles don't show up.</p>
       )}
       {results && results.length > 0 && (
         <ul className="mt-3 flex flex-col gap-1">

@@ -35,6 +35,10 @@ export const avatarLook = (seed: string | null | undefined, avatar?: string | nu
  * reading room. The still pose is the signature move's own, so two avatars in
  * the same skin still look different. Callers bring one to life on hover, or
  * on the reader card.
+ *
+ * Pip is drawn as a portrait, to fill the round frame. It used to be the whole
+ * 32px sprite at 86% of the frame, rounded down to whole pixels: at 125% and
+ * 150% display scaling that left a small Pip in the middle of an empty disc.
  */
 export const PipAvatar = ({ seed, avatar, size = 40, play = false, move, label, className }: PipAvatarProps) => {
   const look = avatarLook(seed, avatar);
@@ -42,17 +46,10 @@ export const PipAvatar = ({ seed, avatar, size = 40, play = false, move, label, 
   const shown = move ?? (play === "idle" ? "idle" : look.move);
   return (
     <span
-      className={`inline-flex shrink-0 items-center justify-center rounded-full bg-surface-container-high/70 ring-1 ring-outline-variant/40 ${className ?? ""}`}
+      className={`inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-surface-container-high/70 ring-1 ring-outline-variant/40 ${className ?? ""}`}
       style={{ width: size, height: size }}
     >
-      <PipSprite
-        move={shown}
-        still={!playing}
-        size={Math.round(size * 0.86)}
-        skin={look.skin}
-        outfit={look.outfit}
-        label={label}
-      />
+      <PipSprite move={shown} still={!playing} size={size} portrait skin={look.skin} outfit={look.outfit} label={label} />
     </span>
   );
 };

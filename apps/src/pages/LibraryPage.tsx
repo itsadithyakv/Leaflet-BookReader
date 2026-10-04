@@ -21,7 +21,9 @@ import { FocusFlower, flowerCaption, flowerLook } from "../components/FocusFlowe
 import { askConfirm } from "../components/ConfirmDialog";
 import { MobileComingSoonBanner } from "../components/MobileComingSoonBanner";
 import { UpNextStrip } from "../components/UpNextStrip";
+import { openHighlightsList, useHighlightsStore } from "../components/highlights/highlightsStore";
 import { librarySeries, type LibrarySeries } from "../library/series";
+import { describeImport } from "../library/importSummary";
 
 const byTitle = (a: Book, b: Book) => a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: "base" });
 
@@ -166,12 +168,28 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
     return sortBooks(result, filters.sort, series);
   }, [books, filters.author, filters.genre, filters.sort, debouncedQuery, series]);
 
+  // Highlights across the library, for the button that lists them. Counted
+  // again whenever the library changes (a sync can bring highlights with it);
+  // the app counts again when a book is closed.
+  const highlightCounts = useHighlightsStore((state) => state.counts);
+  const loadHighlightCounts = useHighlightsStore((state) => state.loadCounts);
+  useEffect(() => {
+    void loadHighlightCounts();
+  }, [books, loadHighlightCounts]);
+  const highlightTotal = useMemo(
+    () => books.reduce((sum, book) => sum + (highlightCounts[book.id] ?? 0), 0),
+    [books, highlightCounts]
+  );
+
   const totalBooks = books.length;
   const finishedBooks = books.filter((book) => isFinished(book.progress)).length;
   /** No books at all (not merely none matching): the page leads with importing. */
   const libraryEmpty = !loading && totalBooks === 0;
   const filtersNarrowed = filters.author !== "all" || filters.genre !== "all";
-  const streakTitle = stats.streakDays > 0 ? `${stats.streakDays} Day Streak!` : "Start Your Streak";
+  // The streak everything else shows (goal days in a row, by the reader's own
+  // day). This used to count days a book was opened, by UTC day, and read
+  // "Start Your Streak" until a book was opened today.
+  const streakTitle = snapshot.streak > 0 ? `${snapshot.streak} Day Streak!` : "Start Your Streak";
 
   const handleImport = () => {
     importBooks().catch((error) => {
@@ -217,15 +235,10 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
         showToast(`Choose a supported book file — ${formatSummary()}.`);
         return;
       }
+      // What the library held before, so a book it already had is not called added.
+      const known = new Set(useLibraryStore.getState().books.map((book) => book.id));
       importPaths(supported)
-        .then((imported) => {
-          const skipped = supported.length - imported.length;
-          showToast(
-            skipped > 0
-              ? `${imported.length} of ${supported.length} added. ${skipped === 1 ? "One file" : `${skipped} files`} couldn't be read; Settings → About → Copy diagnostics has the details.`
-              : `${imported.length} book${imported.length === 1 ? "" : "s"} added.`
-          );
-        })
+        .then((imported) => showToast(describeImport(supported.length, imported, known)))
         .catch((error) => {
           showToast(resolveErrorMessage(error, "Import failed. Try again."));
         });
@@ -577,6 +590,19 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-3">
+            {/* Every highlight in the library, by book, without opening one. */}
+            {!libraryEmpty && (
+              <button
+                type="button"
+                className="tactile-button flex items-center gap-2 px-3 py-2 text-xs font-semibold"
+                onClick={openHighlightsList}
+                title="The text you have highlighted, book by book"
+              >
+                <UiIcon name="highlight" size={16} />
+                Highlights
+                {highlightTotal > 0 && <span className="tabular-nums text-on-surface-variant">{highlightTotal}</span>}
+              </button>
+            )}
             <div className="flex items-center gap-2">
               <button
                 type="button"

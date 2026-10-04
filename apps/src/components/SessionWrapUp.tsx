@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { useHabitStore, type SessionWrapUp as WrapUp } from "../store/habitStore";
+import { useHabitStore, wholeTodayMinutes, type SessionWrapUp as WrapUp } from "../store/habitStore";
 import { usePipStore } from "../store/pipStore";
 import { PipSprite } from "./PipSprite";
 import { goalBeat, pickBeat, type PipBeat } from "../pip/moments";
@@ -209,7 +209,7 @@ export const SessionWrapUp = () => {
   const { move, line } = pickWrapUpMove(wrapUp);
   const showPip = pipMode !== "off";
   const minutes = Math.max(1, Math.round(wrapUp.minutes));
-  const todayMinutes = Math.round(wrapUp.todayMinutes);
+  const todayMinutes = wholeTodayMinutes(wrapUp.todayMinutes, wrapUp.todayMet);
   const goalProgress = wrapUp.goalMinutes > 0 ? Math.min(1, wrapUp.todayMinutes / wrapUp.goalMinutes) : 0;
 
   return (

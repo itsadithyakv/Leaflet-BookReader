@@ -2,7 +2,6 @@ import { useEffect } from "react";
 import { FEATURES } from "../constants/features";
 import { useAccountStore } from "../store/accountStore";
 import { useHabitStore } from "../store/habitStore";
-import { socialService } from "../services/socialService";
 import { useLibraryStore } from "../store/libraryStore";
 import { usePipStore } from "../store/pipStore";
 import { pickBeat, type PipMoment } from "../pip/moments";
@@ -17,8 +16,9 @@ import type { CommunityBoard } from "../services/socialService";
  * the reader's own minutes, fetches new inbox events and the Following board,
  * notices when someone on that board has just passed the reader, and lets Pip
  * react — once per poll at most, to the most interesting thing that happened.
- * A finished session publishes straight away, so the board reflects it when
- * the reader goes to look. Returns the unread count for the nav badge.
+ * A finished session publishes straight away, and reading outside a session
+ * as its minutes are credited (at most once a minute), so the board reflects
+ * both when the reader goes to look. Returns the unread count for the nav badge.
  */
 
 const POLL_MS = 5 * 60_000;
@@ -116,7 +116,7 @@ export const useCommunityPulse = () => {
         // Offline or signed out server-side; try again next time.
       }
       // Our own numbers first, so the board we fetch next already has them.
-      await socialService.publishStats();
+      await store.publish();
       try {
         const board = await store.loadBoard("following");
         if (board) {
@@ -158,9 +158,15 @@ export const useCommunityPulse = () => {
     // then refresh the boards that are showing.
     const unsubscribe = useHabitStore.subscribe((state, previous) => {
       if (state.snapshot.sessions.length === previous.snapshot.sessions.length) {
+        // Reading with no session running moves the ledger too (the board
+        // ranks the ledger, not sessions), and used to wait for the next
+        // five-minute pulse. Sent as it is credited, at most once a minute.
+        if (state.snapshot.todayMinutes !== previous.snapshot.todayMinutes) {
+          void useCommunityStore.getState().publish();
+        }
         return;
       }
-      void socialService.publishStats({ force: true }).then((published) => {
+      void useCommunityStore.getState().publish({ force: true }).then((published) => {
         if (!published || stopped) {
           return;
         }

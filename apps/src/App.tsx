@@ -29,14 +29,16 @@ import { ALIVE_EVERY_MS, AWAY_FREE_MS, flowerGrowing, useHabitStore } from "./st
 import { setAppFullscreen, watchForeground } from "./services/windowService";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { SeriesEditorDialog } from "./components/SeriesEditor";
+import { useHighlightsStore } from "./components/highlights/highlightsStore";
 import { RatePrompt, openStoreReview } from "./components/RatePrompt";
 import { ReminderOptIn } from "./components/ReminderOptIn";
 import { useReminders } from "./hooks/useReminders";
 import { useAppearanceStore, watchSystemTheme } from "./store/appearanceStore";
 import { bookService } from "./services/bookService";
-import { converterService } from "./services/converterService";
+import { converterOffer, converterService, type ConverterOffer } from "./services/converterService";
 import { getPlatform, pickSyncFolder } from "./platform";
 import type { Book } from "@shared/models/book";
+import { requestSettingsSection } from "./pages/settingsSection";
 import {
   findBookFormat,
   getBookExtension,
@@ -63,6 +65,11 @@ const SocialPage = lazy(() => import("./pages/SocialPage").then((module) => ({ d
 const PipPage = lazy(() => import("./pages/PipPage").then((module) => ({ default: module.PipPage })));
 const SettingsPage = lazy(() =>
   import("./pages/SettingsPage").then((module) => ({ default: module.SettingsPage }))
+);
+// Highlights outside the reader. It sorts them with epub.js, so it loads the
+// first time it is opened rather than putting epub.js into startup.
+const HighlightsDialog = lazy(() =>
+  import("./components/highlights/HighlightsDialog").then((module) => ({ default: module.HighlightsDialog }))
 );
 
 /** Books whose scene Pip has already shown once (see showBookNod). */
@@ -128,6 +135,10 @@ const App = () => {
 
   const [activeTab, setActiveTab] = useState<Tab>("library");
   const [selected, setSelected] = useState<Book | null>(null);
+  // Where the reader opens instead of the saved place: a highlight picked in
+  // the library ("Open in book"). Set together with `selected` and cleared when
+  // the reader closes, so the next ordinary open resumes where reading stopped.
+  const [openAt, setOpenAt] = useState<string | null>(null);
   // For long-lived listeners that need to know whether a book is open.
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
@@ -165,9 +176,14 @@ const App = () => {
     }
   });
   const [converterPromptBook, setConverterPromptBook] = useState<Book | null>(null);
+  // Where the book waiting on the converter was to open, if at a highlight.
+  const converterOpenAtRef = useRef<string | null>(null);
   // The converter is compiled out of mobile builds, so the prompt must explain
   // rather than offer a download that cannot succeed.
   const converterSupported = getPlatform() === "desktop";
+  // Whether Leaflet may install Calibre itself. Never in the Microsoft Store
+  // build, where the prompt used to offer a download that could only fail.
+  const [converterOfferKind, setConverterOfferKind] = useState<ConverterOffer>("get");
   const [converterBusy, setConverterBusy] = useState(false);
 
   // Which transport is carrying sync, if any. There is no account tier: sync
@@ -188,6 +204,7 @@ const App = () => {
   const loadWardrobe = usePipWardrobeStore((state) => state.load);
   const fullscreenLockRef = useRef(false);
   const theme = useAppearanceStore((state) => state.theme);
+  const highlightsOpen = useHighlightsStore((state) => state.view !== null);
   const toggleTheme = useAppearanceStore((state) => state.toggleTheme);
 
   useEffect(() => {
@@ -202,6 +219,13 @@ const App = () => {
     // What Pip wears everywhere (the roaming Pip, the reader peek, the wrap-up).
     void loadWardrobe();
   }, [loadBooks, loadStats, loadSyncStatus, loadHabit, loadWardrobe]);
+
+  // Left open past midnight, today's minutes and "goal met" on screen would
+  // be yesterday's until something was read: the ledger is asked again.
+  useEffect(() => {
+    const timer = window.setInterval(() => void useHabitStore.getState().refreshForNewDay(), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => watchSystemTheme(), []);
 
@@ -225,7 +249,10 @@ const App = () => {
   // it is when a backup is worth taking. Imports and deletes schedule their own.
   const closeReader = useCallback(() => {
     setSelected(null);
+    setOpenAt(null);
     requestBackup();
+    // Highlights made or removed while reading show in the library's counts.
+    void useHighlightsStore.getState().loadCounts();
   }, [requestBackup]);
 
   useEffect(() => {
@@ -296,7 +323,7 @@ const App = () => {
     window.setTimeout(() => void ready.then(() => usePipStore.getState().showPeek(nod.move, nod.line, 1)), 2200);
   };
 
-  const openPreparedBook = (book: Book) => {
+  const openPreparedBook = (book: Book, at: string | null = null) => {
     const lastOpened = book.lastOpened ? Date.parse(book.lastOpened) : NaN;
     const idleDays = Number.isFinite(lastOpened) ? Math.floor((Date.now() - lastOpened) / 86_400_000) : 0;
     // Book scenes and "welcome back" lines are chatter: Quiet keeps Pip to
@@ -311,6 +338,7 @@ const App = () => {
       showBookNod(book);
     }
     setSelected(book);
+    setOpenAt(at);
     // Read from the store, not this render: a caller may have started a
     // session a moment ago (the board's "keep reading" does), and starting a
     // second one here would replace its length with the daily goal.
@@ -328,7 +356,8 @@ const App = () => {
     });
   };
 
-  const handleOpenBook = (book: Book) => {
+  /** `at` is a place to open at (a highlight's) rather than the saved one; it rides along every way in. */
+  const handleOpenBook = (book: Book, at: string | null = null) => {
     // Sync carries the library index everywhere but leaves the files where they
     // are, so a book can be listed on this device with nothing to open yet.
     if (book.available === false) {
@@ -341,7 +370,7 @@ const App = () => {
             showToast(`${ready.title} is downloaded and ready.`);
             return;
           }
-          handleOpenBookRef.current(ready);
+          handleOpenBookRef.current(ready, at);
         })
         .catch((error) =>
           showToast(resolveErrorMessage(error, "Could not download that book."))
@@ -352,23 +381,27 @@ const App = () => {
     // Every convertible format needs this gate, not just Kindle ones; and the
     // backend answers false when a cached conversion already exists.
     if (!needsConversion(getBookExtension(book.localPath))) {
-      openPreparedBook(book);
+      openPreparedBook(book, at);
       return;
     }
 
     bookService
       .needsConverter(book.id)
-      .then((required) => {
+      .then(async (required) => {
         if (required) {
+          // Asked before the prompt opens, so it never shows the wrong offer.
+          const info = await converterService.status().catch(() => null);
+          setConverterOfferKind(converterOffer(converterSupported, info));
+          converterOpenAtRef.current = at;
           setConverterPromptBook(book);
         } else {
-          openPreparedBook(book);
+          openPreparedBook(book, at);
         }
       })
       .catch(() => {
         // Let the reader surface the backend's specific reason instead of
         // guessing that the converter is the problem.
-        openPreparedBook(book);
+        openPreparedBook(book, at);
       });
   };
 
@@ -377,6 +410,11 @@ const App = () => {
   // Stable identity so BookCard/BookRow memoisation is not defeated every render.
   const openBookFromLibrary = useCallback((target: Book) => {
     handleOpenBookRef.current(target);
+  }, []);
+  // "Open in book" on a highlight: the usual way in (download, converter),
+  // and the reader opens at the highlight.
+  const openBookAt = useCallback((target: Book, cfi: string) => {
+    handleOpenBookRef.current(target, cfi);
   }, []);
 
   const openAssociatedPaths = useCallback(
@@ -461,7 +499,7 @@ const App = () => {
       .then(() => {
         setConverterPromptBook(null);
         showToast("Book converter ready.");
-        openPreparedBook(book);
+        openPreparedBook(book, converterOpenAtRef.current);
       })
       .catch((error) => {
         showToast(resolveErrorMessage(error, "Converter download failed. Check your connection and retry."));
@@ -935,7 +973,18 @@ const App = () => {
               <CollectionsPage onNavigate={setActiveTab} onOpenBook={openBookFromLibrary} showToast={showToast} />
             )}
             {activeTab === "social" && (
-              <SocialPage showToast={showToast} nowReading={nowReading} onReadNow={readNow} onNavigate={setActiveTab} />
+              <SocialPage
+                showToast={showToast}
+                nowReading={nowReading}
+                onReadNow={readNow}
+                onNavigate={(tab) => {
+                  // The Social page sends readers to Settings to sign in.
+                  if (tab === "settings") {
+                    requestSettingsSection("account");
+                  }
+                  setActiveTab(tab);
+                }}
+              />
             )}
             {activeTab === "pip" && <PipPage showToast={showToast} />}
             {activeTab === "settings" && <SettingsPage showToast={showToast} />}
@@ -1037,7 +1086,7 @@ const App = () => {
               </div>
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">
-                  Optional download
+                  {converterOfferKind === "install" ? "Optional download" : "Needs Calibre"}
                 </p>
                 <h2 id="converter-dialog-title" className="page-title mt-1 text-2xl">
                   Open {getBookExtension(converterPromptBook.localPath).toUpperCase()} books
@@ -1045,12 +1094,18 @@ const App = () => {
               </div>
             </div>
             <p className="mt-5 text-sm leading-6 text-on-surface-variant">
-              {converterSupported ? (
+              {converterOfferKind === "install" ? (
                 <>
                   “{converterPromptBook.title}” needs the Calibre conversion tools. Downloading
                   them uses about 200 MB plus installation space. Leaflet will keep the installer
                   out of the app package and remove the downloaded installer after setup. If
                   Calibre is already installed on this computer, Leaflet will use it instead.
+                </>
+              ) : converterOfferKind === "get" ? (
+                <>
+                  “{converterPromptBook.title}” needs Calibre, a free app. Get it from
+                  calibre-ebook.com and install it, then open this book again. Leaflet finds
+                  Calibre by itself; there is no need to restart.
                 </>
               ) : (
                 <>
@@ -1074,7 +1129,7 @@ const App = () => {
               >
                 {converterSupported ? "Not now" : "Close"}
               </button>
-              {converterSupported && (
+              {converterOfferKind === "install" && (
                 <button
                   type="button"
                   className="tactile-button tactile-button-primary min-w-36 px-4 py-2 text-sm font-bold"
@@ -1082,6 +1137,20 @@ const App = () => {
                   disabled={converterBusy}
                 >
                   {converterBusy ? "Downloading…" : "Download & install"}
+                </button>
+              )}
+              {converterOfferKind === "get" && (
+                <button
+                  type="button"
+                  className="tactile-button tactile-button-primary min-w-36 px-4 py-2 text-sm font-bold"
+                  onClick={() => {
+                    setConverterPromptBook(null);
+                    converterService
+                      .openDownloadPage()
+                      .catch(() => showToast("Couldn't open your browser. Calibre is at calibre-ebook.com."));
+                  }}
+                >
+                  Get Calibre
                 </button>
               )}
             </div>
@@ -1108,7 +1177,7 @@ const App = () => {
               onClose={closeReader}
             />
           ) : (
-            <ReaderView key={selected.id} book={selected} onClose={closeReader} />
+            <ReaderView key={selected.id} book={selected} onClose={closeReader} openAt={openAt} />
           )}
         </Suspense>
       )}
@@ -1122,6 +1191,11 @@ const App = () => {
       <SessionWrapUp />
       <ConfirmDialog />
       <SeriesEditorDialog />
+      {highlightsOpen && (
+        <Suspense fallback={null}>
+          <HighlightsDialog onOpenInBook={openBookAt} />
+        </Suspense>
+      )}
       <RatePrompt />
       <ReminderOptIn />
 

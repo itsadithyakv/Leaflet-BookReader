@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   Backpack,
   Bean,
+  BookA,
   BookCopy,
   BookOpenText,
   BookPlus,
@@ -15,12 +16,15 @@ import {
   Cloud,
   Copy,
   Ellipsis,
+  ExternalLink,
   Cookie,
   Grid2X2,
   Hand,
   Layers,
   Heart,
+  Highlighter,
   House,
+  Info,
   LibraryBig,
   List,
   Lock,
@@ -48,6 +52,9 @@ import {
   Gamepad2,
   Eye,
   NotebookPen,
+  UserRoundSearch,
+  Users,
+  Waypoints,
   X,
   type LucideIcon,
   type LucideProps
@@ -64,11 +71,15 @@ export type UiIconName =
   | "cloud"
   | "collections"
   | "copy"
+  | "dictionary"
   | "edit"
+  | "external"
   | "grid"
   | "hand"
   | "heart"
+  | "highlight"
   | "home"
+  | "info"
   | "library"
   | "list"
   | "more"
@@ -103,7 +114,10 @@ export type UiIconName =
   | "goal"
   | "undo"
   | "up"
-  | "down";
+  | "down"
+  | "people"
+  | "who"
+  | "relations";
 
 type UiIconProps = Omit<LucideProps, "ref"> & {
   name: UiIconName;
@@ -121,11 +135,17 @@ const icons: Record<UiIconName, LucideIcon> = {
   cloud: Cloud,
   collections: BookCopy,
   copy: Copy,
+  // Look a word up: a book with a letter on it.
+  dictionary: BookA,
   edit: Pencil,
+  // A link that opens in the browser.
+  external: ExternalLink,
   grid: Grid2X2,
   hand: Hand,
   heart: Heart,
+  highlight: Highlighter,
   home: House,
+  info: Info,
   library: LibraryBig,
   list: List,
   more: Ellipsis,
@@ -166,7 +186,10 @@ const icons: Record<UiIconName, LucideIcon> = {
   goal: Target,
   undo: Undo2,
   up: ChevronUp,
-  down: ChevronDown
+  down: ChevronDown,
+  people: Users,
+  who: UserRoundSearch,
+  relations: Waypoints
 };
 
 export const UiIcon = ({ name, size = 20, ...props }: UiIconProps) => {

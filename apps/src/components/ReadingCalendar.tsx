@@ -1,7 +1,9 @@
 import { useMemo } from "react";
-import { getDateKey, type DayRecord } from "../services/habitService";
+import { getDateKey, type DayRecord, type FreeReadRecord } from "../services/habitService";
 import { EYEBROW } from "./ui/SectionHeader";
 import { minutesText } from "./community/format";
+import { freeReadsBesides } from "./shelf/rows";
+import { sessionElapsedMs, useHabitStore } from "../store/habitStore";
 
 const WEEKS = 12;
 const DAY_LABELS = ["Mon", "", "Wed", "", "Fri", "", "Sun"];
@@ -18,7 +20,21 @@ const mondayOf = (date: Date) => addDays(new Date(date.getFullYear(), date.getMo
 export const isGoalMet = (day: DayRecord | undefined) =>
   Boolean(day && (day.freezeUsed || day.graceUsed || (day.goalMinutes > 0 && day.minutes >= day.goalMinutes)));
 
-type Cell = { key: string; date: Date; minutes: number; met: boolean; kept: boolean; future: boolean; today: boolean };
+const NO_FREE_READS: FreeReadRecord[] = [];
+
+type Cell = {
+  key: string;
+  date: Date;
+  minutes: number;
+  /** How full the day is, 0..4 (see `dayLevel`). */
+  level: number;
+  /** Of those minutes, the ones read outside a focus session. */
+  free: number;
+  met: boolean;
+  kept: boolean;
+  future: boolean;
+  today: boolean;
+};
 
 /** How full a day is, 0..4, against the daily goal. */
 const level = (minutes: number, goal: number) => {
@@ -26,6 +42,13 @@ const level = (minutes: number, goal: number) => {
   const share = minutes / Math.max(goal, 1);
   return share >= 1 ? 4 : share >= 0.66 ? 3 : share >= 0.33 ? 2 : 1;
 };
+/**
+ * A day's shade. Against the goal it was read against, which the ledger keeps
+ * with the day, so the darkest shade ("Goal met") is on the days that met
+ * theirs whatever the goal is now; a day with none of its own uses today's.
+ */
+export const dayLevel = (day: DayRecord | undefined, goalMinutes: number) =>
+  level(day?.minutes ?? 0, day && day.goalMinutes > 0 ? day.goalMinutes : goalMinutes);
 const LEVEL_CLASS = [
   "bg-surface-container-highest/70",
   "bg-primary/25",
@@ -38,11 +61,29 @@ const LEVEL_CLASS = [
  * The last twelve weeks as a calendar: a column per week (Monday on top, the
  * same weeks as the session shelf and the board), shaded by minutes against
  * the daily goal. Empty days are drawn, not hidden, so a gap reads as a gap.
+ * A day is shaded by everything read on it, in a focus session or not; its
+ * label says how much of it was free reading.
  */
-export const ReadingCalendar = ({ days, goalMinutes }: { days: DayRecord[]; goalMinutes: number }) => {
+export const ReadingCalendar = ({
+  days,
+  goalMinutes,
+  freeReads = NO_FREE_READS
+}: {
+  days: DayRecord[];
+  goalMinutes: number;
+  freeReads?: FreeReadRecord[];
+}) => {
+  const running = useHabitStore((state) => state.activeSession);
   const { weeks, monthLabels, metLast30 } = useMemo(() => {
     const byKey = new Map(days.map((day) => [day.dateKey, day]));
     const now = new Date();
+    // What a running session has read is not free reading (as on the shelf).
+    const free = freeReadsBesides(
+      freeReads,
+      running ? { startedAt: running.startedAt, minutes: sessionElapsedMs(running) / 60000 } : null,
+      now
+    );
+    const freeByKey = new Map(free.map((entry) => [entry.dateKey, entry.minutes]));
     const todayKey = getDateKey(now);
     const first = addDays(mondayOf(now), -7 * (WEEKS - 1));
     const weeks: Cell[][] = [];
@@ -56,7 +97,17 @@ export const ReadingCalendar = ({ days, goalMinutes }: { days: DayRecord[]; goal
         const key = getDateKey(date);
         const day = byKey.get(key);
         const kept = Boolean(day && (day.freezeUsed || day.graceUsed));
-        column.push({ key, date, minutes: day?.minutes ?? 0, met: isGoalMet(day), kept, future: key > todayKey, today: key === todayKey });
+        column.push({
+          key,
+          date,
+          minutes: day?.minutes ?? 0,
+          level: dayLevel(day, goalMinutes),
+          free: freeByKey.get(key) ?? 0,
+          met: isGoalMet(day),
+          kept,
+          future: key > todayKey,
+          today: key === todayKey
+        });
       }
       weeks.push(column);
       // A month's name above the first week that starts in it.
@@ -71,11 +122,16 @@ export const ReadingCalendar = ({ days, goalMinutes }: { days: DayRecord[]; goal
       }
     }
     return { weeks, monthLabels, metLast30 };
-  }, [days]);
+  }, [days, freeReads, goalMinutes, running]);
+
+  // "45m, all free reading" / "45m, 20m of it free reading": the day counts
+  // the same either way, and this says which kind of reading it was.
+  const freeText = (cell: Cell) =>
+    cell.free < 1 ? "" : Math.round(cell.free) >= Math.round(cell.minutes) ? ", all free reading" : `, ${minutesText(cell.free)} of it free reading`;
 
   const describe = (cell: Cell) =>
     `${WEEKDAYS[cell.date.getDay()]} ${cell.date.getDate()} ${MONTHS[cell.date.getMonth()]}: ` +
-    (cell.minutes > 0 ? minutesText(cell.minutes) : "no reading") +
+    (cell.minutes > 0 ? minutesText(cell.minutes) + freeText(cell) : "no reading") +
     (cell.kept ? ", streak kept by a freeze" : cell.met ? ", goal met" : "") +
     (cell.today ? " (today)" : "");
 
@@ -115,7 +171,7 @@ export const ReadingCalendar = ({ days, goalMinutes }: { days: DayRecord[]; goal
                     role="img"
                     aria-label={describe(cell)}
                     title={describe(cell)}
-                    className={`aspect-square rounded-[4px] ${LEVEL_CLASS[level(cell.minutes, goalMinutes)]} ${
+                    className={`aspect-square rounded-[4px] ${LEVEL_CLASS[cell.level]} ${
                       cell.today ? "ring-2 ring-on-surface/60 ring-offset-1 ring-offset-surface" : ""
                     }`}
                   />

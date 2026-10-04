@@ -2,13 +2,13 @@ import { useMemo, useState } from "react";
 import type { Book } from "@shared/models/book";
 import { useLibraryStore } from "../store/libraryStore";
 import { useHabitStore } from "../store/habitStore";
-import { getDateKey } from "../services/habitService";
 import { isFinished } from "../constants/books";
 import { SocialPanel, type SocialNavTarget } from "../components/SocialPanel";
 import { SessionShelf } from "../components/SessionShelf";
 import { ReadingCalendar } from "../components/ReadingCalendar";
 import { CountUp } from "../components/community/CountUp";
 import { minutesText } from "../components/community/format";
+import { weekMinutesOf } from "../components/community/ownRow";
 import { streakText } from "../components/community/copy";
 import { EYEBROW } from "../components/ui/SectionHeader";
 import { SegmentedTabs, panelId, tabId } from "../components/ui/SegmentedTabs";
@@ -23,13 +23,6 @@ const readView = (): SocialView => {
   } catch {
     return "stats";
   }
-};
-
-/** The Monday that starts this local week, as a date key. */
-const thisMondayKey = () => {
-  const now = new Date();
-  const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7));
-  return getDateKey(monday);
 };
 
 export type SocialPageProps = {
@@ -65,8 +58,8 @@ export const SocialPage = ({ showToast, nowReading, onReadNow, onNavigate }: Soc
   // way: minutes from the day ledger (fed by the reading heartbeat), this week
   // from Monday in your own time zone, and "finished" by the one shared rule.
   const stats = useMemo(() => {
-    const monday = thisMondayKey();
-    const weekMinutes = snapshot.days.filter((day) => day.dateKey >= monday).reduce((sum, day) => sum + day.minutes, 0);
+    // The one sum the board uses for your own row too.
+    const weekMinutes = weekMinutesOf(snapshot.days);
     const totalMinutes = snapshot.days.reduce((sum, day) => sum + day.minutes, 0);
     const daysRead = snapshot.days.filter((day) => day.minutes > 0).length;
     return { weekMinutes, totalMinutes, daysRead };
@@ -127,7 +120,7 @@ export const SocialPage = ({ showToast, nowReading, onReadNow, onNavigate }: Soc
             ))}
           </section>
 
-          <ReadingCalendar days={snapshot.days} goalMinutes={snapshot.goalMinutes} />
+          <ReadingCalendar days={snapshot.days} goalMinutes={snapshot.goalMinutes} freeReads={snapshot.freeReads} />
 
           <SessionShelf />
         </div>

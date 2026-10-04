@@ -29,6 +29,15 @@ export type FocusSessionRecord = {
   flowerBloomed?: boolean;
 };
 
+/**
+ * A day's reading outside any focus session. Worked out from the ledger and
+ * the shelf (the day's minutes, less its sessions'), never stored.
+ */
+export type FreeReadRecord = {
+  dateKey: string;
+  minutes: number;
+};
+
 export type HabitSnapshot = {
   streak: number;
   longestStreak: number;
@@ -39,6 +48,8 @@ export type HabitSnapshot = {
   todayMet: boolean;
   days: DayRecord[];
   sessions: FocusSessionRecord[];
+  /** Each day's reading with no focus session running, oldest first. */
+  freeReads: FreeReadRecord[];
   shelfCount: number;
   peakShelf: number;
   /** Set on the one evaluation that detects a break. */
@@ -76,6 +87,7 @@ export const EMPTY_SNAPSHOT: HabitSnapshot = {
   todayMet: false,
   days: [],
   sessions: [],
+  freeReads: [],
   shelfCount: 0,
   peakShelf: 0,
   brokeFrom: null,
@@ -104,21 +116,31 @@ export const habitService = {
     }
     return invoke<HabitSnapshot>("habit_snapshot", { todayKey: getDateKey() });
   },
-  /** Credits reading time to today and returns the re-evaluated snapshot. */
-  async creditMinutes(minutes: number): Promise<HabitSnapshot | null> {
+  /**
+   * Credits reading time to the day it was read and returns the snapshot,
+   * re-evaluated as of today. The day is today, except for time left over
+   * from a read that Leaflet was closed in the middle of.
+   */
+  async creditMinutes(minutes: number, dateKey: string = getDateKey()): Promise<HabitSnapshot | null> {
     if (!isTauri() || minutes <= 0) {
       return null;
     }
     return invoke<HabitSnapshot>("credit_reading_minutes", {
-      dateKey: getDateKey(),
-      minutes
+      dateKey,
+      minutes,
+      todayKey: getDateKey()
     });
   },
-  async setGoal(minutes: number): Promise<void> {
+  /**
+   * Saves the daily goal. It applies to today at once unless today has met
+   * the goal it had (lowered to what has been read, today is met now), and
+   * the snapshot returned is today's, evaluated after the change.
+   */
+  async setGoal(minutes: number): Promise<HabitSnapshot | null> {
     if (!isTauri()) {
-      return;
+      return null;
     }
-    await invoke("set_habit_goal", { minutes });
+    return invoke<HabitSnapshot | null>("set_habit_goal", { minutes, todayKey: getDateKey() });
   },
   async recordSession(session: FocusSessionInput): Promise<HabitSnapshot | null> {
     if (!isTauri()) {

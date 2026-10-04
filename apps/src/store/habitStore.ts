@@ -78,6 +78,17 @@ export type ActiveSession = {
   flower?: FocusFlower;
 };
 
+/**
+ * Reading the heartbeat has counted that the ledger does not hold yet, and
+ * the local day it was read on. Kept in storage between flushes, so closing
+ * Leaflet in the middle of a read does not lose its last minute: it is
+ * credited when Leaflet next opens.
+ */
+export type PendingReading = { dateKey: string; ms: number };
+
+/** The most held at once: what the ledger takes in one credit (MAX_MINUTES_PER_CREDIT). */
+const PENDING_MAX_MS = 15 * 60_000;
+
 /** A switch to another app shorter than this is free. */
 export const AWAY_FREE_MS = 30_000;
 
@@ -137,9 +148,23 @@ type HabitState = {
    * clock adds the time since then, so it runs smoothly between beats.
    */
   readingAt: number | null;
+  /** Reading counted since the last flush to the ledger; null when there is none. */
+  pendingReading: PendingReading | null;
 
   load: () => Promise<void>;
-  creditMinutes: (minutes: number) => Promise<void>;
+  /**
+   * The reading heartbeat counted `ms` of reading, with or without a focus
+   * session: it is held for the day's ledger until the next flush.
+   */
+  addReading: (ms: number) => void;
+  /**
+   * Writes the held reading to the ledger, under the day it was read on, and
+   * returns the ledger's answer. `show` false leaves the snapshot on screen
+   * as it is, for a caller that shows the answer itself.
+   */
+  flushReading: (show?: boolean) => Promise<HabitSnapshot | null>;
+  /** Leaflet left open past midnight: asks the ledger about the new day. */
+  refreshForNewDay: () => Promise<void>;
   setGoalMinutes: (minutes: number) => Promise<void>;
   setFocusSettings: (next: Partial<FocusSettings>) => void;
   startSession: (session: ActiveSession) => void;
@@ -181,6 +206,8 @@ const SETTINGS_KEY = "leaflet.habit.settings";
 const ACTIVE_KEY = "leaflet.habit.active";
 /** When Leaflet last noted it was running a session with a growing flower. */
 const ALIVE_KEY = "leaflet.habit.aliveAt";
+/** Reading counted and not yet in the ledger (see PendingReading). */
+const PENDING_KEY = "leaflet.habit.pendingReading";
 const LEGACY_KEY = "leaflet.habit";
 const LEGACY_DONE_KEY = "leaflet.habit.migrated";
 
@@ -207,6 +234,41 @@ const writeJson = (key: string, value: unknown) => {
     // Preferences are best-effort; reading must not depend on them.
   }
 };
+
+/** The reading a previous run left unflushed, if what is stored still reads as that. */
+const readPending = (): PendingReading | null => {
+  const held = readJson<Partial<PendingReading>>(PENDING_KEY);
+  if (!held || typeof held.dateKey !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(held.dateKey)) {
+    return null;
+  }
+  const ms = Number(held.ms);
+  return Number.isFinite(ms) && ms > 0 ? { dateKey: held.dateKey, ms: Math.min(ms, PENDING_MAX_MS) } : null;
+};
+
+const writePending = (pending: PendingReading | null) => {
+  if (pending) {
+    writeJson(PENDING_KEY, pending);
+    return;
+  }
+  try {
+    localStorage.removeItem(PENDING_KEY);
+  } catch {
+    // ignore
+  }
+};
+
+/** The local day `load` last asked the ledger about. */
+let loadedDay: string | null = null;
+
+/**
+ * The notice of a broken streak, when this snapshot is the one that found it.
+ * Any call that evaluates the streak can be that one: opening Leaflet, but
+ * also a credit or a session recorded after Leaflet sat open for days.
+ */
+const breakFound = (snapshot: HabitSnapshot | null) =>
+  snapshot && snapshot.brokeFrom !== null
+    ? { pendingBreak: { brokeFrom: snapshot.brokeFrom, burned: snapshot.justBurned } }
+    : {};
 
 /**
  * Moves the old `leaflet.habit` blob into the database once.
@@ -284,13 +346,20 @@ export const useHabitStore = create<HabitState>((set, get) => ({
   wrapUp: null,
   awaySince: null,
   readingAt: null,
+  pendingReading: readPending(),
 
   async load() {
     set({ loading: true });
+    // Leaflet was closed in the middle of a read: its last minute counts
+    // first. It can be the minute that met yesterday's goal, and a streak
+    // judged before it lands spends grace or a freeze on a day that was met,
+    // or burns the shelf for it.
+    await get().flushReading();
     try {
       const migrated = await migrateLegacy();
       const snapshot = migrated ?? (await habitService.snapshot());
       set({ snapshot, loading: false });
+      loadedDay = getDateKey();
       if (snapshot.brokeFrom !== null) {
         set({ pendingBreak: { brokeFrom: snapshot.brokeFrom, burned: snapshot.justBurned } });
       }
@@ -299,15 +368,63 @@ export const useHabitStore = create<HabitState>((set, get) => ({
     }
   },
 
-  async creditMinutes(minutes) {
-    const snapshot = await habitService.creditMinutes(minutes).catch(() => null);
-    if (snapshot) {
-      set({ snapshot });
+  async refreshForNewDay() {
+    // The snapshot is of the day it was taken: past midnight its minutes and
+    // "goal met" are yesterday's until the ledger is asked again.
+    if (loadedDay !== null && loadedDay !== getDateKey()) {
+      await get().load();
+    }
+  },
+
+  addReading(ms) {
+    if (!(ms > 0)) {
+      return;
+    }
+    const today = getDateKey();
+    const held = get().pendingReading;
+    // Read on past midnight: what was read yesterday goes to yesterday.
+    if (held && held.dateKey !== today) {
+      void get().flushReading();
+    }
+    const pendingReading = { dateKey: today, ms: Math.min(PENDING_MAX_MS, (get().pendingReading?.ms ?? 0) + ms) };
+    set({ pendingReading });
+    writePending(pendingReading);
+  },
+
+  async flushReading(show = true) {
+    const held = get().pendingReading;
+    if (!held) {
+      return null;
+    }
+    // Taken before the ledger answers, so a beat or a second flush in the
+    // meantime cannot credit the same time twice.
+    set({ pendingReading: null });
+    writePending(null);
+    try {
+      const snapshot = await habitService.creditMinutes(held.ms / 60000, held.dateKey);
+      if (snapshot && show) {
+        set({ snapshot, ...breakFound(snapshot) });
+      }
+      return snapshot;
+    } catch {
+      // The ledger could not be written: the time is held for the next flush.
+      const since = get().pendingReading;
+      if (!since || since.dateKey === held.dateKey) {
+        const pendingReading = { dateKey: held.dateKey, ms: Math.min(PENDING_MAX_MS, held.ms + (since?.ms ?? 0)) };
+        set({ pendingReading });
+        writePending(pendingReading);
+      }
+      return null;
     }
   },
 
   async setGoalMinutes(minutes) {
-    await habitService.setGoal(minutes).catch(() => undefined);
+    // The change is an evaluation too (a lowered goal can meet today), so a
+    // break it finds is shown like any other.
+    const snapshot = await habitService.setGoal(minutes).catch(() => null);
+    if (snapshot) {
+      set({ snapshot, ...breakFound(snapshot) });
+    }
     await get().load();
   },
 
@@ -471,6 +588,11 @@ export const useHabitStore = create<HabitState>((set, get) => ({
       // ignore
     }
 
+    // The reading still held goes to the ledger first. A session as long as
+    // the goal otherwise ends with its last minute uncounted, and the wrap-up
+    // says the goal is a minute away. Its answer is shown with the wrap-up.
+    const flushed = await get().flushReading(false);
+
     const snapshot = await habitService
       .recordSession({
         id,
@@ -487,7 +609,8 @@ export const useHabitStore = create<HabitState>((set, get) => ({
       })
       .catch(() => null);
 
-    const after = snapshot ?? before;
+    const shown = snapshot ?? flushed;
+    const after = shown ?? before;
     const wrapUp: SessionWrapUp | null =
       minutes >= WRAP_UP_MIN_MINUTES
         ? {
@@ -515,7 +638,7 @@ export const useHabitStore = create<HabitState>((set, get) => ({
         : null;
     // One update, so anything watching for "goal met" sees the wrap-up in the
     // same render and leaves the celebration to it.
-    set({ ...(snapshot ? { snapshot } : {}), wrapUp });
+    set({ ...(shown ? { snapshot: shown } : {}), wrapUp, ...breakFound(flushed), ...breakFound(snapshot) });
     // The session changed the seed balance and cheered Pip up.
     void usePipWardrobeStore.getState().load();
     return id;
@@ -539,6 +662,7 @@ export const useHabitStore = create<HabitState>((set, get) => ({
       localStorage.removeItem(SETTINGS_KEY);
       localStorage.removeItem(ACTIVE_KEY);
       localStorage.removeItem(ALIVE_KEY);
+      localStorage.removeItem(PENDING_KEY);
       localStorage.removeItem(LEGACY_KEY);
       localStorage.removeItem(LEGACY_DONE_KEY);
     } catch {
@@ -546,6 +670,7 @@ export const useHabitStore = create<HabitState>((set, get) => ({
     }
     set({
       snapshot: EMPTY_SNAPSHOT,
+      pendingReading: null,
       activeSession: null,
       focusSettings: defaultFocusSettings,
       pendingBreak: null,
@@ -562,6 +687,14 @@ export const useHabitStore = create<HabitState>((set, get) => ({
     }
   }
 }));
+
+/**
+ * Today's minutes as the whole number beside the goal ("19 / 20 min"). Rounded
+ * down while the goal is unmet: 19.6 of 20 is not "20 / 20" with a minute
+ * still to read.
+ */
+export const wholeTodayMinutes = (minutes: number, met: boolean) =>
+  met ? Math.round(minutes) : Math.floor(minutes);
 
 /** Longest stretch the clock runs ahead of the heartbeat (one beat), so a stall cannot run it on. */
 const LIVE_MAX_MS = 15_000;

@@ -58,6 +58,12 @@ type LibraryState = {
 };
 
 let syncTimer: ReturnType<typeof setTimeout> | null = null;
+/**
+ * Imports in flight. Counted, because the dialog, a drop and "Open with" can
+ * overlap: with a plain flag, the first to finish said importing was over
+ * while another was still copying a book in.
+ */
+let importsRunning = 0;
 let seriesScanned = false;
 
 // Some books simply have no match upstream. Without a cooldown the library
@@ -151,6 +157,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     }
   },
   async importBooks() {
+    importsRunning += 1;
     set({ importing: true });
     try {
       const imported = await bookService.importFromDialog();
@@ -162,10 +169,12 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       scheduleSync(set, get);
       void get().refreshMissingMetadata(imported);
     } finally {
-      set({ importing: false });
+      importsRunning -= 1;
+      set({ importing: importsRunning > 0 });
     }
   },
   async importPaths(paths) {
+    importsRunning += 1;
     set({ importing: true });
     try {
       const imported = await bookService.importPaths(paths);
@@ -178,7 +187,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       void get().refreshMissingMetadata(imported);
       return imported;
     } finally {
-      set({ importing: false });
+      importsRunning -= 1;
+      set({ importing: importsRunning > 0 });
     }
   },
   async refreshMetadata(id: string) {

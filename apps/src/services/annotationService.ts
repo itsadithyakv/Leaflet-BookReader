@@ -18,6 +18,9 @@ export type Annotation = {
 
 export type AnnotationInput = Omit<Annotation, "createdAt" | "updatedAt" | "deletedAt">;
 
+/** How many highlights a book has. */
+export type HighlightCount = { bookId: string; count: number };
+
 /**
  * The browser preview has no database; it keeps annotations in its own
  * storage so the reader can be tried (and tested) there.
@@ -45,6 +48,24 @@ export const annotationService = {
       return previewAll().filter((item) => item.bookId === bookId && !item.deletedAt);
     }
     return invoke<Annotation[]>("annotations_list", { bookId });
+  },
+
+  /**
+   * Each book's number of highlights, for the books that have any (bookmarks
+   * and deleted highlights are not counted). Lets the library list them
+   * without loading every highlight.
+   */
+  async highlightCounts(): Promise<HighlightCount[]> {
+    if (!isTauri()) {
+      const counts = new Map<string, number>();
+      for (const item of previewAll()) {
+        if (item.kind === "highlight" && !item.deletedAt) {
+          counts.set(item.bookId, (counts.get(item.bookId) ?? 0) + 1);
+        }
+      }
+      return [...counts].map(([bookId, count]) => ({ bookId, count }));
+    }
+    return invoke<HighlightCount[]>("annotations_highlight_counts");
   },
 
   async save(input: AnnotationInput): Promise<Annotation> {

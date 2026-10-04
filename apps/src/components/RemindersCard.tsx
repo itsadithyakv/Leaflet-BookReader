@@ -50,7 +50,15 @@ export const RemindersCard = ({ showToast }: { showToast: (message: string) => v
     reminderService
       .save(merged)
       .then(setStatus)
-      .catch(() => showToast("Could not save reminders."));
+      .catch(() => {
+        showToast("Could not save reminders.");
+        // The switch moved before the save was tried. It did not happen, so
+        // show what is stored (or, failing that, what was shown before).
+        reminderService
+          .status()
+          .then(setStatus)
+          .catch(() => setStatus(status));
+      });
   };
 
   const preview = () => {

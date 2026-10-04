@@ -38,6 +38,16 @@ export async function pickSyncFolder(): Promise<string | null> {
   return typeof selected === "string" ? selected : null;
 }
 
+/** Picks the folder that holds a readable copy of each book. */
+export async function pickLibraryCopyFolder(): Promise<string | null> {
+  const selected = await open({
+    directory: true,
+    multiple: false,
+    title: "Choose a folder for copies of your books"
+  });
+  return typeof selected === "string" ? selected : null;
+}
+
 export async function pickBookFiles(): Promise<string[]> {
   const selected = await open({
     multiple: true,

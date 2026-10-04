@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Copy, Pencil } from "lucide-react";
 import type { SocialProfile } from "@shared/sync/types";
 import { socialService } from "../../services/socialService";
@@ -6,12 +6,24 @@ import { useAccountStore } from "../../store/accountStore";
 import { randomAvatar } from "../../pip/avatars";
 import { AvatarPicker } from "../AvatarPicker";
 import { EYEBROW } from "../ui/SectionHeader";
+import { COPY } from "./copy";
 import { PipAvatar } from "./PipAvatar";
 import { SharedShelf } from "./SharedShelf";
-import { at, errorText } from "./format";
+import { at, errorText, nameToEdit } from "./format";
+import { handleProblem } from "./handle";
+import { HandleField } from "./HandleField";
 
 type ProfileCardProps = {
+  /** The reader's profile; null while it loads, and when it could not be read. */
   profile: SocialProfile | null;
+  /** Why the profile could not be read. A failed load is not a private profile. */
+  loadError?: string | null;
+  onRetry?: () => void;
+  /**
+   * Counts up each time the board's own row asks to share a profile that has
+   * no handle yet: the card opens its fields and puts the cursor in Handle.
+   */
+  handleNudge?: number;
   onSaved: (profile: SocialProfile) => void;
   showToast: (message: string) => void;
   /** Opens the Pip tab, where a reader dresses their own Pip. */
@@ -28,7 +40,7 @@ type Panel = "none" | "details" | "avatar";
  * Settings keeps the account itself (email, password); everything that
  * appears on the board is edited here.
  */
-export const ProfileCard = ({ profile, onSaved, showToast, onOpenPip }: ProfileCardProps) => {
+export const ProfileCard = ({ profile, loadError = null, onRetry, handleNudge = 0, onSaved, showToast, onOpenPip }: ProfileCardProps) => {
   const account = useAccountStore((state) => state.status.account);
   const saveAvatar = useAccountStore((state) => state.setAvatar);
   const [handle, setHandle] = useState("");
@@ -37,11 +49,29 @@ export const ProfileCard = ({ profile, onSaved, showToast, onOpenPip }: ProfileC
   const [panel, setPanel] = useState<Panel>("none");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const handleField = useRef<HTMLInputElement | null>(null);
+  const nudgeAnswered = useRef(0);
 
-  // The name given at sign-up seeds the profile's, so there is one name, not two.
+  // Asked to share from the board with no handle: show where to pick one.
+  // Two passes: the first opens the fields, the second (once they are on
+  // screen) brings the Handle field into view and puts the cursor in it.
+  useEffect(() => {
+    if (handleNudge === 0 || handleNudge === nudgeAnswered.current) {
+      return;
+    }
+    if (panel !== "details") {
+      setPanel("details");
+      return;
+    }
+    nudgeAnswered.current = handleNudge;
+    handleField.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+    handleField.current?.focus({ preventScroll: true });
+  }, [handleNudge, panel]);
+
+  // The name given at sign-up seeds a new profile's, so there is one name, not two.
   useEffect(() => {
     setHandle(profile?.handle ?? "");
-    setDisplayName(profile?.displayName ?? account?.displayName ?? "");
+    setDisplayName(nameToEdit(profile, account?.displayName));
   }, [profile?.handle, profile?.displayName, account?.displayName]);
 
   // A reader without a handle has nothing to show yet: start with the fields open.
@@ -52,7 +82,8 @@ export const ProfileCard = ({ profile, onSaved, showToast, onOpenPip }: ProfileC
   }, [profile]);
 
   const isPublic = profile?.visibility === "public";
-  const name = profile?.displayName || account?.displayName || (profile?.handle ? at(profile.handle) : "Your profile");
+  // As other readers see it: a profile with a handle and no name goes by the handle.
+  const name = profile?.displayName || (profile?.handle ? at(profile.handle) : account?.displayName || "Your profile");
 
   const open = (next: Panel) => {
     setError(null);
@@ -79,22 +110,23 @@ export const ProfileCard = ({ profile, onSaved, showToast, onOpenPip }: ProfileC
     setError(null);
     socialService
       .saveProfile({
-        handle: handle.trim() || null,
-        displayName: displayName.trim() || null,
-        visibility: visibility ?? profile?.visibility ?? "private"
+        // Making a profile private is never held up by a handle that was
+        // half-typed in the field: the handle is then left as it is.
+        handle: (visibility === "private" && handleFault ? "" : handle) || null,
+        // Sent even when empty: an empty name removes it. Sent as "nothing",
+        // it was left as it was, and the card said "Saved." all the same.
+        displayName: displayName.trim(),
+        // Left out when it is not being changed and is not known (the profile
+        // did not load): defaulting to "private" here un-shared a shared
+        // reader who only meant to fix their name.
+        visibility: visibility ?? profile?.visibility
       })
       .then((saved) => {
         onSaved(saved);
         if (!visibility) {
           setPanel("none");
         }
-        showToast(
-          visibility === "public"
-            ? "Your profile is shared. You're on this week's board."
-            : visibility === "private"
-              ? "Your profile is private again. You're off the board."
-              : "Saved."
-        );
+        showToast(visibility === "public" ? COPY.sharedToast : visibility === "private" ? COPY.privateToast : "Saved.");
       })
       .catch((cause) => setError(errorText(cause)))
       .finally(() => setBusy(false));
@@ -112,7 +144,12 @@ export const ProfileCard = ({ profile, onSaved, showToast, onOpenPip }: ProfileC
       .finally(() => setBusy(false));
   };
 
-  const needsHandle = !isPublic && handle.trim().length === 0;
+  const needsHandle = !isPublic && handle.length === 0;
+  // The same rule the sign-up form and the server apply, said before saving.
+  const handleFault = handle ? handleProblem(handle) : null;
+  // Until the profile has been read, whether it is shared is not known, and
+  // saying "Private" (as this card did) told a shared reader the wrong thing.
+  const unknown = profile === null;
 
   return (
     <section className="paper-surface rounded-xl p-6" aria-labelledby="you-title">
@@ -135,7 +172,9 @@ export const ProfileCard = ({ profile, onSaved, showToast, onOpenPip }: ProfileC
             {name}
           </h2>
           <p className="mt-0.5 text-sm text-on-surface-variant">
-            {isPublic ? (
+            {unknown ? (
+              loadError ? COPY.profileFailed : COPY.profileLoading
+            ) : isPublic ? (
               <>
                 Shared as <span className="font-semibold text-on-surface">{at(profile?.handle)}</span>
               </>
@@ -163,19 +202,32 @@ export const ProfileCard = ({ profile, onSaved, showToast, onOpenPip }: ProfileC
             type="button"
             className={`tactile-button px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60 ${isPublic ? "" : "tactile-button-primary"}`}
             onClick={() => save(isPublic ? "private" : "public")}
-            disabled={busy || needsHandle}
-            title={needsHandle ? "Pick a handle first" : undefined}
+            disabled={busy || needsHandle || unknown || Boolean(handleFault && !isPublic)}
+            title={needsHandle && !unknown ? "Pick a handle first" : undefined}
           >
             {isPublic ? "Make private" : "Share my profile"}
           </button>
         </div>
       </div>
 
-      <p className="mt-3 max-w-prose text-xs leading-5 text-on-surface-variant">
-        {isPublic
-          ? "Your Pip, name, handle, streak, weekly minutes and shelf are visible to other readers."
-          : "Share your profile to appear on the board and to follow, send kudos and duel."}
-      </p>
+      {unknown ? (
+        loadError && (
+          <div role="alert" className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-error-container/40 px-3 py-2 text-xs text-on-surface">
+            <span>{loadError}</span>
+            {onRetry && (
+              <button type="button" className="tactile-button px-3 py-1 text-xs" onClick={onRetry}>
+                Try again
+              </button>
+            )}
+          </div>
+        )
+      ) : (
+        <p className="mt-3 max-w-prose text-xs leading-5 text-on-surface-variant">
+          {isPublic
+            ? "Your Pip, name, handle, streak, weekly minutes and shelf are visible to other readers."
+            : "Nobody else can see you, and you are not on the board. Share your profile to appear there and to follow, send kudos and duel."}
+        </p>
+      )}
 
       {panel === "details" && (
         <div className="mt-5 border-t border-outline-variant/40 pt-4">
@@ -192,25 +244,18 @@ export const ProfileCard = ({ profile, onSaved, showToast, onOpenPip }: ProfileC
             </label>
             <label className="block">
               <span className={EYEBROW}>Handle</span>
-              <input
-                value={handle}
-                onChange={(event) => setHandle(event.target.value.toLowerCase())}
-                placeholder="letters, numbers, - and _"
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-                maxLength={24}
-                className="inset-field mt-1 w-full px-3 py-2 text-sm text-on-surface"
-              />
+              <HandleField inputRef={handleField} value={handle} onChange={setHandle} invalid={Boolean(handleFault)} />
             </label>
           </div>
-          {needsHandle && <p className="mt-2 text-[11px] text-on-surface-variant">Pick a handle: it's how other readers find you.</p>}
+          <p className="mt-2 text-[11px] text-on-surface-variant">
+            {handleFault ?? (handle ? `Other readers find you as ${at(handle)}.` : COPY.handleHint)}
+          </p>
           <div className="mt-4 flex gap-2">
             <button
               type="button"
               className="tactile-button tactile-button-primary px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
               onClick={() => save()}
-              disabled={busy}
+              disabled={busy || Boolean(handleFault)}
             >
               {busy ? "Saving…" : "Save"}
             </button>

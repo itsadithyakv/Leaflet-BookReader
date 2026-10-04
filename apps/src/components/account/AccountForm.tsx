@@ -1,9 +1,18 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import type { SocialProfile } from "@shared/sync/types";
 import { useAccountStore } from "../../store/accountStore";
-import { accountService, errorMessage } from "../../services/accountService";
+import { accountService, errorMessage, type AccountStatus } from "../../services/accountService";
+import { socialService } from "../../services/socialService";
+import { FEATURES } from "../../constants/features";
 import { PRIVACY_URL, TERMS_URL } from "../../constants/links";
 import { randomAvatar } from "../../pip/avatars";
 import { AvatarPicker } from "../AvatarPicker";
+import { useCommunityStore } from "../community/communityStore";
+import { COPY } from "../community/copy";
+import { at } from "../community/format";
+import { handleProblem, suggestHandle } from "../community/handle";
+import { HandleField } from "../community/HandleField";
+import { signUpWithProfile } from "./signUpFlow";
 
 export type AccountFormMode = "signin" | "signup" | "reset";
 
@@ -24,9 +33,15 @@ const labelClass = "mt-3 block text-[10px] uppercase tracking-[0.2em] text-on-su
  * Signing in, creating an account, and a forgotten password, in one form.
  * Used by Settings → Account, the first-run account step and the profile menu,
  * so the three can never drift apart.
+ *
+ * A new account's profile is shared with other readers unless the switch on
+ * the form is turned off: the form asks for a handle, says what becomes
+ * visible, and saves the profile straight after the account (`signUpFlow.ts`).
  */
 export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming = false }: Props) => {
-  const signUp = useAccountStore((state) => state.signUp);
+  const createAccount = useAccountStore((state) => state.createAccount);
+  const adopt = useAccountStore((state) => state.adopt);
+  const setMe = useCommunityStore((state) => state.setMe);
   const signIn = useAccountStore((state) => state.signIn);
   const requestReset = useAccountStore((state) => state.requestReset);
   const resetPassword = useAccountStore((state) => state.resetPassword);
@@ -40,8 +55,114 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
   const [displayName, setDisplayName] = useState("");
   // Preselected at random, so a reader who skips past it still gets a Pip of their own.
   const [avatar, setAvatar] = useState(() => randomAvatar().id);
+  // The handle starts as a suggestion and follows the name and email until
+  // the reader types one of their own.
+  const [typedHandle, setTypedHandle] = useState<string | null>(null);
+  // On unless the reader turns it off. (A build without the community has
+  // nothing to share a profile with, so there it is off and not shown.)
+  const [share, setShare] = useState(FEATURES.community);
+  // The account exists and this device is signed in, but its profile is not
+  // shared yet (the handle was taken, the connection dropped): one step left.
+  const [created, setCreated] = useState<AccountStatus | null>(null);
+  const createdRef = useRef<AccountStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const handleId = useId();
+  const handleNoteId = useId();
+  const shareNoteId = useId();
+
+  // Closed half-way (the dialog's X, another page): the account is real and
+  // signed in, so the app is told, with a profile that stayed private.
+  useEffect(
+    () => () => {
+      if (createdRef.current) {
+        adopt(createdRef.current);
+      }
+    },
+    [adopt]
+  );
+
+  const handle = typedHandle ?? (share ? suggestHandle(displayName, email) : "");
+  // Needed to share; optional (but still a real handle, if given) otherwise.
+  const handleFault = handle ? handleProblem(handle) : null;
+  const handleReady = handle ? handleFault === null : !share;
+
+  /** The sign-up is over: say who is signed in, and close. */
+  const finish = (status: AccountStatus, profile: SocialProfile | null, message: string) => {
+    createdRef.current = null;
+    setCreated(null);
+    if (profile) {
+      setMe(profile);
+    }
+    adopt(status);
+    setPassword("");
+    setMode("signin");
+    onDone(message);
+  };
+
+  const sharedMessage = (shared: string | null) => `Account created. You're signed in, and your profile is shared as ${at(shared)}.`;
+
+  const submitSignUp = () => {
+    setBusy(true);
+    setError(null);
+    signUpWithProfile(
+      { create: createAccount, saveProfile: (update) => socialService.saveProfile(update) },
+      { email: email.trim(), password, name: displayName, avatar, handle, share }
+    )
+      .then((outcome) => {
+        if (outcome.kind === "created") {
+          createdRef.current = outcome.status;
+          setCreated(outcome.status);
+          setTypedHandle(handle);
+          setPassword("");
+          setError(outcome.reason);
+          return;
+        }
+        finish(
+          outcome.status,
+          outcome.profile,
+          outcome.shared
+            ? sharedMessage(outcome.profile?.handle ?? handle)
+            : `Account created. You are signed in. Your profile is private.${outcome.note ? ` ${outcome.note}` : ""}`
+        );
+      })
+      .catch((cause) => setError(errorMessage(cause)))
+      .finally(() => setBusy(false));
+  };
+
+  /** The step left over: share the profile of the account just created. */
+  const shareCreated = () => {
+    if (!created) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    socialService
+      .saveProfile({ handle, displayName: displayName.trim(), visibility: "public" })
+      .then((profile) => finish(created, profile, sharedMessage(profile.handle ?? handle)))
+      .catch((cause) => setError(errorMessage(cause)))
+      .finally(() => setBusy(false));
+  };
+
+  const handleField = (
+    <>
+      <label htmlFor={handleId} className={labelClass}>
+        Handle{share || created ? "" : " (optional)"}
+      </label>
+      <HandleField
+        id={handleId}
+        value={handle}
+        onChange={setTypedHandle}
+        describedBy={handleNoteId}
+        invalid={Boolean(handleFault)}
+        disabled={busy}
+        className="text-xs"
+      />
+      <p id={handleNoteId} className="mt-1 text-[10px] text-on-surface-variant">
+        {handleFault ?? (handle ? `Other readers find you as ${at(handle)}.` : COPY.handleHint)}
+      </p>
+    </>
+  );
 
   const attempt = (action: () => Promise<void>, done: string) => {
     setBusy(true);
@@ -63,6 +184,45 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
       {error}
     </p>
   );
+
+  if (created) {
+    return (
+      <div>
+        <p className="font-headline text-2xl font-bold text-on-surface">One thing left</p>
+        <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
+          Your account is created and you are signed in. Your profile isn't shared yet, so nobody else can see you.
+        </p>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (handleReady && handle && !busy) {
+              shareCreated();
+            }
+          }}
+        >
+          {errorBox}
+          {handleField}
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              type="submit"
+              className="tactile-button tactile-button-primary px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={busy || !handle || !handleReady}
+            >
+              {busy ? "One moment…" : "Share my profile"}
+            </button>
+            <button
+              type="button"
+              className="text-xs text-on-surface-variant underline"
+              disabled={busy}
+              onClick={() => finish(created, null, `Account created. You are signed in. Your profile is private. ${COPY.shareLater}`)}
+            >
+              Keep it private for now
+            </button>
+          </div>
+        </form>
+      </div>
+    );
+  }
 
   if (mode === "reset") {
     const leave = () => {
@@ -189,12 +349,8 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
     setPassword("");
     setError(null);
   };
-  const canSubmit = email.trim().length > 0 && password.length >= (signingUp ? 8 : 1);
-  const submit = () =>
-    attempt(
-      () => (signingUp ? signUp(email.trim(), password, displayName, avatar) : signIn(email.trim(), password)),
-      signingUp ? "Account created. You are signed in." : "Signed in."
-    );
+  const canSubmit = email.trim().length > 0 && password.length >= (signingUp ? 8 : 1) && (!signingUp || handleReady);
+  const submit = () => (signingUp ? submitSignUp() : attempt(() => signIn(email.trim(), password), "Signed in."));
 
   return (
     <div>
@@ -232,6 +388,7 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
               onChange={(event) => setDisplayName(event.target.value)}
               className={fieldClass}
             />
+            {FEATURES.community && handleField}
             <p className={`${labelClass} mb-2`}>Your Pip</p>
             <AvatarPicker value={avatar} onChange={setAvatar} disabled={busy} label="Your Pip" />
           </>
@@ -245,7 +402,35 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
           className={fieldClass}
         />
         {signingUp ? (
-          <p className="mt-1 text-[10px] text-on-surface-variant">At least 8 characters.</p>
+          <>
+            <p className="mt-1 text-[10px] text-on-surface-variant">At least 8 characters.</p>
+            {FEATURES.community && (
+            <>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={share}
+              aria-describedby={shareNoteId}
+              className="inset-field mt-4 flex w-full items-center justify-between gap-4 px-3 py-2.5 text-xs text-on-surface disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={() => setShare((on) => !on)}
+              disabled={busy}
+            >
+              <span className="font-semibold">Share my profile</span>
+              <span
+                aria-hidden
+                className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${share ? "bg-primary" : "bg-surface-container-highest"}`}
+              >
+                <span
+                  className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-[left] ${share ? "left-[18px]" : "left-0.5"}`}
+                />
+              </span>
+            </button>
+            <p id={shareNoteId} className="mt-1.5 text-[10px] leading-relaxed text-on-surface-variant">
+              {share ? COPY.shareAtSignUp : COPY.privateAtSignUp}
+            </p>
+            </>
+            )}
+          </>
         ) : (
           <div className="mt-1 flex justify-end">
             <button type="button" className="text-[11px] font-semibold text-primary hover:underline" onClick={forgotPassword}>

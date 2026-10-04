@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Book } from "@shared/models/book";
 import { useCollectionStore } from "../store/collectionStore";
+import { getBookExtension, isPageImageFormat } from "../constants/bookFormats";
+import { openHighlights, useHighlightsStore } from "./highlights/highlightsStore";
 import { openSeriesEditor } from "./SeriesEditor";
 import { UiIcon } from "./UiIcon";
 
@@ -18,7 +20,7 @@ const MENU_WIDTH = 248;
 
 /**
  * A book's "⋯" menu: its collections (tick to add or take out, or make a new
- * one with it in) and its series.
+ * one with it in), its series and its highlights.
  *
  * The menu is drawn at the top of the page rather than inside the card: cards
  * lift on hover (a transform) and sit in rows drawn one over another, either of
@@ -36,6 +38,9 @@ export const BookMenu = ({ book, actions = [], className = "" }: Props) => {
   const load = useCollectionStore((state) => state.load);
   const toggleBook = useCollectionStore((state) => state.toggleBook);
   const create = useCollectionStore((state) => state.create);
+  // Only books read as text can be highlighted; a PDF or a comic has none to show.
+  const highlightable = !isPageImageFormat(getBookExtension(book.localPath));
+  const highlightCount = useHighlightsStore((state) => state.counts[book.id] ?? 0);
 
   useLayoutEffect(() => {
     if (!open || !triggerRef.current) {
@@ -120,7 +125,7 @@ export const BookMenu = ({ book, actions = [], className = "" }: Props) => {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`More for ${book.title}`}
-        title="Collections and series"
+        title={highlightable ? "Collections, series and highlights" : "Collections and series"}
         className={`flex h-8 w-8 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface ${className}`}
         onClick={(event) => {
           event.stopPropagation();
@@ -136,7 +141,7 @@ export const BookMenu = ({ book, actions = [], className = "" }: Props) => {
           <div
             ref={menuRef}
             role="menu"
-            aria-label={`${book.title}: collections and series`}
+            aria-label={`${book.title}: ${highlightable ? "collections, series and highlights" : "collections and series"}`}
             className="modal-surface fixed z-[80] max-h-[70vh] overflow-y-auto rounded-xl p-2 shadow-xl"
             style={{ ...place, width: MENU_WIDTH }}
             onClick={(event) => event.stopPropagation()}
@@ -203,6 +208,25 @@ export const BookMenu = ({ book, actions = [], className = "" }: Props) => {
               <UiIcon name="series" size={16} className="text-on-surface-variant" />
               Series…
             </button>
+            {highlightable && (
+              <button
+                type="button"
+                role="menuitem"
+                className={item}
+                onClick={() => {
+                  close();
+                  // So closing the highlights comes back to this book's menu button.
+                  triggerRef.current?.focus();
+                  openHighlights(book.id);
+                }}
+              >
+                <UiIcon name="highlight" size={16} className="text-on-surface-variant" />
+                Highlights
+                {highlightCount > 0 && (
+                  <span className="ml-auto text-xs tabular-nums text-on-surface-variant">{highlightCount}</span>
+                )}
+              </button>
+            )}
             {actions.map((action) => (
               <button
                 key={action.label}

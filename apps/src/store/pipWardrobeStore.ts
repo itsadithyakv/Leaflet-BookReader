@@ -20,6 +20,8 @@ type WardrobeState = {
   harvest: (plantingId: string) => Promise<number>;
   /** Records a finished arcade game. Resolves with the mood it added. */
   gamePlayed: (game: string, score: number) => Promise<number>;
+  /** Records a bout of play by hand. Resolves with the mood it added (0 once the day's allowance is used). */
+  played: (kind: string) => Promise<number>;
 };
 
 const lookOf = (overview: PipOverview): PipLook => ({
@@ -93,6 +95,20 @@ export const usePipWardrobeStore = create<WardrobeState>((set, get) => {
         return Math.max(0, after < before ? after : after - before);
       } catch (cause) {
         throw new Error(shopError(cause));
+      }
+    },
+
+    async played(kind) {
+      const before = get().overview?.arcade.moodToday ?? 0;
+      try {
+        const overview = await pipService.played(kind);
+        set({ overview });
+        const after = overview.arcade.moodToday;
+        // A new day's allowance starts from nothing, so less than before means all of it is new.
+        return Math.max(0, after < before ? after : after - before);
+      } catch {
+        // Play is never refused out loud: Pip still had fun.
+        return 0;
       }
     }
   };
