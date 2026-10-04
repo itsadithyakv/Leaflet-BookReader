@@ -201,7 +201,15 @@ pub fn evaluate(
   }
 
   let previous_streak = previous.current_streak;
-  let broke = streak < previous_streak && previous_streak > 0;
+  // Asked about a day before the one last asked about (a date line crossed
+  // going east, a clock corrected), the walk counts fewer days. Nothing was
+  // missed, so nothing broke.
+  let rewound = previous
+    .last_evaluated_day
+    .as_deref()
+    .and_then(parse_day)
+    .is_some_and(|last| today < last);
+  let broke = streak < previous_streak && previous_streak > 0 && !rewound;
   let broke_from = if broke { Some(previous_streak) } else { None };
 
   // Crossing each multiple of DAYS_PER_FREEZE banks one, up to the cap.
@@ -234,6 +242,81 @@ pub fn evaluate(
     today_minutes,
     today_goal
   }
+}
+
+/// Free reading shorter than this is not listed. The heartbeat writes the
+/// ledger about once a minute, so a session and its day can differ by that
+/// much without anything having been read outside the session.
+pub const FREE_READ_MIN_MINUTES: f64 = 1.0;
+
+/// What `free_reads` needs to know about one focus session.
+#[derive(Debug, Clone)]
+pub struct SessionSpan<'a> {
+  /// The local day the session ended on: the day it is shelved under.
+  pub date_key: &'a str,
+  /// The local day it started on. The same day, unless it was read across
+  /// midnight or left running and ended on a later day.
+  pub started_day: &'a str,
+  pub minutes: f64
+}
+
+/// A day's reading outside any focus session.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FreeRead {
+  pub date_key: String,
+  pub minutes: f64
+}
+
+/// Reading done with no focus session running, a day at a time, oldest first.
+///
+/// Never stored. The ledger holds every minute the heartbeat counted, session
+/// or not, and a session's minutes are the part of it read with the timer on,
+/// so what is left of a day is its free reading. Derived like this it needs no
+/// record of its own: days read before this existed have their free reading
+/// too, and two devices holding the same ledger and shelf agree on it.
+///
+/// A session takes its minutes from the day it ended on first, then from the
+/// day it started on, since the heartbeat credited each minute to the day it
+/// was read. Burned sessions still take theirs: a book lost to a broken
+/// streak does not come back as free reading. Session time the ledger never
+/// saw (a timer from before the session clock counted reading) takes nothing
+/// more than the day holds.
+pub fn free_reads(days: &HashMap<String, DayRecord>, sessions: &[SessionSpan<'_>]) -> Vec<FreeRead> {
+  let mut left: std::collections::BTreeMap<&str, f64> = days
+    .values()
+    .filter(|day| day.minutes > 0.0)
+    .map(|day| (day.date_key.as_str(), day.minutes))
+    .collect();
+
+  // In a fixed order, so the answer does not depend on how the shelf was listed.
+  let mut ordered: Vec<&SessionSpan<'_>> = sessions.iter().collect();
+  ordered.sort_by(|a, b| {
+    a.date_key
+      .cmp(b.date_key)
+      .then_with(|| a.started_day.cmp(b.started_day))
+      .then_with(|| a.minutes.total_cmp(&b.minutes))
+  });
+  for session in ordered {
+    let mut owed = session.minutes.max(0.0);
+    let mut take = |day: &str, owed: &mut f64| {
+      if let Some(rest) = left.get_mut(day) {
+        let taken = owed.min(*rest);
+        *rest -= taken;
+        *owed -= taken;
+      }
+    };
+    take(session.date_key, &mut owed);
+    if session.started_day != session.date_key {
+      take(session.started_day, &mut owed);
+    }
+  }
+
+  left
+    .into_iter()
+    .filter(|(_, minutes)| *minutes >= FREE_READ_MIN_MINUTES)
+    .map(|(date_key, minutes)| FreeRead { date_key: date_key.to_string(), minutes })
+    .collect()
 }
 
 #[cfg(test)]
@@ -428,5 +511,105 @@ mod tests {
     let result = evaluate(&days, "not-a-date", &state(3, 1, true));
     assert_eq!(result.streak, 3, "state is returned unchanged");
     assert_eq!(result.broke_from, None);
+  }
+
+  #[test]
+  fn a_clock_set_back_is_not_a_broken_streak() {
+    let days = ledger(vec![
+      day("2026-10-01", 25.0, 20),
+      day("2026-10-02", 25.0, 20),
+      day("2026-10-03", 25.0, 20)
+    ]);
+    let mut previous = state(3, 0, false);
+    previous.last_evaluated_day = Some("2026-10-03".to_string());
+    // The same ledger, asked about the day before: a date line crossed going
+    // east, or a clock corrected. One day fewer is counted, and nothing broke.
+    let result = evaluate(&days, "2026-10-02", &previous);
+    assert_eq!(result.streak, 2);
+    assert_eq!(result.broke_from, None);
+    assert_eq!(result.burn_count, 0);
+
+    // A real break is still one, asked on the same day or a later one.
+    let gap = ledger(vec![day("2026-10-01", 25.0, 20), day("2026-10-05", 25.0, 20)]);
+    let result = evaluate(&gap, "2026-10-05", &previous);
+    assert_eq!(result.broke_from, Some(3));
+  }
+
+  // ---- free reading ------------------------------------------------------
+
+  fn span<'a>(date_key: &'a str, started_day: &'a str, minutes: f64) -> SessionSpan<'a> {
+    SessionSpan { date_key, started_day, minutes }
+  }
+
+  fn free(date_key: &str, minutes: f64) -> FreeRead {
+    FreeRead { date_key: date_key.to_string(), minutes }
+  }
+
+  #[test]
+  fn a_day_read_with_no_session_is_all_free_reading() {
+    // The reported case: an evening of reading, no timer started.
+    let days = ledger(vec![day("2026-10-02", 95.0, 20)]);
+    assert_eq!(free_reads(&days, &[]), vec![free("2026-10-02", 95.0)]);
+  }
+
+  #[test]
+  fn a_session_takes_its_minutes_and_the_rest_of_the_day_is_free() {
+    let days = ledger(vec![day("2026-10-02", 65.0, 20)]);
+    let sessions = [span("2026-10-02", "2026-10-02", 25.0)];
+    assert_eq!(free_reads(&days, &sessions), vec![free("2026-10-02", 40.0)]);
+  }
+
+  #[test]
+  fn a_day_read_only_in_sessions_has_no_free_reading() {
+    let days = ledger(vec![day("2026-10-02", 45.4, 20)]);
+    let sessions = [span("2026-10-02", "2026-10-02", 20.0), span("2026-10-02", "2026-10-02", 25.0)];
+    // The last flush lags the session by under a minute: not a free read.
+    assert!(free_reads(&days, &sessions).is_empty());
+  }
+
+  #[test]
+  fn session_time_the_ledger_never_saw_takes_nothing_from_other_days() {
+    // An old timer left running: 175 minutes on the shelf, 10 actually read.
+    let days = ledger(vec![day("2026-09-01", 30.0, 20), day("2026-09-02", 10.0, 20)]);
+    let sessions = [span("2026-09-02", "2026-09-02", 175.0)];
+    assert_eq!(free_reads(&days, &sessions), vec![free("2026-09-01", 30.0)]);
+  }
+
+  #[test]
+  fn a_session_read_across_midnight_takes_from_both_days() {
+    // 15 minutes before midnight, 10 after, and 30 read freely that afternoon.
+    let days = ledger(vec![day("2026-10-01", 45.0, 20), day("2026-10-02", 10.0, 20)]);
+    let sessions = [span("2026-10-02", "2026-10-01", 25.0)];
+    assert_eq!(free_reads(&days, &sessions), vec![free("2026-10-01", 30.0)]);
+  }
+
+  #[test]
+  fn a_session_ended_days_later_takes_from_the_day_it_was_read() {
+    // Started and read on the 1st, left running, ended when Leaflet next opened.
+    let days = ledger(vec![day("2026-10-01", 12.0, 20)]);
+    let sessions = [span("2026-10-04", "2026-10-01", 12.0)];
+    assert!(free_reads(&days, &sessions).is_empty());
+  }
+
+  #[test]
+  fn free_reading_is_listed_oldest_first_whatever_the_order_given() {
+    let days = ledger(vec![
+      day("2026-10-03", 20.0, 20),
+      day("2026-10-01", 30.0, 20),
+      day("2026-10-02", 40.0, 20)
+    ]);
+    let one = [span("2026-10-02", "2026-10-02", 15.0), span("2026-10-03", "2026-10-03", 5.0)];
+    let other = [span("2026-10-03", "2026-10-03", 5.0), span("2026-10-02", "2026-10-02", 15.0)];
+    let expected = vec![free("2026-10-01", 30.0), free("2026-10-02", 25.0), free("2026-10-03", 15.0)];
+    assert_eq!(free_reads(&days, &one), expected);
+    assert_eq!(free_reads(&days, &other), expected);
+  }
+
+  #[test]
+  fn a_covered_day_with_nothing_read_is_not_a_free_read() {
+    let mut covered = day("2026-10-02", 0.0, 20);
+    covered.freeze_used = true;
+    let days = ledger(vec![covered, day("2026-10-03", 0.4, 20)]);
+    assert!(free_reads(&days, &[]).is_empty());
   }
 }

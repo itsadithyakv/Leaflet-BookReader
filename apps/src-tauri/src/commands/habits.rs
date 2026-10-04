@@ -52,6 +52,9 @@ pub struct HabitSnapshot {
   pub today_met: bool,
   pub days: Vec<habit::DayRecord>,
   pub sessions: Vec<FocusSessionRecord>,
+  /// Each day's reading outside a focus session (see `habit::free_reads`):
+  /// worked out from the two lists above, so the shelf can show it too.
+  pub free_reads: Vec<habit::FreeRead>,
   pub shelf_count: i64,
   pub peak_shelf: i64,
   /// Set on the evaluation that detects a break, so the UI can explain it once.
@@ -66,6 +69,40 @@ pub struct HabitSnapshot {
   /// are ripe to pick: the wrap-up's "+N water, 2 plants ripe!".
   pub garden_water: f64,
   pub garden_ripe: i64
+}
+
+/// The local day an instant fell on, as the ledger keys days.
+fn local_day(stamp: &str) -> Option<String> {
+  chrono::DateTime::parse_from_rfc3339(stamp)
+    .ok()
+    .map(|at| at.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string())
+}
+
+/// The local day a session started on. A session is shelved under the day it
+/// ended; the day it started is read from its start time, and one that cannot
+/// be read, or reads as later than the end, is taken to be the same day.
+pub(crate) fn started_day(session: &FocusSessionRecord) -> String {
+  local_day(&session.started_at)
+    .filter(|day| day.as_str() <= session.date_key.as_str())
+    .unwrap_or_else(|| session.date_key.clone())
+}
+
+/// Each day's reading outside a focus session, from the ledger and the shelf.
+pub(crate) fn free_reads_from(
+  days: &std::collections::HashMap<String, habit::DayRecord>,
+  sessions: &[FocusSessionRecord]
+) -> Vec<habit::FreeRead> {
+  let started: Vec<String> = sessions.iter().map(started_day).collect();
+  let spans: Vec<habit::SessionSpan<'_>> = sessions
+    .iter()
+    .zip(&started)
+    .map(|(session, started_day)| habit::SessionSpan {
+      date_key: &session.date_key,
+      started_day,
+      minutes: session.minutes
+    })
+    .collect();
+  habit::free_reads(days, &spans)
 }
 
 pub(crate) fn build_snapshot(db: &db::Database, today_key: &str) -> Result<HabitSnapshot, String> {
@@ -97,6 +134,7 @@ pub(crate) fn build_snapshot(db: &db::Database, today_key: &str) -> Result<Habit
   let day_map = db.reading_days().map_err(|e| e.to_string())?;
   let sessions = db.focus_sessions().map_err(|e| e.to_string())?;
   let (garden, seeds_earned) = garden_totals(db, &day_map, &sessions)?;
+  let free_reads = free_reads_from(&day_map, &sessions);
   let mut day_list: Vec<habit::DayRecord> = day_map.into_values().collect();
   day_list.sort_by(|a, b| a.date_key.cmp(&b.date_key));
 
@@ -110,6 +148,7 @@ pub(crate) fn build_snapshot(db: &db::Database, today_key: &str) -> Result<Habit
     today_met: evaluation.today_met,
     days: day_list,
     sessions,
+    free_reads,
     shelf_count,
     peak_shelf: state.peak_shelf,
     broke_from: evaluation.broke_from,
@@ -129,25 +168,49 @@ pub fn habit_snapshot(today_key: String, state: State<'_, AppState>) -> Result<H
   build_snapshot(&db, &today_key)
 }
 
-/// Adds reading time to today and re-evaluates. Called by the reader heartbeat.
+/// Adds reading time to a day and re-evaluates. Called by the reader heartbeat,
+/// whether or not a focus session is running.
+///
+/// `date_key` is the day the minutes were read. It is today, except for the
+/// last minute of a read that Leaflet was closed in the middle of, which is
+/// credited when it next opens: `today_key` is then the day to evaluate the
+/// streak on. Evaluating it as of an earlier day would read as a break.
 #[tauri::command]
 pub fn credit_reading_minutes(
   date_key: String,
   minutes: f64,
+  today_key: Option<String>,
   state: State<'_, AppState>
 ) -> Result<HabitSnapshot, String> {
   let db = state.db.guard();
+  credit_reading(&db, &date_key, minutes, today_key.as_deref())
+}
+
+pub(crate) fn credit_reading(
+  db: &db::Database,
+  date_key: &str,
+  minutes: f64,
+  today_key: Option<&str>
+) -> Result<HabitSnapshot, String> {
   if minutes > 0.0 {
-    match creditable(&db, &date_key, minutes) {
+    match creditable(db, date_key, minutes) {
       Ok(minutes) => {
-        let goal = read_goal(&db);
-        db.credit_minutes(&date_key, minutes, goal)
+        // Which goal the day is judged against is `goal_for_day`'s to say.
+        let earlier = today_key.is_some_and(|today| today != date_key);
+        let goal = goal_for_day(db, date_key, earlier)?;
+        db.credit_minutes(date_key, minutes, goal)
           .map_err(|e| e.to_string())?;
+        // Any reading cheers Pip up, in a focus session or not: the minutes
+        // the ledger took, out of that day's allowance. A courtesy: the
+        // minutes are credited whether or not she could be cheered up.
+        if let Err(reason) = cheer_pip_for_reading(db, date_key, minutes) {
+          crate::diag::warn(&format!("reading credited to {date_key}, but Pip was not cheered up: {reason}"));
+        }
       }
       Err(reason) => crate::diag::warn(&format!("reading minutes not credited to {date_key}: {reason}"))
     }
   }
-  build_snapshot(&db, &date_key)
+  build_snapshot(db, today_key.unwrap_or(date_key))
 }
 
 /// The most the heartbeat can honestly report in one call: it flushes about
@@ -179,11 +242,76 @@ pub(crate) fn creditable(db: &db::Database, date_key: &str, minutes: f64) -> Res
   Ok(minutes.min(MAX_MINUTES_PER_CREDIT))
 }
 
+/// The goal a day is judged against. Decided here and nowhere else: the
+/// ledger stamps a day with whatever it is given.
+///
+/// * A day that has met the goal it is stamped with keeps that goal. A goal
+///   raised afterwards must not unmeet it (the streak would drop by the day,
+///   read as broken, and burn the shelf), and one lowered afterwards changes
+///   nothing: a day is met once, and its bonus is worked out from the ledger,
+///   so no run of goal changes can pay it twice.
+/// * An earlier day (`earlier`: the last minute of a read Leaflet was closed
+///   in, credited the next day) keeps the goal it was read against, met or
+///   not.
+/// * Any other day, which is today short of its goal or not yet read, takes
+///   the goal in force now, lower or higher than the one it had.
+pub(crate) fn goal_for_day(db: &db::Database, date_key: &str, earlier: bool) -> Result<i64, String> {
+  let kept = db
+    .reading_days()
+    .map_err(|e| e.to_string())?
+    .get(date_key)
+    .filter(|day| earlier || day.goal_met())
+    .map(|day| day.goal_minutes)
+    .filter(|goal| *goal > 0);
+  Ok(kept.unwrap_or_else(|| read_goal(db)))
+}
+
+/// Whether a goal change may re-stamp `today_key`: it is the reader's today
+/// (a day either side of this machine's, for time zones and midnight) and no
+/// later day has reading on it. An earlier day is never re-stamped: with the
+/// clock set back, lowering the goal would meet a day that had missed it.
+fn is_reading_today(db: &db::Database, today_key: &str) -> bool {
+  let Ok(day) = chrono::NaiveDate::parse_from_str(today_key, "%Y-%m-%d") else {
+    return false;
+  };
+  if (day - chrono::Local::now().date_naive()).num_days().abs() > 1 {
+    return false;
+  }
+  !matches!(db.latest_reading_day(), Ok(Some(latest)) if latest.as_str() > today_key)
+}
+
+/// Saves the daily goal. With `today_key` (the caller's local day) the change
+/// applies to today at once: today's row, if it has one, is stamped again by
+/// `goal_for_day`'s rule, so a goal lowered to what has been read meets today
+/// now, not at the next minute credited. The snapshot is today's, evaluated
+/// after the change.
 #[tauri::command]
-pub fn set_habit_goal(minutes: i64, state: State<'_, AppState>) -> Result<(), String> {
+pub fn set_habit_goal(
+  minutes: i64,
+  today_key: Option<String>,
+  state: State<'_, AppState>
+) -> Result<Option<HabitSnapshot>, String> {
   let db = state.db.guard();
+  set_goal(&db, minutes, today_key.as_deref())
+}
+
+pub(crate) fn set_goal(
+  db: &db::Database,
+  minutes: i64,
+  today_key: Option<&str>
+) -> Result<Option<HabitSnapshot>, String> {
   db.set_setting(GOAL_SETTING, &minutes.clamp(MIN_GOAL_MINUTES, 600).to_string())
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+  let Some(today) = today_key else {
+    return Ok(None);
+  };
+  let has_row = db.reading_days().map_err(|e| e.to_string())?.contains_key(today);
+  if has_row && is_reading_today(db, today) {
+    // No minutes: only the stamp changes.
+    let goal = goal_for_day(db, today, false)?;
+    db.credit_minutes(today, 0.0, goal).map_err(|e| e.to_string())?;
+  }
+  build_snapshot(db, today).map(Some)
 }
 
 #[derive(Deserialize)]
@@ -311,4 +439,380 @@ pub fn import_legacy_habit(
   }
 
   build_snapshot(&db, &today_key)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::db::tests::memory_db;
+
+  /// Now, and the local days around it: minutes are only credited near today.
+  fn clock() -> (chrono::DateTime<chrono::Local>, String, String) {
+    let now = chrono::Local::now();
+    let day = |offset: i64| (now.date_naive() + chrono::Duration::days(offset)).format("%Y-%m-%d").to_string();
+    (now, day(0), day(-1))
+  }
+
+  fn session(id: &str, day: &str, at: &chrono::DateTime<chrono::Local>, minutes: f64) -> FocusSessionRecord {
+    FocusSessionRecord {
+      id: id.to_string(),
+      started_at: at.to_rfc3339(),
+      ended_at: at.to_rfc3339(),
+      date_key: day.to_string(),
+      minutes,
+      book_id: None,
+      title: None,
+      notes: None,
+      ended_reason: "completed".to_string(),
+      clean: true,
+      style_seed: id.to_string(),
+      burned_at: None,
+      flower: None,
+      flower_bloomed: false
+    }
+  }
+
+  #[test]
+  fn reading_with_no_session_counts_and_is_listed_as_free_reading() {
+    let db = memory_db();
+    let (_, today, _) = clock();
+    // The heartbeat's flushes over a quarter of an hour, no timer running.
+    credit_reading(&db, &today, 10.0, None).expect("first");
+    let snapshot = credit_reading(&db, &today, 5.0, None).expect("second");
+    assert_eq!(snapshot.today_minutes, 15.0);
+    assert!(snapshot.sessions.is_empty(), "no session is made up for it");
+    assert_eq!(snapshot.shelf_count, 0);
+    assert_eq!(snapshot.free_reads, vec![habit::FreeRead { date_key: today, minutes: 15.0 }]);
+  }
+
+  #[test]
+  fn a_session_is_not_counted_again_as_free_reading() {
+    let db = memory_db();
+    let (now, today, _) = clock();
+    credit_reading(&db, &today, 12.0, None).expect("in the session");
+    db.insert_focus_session(&session("s1", &today, &now, 12.0)).expect("session");
+    let only_session = build_snapshot(&db, &today).expect("snapshot");
+    assert!(only_session.free_reads.is_empty());
+
+    // Reading on after the timer ran out is free reading.
+    let snapshot = credit_reading(&db, &today, 8.0, None).expect("after it");
+    assert_eq!(snapshot.today_minutes, 20.0);
+    assert_eq!(snapshot.free_reads, vec![habit::FreeRead { date_key: today, minutes: 8.0 }]);
+  }
+
+  #[test]
+  fn free_reading_meets_the_goal_and_keeps_the_streak_like_a_session() {
+    let db = memory_db();
+    let (_, today, yesterday) = clock();
+    db.credit_minutes(&yesterday, 25.0, 20).expect("yesterday");
+    credit_reading(&db, &today, 15.0, None).expect("first");
+    let snapshot = credit_reading(&db, &today, 6.0, None).expect("second");
+    assert!(snapshot.today_met);
+    assert_eq!(snapshot.streak, 2);
+    assert_eq!(snapshot.free_reads.len(), 2);
+  }
+
+  #[test]
+  fn a_minute_left_over_from_yesterday_is_credited_to_yesterday_without_breaking_today() {
+    let db = memory_db();
+    let (_, today, yesterday) = clock();
+    db.credit_minutes(&yesterday, 25.0, 20).expect("yesterday");
+    db.credit_minutes(&today, 25.0, 20).expect("today");
+    assert_eq!(build_snapshot(&db, &today).expect("snapshot").streak, 2);
+    // The goal went up this morning; yesterday was read against the old one.
+    db.set_setting(GOAL_SETTING, "60").expect("goal");
+
+    // Leaflet was closed mid-read last night: its last minute arrives now.
+    let snapshot = credit_reading(&db, &yesterday, 0.75, Some(&today)).expect("late credit");
+    assert_eq!(snapshot.streak, 2, "evaluated as of today, not as of yesterday");
+    assert_eq!(snapshot.broke_from, None);
+    assert_eq!(snapshot.today_minutes, 25.0);
+    let day = snapshot.days.iter().find(|day| day.date_key == yesterday).expect("yesterday");
+    assert_eq!(day.minutes, 25.75);
+    assert_eq!(day.goal_minutes, 20, "yesterday keeps the goal it was read against");
+  }
+
+  #[test]
+  fn raising_the_goal_after_meeting_it_does_not_unmeet_today_or_burn_the_shelf() {
+    let db = memory_db();
+    let (now, today, yesterday) = clock();
+    db.credit_minutes(&yesterday, 25.0, 20).expect("yesterday");
+    db.insert_focus_session(&session("s1", &yesterday, &now, 25.0)).expect("session");
+    credit_reading(&db, &today, 15.0, Some(&today)).expect("first");
+    let met = credit_reading(&db, &today, 6.0, Some(&today)).expect("second");
+    assert!(met.today_met);
+    assert_eq!(met.streak, 2);
+
+    // The goal goes up for tomorrow, and the reader reads on tonight.
+    db.set_setting(GOAL_SETTING, "60").expect("goal");
+    let after = credit_reading(&db, &today, 1.0, Some(&today)).expect("reading on");
+    assert!(after.today_met, "today met the goal it was read against");
+    assert_eq!(after.streak, 2);
+    assert_eq!(after.broke_from, None);
+    assert!(after.just_burned.is_empty(), "nothing burns");
+    assert_eq!(after.shelf_count, 1);
+    let day = after.days.iter().find(|day| day.date_key == today).expect("today");
+    assert_eq!((day.minutes, day.goal_minutes), (22.0, 20));
+  }
+
+  #[test]
+  fn a_day_still_short_of_its_goal_takes_a_raised_one() {
+    let db = memory_db();
+    let (_, today, _) = clock();
+    credit_reading(&db, &today, 10.0, Some(&today)).expect("first");
+    db.set_setting(GOAL_SETTING, "60").expect("goal");
+    let snapshot = credit_reading(&db, &today, 12.0, Some(&today)).expect("second");
+    assert!(!snapshot.today_met, "22 minutes against the goal now in force");
+    let day = snapshot.days.iter().find(|day| day.date_key == today).expect("today");
+    assert_eq!(day.goal_minutes, 60);
+  }
+
+  fn goal_of(snapshot: &HabitSnapshot, day: &str) -> i64 {
+    snapshot.days.iter().find(|record| record.date_key == day).expect("the day").goal_minutes
+  }
+
+  #[test]
+  fn lowering_the_goal_meets_today_at_once_when_enough_is_read() {
+    let db = memory_db();
+    let (_, today, yesterday) = clock();
+    db.credit_minutes(&yesterday, 25.0, 20).expect("yesterday");
+    set_goal(&db, 60, Some(&today)).expect("goal").expect("snapshot");
+    credit_reading(&db, &today, 15.0, Some(&today)).expect("first");
+    let short = credit_reading(&db, &today, 11.0, Some(&today)).expect("second");
+    assert!(!short.today_met, "26 minutes of 60");
+    assert_eq!(short.streak, 1);
+
+    // On the change itself, not at the next minute credited.
+    let lowered = set_goal(&db, 20, Some(&today)).expect("goal").expect("snapshot");
+    assert_eq!(lowered.goal_minutes, 20);
+    assert!(lowered.today_met);
+    assert_eq!(lowered.today_minutes, 26.0, "no minutes were added");
+    assert_eq!(goal_of(&lowered, &today), 20);
+    assert_eq!(lowered.streak, 2);
+    // The goal day is paid once: its bonus, and day two of a streak.
+    assert_eq!(
+      lowered.seeds_earned - short.seeds_earned,
+      habit::seeds::GOAL_DAY_BONUS + habit::seeds::streak_bonus_for(2)
+    );
+  }
+
+  #[test]
+  fn lowering_then_raising_then_lowering_pays_the_goal_once_and_never_unmeets_it() {
+    let db = memory_db();
+    let (now, today, yesterday) = clock();
+    db.credit_minutes(&yesterday, 25.0, 20).expect("yesterday");
+    db.insert_focus_session(&session("s1", &yesterday, &now, 25.0)).expect("session");
+    set_goal(&db, 60, Some(&today)).expect("goal");
+    credit_reading(&db, &today, 15.0, Some(&today)).expect("first");
+    credit_reading(&db, &today, 11.0, Some(&today)).expect("second");
+
+    let met = set_goal(&db, 20, Some(&today)).expect("lower").expect("snapshot");
+    assert!(met.today_met);
+    for goal in [60, 20, 5, 240, 20] {
+      let after = set_goal(&db, goal, Some(&today)).expect("change").expect("snapshot");
+      assert!(after.today_met, "goal {goal}: today stays met");
+      assert_eq!(goal_of(&after, &today), 20, "goal {goal}: against the goal it met");
+      assert_eq!(after.seeds_earned, met.seeds_earned, "goal {goal}: paid once");
+      assert_eq!((after.streak, after.freezes), (met.streak, met.freezes));
+      assert_eq!(after.broke_from, None);
+      assert_eq!(after.shelf_count, 1, "goal {goal}: nothing burns");
+    }
+    // Reading on under a raised goal changes none of it either.
+    set_goal(&db, 240, Some(&today)).expect("raise");
+    let reading_on = credit_reading(&db, &today, 1.0, Some(&today)).expect("reading on");
+    assert!(reading_on.today_met);
+    assert_eq!(reading_on.seeds_earned, met.seeds_earned);
+  }
+
+  #[test]
+  fn lowering_the_goal_after_meeting_it_changes_nothing_for_today() {
+    let db = memory_db();
+    let (_, today, _) = clock();
+    credit_reading(&db, &today, 15.0, Some(&today)).expect("first");
+    let met = credit_reading(&db, &today, 10.0, Some(&today)).expect("second");
+    assert!(met.today_met);
+    let lowered = set_goal(&db, 10, Some(&today)).expect("goal").expect("snapshot");
+    assert!(lowered.today_met);
+    assert_eq!(goal_of(&lowered, &today), 20, "the goal it met");
+    assert_eq!(lowered.seeds_earned, met.seeds_earned);
+  }
+
+  #[test]
+  fn raising_the_goal_before_meeting_it_applies_to_today_at_once() {
+    let db = memory_db();
+    let (_, today, _) = clock();
+    credit_reading(&db, &today, 10.0, Some(&today)).expect("reading");
+    let raised = set_goal(&db, 60, Some(&today)).expect("goal").expect("snapshot");
+    assert_eq!(goal_of(&raised, &today), 60);
+    assert!(!raised.today_met);
+    // Read up to the old goal: not met against the new one.
+    let after = credit_reading(&db, &today, 12.0, Some(&today)).expect("more");
+    assert!(!after.today_met);
+  }
+
+  #[test]
+  fn raising_the_goal_after_meeting_it_changes_nothing_for_today() {
+    let db = memory_db();
+    let (_, today, _) = clock();
+    credit_reading(&db, &today, 15.0, Some(&today)).expect("first");
+    let met = credit_reading(&db, &today, 10.0, Some(&today)).expect("second");
+    let raised = set_goal(&db, 60, Some(&today)).expect("goal").expect("snapshot");
+    assert_eq!(raised.goal_minutes, 60, "the goal from tomorrow");
+    assert!(raised.today_met);
+    assert_eq!(goal_of(&raised, &today), 20);
+    assert_eq!(raised.seeds_earned, met.seeds_earned);
+  }
+
+  #[test]
+  fn a_goal_change_never_restamps_an_earlier_day() {
+    let db = memory_db();
+    let (_, today, yesterday) = clock();
+    // Yesterday fell short of the 60 it was read against.
+    db.credit_minutes(&yesterday, 26.0, 60).expect("yesterday");
+    credit_reading(&db, &today, 5.0, Some(&today)).expect("today");
+
+    let lowered = set_goal(&db, 20, Some(&today)).expect("goal").expect("snapshot");
+    assert_eq!(goal_of(&lowered, &yesterday), 60);
+    assert_eq!(goal_of(&lowered, &today), 20);
+    assert_eq!(lowered.streak, 0, "yesterday is not met after the fact");
+
+    // Nor when the caller names yesterday as its today (a clock set back).
+    let named = set_goal(&db, 5, Some(&yesterday)).expect("goal").expect("snapshot");
+    assert_eq!(goal_of(&named, &yesterday), 60);
+    // A late credit to yesterday keeps its goal too.
+    let late = credit_reading(&db, &yesterday, 0.5, Some(&today)).expect("late credit");
+    assert_eq!(goal_of(&late, &yesterday), 60);
+  }
+
+  #[test]
+  fn a_goal_change_on_a_day_with_no_reading_adds_no_day() {
+    let db = memory_db();
+    let (_, today, _) = clock();
+    let snapshot = set_goal(&db, 45, Some(&today)).expect("goal").expect("snapshot");
+    assert_eq!(snapshot.goal_minutes, 45);
+    assert!(snapshot.days.is_empty());
+    assert_eq!(set_goal(&db, 30, None).expect("goal").map(|s| s.goal_minutes), None, "an older caller: saved, no snapshot");
+    assert_eq!(read_goal(&db), 30);
+  }
+
+  #[test]
+  fn minutes_from_days_ago_are_not_credited() {
+    let db = memory_db();
+    let (now, today, yesterday) = clock();
+    let stale = (now.date_naive() - chrono::Duration::days(3)).format("%Y-%m-%d").to_string();
+    // A leftover minute is only good for a day: the ledger takes today's
+    // reading, a day either side, and nothing older.
+    assert_eq!(creditable(&db, &stale, 1.0), Err("not today"));
+    assert_eq!(creditable(&db, &yesterday, 1.0), Ok(1.0));
+    assert_eq!(creditable(&db, &today, 1.0), Ok(1.0));
+  }
+
+  /// How far Pip's mood is above where a new Pip's starts. (A few
+  /// milliseconds of drift pass in a test: near enough is equal.)
+  fn cheered_by(db: &db::Database) -> f64 {
+    db.pip_state().expect("state").map(|state| state.mood).unwrap_or(habit::seeds::MOOD_START) - habit::seeds::MOOD_START
+  }
+
+  fn near(a: f64, b: f64) -> bool {
+    (a - b).abs() < 0.001
+  }
+
+  #[test]
+  fn any_reading_cheers_pip_up_with_or_without_a_session() {
+    let db = memory_db();
+    let (_, today, _) = clock();
+    // The heartbeat's flushes, no timer running.
+    credit_reading(&db, &today, 10.0, None).expect("first");
+    credit_reading(&db, &today, 0.5, None).expect("half a minute");
+    let snapshot = credit_reading(&db, &today, 4.5, None).expect("third");
+    assert_eq!(snapshot.today_minutes, 15.0);
+    assert!(snapshot.sessions.is_empty());
+    assert!(near(cheered_by(&db), 15.0 * pip::MOOD_PER_READING_MINUTE), "{}", cheered_by(&db));
+    assert_eq!(read_reading_mood(&db).given_on(&today), 3.75);
+    // Flush after flush is one line in the mood's notes, with all it added.
+    let log = read_mood_log(&db);
+    assert_eq!(log.len(), 1);
+    assert_eq!(log[0].cause, "reading");
+    assert!(near(log[0].gain, 3.75), "{}", log[0].gain);
+    // A focus session still adds its own, on top of its minutes.
+    cheer_pip(&db, habit::seeds::MOOD_PER_SESSION).expect("session");
+    assert!(near(cheered_by(&db), 3.75 + habit::seeds::MOOD_PER_SESSION));
+    assert_eq!(read_reading_mood(&db).given_on(&today), 3.75, "the session's own cheer is not reading's allowance");
+  }
+
+  #[test]
+  fn reading_cheers_pip_up_no_more_than_a_days_allowance() {
+    let db = memory_db();
+    let (_, today, _) = clock();
+    for _ in 0..4 {
+      credit_reading(&db, &today, 15.0, Some(&today)).expect("a quarter of an hour");
+    }
+    assert!(near(cheered_by(&db), pip::READING_MOOD_PER_DAY), "{}", cheered_by(&db));
+    // Reading on is still reading: the minutes count, the mood has had its day.
+    let snapshot = credit_reading(&db, &today, 15.0, Some(&today)).expect("reading on");
+    assert_eq!(snapshot.today_minutes, 75.0);
+    assert!(near(cheered_by(&db), pip::READING_MOOD_PER_DAY));
+    assert_eq!(read_reading_mood(&db).given_on(&today), pip::READING_MOOD_PER_DAY);
+  }
+
+  #[test]
+  fn only_minutes_the_ledger_took_cheer_pip_up() {
+    let db = memory_db();
+    let (now, today, _) = clock();
+    let stale = (now.date_naive() - chrono::Duration::days(3)).format("%Y-%m-%d").to_string();
+    // Refused minutes, and no minutes at all.
+    credit_reading(&db, &stale, 15.0, Some(&today)).expect("refused, not failed");
+    credit_reading(&db, &today, 0.0, Some(&today)).expect("nothing");
+    credit_reading(&db, &today, f64::NAN, Some(&today)).expect("not a number");
+    assert_eq!(read_reading_mood(&db), pip::ReadingMood::default());
+    assert!(read_mood_log(&db).is_empty());
+    assert_eq!(cheered_by(&db), 0.0);
+    // An hour reported in one call is taken as the most a call can hold.
+    credit_reading(&db, &today, 60.0, Some(&today)).expect("clipped");
+    assert_eq!(read_reading_mood(&db).given_on(&today), MAX_MINUTES_PER_CREDIT * pip::MOOD_PER_READING_MINUTE);
+  }
+
+  #[test]
+  fn a_late_minute_for_yesterday_does_not_open_a_second_allowance() {
+    let db = memory_db();
+    let (_, today, yesterday) = clock();
+    for _ in 0..3 {
+      credit_reading(&db, &yesterday, 15.0, Some(&yesterday)).expect("last night");
+    }
+    credit_reading(&db, &today, 8.0, Some(&today)).expect("this morning");
+    let before = cheered_by(&db);
+    assert!(near(before, pip::READING_MOOD_PER_DAY + 2.0), "{before}");
+    // Leaflet was closed mid-read last night: its last minute arrives now,
+    // and then the days alternate. Yesterday is used up and stays so.
+    for _ in 0..5 {
+      credit_reading(&db, &yesterday, 0.75, Some(&today)).expect("late credit");
+    }
+    assert!(near(cheered_by(&db), before), "{}", cheered_by(&db));
+    credit_reading(&db, &today, 4.0, Some(&today)).expect("reading on");
+    credit_reading(&db, &yesterday, 0.75, Some(&today)).expect("late again");
+    assert!(near(cheered_by(&db), before + 1.0));
+    let reading = read_reading_mood(&db);
+    assert_eq!((reading.given_on(&yesterday), reading.given_on(&today)), (pip::READING_MOOD_PER_DAY, 3.0));
+  }
+
+  /// Reading's allowance is this device's own: only the mood it raised is in
+  /// the document that syncs and backs up, with Pip's state.
+  #[test]
+  fn readings_allowance_stays_on_this_device() {
+    let from = memory_db();
+    let (_, today, _) = clock();
+    credit_reading(&from, &today, 12.0, Some(&today)).expect("reading");
+    let doc = crate::sync::store::snapshot(&from, &db::now_iso()).expect("snapshot");
+    let sent = serde_json::to_string(&doc).expect("encodes");
+    for local in ["readingMood", "reading_mood", "moodLog", "mood_log", "moodToday"] {
+      assert!(!sent.contains(local), "{local} is in the sync document");
+    }
+    let to = memory_db();
+    crate::sync::store::apply(&to, &doc).expect("apply");
+    assert_eq!(read_reading_mood(&to), pip::ReadingMood::default());
+    assert!(read_mood_log(&to).is_empty());
+    assert_eq!(to.get_setting(READING_MOOD_SETTING).expect("read"), None);
+    // The mood itself travels, as it always has.
+    assert!(near(cheered_by(&to), 3.0), "{}", cheered_by(&to));
+  }
 }

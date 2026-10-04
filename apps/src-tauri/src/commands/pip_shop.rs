@@ -51,6 +51,7 @@ pub(crate) fn session_inputs(sessions: &[FocusSessionRecord]) -> Vec<habit::seed
       ended_at: &session.ended_at,
       ended_at_ms: millis(&session.ended_at),
       date_key: &session.date_key,
+      started_day: started_day(session),
       minutes: session.minutes,
       completed_clean: session.ended_reason == "completed" && session.clean
     })
@@ -185,6 +186,8 @@ pub struct PipOverview {
   pub sessions_done: i64,
   /// Best arcade scores, and how much mood games gave today.
   pub arcade: pip::Arcade,
+  /// How much mood reading has given, by local day (this device's).
+  pub reading_mood: pip::ReadingMood,
   /// A new reader's first steps, in the order Pip suggests them: done or
   /// not, and the seeds each pays (already in `wallet.earned.goals`).
   pub goals: Vec<pip::rewards::GoalStatus>,
@@ -195,7 +198,53 @@ pub struct PipOverview {
   /// Owned out of all there are, by catalogue kind ("accessory": 5 of 42).
   pub collection: std::collections::BTreeMap<String, pip::rewards::Count>,
   /// Today's wish (the reader's local day), and whether it was granted.
-  pub wish: Option<pip::rewards::WishView>
+  pub wish: Option<pip::rewards::WishView>,
+  /// The last few things that cheered Pip up, oldest first (this device's).
+  pub mood_log: Vec<pip::MoodEvent>,
+  /// What moves the mood and by how much, so the tab explains the real rules.
+  pub mood_rules: MoodRules
+}
+
+/// The mood's rules as they stand in this build, for the Pip tab to put into
+/// words: nothing here is decided by the webview.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoodRules {
+  /// Mood lost per day since Pip was last cheered up.
+  pub drift_per_day: f64,
+  /// Where the drift stops: time alone never takes the mood below this.
+  pub drift_floor: f64,
+  /// What a minute of reading adds, in a focus session or not...
+  pub per_reading_minute: f64,
+  /// ...and the most reading can add in a day.
+  pub reading_per_day: f64,
+  /// What a recorded focus session adds, on top of its minutes.
+  pub per_session: f64,
+  pub per_harvest: f64,
+  pub per_game: f64,
+  pub per_play: f64,
+  /// The most games and play can add in a day, together.
+  pub play_per_day: f64,
+  /// What granting the day's wish adds.
+  pub per_wish: f64,
+  /// Where a new Pip's mood starts.
+  pub start: f64
+}
+
+fn mood_rules(catalogue: &pip::Catalogue) -> MoodRules {
+  MoodRules {
+    drift_per_day: habit::seeds::MOOD_DRIFT_PER_DAY,
+    drift_floor: habit::seeds::MOOD_DRIFT_FLOOR,
+    per_reading_minute: pip::MOOD_PER_READING_MINUTE,
+    reading_per_day: pip::READING_MOOD_PER_DAY,
+    per_session: habit::seeds::MOOD_PER_SESSION,
+    per_harvest: pip::MOOD_PER_HARVEST,
+    per_game: pip::MOOD_PER_GAME,
+    per_play: pip::MOOD_PER_PLAY,
+    play_per_day: pip::GAME_MOOD_PER_DAY,
+    per_wish: catalogue.rewards().wish.mood,
+    start: habit::seeds::MOOD_START
+  }
 }
 
 /// Arcade scores are this device's alone (a settings row, not the backup):
@@ -227,15 +276,70 @@ pub(crate) fn stored_pip_state(db: &db::Database) -> Result<pip::PipState, Strin
   Ok(fresh)
 }
 
-/// Raises Pip's mood from wherever it has drifted to by now.
+/// What cheered Pip up lately is this device's alone (a settings row, like
+/// the arcade's scores): it explains the mood, and is never read back into it.
+pub(crate) const MOOD_LOG_SETTING: &str = "pip.moodLog";
+
+pub(crate) fn read_mood_log(db: &db::Database) -> Vec<pip::MoodEvent> {
+  db.get_setting(MOOD_LOG_SETTING)
+    .ok()
+    .flatten()
+    .and_then(|value| serde_json::from_str(&value).ok())
+    .unwrap_or_default()
+}
+
+/// A finished focus session cheering Pip up: the reading's own call
+/// (`commands::habits`). Everything else says what it is with `cheer_pip_for`.
 pub(crate) fn cheer_pip(db: &db::Database, gain: f64) -> Result<(), String> {
+  cheer_pip_for(db, gain, "session")
+}
+
+/// Raises Pip's mood from wherever it has drifted to by now, and notes what
+/// did it (`cause`: see `pip::MoodEvent`).
+pub(crate) fn cheer_pip_for(db: &db::Database, gain: f64, cause: &str) -> Result<(), String> {
   let mut state = stored_pip_state(db)?;
   let now = db::now_iso();
   let current = habit::seeds::mood_at(state.mood, millis(&state.mood_updated_at), millis(&now));
   state.mood = habit::seeds::mood_plus(current, gain);
   state.mood_updated_at = now.clone();
-  state.updated_at = now;
-  db.put_pip_state(&state).map_err(|e| e.to_string())
+  state.updated_at = now.clone();
+  db.put_pip_state(&state).map_err(|e| e.to_string())?;
+  // The note is a courtesy: a log that will not save never stops Pip being cheered up.
+  let event = pip::MoodEvent { at: now, cause: cause.to_string(), gain: state.mood - current, mood: state.mood };
+  let log = pip::log_mood(&read_mood_log(db), event);
+  if let Ok(encoded) = serde_json::to_string(&log) {
+    let _ = db.set_setting(MOOD_LOG_SETTING, &encoded);
+  }
+  Ok(())
+}
+
+/// How much reading has cheered Pip up, day by day, is this device's alone (a
+/// settings row, like the arcade's scores): never the sync document, never
+/// the backup. Only the mood it raised travels, with Pip's state.
+pub(crate) const READING_MOOD_SETTING: &str = "pip.readingMood";
+
+pub(crate) fn read_reading_mood(db: &db::Database) -> pip::ReadingMood {
+  db.get_setting(READING_MOOD_SETTING)
+    .ok()
+    .flatten()
+    .and_then(|value| serde_json::from_str(&value).ok())
+    .unwrap_or_default()
+}
+
+/// Minutes of reading the ledger has just taken for `date_key` cheering Pip
+/// up, out of that day's allowance (`pip::record_reading`): the reading's own
+/// call (`commands::habits`), for any reading, in a focus session or not.
+///
+/// The allowance is saved before the mood, as the games' is: if the second
+/// write fails, a little cheer is lost rather than handed out twice.
+pub(crate) fn cheer_pip_for_reading(db: &db::Database, date_key: &str, minutes: f64) -> Result<(), String> {
+  let (reading, mood) = pip::record_reading(&read_reading_mood(db), date_key, minutes);
+  if mood <= 0.0 {
+    return Ok(());
+  }
+  let encoded = serde_json::to_string(&reading).map_err(|e| e.to_string())?;
+  db.set_setting(READING_MOOD_SETTING, &encoded).map_err(|e| e.to_string())?;
+  cheer_pip_for(db, mood, "reading")
 }
 
 pub(crate) fn pip_overview(db: &db::Database) -> Result<PipOverview, String> {
@@ -266,11 +370,14 @@ pub(crate) fn pip_overview(db: &db::Database) -> Result<PipOverview, String> {
     },
     sessions_done: ledger.sessions_done,
     arcade: read_arcade(db),
+    reading_mood: read_reading_mood(db),
     goals: ledger.rewards.goals,
     chest: ledger.rewards.chest,
     sets: ledger.rewards.sets,
     collection,
-    wish
+    wish,
+    mood_log: read_mood_log(db),
+    mood_rules: mood_rules(catalogue)
   })
 }
 
@@ -280,7 +387,7 @@ fn record_purchase(db: &db::Database, ledger: &PipLedger, purchase: &pip::Purcha
   let wished = pip::rewards::grants_wish_now(catalogue, &ledger.purchases, purchase, &local_today());
   db.insert_pip_purchase(purchase).map_err(|e| e.to_string())?;
   if wished {
-    cheer_pip(db, catalogue.rewards().wish.mood)?;
+    cheer_pip_for(db, catalogue.rewards().wish.mood, "wish")?;
   }
   Ok(())
 }
@@ -362,7 +469,7 @@ pub fn pip_feed(treat_id: String, state: State<'_, AppState>) -> Result<PipOverv
     };
     record_purchase(&db, &ledger, &purchase)?;
   }
-  cheer_pip(&db, treat.mood)?;
+  cheer_pip_for(&db, treat.mood, &format!("treat:{}", treat.id))?;
   pip_overview(&db)
 }
 
@@ -433,7 +540,7 @@ pub fn pip_harvest(planting_id: String, state: State<'_, AppState>) -> Result<Pi
     harvested_at: db::now_iso()
   })
   .map_err(|e| e.to_string())?;
-  cheer_pip(&db, 2.0)?;
+  cheer_pip_for(&db, pip::MOOD_PER_HARVEST, "harvest")?;
   pip_overview(&db)
 }
 
@@ -451,7 +558,22 @@ pub fn pip_game_played(
   let encoded = serde_json::to_string(&result.arcade).map_err(|e| e.to_string())?;
   db.set_setting(ARCADE_SETTING, &encoded).map_err(|e| e.to_string())?;
   if result.mood > 0.0 {
-    cheer_pip(&db, result.mood)?;
+    cheer_pip_for(&db, result.mood, &format!("game:{game}"))?;
+  }
+  pip_overview(&db)
+}
+
+/// A bout of play by hand (a stroke, a tickle, the ball fetched, a toss):
+/// cheers Pip up a little, out of the same daily allowance as the games.
+/// Never seeds.
+#[tauri::command]
+pub fn pip_played(kind: String, today_key: String, state: State<'_, AppState>) -> Result<PipOverview, String> {
+  let db = state.db.guard();
+  let (arcade, mood) = pip::record_play(&read_arcade(&db), &today_key, &kind)?;
+  let encoded = serde_json::to_string(&arcade).map_err(|e| e.to_string())?;
+  db.set_setting(ARCADE_SETTING, &encoded).map_err(|e| e.to_string())?;
+  if mood > 0.0 {
+    cheer_pip_for(&db, mood, &format!("play:{kind}"))?;
   }
   pip_overview(&db)
 }

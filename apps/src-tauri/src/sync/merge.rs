@@ -327,18 +327,35 @@ fn merge_book(a: &BookEntry, b: &BookEntry) -> BookEntry {
 /// Minutes take the maximum rather than the sum. Neither device knows how much
 /// of the other's time overlapped its own, and a sum would let a reader inflate
 /// a streak by syncing repeatedly. The maximum is monotone, so it converges.
+///
+/// The goal: a day that met its goal on a device stays met. "Met" is a goal
+/// above zero and that device's own minutes at or over it.
+///
+/// * Both devices met theirs: the harder (larger) of the two goals.
+/// * One did: that device's goal, whatever the other's minutes or goal. The
+///   other read more against a goal it did not reach; its minutes are kept,
+///   its goal is not.
+/// * Neither did: the goal of the device that read more; on equal minutes the
+///   harder of the two, so a day is never judged against a goal the reader
+///   had already raised.
+///
+/// The minutes kept are the larger, so they are at or over any goal either
+/// device met: a met day cannot come out of a merge unmet, and a day met by
+/// neither cannot come out met (the goal kept is over the minutes kept). The
+/// rule is the same whichever side is `a`, merging a day with itself changes
+/// nothing, and three devices reach the same day in any order.
 fn merge_day(a: &DayEntry, b: &DayEntry) -> DayEntry {
+  let met = |day: &DayEntry| day.goal_minutes > 0 && day.minutes >= day.goal_minutes as f64;
   let leader = if a.minutes >= b.minutes { a } else { b };
   DayEntry {
     date_key: a.date_key.clone(),
     minutes: leader.minutes,
-    // The goal that was in force belongs to whichever device did the reading;
-    // an exact tie takes the harder of the two so a streak is never credited
-    // against a goal the reader had already raised.
-    goal_minutes: if (a.minutes - b.minutes).abs() < f64::EPSILON {
-      a.goal_minutes.max(b.goal_minutes)
-    } else {
-      leader.goal_minutes
+    goal_minutes: match (met(a), met(b)) {
+      (true, true) => a.goal_minutes.max(b.goal_minutes),
+      (true, false) => a.goal_minutes,
+      (false, true) => b.goal_minutes,
+      (false, false) if (a.minutes - b.minutes).abs() < f64::EPSILON => a.goal_minutes.max(b.goal_minutes),
+      (false, false) => leader.goal_minutes
     },
     // Spending a freeze or grace on one device spends it everywhere: the
     // alternative lets a reader claim the same protection twice.
@@ -1227,6 +1244,103 @@ mod tests {
 
     let merged = merge(&mine, &theirs, NOW);
     assert_eq!(merged.days[0].minutes, 30.0);
+  }
+
+  fn day_with(minutes: f64, goal_minutes: i64) -> DayEntry {
+    DayEntry { goal_minutes, ..day("2026-10-03", minutes) }
+  }
+
+  fn met(day: &DayEntry) -> bool {
+    day.to_record().goal_met()
+  }
+
+  /// A day met on one device stays met when the other read more against a
+  /// goal it did not reach: the reported case, which broke the streak and
+  /// burned the shelf.
+  #[test]
+  fn a_day_met_on_one_device_is_not_unmet_by_the_other() {
+    let here = SyncDoc { days: vec![day("2026-10-02", 25.0), day_with(25.0, 20)], ..doc(vec![]) };
+    let there = SyncDoc { days: vec![day_with(26.0, 60)], ..doc(vec![]) };
+
+    let merged = merge(&here, &there, NOW);
+    let today = merged.days.iter().find(|d| d.date_key == "2026-10-03").expect("today");
+    assert_eq!((today.minutes, today.goal_minutes), (26.0, 20));
+    assert!(met(today));
+
+    // The streak this device held before the sync still stands: no break,
+    // nothing to burn.
+    let ledger = merged.days.iter().map(|d| (d.date_key.clone(), d.to_record())).collect();
+    let previous = crate::habit::StreakState {
+      current_streak: 2,
+      longest_streak: 2,
+      last_evaluated_day: Some("2026-10-03".to_string()),
+      ..Default::default()
+    };
+    let result = crate::habit::evaluate(&ledger, "2026-10-03", &previous);
+    assert_eq!(result.streak, 2);
+    assert_eq!(result.broke_from, None);
+    assert_eq!(result.burn_count, 0);
+  }
+
+  #[test]
+  fn the_goal_kept_is_the_hardest_one_met() {
+    // Both met: the harder goal.
+    assert_eq!(merge_day(&day_with(25.0, 20), &day_with(70.0, 60)).goal_minutes, 60);
+    // One met: its goal, even on equal minutes.
+    assert_eq!(merge_day(&day_with(25.0, 20), &day_with(25.0, 60)).goal_minutes, 20);
+    // Neither met: the goal of the one that read more; a tie takes the harder.
+    assert_eq!(merge_day(&day_with(10.0, 20), &day_with(15.0, 60)).goal_minutes, 60);
+    assert_eq!(merge_day(&day_with(15.0, 20), &day_with(10.0, 60)).goal_minutes, 20);
+    assert_eq!(merge_day(&day_with(10.0, 20), &day_with(10.0, 60)).goal_minutes, 60);
+  }
+
+  /// Every pair and triple of a small grid of days: the merge is the same in
+  /// any order, repeating it changes nothing, and a day comes out met exactly
+  /// when some device met it.
+  #[test]
+  fn day_merges_commute_repeat_and_converge_with_goals() {
+    let mut grid = Vec::new();
+    for minutes in [0.0, 10.0, 25.0, 26.0, 70.0] {
+      for goal in [0, 20, 60] {
+        for covered in [false, true] {
+          let mut entry = day_with(minutes, goal);
+          entry.grace_used = covered;
+          grid.push(entry);
+        }
+      }
+    }
+    for a in &grid {
+      assert_eq!(&merge_day(a, a), a, "a day merged with itself is itself");
+      for b in &grid {
+        let ab = merge_day(a, b);
+        assert_eq!(ab, merge_day(b, a), "commutative: {a:?} {b:?}");
+        assert_eq!(merge_day(a, &ab), ab, "idempotent: {a:?} {b:?}");
+        assert_eq!(merge_day(&ab, b), ab, "idempotent: {a:?} {b:?}");
+        assert_eq!(met(&ab), met(a) || met(b), "met exactly when one of them was: {a:?} {b:?}");
+        assert_eq!(ab.minutes, a.minutes.max(b.minutes));
+        for c in &grid {
+          let one = merge_day(&ab, c);
+          assert_eq!(one, merge_day(a, &merge_day(b, c)), "three devices: {a:?} {b:?} {c:?}");
+          assert_eq!(one, merge_day(&merge_day(c, a), b), "three devices: {a:?} {b:?} {c:?}");
+        }
+      }
+    }
+  }
+
+  /// The same through whole documents, as the devices exchange them.
+  #[test]
+  fn three_devices_converge_on_a_day_and_its_goal() {
+    let phone = SyncDoc { days: vec![day_with(25.0, 20)], ..doc(vec![]) };
+    let laptop = SyncDoc { days: vec![day_with(26.0, 60)], ..doc(vec![]) };
+    let desktop = SyncDoc { days: vec![day_with(45.0, 30)], ..doc(vec![]) };
+
+    let a = merge(&merge(&phone, &laptop, NOW), &desktop, NOW);
+    let b = merge(&merge(&desktop, &laptop, NOW), &phone, NOW);
+    let c = merge(&laptop, &merge(&phone, &desktop, NOW), NOW);
+    assert_eq!(a, b);
+    assert_eq!(a, c);
+    assert_eq!((a.days[0].minutes, a.days[0].goal_minutes), (45.0, 30));
+    assert_eq!(merge(&a, &phone, NOW), a, "a device syncing again changes nothing");
   }
 
   #[test]

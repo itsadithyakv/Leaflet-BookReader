@@ -33,6 +33,14 @@ pub struct Annotation {
   pub deleted_at: Option<String>
 }
 
+/// How many highlights a book has, for the library's list of books with any.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct HighlightCount {
+  pub book_id: String,
+  pub count: i64
+}
+
 /// A collection the reader made ("Summer reading", "Book club"): a name and the
 /// books in it, in the order they were added.
 ///
@@ -450,15 +458,15 @@ impl Database {
     Ok(days)
   }
 
-  /// Adds reading time to a day. The goal is re-stamped because the goal in
-  /// force today is today's goal; past days keep the snapshot they were earned
-  /// against, since they are never credited again.
+  /// Adds reading time to a day and stamps it with the goal given, as given:
+  /// which goal a day is judged against (the one in force, or the one it has
+  /// already met) is the caller's to decide, in `commands::goal_for_day`.
   pub fn credit_minutes(&self, date_key: &str, minutes: f64, goal_minutes: i64) -> Result<()> {
     self.conn.execute(
       "INSERT INTO reading_days (date_key, minutes, goal_minutes) VALUES (?1, min(?2, 1440), ?3)
        ON CONFLICT(date_key) DO UPDATE SET
          minutes = min(1440, reading_days.minutes + excluded.minutes),
-         goal_minutes = max(reading_days.goal_minutes, excluded.goal_minutes)",
+         goal_minutes = excluded.goal_minutes",
       params![date_key, minutes.max(0.0), goal_minutes]
     )?;
     Ok(())
@@ -687,6 +695,18 @@ impl Database {
       Self::ANNOTATION_COLUMNS
     ))?;
     let rows = stmt.query_map([book_id], Self::row_to_annotation)?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+  }
+
+  /// Each book's number of highlights, for the books that have any. Bookmarks
+  /// and deleted highlights are not counted.
+  pub fn highlight_counts(&self) -> Result<Vec<HighlightCount>> {
+    let mut stmt = self.conn.prepare(
+      "SELECT book_id, COUNT(*) FROM annotations
+       WHERE kind = 'highlight' AND deleted_at IS NULL
+       GROUP BY book_id ORDER BY book_id"
+    )?;
+    let rows = stmt.query_map([], |row| Ok(HighlightCount { book_id: row.get(0)?, count: row.get(1)? }))?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
   }
 
@@ -1035,6 +1055,9 @@ impl Database {
        DELETE FROM pip_harvests;
        DELETE FROM annotations;"
     )?;
+    // `DELETE` only marks the pages free: the titles, notes and paths stay in
+    // the file until it is rebuilt. Best effort; the rows are gone either way.
+    let _ = self.conn.execute_batch("VACUUM;");
     Ok(())
   }
 }
@@ -1733,6 +1756,45 @@ pub(crate) mod tests {
     assert_eq!(db.pip_state().expect("read").map(|s| s.mood), Some(12.5));
   }
 
+  fn annotation(id: &str, book_id: &str, kind: &str, deleted_at: Option<&str>) -> Annotation {
+    Annotation {
+      id: id.to_string(),
+      book_id: book_id.to_string(),
+      kind: kind.to_string(),
+      cfi: "epubcfi(/6/2!/4/2,/1:0,/1:5)".to_string(),
+      text: Some("It was a dark and stormy night".to_string()),
+      note: None,
+      color: Some("yellow".to_string()),
+      chapter: Some("Chapter 1".to_string()),
+      created_at: "2026-09-01T10:00:00Z".to_string(),
+      updated_at: "2026-09-01T10:00:00Z".to_string(),
+      deleted_at: deleted_at.map(str::to_string)
+    }
+  }
+
+  #[test]
+  fn annotation_highlight_counts_leave_out_bookmarks_and_deleted_ones() {
+    let db = memory_db();
+    assert!(db.highlight_counts().expect("counts").is_empty());
+
+    db.put_annotation(&annotation("h1", "b1", "highlight", None)).expect("save");
+    db.put_annotation(&annotation("h2", "b1", "highlight", None)).expect("save");
+    db.put_annotation(&annotation("m1", "b1", "bookmark", None)).expect("save");
+    db.put_annotation(&annotation("h3", "b2", "highlight", None)).expect("save");
+    db.put_annotation(&annotation("h4", "b2", "highlight", Some("2026-09-02T00:00:00Z"))).expect("save");
+    // Only a bookmark, and only a deleted highlight: neither book is listed.
+    db.put_annotation(&annotation("m2", "b3", "bookmark", None)).expect("save");
+    db.put_annotation(&annotation("h5", "b4", "highlight", Some("2026-09-02T00:00:00Z"))).expect("save");
+
+    assert_eq!(
+      db.highlight_counts().expect("counts"),
+      vec![
+        HighlightCount { book_id: "b1".to_string(), count: 2 },
+        HighlightCount { book_id: "b2".to_string(), count: 1 }
+      ]
+    );
+  }
+
   #[test]
   fn clearing_everything_clears_pip_too() {
     let db = memory_db();
@@ -1740,5 +1802,30 @@ pub(crate) mod tests {
     db.clear_all().expect("clear");
     assert!(db.pip_state().expect("read").is_none());
     assert!(db.pip_purchases().expect("purchases").is_empty());
+  }
+
+  /// The bug this guards: `DELETE` only marks the pages free, so after "Delete
+  /// All Data" the file still held every title, note and folder path, there
+  /// for anyone who opened it in a text editor.
+  #[test]
+  fn clearing_everything_leaves_nothing_readable_in_the_file() {
+    let path = std::env::temp_dir().join(format!("leaflet-clear-test-{}.db", std::process::id()));
+    let _ = fs::remove_file(&path);
+    let conn = Connection::open(&path).expect("open");
+    apply_schema(&conn).expect("schema");
+    let db = Database { conn, path: path.clone() };
+    seeded_book(&db);
+    for index in 0..200 {
+      db.set_setting(&format!("key-{index}"), &format!("ZZ-PRIVATE-{index}-ZZ D:\\Books\\A Title I Read.epub")).expect("setting");
+    }
+
+    db.clear_all().expect("clear");
+    drop(db);
+
+    let bytes = fs::read(&path).expect("read");
+    let holds = |needle: &str| bytes.windows(needle.len()).any(|window| window == needle.as_bytes());
+    assert!(!holds("ZZ-PRIVATE-"), "a deleted setting is still in the file");
+    assert!(!holds("A Title I Read"), "a deleted path is still in the file");
+    let _ = fs::remove_file(&path);
   }
 }

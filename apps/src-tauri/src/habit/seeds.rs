@@ -19,10 +19,12 @@
 //! Seeds earned before the garden existed (`GARDEN_SINCE`) were paid straight
 //! from minutes; they are kept, as if already harvested.
 //!
-//! A session's minutes count only up to the reading the heartbeat recorded that
-//! day. The heartbeat is the app's only source of reading time (a timer running
-//! while nobody reads earns nothing towards the goal), and the same rule keeps
-//! a timer left running from watering anything.
+//! A session's minutes count only up to the reading the heartbeat recorded on
+//! the days it spans: the day it ended, then the day it started (a session
+//! read across midnight, or left running and ended the next day). The
+//! heartbeat is the app's only source of reading time (a timer running while
+//! nobody reads earns nothing towards the goal), and the same rule keeps a
+//! timer left running from watering anything.
 //!
 //! Nothing withers: a plant waits, unwatered, for the next chapter, and water
 //! read on another device reaches the garden when it syncs.
@@ -63,6 +65,9 @@ pub struct SessionSeeds<'a> {
   /// `ended_at` as milliseconds, for ordering water against plantings.
   pub ended_at_ms: i64,
   pub date_key: &'a str,
+  /// The local day it started on: the day it ended (`date_key`), or an
+  /// earlier one for a session read across midnight or ended on a later day.
+  pub started_day: String,
   pub minutes: f64,
   /// Ran to its planned end (`completed`) without leaving the book (`clean`).
   pub completed_clean: bool
@@ -126,30 +131,51 @@ pub fn streak_bonus_for(streak: i64) -> i64 {
 }
 
 /// Each session's countable minutes: its own, capped by what the heartbeat
-/// recorded on its day (shared, in the order the sessions ended).
+/// recorded on the days it spans.
+///
+/// Sessions are taken in the order they ended, and each day's minutes are
+/// handed out once: what one session counted is gone for the next. A session
+/// takes from the day it ended on, then from the day it started on if that is
+/// an earlier one (read across midnight, or left running and ended the next
+/// day: the heartbeat credited each minute to the day it was read, as
+/// `free_reads` knows too), and last from the end day's slack. So it never
+/// counts more than was read on its days (and that minute of slack), and no
+/// minute of reading is counted for two sessions.
+///
+/// Sessions from before the garden keep the rule they were paid under, the
+/// day they ended on alone, so what they earned does not change.
 fn counted_minutes<'a>(days: &HashMap<String, DayRecord>, sessions: &'a [SessionSeeds<'a>]) -> Vec<(&'a SessionSeeds<'a>, f64)> {
   let mut ordered: Vec<&SessionSeeds<'_>> = sessions.iter().collect();
   ordered.sort_by(|a, b| a.ended_at.cmp(b.ended_at).then_with(|| a.id.cmp(b.id)));
-  let mut allowance: HashMap<&str, f64> = HashMap::new();
+  // What is left of each day: the minutes read, and the slack.
+  let mut left: HashMap<&str, (f64, f64)> = HashMap::new();
   let mut out = Vec::with_capacity(ordered.len());
   for session in ordered {
-    let left = allowance.entry(session.date_key).or_insert_with(|| {
-      let read = days.get(session.date_key).map(|day| day.minutes).unwrap_or(0.0);
-      if read > 0.0 {
-        read + LEDGER_SLACK_MINUTES
-      } else {
-        0.0
-      }
-    });
-    let counted = session.minutes.max(0.0).min(*left);
-    *left -= counted;
+    let mut owed = session.minutes.max(0.0);
+    let mut counted = 0.0;
+    let mut take = |day: &'a str, slack: bool| {
+      let (read, spare) = left.entry(day).or_insert_with(|| {
+        let read = days.get(day).map(|record| record.minutes).unwrap_or(0.0).max(0.0);
+        (read, if read > 0.0 { LEDGER_SLACK_MINUTES } else { 0.0 })
+      });
+      let pool = if slack { spare } else { read };
+      let taken = owed.min(*pool);
+      *pool -= taken;
+      owed -= taken;
+      counted += taken;
+    };
+    take(session.date_key, false);
+    if in_garden_era(session.date_key) && session.started_day.as_str() < session.date_key {
+      take(session.started_day.as_str(), false);
+    }
+    take(session.date_key, true);
     out.push((session, counted));
   }
   out
 }
 
 /// The most minutes any one focus session counted: its own, up to what the
-/// heartbeat recorded that day, as for water. The starter chest opens on it.
+/// heartbeat recorded on its days, as for water. The starter chest opens on it.
 pub fn longest_focus(days: &HashMap<String, DayRecord>, sessions: &[SessionSeeds<'_>]) -> f64 {
   counted_minutes(days, sessions)
     .into_iter()
@@ -389,20 +415,29 @@ pub fn grow(drops: &[(i64, f64)], plantings: &[PlantingIn<'_>], harvests: &[Harv
 
 /// Pip's mood runs 0..100 and starts here.
 pub const MOOD_START: f64 = 70.0;
-/// How much it drifts down per day nobody visits. Slow: a weekend away takes
-/// Pip from content to wistful, not to miserable.
+/// How much it drifts down per day nobody cheers Pip up. Slow: a weekend away
+/// takes Pip from happy to content, not to miserable.
 pub const MOOD_DRIFT_PER_DAY: f64 = 8.0;
+/// Where the drift stops. However long the reader is away, Pip is still
+/// content when they come back: time alone never makes her mope.
+pub const MOOD_DRIFT_FLOOR: f64 = 40.0;
 /// What a recorded reading session adds.
 pub const MOOD_PER_SESSION: f64 = 5.0;
 
 /// The mood now, given the last stored value and when it was stored.
 ///
-/// Drift only ever lowers it and never below zero; a clock that went
-/// backwards (another device's timestamp, a changed system clock) is treated
-/// as no time passing.
+/// Drift only ever lowers it, and never below `MOOD_DRIFT_FLOOR`. A mood
+/// stored under the floor (a reader who was away before there was one) stays
+/// where it is: not lifted to the floor, not lowered further. A clock that
+/// went backwards (another device's timestamp, a changed system clock) is
+/// treated as no time passing.
 pub fn mood_at(stored: f64, stored_at_ms: i64, now_ms: i64) -> f64 {
+  let stored = stored.clamp(0.0, 100.0);
+  if stored <= MOOD_DRIFT_FLOOR {
+    return stored;
+  }
   let days = (now_ms - stored_at_ms).max(0) as f64 / 86_400_000.0;
-  (stored - days * MOOD_DRIFT_PER_DAY).clamp(0.0, 100.0)
+  (stored - days * MOOD_DRIFT_PER_DAY).max(MOOD_DRIFT_FLOOR)
 }
 
 /// The mood after something cheered Pip up, from the mood now.
@@ -436,9 +471,22 @@ mod tests {
       ended_at: date_key,
       ended_at_ms: at_ms,
       date_key,
+      started_day: date_key.to_string(),
       minutes,
       completed_clean
     }
+  }
+
+  /// A session that started on an earlier day than it ended.
+  fn spanning<'a>(
+    id: &'a str,
+    started_day: &str,
+    date_key: &'a str,
+    at_ms: i64,
+    minutes: f64,
+    completed_clean: bool
+  ) -> SessionSeeds<'a> {
+    SessionSeeds { started_day: started_day.to_string(), ..session(id, date_key, at_ms, minutes, completed_clean) }
   }
 
   fn planting<'a>(id: &'a str, plot: i64, at_ms: i64, need: f64, yield_seeds: i64) -> PlantingIn<'a> {
@@ -535,6 +583,90 @@ mod tests {
     assert!(water_drops(&days, &[session("a", "2026-09-20", 5, 25.0, false)]).is_empty());
   }
 
+  #[test]
+  fn a_session_ended_the_next_day_waters_for_what_was_read() {
+    // Thirty minutes read on the 1st with the timer on; Leaflet was closed and
+    // the session ended when it next opened, on the 2nd.
+    let days = ledger(vec![day("2026-10-01", 30.0, 20)]);
+    let drops = water_drops(&days, &[spanning("a", "2026-10-01", "2026-10-02", 5, 30.0, false)]);
+    assert_eq!(drops, vec![(5, 30.0)]);
+  }
+
+  #[test]
+  fn a_session_read_across_midnight_waters_for_both_days() {
+    // Fifteen minutes before midnight and ten after, finished cleanly.
+    let days = ledger(vec![day("2026-10-01", 15.0, 20), day("2026-10-02", 10.0, 20)]);
+    let sessions = [spanning("a", "2026-10-01", "2026-10-02", 5, 25.0, true)];
+    let drops = water_drops(&days, &sessions);
+    assert_eq!(drops, vec![(5, 37.0)], "25 minutes and half again, not the 10 read after midnight");
+    assert_eq!(longest_focus(&days, &sessions), 25.0);
+  }
+
+  #[test]
+  fn a_days_minutes_are_counted_for_one_session_only() {
+    let counted = |days: &HashMap<String, DayRecord>, sessions: &[SessionSeeds<'_>]| -> Vec<f64> {
+      let mut by_id: Vec<(String, f64)> = counted_minutes(days, sessions)
+        .into_iter()
+        .map(|(session, counted)| (session.id.to_string(), counted))
+        .collect();
+      by_id.sort_by(|a, b| a.0.cmp(&b.0));
+      by_id.into_iter().map(|(_, counted)| counted).collect()
+    };
+    // Twenty minutes read on the 1st. One session ended that evening; another
+    // started that night and was ended the next day, with nothing read then.
+    let days = ledger(vec![day("2026-10-01", 20.0, 20)]);
+    let evening = session("a", "2026-10-01", 1, 15.0, false);
+    let overnight = spanning("b", "2026-10-01", "2026-10-02", 2, 15.0, false);
+    // The start day lends the second only what was read and is left.
+    assert_eq!(counted(&days, &[evening.clone(), overnight.clone()]), vec![15.0, 5.0]);
+    assert_eq!(counted(&days, &[overnight, evening]), vec![15.0, 5.0], "whatever order they are listed in");
+
+    // Two that both started on the 1st and ended on the 2nd share it the same way.
+    let first = spanning("a", "2026-10-01", "2026-10-02", 1, 15.0, false);
+    let second = spanning("b", "2026-10-01", "2026-10-02", 2, 15.0, false);
+    assert_eq!(counted(&days, &[first, second]), vec![15.0, 5.0]);
+
+    // A session never takes from a day it did not span.
+    let days = ledger(vec![day("2026-09-30", 40.0, 20), day("2026-10-01", 5.0, 20)]);
+    assert_eq!(counted(&days, &[spanning("a", "2026-10-01", "2026-10-02", 1, 30.0, false)]), vec![5.0]);
+  }
+
+  #[test]
+  fn sessions_before_the_garden_count_as_they_were_paid() {
+    // Read across midnight under the old rules: the day it ended on alone.
+    let days = ledger(vec![day("2026-09-19", 15.0, 60), day("2026-09-20", 10.0, 60)]);
+    let result = earnings(&days, &[spanning("a", "2026-09-19", "2026-09-20", 0, 25.0, false)], 0);
+    assert_eq!(result.earlier, 11, "10 read after midnight, and the minute of slack");
+  }
+
+  #[test]
+  fn sessions_another_device_brings_never_lower_what_is_counted() {
+    let total = |days: &HashMap<String, DayRecord>, sessions: &[SessionSeeds<'_>]| -> f64 {
+      counted_minutes(days, sessions).into_iter().map(|(_, counted)| counted).sum()
+    };
+    let days = ledger(vec![day("2026-10-01", 20.0, 20), day("2026-10-02", 12.0, 20)]);
+    let mine = vec![
+      session("b", "2026-10-01", 50, 20.0, true),
+      spanning("d", "2026-10-01", "2026-10-02", 90, 12.0, false)
+    ];
+    let before = total(&days, &mine);
+    // The other device's sessions arrive: before, between and after this
+    // one's. The ledger merges as the maximum, so it holds at least as much.
+    let theirs = [
+      session("a", "2026-10-01", 10, 20.0, false),
+      spanning("c", "2026-10-01", "2026-10-02", 70, 8.0, false),
+      session("e", "2026-10-02", 95, 30.0, false)
+    ];
+    let mut both = mine.clone();
+    for (count, arrived) in theirs.iter().enumerate() {
+      both.push(arrived.clone());
+      let after = total(&days, &both);
+      assert!(after >= before, "{} of their sessions: {after} < {before}", count + 1);
+    }
+    let more_read = ledger(vec![day("2026-10-01", 45.0, 20), day("2026-10-02", 30.0, 20)]);
+    assert!(total(&more_read, &both) >= total(&days, &both));
+  }
+
   // ---- growing --------------------------------------------------------------
 
   #[test]
@@ -589,6 +721,22 @@ mod tests {
   }
 
   #[test]
+  fn replaying_the_same_records_grows_the_same_garden() {
+    let days = ledger(vec![day("2026-10-01", 15.0, 20), day("2026-10-02", 40.0, 20)]);
+    let listed = vec![
+      session("a", "2026-10-01", 10, 12.0, true),
+      spanning("b", "2026-10-01", "2026-10-02", 20, 25.0, true),
+      session("c", "2026-10-02", 30, 20.0, false)
+    ];
+    let mut shuffled = listed.clone();
+    shuffled.reverse();
+    let plants = [planting("p", 1, 0, 30.0, 9), planting("q", 2, 15, 60.0, 20)];
+    let once = grow(&water_drops(&days, &listed), &plants, &[]);
+    assert_eq!(once, grow(&water_drops(&days, &listed), &plants, &[]), "the same records, the same garden");
+    assert_eq!(once, grow(&water_drops(&days, &shuffled), &plants, &[]), "however the shelf was listed");
+  }
+
+  #[test]
   fn more_reading_only_brings_plants_closer() {
     let plants = [planting("a", 1, 0, 30.0, 9), planting("b", 2, 0, 60.0, 20)];
     let before = grow(&[(10, 20.0)], &plants, &[]);
@@ -611,11 +759,38 @@ mod tests {
   // ---- mood -----------------------------------------------------------------
 
   #[test]
-  fn mood_drifts_down_about_eight_a_day_and_stops_at_zero() {
+  fn mood_drifts_down_about_eight_a_day_and_stops_at_forty() {
     assert_eq!(mood_at(70.0, 0, 0), 70.0);
     assert!((mood_at(70.0, 0, DAY_MS) - 62.0).abs() < 1e-9);
-    assert_eq!(mood_at(70.0, 0, 30 * DAY_MS), 0.0);
+    assert!((mood_at(70.0, 0, 3 * DAY_MS) - 46.0).abs() < 1e-9);
+    // Four days would be 38: the drift stops at the floor, and stays there.
+    assert_eq!(mood_at(70.0, 0, 4 * DAY_MS), MOOD_DRIFT_FLOOR);
+    assert_eq!(mood_at(70.0, 0, 30 * DAY_MS), MOOD_DRIFT_FLOOR);
+    assert_eq!(mood_at(100.0, 0, 3650 * DAY_MS), MOOD_DRIFT_FLOOR);
     assert_eq!(mood_at(70.0, DAY_MS, 0), 70.0);
+  }
+
+  #[test]
+  fn a_mood_already_under_the_floor_stays_where_it_is() {
+    // A reader who was away under the old rule: not lifted, not lowered.
+    assert_eq!(mood_at(12.5, 0, 0), 12.5);
+    assert_eq!(mood_at(12.5, 0, DAY_MS), 12.5);
+    assert_eq!(mood_at(12.5, 0, 30 * DAY_MS), 12.5);
+    assert_eq!(mood_at(0.0, 0, 30 * DAY_MS), 0.0);
+    assert_eq!(mood_at(39.9, 0, 30 * DAY_MS), 39.9);
+    // Cheered up past the floor, it drifts again, and only back to the floor.
+    assert_eq!(mood_at(mood_plus(12.5, 30.0), 0, 30 * DAY_MS), MOOD_DRIFT_FLOOR);
+  }
+
+  #[test]
+  fn a_mood_exactly_at_the_floor_does_not_move() {
+    assert_eq!(mood_at(MOOD_DRIFT_FLOOR, 0, 0), MOOD_DRIFT_FLOOR);
+    assert_eq!(mood_at(MOOD_DRIFT_FLOOR, 0, DAY_MS), MOOD_DRIFT_FLOOR);
+    assert_eq!(mood_at(MOOD_DRIFT_FLOOR, 0, 30 * DAY_MS), MOOD_DRIFT_FLOOR);
+    assert_eq!(mood_at(MOOD_DRIFT_FLOOR, DAY_MS, 0), MOOD_DRIFT_FLOOR);
+    // What is stored is still kept to the scale.
+    assert_eq!(mood_at(140.0, 0, 0), 100.0);
+    assert_eq!(mood_at(-5.0, 0, DAY_MS), 0.0);
   }
 
   #[test]

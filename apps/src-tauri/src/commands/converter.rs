@@ -55,9 +55,15 @@ pub struct ConverterInfo {
   pub can_auto_install: bool
 }
 
+/// Async, so the search runs off the window's thread. It looks in every
+/// folder on PATH and the usual install places, Settings asks again each time
+/// the window comes back, and one PATH entry on a drive that does not answer
+/// would hold the window still each time.
 #[tauri::command]
-pub fn converter_status(app: AppHandle) -> Result<ConverterInfo, String> {
-  let path = storage::converter_path(&app);
+pub async fn converter_status(app: AppHandle) -> Result<ConverterInfo, String> {
+  let path = tauri::async_runtime::spawn_blocking(move || storage::converter_path(&app))
+    .await
+    .map_err(|error| format!("Couldn't look for the converter: {error}"))?;
   Ok(ConverterInfo {
     installed: path.is_some(),
     path: path.map(|value| value.to_string_lossy().to_string()),

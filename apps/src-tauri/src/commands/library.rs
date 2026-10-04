@@ -10,7 +10,8 @@ use super::*;
 #[tauri::command]
 pub async fn import_books(
   paths: Vec<String>,
-  state: State<'_, AppState>
+  state: State<'_, AppState>,
+  app: AppHandle
 ) -> Result<Vec<BookRecord>, String> {
   let mut imported = Vec::new();
   let mut last_error = None;
@@ -24,6 +25,12 @@ pub async fn import_books(
       }
     }
   }
+  // Every way a book is added ends up here (the import dialog, drag and drop,
+  // "Open with"), so this is where "keep a copy of my books" hears of it. A
+  // book already in the library counts too: opening it again is how one gets
+  // its copy when the option was turned on later. Done after the import, in
+  // the background: the books are in the library whatever happens to the copy.
+  keep_copies_later(&app, imported.clone());
   match last_error {
     Some(error) if imported.is_empty() => Err(error),
     _ => Ok(imported)
@@ -41,7 +48,7 @@ pub(crate) async fn import_one(path: &str, state: &State<'_, AppState>) -> Resul
     }
     let hash = {
       let source = source.clone();
-      tauri::async_runtime::spawn_blocking(move || storage::hash_file(&source))
+      tauri::async_runtime::spawn_blocking(move || storage::hash_for_import(&source))
         .await
         .map_err(|e| format!("Import task failed: {e}"))?
         .map_err(|e| e.to_string())?
@@ -55,6 +62,35 @@ pub(crate) async fn import_one(path: &str, state: &State<'_, AppState>) -> Resul
       db.find_by_hash(&hash).map_err(|e| e.to_string())?
     } {
       if existing.deleted_at.is_none() {
+        let mut existing = existing;
+        // Listed, but its file is not on this computer (it came from a backup
+        // and was never downloaded). The reader has just handed over the same
+        // bytes, so keep them: returning the entry alone left the book
+        // unreadable once the file they opened was gone.
+        if !existing.available {
+          let source = source.clone();
+          let hash = hash.clone();
+          let known = existing.local_path.clone();
+          let restored = tauri::async_runtime::spawn_blocking(move || -> anyhow::Result<std::path::PathBuf> {
+            if known.is_empty() {
+              return storage::store_book_file(&source, &hash);
+            }
+            let dest = std::path::PathBuf::from(known);
+            storage::restore_book_file(&source, &dest)?;
+            Ok(dest)
+          })
+          .await
+          .map_err(|e| format!("Import task failed: {e}"))?
+          .map_err(|e| e.to_string())?;
+          let restored = restored.to_string_lossy().to_string();
+          existing.available = true;
+          // Only an entry that had no path at all needs writing back.
+          if existing.local_path != restored {
+            existing.local_path = restored;
+            let db = state.db.guard();
+            db.upsert_book(&existing).map_err(|e| e.to_string())?;
+          }
+        }
         return Ok(Some(existing));
       }
     }
@@ -412,6 +448,23 @@ pub fn delete_book(book_id: String, state: State<'_, AppState>) -> Result<(), St
   Ok(())
 }
 
+/// Removes the copies of the database kept from before each upgrade
+/// (`library.db.bak-v3`, beside it). Each is the whole library as it was:
+/// titles, reading history, notes, settings. "Delete All Data" left them.
+fn remove_database_backups(database: &std::path::Path) {
+  let (Some(dir), Some(name)) = (database.parent(), database.file_name().and_then(|name| name.to_str())) else {
+    return;
+  };
+  let prefix = format!("{name}.bak-v");
+  let Ok(entries) = fs::read_dir(dir) else {
+    return;
+  };
+  for entry in entries.flatten() {
+    if entry.file_name().to_string_lossy().starts_with(&prefix) {
+      let _ = fs::remove_file(entry.path());
+    }
+  }
+}
 
 #[tauri::command]
 pub fn clear_all_data(state: State<'_, AppState>) -> Result<(), String> {
@@ -423,7 +476,12 @@ pub fn clear_all_data(state: State<'_, AppState>) -> Result<(), String> {
     // The Leaflet session token is in the keychain too. The account itself
     // stays on the server; this only signs this device out.
     cloud::clear_session(&db);
+    // Where Leaflet's server is, which is not the reader's data and is only
+    // learned at startup.
+    let server = crate::sync::remote_config::remembered(&db);
     db.clear_all().map_err(|e| e.to_string())?;
+    crate::sync::remote_config::put_back(&db, &server);
+    remove_database_backups(db.path());
   }
 
   if let Ok(dir) = storage::books_dir() {
@@ -436,4 +494,38 @@ pub fn clear_all_data(state: State<'_, AppState>) -> Result<(), String> {
   }
 
   Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  /// The bug this guards: "Delete All Data" emptied `library.db` and left the
+  /// copies made before each upgrade beside it, each one the whole library.
+  #[test]
+  fn deleting_all_data_removes_the_backups_made_before_upgrades() {
+    let dir = std::env::temp_dir().join(format!("leaflet-clear-backups-test-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("books")).expect("dir");
+    let database = dir.join("library.db");
+    for name in ["library.db", "library.db.bak-v2", "library.db.bak-v3", "library.db.broken-20260101-120000", "notes.txt"] {
+      fs::write(dir.join(name), b"x").expect("write");
+    }
+
+    remove_database_backups(&database);
+
+    let mut left: Vec<String> = fs::read_dir(&dir)
+      .expect("read")
+      .flatten()
+      .map(|entry| entry.file_name().to_string_lossy().to_string())
+      .collect();
+    left.sort();
+    // The database itself is emptied, not removed; a database set aside as
+    // damaged was kept on purpose and is not Leaflet's to remove here.
+    assert_eq!(left, vec!["books", "library.db", "library.db.broken-20260101-120000", "notes.txt"]);
+
+    // Nothing to do, and nothing to fail, for a database with no folder.
+    remove_database_backups(std::path::Path::new(":memory:"));
+    let _ = fs::remove_dir_all(&dir);
+  }
 }

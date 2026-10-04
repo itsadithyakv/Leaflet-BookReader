@@ -23,6 +23,10 @@ pub fn diagnostics(state: State<'_, AppState>) -> Result<String, String> {
   let drive = drive::load_refresh_token(&db).ok().flatten().is_some();
   let account = crate::sync::cloud::signed_in(&db);
   let schema = db.schema_version();
+  // On or off only: where the copies go is the reader's business. From the
+  // settings, without looking at the folder: this runs on the window's thread
+  // with the database locked, and an unreachable network share is slow to answer.
+  let copies = copies_on(&db);
   let data_dir = crate::storage::app_data_dir().map(|dir| dir.display().to_string()).unwrap_or_default();
   drop(db);
   let lines = [
@@ -34,6 +38,7 @@ pub fn diagnostics(state: State<'_, AppState>) -> Result<String, String> {
     format!("Database schema: v{schema} (this build expects v{})", crate::db::SCHEMA_VERSION),
     format!("Books: {books}, focus sessions: {sessions}"),
     format!("Backup: Drive {}, folder {}, Leaflet account {}", on_off(drive), on_off(folder), on_off(account)),
+    format!("Book copies in a folder: {}", on_off(copies)),
     format!("Report made: {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S %z")),
     String::new(),
     "Recent log:".to_string(),

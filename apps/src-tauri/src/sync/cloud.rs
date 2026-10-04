@@ -82,6 +82,12 @@ pub fn normalise_api_base(value: &str) -> Result<String> {
   if url.host_str().map_or(true, str::is_empty) || !url.username().is_empty() || url.password().is_some() {
     return Err(anyhow!("That does not look like a web address."));
   }
+  // Every request is this address with a path put on the end. After a `?` or
+  // a `#` that path is not a path any more, and each call went to the site's
+  // front page instead, the sign-in form's email and password with it.
+  if url.query().is_some() || url.fragment().is_some() {
+    return Err(anyhow!("Leave out everything from the ? or # on: just the server's address."));
+  }
   Ok(trimmed.to_string())
 }
 
@@ -96,6 +102,15 @@ pub fn api_base(db: &Database) -> Option<String> {
     .filter(|value| !value.is_empty())
     .or_else(|| crate::sync::remote_config::cached(db))
     .or_else(build_default_api_base)
+}
+
+/// Whether this device names its own server, rather than using Leaflet's.
+pub fn api_base_is_custom(db: &Database) -> bool {
+  db.get_setting(API_BASE_SETTING)
+    .ok()
+    .flatten()
+    .and_then(|value| normalise_api_base(&value).ok())
+    .is_some_and(|value| !value.is_empty())
 }
 
 /// Saves this device's API base. Empty falls back to the build's default.
@@ -207,6 +222,35 @@ pub fn clear_session(db: &Database) {
   }
   let _ = db.set_setting(ACCOUNT_API_SETTING, "");
   let _ = db.set_setting(ACCOUNT_CACHE_SETTING, "");
+  // Whether the profile is shared belongs to the account that was signed in.
+  // Kept, it made the next account on this computer publish (or not) by the
+  // last one's choice.
+  forget_visibility(db);
+}
+
+/// Whether the signed-in reader shares their profile, as this device last
+/// heard it from the server: `Some(true)` public, `Some(false)` private, and
+/// `None` when it has not heard (a new sign-in, another device made the
+/// choice, a fresh install).
+///
+/// A copy only. The server holds the truth; this is what lets the app decide
+/// to publish nothing for a private reader without asking every time.
+pub fn known_visibility(db: &Database) -> Option<bool> {
+  match db.get_setting(PROFILE_VISIBILITY_SETTING).ok().flatten().as_deref() {
+    Some("public") => Some(true),
+    Some("private") => Some(false),
+    _ => None
+  }
+}
+
+/// Keeps what the server said about the profile's visibility.
+pub fn remember_visibility(db: &Database, visibility: &str) {
+  let value = if visibility == "public" { "public" } else { "private" };
+  let _ = db.set_setting(PROFILE_VISIBILITY_SETTING, value);
+}
+
+pub fn forget_visibility(db: &Database) {
+  let _ = db.set_setting(PROFILE_VISIBILITY_SETTING, "");
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -314,6 +358,39 @@ fn unreachable(error: reqwest::Error) -> anyhow::Error {
   }
 }
 
+/// Asks the server whether it is there, for Settings to say "connected" or
+/// why not. Nothing is sent but the request itself, and no account is needed.
+pub async fn check_reachable(db_mutex: &std::sync::Mutex<Database>) -> Result<()> {
+  let base = configured_base(db_mutex)?;
+  let response = reqwest::Client::builder()
+    .timeout(Duration::from_secs(10))
+    .build()?
+    .get(format!("{base}/health"))
+    .send()
+    .await
+    .map_err(unreachable)?;
+  if !response.status().is_success() {
+    return Err(anyhow!("The Leaflet server had a problem ({}). Try again later.", response.status()));
+  }
+  if is_health_reply(&response.text().await.unwrap_or_default()) {
+    Ok(())
+  } else {
+    Err(anyhow!("Something answers at that address, but it is not a Leaflet server."))
+  }
+}
+
+/// Whether a body is the server's own `/health` answer, `{"ok":true}`.
+///
+/// Any site that answers every path with a page (a sign-in wall, a parked
+/// domain, a web app that serves its front page for unknown paths) returned
+/// 200 here, and Settings said "Connected" to a server that was not there.
+fn is_health_reply(body: &str) -> bool {
+  serde_json::from_str::<serde_json::Value>(body)
+    .ok()
+    .and_then(|json| json.get("ok").and_then(|ok| ok.as_bool()))
+    .unwrap_or(false)
+}
+
 async fn start_session(
   db_mutex: &std::sync::Mutex<Database>,
   path: &str,
@@ -333,6 +410,9 @@ async fn start_session(
   let db = db_mutex.guard();
   store_session_token(&session.token)?;
   remember_account(&db, &base, &session.account)?;
+  // A different account may have just signed in: ask the server about its
+  // profile rather than go by the last one's.
+  forget_visibility(&db);
   Ok(AccountStatus {
     available: true,
     api_base: Some(base),
@@ -513,7 +593,6 @@ pub async fn delete_account(db_mutex: &std::sync::Mutex<Database>, password: &st
   {
     let db = db_mutex.guard();
     clear_session(&db);
-    let _ = db.set_setting(PROFILE_VISIBILITY_SETTING, "");
   }
   status(db_mutex, false).await
 }
@@ -858,6 +937,27 @@ mod tests {
     }
   }
 
+  /// The device's copy of "is my profile shared" is the server's word or
+  /// nothing: an empty or unknown value is "not heard", never "private".
+  #[test]
+  fn the_remembered_visibility_is_the_servers_word_or_nothing() {
+    let db = memory_db();
+    assert_eq!(known_visibility(&db), None, "a fresh install has not heard");
+
+    remember_visibility(&db, "public");
+    assert_eq!(known_visibility(&db), Some(true));
+    remember_visibility(&db, "private");
+    assert_eq!(known_visibility(&db), Some(false));
+    // Anything the server might say that is not "public" is private.
+    remember_visibility(&db, "friends-only");
+    assert_eq!(known_visibility(&db), Some(false));
+
+    // Signing out or in forgets it, so the next account is asked about.
+    remember_visibility(&db, "public");
+    forget_visibility(&db);
+    assert_eq!(known_visibility(&db), None);
+  }
+
   #[test]
   fn iso_week_keys_follow_the_local_date() {
     let week = iso_week_key;
@@ -879,5 +979,33 @@ mod tests {
     assert!(normalise_api_base("http://[::1]:8787").is_ok());
     assert!(normalise_api_base("https://user:pw@api.example.com").is_err());
     assert_eq!(normalise_api_base("  ").unwrap(), "");
+  }
+
+  /// Requests are made by putting a path on the end of the address, so the
+  /// address has to be one a path can be put on the end of.
+  #[test]
+  fn an_address_ends_where_a_path_can_follow() {
+    assert!(normalise_api_base("https://api.example.com?team=1").is_err());
+    assert!(normalise_api_base("https://api.example.com/#/home").is_err());
+    assert!(normalise_api_base("https://api.example.com/leaflet?x=1#y").is_err());
+    // A server kept under a path is fine, with or without the last slash.
+    assert_eq!(normalise_api_base("https://example.com/leaflet/").unwrap(), "https://example.com/leaflet");
+    assert_eq!(normalise_api_base("https://example.com/leaflet").unwrap(), "https://example.com/leaflet");
+    assert_eq!(normalise_api_base("https://api.example.com:8443//").unwrap(), "https://api.example.com:8443");
+    // Not addresses at all.
+    assert!(normalise_api_base("https://").is_err());
+    assert!(normalise_api_base("https://exa mple.com").is_err());
+    assert!(normalise_api_base("javascript:alert(1)").is_err());
+  }
+
+  #[test]
+  fn only_the_servers_own_answer_counts_as_connected() {
+    assert!(is_health_reply(r#"{"ok":true}"#));
+    assert!(is_health_reply("{ \"ok\": true, \"version\": 2 }\n"));
+    // A page served for every path, an empty body, or some other JSON.
+    assert!(!is_health_reply("<!doctype html><title>Sign in to Wi-Fi</title>"));
+    assert!(!is_health_reply(""));
+    assert!(!is_health_reply(r#"{"ok":false}"#));
+    assert!(!is_health_reply(r#"{"status":"up"}"#));
   }
 }

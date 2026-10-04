@@ -12,6 +12,7 @@ use tokio::io::AsyncWriteExt;
 use regex::Regex;
 
 pub mod epub;
+pub mod library_copy;
 
 #[cfg(desktop)]
 static CONVERTER_INSTALL_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -68,23 +69,85 @@ pub fn hash_file(path: &Path) -> Result<String> {
   Ok(hex::encode(hasher.finalize()))
 }
 
+/// The hash of a file about to be imported, after checking there is a book to
+/// hash. Every empty file has the same hash, so the first one imported became
+/// a book that could never open, and every later empty file, of any format,
+/// was taken for that book.
+pub fn hash_for_import(path: &Path) -> Result<String> {
+  let metadata = fs::metadata(path)?;
+  if metadata.is_dir() {
+    anyhow::bail!("That is a folder, not a book file.");
+  }
+  if metadata.len() == 0 {
+    anyhow::bail!("That file is empty (0 bytes), so there is nothing to read. If you downloaded it, the download may not have finished.");
+  }
+  hash_file(path)
+}
+
+/// One book file is put in place at a time. Two imports of the same file at
+/// once (a second double-click while a large book is still being copied) wrote
+/// to the same staging file, and Windows failed one of them with "the file is
+/// being used by another process" although the book came in.
+static STORING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub fn store_book_file(source: &Path, hash: &str) -> Result<PathBuf> {
+  store_book_file_in(&books_dir()?, source, hash)
+}
+
+/// `store_book_file` against an explicit folder, so it can be exercised
+/// without touching the real library.
+fn store_book_file_in(dir: &Path, source: &Path, hash: &str) -> Result<PathBuf> {
   let ext = normalized_ext(source);
   let ext = if ext.is_empty() { "bin".to_string() } else { ext };
-  let dir = books_dir()?;
-  fs::create_dir_all(&dir)?;
+  fs::create_dir_all(dir)?;
   let dest = dir.join(format!("{}.{}", hash, ext));
+  let _one_at_a_time = STORING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
   if !dest.exists() {
     // Through a staging file: an interrupted copy straight to `dest` left a
     // truncated book that the `exists()` check above then trusted forever.
     let staging = dir.join(format!("{}.{}.part", hash, ext));
-    fs::copy(source, &staging)?;
+    // One left by an interrupted import. A copy keeps the original's
+    // read-only mark, and a read-only leftover cannot be written over.
+    let _ = fs::remove_file(&staging);
+    if let Err(error) = fs::copy(source, &staging) {
+      let _ = fs::remove_file(&staging);
+      return Err(error.into());
+    }
     if let Err(error) = fs::rename(&staging, &dest) {
       let _ = fs::remove_file(&staging);
       return Err(error.into());
     }
   }
   Ok(dest)
+}
+
+/// Puts a book's bytes back where the library expects them.
+///
+/// For a book the library lists but has no file for (it came from a backup and
+/// was never downloaded, or its file was removed by hand). `source` has the
+/// same content hash, so it is the same book whatever it is called.
+pub fn restore_book_file(source: &Path, dest: &Path) -> Result<()> {
+  // The same staging file as an import of this book would use.
+  let _one_at_a_time = STORING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+  if dest.exists() {
+    return Ok(());
+  }
+  if let Some(parent) = dest.parent() {
+    fs::create_dir_all(parent)?;
+  }
+  let mut staging = dest.as_os_str().to_owned();
+  staging.push(".part");
+  let staging = PathBuf::from(staging);
+  let _ = fs::remove_file(&staging);
+  if let Err(error) = fs::copy(source, &staging) {
+    let _ = fs::remove_file(&staging);
+    return Err(error.into());
+  }
+  if let Err(error) = fs::rename(&staging, dest) {
+    let _ = fs::remove_file(&staging);
+    return Err(error.into());
+  }
+  Ok(())
 }
 
 pub fn converted_epub_path(hash: &str) -> Result<PathBuf> {
@@ -326,7 +389,7 @@ pub async fn install_converter(app: &AppHandle) -> Result<PathBuf> {
     if let Some(existing) = resolve_converter_path(Some(app)) {
       return Ok(existing);
     }
-    anyhow::bail!("Install Calibre from calibre-ebook.com, then reopen Leaflet: it will find it.");
+    anyhow::bail!("Install Calibre from calibre-ebook.com, then open the book again: Leaflet finds it without a restart.");
   }
   let _install_guard = CONVERTER_INSTALL_LOCK.lock().await;
   if let Some(existing) = resolve_converter_path(Some(app)) {
@@ -912,6 +975,115 @@ mod tests {
     // Made once: a second call returns the same file untouched.
     let again = thumbnail_into(&dir, &cover, "h").expect("again");
     assert_eq!(again, thumb);
+    let _ = fs::remove_dir_all(&dir);
+  }
+
+  /// The bug this guards: opening a file whose book the library already listed
+  /// (from a backup, not downloaded yet) did nothing, so the book still could
+  /// not be read once the file in Downloads was gone.
+  #[test]
+  fn a_listed_book_without_its_file_gets_it_back_from_the_same_bytes() {
+    let dir = std::env::temp_dir().join(format!("leaflet-restore-test-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("dir");
+    let source = dir.join("Downloads copy.epub");
+    fs::write(&source, b"the whole book").expect("source");
+    let dest = dir.join("books").join("abc.epub");
+
+    restore_book_file(&source, &dest).expect("restore");
+    assert_eq!(fs::read(&dest).expect("read"), b"the whole book");
+    assert!(!dir.join("books").join("abc.epub.part").exists());
+
+    // The original can go; the library's copy stays. A file already there is kept.
+    fs::remove_file(&source).expect("delete the original");
+    assert_eq!(fs::read(&dest).expect("read"), b"the whole book");
+    fs::write(&source, b"something else").expect("another");
+    restore_book_file(&source, &dest).expect("no-op");
+    assert_eq!(fs::read(&dest).expect("read"), b"the whole book");
+
+    let _ = fs::remove_dir_all(&dir);
+  }
+
+  /// The bug this guards: a second import of a file still being copied (a
+  /// second double-click on a large book) opened the same staging file, and
+  /// Windows refused it: "being used by another process", shown as a failed
+  /// import of a book that had in fact come in.
+  #[test]
+  fn two_imports_of_one_file_at_once_both_succeed() {
+    let dir = std::env::temp_dir().join(format!("leaflet-store-twice-test-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("dir");
+    let source = dir.join("A Large Book.PDF");
+    fs::write(&source, vec![7u8; 48 * 1024 * 1024]).expect("source");
+    let books = dir.join("books");
+
+    let threads: Vec<_> = (0..4)
+      .map(|_| {
+        let (books, source) = (books.clone(), source.clone());
+        std::thread::spawn(move || store_book_file_in(&books, &source, "abc").map_err(|error| error.to_string()))
+      })
+      .collect();
+    for thread in threads {
+      assert_eq!(thread.join().unwrap(), Ok(books.join("abc.pdf")));
+    }
+    assert_eq!(fs::metadata(books.join("abc.pdf")).expect("stored").len(), 48 * 1024 * 1024);
+    assert!(!books.join("abc.pdf.part").exists());
+
+    let _ = fs::remove_dir_all(&dir);
+  }
+
+  /// A copy keeps the original's read-only mark, staging file included. One
+  /// left behind by an interrupted import could not be written over, so that
+  /// book could never be imported again: "Access is denied".
+  #[test]
+  fn a_read_only_staging_file_left_behind_does_not_block_the_import() {
+    let dir = std::env::temp_dir().join(format!("leaflet-store-readonly-test-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let books = dir.join("books");
+    fs::create_dir_all(&books).expect("dir");
+    let source = dir.join("From a CD.epub");
+    fs::write(&source, b"the whole book").expect("source");
+    let mut permissions = fs::metadata(&source).expect("meta").permissions();
+    permissions.set_readonly(true);
+    fs::set_permissions(&source, permissions).expect("read-only");
+    fs::copy(&source, books.join("abc.epub.part")).expect("the interrupted import");
+
+    let stored = store_book_file_in(&books, &source, "abc").expect("import");
+    assert_eq!(fs::read(&stored).expect("read"), b"the whole book");
+    assert!(!books.join("abc.epub.part").exists());
+
+    // The same for a listed book getting its file back.
+    let dest = books.join("def.epub");
+    fs::copy(&source, books.join("def.epub.part")).expect("another leftover");
+    restore_book_file(&source, &dest).expect("restore");
+    assert_eq!(fs::read(&dest).expect("read"), b"the whole book");
+
+    for path in [source, stored, dest] {
+      let mut permissions = fs::metadata(&path).expect("meta").permissions();
+      #[allow(clippy::permissions_set_readonly_false)]
+      permissions.set_readonly(false);
+      let _ = fs::set_permissions(&path, permissions);
+    }
+    let _ = fs::remove_dir_all(&dir);
+  }
+
+  /// Every empty file hashes the same, so the first became a book that could
+  /// not open and every later one, of any format, was taken for it.
+  #[test]
+  fn an_empty_file_or_a_folder_is_not_imported_as_a_book() {
+    let dir = std::env::temp_dir().join(format!("leaflet-empty-import-test-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("A Folder.epub")).expect("dir");
+    let empty = dir.join("unfinished download.epub");
+    fs::write(&empty, b"").expect("empty");
+    let book = dir.join("book.epub");
+    fs::write(&book, b"the whole book").expect("book");
+
+    assert!(hash_for_import(&empty).unwrap_err().to_string().contains("empty"));
+    assert!(hash_for_import(&dir.join("A Folder.epub")).unwrap_err().to_string().contains("folder"));
+    assert!(hash_for_import(&dir.join("gone.epub")).is_err(), "a file that vanished after it was picked");
+    assert_eq!(hash_for_import(&book).expect("hash"), hash_file(&book).expect("hash"));
+
     let _ = fs::remove_dir_all(&dir);
   }
 

@@ -26,7 +26,10 @@ pub fn from_html_archive(source: &Path, fallback_title: &str) -> Result<EpubBuil
 
 /// Removes an element and everything inside it, tag included.
 fn strip_element(html: &str, tag: &str) -> String {
-  let lowered = html.to_lowercase();
+  // ASCII only: the offsets found here are used on `html`, and full
+  // lower-casing changes the length of some letters (Turkish "İ" grows by a
+  // byte), which cut the page in the wrong place or in the middle of a letter.
+  let lowered = html.to_ascii_lowercase();
   let open = format!("<{tag}");
   let close = format!("</{tag}>");
   let mut out = String::with_capacity(html.len());
@@ -52,7 +55,8 @@ fn strip_element(html: &str, tag: &str) -> String {
 }
 
 fn slice_between(html: &str, open_tag: &str, close_tag: &str) -> Option<String> {
-  let lowered = html.to_lowercase();
+  // ASCII only, for the same reason as in `strip_element`.
+  let lowered = html.to_ascii_lowercase();
   let open = lowered.find(open_tag)?;
   let body_start = lowered[open..].find('>')? + open + 1;
   let end = lowered[body_start..]
@@ -148,6 +152,25 @@ mod tests {
     let builder = build("<p>bare fragment</p>", "Fallback");
     assert_eq!(builder.chapters.len(), 1);
     assert!(builder.chapters[0].body.contains("bare fragment"));
+  }
+
+  /// The bug this guards: tags were found in a lower-cased copy and cut out of
+  /// the original by the same byte offsets. "İ" is two bytes and its lower case
+  /// three, so every one before a tag moved the cut along by a byte: a Turkish
+  /// page lost the start of its text, kept part of a script, or stopped the
+  /// conversion with a cut through the middle of a letter.
+  #[test]
+  fn letters_that_change_length_in_lower_case_do_not_move_the_cuts() {
+    let page = "<html><head><title>İstanbul İİİ</title><script>evil()</script></head>\
+                <body><p>İyi günler, İstanbul’da KELVİN \u{212A}</p><script>more()</script><p>ığüşöç</p></body></html>";
+    let builder = build(page, "Fallback");
+    assert_eq!(builder.title, "İstanbul İİİ");
+    assert_eq!(
+      builder.chapters[0].body,
+      "<p>İyi günler, İstanbul’da KELVİN \u{212A}</p><p>ığüşöç</p>"
+    );
+
+    assert_eq!(strip_element("İİİİ<script>x()</script>é", "script"), "İİİİé");
   }
 
   #[test]

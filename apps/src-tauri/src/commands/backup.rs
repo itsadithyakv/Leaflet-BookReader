@@ -22,6 +22,9 @@ pub struct SyncStatus {
   pub folder_path: Option<String>,
   /// The Leaflet API, when cloud sync and the social features are in use.
   pub api_base: Option<String>,
+  /// The address was typed in on this device (Settings, Advanced) rather than
+  /// being Leaflet's own, which arrives by itself from the signed config.
+  pub api_base_custom: bool,
   pub last_synced_at: Option<String>,
   /// Books in the library whose file is not on this device yet.
   pub books_pending: usize
@@ -55,6 +58,7 @@ pub(crate) fn read_sync_status(db: &db::Database) -> Result<SyncStatus, String> 
       .map_err(|e| e.to_string())?
       .filter(|value| !value.is_empty()),
     api_base: crate::sync::cloud::api_base(db),
+    api_base_custom: crate::sync::cloud::api_base_is_custom(db),
     last_synced_at: db
       .get_setting(LAST_SYNCED_SETTING)
       .map_err(|e| e.to_string())?
@@ -254,7 +258,11 @@ pub(crate) async fn run_sync(state: &State<'_, AppState>) -> Result<crate::sync:
 /// syncs instantly, while a library is gigabytes. Connecting a new device is
 /// immediate, and the bytes arrive when a book is actually opened.
 #[tauri::command]
-pub async fn download_book(book_id: String, state: State<'_, AppState>) -> Result<String, String> {
+pub async fn download_book(
+  book_id: String,
+  state: State<'_, AppState>,
+  app: AppHandle
+) -> Result<String, String> {
   let (folder_path, drive_connected) = {
     let db = state.db.guard();
     (
@@ -278,17 +286,30 @@ pub async fn download_book(book_id: String, state: State<'_, AppState>) -> Resul
       let source = std::path::Path::new(&path).join("books").join(entry.remote_name());
       if source.exists() {
         let destination = crate::sync::store::local_path_for(&entry).map_err(|e| e.to_string())?;
-        if let Some(parent) = destination.parent() {
-          std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        }
-        std::fs::copy(&source, &destination).map_err(|e| e.to_string())?;
-        return Ok(destination.to_string_lossy().to_string());
+        // Through a staging file, like an import and a Drive download: copied
+        // straight to its place, a copy cut short (the sync folder's own cloud
+        // client still fetching it, the app closed) left a truncated file that
+        // counted as the book from then on and was never fetched again.
+        storage::restore_book_file(&source, &destination).map_err(|e| e.to_string())?;
+        let local = destination.to_string_lossy().to_string();
+        // A book that arrives from the backup is a book added to this library,
+        // so it gets its copy too. In the background: the reader is waiting to read.
+        keep_copies_later(&app, vec![BookRecord { local_path: local.clone(), ..record }]);
+        return Ok(local);
       }
     }
   }
 
   if drive_connected {
-    return drive::fetch_book(&state.db, &book_id).await.map_err(|e| e.to_string());
+    let local = drive::fetch_book(&state.db, &book_id).await.map_err(|e| e.to_string())?;
+    let record = {
+      let db = state.db.guard();
+      db.find_by_id(&book_id).ok().flatten()
+    };
+    if let Some(record) = record {
+      keep_copies_later(&app, vec![BookRecord { local_path: local.clone(), ..record }]);
+    }
+    return Ok(local);
   }
   Err("That book is not on this device, and sync is not set up.".to_string())
 }

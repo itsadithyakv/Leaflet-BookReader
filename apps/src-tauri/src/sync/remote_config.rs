@@ -79,6 +79,24 @@ pub fn cached(db: &Database) -> Option<String> {
     .filter(|value| !value.is_empty())
 }
 
+/// The signed address and its date, as stored, for `put_back`.
+pub fn remembered(db: &Database) -> Vec<(&'static str, String)> {
+  [REMOTE_API_SETTING, ISSUED_SETTING]
+    .into_iter()
+    .filter_map(|key| db.get_setting(key).ok().flatten().map(|value| (key, value)))
+    .collect()
+}
+
+/// Restores what `remembered` read. "Delete All Data" empties the settings
+/// table, and this is not the reader's data: it is where Leaflet's server is,
+/// learned only at startup. Without it the app fell back to the address it was
+/// built with (or to none) until it was next opened.
+pub fn put_back(db: &Database, remembered: &[(&'static str, String)]) {
+  for (key, value) in remembered {
+    let _ = db.set_setting(key, value);
+  }
+}
+
 /// Fetches, verifies and caches the config. Failures leave the cache alone:
 /// offline, GitHub down or a bad file all mean "keep using the last good one".
 pub async fn refresh(db_mutex: &std::sync::Mutex<Database>) -> Result<Option<String>> {
@@ -131,6 +149,30 @@ mod tests {
   #[test]
   fn another_key_is_refused() {
     assert!(verify(SIGNED, &[7u8; 32]).is_err());
+  }
+
+  /// The bug this guards: "Delete All Data" cleared the signed address with
+  /// the reader's settings, and nothing fetched it again until the next start.
+  #[test]
+  fn the_signed_address_survives_a_reset() {
+    let db = crate::db::tests::memory_db();
+    db.set_setting(REMOTE_API_SETTING, "https://leaflet.example").expect("address");
+    db.set_setting(ISSUED_SETTING, "2026-09-27T12:04:28.394Z").expect("issued");
+    db.set_setting(cloud::API_BASE_SETTING, "https://my-own.example").expect("the reader's own");
+
+    let kept = remembered(&db);
+    db.clear_all().expect("clear");
+    assert_eq!(cached(&db), None, "cleared with everything else");
+    put_back(&db, &kept);
+
+    assert_eq!(cached(&db).as_deref(), Some("https://leaflet.example"));
+    assert_eq!(db.get_setting(ISSUED_SETTING).expect("read").as_deref(), Some("2026-09-27T12:04:28.394Z"));
+    // The address the reader typed in is a setting of theirs, and goes.
+    assert!(!cloud::api_base_is_custom(&db));
+
+    // Nothing learned yet: nothing to put back.
+    let fresh = crate::db::tests::memory_db();
+    assert!(remembered(&fresh).is_empty());
   }
 
   #[test]

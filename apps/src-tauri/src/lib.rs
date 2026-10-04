@@ -13,6 +13,8 @@ mod db;
 mod diag;
 mod formats;
 mod habit;
+mod http;
+mod lookup;
 mod metadata;
 mod pip;
 mod reminders;
@@ -242,8 +244,14 @@ pub fn run() {
       commands::diagnostics,
       commands::epub_sections,
       commands::annotations_list,
+      commands::annotations_highlight_counts,
       commands::annotation_save,
       commands::annotation_delete,
+      commands::people_list,
+      commands::people_save,
+      commands::people_delete,
+      commands::people_export,
+      commands::lookup_term,
       commands::collections_list,
       commands::collection_save,
       commands::collection_delete,
@@ -275,6 +283,10 @@ pub fn run() {
       commands::delete_book,
       commands::converter_status,
       commands::install_converter,
+      commands::library_copy_status,
+      commands::library_copy_set,
+      commands::library_copy_run,
+      commands::cloud_reachable,
       commands::take_pending_open_paths,
       commands::clear_all_data,
       commands::supported_formats,
@@ -294,6 +306,7 @@ pub fn run() {
       commands::pip_state_set,
       commands::pip_feed,
       commands::pip_game_played,
+      commands::pip_played,
       commands::pip_plant,
       commands::pip_harvest
     ])

@@ -529,6 +529,163 @@ pub fn record_game(arcade: &Arcade, today: &str, game: &str, score: i64) -> Resu
   Ok(GameResult { arcade: next, mood, new_best })
 }
 
+// ---- playing with Pip ---------------------------------------------------------
+//
+// Stroking Pip, tickling her, throwing the ball, tossing her in the air: play
+// by hand, in the Pip tab. Like the arcade's games it cheers her up a little
+// and never pays seeds, and it draws on the *same* daily allowance
+// (`GAME_MOOD_PER_DAY`): an afternoon of petting adds no more mood than an
+// afternoon of games did before, so the economy of snacks is as it was.
+
+/// The ways of playing there are. Anything else is refused.
+pub const PLAYS: [&str; 5] = ["pet", "tickle", "fetch", "toss", "dance"];
+/// What one bout of play adds to Pip's mood, out of the day's allowance.
+pub const MOOD_PER_PLAY: f64 = 1.0;
+/// What picking a ripe plant adds.
+pub const MOOD_PER_HARVEST: f64 = 2.0;
+
+/// Records a bout of play: the mood to add now (0 once today's allowance,
+/// shared with the games, is used up) and the allowance after it.
+pub fn record_play(arcade: &Arcade, today: &str, kind: &str) -> Result<(Arcade, f64), String> {
+  if !PLAYS.contains(&kind) {
+    return Err("That isn't a way of playing with Pip.".to_string());
+  }
+  let mut next = arcade.clone();
+  if next.day != today {
+    next.day = today.to_string();
+    next.mood_today = 0.0;
+  }
+  let mood = MOOD_PER_PLAY.min(GAME_MOOD_PER_DAY - next.mood_today).max(0.0);
+  next.mood_today += mood;
+  Ok((next, mood))
+}
+
+// ---- reading cheers Pip up ----------------------------------------------------
+//
+// Any reading counts, in a focus session or not: each minute the ledger takes
+// cheers Pip up a little, up to a day's allowance. A finished focus session
+// still adds its own `MOOD_PER_SESSION` on top. Its own allowance, apart from
+// the games' and play's, and never seeds: those are the ledger's business.
+
+/// What a minute of reading adds to Pip's mood: twenty minutes is what a
+/// focus session adds.
+pub const MOOD_PER_READING_MINUTE: f64 = 0.25;
+/// The most reading can add in a day, by the day the minutes are credited to.
+pub const READING_MOOD_PER_DAY: f64 = 10.0;
+/// How many days' allowances are remembered: the latest read on, and the one
+/// before it (the ledger takes a late minute for yesterday, and no older).
+const READING_MOOD_DAYS_KEPT: usize = 2;
+
+/// How much mood reading has given, by local day ("2026-10-03").
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadingMood {
+  /// The latest days read on, and what reading has added on each.
+  #[serde(default)]
+  pub days: BTreeMap<String, f64>
+}
+
+impl ReadingMood {
+  /// What reading has added on `day`, out of `READING_MOOD_PER_DAY`.
+  pub fn given_on(&self, day: &str) -> f64 {
+    self.days.get(day).map(|given| spent_of_the_day(*given)).unwrap_or(0.0)
+  }
+}
+
+/// A stored amount, kept to what a day can hold (a row edited by hand, or
+/// one that will not read as a number, is not a bigger allowance).
+fn spent_of_the_day(given: f64) -> f64 {
+  given.max(0.0).min(READING_MOOD_PER_DAY)
+}
+
+/// Records minutes of reading credited to `day` (the reader's local date, as
+/// the ledger keys days): the mood to add now (0 once that day's allowance is
+/// used up) and the allowances after it.
+///
+/// Each day has its own allowance, and a day gets one only once. The two
+/// latest days are remembered, so a minute credited late to yesterday draws
+/// on what yesterday has left, not on a fresh allowance and not on today's;
+/// a day older than both adds nothing. Days only ever leave from the old end,
+/// so going back and forth between days never hands out a second allowance.
+pub fn record_reading(reading: &ReadingMood, day: &str, minutes: f64) -> (ReadingMood, f64) {
+  let wanted = minutes * MOOD_PER_READING_MINUTE;
+  // No minutes, minutes that are not a number, or a day that is not a date.
+  let Ok(date) = chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d") else {
+    return (reading.clone(), 0.0);
+  };
+  if wanted.is_nan() || wanted <= 0.0 {
+    return (reading.clone(), 0.0);
+  }
+  let day = date.format("%Y-%m-%d").to_string();
+  let mut next = reading.clone();
+  if !next.days.contains_key(&day) {
+    let oldest = next.days.keys().next().cloned();
+    let full = next.days.len() >= READING_MOOD_DAYS_KEPT;
+    if full && oldest.is_some_and(|oldest| day < oldest) {
+      // Older than every day remembered: its allowance was let go of.
+      return (next, 0.0);
+    }
+    next.days.insert(day.clone(), 0.0);
+    while next.days.len() > READING_MOOD_DAYS_KEPT {
+      next.days.pop_first();
+    }
+  }
+  let given = next.given_on(&day);
+  let mood = wanted.min(READING_MOOD_PER_DAY - given).max(0.0);
+  next.days.insert(day, given + mood);
+  (next, mood)
+}
+
+// ---- why Pip feels as she does ----------------------------------------------
+//
+// The last few things that cheered Pip up, so the Pip tab can say what moved
+// her mood and when, instead of leaving the reader to guess. This device's
+// alone (a settings row, like the arcade's scores): it explains, it is never
+// read back into the mood, and nothing is bought with it.
+
+/// How many events are kept.
+pub const MOOD_LOG_KEPT: usize = 12;
+/// The same cause again within this long joins the entry before it (ten
+/// strokes are one petting, not ten lines).
+const MOOD_LOG_JOIN_MS: i64 = 10 * 60 * 1000;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MoodEvent {
+  /// When, RFC 3339.
+  pub at: String,
+  /// "reading", "session", "treat:<id>", "harvest", "game:<id>", "play:<kind>" or "wish".
+  pub cause: String,
+  /// How much the mood actually rose (less than the rule says at the top of the scale).
+  pub gain: f64,
+  /// The mood afterwards.
+  pub mood: f64
+}
+
+fn stamp_ms(value: &str) -> i64 {
+  chrono::DateTime::parse_from_rfc3339(value).map(|at| at.timestamp_millis()).unwrap_or(0)
+}
+
+/// The log with one more event, oldest first. An event that raised nothing
+/// (Pip was already as happy as she gets) is not an event.
+pub fn log_mood(log: &[MoodEvent], event: MoodEvent) -> Vec<MoodEvent> {
+  let mut next = log.to_vec();
+  if event.gain <= 0.0 {
+    return next;
+  }
+  match next.last_mut() {
+    Some(last) if last.cause == event.cause && (stamp_ms(&event.at) - stamp_ms(&last.at)).abs() <= MOOD_LOG_JOIN_MS => {
+      last.gain += event.gain;
+      last.mood = event.mood;
+      last.at = event.at;
+    }
+    _ => next.push(event)
+  }
+  let extra = next.len().saturating_sub(MOOD_LOG_KEPT);
+  next.drain(..extra);
+  next
+}
+
 /// A fresh purchase id: random, so two devices never mint the same one.
 pub fn new_purchase_id() -> String {
   use ring::rand::SecureRandom;
@@ -788,6 +945,201 @@ mod tests {
     let tomorrow = record_game(&arcade, "2026-09-28", "flap", 5).expect("a game");
     assert_eq!(tomorrow.mood, MOOD_PER_GAME, "the cap resets on the reader's next day");
     assert_eq!(tomorrow.arcade.best.get("dash"), Some(&109));
+  }
+
+  #[test]
+  fn play_cheers_pip_up_out_of_the_games_allowance() {
+    let mut arcade = Arcade::default();
+    let mut total = 0.0;
+    for _ in 0..40 {
+      let (next, mood) = record_play(&arcade, "2026-10-03", "pet").expect("play");
+      total += mood;
+      arcade = next;
+    }
+    assert_eq!(total, GAME_MOOD_PER_DAY, "play and games share one allowance a day");
+    // The allowance is used up: a game now adds nothing either.
+    assert_eq!(record_game(&arcade, "2026-10-03", "dash", 50).expect("a game").mood, 0.0);
+    // And the other way: games first leave less for play.
+    let mut after_games = Arcade::default();
+    for _ in 0..3 {
+      after_games = record_game(&after_games, "2026-10-03", "dash", 50).expect("a game").arcade;
+    }
+    let (_, left) = record_play(&after_games, "2026-10-03", "fetch").expect("play");
+    assert_eq!(left, MOOD_PER_PLAY);
+    assert_eq!(after_games.mood_today, 3.0 * MOOD_PER_GAME);
+    // Tomorrow it starts again, and best scores are untouched by play.
+    let (tomorrow, mood) = record_play(&arcade, "2026-10-04", "toss").expect("play");
+    assert_eq!((mood, tomorrow.mood_today), (MOOD_PER_PLAY, MOOD_PER_PLAY));
+    assert!(tomorrow.best.is_empty());
+    assert!(record_play(&arcade, "2026-10-03", "bribe").is_err());
+  }
+
+  /// Minute after minute of reading credited to one day.
+  fn read_on(reading: &ReadingMood, day: &str, credits: &[f64]) -> (ReadingMood, f64) {
+    credits.iter().fold((reading.clone(), 0.0), |(reading, total), minutes| {
+      let (next, mood) = record_reading(&reading, day, *minutes);
+      (next, total + mood)
+    })
+  }
+
+  #[test]
+  fn reading_cheers_pip_up_by_the_minute() {
+    let (reading, mood) = record_reading(&ReadingMood::default(), "2026-10-03", 1.0);
+    assert_eq!(mood, MOOD_PER_READING_MINUTE);
+    assert_eq!(reading.given_on("2026-10-03"), 0.25);
+    // Part of a minute is part of a quarter, and they add up as they are.
+    let (reading, mood) = record_reading(&reading, "2026-10-03", 0.5);
+    assert_eq!(mood, 0.125);
+    assert_eq!(reading.given_on("2026-10-03"), 0.375);
+    // Twenty minutes, a minute at a time, is what a focus session adds.
+    let (reading, total) = read_on(&ReadingMood::default(), "2026-10-03", &[1.0; 20]);
+    assert_eq!(total, crate::habit::seeds::MOOD_PER_SESSION);
+    assert_eq!(reading.given_on("2026-10-03"), 5.0);
+    // The heartbeat's odd lengths come to the same as their sum.
+    let (_, odd) = read_on(&ReadingMood::default(), "2026-10-03", &[1.02, 0.97, 1.31, 0.7]);
+    assert!((odd - 1.0).abs() < 1e-9);
+  }
+
+  #[test]
+  fn reading_adds_no_more_than_a_days_allowance() {
+    // Forty minutes use the day up; the next hour adds nothing.
+    let (reading, total) = read_on(&ReadingMood::default(), "2026-10-03", &[1.0; 100]);
+    assert_eq!(total, READING_MOOD_PER_DAY);
+    assert_eq!(reading.given_on("2026-10-03"), READING_MOOD_PER_DAY);
+    assert_eq!(record_reading(&reading, "2026-10-03", 15.0), (reading.clone(), 0.0));
+    // The last credit before the cap gets only what is left.
+    let (nearly, _) = read_on(&ReadingMood::default(), "2026-10-03", &[13.0; 3]);
+    assert_eq!(nearly.given_on("2026-10-03"), 9.75);
+    let (full, last) = record_reading(&nearly, "2026-10-03", 15.0);
+    assert_eq!((last, full.given_on("2026-10-03")), (0.25, READING_MOOD_PER_DAY));
+    // Tomorrow it starts again.
+    let (tomorrow, mood) = record_reading(&full, "2026-10-04", 2.0);
+    assert_eq!(mood, 0.5);
+    assert_eq!((tomorrow.given_on("2026-10-04"), tomorrow.given_on("2026-10-03")), (0.5, READING_MOOD_PER_DAY));
+  }
+
+  #[test]
+  fn a_late_credit_to_yesterday_draws_on_yesterdays_allowance() {
+    // Last night used yesterday up; this morning has begun.
+    let (reading, _) = read_on(&ReadingMood::default(), "2026-10-02", &[15.0; 3]);
+    let (reading, _) = record_reading(&reading, "2026-10-03", 8.0);
+    assert_eq!(reading.given_on("2026-10-03"), 2.0);
+    // The minute Leaflet was closed in the middle of arrives now: yesterday
+    // has nothing left, and today's allowance is not touched.
+    let (late, mood) = record_reading(&reading, "2026-10-02", 0.75);
+    assert_eq!(mood, 0.0);
+    assert_eq!(late, reading);
+
+    // Yesterday had some left: the late minute gets it, out of yesterday's.
+    let (reading, _) = record_reading(&ReadingMood::default(), "2026-10-02", 12.0);
+    let (reading, _) = record_reading(&reading, "2026-10-03", 8.0);
+    let (late, mood) = record_reading(&reading, "2026-10-02", 1.0);
+    assert_eq!(mood, 0.25);
+    assert_eq!((late.given_on("2026-10-02"), late.given_on("2026-10-03")), (3.25, 2.0));
+  }
+
+  #[test]
+  fn going_back_and_forth_between_days_never_hands_out_a_second_allowance() {
+    let mut reading = ReadingMood::default();
+    let mut total = 0.0;
+    for _ in 0..50 {
+      for day in ["2026-10-03", "2026-10-02", "2026-10-04", "2026-10-01", "2026-10-03", "2026-10-02"] {
+        let (next, mood) = record_reading(&reading, day, 15.0);
+        reading = next;
+        total += mood;
+      }
+    }
+    // The 3rd and the 4th: one allowance each, however often they come round.
+    // The 2nd had one credit (15 minutes) while it was still remembered, and
+    // nothing once the 4th had pushed it out. The 1st was older than both
+    // days remembered from the start.
+    assert_eq!(total, 2.0 * READING_MOOD_PER_DAY + 15.0 * MOOD_PER_READING_MINUTE);
+    assert_eq!(reading.days.keys().collect::<Vec<_>>(), ["2026-10-03", "2026-10-04"]);
+
+    // A day skipped and read late gets its one allowance, and the day it
+    // pushed out does not come back.
+    let (reading, _) = record_reading(&ReadingMood::default(), "2026-10-05", 15.0);
+    let (reading, _) = record_reading(&reading, "2026-10-07", 15.0);
+    let (reading, tuesday) = record_reading(&reading, "2026-10-06", 100.0);
+    assert_eq!(tuesday, READING_MOOD_PER_DAY);
+    assert_eq!(record_reading(&reading, "2026-10-05", 100.0).1, 0.0);
+    assert_eq!(record_reading(&reading, "2026-10-06", 100.0).1, 0.0);
+  }
+
+  #[test]
+  fn minutes_that_are_not_reading_add_nothing() {
+    let (some, _) = record_reading(&ReadingMood::default(), "2026-10-03", 4.0);
+    for minutes in [0.0, -0.0, -5.0, f64::NAN, f64::NEG_INFINITY] {
+      assert_eq!(record_reading(&some, "2026-10-03", minutes), (some.clone(), 0.0), "{minutes}");
+      // Nor do they start a day.
+      assert_eq!(record_reading(&some, "2026-10-04", minutes), (some.clone(), 0.0), "{minutes}");
+    }
+    // More minutes than a day has is still only a day's allowance.
+    for minutes in [1.0e12, f64::MAX, f64::INFINITY] {
+      let (reading, mood) = record_reading(&ReadingMood::default(), "2026-10-03", minutes);
+      assert_eq!((mood, reading.given_on("2026-10-03")), (READING_MOOD_PER_DAY, READING_MOOD_PER_DAY), "{minutes}");
+      assert_eq!(record_reading(&some, "2026-10-03", minutes).1, READING_MOOD_PER_DAY - 1.0, "{minutes}");
+    }
+    // A day that is not a date has no allowance.
+    for day in ["", "today", "2026-13-40", "03/10/2026"] {
+      assert_eq!(record_reading(&some, day, 5.0), (some.clone(), 0.0), "{day}");
+    }
+  }
+
+  #[test]
+  fn a_reading_allowance_that_will_not_read_is_not_a_bigger_one() {
+    // The settings row is this device's own, and could be edited by hand.
+    let odd: ReadingMood = serde_json::from_str(r#"{"days":{"2026-10-02":-40.0,"2026-10-03":250.0}}"#).expect("parses");
+    assert_eq!(record_reading(&odd, "2026-10-03", 15.0).1, 0.0, "more than a day holds is a day used up");
+    assert_eq!(record_reading(&odd, "2026-10-02", 100.0).1, READING_MOOD_PER_DAY, "less than nothing is nothing");
+    assert_eq!(serde_json::from_str::<ReadingMood>("{}").expect("parses"), ReadingMood::default());
+    let (reading, _) = record_reading(&ReadingMood::default(), "2026-10-03", 2.0);
+    assert_eq!(serde_json::to_string(&reading).expect("encodes"), r#"{"days":{"2026-10-03":0.5}}"#);
+  }
+
+  fn cheered(at: &str, cause: &str, gain: f64, mood: f64) -> MoodEvent {
+    MoodEvent { at: at.into(), cause: cause.into(), gain, mood }
+  }
+
+  #[test]
+  fn the_mood_log_keeps_the_last_few_things_that_cheered_pip_up() {
+    let mut log = Vec::new();
+    log = log_mood(&log, cheered("2026-10-03T09:00:00+00:00", "session", 5.0, 60.0));
+    log = log_mood(&log, cheered("2026-10-03T09:30:00+00:00", "treat:apple", 5.0, 65.0));
+    assert_eq!(log.len(), 2);
+    // Strokes close together are one petting.
+    log = log_mood(&log, cheered("2026-10-03T09:31:00+00:00", "play:pet", 1.0, 66.0));
+    log = log_mood(&log, cheered("2026-10-03T09:32:00+00:00", "play:pet", 1.0, 67.0));
+    assert_eq!(log.len(), 3);
+    assert_eq!(log[2], cheered("2026-10-03T09:32:00+00:00", "play:pet", 2.0, 67.0));
+    // Later, it is a new one.
+    log = log_mood(&log, cheered("2026-10-03T12:00:00+00:00", "play:pet", 1.0, 66.0));
+    assert_eq!(log.len(), 4);
+    // Nothing gained is nothing to say.
+    assert_eq!(log_mood(&log, cheered("2026-10-03T12:01:00+00:00", "treat:cake", 0.0, 100.0)), log);
+    // Only the last few are kept, oldest dropped first.
+    for hour in 0..30 {
+      log = log_mood(&log, cheered(&format!("2026-10-04T{:02}:00:00+00:00", hour % 24), if hour % 2 == 0 { "session" } else { "harvest" }, 2.0, 70.0));
+    }
+    assert_eq!(log.len(), MOOD_LOG_KEPT);
+    assert_eq!(log.last().map(|event| event.cause.as_str()), Some("harvest"));
+  }
+
+  #[test]
+  fn reading_minute_by_minute_is_one_line_in_the_mood_log() {
+    // Forty minutes, a quarter of a point a minute: each joins the one
+    // before (the ten minutes run from the latest), and the quarters add up
+    // as quarters, not as ones.
+    let mut log = vec![cheered("2026-10-03T08:00:00+00:00", "session", 5.0, 60.0)];
+    for minute in 0..40 {
+      let mood = 60.0 + 0.25 * f64::from(minute + 1);
+      log = log_mood(&log, cheered(&format!("2026-10-03T09:{minute:02}:00+00:00"), "reading", MOOD_PER_READING_MINUTE, mood));
+    }
+    assert_eq!(log.len(), 2);
+    assert_eq!(log[1], cheered("2026-10-03T09:39:00+00:00", "reading", 10.0, 70.0));
+    // A read later in the day is a line of its own, a quarter still a quarter.
+    log = log_mood(&log, cheered("2026-10-03T15:00:00+00:00", "reading", 0.25, 70.25));
+    assert_eq!((log.len(), log[2].gain), (3, 0.25));
   }
 
   #[test]
