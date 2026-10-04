@@ -7,22 +7,26 @@ is in [deploy.md](deploy.md) (the checklist) and
 
 ## Read this first
 
-**The version is 1.2.0, nothing from these sessions is committed, and no 1.2.0
-package has been built.** The owner tested 1.1.0 and sent a long list of bugs
-and wishes over two days; all of the work below is in the working tree on
-`release/1.1`, on top of its two unpushed commits. The packages in
-`target\msix` are 1.1.0 and older.
+**The version is 1.2.0, the work is committed on `release/1.2` (not pushed),
+and no 1.2.0 package has been built.** The owner tested 1.1.0 and sent a long
+list of bugs and wishes over two days. The packages in `target\msix` are
+1.1.0 and older.
 
 | Branch | State |
 | --- | --- |
 | `main` | Pushed to GitHub at `399f6c4` |
 | `release/1.1` | Two commits on `main`, **not pushed**: `8eb6a1e` version 1.1.0, `51b0341` release docs without a fixed version |
-| Working tree | Everything below, uncommitted: about 366 changed or new paths (some 190 of them regenerated icons and logo files) |
+| `release/1.2` | Eight themed commits on `release/1.1`, **not pushed**: version, logo, server, backend, Pip, readers, app, docs |
+| Working tree | Clean, bar the untracked `.claude/` (the preview's launch file) |
 
-Suggested next step: the owner looks at it (list below), then commit in themed
-commits on a `release/1.2` branch, build the package, redeploy the server.
+The commits are split by folder, not by change, because the big files
+(`ReaderView.tsx`, `lib.rs`, `index.css`) carry several themes each. Only the
+tip was checked: a commit in the middle of the eight may not type-check alone.
 
-## Current state (all run together at the end, 2026-10-04)
+Suggested next step: the owner looks at it (list below), builds the package,
+redeploys the server, then fast-forwards `main` and pushes.
+
+## Current state## Current state (all run together at the end, 2026-10-04)
 
 | | |
 | --- | --- |
