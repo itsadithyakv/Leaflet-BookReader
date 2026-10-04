@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSectionWeights, isChapterLike, spineIndexForProgress } from "./progress";
+import { buildSectionWeights, isChapterLike, spineIndexForProgress, outsideStory } from "./progress";
 
 const section = (href: string, bytes: number, linear = true) => ({ href, bytes, linear });
 const spine = (items: { href: string }[]) => items.map((item) => item.href);
@@ -110,5 +110,28 @@ describe("isChapterLike", () => {
     expect(isChapterLike("XIV")).toBe(true);
     expect(isChapterLike("Copyright")).toBe(false);
     expect(isChapterLike("The Boy Who Lived")).toBe(false);
+  });
+});
+
+describe("a look outside the story", () => {
+  it("does not reset progress: the map opened from chapter 20 leaves it, and the place, alone", () => {
+    expect(outsideStory("front", 0.62)).toEqual({ progress: null, placeFollows: false });
+    expect(outsideStory("front", 0.05)).toEqual({ progress: null, placeFollows: false });
+  });
+
+  it("is reading when the reader really is at the start", () => {
+    expect(outsideStory("front", 0)).toEqual({ progress: 0, placeFollows: true });
+    expect(outsideStory("front", 0.015)).toEqual({ progress: 0, placeFollows: true });
+    // A book never opened before has no progress to speak of.
+    expect(outsideStory("front", Number.NaN)).toEqual({ progress: 0, placeFollows: true });
+  });
+
+  it("leaves progress where the story is for back matter: a footnote is not finishing the book", () => {
+    expect(outsideStory("back", 0.4)).toEqual({ progress: null, placeFollows: false });
+  });
+
+  it("lets the place follow into the back matter once the story is finished", () => {
+    expect(outsideStory("back", 1)).toEqual({ progress: null, placeFollows: true });
+    expect(outsideStory("back", 0.99)).toEqual({ progress: null, placeFollows: true });
   });
 });

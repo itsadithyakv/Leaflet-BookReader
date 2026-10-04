@@ -106,6 +106,17 @@ export const useAnnotations = (bookId: string) => {
   return { bookmarks, highlights, addBookmark, addHighlight, update, remove };
 };
 
+/**
+ * A line of a book's text as Markdown shows it, mark for mark. In the quote,
+ * a line that happens to start like a heading ("# 1"), a list ("- x",
+ * "1. x"), a quote of its own or a rule ("---") would be read as one; a
+ * backslash before the mark keeps the line as the book printed it.
+ */
+const literalLine = (line: string) =>
+  line
+    .replace(/^(\s*)(#{1,6}(?=\s|$)|>|[-+*](?=\s|$)|[-=_*](?=[-=_*\s]*$))/, "$1\\$2")
+    .replace(/^(\s*\d{1,9})([.)])(?=\s|$)/, "$1\\$2");
+
 /** A book's highlights and notes as Markdown, for pasting elsewhere. */
 export const highlightsMarkdown = (title: string, author: string | null | undefined, highlights: Annotation[]) => {
   const lines = [`# ${title}`];
@@ -114,11 +125,14 @@ export const highlightsMarkdown = (title: string, author: string | null | undefi
   }
   let chapter: string | null | undefined;
   for (const item of highlights) {
-    if (item.chapter && item.chapter !== chapter) {
-      chapter = item.chapter;
+    // As the highlights dialog groups them (`groupByChapter`): a label is what
+    // it reads as, so a line break in one cannot end its heading early.
+    const label = item.chapter?.replace(/\s+/g, " ").trim();
+    if (label && label !== chapter) {
+      chapter = label;
       lines.push("", `## ${chapter}`);
     }
-    lines.push("", ...(item.text ?? "").split("\n").map((line) => `> ${line}`));
+    lines.push("", ...(item.text ?? "").split(/\r\n|\r|\n/).map((line) => `> ${literalLine(line)}`));
     if (item.note) {
       lines.push("", item.note);
     }

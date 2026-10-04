@@ -1,0 +1,105 @@
+/* The text layer over a PDF page (readers/pdfTextLayer.ts, pageSources.ts
+ * `layText`). These are pdf.js's own rules for it, from
+ * pdfjs-dist/web/pdf_viewer.css, and only those: its `TextLayer` places every
+ * run of text as a span and relies on them. Scoped to the page reader's page.
+ * Keep in step with the installed pdfjs-dist when it is upgraded. */
+
+.pdf-reader-page .textLayer {
+  position: absolute;
+  text-align: initial;
+  inset: 0;
+  overflow: clip;
+  opacity: 1;
+  line-height: 1;
+  -webkit-text-size-adjust: none;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: CanvasText;
+  z-index: 2;
+  /* The reader's own type settings must not reach the layer: pdf.js measures
+     each run in a plain font and stretches it to the width it has on the page. */
+  font-weight: normal;
+  font-style: normal;
+  letter-spacing: normal;
+  word-spacing: normal;
+  text-transform: none;
+  text-indent: 0;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.pdf-reader-page .textLayer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+
+.pdf-reader-page .textLayer > :not(.markedContent),
+.pdf-reader-page .textLayer .markedContent span:not(.markedContent) {
+  z-index: 1;
+}
+
+.pdf-reader-page .textLayer span.markedContent {
+  top: 0;
+  height: 0;
+}
+
+.pdf-reader-page .textLayer span[role="img"] {
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+/* The selection takes the reader's accent, which is chosen to show on every
+   page finish; pdf.js's system blue is lost on a dark page. */
+.pdf-reader-page .textLayer ::selection {
+  background: rgba(0 0 255 / 0.25);
+  background: color-mix(in srgb, var(--reader-accent, AccentColor) 38%, transparent);
+}
+
+.pdf-reader-page .textLayer br::selection {
+  background: transparent;
+}
+
+.pdf-reader-page .textLayer .endOfContent {
+  display: block;
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: 0;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.pdf-reader-page .textLayer.selecting .endOfContent {
+  top: 0;
+}
+
+/* A page the PDF says to show turned: the layer is laid out unturned and
+   turned as a whole. */
+.pdf-reader-page .textLayer[data-main-rotation="90"] {
+  transform: rotate(90deg) translateY(-100%);
+}
+
+.pdf-reader-page .textLayer[data-main-rotation="180"] {
+  transform: rotate(180deg) translate(-100%, -100%);
+}
+
+.pdf-reader-page .textLayer[data-main-rotation="270"] {
+  transform: rotate(270deg) translateX(-100%);
+}
+
+/* pdf.js measures text on a canvas it adds to the end of the document; this
+   is its rule for keeping that canvas out of the page. It is outside the
+   reader's page, so it cannot be scoped to it. */
+.hiddenCanvasElement {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  display: none;
+}

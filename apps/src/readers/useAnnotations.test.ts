@@ -45,5 +45,43 @@ describe("highlightsMarkdown", () => {
 
   it("quotes every line of a multi-line highlight", () => {
     expect(highlightsMarkdown("T", null, [highlight("one\ntwo", null)])).toBe("# T\n\n> one\n> two\n");
+    // Line breaks as Windows writes them leave nothing behind.
+    expect(highlightsMarkdown("T", null, [highlight("one\r\ntwo", null)])).toBe("# T\n\n> one\n> two\n");
+  });
+
+  it("keeps a highlighted line that starts like Markdown as the book printed it", () => {
+    const text = ["# 1", "- a dash", "1. First", "2) Second", "> quoted", "---", "* * *", "  + indented"].join("\n");
+    expect(highlightsMarkdown("T", null, [highlight(text, null)])).toBe(
+      [
+        "# T",
+        "",
+        "> \\# 1",
+        "> \\- a dash",
+        "> 1\\. First",
+        "> 2\\) Second",
+        "> \\> quoted",
+        "> \\---",
+        "> \\* * *",
+        ">   \\+ indented",
+        ""
+      ].join("\n")
+    );
+    // Ordinary lines are left alone, marks inside them too.
+    const plain = ["1984 was a year", "#hashtag", "-5 degrees", "a - b", "*starred* word", "3.14"].join("\n");
+    expect(highlightsMarkdown("T", null, [highlight(plain, null)])).toBe(
+      `# T\n\n${plain
+        .split("\n")
+        .map((line) => `> ${line}`)
+        .join("\n")}\n`
+    );
+  });
+
+  it("writes one heading for labels that read the same, on one line", () => {
+    const markdown = highlightsMarkdown("T", null, [
+      highlight("one", "Chapter\n      1"),
+      highlight("two", "Chapter 1 "),
+      highlight("three", "  ")
+    ]);
+    expect(markdown).toBe("# T\n\n## Chapter 1\n\n> one\n\n> two\n\n> three\n");
   });
 });

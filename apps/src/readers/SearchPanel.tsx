@@ -10,6 +10,8 @@ type SearchPanelProps = {
   chapterOf: (section: number) => string | null;
   onOpen: (hit: SearchHit) => void;
   onClose: () => void;
+  /** Words to search for straight away (text selected in the book); the panel opens empty without it. */
+  initialQuery?: string;
 };
 
 const LIMIT = 200;
@@ -37,8 +39,8 @@ const marked = (excerpt: string, query: string): ReactNode[] => {
  * their chapter. Selecting one jumps there and marks the words for a moment.
  * Escape closes it; Enter opens the first result.
  */
-export const SearchPanel = ({ book, chapterOf, onOpen, onClose }: SearchPanelProps) => {
-  const [query, setQuery] = useState("");
+export const SearchPanel = ({ book, chapterOf, onOpen, onClose, initialQuery = "" }: SearchPanelProps) => {
+  const [query, setQuery] = useState(initialQuery);
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [progress, setProgress] = useState<number | null>(null);
   const input = useRef<HTMLInputElement | null>(null);

@@ -84,6 +84,9 @@ export const getReadingTimeBand = (date = new Date()): ReadingTimeBand => {
   return "night";
 };
 
+/** An everyday word (given in lower case, letters only): one SpeedRead never holds longer. */
+export const isCommonWord = (normalized: string) => COMMON_RSVP_WORDS.has(normalized);
+
 export const estimateWordDifficulty = (word: string) => {
   const letters = word.replace(/[^\p{L}]/gu, "");
   const lengthPenalty = Math.max(0, letters.length - 6) * 0.045;

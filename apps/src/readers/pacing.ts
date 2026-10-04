@@ -2,17 +2,19 @@
 
 import type { ReaderWord } from "./readerTypes";
 
+/** Where the eye rests in a word shown on its own, and how the word is fitted to the stage: see `rsvpWord.ts`. */
+export { rsvpPivotIndex, rsvpFit, RSVP_ANCHOR } from "./rsvpWord";
+export { rsvpStageVars } from "./rsvpMeasure";
+
+/** How SpeedRead holds a new name or word longer, and eases off after Play: see `rsvpHold.ts`. */
+export { noveltyHolds, rsvpRamp, MAX_WORD_HOLD } from "./rsvpHold";
+
 /**
- * Where the eye should fixate in a word shown on its own (the "optimal
- * recognition point"): slightly left of centre, by word length. Leading
- * quotes and brackets are skipped so "“Hello" pivots on the e, not the quote.
+ * A word of the book's text: letters and digits, with apostrophes and hyphens
+ * inside it ("wouldn’t", "mother-in-law"), and a figure kept whole ("1,200",
+ * "3.5") instead of being read out as two numbers.
  */
-export const rsvpPivotIndex = (text: string) => {
-  const lead = text.match(/^[“"'‘(\[]*/)?.[0].length ?? 0;
-  const length = Math.max(1, text.length - lead);
-  const offset = length <= 1 ? 0 : length <= 5 ? 1 : length <= 9 ? 2 : length <= 13 ? 3 : 4;
-  return Math.min(text.length - 1, lead + offset);
-};
+export const READER_WORD_PATTERN = /[\p{L}\p{N}]+(?:[’'\-][\p{L}\p{N}]+|(?<=\p{N})[.,]\p{N}+)*/gu;
 
 /** How long auto-scroll or Smart Read keeps crediting time after the last real input. */
 export const HANDS_FREE_GRACE_MS = 5 * 60_000;

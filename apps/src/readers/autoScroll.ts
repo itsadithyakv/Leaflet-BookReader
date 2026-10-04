@@ -10,13 +10,14 @@ export const AUTO_SCROLL_TUNE_COOLDOWN_MS = 12_000;
 
 /**
  * Auto-scroll pace in lines of text per minute. The slider (0..100) sets this;
- * pixels follow from the font size, so a bigger font scrolls faster in pixels
- * and exactly as fast in reading. Lines are 1.8em tall (see the typography).
+ * pixels follow from the height of a line (`lineHeightPx` in readerTypes: the
+ * type size and the line spacing), so bigger or airier type scrolls faster in
+ * pixels and exactly as fast in reading.
  */
 export const autoScrollLinesPerMinute = (speed: number) =>
   Math.round((3 + Math.min(100, Math.max(0, speed)) * 0.45) * 1.852);
-export const autoScrollPixelsPerSecond = (speed: number, fontSize: number) =>
-  (autoScrollLinesPerMinute(speed) * 1.8 * fontSize) / 60;
+export const autoScrollPixelsPerSecond = (speed: number, linePx: number) =>
+  (autoScrollLinesPerMinute(speed) * linePx) / 60;
 
 /** The slider position for a pace in lines a minute: the other way from `autoScrollLinesPerMinute`. */
 export const autoScrollSpeedForLines = (linesPerMinute: number) =>

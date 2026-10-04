@@ -20,9 +20,11 @@ const FLUSH_MS = 60_000;
  *
  * This is the only source of ledger minutes. A focus session labels a span of
  * reading rather than granting time of its own, so a timer you start and walk
- * away from earns nothing, and reading without a timer still counts. The
- * session's clock counts the same moments, so a session can no longer claim
- * 175 minutes for ten minutes of reading and a window left open.
+ * away from earns nothing, and reading without a timer still counts: it goes
+ * to the day's ledger the same way, and the shelf shows what a day read
+ * outside its sessions as that day's free read. The session's clock counts
+ * the same moments, so a session can no longer claim 175 minutes for ten
+ * minutes of reading and a window left open.
  *
  * Reading is: a book open, Leaflet the app in front, and some input in the
  * last IDLE_MS. Each tick credits `min(elapsed, TICK_MS)`, so a sleeping laptop
@@ -30,10 +32,8 @@ const FLUSH_MS = 60_000;
  * was read up to that moment and nothing while away.
  */
 export const useReadingHeartbeat = (active: boolean) => {
-  const creditMinutes = useHabitStore((state) => state.creditMinutes);
   const lastActivityRef = useRef(Date.now());
   const lastTickRef = useRef(Date.now());
-  const pendingMsRef = useRef(0);
   const lastFlushRef = useRef(Date.now());
 
   const markActivity = useCallback(() => {
@@ -45,13 +45,11 @@ export const useReadingHeartbeat = (active: boolean) => {
       return;
     }
 
+    // The time counted between flushes is held by the store, which keeps it
+    // in storage: Leaflet closed mid-read credits it when it next opens.
     const flush = () => {
-      const minutes = pendingMsRef.current / 60000;
-      pendingMsRef.current = 0;
       lastFlushRef.current = Date.now();
-      if (minutes > 0) {
-        void creditMinutes(minutes);
-      }
+      void useHabitStore.getState().flushReading();
     };
 
     const onActivity = () => markActivity();
@@ -64,7 +62,10 @@ export const useReadingHeartbeat = (active: boolean) => {
     events.forEach((name) => window.addEventListener(name, onActivity, { passive: true }));
 
     const session = () => useHabitStore.getState();
-    const idle = () => Date.now() - lastActivityRef.current > IDLE_MS;
+    // Either way from the last input: with the clock set back the difference
+    // is negative, and an open book left alone would read as in use until
+    // the clock caught up.
+    const idle = () => Math.abs(Date.now() - lastActivityRef.current) > IDLE_MS;
 
     /** Ends a beat: its time counts if it was reading, and the next one starts now. */
     const beat = (reading: boolean) => {
@@ -72,7 +73,9 @@ export const useReadingHeartbeat = (active: boolean) => {
       const add = Math.min(Math.max(0, now - lastTickRef.current), TICK_MS);
       lastTickRef.current = now;
       if (reading && add > 0) {
-        pendingMsRef.current += add;
+        // The day's ledger takes it with or without a session; a running
+        // session's clock counts the same moments.
+        session().addReading(add);
         session().addSessionReading(add);
       } else {
         session().setSessionReading(false);
@@ -116,7 +119,9 @@ export const useReadingHeartbeat = (active: boolean) => {
 
     const timer = window.setInterval(() => {
       beat(reading());
-      if (Date.now() - lastFlushRef.current >= FLUSH_MS) {
+      // Either way, for the same reason: a clock set back must not hold the
+      // flush off until it catches up (what is held is capped, and the rest lost).
+      if (Math.abs(Date.now() - lastFlushRef.current) >= FLUSH_MS) {
         flush();
       }
     }, TICK_MS);
@@ -135,7 +140,7 @@ export const useReadingHeartbeat = (active: boolean) => {
       // Closing the reader must not throw away the minutes already earned.
       flush();
     };
-  }, [active, creditMinutes, markActivity]);
+  }, [active, markActivity]);
 
   return markActivity;
 };

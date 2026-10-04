@@ -268,9 +268,11 @@ body::before {
   outline-offset: 3px;
 }
 
+/* The face fills the button, so the button's border is its only ring. */
 .profile-button > :first-child {
   border-radius: 9999px;
   overflow: hidden;
+  box-shadow: none;
 }
 
 /* Backing up: a thin arc runs round the frame. */
@@ -444,61 +446,67 @@ body::before {
   color: var(--reader-accent);
 }
 
+/* Dotty marks the line being read, and should not compete with the text: a
+   small flat dot that glides from one line to the next. The ring, the bounce
+   and the sparks are for when a hand reaches for it. */
 .reader-dot {
   isolation: isolate;
-  background: var(--reader-dot-color);
-  border: 2px solid var(--reader-dot-border);
-  box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--reader-dot-color) 18%, transparent),
-    0 0 12px color-mix(in srgb, var(--reader-dot-color) 38%, transparent),
-    0 2px 7px rgba(0, 0, 0, 0.24);
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--reader-dot-color) 82%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--reader-dot-color) 13%, transparent);
   cursor: grab;
   left: 8px;
   touch-action: none;
+  transition:
+    top 0.5s cubic-bezier(0.33, 1, 0.68, 1),
+    left 0.3s ease,
+    opacity 0.25s ease,
+    transform 0.16s ease,
+    box-shadow 0.2s ease;
 }
 
+/* The dot is small; what a pointer or a finger can catch is not. */
 .reader-dot::before {
   position: absolute;
-  inset: -6px;
+  inset: -10px;
   z-index: -1;
-  border: 1px solid color-mix(in srgb, var(--reader-dot-color) 42%, transparent);
+  border: 1px solid transparent;
   border-radius: 9999px;
   content: "";
-  opacity: 0;
-  pointer-events: none;
-  animation: readerDotGlow 2.6s ease-out infinite;
-}
-
-.reader-dot::after {
-  position: absolute;
-  top: 1px;
-  left: 2px;
-  width: 3px;
-  height: 2px;
-  border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.76);
-  content: "";
-  pointer-events: none;
+  transition: border-color 0.2s ease, inset 0.2s ease;
 }
 
 .reader-dot:hover:not(.reader-dot-dragging),
 .reader-dot:focus-visible:not(.reader-dot-dragging) {
   animation: readerDotHoverBounce 0.82s cubic-bezier(0.28, 0.84, 0.42, 1) infinite;
+  background: var(--reader-dot-color);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--reader-dot-color) 22%, transparent),
+    0 0 10px color-mix(in srgb, var(--reader-dot-color) 40%, transparent);
   outline: none;
 }
 
 .reader-dot:hover:not(.reader-dot-dragging)::before,
 .reader-dot:focus-visible:not(.reader-dot-dragging)::before {
-  border-color: color-mix(in srgb, var(--reader-dot-color) 72%, white);
-  animation-duration: 0.78s;
+  inset: -6px;
+  border-color: color-mix(in srgb, var(--reader-dot-color) 60%, transparent);
 }
 
 .reader-dot-dragging {
   cursor: grabbing;
-  transform: scale(1.38) !important;
+  background: var(--reader-dot-color);
+  transform: scale(1.5) !important;
+  /* Under the hand it keeps up with the pointer rather than gliding after it. */
+  transition: transform 0.16s ease, box-shadow 0.2s ease;
   box-shadow:
-    0 0 0 5px color-mix(in srgb, var(--reader-dot-color) 24%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--reader-dot-color) 24%, transparent),
     0 3px 10px rgba(0, 0, 0, 0.32);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reader-dot {
+    transition: opacity 0.25s ease;
+  }
 }
 
 .reader-dot-reacquired {
@@ -577,21 +585,6 @@ body::before {
 .reader-dot:hover:not(.reader-dot-dragging) .reader-dot-spark-5,
 .reader-dot:focus-visible:not(.reader-dot-dragging) .reader-dot-spark-5 {
   animation-delay: -0.9s;
-}
-
-@keyframes readerDotGlow {
-  0% {
-    opacity: 0;
-    transform: scale(0.55);
-  }
-  24% {
-    opacity: 0.62;
-  }
-  72%,
-  100% {
-    opacity: 0;
-    transform: scale(1.55);
-  }
 }
 
 @keyframes readerDotHoverBounce {
@@ -828,7 +821,58 @@ body::before {
   bottom: 0;
   left: 0;
   z-index: 39;
-  width: 6px;
+  width: 10px;
+}
+
+/* The chapter list slides wholly out of sight, and nothing said it was there.
+   This tab stays on the left edge: faint while reading, plain under the
+   pointer, and a click (or a rest of the pointer) opens the list. */
+.reader-sidebar-tab {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  z-index: 39;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 76px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--reader-page-ink, var(--reader-text)) 16%, transparent);
+  border-left: 0;
+  border-radius: 0 10px 10px 0;
+  background: color-mix(in srgb, var(--reader-page-ink, var(--reader-text)) 9%, transparent);
+  color: color-mix(in srgb, var(--reader-page-ink, var(--reader-text)) 58%, transparent);
+  transform: translateY(-50%);
+  transition:
+    width 0.2s ease,
+    background 0.2s ease,
+    color 0.2s ease,
+    opacity 0.2s ease;
+}
+
+.reader-sidebar-tab .material-symbols-outlined {
+  font-size: 16px;
+}
+
+.reader-sidebar-tab:hover,
+.reader-sidebar-tab:focus-visible {
+  width: 24px;
+  background: color-mix(in srgb, var(--reader-page-ink, var(--reader-text)) 18%, transparent);
+  color: var(--reader-accent);
+  outline: none;
+}
+
+.reader-sidebar-tab.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .reader-sidebar-tab {
+    width: 22px;
+    height: 88px;
+  }
 }
 
 .reader-sidebar-open {
@@ -973,6 +1017,41 @@ body::before {
 
 .reader-container.reader-pages iframe {
   height: 100% !important;
+}
+
+/* Turning into another chapter: the new page comes in from the side it was
+   turned from. (Within a chapter the columns themselves slide across.) */
+.reader-container.reader-pages[data-turn="out"] .epub-container {
+  opacity: 0;
+}
+
+.reader-container.reader-pages[data-turn="next"] .epub-container {
+  animation: readerPageInNext 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.reader-container.reader-pages[data-turn="prev"] .epub-container {
+  animation: readerPageInPrev 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes readerPageInNext {
+  from {
+    opacity: 0;
+    transform: translateX(48px);
+  }
+}
+
+@keyframes readerPageInPrev {
+  from {
+    opacity: 0;
+    transform: translateX(-48px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reader-container.reader-pages[data-turn] .epub-container {
+    animation: none;
+    opacity: 1;
+  }
 }
 
 /* ---- Session shelf ----
@@ -1977,6 +2056,21 @@ body::before {
 .reader-notes-input:focus {
   border-color: var(--reader-accent);
 }
+/* Above the chapter bar, and above auto-scroll's or Smart Read's controls when
+   they are showing: it used to sit in exactly their place, underneath them,
+   so a selection could neither be highlighted nor let go. */
+.reader-selection-dock {
+  position: absolute;
+  bottom: 64px;
+  left: 50%;
+  z-index: 46;
+  transform: translateX(-50%);
+}
+
+.reader-selection-dock.is-above-pace {
+  bottom: calc(118px + env(safe-area-inset-bottom, 0px));
+}
+
 .reader-selection-bar {
   display: flex;
   align-items: center;
@@ -2092,7 +2186,19 @@ body::before {
   color: var(--rsvp-text);
 }
 
+/* --rsvp-anchor: where the pivot letter is held, from the reticle's left. It
+   is left of the middle because the pivot is left of a word's middle: held
+   at the middle, every word ran off to the right. It is a fixed distance in
+   the stage's own type (RSVP_ANCHOR_EM in readers/rsvpWord.ts), not a share
+   of the stage's width: the type grows with the window and the stage does
+   not, so a share put every word left of the middle on a small window.
+   --rsvp-left / --rsvp-right: how far the word reaches either side of the
+   spot, in em, measured (readers/rsvpMeasure.ts); the line's type is the
+   largest that keeps both inside the stage as it really is. --rsvp-fit is
+   the older estimate, for where type cannot be sized by its container. */
 .reader-rsvp-reticle {
+  --rsvp-size: clamp(2.4rem, 5.2vw, 4.4rem);
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   width: min(720px, 100%);
@@ -2107,7 +2213,7 @@ body::before {
 .reader-rsvp-guide::after {
   content: "";
   position: absolute;
-  left: 50%;
+  left: var(--rsvp-anchor, 50%);
   width: 2px;
   height: 12px;
   border-radius: 1px;
@@ -2123,29 +2229,48 @@ body::before {
   bottom: 0;
 }
 
-/* Three columns around a centred pivot: the lead-in right-aligned against it,
-   the tail left-aligned after it. */
+/* Three columns around the pivot: the lead-in right-aligned against it, the
+   tail left-aligned after it. The two sides are equal, so the pivot is the
+   line's exact middle whatever its width; the line stops short of the
+   reticle's right edge by enough to put that middle on the anchor, and the
+   tail runs on past the line into the room left there.
+   The line's height is set from the full size, so a long word set smaller
+   does not move the guides or the text below. */
 .reader-rsvp-line {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: baseline;
-  padding: 0.5em 0 0.55em;
+  margin-right: calc(100% - 2 * var(--rsvp-anchor, 50%));
+  padding: calc(var(--rsvp-size) * 0.5) 0 calc(var(--rsvp-size) * 0.55);
   font-family: Georgia, Cambria, "Times New Roman", serif;
-  font-size: clamp(2.4rem, 5.2vw, 4.4rem);
+  font-size: calc(var(--rsvp-size) * var(--rsvp-fit, 1));
   font-weight: 600;
-  line-height: 1.1;
+  line-height: calc(var(--rsvp-size) * 1.1);
   letter-spacing: 0.01em;
   white-space: nowrap;
 }
 
+/* A flex row packed to its end, so a lead-in longer than its column runs out
+   to the left, away from the pivot, and never under it. */
+@supports (width: 1cqw) {
+  .reader-rsvp-line {
+    font-size: min(
+      var(--rsvp-size),
+      calc((50cqw - var(--rsvp-size) * var(--rsvp-anchor-em, 0.55)) * var(--rsvp-edge, 0.96) / var(--rsvp-left, 1)),
+      calc((50cqw + var(--rsvp-size) * var(--rsvp-anchor-em, 0.55)) * var(--rsvp-edge, 0.96) / var(--rsvp-right, 1))
+    );
+  }
+}
+
 .reader-rsvp-pre {
-  overflow: hidden;
-  text-align: right;
+  display: flex;
+  justify-content: flex-end;
+  white-space: pre;
 }
 
 .reader-rsvp-post {
-  overflow: hidden;
   text-align: left;
+  white-space: pre;
 }
 
 .reader-rsvp-focus {
@@ -4074,19 +4199,12 @@ textarea:focus-visible,
   }
 }
 
-/* The chapter toggle is redundant where a hover strip works, so it appears
-   only on narrow screens and touch input, leaving the desktop toolbar as it
-   was. */
+/* The chapter toggle is on every screen: with only a hover strip to open it,
+   readers did not know the chapter list was there. */
 .reader-chapters-toggle {
-  display: none;
-}
-
-@media (max-width: 767px), (hover: none) and (pointer: coarse) {
-  .reader-chapters-toggle {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* `.leather-surface` also declares `position: relative`, and sitting later in

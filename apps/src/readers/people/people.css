@@ -1,0 +1,530 @@
+/* Characters (readers/people): the card that says who someone is, on top of
+   the lookup card's own look (readers/lookupCard.css), which it shares. Built
+   from the reader's variables, so it fits every page finish and both themes. */
+
+/* A group's colour: a dot beside its name, a node's edge in the relations
+   drawing. Mid tones, legible on paper and on a dark page alike. */
+.reader-people-card,
+.reader-people-panel {
+  --people-rose: #c96a7b;
+  --people-amber: #c9953a;
+  --people-moss: #6f9a52;
+  --people-teal: #3f9a93;
+  --people-sky: #5b93c9;
+  --people-violet: #8b76c9;
+  --people-clay: #b0714e;
+  --people-slate: #7d8794;
+}
+
+[data-color="rose"] {
+  --people-color: var(--people-rose);
+}
+[data-color="amber"] {
+  --people-color: var(--people-amber);
+}
+[data-color="moss"] {
+  --people-color: var(--people-moss);
+}
+[data-color="teal"] {
+  --people-color: var(--people-teal);
+}
+[data-color="sky"] {
+  --people-color: var(--people-sky);
+}
+[data-color="violet"] {
+  --people-color: var(--people-violet);
+}
+[data-color="clay"] {
+  --people-color: var(--people-clay);
+}
+[data-color="slate"] {
+  --people-color: var(--people-slate);
+}
+
+.reader-people-head-actions {
+  display: inline-flex;
+  flex: none;
+  gap: 6px;
+}
+
+.reader-people-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.reader-people-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--people-color, var(--reader-muted));
+}
+
+/* The card's sections start without the lookup card's first-child spacing. */
+.reader-people-card .reader-lookup-section:first-child {
+  margin-top: 0;
+}
+
+.reader-people-notes,
+.reader-people-mentions,
+.reader-people-links,
+.reader-people-suggested,
+.reader-people-rows,
+.reader-people-chips {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* What the reader wrote: their own words, each with where it was written. */
+.reader-people-note {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 3px 0;
+}
+
+.reader-people-note-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.reader-people-note-where {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button.reader-people-note-where:hover {
+  color: var(--reader-accent);
+  text-decoration: underline;
+}
+
+/* Notes from later in the book, shown because the reader asked. */
+.reader-people-note.is-later {
+  border-left: 2px solid var(--reader-accent);
+  padding-left: 8px;
+}
+
+.reader-people-later {
+  margin: 6px 0 0;
+  font-size: 11px;
+}
+
+.reader-people-suggested li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  border: 1px dashed var(--reader-border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.reader-people-suggested li > span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.reader-people-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.reader-people-link {
+  border: 1px solid var(--reader-border);
+  border-radius: 999px;
+  background: var(--reader-pill);
+  padding: 2px 9px;
+  font-size: 12px;
+  text-align: left;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.reader-people-link:hover {
+  border-color: var(--reader-accent);
+  color: var(--reader-accent);
+}
+
+.reader-people-link.is-over {
+  border-style: dashed;
+  background: transparent;
+}
+
+.reader-people-sub {
+  margin-top: 8px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+/* A line of the book's own words, and the way back to it. */
+.reader-people-mention {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  border-radius: 6px;
+  padding: 3px 6px;
+  margin-left: -6px;
+  text-align: left;
+  transition: background 0.15s ease;
+}
+
+.reader-people-mention:hover {
+  background: var(--reader-hover-bg);
+}
+
+.reader-people-mention-where {
+  display: block;
+  overflow: hidden;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reader-people-mention-text {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  font-style: italic;
+}
+
+.reader-people-mention-text mark {
+  background: none;
+  color: var(--reader-accent);
+  font-style: normal;
+  font-weight: 600;
+}
+
+.reader-people-spacer {
+  height: 12px;
+}
+
+.reader-people-card :is(.reader-people-mention, .reader-people-link, .reader-people-note-where, .reader-notes-action, .reader-notes-remove, .reader-people-swatch):focus-visible {
+  outline: 2px solid var(--reader-accent);
+  outline-offset: 1px;
+}
+
+/* One line to type, at the foot: a note about them, or who they are. */
+.reader-people-foot {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  border-top-width: 1px;
+  padding: 8px 10px 8px 14px;
+}
+
+.reader-people-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  resize: none;
+}
+
+.reader-people-select {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 5px 6px;
+}
+
+/* The card's other face: names, group, links. */
+.reader-people-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.reader-people-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.reader-people-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.reader-people-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.reader-people-check input {
+  accent-color: var(--reader-accent);
+}
+
+.reader-people-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.reader-people-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--reader-border);
+  border-radius: 999px;
+  padding: 1px 4px 1px 9px;
+  font-size: 12px;
+}
+
+.reader-people-rows li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
+.reader-people-rows li > span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.reader-people-rows li.is-editing {
+  flex-wrap: wrap;
+}
+
+.reader-people-rows li.is-editing textarea {
+  flex: 1 1 100%;
+}
+
+.reader-people-swatches {
+  display: flex;
+  gap: 6px;
+}
+
+.reader-people-swatch {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--reader-panel);
+  border-radius: 999px;
+  background: var(--people-color);
+  box-shadow: 0 0 0 1px var(--reader-border);
+}
+
+.reader-people-swatch[aria-checked="true"] {
+  box-shadow: 0 0 0 2px var(--reader-accent);
+}
+
+/* ---- The panel: everyone met so far, and how they are tied ---- */
+.reader-people-panel {
+  position: fixed;
+  top: 5rem;
+  right: 1rem;
+  z-index: 60;
+  display: flex;
+  width: 22rem;
+  max-width: calc(100vw - 2rem);
+  max-height: 72vh;
+  flex-direction: column;
+  gap: 10px;
+  border-width: 1px;
+  border-radius: 12px;
+  padding: 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.26);
+}
+
+/* The drawing wants room. */
+.reader-people-panel.is-wide {
+  width: 46rem;
+}
+
+.reader-people-panel-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.reader-people-panel-foot {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-top-width: 1px;
+  padding-top: 10px;
+}
+
+.reader-people-list {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--reader-border) transparent;
+}
+
+.reader-people-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 2px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.reader-people-list > section:first-child .reader-people-group-head {
+  margin-top: 0;
+}
+
+.reader-people-person {
+  display: block;
+  width: 100%;
+  border-radius: 8px;
+  padding: 4px 8px;
+  text-align: left;
+  transition: background 0.15s ease;
+}
+
+.reader-people-person:hover {
+  background: var(--reader-pill);
+}
+
+.reader-people-person-name {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.reader-people-person-note {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reader-people-rows li > .reader-people-person {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.reader-people-suggest {
+  margin-top: 6px;
+  border-top: 1px solid color-mix(in srgb, var(--reader-border) 55%, transparent);
+  padding-top: 2px;
+}
+
+.reader-people-panel :is(.reader-people-person, .reader-people-link, .reader-notes-action, .reader-notes-tab):focus-visible,
+.reader-people-graph:focus-visible,
+.reader-people-node:focus-visible rect {
+  outline: 2px solid var(--reader-accent);
+  outline-offset: 1px;
+}
+
+/* The relations drawing: scrolls both ways, and can be dragged. */
+.reader-people-graph {
+  min-height: 12rem;
+  flex: 1 1 auto;
+  overflow: auto;
+  border-width: 1px;
+  border-radius: 10px;
+  background: var(--reader-pill);
+  cursor: grab;
+  scrollbar-width: thin;
+  scrollbar-color: var(--reader-border) transparent;
+  touch-action: pan-x pan-y;
+}
+
+.reader-people-graph:active {
+  cursor: grabbing;
+}
+
+.reader-people-graph svg {
+  display: block;
+}
+
+.reader-people-node {
+  cursor: pointer;
+  outline: none;
+}
+
+.reader-people-node rect {
+  fill: var(--reader-panel);
+  stroke: var(--people-color, var(--reader-border));
+  stroke-width: 1.5;
+}
+
+.reader-people-node[data-color] rect {
+  stroke-width: 2;
+}
+
+.reader-people-node.is-focus rect {
+  fill: color-mix(in srgb, var(--reader-accent) 14%, var(--reader-panel));
+}
+
+.reader-people-node:hover rect,
+.reader-people-node:focus-visible rect {
+  stroke: var(--reader-accent);
+}
+
+.reader-people-node text {
+  fill: var(--reader-text);
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+  user-select: none;
+}
+
+.reader-people-edge path {
+  fill: none;
+  stroke: var(--reader-muted);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+/* A couple: a heavier line; brothers and sisters: a dashed one over their heads. */
+.reader-people-edge.is-spouse path {
+  stroke-width: 3;
+}
+
+.reader-people-edge.is-sibling path {
+  stroke-dasharray: 5 4;
+}
+
+.reader-people-edge.is-other path {
+  stroke: color-mix(in srgb, var(--reader-accent) 60%, var(--reader-muted));
+  stroke-width: 1;
+}
+
+.reader-people-edge.is-over path {
+  stroke-dasharray: 2 4;
+  opacity: 0.6;
+}
+
+.reader-people-edge text {
+  fill: var(--reader-muted);
+  font-size: 10px;
+  paint-order: stroke;
+  stroke: var(--reader-pill);
+  stroke-width: 3px;
+  pointer-events: none;
+  user-select: none;
+}

@@ -11,7 +11,9 @@
  * - "art" otherwise (a line map, a full-page drawing): these only lose their
  *   white on the paper finish, and on a dark page stay exactly as drawn, so a
  *   map is never turned into its negative.
- * Clicking a marked image shows the original, and clicking again blends it.
+ * A click on a picture opens it in the picture viewer, which offers "Show as
+ * drawn" and "Blend with page" for a marked one (`data-leaflet-ink-off`; see
+ * readers/pictures.ts). It used to be the click itself that switched them.
  */
 export const INK_SAMPLE = 40;
 export const markInkImages = (doc: Document) => {
@@ -89,9 +91,6 @@ export const markInkImages = (doc: Document) => {
         if (inkOnly && (light / counted > 0.55 || transparentInk)) {
           const banner = probe.naturalHeight <= probe.naturalWidth * 0.6 || probe.naturalHeight <= 240;
           node.dataset.leafletInk = banner ? "title" : "art";
-          node.addEventListener("click", () => {
-            node.dataset.leafletInkOff = node.dataset.leafletInkOff ? "" : "1";
-          });
         }
       } catch {
         // A cross-origin (tainted) image cannot be read; leave it be.

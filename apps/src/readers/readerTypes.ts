@@ -26,6 +26,9 @@ export type ReaderWord = {
 export type ReadingWordState = {
   index: number;
   total: number;
+  /** Where the word's chapter starts and ends among the words indexed (scrolling holds several chapters). */
+  sectionStart: number;
+  sectionEnd: number;
   text: string;
   /** Punctuation after the word ("," or ".”"), shown in RSVP so sentences still read as sentences. */
   punctuation: string;
@@ -108,4 +111,111 @@ export const MEASURE_PADDING =
 export const pagesViewerMaxWidth = (measure: ReaderMeasure, fontSize: number) => {
   const em = MEASURE_EM[measure];
   return em === null ? null : Math.round(em * fontSize + 96);
+};
+
+/**
+ * The type itself: its face, the room between lines, and whether the right
+ * edge is squared off. The text used to be Georgia at 1.8, justified, whatever
+ * the reader preferred. Preferences of the device, like the line length: they
+ * suit an eye and a screen, not a book.
+ */
+export type ReaderTypeface = "book" | "serif" | "modern" | "sans" | "wide";
+
+export const TYPEFACE_KEY = "leaflet.reader.typeface";
+
+/**
+ * Faces that come with the system: no font files are shipped. Each names the
+ * Windows face first, then what stands in for it on a Mac or Linux. "book" is
+ * the publisher's own choice, and has no stack: nothing is imposed.
+ */
+export const TYPEFACE_STACK: Record<ReaderTypeface, string | null> = {
+  book: null,
+  serif: 'Georgia, "Iowan Old Style", "Noto Serif", "DejaVu Serif", "Times New Roman", serif',
+  modern: 'Cambria, Charter, "Bitstream Charter", "Sitka Text", "Noto Serif", Georgia, serif',
+  sans: '"Segoe UI", system-ui, -apple-system, "Helvetica Neue", "Noto Sans", Arial, sans-serif',
+  wide: 'Verdana, "DejaVu Sans", "Bitstream Vera Sans", Geneva, Tahoma, sans-serif'
+};
+
+/** What a book with no face of its own is set in (and the face of "serif"). */
+export const FALLBACK_FACE = TYPEFACE_STACK.serif as string;
+
+export const readTypeface = (): ReaderTypeface => {
+  try {
+    const value = localStorage.getItem(TYPEFACE_KEY);
+    return value === "book" || value === "modern" || value === "sans" || value === "wide" ? value : "serif";
+  } catch {
+    return "serif";
+  }
+};
+
+export type ReaderSpacing = "compact" | "normal" | "airy";
+
+export const SPACING_KEY = "leaflet.reader.spacing";
+
+/** A line's height for each, in lines of the reading size. */
+export const LINE_HEIGHT: Record<ReaderSpacing, number> = { compact: 1.5, normal: 1.8, airy: 2.1 };
+
+export const readSpacing = (): ReaderSpacing => {
+  try {
+    const value = localStorage.getItem(SPACING_KEY);
+    return value === "compact" || value === "airy" ? value : "normal";
+  } catch {
+    return "normal";
+  }
+};
+
+/**
+ * One line of text, in pixels. Everything that counts in lines (Smart Read's
+ * page steps, auto-scroll's lines a minute, the words a line holds) asks
+ * here: the height was written out as "size x 1.8" in several places, which
+ * would all have been wrong at any other spacing.
+ */
+export const lineHeightPx = (fontSize: number, spacing: ReaderSpacing) => fontSize * LINE_HEIGHT[spacing];
+
+export type ReaderAlign = "justify" | "left";
+
+export const ALIGN_KEY = "leaflet.reader.align";
+
+export const readAlign = (): ReaderAlign => {
+  try {
+    return localStorage.getItem(ALIGN_KEY) === "left" ? "left" : "justify";
+  } catch {
+    return "justify";
+  }
+};
+
+export type TypeChoice = { typeface: ReaderTypeface; spacing: ReaderSpacing; align: ReaderAlign };
+
+/**
+ * A type choice as the book's stylesheet reads it: variables on the chapter's
+ * root, and two attributes for what a variable cannot switch (imposing a face
+ * at all, and turning hyphenation off). "Left" is the start edge, so a book
+ * read right to left keeps its ragged edge on the other side.
+ */
+export const typeVariables = (choice: TypeChoice) => {
+  const stack = TYPEFACE_STACK[choice.typeface];
+  return {
+    variables: {
+      "--reader-font-family": stack ?? FALLBACK_FACE,
+      "--reader-line-height": String(LINE_HEIGHT[choice.spacing]),
+      "--reader-align": choice.align === "left" ? "start" : "justify"
+    } as Record<string, string>,
+    attributes: {
+      "data-leaflet-face": stack === null ? null : choice.typeface,
+      "data-leaflet-align": choice.align
+    } as Record<string, string | null>
+  };
+};
+
+/** Puts a type choice on a chapter's document. */
+export const applyTypeChoice = (root: HTMLElement, choice: TypeChoice) => {
+  const { variables, attributes } = typeVariables(choice);
+  Object.entries(variables).forEach(([name, value]) => root.style.setProperty(name, value));
+  Object.entries(attributes).forEach(([name, value]) => {
+    if (value === null) {
+      root.removeAttribute(name);
+    } else {
+      root.setAttribute(name, value);
+    }
+  });
 };

@@ -1,0 +1,98 @@
+/* The percentage and the time left, in the chapter dock
+   (readers/ReadingOutlook.tsx). On one line with the chapter's name, so the
+   dock grows sideways and never up into auto-scroll's or Smart Read's
+   controls, which sit just above it. */
+.reader-outlook-percent {
+  flex: none;
+  border-radius: 6px;
+  padding: 2px 4px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+}
+
+.reader-outlook-percent:hover,
+.reader-outlook-percent[aria-expanded="true"] {
+  color: var(--reader-accent);
+}
+
+.reader-outlook-percent:focus-visible {
+  outline: 2px solid var(--reader-accent);
+  outline-offset: 1px;
+}
+
+.reader-outlook-time {
+  display: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(46rem, calc(100vw - 16rem));
+  overflow: hidden;
+  border-left: 1px solid var(--reader-border);
+  padding-left: 10px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.reader-chapter-dock:hover .reader-outlook-time,
+.reader-chapter-dock:focus-within .reader-outlook-time,
+.reader-chapter-dock.is-open .reader-outlook-time {
+  display: block;
+}
+
+/* The way back after a jump (readers/ChapterDock.tsx). */
+.reader-dock-back {
+  gap: 4px;
+  padding: 0 8px 0 6px;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+}
+
+/* One row that never runs off a narrow window: the chapter's name and the
+   time left give way first. */
+.reader-chapter-dock > div {
+  max-width: calc(100vw - 1.5rem);
+}
+
+.reader-dock-label {
+  flex: 0 1 auto;
+  min-width: 2.5rem;
+  max-width: min(22rem, 40vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reader-chapter-dock button:focus-visible {
+  outline: 2px solid var(--reader-accent);
+  outline-offset: 1px;
+}
+
+/* Opened with the percentage: awake until it is closed again. Awake for a
+   moment after a jump too, so "Back" is seen. */
+.reader-chapter-dock.is-awake,
+.reader-chapter-dock.is-open {
+  opacity: 0.94;
+  transform: translateX(-50%) scale(1);
+  filter: saturate(1);
+}
+
+.reader-outlook-short {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .reader-outlook-long {
+    display: none;
+  }
+
+  .reader-outlook-short {
+    display: inline;
+  }
+
+  .reader-outlook-time {
+    max-width: calc(100vw - 13rem);
+  }
+}

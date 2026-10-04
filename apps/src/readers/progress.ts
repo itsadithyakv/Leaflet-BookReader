@@ -136,3 +136,25 @@ export const isChapterLike = (label: string) => {
   }
   return false;
 };
+
+/** Progress this close to an end counts as being there. */
+const AT_AN_END = 0.02;
+
+/**
+ * A place outside the story: front matter (a map, the contents) or back
+ * matter (notes, an appendix). Looking there is not reading there. Front
+ * matter used to read as 0%, so opening the map from chapter 20 and closing
+ * the book saved 0% and the map as the place to come back to.
+ *
+ * The progress to record (null: leave it as it is) and whether the saved
+ * place follows the reader there. Both follow only when that is where the
+ * reading is: front matter at the very start of the book, back matter once
+ * the story is finished.
+ */
+export const outsideStory = (side: "front" | "back", progress: number) => {
+  const known = Number.isFinite(progress) ? progress : 0;
+  if (side === "front") {
+    return known <= AT_AN_END ? { progress: 0 as number | null, placeFollows: true } : { progress: null, placeFollows: false };
+  }
+  return { progress: null as number | null, placeFollows: known >= 1 - AT_AN_END };
+};

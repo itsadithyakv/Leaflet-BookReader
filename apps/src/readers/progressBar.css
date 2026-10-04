@@ -1,0 +1,109 @@
+/* The whole book along the bottom edge of the page (readers/ProgressBar.tsx).
+   It lives in the strip below the chapter dock, which sits 16px up: the bar's
+   own 14px never reach it, and its label fits under auto-scroll's and Smart
+   Read's controls (64px up). Out of sight until the dock wakes, the pointer
+   reaches the edge, or the keyboard does. */
+.reader-progress {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 31;
+  height: 14px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.reader-progress:hover,
+.reader-progress:focus-within,
+.reader-progress.is-shown {
+  opacity: 1;
+}
+
+.reader-progress-track {
+  position: absolute;
+  inset: 0 14px;
+  cursor: pointer;
+  outline: none;
+  touch-action: none;
+}
+
+.reader-progress-line {
+  position: absolute;
+  right: 0;
+  bottom: 4px;
+  left: 0;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--reader-page-ink, var(--reader-text)) 20%, transparent);
+  transition: height 0.15s ease, bottom 0.15s ease;
+}
+
+.reader-progress:hover .reader-progress-line,
+.reader-progress.is-active .reader-progress-line,
+.reader-progress-track:focus-visible .reader-progress-line {
+  bottom: 3px;
+  height: 5px;
+}
+
+.reader-progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--reader-accent);
+}
+
+.reader-progress-handle {
+  position: absolute;
+  bottom: 0;
+  width: 11px;
+  height: 11px;
+  transform: translateX(-50%);
+  border: 2px solid var(--reader-page-bg, var(--reader-panel));
+  border-radius: 999px;
+  background: var(--reader-accent);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+.reader-progress-track:focus-visible .reader-progress-handle {
+  outline: 2px solid var(--reader-accent);
+  outline-offset: 2px;
+}
+
+/* The chapter and the percentage where the handle is. While it shows, the
+   dock (which names where the reader is, not where the handle is) steps
+   aside: the two would sit in the same place. */
+.reader-progress-bubble {
+  position: absolute;
+  bottom: 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 14rem;
+  transform: translateX(-50%);
+  border-width: 1px;
+  border-style: solid;
+  border-radius: 8px;
+  padding: 4px 9px;
+  font-size: 11px;
+  white-space: nowrap;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+  pointer-events: none;
+}
+
+.reader-progress-chapter {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.reader-progress.is-active ~ .reader-chapter-dock {
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reader-progress,
+  .reader-progress-line {
+    transition: none;
+  }
+}

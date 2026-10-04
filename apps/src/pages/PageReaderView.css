@@ -1,0 +1,235 @@
+/* The page reader's own pieces (PageReaderView.tsx). The shared reader look
+ * (.reader-*, .pdf-reader-stage, .pdf-reader-page) is in index.css; pdf.js's
+ * text layer rules are in readers/pdfTextLayer.css. Built from the reader's
+ * variables, so every page finish fits. */
+
+/* The text layer and the search marks are laid over the canvas. */
+.pdf-reader-page {
+  position: relative;
+}
+
+/* What a search found, on the page. Fractions of the page, so the marks stay
+   on the words at any zoom; above the canvas and under the text layer, so
+   marked words can still be selected. */
+.pdf-reader-marks {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* The mark's place is worked out from the run's width, not its letters, so
+   it is given a little to spare each side. */
+.pdf-reader-mark {
+  --mark: color-mix(in srgb, #f5b800 40%, transparent);
+  position: absolute;
+  border-radius: 2px;
+  background: var(--mark);
+  box-shadow: 0 0 0 2px var(--mark);
+}
+
+.pdf-reader-mark.is-current {
+  --mark: color-mix(in srgb, #ff8a00 50%, transparent);
+  outline: 1.5px solid color-mix(in srgb, #ff8a00 90%, transparent);
+  outline-offset: 2px;
+}
+
+/* On a dark page the same amber would glare; it is thinner there and the
+   ring carries the eye. */
+.pdf-reader-page[data-dark="true"] .pdf-reader-mark {
+  --mark: color-mix(in srgb, #f5b800 30%, transparent);
+}
+
+.pdf-reader-page[data-dark="true"] .pdf-reader-mark.is-current {
+  --mark: color-mix(in srgb, #ffa31a 40%, transparent);
+}
+
+.pdf-search-hit-current {
+  background: var(--reader-pill);
+  box-shadow: inset 2px 0 var(--reader-accent);
+}
+
+/* A comic's page turns on a click of its left or right third. */
+.pdf-reader-page.is-clickable {
+  cursor: pointer;
+}
+
+/* Contents | Pages, at the head of the sidebar's list. */
+.page-reader-tabs {
+  display: flex;
+  gap: 4px;
+  border: 1px solid color-mix(in srgb, var(--reader-border) 70%, transparent);
+  border-radius: 9px;
+  padding: 3px;
+}
+
+.page-reader-tab {
+  flex: 1;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--reader-muted);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.page-reader-tab:hover {
+  color: var(--reader-text);
+}
+
+.page-reader-tab[aria-selected="true"] {
+  background: var(--chapter-hover-bg, rgba(255, 255, 255, 0.065));
+  color: var(--reader-text);
+}
+
+.page-reader-tab:focus-visible,
+.page-reader-place:focus-visible,
+.page-reader-fit:focus-visible {
+  outline: 2px solid var(--reader-accent);
+  outline-offset: 1px;
+}
+
+.page-reader-outline-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page-reader-outline-page {
+  flex: none;
+  margin-left: 8px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.6;
+}
+
+/* "Page 12 of 300 · 4%" in the dock is the way in to "go to page". */
+.page-reader-place {
+  min-width: 6rem;
+  border-radius: 6px;
+  padding: 4px 8px;
+  text-align: center;
+  font-size: 10px;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: var(--reader-muted);
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.page-reader-place:hover {
+  background: var(--reader-hover-bg);
+  color: var(--reader-accent);
+}
+
+.page-reader-goto {
+  width: 4.5rem;
+  border: 1px solid var(--reader-border);
+  border-radius: 6px;
+  background: var(--reader-pill);
+  color: var(--reader-text);
+  padding: 3px 6px;
+  text-align: center;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+}
+
+.page-reader-goto:focus {
+  border-color: var(--reader-accent);
+}
+
+.page-reader-goto[aria-invalid="true"] {
+  border-color: #d2553f;
+}
+
+/* The three fits, in the page size panel. */
+.page-reader-fit {
+  flex: 1;
+  border: 1px solid var(--reader-border);
+  border-radius: 8px;
+  padding: 6px 4px;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--reader-icon);
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.page-reader-fit:hover {
+  color: var(--reader-accent);
+}
+
+.page-reader-fit[aria-pressed="true"] {
+  border-color: var(--reader-accent);
+  background: color-mix(in srgb, var(--reader-accent) 14%, transparent);
+  color: var(--reader-accent);
+}
+
+/* The bookmark for the page in view. */
+.page-reader-bookmark[aria-current="page"] {
+  border-color: var(--reader-accent);
+  box-shadow: inset 2px 0 var(--reader-accent);
+}
+
+.page-reader-toolbar-on {
+  color: var(--reader-accent);
+}
+
+/* Continuous scrolling (readers/PdfScrollPages.tsx): the pages in one column. */
+
+/* The reader's place is put back by the column itself when a page above it
+   takes its real size; the browser doing the same would do it twice. */
+.pdf-scroll-stage {
+  overflow-anchor: none;
+}
+
+.pdf-scroll-column {
+  position: relative;
+  margin: 0 auto;
+}
+
+/* A page has its size before it is drawn, from the layout, not from its canvas. */
+.pdf-reader-page.pdf-scroll-page {
+  position: absolute;
+  min-height: 0;
+  margin: 0;
+  overflow: hidden;
+  /* No fade as pages come and go under a moving scroll. */
+  transition: none;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.3), 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+.reader-light .pdf-reader-page.pdf-scroll-page {
+  box-shadow: 0 10px 26px rgba(65, 53, 37, 0.18), 0 1px 4px rgba(65, 53, 37, 0.16);
+}
+
+/* The canvas fills its page whatever size it was drawn for: after a zoom the
+   page drawn is stretched until it is drawn again. */
+.pdf-reader-page.pdf-scroll-page canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* A page not drawn yet: the page colour (from the finish) and its number, faint. */
+.pdf-scroll-page-number {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  letter-spacing: 0.2em;
+  font-variant-numeric: tabular-nums;
+  color: #000;
+  opacity: 0.22;
+  pointer-events: none;
+  user-select: none;
+}
+
+.pdf-reader-page[data-dark="true"] .pdf-scroll-page-number {
+  color: #fff;
+}

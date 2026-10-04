@@ -1,0 +1,300 @@
+/* The lookup card (readers/LookupCard.tsx): a selected word's meaning and a
+   short summary, above the selection bar. Built from the reader's own
+   variables, so it fits every page finish and both app themes. */
+.reader-lookup {
+  /* Above the bar, in the bar's dock. Its height, how far above and any
+     sideways nudge are worked out in readers/lookupPlacement.ts. */
+  position: absolute;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  /* A column for reading, not a banner; narrower only when the window is. */
+  width: min(24rem, calc(100vw - 16px));
+  overflow: hidden;
+  border-width: 1px;
+  border-radius: 12px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.26);
+  font-size: 13px;
+  line-height: 1.5;
+  letter-spacing: normal;
+  text-align: left;
+  text-transform: none;
+}
+
+/* Focus is put on the card itself when it opens, for a screen reader to
+   announce it; a ring around the whole card would say nothing to the eye. */
+.reader-lookup:focus {
+  outline: none;
+}
+
+.reader-lookup-head {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom-width: 1px;
+  padding: 10px 10px 9px 14px;
+}
+
+.reader-lookup-term {
+  min-width: 0;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.reader-lookup-kicker {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* A phrase of six long words: two lines, then an ellipsis. */
+.reader-lookup-term-text {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* The answer scrolls in here; the card around it keeps its size. */
+.reader-lookup-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 10px 14px 12px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--reader-border) transparent;
+}
+
+.reader-lookup-body:focus-visible,
+.reader-lookup-more:focus-visible,
+.reader-lookup-inline:focus-visible,
+.reader-lookup-info:focus-visible {
+  outline: 2px solid var(--reader-accent);
+  outline-offset: -2px;
+}
+
+.reader-lookup-more:focus-visible,
+.reader-lookup-inline:focus-visible {
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.reader-lookup-section + .reader-lookup-section {
+  margin-top: 14px;
+  border-top: 1px solid color-mix(in srgb, var(--reader-border) 55%, transparent);
+  padding-top: 12px;
+}
+
+.reader-lookup-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.reader-lookup-label {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--reader-accent);
+}
+
+.reader-lookup-source {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+/* The word an entry is for, when it is not the one selected: the form that
+   was found, or the word a plural or a past tense points at. */
+.reader-lookup-word {
+  margin-top: 6px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.reader-lookup-entry {
+  margin-top: 6px;
+}
+
+.reader-lookup-part {
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.06em;
+}
+
+.reader-lookup-definitions {
+  margin: 1px 0 0;
+  padding-left: 1.5em;
+  list-style: decimal;
+}
+
+.reader-lookup-definitions li + li {
+  margin-top: 3px;
+}
+
+.reader-lookup-definitions li::marker {
+  color: var(--reader-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.reader-lookup-description {
+  font-size: 12px;
+  font-style: italic;
+}
+
+.reader-lookup-text {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.reader-lookup-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--reader-accent);
+}
+
+.reader-lookup-more:hover,
+.reader-lookup-inline:hover {
+  text-decoration: underline;
+}
+
+.reader-lookup-inline {
+  color: var(--reader-accent);
+  text-decoration: underline;
+}
+
+/* Nothing found, could not reach, too long: a line and what to do about it. */
+.reader-lookup-state {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 10px;
+}
+
+.reader-lookup-state .reader-lookup-text {
+  margin: 0;
+}
+
+.reader-lookup-hint {
+  margin: -6px 0 0;
+  font-size: 12px;
+}
+
+.reader-lookup-sample {
+  margin: 0 0 10px;
+  border-width: 1px;
+  border-style: dashed;
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+.reader-lookup-missed {
+  margin: 12px 0 0;
+  font-size: 11px;
+}
+
+/* While the answer is on its way: lines where the words will be. */
+.reader-lookup-bone {
+  display: block;
+  height: 10px;
+  margin-top: 10px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--reader-muted) 24%, transparent);
+  animation: reader-lookup-wait 1.1s ease-in-out infinite alternate;
+}
+
+.reader-lookup-bone.is-label {
+  width: 26%;
+  height: 8px;
+  margin-top: 16px;
+}
+
+.reader-lookup-bone.is-label:first-of-type {
+  margin-top: 3px;
+}
+
+.reader-lookup-bone.is-short {
+  width: 62%;
+}
+
+@keyframes reader-lookup-wait {
+  from {
+    opacity: 0.45;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reader-lookup-bone {
+    animation: none;
+  }
+}
+
+.reader-lookup-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.reader-lookup-foot {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top-width: 1px;
+  padding: 4px 6px 4px 14px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.reader-lookup-note {
+  flex: 1 1 auto;
+  margin: 3px 0;
+}
+
+.reader-lookup-note[hidden] {
+  display: none;
+}
+
+.reader-lookup-info {
+  display: inline-flex;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: var(--reader-muted);
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.reader-lookup-info:hover,
+.reader-lookup-info[aria-expanded="true"] {
+  color: var(--reader-accent);
+}
+
+.reader-lookup-info:hover {
+  background: var(--reader-hover-bg);
+}
