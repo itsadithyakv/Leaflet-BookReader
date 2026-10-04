@@ -1,6 +1,6 @@
 # Leaflet Terms of Use
 
-**Effective date:** 27 September 2026
+**Effective date:** 3 October 2026
 
 These terms are between you and PaperKite ("we", "us"), the maker of Leaflet.
 By using Leaflet you agree to them.
@@ -25,8 +25,11 @@ You can delete your account at any time from Settings.
 
 ## Leaderboards and public profiles
 
-If you make your profile public, your handle, display name and reading
-statistics can be seen by other readers, and other signed-in readers can follow
+When you create an account, your profile is public unless you turn off "Share
+my profile" on the sign-up form, and you can make it private at any time under
+Social → You. (Accounts created before Leaflet 1.2 are private unless their
+owner shared them.) While your profile is public, your handle, display name,
+Pip, reading statistics and shelf can be seen by other readers, and other signed-in readers can follow
 you, send you kudos and challenge you to a weekly reading duel. Keep it friendly:
 kudos and challenges are for encouragement, not harassment. Do not choose a handle or name that
 impersonates someone else, is offensive, or infringes anyone's rights. We may

@@ -19,7 +19,7 @@ import { HttpError, asyncHandler, smallJson } from "../http.js";
 import { RateLimiter, defaultLimits } from "../rateLimit.js";
 import { isPlausibleDayKey, isWeekKey, isoWeekKey, plausibleWeekKeys, weekIsOver } from "../week.js";
 import { HANDLE_PATTERN } from "./social.js";
-import { cachedBoard, rememberBoard } from "../boardCache.js";
+import { boardStamp, cachedBoard, rememberBoard } from "../boardCache.js";
 
 /**
  * The interactive half of the board: following, kudos, weekly duels, the
@@ -108,7 +108,12 @@ export function communityRoutes(db, limits = defaultLimits()) {
    * minutes first, ties broken by streak then handle. `scope=following` is the
    * signed-in reader plus everyone they follow who is public, zeros included.
    * When signed in and public but outside the top 100, `you` carries the
-   * reader's own row and rank.
+   * reader's own row and rank. `sharedReaders` (everyone only) counts the
+   * public profiles there are, read this week or not.
+   *
+   * A private reader gets no row here, their own included: the app draws
+   * their own row from the minutes on their device, so nothing about a
+   * private profile ever has to be on this server to be shown to its owner.
    */
   router.get(
     "/leaderboard",
@@ -132,20 +137,33 @@ export function communityRoutes(db, limits = defaultLimits()) {
         return;
       }
 
-      let rows = cachedBoard(weekKey);
-      if (!rows) {
-        rows = await profiles(db)
-          .find(
-            { visibility: "public", weekKey, weekMinutes: { $gt: 0 } },
-            {
-              projection: { handle: 1, displayName: 1, avatar: 1, weekKey: 1, weekMinutes: 1, streak: 1, booksFinished: 1, visibility: 1 },
-              sort: { weekMinutes: -1, streak: -1, handle: 1 },
-              limit: LEADERBOARD_LIMIT
-            }
-          )
-          .toArray();
-        rememberBoard(weekKey, rows);
+      let board = cachedBoard(weekKey);
+      if (!board) {
+        const stamp = boardStamp();
+        const [rows, sharedReaders] = await Promise.all([
+          profiles(db)
+            .find(
+              // Only profiles with a handle are shared with anyone. Without
+              // that here, "public" profiles with no handle took places in
+              // the hundred and were then left out, so a hundred of them
+              // emptied the board for everybody.
+              { visibility: "public", weekKey, weekMinutes: { $gt: 0 }, handle: { $type: "string" } },
+              {
+                projection: { handle: 1, displayName: 1, avatar: 1, weekKey: 1, weekMinutes: 1, streak: 1, booksFinished: 1, visibility: 1 },
+                sort: { weekMinutes: -1, streak: -1, handle: 1 },
+                limit: LEADERBOARD_LIMIT
+              }
+            )
+            .toArray(),
+          // Everyone who shares a profile, whether or not they have read this
+          // week. A count only: it lets an empty board say why it is empty
+          // ("nobody shares yet" or "nobody has read yet") and names nobody.
+          profiles(db).countDocuments({ visibility: "public", handle: { $type: "string" } })
+        ]);
+        board = { rows, sharedReaders };
+        rememberBoard(weekKey, rows, sharedReaders, stamp);
       }
+      const { rows, sharedReaders } = board;
       const entries = rows.filter(isPublic).map((row, index) => rowView(row, weekKey, index + 1, meId));
 
       let you = entries.find((entry) => entry.isYou) ?? null;
@@ -157,6 +175,7 @@ export function communityRoutes(db, limits = defaultLimits()) {
           const ahead = await profiles(db).countDocuments({
             visibility: "public",
             weekKey,
+            handle: { $type: "string" },
             $or: [
               { weekMinutes: { $gt: minutes } },
               { weekMinutes: minutes, streak: { $gt: streak } },
@@ -166,7 +185,7 @@ export function communityRoutes(db, limits = defaultLimits()) {
           you = rowView(me, weekKey, ahead + 1, meId);
         }
       }
-      response.json({ weekKey, scope, entries, you });
+      response.json({ weekKey, scope, entries, you, sharedReaders });
     })
   );
 
@@ -363,6 +382,20 @@ export function communityRoutes(db, limits = defaultLimits()) {
           throw new HttpError(409, "You two already have a duel this week.");
         }
         throw error;
+      }
+      // The two counts above were taken before the insert, so challenges sent
+      // at the same moment each saw room and all went in: six duels where
+      // three are allowed, and as many invites in one reader's inbox. Counted
+      // again with this duel in place, and taken back out if it is one too
+      // many. Whichever of several checks last sees all the others, so the
+      // limit holds; at worst a few sent together are all refused.
+      const [mine, theirs] = await Promise.all([
+        countActiveDuels(db, me._id, weekKey),
+        countActiveDuels(db, them._id, weekKey)
+      ]);
+      if (mine > DUEL_LIMIT || theirs > DUEL_LIMIT) {
+        await duels(db).deleteOne({ _id: duel._id });
+        throw new HttpError(409, "Too many challenges at once. Try that one again.");
       }
       await events(db).insertOne({ userId: them._id, type: "duel_invite", actorId: me._id, refId: duel._id, createdAt: now });
       const byId = await publicProfilesById(db, [me._id, them._id]);

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { createHash, randomInt, timingSafeEqual } from "node:crypto";
 import { accounts, profiles, resets, sessions, states } from "../db.js";
-import { HttpError, asyncHandler, smallJson } from "../http.js";
+import { HttpError, asyncHandler, plainText, smallJson } from "../http.js";
 import { accountView, createSession, loadAccount, requireAccount } from "../auth.js";
 import { burnPasswordCheck, hashPassword, passwordProblem, verifyPassword } from "../passwords.js";
 import { RateLimiter } from "../rateLimit.js";
@@ -87,7 +87,7 @@ function cleanDisplayName(value) {
   if (typeof value !== "string") {
     throw new HttpError(400, "Display name should be text.");
   }
-  return value.trim().slice(0, DISPLAY_NAME_MAX) || null;
+  return plainText(value, DISPLAY_NAME_MAX) || null;
 }
 
 /** An avatar id from the allowlist, null to clear it, or a 400. */

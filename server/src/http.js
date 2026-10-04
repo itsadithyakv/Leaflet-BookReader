@@ -34,6 +34,25 @@ export const smallJson = express.json({ limit: "16kb" });
 // 2 MB of state is ~2.7 MB as base64, plus the envelope.
 export const stateJson = express.json({ limit: "3mb" });
 
+// The marks and overrides that turn the text after them right-to-left, and
+// zero-width spaces: characters that show nothing themselves.
+const INVISIBLE = /[\u061C\u200B\u200E\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g;
+// Control characters (a line break, a tab, an escape).
+const CONTROL = /\p{Cc}/gu;
+
+/**
+ * Text fit to show to other readers: one line, at most `max` characters.
+ *
+ * A name goes on every reader's board, so it cannot carry a line break, text
+ * that reverses the row around it, or nothing but invisible characters (which
+ * read as a blank name). Counted in whole characters, so the cut never lands
+ * in the middle of an emoji.
+ */
+export function plainText(value, max) {
+  const clean = String(value).replace(INVISIBLE, "").replace(CONTROL, " ").replace(/\s+/g, " ").trim();
+  return [...clean].slice(0, max).join("").trim();
+}
+
 export function notFound(_request, response) {
   response.status(404).json({ error: "Not found." });
 }

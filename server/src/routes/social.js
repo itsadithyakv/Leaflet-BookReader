@@ -2,7 +2,7 @@ import { Router } from "express";
 import { requireAccount } from "../auth.js";
 import { accounts, profiles } from "../db.js";
 import { avatarView } from "../avatars.js";
-import { HttpError, asyncHandler, smallJson } from "../http.js";
+import { HttpError, asyncHandler, plainText, smallJson } from "../http.js";
 import { isWeekKey, plausibleWeekKeys } from "../week.js";
 import { deleteCommunityData, recordDuelMinutes } from "../community.js";
 import { forgetBoards } from "../boardCache.js";
@@ -12,8 +12,12 @@ import { forgetBoards } from "../boardCache.js";
  * chose to show. The public side (the board, other readers' profiles, follows,
  * kudos and duels) is in `community.js`.
  *
- * Everything here is opt-in. A profile starts `private`, appears on no board and
- * is readable by nobody, until its owner turns sharing on.
+ * Nothing is shared unless a request says so. A profile starts `private`,
+ * appears on no board and is readable by nobody, until a save carries
+ * `visibility: "public"`. Since 1.2 the app sends that straight after sign-up
+ * unless the reader turned "Share my profile" off on the form; this server
+ * never makes that choice itself, and never changes one already made, so
+ * every profile that was private stays private.
  */
 
 export const HANDLE_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{1,22}[a-z0-9])$/;
@@ -33,6 +37,10 @@ const MAX_WEEK_MINUTES = 7 * 24 * 60;
 const MAX_STREAK = 36_500;
 const MAX_BOOKS_FINISHED = 100_000;
 
+/** What a reader publishes about their reading, as opposed to who they are. */
+const FIGURES = ["weekKey", "weekMinutes", "streak", "booksFinished", "shelf"];
+const NO_FIGURES = { weekKey: null, weekMinutes: 0, streak: 0, booksFinished: 0, shelf: [] };
+
 function ownView(profile) {
   return {
     handle: profile?.handle ?? null,
@@ -51,8 +59,8 @@ function sanitiseShelf(shelf) {
     throw new HttpError(400, "Shelf should be a list.");
   }
   return shelf.slice(0, MAX_SHELF).map((book) => ({
-    title: String(book?.title ?? "").slice(0, 120),
-    author: book?.author ? String(book.author).slice(0, 80) : null,
+    title: plainText(book?.title ?? "", 120),
+    author: book?.author ? plainText(book.author, 80) || null : null,
     // Drives the spine's look. Deterministic, so no image is ever uploaded.
     styleSeed: String(book?.styleSeed ?? "").slice(0, 64)
   }));
@@ -104,11 +112,11 @@ export function socialRoutes(db) {
       const update = { updatedAt: new Date() };
 
       if (body.displayName !== undefined) {
-        update.displayName =
-          body.displayName === null ? null : String(body.displayName).trim().slice(0, 40) || null;
+        update.displayName = body.displayName === null ? null : plainText(body.displayName, 40) || null;
       }
       if (body.handle !== undefined) {
-        const handle = body.handle === null ? "" : String(body.handle).trim().toLowerCase();
+        // Handles are shown with an "@" and stored without one.
+        const handle = body.handle === null ? "" : String(body.handle).trim().toLowerCase().replace(/^@/, "");
         if (handle) {
           const problem = handleProblem(handle);
           if (problem) {
@@ -143,14 +151,44 @@ export function socialRoutes(db) {
       const account = await accounts(db).findOne({ _id: request.account.id }, { projection: { avatar: 1 } });
       update.avatar = avatarView(account?.avatar);
 
+      // The reading figures are kept for a public profile only: that is the
+      // privacy policy's promise, and the app's check (made on the device,
+      // from what it last heard) can be out of date: a profile made private
+      // on another computer, or a publish already on its way when the reader
+      // un-shared. So they are split off, and saved only where the profile is
+      // public once this request's own choice has been applied.
+      const figures = {};
+      for (const name of FIGURES) {
+        if (update[name] !== undefined) {
+          figures[name] = update[name];
+          delete update[name];
+        }
+      }
+      if (update.visibility === "public") {
+        Object.assign(update, figures);
+      } else if (update.visibility === "private") {
+        // Going private takes the figures off the server, not just off the board.
+        Object.assign(update, NO_FIGURES);
+      }
+
       // `visibility` may only be in one of $set / $setOnInsert: naming it in
       // both is a Mongo conflict error, which is what broke every profile save.
       const operation = { $set: update };
       if (update.visibility === undefined) {
         operation.$setOnInsert = { visibility: "private" };
       }
+      let figuresSaved = update.visibility === "public";
       try {
         await profiles(db).updateOne({ _id: request.account.id }, operation, { upsert: true });
+        if (update.visibility === undefined && Object.keys(figures).length > 0) {
+          // No choice in this request: the figures go in only if the profile
+          // is public at the moment they are written.
+          const { matchedCount } = await profiles(db).updateOne(
+            { _id: request.account.id, visibility: "public" },
+            { $set: figures }
+          );
+          figuresSaved = matchedCount > 0;
+        }
         forgetBoards();
       } catch (error) {
         if (error?.code === 11000) {
@@ -160,8 +198,8 @@ export function socialRoutes(db) {
       }
       // A duel keeps each side's latest minutes, so its result survives the
       // week turning over on the profile.
-      if (update.weekKey !== undefined) {
-        await recordDuelMinutes(db, request.account.id, update.weekKey, update.weekMinutes);
+      if (figuresSaved && figures.weekKey !== undefined) {
+        await recordDuelMinutes(db, request.account.id, figures.weekKey, figures.weekMinutes);
       }
       response.json(ownView(await profiles(db).findOne({ _id: request.account.id })));
     })

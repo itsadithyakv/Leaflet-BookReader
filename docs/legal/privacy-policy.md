@@ -1,6 +1,6 @@
 # Leaflet Privacy Policy
 
-**Effective date:** 29 September 2026
+**Effective date:** 3 October 2026
 
 **Who we are:** Leaflet is made by PaperKite ("we", "us"). Contact: [adithyakrishnan.vinod@gmail.com](mailto:adithyakrishnan.vinod@gmail.com)
 
@@ -14,8 +14,13 @@ cannot.
 - Your books never leave your device unless you turn on backup to **your own**
   Google Drive. We cannot see what is in your Drive.
 - An account is optional. If you create one, we store your email address, a
-  scrambled (hashed) form of your password, and the reading statistics you
-  choose to share.
+  scrambled (hashed) form of your password, and, while your profile is public,
+  the reading statistics shown on it.
+- From Leaflet 1.2, a new account's profile is **public by default**. The
+  sign-up form shows the "Share my profile" switch and what it makes visible;
+  you can turn it off there, or make your profile private at any time later.
+  Accounts created before 1.2 were not changed: they stay private unless
+  their owner shares them.
 - You can delete your account, and everything we hold about you, from
   Settings at any time.
 
@@ -26,6 +31,12 @@ book files, your library (titles, authors, covers), your reading position and
 progress, your reading time, streaks and session history, your reading pace
 (how fast you read, book by book, so Smart Read can keep up with you), your
 highlights, notes and bookmarks, your collections, and your settings.
+
+There is one exception, and only while you have an account with a public
+profile: the few figures shown on that profile (this week's minutes, your
+streak, how many books you have finished, and the titles on your shared shelf)
+are sent to our server so other readers can see them. See "Your profile"
+below.
 
 ## Google Drive backup (optional)
 
@@ -62,10 +73,11 @@ one, we store the following on our server:
   once used, after five wrong tries, or when it expires. We also keep the dates
   of your resets from the last year, because an account can be reset three
   times a year.
-- **Profile, only if you make it public:** a handle you choose, your display
-  name, and weekly reading minutes, streak and number of finished books, which
-  are shown on leaderboards. Profiles are private by default, and a private
-  profile cannot be looked up by anyone.
+- **Profile:** a handle you choose (shown as `@handle`), your display name,
+  and whether the profile is public or private. While it is public we also
+  store what it shows: this week's reading minutes, your streak, how many
+  books you have finished, and a shelf of up to twelve titles from your recent
+  reading sessions. See "Your profile" below.
 - **Synced reading state** (when leaderboards and cross-device features are on):
   a compressed copy of your progress and reading history, so your devices agree.
   It includes your highlights, notes, bookmarks and collections if you have
@@ -80,6 +92,31 @@ India, at `leafletapp.duckdns.org`, and account data is stored in a MongoDB
 Atlas database. Your information may therefore be processed outside your own
 country.
 
+### Your profile: public by default, private whenever you choose
+
+When you create an account in Leaflet 1.2 or later, the sign-up form has a
+"Share my profile" switch. It is on unless you turn it off, and the form says
+what it makes visible before you create the account.
+
+- **If it is on,** your profile is public from the moment the account is
+  created. Other readers can see your display name, your `@handle`, your Pip
+  (the avatar you picked), this week's reading minutes, your streak, how many
+  books you have finished, and your shelf (up to twelve titles from your recent
+  reading sessions). You appear on the weekly leaderboard and can be found by
+  your handle.
+- **If you turn it off,** the account is created with a private profile:
+  nothing about you is shown to anyone, you are on no leaderboard, you cannot
+  be looked up, and no reading figures are sent to us.
+- **You can change it at any time** in the app under Social → You ("Make
+  private" / "Share my profile"). Making your profile private hides you from
+  leaderboards, search, inboxes and duels straight away, and removes the
+  reading figures and shelf we stored for it. Your handle and display name
+  are kept, unseen, so you can share again later; deleting your account
+  removes them too.
+- **Accounts created before Leaflet 1.2 were not changed.** Their profiles
+  were private unless the owner had shared them, and they stay that way:
+  updating the app does not make an existing profile public.
+
 **Readers you interact with.** If your profile is public, other signed-in
 readers can follow you, send you kudos and challenge you to a weekly reading
 duel, and we store those interactions (who, to whom, and when) so they can be
@@ -92,6 +129,13 @@ challenged.
   covers, Leaflet sends the book's title and author to these public catalogues.
   No account or identifier of yours is included. You can see their privacy
   policies on their websites.
+- **Wiktionary and Wikipedia (looking a word up).** When you select a word or
+  a short phrase in a book and press **Look up**, Leaflet sends those selected
+  words, and nothing else (not the book, not the sentence around them, no
+  account or identifier of yours), to Wiktionary and Wikipedia to fetch a
+  meaning and a short summary. Nothing is sent until you press it, and what
+  you looked up is not stored. "Search the web", offered when nothing is
+  found, opens a DuckDuckGo search for those words in your browser.
 - **Calibre (optional).** If you choose to install the optional converter,
   Leaflet downloads it from calibre-ebook.com.
 - **GitHub Pages.** Leaflet's website, and a small signed settings file the app
@@ -121,7 +165,8 @@ sessions expire after 90 days without use, and a password reset code after 15
 minutes. Community data is kept only as long
 as it is useful: kudos for 21 days, your inbox of notifications for 60 days,
 weekly duels for 90 days, and a follow until either reader removes it. Making
-your profile private hides you from boards, inboxes and duels straight away. When you delete your account from
+your profile private hides you from boards, inboxes and duels straight away,
+and removes the reading figures and shelf stored for it. When you delete your account from
 Settings, we delete your account, profile, synced reading state, all sign-in
 sessions, and every follow, kudos, duel and notification that involves you,
 straight away.
@@ -129,7 +174,7 @@ straight away.
 ## Your choices and rights
 
 From inside the app you can see and change what is shared, make your profile
-private, sign out of a device, change your password, and delete your account.
+private (or choose that when you create your account), sign out of a device, change your password, and delete your account.
 You can also contact us to ask for a copy of your data or for its deletion.
 Depending on where you live, you may have further rights under laws such as the
 GDPR or the CCPA; contact us and we will help.
@@ -144,6 +189,11 @@ contact us and we will delete it.
 
 If this policy changes, we will update the date above and, for significant
 changes, say so in the app.
+
+- **3 October 2026 (Leaflet 1.2):** a profile created at sign-up is public by
+  default, with the switch shown on the sign-up form; making a profile private
+  now also removes its stored reading figures; the shelf titles on a public
+  profile are listed among what is shared. Existing accounts were not changed.
 
 ## Contact
 

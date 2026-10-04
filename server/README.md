@@ -65,9 +65,9 @@ Authenticated routes take `Authorization: Bearer <token>`. Errors are
 | `PUT /v1/state` | ✓ | `{version, state}`. `version` is the one last read (0 = none). `409` with the current document if another device wrote first. Up to 2 MB. |
 | `DELETE /v1/state` | ✓ | Removes the stored state. |
 | `GET /v1/profile/me` | ✓ | The reader's own profile, private fields included. |
-| `PUT /v1/profile/me` | ✓ | `handle`, `displayName`, `visibility`, `weekKey` + `weekMinutes`, `streak`, `booksFinished`, `shelf`. |
+| `PUT /v1/profile/me` | ✓ | `handle`, `displayName`, `visibility`, `weekKey` + `weekMinutes`, `streak`, `booksFinished`, `shelf`. The reading figures (everything from `weekKey` on) are kept only for a public profile: sent for a private one they are checked, answered `200` and not stored, and `visibility: "private"` removes the ones held. The answer is the profile as it now stands, so a client can see from `visibility` that its figures were not kept. Names and shelf titles are stored as one line of visible text (no control characters, right-to-left overrides or zero-width spaces); `displayName: ""` clears the name. |
 | `DELETE /v1/profile/me` | ✓ | Removes the profile and all community data (follows both ways, kudos sent and received, duels, inbox events). |
-| `GET /v1/leaderboard?week=2026-W39&scope=everyone` | optional | Top 100 public profiles for that ISO week (default: the server's). Rows: `{rank, handle, displayName, pipSeed, avatar, weekMinutes, streak, booksFinished, isYou}`. With a token, `you` is the reader's own row and rank even outside the top 100. |
+| `GET /v1/leaderboard?week=2026-W39&scope=everyone` | optional | Top 100 public profiles for that ISO week (default: the server's). Rows: `{rank, handle, displayName, pipSeed, avatar, weekMinutes, streak, booksFinished, isYou}`. With a token, `you` is the reader's own row and rank even outside the top 100 (public profiles only: a private reader gets `null`, and the app draws their own row from the minutes on their device). `sharedReaders` counts the public profiles there are, read this week or not, so an empty board can say why it is empty. |
 | `GET /v1/leaderboard?week=…&scope=following` | ✓ | The reader plus the public readers they follow, zeros included. |
 | `GET /v1/profile/:handle?week=&day=` | optional | A public profile plus `kudosThisWeek`, `followerCount`, `followingCount`; with a token also `isYou`, `isFollowing`, `followsYou`, `kudosSentToday` (for local `day`), `activeDuel`. `404` if private or absent. |
 | `POST /v1/follows/:handle` | ✓ | Follow. Idempotent. The follower must be public (`403`), the target public (`404`), not yourself (`400`). Up to 500. |
@@ -160,7 +160,7 @@ collections that reference it.
 - `attempts` — wrong tries so far
 - `createdAt`, `expiresAt` — dates
 
-**`profiles`** — only once the reader saves a profile (private by default)
+**`profiles`** — only once the reader saves a profile. Private unless a save says `visibility: "public"`; the app (1.2 and later) sends that straight after sign-up unless the reader turned "Share my profile" off on the form. The server never shares a profile by itself, so accounts from before 1.2 stay as they were
 - `_id` — the account's ObjectId
 - `handle` — optional, 3–24 characters, unique
 - `displayName` — optional, up to 40 characters (the public name; separate from the account's)
@@ -169,6 +169,7 @@ collections that reference it.
 - `weekKey` — ISO week the minutes belong to, e.g. `2026-W39`
 - `weekMinutes` — 0–10080; `streak` — 0–36500; `booksFinished` — 0–100000
 - `shelf` — up to 12 of `{title (≤120), author (≤80) | null, styleSeed (≤64)}`
+- `weekKey`, `weekMinutes`, `streak`, `booksFinished` and `shelf` are held **only while the profile is public**: a private profile's are refused quietly, and going private clears them
 - `updatedAt` — date
 
 **`states`** — only if the device syncs through this server

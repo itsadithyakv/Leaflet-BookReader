@@ -259,6 +259,33 @@ describe("profiles", () => {
     assert.equal((await call("GET", `/v1/profile/${handle}`)).status, 404);
   });
 
+  test("a name is one line of visible text, and an empty one clears it", async () => {
+    const { token } = await signup();
+    const save = async (displayName) => (await call("PUT", "/v1/profile/me", { token, body: { displayName } })).body.displayName;
+    // A line break, a right-to-left override (which reverses the row it is
+    // shown in) and a zero-width space.
+    assert.equal(await save("  Ada\n\u202ELove\u200Blace\t "), "Ada Lovelace");
+    // Nothing but invisible characters is no name at all, not a blank one.
+    assert.equal(await save("\u200B\u202E\u2066 \n"), null);
+    // Forty characters, and the cut never splits an emoji in two.
+    const long = await save(`${"a".repeat(39)}😀😀`);
+    assert.equal([...long].length, 40);
+    assert.ok(long.endsWith("😀"));
+    assert.ok(long.isWellFormed());
+    // The app sends an empty name to remove it.
+    assert.equal(await save("Ada"), "Ada");
+    assert.equal(await save(""), null);
+
+    // The account's own name and the shelf go through the same rule.
+    const renamed = await call("PATCH", "/v1/account", { token, body: { displayName: "Gra\u202Ece\r\nHopper" } });
+    assert.equal(renamed.body.account.displayName, "Grace Hopper");
+    const shelved = await call("PUT", "/v1/profile/me", {
+      token,
+      body: { visibility: "public", shelf: [{ title: "Du\u202Ene\n", author: "\u200B", styleSeed: "s" }] }
+    });
+    assert.deepEqual(shelved.body.shelf, [{ title: "Dune", author: null, styleSeed: "s" }]);
+  });
+
   test("two readers can both clear their handle", async () => {
     for (let i = 0; i < 2; i += 1) {
       const { token } = await signup();
