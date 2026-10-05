@@ -711,7 +711,12 @@ pub struct ProfileUpdate {
   #[serde(skip_serializing_if = "Option::is_none")]
   pub books_finished: Option<i64>,
   #[serde(skip_serializing_if = "Option::is_none")]
-  pub shelf: Option<Vec<ShelfBook>>
+  pub shelf: Option<Vec<ShelfBook>>,
+  /// The local date the reader last read on, e.g. `2026-09-27`: sent only on
+  /// a day with reading in it, so a friend's Pip can visit "on a day you both
+  /// read". A server from before visitors ignores it.
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub read_day: Option<String>
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -820,6 +825,42 @@ pub async fn community_call(
   body: Option<serde_json::Value>,
   auth: CommunityAuth
 ) -> Result<serde_json::Value> {
+  let response = community_send(db_mutex, method, path, query, body, auth).await?;
+  if !response.status().is_success() {
+    return Err(community_failure(db_mutex, response).await);
+  }
+  Ok(response.json().await?)
+}
+
+/// A call to an endpoint a server may not have yet: `None` when it answers
+/// "no such route" (a server deployed before the app that asks), so a newer
+/// app on an older server goes without the feature instead of showing an error.
+/// Only for routes that never answer 404 themselves.
+pub async fn community_call_if_there(
+  db_mutex: &std::sync::Mutex<Database>,
+  method: reqwest::Method,
+  path: &str,
+  query: &[(&str, &str)],
+  auth: CommunityAuth
+) -> Result<Option<serde_json::Value>> {
+  let response = community_send(db_mutex, method, path, query, None, auth).await?;
+  if response.status() == reqwest::StatusCode::NOT_FOUND {
+    return Ok(None);
+  }
+  if !response.status().is_success() {
+    return Err(community_failure(db_mutex, response).await);
+  }
+  Ok(Some(response.json().await?))
+}
+
+async fn community_send(
+  db_mutex: &std::sync::Mutex<Database>,
+  method: reqwest::Method,
+  path: &str,
+  query: &[(&str, &str)],
+  body: Option<serde_json::Value>,
+  auth: CommunityAuth
+) -> Result<reqwest::Response> {
   let (base, token) = match auth {
     CommunityAuth::Required => {
       let (base, token) = session_token(db_mutex)?;
@@ -840,11 +881,7 @@ pub async fn community_call(
   if let Some(body) = body {
     request = request.json(&body);
   }
-  let response = request.send().await.map_err(unreachable)?;
-  if !response.status().is_success() {
-    return Err(community_failure(db_mutex, response).await);
-  }
-  Ok(response.json().await?)
+  request.send().await.map_err(unreachable)
 }
 
 /// A handle as a path segment: trimmed, lower-case, without a leading `@`.

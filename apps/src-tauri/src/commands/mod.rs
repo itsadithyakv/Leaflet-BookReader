@@ -35,6 +35,8 @@ mod collections;
 mod reading;
 mod library_copy;
 mod lookup;
+mod diary;
+mod words;
 
 pub use library::*;
 pub use backup::*;
@@ -52,3 +54,5 @@ pub use collections::*;
 pub use reading::*;
 pub use library_copy::*;
 pub use lookup::*;
+pub use diary::*;
+pub use words::*;

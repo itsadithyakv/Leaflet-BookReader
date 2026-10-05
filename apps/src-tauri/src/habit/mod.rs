@@ -1,4 +1,8 @@
-//! The habit engine: what a streak is, when it breaks, and what it costs.
+//! The habit engine: what a streak is, when it breaks, and what follows.
+//!
+//! A broken streak used to burn the newest books on the shelf. It burns
+//! nothing now: Pip catches a cold instead (`cold`), and reading nurses her
+//! back. Sessions an earlier version burned keep their tombstone.
 //!
 //! Deliberately pure. Every function here takes the day ledger as data and
 //! returns a decision, so the rules can be tested without a database or a clock.
@@ -17,10 +21,12 @@ pub mod seeds;
 const DAYS_PER_FREEZE: i64 = 5;
 /// Most freezes a reader can bank at once.
 const MAX_FREEZES: i64 = 2;
-/// Books burned per day of the streak that was lost.
-const BURN_PER_STREAK_DAY: i64 = 1;
-/// Ceiling on a single burn, so a long streak cannot wipe an entire shelf.
-const MAX_BURN: i64 = 12;
+/// The shortest streak whose breaking gives Pip a cold. A day or two lost is
+/// not worth one.
+pub const COLD_MIN_STREAK: i64 = 3;
+/// How many days the cold lasts when nothing cures it, counted from the day
+/// after the one that was missed. It always passes: it can never be permanent.
+pub const COLD_DAYS: i64 = 3;
 /// How far back a walk will look before giving up, in days.
 const MAX_WALK_DAYS: i64 = 3650;
 
@@ -66,8 +72,14 @@ pub struct StreakState {
   /// One free missed day per streak; refills when a new streak begins.
   pub grace_available: bool,
   pub last_evaluated_day: Option<String>,
-  /// High-water mark of the shelf, kept so a burn leaves a record of the peak.
-  pub peak_shelf: i64
+  /// High-water mark of the shelf. Kept from when a broken streak burned
+  /// books, so a burn left a record of the peak; nothing lowers the shelf now.
+  pub peak_shelf: i64,
+  /// The day the last break was found. The walk pays for no day before it:
+  /// those gaps were judged then. Absent in a state saved by an earlier
+  /// version, which reads as no break on record.
+  #[serde(default)]
+  pub broke_on: Option<String>
 }
 
 impl Default for StreakState {
@@ -78,7 +90,8 @@ impl Default for StreakState {
       freezes: 0,
       grace_available: true,
       last_evaluated_day: None,
-      peak_shelf: 0
+      peak_shelf: 0,
+      broke_on: None
     }
   }
 }
@@ -90,10 +103,9 @@ pub struct Evaluation {
   /// Days to persist as paid for, with what.
   pub covers: Vec<(String, CoverKind)>,
   pub state: StreakState,
-  /// Length of the streak that was just lost, when one was.
+  /// Length of the streak that was just lost, when one was. Nothing is taken
+  /// for it: see `cold` for what a break does now.
   pub broke_from: Option<i64>,
-  /// How many shelf books that break costs.
-  pub burn_count: i64,
   /// True once today's goal is met — the frontend celebrates on the edge.
   pub today_met: bool,
   pub today_minutes: f64,
@@ -108,11 +120,6 @@ fn key_of(date: chrono::NaiveDate) -> String {
   date.format("%Y-%m-%d").to_string()
 }
 
-/// How many books a broken streak burns.
-pub fn burn_count_for(broken_streak: i64) -> i64 {
-  (broken_streak * BURN_PER_STREAK_DAY).clamp(0, MAX_BURN)
-}
-
 /// Walks the ledger backwards from `today_key` and decides the streak.
 ///
 /// Grace is spent before a freeze: grace is free and refills every streak, so
@@ -121,6 +128,12 @@ pub fn burn_count_for(broken_streak: i64) -> i64 {
 /// A gap is only paid for once the walk finds an earlier qualifying day. Without
 /// that, a reader opening the app for the first time would spend their grace
 /// bridging a gap to a streak that never existed.
+///
+/// A break is final. The grace it refills belongs to the streak that comes
+/// after, so the walk pays for no day earlier than the day the break was
+/// found (`broke_on`). Without that the very next walk spent the new grace on
+/// the gap that had just broken the streak: the streak came back a minute
+/// after its end was announced, and a single missed day could never end one.
 pub fn evaluate(
   days: &HashMap<String, DayRecord>,
   today_key: &str,
@@ -134,7 +147,6 @@ pub fn evaluate(
         covers: Vec::new(),
         state: previous.clone(),
         broke_from: None,
-        burn_count: 0,
         today_met: false,
         today_minutes: 0.0,
         today_goal: 0
@@ -160,6 +172,7 @@ pub fn evaluate(
   let mut freezes = previous.freezes;
   let mut cursor = today;
   let mut walked = 0i64;
+  let judged_before = previous.broke_on.as_deref().and_then(parse_day);
 
   loop {
     let key = key_of(cursor);
@@ -172,6 +185,9 @@ pub fn evaluate(
       committed.append(&mut pending);
     } else if cursor == today {
       // Today is still in progress: it neither counts nor breaks the streak.
+    } else if judged_before.is_some_and(|found| cursor < found) {
+      // A gap the last break already judged: it is not paid for after the fact.
+      break;
     } else if grace {
       grace = false;
       pending.push((key, CoverKind::Grace));
@@ -229,19 +245,111 @@ pub fn evaluate(
     streak,
     covers: committed,
     broke_from,
-    burn_count: broke_from.map(burn_count_for).unwrap_or(0),
     state: StreakState {
       current_streak: streak,
       longest_streak: previous.longest_streak.max(streak),
       freezes,
       grace_available: grace,
       last_evaluated_day: Some(today_key.to_string()),
-      peak_shelf: previous.peak_shelf
+      peak_shelf: previous.peak_shelf,
+      broke_on: if broke { Some(today_key.to_string()) } else { previous.broke_on.clone() }
     },
     today_met,
     today_minutes,
     today_goal
   }
+}
+
+/// Pip's cold: what a broken streak costs now, in place of burned books.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Cold {
+  /// The day the streak broke: the first day missed. Local, `YYYY-MM-DD`.
+  pub since: String,
+  /// How many days the streak had run.
+  pub broke_from: i64,
+  /// How far the cure has come, 0 to 1: today's reading against today's
+  /// goal. Under 1 for as long as she has it (at 1 today is met, and she is
+  /// well).
+  pub cure: f64,
+  /// Whole minutes of reading today that would cure it.
+  pub minutes_left_today: i64,
+  /// Days until it passes by itself, today included: `COLD_DAYS` down to 1.
+  pub days_left: i64
+}
+
+/// How many days in a row count, ending on `last` (0 when `last` does not).
+fn run_ending(days: &HashMap<String, DayRecord>, last: chrono::NaiveDate) -> i64 {
+  let mut run = 0i64;
+  let mut cursor = last;
+  while run < MAX_WALK_DAYS && days.get(&key_of(cursor)).is_some_and(DayRecord::counts) {
+    run += 1;
+    cursor = match cursor.pred_opt() {
+      Some(previous_day) => previous_day,
+      None => break
+    };
+  }
+  run
+}
+
+/// Whether Pip has a cold, and how the nursing is going.
+///
+/// She catches one when a streak of `COLD_MIN_STREAK` days or more breaks,
+/// and has it from the day after the missed day until the reader meets the
+/// daily goal on any day since (a day covered by grace or a freeze is not a
+/// cure), or for `COLD_DAYS` days, whichever comes first.
+///
+/// Derived, like the streak: a pure function of the ledger, today's local
+/// date and the goal in force, so it needs no storage and no sync rule, and
+/// two devices holding the same ledger agree. It reads the ledger as it
+/// stands *after* the streak walk has stamped its covers: a missed day that
+/// grace or a freeze paid for counts, so there was no break and there is no
+/// cold. And because it only ever looks `COLD_DAYS` back from today, a break
+/// long past (a ledger that has only just arrived by sync, a reader back
+/// after a fortnight away) gives none.
+///
+/// The cure looks at every day after the break, not only those up to today:
+/// asked about an earlier day (a clock set back, the date line crossed), a
+/// cold already nursed away does not come back.
+pub fn cold(days: &HashMap<String, DayRecord>, today_key: &str, goal_minutes: i64) -> Option<Cold> {
+  let today = parse_day(today_key)?;
+  let counts = |date: chrono::NaiveDate| days.get(&key_of(date)).is_some_and(DayRecord::counts);
+
+  // The break: the nearest day before today that was missed straight after a
+  // streak worth a cold. Today is never it: a day in progress breaks nothing.
+  let (missed, back, broke_from) = (1..=COLD_DAYS).find_map(|back| {
+    let missed = today.checked_sub_signed(chrono::Duration::days(back))?;
+    if counts(missed) {
+      return None;
+    }
+    let run = run_ending(days, missed.pred_opt()?);
+    (run >= COLD_MIN_STREAK).then_some((missed, back, run))
+  })?;
+
+  // Nursed back: the goal met by reading, on any day since.
+  let cured = days
+    .values()
+    .any(|day| day.goal_met() && parse_day(&day.date_key).is_some_and(|date| date > missed));
+  if cured {
+    return None;
+  }
+
+  // Today's reading against today's goal: the goal its row is stamped with,
+  // or the one in force when nothing has been read yet.
+  let record = days.get(today_key);
+  let minutes = record.map(|day| day.minutes).filter(|m| m.is_finite()).unwrap_or(0.0).max(0.0);
+  let goal = record
+    .map(|day| day.goal_minutes)
+    .filter(|goal| *goal > 0)
+    .unwrap_or(goal_minutes)
+    .max(1) as f64;
+  Some(Cold {
+    since: key_of(missed),
+    broke_from,
+    cure: (minutes / goal).clamp(0.0, 1.0),
+    minutes_left_today: ((goal - minutes).ceil() as i64).max(1),
+    days_left: COLD_DAYS - back + 1
+  })
 }
 
 /// Free reading shorter than this is not listed. The heartbeat writes the
@@ -347,7 +455,8 @@ mod tests {
       freezes,
       grace_available: grace,
       last_evaluated_day: None,
-      peak_shelf: 0
+      peak_shelf: 0,
+      broke_on: None
     }
   }
 
@@ -411,7 +520,6 @@ mod tests {
     let result = evaluate(&days, "2026-03-05", &state(9, 0, false));
     assert_eq!(result.streak, 1, "only today survives");
     assert_eq!(result.broke_from, Some(9));
-    assert_eq!(result.burn_count, 9);
   }
 
   #[test]
@@ -481,14 +589,6 @@ mod tests {
   }
 
   #[test]
-  fn the_burn_is_capped() {
-    assert_eq!(burn_count_for(0), 0);
-    assert_eq!(burn_count_for(7), 7);
-    assert_eq!(burn_count_for(12), 12);
-    assert_eq!(burn_count_for(100), MAX_BURN);
-  }
-
-  #[test]
   fn longest_streak_only_grows() {
     let days = ledger(vec![day("2026-03-05", 25.0, 20)]);
     let mut previous = state(9, 0, false);
@@ -527,12 +627,276 @@ mod tests {
     let result = evaluate(&days, "2026-10-02", &previous);
     assert_eq!(result.streak, 2);
     assert_eq!(result.broke_from, None);
-    assert_eq!(result.burn_count, 0);
 
     // A real break is still one, asked on the same day or a later one.
     let gap = ledger(vec![day("2026-10-01", 25.0, 20), day("2026-10-05", 25.0, 20)]);
     let result = evaluate(&gap, "2026-10-05", &previous);
     assert_eq!(result.broke_from, Some(3));
+  }
+
+  #[test]
+  fn a_break_is_final_and_the_grace_it_refills_is_for_the_streak_after() {
+    // Five days to the 9th, the 10th missed, nothing left to pay with.
+    let mut entries: Vec<DayRecord> = (5..=9).map(|d| day(&format!("2026-10-{d:02}"), 25.0, 20)).collect();
+    let found = evaluate(&ledger(entries.clone()), "2026-10-11", &state(5, 0, false));
+    assert_eq!((found.streak, found.broke_from), (0, Some(5)));
+    assert!(found.state.grace_available, "a new streak's grace");
+    assert_eq!(found.state.broke_on.as_deref(), Some("2026-10-11"));
+
+    // Asked again the same day, a minute later: the new grace does not go
+    // back and pay for the 10th. This used to restore the streak.
+    let again = evaluate(&ledger(entries.clone()), "2026-10-11", &found.state);
+    assert_eq!((again.streak, again.broke_from), (0, None));
+    assert!(again.covers.is_empty());
+    assert!(again.state.grace_available);
+
+    // The 11th is read: a streak of one, not of seven.
+    entries.push(day("2026-10-11", 25.0, 20));
+    let met = evaluate(&ledger(entries.clone()), "2026-10-11", &again.state);
+    assert_eq!(met.streak, 1);
+    assert!(met.covers.is_empty());
+
+    // The 12th is missed and the 13th read: that gap is the new streak's, and its grace pays.
+    entries.push(day("2026-10-13", 25.0, 20));
+    let covered = evaluate(&ledger(entries), "2026-10-13", &met.state);
+    assert_eq!(covered.streak, 3);
+    assert_eq!(covered.covers, vec![("2026-10-12".to_string(), CoverKind::Grace)]);
+    assert_eq!(covered.broke_from, None);
+  }
+
+  #[test]
+  fn a_streak_state_from_an_earlier_version_reads_as_no_break_on_record() {
+    let saved = r#"{"currentStreak":4,"longestStreak":9,"freezes":1,"graceAvailable":false,"lastEvaluatedDay":"2026-10-03","peakShelf":12}"#;
+    let state: StreakState = serde_json::from_str(saved).expect("reads");
+    assert_eq!((state.current_streak, state.freezes, state.broke_on), (4, 1, None));
+  }
+
+  // ---- the cold ----------------------------------------------------------
+
+  /// `streak` days met in a row, the last of them the day before `missed`.
+  fn streak_before(missed: &str, streak: i64) -> Vec<DayRecord> {
+    let missed = parse_day(missed).expect("a date");
+    (1..=streak)
+      .map(|back| day(&key_of(missed - chrono::Duration::days(back)), 25.0, 20))
+      .collect()
+  }
+
+  /// Stamps a cover on the ledger, as `build_snapshot` does with what the walk decided.
+  fn stamp(days: &mut HashMap<String, DayRecord>, key: &str, kind: CoverKind) {
+    let record = days.entry(key.to_string()).or_insert_with(|| day(key, 0.0, 20));
+    match kind {
+      CoverKind::Grace => record.grace_used = true,
+      CoverKind::Freeze => record.freeze_used = true
+    }
+  }
+
+  #[test]
+  fn a_streak_of_three_that_breaks_gives_pip_a_cold_the_next_day() {
+    let days = ledger(streak_before("2026-10-10", 3));
+    assert_eq!(
+      cold(&days, "2026-10-11", 20),
+      Some(Cold {
+        since: "2026-10-10".to_string(),
+        broke_from: 3,
+        cure: 0.0,
+        minutes_left_today: 20,
+        days_left: 3
+      })
+    );
+  }
+
+  #[test]
+  fn a_new_reader_or_a_short_streak_gets_no_cold() {
+    // Nothing read, ever.
+    assert_eq!(cold(&ledger(vec![]), "2026-10-11", 20), None);
+    // Two days, then a miss: not worth one.
+    assert_eq!(cold(&ledger(streak_before("2026-10-10", COLD_MIN_STREAK - 1)), "2026-10-11", 20), None);
+    // A first week of reading a little and never meeting the goal.
+    let dabbling = ledger(vec![day("2026-10-08", 6.0, 20), day("2026-10-09", 4.0, 20), day("2026-10-11", 3.0, 20)]);
+    assert_eq!(cold(&dabbling, "2026-10-11", 20), None);
+    // A date that cannot be read.
+    assert_eq!(cold(&ledger(streak_before("2026-10-10", 9)), "not-a-date", 20), None);
+  }
+
+  #[test]
+  fn the_day_in_progress_is_never_the_break() {
+    // The 10th is today with nothing read yet: the streak still stands. The
+    // day is the reader's own local one, whatever the date is elsewhere, and
+    // nothing here reads a clock: only when their 10th is over was it missed.
+    let days = ledger(streak_before("2026-10-10", 5));
+    assert_eq!(cold(&days, "2026-10-10", 20), None);
+    assert!(cold(&days, "2026-10-11", 20).is_some());
+    // Flying west brings the 10th round again: it is in progress again, and
+    // reading on it keeps the streak after all.
+    assert_eq!(cold(&days, "2026-10-10", 20), None);
+  }
+
+  #[test]
+  fn reading_shows_the_cure_coming_and_meeting_the_goal_is_the_cure() {
+    let on_the_11th = |minutes: f64| {
+      let mut entries = streak_before("2026-10-10", 4);
+      entries.push(day("2026-10-11", minutes, 20));
+      cold(&ledger(entries), "2026-10-11", 20)
+    };
+    let half = on_the_11th(12.0).expect("still ill");
+    assert_eq!((half.cure, half.minutes_left_today), (0.6, 8));
+    // Under a minute to go is said as one, never as none.
+    let nearly = on_the_11th(19.2).expect("still ill");
+    assert_eq!(nearly.minutes_left_today, 1);
+    assert!(nearly.cure < 1.0);
+    // The goal met: she is well, in the same breath.
+    assert_eq!(on_the_11th(20.0), None);
+    assert_eq!(on_the_11th(48.0), None);
+  }
+
+  #[test]
+  fn todays_reading_is_measured_against_todays_goal() {
+    // The goal today's row is stamped with, not the one passed in.
+    let mut entries = streak_before("2026-10-10", 3);
+    entries.push(day("2026-10-11", 10.0, 40));
+    let stamped = cold(&ledger(entries), "2026-10-11", 20).expect("a cold");
+    assert_eq!((stamped.cure, stamped.minutes_left_today), (0.25, 30));
+    // Nothing read yet today: the goal in force.
+    let unread = cold(&ledger(streak_before("2026-10-10", 3)), "2026-10-11", 45).expect("a cold");
+    assert_eq!((unread.cure, unread.minutes_left_today), (0.0, 45));
+    // A goal of nothing divides nothing.
+    let no_goal = cold(&ledger(streak_before("2026-10-10", 3)), "2026-10-11", 0).expect("a cold");
+    assert_eq!((no_goal.cure, no_goal.minutes_left_today), (0.0, 1));
+  }
+
+  #[test]
+  fn it_passes_by_itself_after_three_days() {
+    let days = ledger(streak_before("2026-10-10", 6));
+    let left: Vec<Option<i64>> = ["2026-10-11", "2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15"]
+      .iter()
+      .map(|today| cold(&days, today, 20).map(|caught| caught.days_left))
+      .collect();
+    assert_eq!(left, vec![Some(3), Some(2), Some(1), None, None]);
+    // It is dated from the first day missed however many follow.
+    let last_day = cold(&days, "2026-10-13", 20).expect("its last day");
+    assert_eq!((last_day.since.as_str(), last_day.broke_from), ("2026-10-10", 6));
+  }
+
+  #[test]
+  fn reading_short_of_the_goal_neither_cures_it_nor_keeps_it_going() {
+    let mut entries = streak_before("2026-10-10", 3);
+    // A little on the day that was missed, and a little each day since.
+    entries.push(day("2026-10-10", 4.0, 20));
+    entries.push(day("2026-10-11", 9.0, 20));
+    entries.push(day("2026-10-12", 15.0, 20));
+    let days = ledger(entries);
+    let second_day = cold(&days, "2026-10-12", 20).expect("still ill");
+    assert_eq!((second_day.since.as_str(), second_day.days_left, second_day.cure), ("2026-10-10", 2, 0.75));
+    assert_eq!(cold(&days, "2026-10-14", 20), None, "it passes all the same");
+  }
+
+  #[test]
+  fn a_cure_holds_on_the_days_after() {
+    let mut entries = streak_before("2026-10-10", 3);
+    entries.push(day("2026-10-11", 22.0, 20));
+    let days = ledger(entries);
+    // Cured on the 11th; the 12th is then missed, after a streak of one.
+    for today in ["2026-10-11", "2026-10-12", "2026-10-13", "2026-10-14"] {
+      assert_eq!(cold(&days, today, 20), None, "{today}");
+    }
+  }
+
+  #[test]
+  fn only_reading_cures_it() {
+    // A day after the break that counts by a cover alone is not a cure.
+    let mut entries = streak_before("2026-10-10", 3);
+    let mut covered = day("2026-10-11", 0.0, 20);
+    covered.freeze_used = true;
+    entries.push(covered);
+    let caught = cold(&ledger(entries), "2026-10-12", 20).expect("still ill");
+    assert_eq!((caught.since.as_str(), caught.days_left), ("2026-10-10", 2));
+  }
+
+  #[test]
+  fn a_miss_paid_for_by_grace_or_a_freeze_is_no_break_and_no_cold() {
+    // As build_snapshot does it: the walk decides the covers, they are
+    // stamped on the ledger, and the cold is read from the ledger after.
+    let mut days = ledger(streak_before("2026-10-10", 5));
+    let walked = evaluate(&days, "2026-10-11", &state(5, 0, true));
+    assert_eq!(walked.broke_from, None);
+    assert_eq!(walked.covers, vec![("2026-10-10".to_string(), CoverKind::Grace)]);
+    for (key, kind) in &walked.covers {
+      stamp(&mut days, key, *kind);
+    }
+    assert_eq!(cold(&days, "2026-10-11", 20), None);
+
+    // Two days away (or one, and a date skipped flying east): grace and a freeze.
+    let mut days = ledger(streak_before("2026-10-10", 5));
+    let walked = evaluate(&days, "2026-10-12", &state(5, 1, true));
+    assert_eq!((walked.broke_from, walked.covers.len()), (None, 2));
+    for (key, kind) in &walked.covers {
+      stamp(&mut days, key, *kind);
+    }
+    assert_eq!(cold(&days, "2026-10-12", 20), None);
+
+    // Nothing left to pay with: the same ledger is a break, and a cold.
+    let days = ledger(streak_before("2026-10-10", 5));
+    let walked = evaluate(&days, "2026-10-11", &state(5, 0, false));
+    assert_eq!(walked.broke_from, Some(5));
+    assert!(walked.covers.is_empty());
+    assert_eq!(cold(&days, "2026-10-11", 20).map(|caught| caught.broke_from), Some(5));
+  }
+
+  #[test]
+  fn covered_days_count_in_the_streak_that_broke() {
+    let mut covered = day("2026-10-08", 0.0, 20);
+    covered.grace_used = true;
+    let days = ledger(vec![day("2026-10-07", 25.0, 20), covered, day("2026-10-09", 25.0, 20)]);
+    assert_eq!(cold(&days, "2026-10-11", 20).map(|caught| caught.broke_from), Some(3));
+  }
+
+  #[test]
+  fn a_break_long_past_gives_no_cold_on_a_device_that_has_only_just_heard_of_it() {
+    // A ledger arriving by sync: a month's streak that broke in March, a
+    // little reading after it, and nothing since.
+    let mut entries = streak_before("2026-03-10", 30);
+    entries.push(day("2026-03-12", 5.0, 20));
+    assert_eq!(cold(&ledger(entries), "2026-10-11", 20), None);
+    // Four days is already long past.
+    assert_eq!(cold(&ledger(streak_before("2026-10-07", 30)), "2026-10-11", 20), None);
+    // And a clock far ahead of the ledger finds nothing either.
+    assert_eq!(cold(&ledger(streak_before("2026-10-10", 30)), "2031-01-01", 20), None);
+  }
+
+  #[test]
+  fn a_clock_set_back_brings_no_cold() {
+    // A streak to the 5th, the 6th missed, nursed back on the 7th, read on since.
+    let mut entries = streak_before("2026-10-06", 5);
+    for d in 7..=12 {
+      entries.push(day(&format!("2026-10-{d:02}"), 25.0, 20));
+    }
+    let days = ledger(entries);
+    // Asked about days already lived: inside the old streak, the day that
+    // was missed, the day of the cure and the days after it.
+    for today in ["2026-10-03", "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09"] {
+      assert_eq!(cold(&days, today, 20), None, "{today}");
+    }
+
+    // Two days missed and the cure on the third: asked about the second
+    // missed day again, the cure that came after it still holds.
+    let mut entries = streak_before("2026-10-06", 5);
+    entries.push(day("2026-10-08", 25.0, 20));
+    let days = ledger(entries);
+    assert_eq!(cold(&days, "2026-10-07", 20), None);
+    assert_eq!(cold(&days, "2026-10-08", 20), None);
+  }
+
+  #[test]
+  fn two_devices_with_the_same_ledger_agree() {
+    // Nothing but the ledger, the date and the goal goes in: whatever each
+    // device's own streak state says, the answer is the same.
+    let mut entries = streak_before("2026-10-10", 7);
+    entries.push(day("2026-10-11", 5.0, 20));
+    let here = cold(&ledger(entries.clone()), "2026-10-11", 20);
+    entries.reverse();
+    let there = cold(&ledger(entries), "2026-10-11", 20);
+    assert!(here.is_some());
+    assert_eq!(here, there);
   }
 
   // ---- free reading ------------------------------------------------------

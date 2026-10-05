@@ -77,8 +77,24 @@ pub(crate) fn build_profile_update(db: &db::Database, today_key: &str) -> Result
         })
         .collect()
     ),
+    read_day: read_day(&snapshot.days, today_key),
     ..cloud::ProfileUpdate::default()
   })
+}
+
+/// A day counts as read from this many minutes on its ledger. The same number
+/// is `READ_TODAY_MINUTES` in `apps/src/pip/visitors.ts`: what a reader
+/// publishes as "read today" is what lets their own Pip have visitors.
+pub(crate) const READ_DAY_MINUTES: f64 = 1.0;
+
+/// Today's date when today has been read on, for a friend's Pip to visit
+/// "on a day you both read"; nothing on a day with no reading yet, which
+/// leaves the last day published standing (and that day is not today).
+pub(crate) fn read_day(days: &[habit::DayRecord], today_key: &str) -> Option<String> {
+  days
+    .iter()
+    .any(|day| day.date_key == today_key && day.minutes >= READ_DAY_MINUTES)
+    .then(|| today_key.to_string())
 }
 
 /// Pushes the ranked numbers. Resolves `true` when something was published.
@@ -230,6 +246,7 @@ pub async fn save_social_profile(
     update.streak = stats.streak;
     update.books_finished = stats.books_finished;
     update.shelf = stats.shelf;
+    update.read_day = stats.read_day;
   }
 
   cloud::put_profile(&state.db, &update).await.map_err(|e| e.to_string())?;
@@ -291,6 +308,8 @@ mod tests {
     assert_eq!(update.week_key.as_deref(), Some("2026-W40"));
     assert_eq!(update.week_minutes, Some(137.5));
     assert!(update.shelf.expect("shelf").is_empty(), "the shelf is sessions only");
+    // Read on the day itself: that day is published, for a friend's Pip to visit on.
+    assert_eq!(update.read_day.as_deref(), Some("2026-10-03"));
     // Nothing a reader did not choose to change rides along.
     assert!(update.visibility.is_none() && update.handle.is_none() && update.display_name.is_none());
   }
@@ -310,6 +329,28 @@ mod tests {
     // Already confirmed this run: no need to ask again.
     assert_eq!(shared_now(Some(true), None), Ok(true));
     assert_eq!(shared_now(Some(false), None), Ok(false));
+  }
+
+  /// "Read today" is published only on a day with a minute of reading in it,
+  /// and is the device's own date.
+  #[test]
+  fn the_day_read_is_published_only_once_it_has_been_read_on() {
+    let db = crate::db::tests::memory_db();
+    db.credit_minutes("2026-10-02", 40.0, 20).expect("yesterday");
+    // Nothing read yet today: no day is sent, and nothing else changes.
+    let before = build_profile_update(&db, "2026-10-03").expect("update");
+    assert_eq!(before.read_day, None);
+    assert_eq!(before.week_minutes, Some(40.0));
+    assert!(!serde_json::to_string(&before).expect("json").contains("readDay"));
+    // A few seconds on the page is not a day read.
+    db.credit_minutes("2026-10-03", 0.4, 20).expect("a glance");
+    assert_eq!(build_profile_update(&db, "2026-10-03").expect("update").read_day, None);
+    db.credit_minutes("2026-10-03", 0.8, 20).expect("a page");
+    let after = build_profile_update(&db, "2026-10-03").expect("update");
+    assert_eq!(after.read_day.as_deref(), Some("2026-10-03"));
+    assert!(serde_json::to_string(&after).expect("json").contains(r#""readDay":"2026-10-03""#));
+    // The next morning, before any reading: yesterday is not passed off as today.
+    assert_eq!(build_profile_update(&db, "2026-10-04").expect("update").read_day, None);
   }
 
   /// A publish is answered with the profile as the server has it, which is

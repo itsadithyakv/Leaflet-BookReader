@@ -58,10 +58,12 @@ pub struct HabitSnapshot {
   pub shelf_count: i64,
   pub peak_shelf: i64,
   /// Set on the evaluation that detects a break, so the UI can explain it once.
+  /// A break takes nothing from the shelf (it used to burn the newest books).
   pub broke_from: Option<i64>,
-  /// Ids burned by *this* evaluation. Empty on every later call, so replaying
-  /// the snapshot cannot replay the fire.
-  pub just_burned: Vec<String>,
+  /// Pip's cold, when a streak worth one has just broken and reading has not
+  /// yet nursed her back (see `habit::cold`). Worked out from the ledger
+  /// every time, never stored.
+  pub cold: Option<habit::Cold>,
   /// Every seed ever earned (see `habit::seeds`). The wrap-up shows the
   /// difference a session made; the balance is on `pip_wallet`.
   pub seeds_earned: i64,
@@ -119,14 +121,10 @@ pub(crate) fn build_snapshot(db: &db::Database, today_key: &str) -> Result<Habit
       .map_err(|e| e.to_string())?;
   }
 
+  // A break burns nothing. Sessions an earlier version burned (or a device
+  // still on one burns, and syncs here) keep their tombstone: `shelf_count`
+  // is still the spines left standing.
   let mut state = evaluation.state.clone();
-  let mut just_burned = Vec::new();
-  if evaluation.burn_count > 0 {
-    just_burned = db
-      .burn_recent_sessions(evaluation.burn_count, &db::now_iso())
-      .map_err(|e| e.to_string())?;
-  }
-
   let shelf_count = db.unburned_session_count().map_err(|e| e.to_string())?;
   state.peak_shelf = state.peak_shelf.max(shelf_count);
   write_streak_state(db, &state)?;
@@ -135,6 +133,9 @@ pub(crate) fn build_snapshot(db: &db::Database, today_key: &str) -> Result<Habit
   let sessions = db.focus_sessions().map_err(|e| e.to_string())?;
   let (garden, seeds_earned) = garden_totals(db, &day_map, &sessions)?;
   let free_reads = free_reads_from(&day_map, &sessions);
+  // Read from the ledger as it stands with this walk's covers stamped on it:
+  // a miss that grace or a freeze paid for is no break.
+  let cold = habit::cold(&day_map, today_key, goal_minutes);
   let mut day_list: Vec<habit::DayRecord> = day_map.into_values().collect();
   day_list.sort_by(|a, b| a.date_key.cmp(&b.date_key));
 
@@ -152,7 +153,7 @@ pub(crate) fn build_snapshot(db: &db::Database, today_key: &str) -> Result<Habit
     shelf_count,
     peak_shelf: state.peak_shelf,
     broke_from: evaluation.broke_from,
-    just_burned,
+    cold,
     seeds_earned,
     garden_water: garden.water,
     garden_ripe: garden.ripe_count()
@@ -246,8 +247,8 @@ pub(crate) fn creditable(db: &db::Database, date_key: &str, minutes: f64) -> Res
 /// ledger stamps a day with whatever it is given.
 ///
 /// * A day that has met the goal it is stamped with keeps that goal. A goal
-///   raised afterwards must not unmeet it (the streak would drop by the day,
-///   read as broken, and burn the shelf), and one lowered afterwards changes
+///   raised afterwards must not unmeet it (the streak would drop by the day
+///   and read as broken), and one lowered afterwards changes
 ///   nothing: a day is met once, and its bonus is worked out from the ledger,
 ///   so no run of goal changes can pay it twice.
 /// * An earlier day (`earlier`: the last minute of a read Leaflet was closed
@@ -533,7 +534,7 @@ mod tests {
   }
 
   #[test]
-  fn raising_the_goal_after_meeting_it_does_not_unmeet_today_or_burn_the_shelf() {
+  fn raising_the_goal_after_meeting_it_does_not_unmeet_today_or_break_the_streak() {
     let db = memory_db();
     let (now, today, yesterday) = clock();
     db.credit_minutes(&yesterday, 25.0, 20).expect("yesterday");
@@ -549,7 +550,7 @@ mod tests {
     assert!(after.today_met, "today met the goal it was read against");
     assert_eq!(after.streak, 2);
     assert_eq!(after.broke_from, None);
-    assert!(after.just_burned.is_empty(), "nothing burns");
+    assert_eq!(after.cold, None);
     assert_eq!(after.shelf_count, 1);
     let day = after.days.iter().find(|day| day.date_key == today).expect("today");
     assert_eq!((day.minutes, day.goal_minutes), (22.0, 20));
@@ -615,7 +616,7 @@ mod tests {
       assert_eq!(after.seeds_earned, met.seeds_earned, "goal {goal}: paid once");
       assert_eq!((after.streak, after.freezes), (met.streak, met.freezes));
       assert_eq!(after.broke_from, None);
-      assert_eq!(after.shelf_count, 1, "goal {goal}: nothing burns");
+      assert_eq!(after.shelf_count, 1, "goal {goal}: the shelf stands");
     }
     // Reading on under a raised goal changes none of it either.
     set_goal(&db, 240, Some(&today)).expect("raise");
@@ -705,6 +706,187 @@ mod tests {
     assert_eq!(creditable(&db, &stale, 1.0), Err("not today"));
     assert_eq!(creditable(&db, &yesterday, 1.0), Ok(1.0));
     assert_eq!(creditable(&db, &today, 1.0), Ok(1.0));
+  }
+
+  // ---- a broken streak: nothing burns, and Pip catches a cold ---------------
+
+  fn day_before(now: &chrono::DateTime<chrono::Local>, back: i64) -> String {
+    (now.date_naive() - chrono::Duration::days(back)).format("%Y-%m-%d").to_string()
+  }
+
+  /// Three days met, the last of them the day before yesterday, a session on
+  /// each; yesterday missed; and a streak state with nothing left to cover it.
+  fn a_streak_broken_yesterday(db: &db::Database, now: &chrono::DateTime<chrono::Local>) {
+    for back in 2..=4 {
+      let key = day_before(now, back);
+      db.credit_minutes(&key, 25.0, 20).expect("a day");
+      db.insert_focus_session(&session(&format!("s{back}"), &key, now, 25.0)).expect("a session");
+    }
+    let state = habit::StreakState {
+      current_streak: 3,
+      longest_streak: 3,
+      freezes: 0,
+      grace_available: false,
+      last_evaluated_day: Some(day_before(now, 1)),
+      peak_shelf: 3,
+      broke_on: None
+    };
+    write_streak_state(db, &state).expect("streak state");
+  }
+
+  #[test]
+  fn a_broken_streak_burns_nothing_and_gives_pip_a_cold() {
+    let db = memory_db();
+    let (now, today, yesterday) = clock();
+    a_streak_broken_yesterday(&db, &now);
+
+    let snapshot = build_snapshot(&db, &today).expect("snapshot");
+    assert_eq!(snapshot.broke_from, Some(3), "the break is still found, and said once");
+    assert_eq!(snapshot.streak, 0);
+    assert_eq!(snapshot.shelf_count, 3, "every book still stands");
+    assert!(snapshot.sessions.iter().all(|session| session.burned_at.is_none()));
+    assert_eq!(db.unburned_session_count().expect("count"), 3);
+    assert_eq!(
+      snapshot.cold,
+      Some(habit::Cold { since: yesterday, broke_from: 3, cure: 0.0, minutes_left_today: 20, days_left: 3 })
+    );
+
+    // Asked again, the break is not announced twice, the streak does not
+    // come back, and the cold is still there.
+    let again = build_snapshot(&db, &today).expect("again");
+    assert_eq!((again.broke_from, again.streak), (None, 0));
+    assert_eq!(again.cold, snapshot.cold);
+    assert_eq!(again.shelf_count, 3);
+  }
+
+  #[test]
+  fn reading_nurses_pip_back() {
+    let db = memory_db();
+    let (now, today, _) = clock();
+    a_streak_broken_yesterday(&db, &now);
+    build_snapshot(&db, &today).expect("the break");
+
+    // Any reading counts, in a focus session or not.
+    let some = credit_reading(&db, &today, 12.0, Some(&today)).expect("some reading");
+    let caught = some.cold.expect("still ill");
+    assert_eq!((caught.cure, caught.minutes_left_today), (0.6, 8));
+    // The goal met: she is well in the same snapshot, and a new streak begins.
+    let met = credit_reading(&db, &today, 8.0, Some(&today)).expect("the rest");
+    assert!(met.today_met);
+    assert_eq!(met.cold, None);
+    assert_eq!(met.streak, 1);
+    assert_eq!(met.shelf_count, 3);
+  }
+
+  #[test]
+  fn a_miss_covered_by_grace_is_no_break_and_no_cold() {
+    let db = memory_db();
+    let (now, today, yesterday) = clock();
+    a_streak_broken_yesterday(&db, &now);
+    // The same ledger, with grace still in hand.
+    let mut state = read_streak_state(&db);
+    state.grace_available = true;
+    write_streak_state(&db, &state).expect("streak state");
+
+    let snapshot = build_snapshot(&db, &today).expect("snapshot");
+    assert_eq!(snapshot.broke_from, None);
+    assert_eq!(snapshot.streak, 4, "three days and the one grace paid for");
+    assert_eq!(snapshot.cold, None);
+    let covered = snapshot.days.iter().find(|day| day.date_key == yesterday).expect("yesterday");
+    assert!(covered.grace_used);
+  }
+
+  #[test]
+  fn books_already_burned_stay_burned() {
+    let db = memory_db();
+    let (now, today, _) = clock();
+    a_streak_broken_yesterday(&db, &now);
+    // One burned by an earlier version (or by a device still on one, by sync).
+    let mut burned = session("old", &day_before(&now, 9), &now, 30.0);
+    burned.burned_at = Some("2026-01-05T08:00:00+00:00".to_string());
+    db.put_focus_session(&burned).expect("burned");
+
+    let snapshot = build_snapshot(&db, &today).expect("snapshot");
+    assert_eq!(snapshot.sessions.len(), 4);
+    assert_eq!(snapshot.shelf_count, 3, "the burned one is not counted, and not brought back");
+    let old = snapshot.sessions.iter().find(|session| session.id == "old").expect("the burned one");
+    assert_eq!(old.burned_at.as_deref(), Some("2026-01-05T08:00:00+00:00"));
+    // And the break found just now added no tombstone of its own.
+    assert_eq!(snapshot.sessions.iter().filter(|session| session.burned_at.is_some()).count(), 1);
+  }
+
+  #[test]
+  fn the_cold_does_not_touch_pips_mood() {
+    let well = memory_db();
+    let ill = memory_db();
+    let (now, today, _) = clock();
+    a_streak_broken_yesterday(&ill, &now);
+    assert!(build_snapshot(&ill, &today).expect("the break").cold.is_some());
+    // Finding the break, and having the cold, moved nothing.
+    assert_eq!(ill.pip_state().expect("state").map(|state| state.mood), well.pip_state().expect("state").map(|state| state.mood));
+    assert!(read_mood_log(&ill).is_empty());
+
+    // The same reading cheers her up by the same amount, cold or no cold,
+    // and the cure adds nothing of its own.
+    for db in [&well, &ill] {
+      credit_reading(db, &today, 12.0, Some(&today)).expect("reading");
+      credit_reading(db, &today, 8.0, Some(&today)).expect("to the goal");
+    }
+    assert!(near(cheered_by(&ill), cheered_by(&well)), "{} / {}", cheered_by(&ill), cheered_by(&well));
+    assert!(near(cheered_by(&ill), 20.0 * pip::MOOD_PER_READING_MINUTE));
+    assert_eq!(read_reading_mood(&ill), read_reading_mood(&well));
+  }
+
+  /// The cold is worked out, not kept: nothing of it is in the document that
+  /// syncs and backs up, and a device given the same ledger finds it itself.
+  #[test]
+  fn the_cold_is_not_stored_or_synced() {
+    let from = memory_db();
+    let (now, today, _) = clock();
+    a_streak_broken_yesterday(&from, &now);
+    let here = build_snapshot(&from, &today).expect("snapshot").cold.expect("a cold");
+
+    let doc = crate::sync::store::snapshot(&from, &db::now_iso()).expect("snapshot");
+    let sent = serde_json::to_string(&doc).expect("encodes");
+    assert!(!sent.to_lowercase().contains("cold"), "the cold is in the sync document");
+
+    // A device that never held the streak, with nothing to cover the miss
+    // either: its own state says nothing broke, and the ledger still says
+    // she has a cold.
+    let to = memory_db();
+    crate::sync::store::apply(&to, &doc).expect("apply");
+    write_streak_state(&to, &habit::StreakState { grace_available: false, ..Default::default() }).expect("streak state");
+    let there = build_snapshot(&to, &today).expect("snapshot");
+    assert_eq!(there.broke_from, None);
+    assert_eq!(there.cold, Some(here));
+  }
+
+  /// The streak's bank is each device's own, so a device with grace in hand
+  /// pays for a miss another could not. The cover travels (spent on one
+  /// device, spent everywhere), and with it the cold goes from both.
+  #[test]
+  fn a_cover_from_another_device_cures_the_cold_here_too() {
+    let from = memory_db();
+    let (now, today, yesterday) = clock();
+    a_streak_broken_yesterday(&from, &now);
+    assert!(build_snapshot(&from, &today).expect("snapshot").cold.is_some());
+
+    // The other device: the same ledger, and a new device's grace.
+    let other = memory_db();
+    crate::sync::store::apply(&other, &crate::sync::store::snapshot(&from, &db::now_iso()).expect("snapshot")).expect("apply");
+    let there = build_snapshot(&other, &today).expect("snapshot");
+    assert_eq!(there.cold, None);
+    assert!(there.days.iter().any(|day| day.date_key == yesterday && day.grace_used));
+
+    // Back here by sync: the day is paid for, so it was no break after all.
+    let stamp = db::now_iso();
+    let merged = crate::sync::merge::merge(
+      &crate::sync::store::snapshot(&from, &stamp).expect("here"),
+      &crate::sync::store::snapshot(&other, &stamp).expect("there"),
+      &stamp
+    );
+    crate::sync::store::apply(&from, &merged).expect("apply");
+    assert_eq!(build_snapshot(&from, &today).expect("snapshot").cold, None);
   }
 
   /// How far Pip's mood is above where a new Pip's starts. (A few

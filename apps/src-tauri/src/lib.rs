@@ -10,6 +10,7 @@ mod comic;
 mod commands;
 mod convert;
 mod db;
+mod desktop_pip;
 mod diag;
 mod formats;
 mod habit;
@@ -192,6 +193,8 @@ pub fn run() {
 
       // Reading reminders: takes over from Windows' schedule while running.
       reminders::runtime::init(_app.handle());
+      // Pip on the desktop: nothing starts until the reader has switched her on.
+      desktop_pip::runtime::init(_app.handle());
 
       // A window icon is a desktop window-manager concept; a phone takes its
       // icon from the manifest instead.
@@ -212,6 +215,8 @@ pub fn run() {
     .on_window_event(|window, event| {
       if matches!(event, tauri::WindowEvent::Destroyed) && window.label() == "main" {
         reminders::runtime::schedule_for_exit(window.app_handle());
+        // Desktop Pip's window goes too, or the process would stay for it.
+        desktop_pip::runtime::shutdown(window.app_handle());
       }
     })
     .invoke_handler(tauri::generate_handler![
@@ -220,6 +225,15 @@ pub fn run() {
       reminders::runtime::reminders_context,
       reminders::runtime::reminders_take_activation,
       reminders::runtime::reminders_preview,
+      desktop_pip::runtime::desktop_pip_set,
+      desktop_pip::runtime::desktop_pip_status,
+      desktop_pip::runtime::desktop_pip_attach,
+      desktop_pip::runtime::desktop_pip_stroll,
+      desktop_pip::runtime::desktop_pip_halt,
+      desktop_pip::runtime::desktop_pip_hold,
+      desktop_pip::runtime::desktop_pip_release,
+      desktop_pip::runtime::desktop_pip_frame,
+      desktop_pip::runtime::desktop_pip_act,
       commands::import_books,
       commands::list_books,
       commands::refresh_metadata,
@@ -252,6 +266,12 @@ pub fn run() {
       commands::people_delete,
       commands::people_export,
       commands::lookup_term,
+      commands::diary_sources,
+      commands::diary_save_picture,
+      commands::words_list,
+      commands::word_record,
+      commands::words_review,
+      commands::words_delete,
       commands::collections_list,
       commands::collection_save,
       commands::collection_delete,
@@ -268,6 +288,7 @@ pub fn run() {
       commands::community_duels,
       commands::community_inbox,
       commands::community_search,
+      commands::community_visitors,
       commands::account_status,
       commands::account_signup,
       commands::account_login,

@@ -1267,8 +1267,7 @@ mod tests {
     assert_eq!((today.minutes, today.goal_minutes), (26.0, 20));
     assert!(met(today));
 
-    // The streak this device held before the sync still stands: no break,
-    // nothing to burn.
+    // The streak this device held before the sync still stands: no break.
     let ledger = merged.days.iter().map(|d| (d.date_key.clone(), d.to_record())).collect();
     let previous = crate::habit::StreakState {
       current_streak: 2,
@@ -1279,7 +1278,6 @@ mod tests {
     let result = crate::habit::evaluate(&ledger, "2026-10-03", &previous);
     assert_eq!(result.streak, 2);
     assert_eq!(result.broke_from, None);
-    assert_eq!(result.burn_count, 0);
   }
 
   #[test]

@@ -467,7 +467,9 @@ fn remove_database_backups(database: &std::path::Path) {
 }
 
 #[tauri::command]
-pub fn clear_all_data(state: State<'_, AppState>) -> Result<(), String> {
+pub fn clear_all_data(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+  // Pip on the desktop is switched off and her window closed.
+  crate::desktop_pip::runtime::forget(&app);
   {
     let db = state.db.guard();
     // The refresh token lives in the OS keychain now, so clearing the settings

@@ -158,7 +158,7 @@ pub struct HabitView {
 
 impl HabitView {
   /// Reads the ledger without changing it: a reminder check must never spend
-  /// a freeze or burn a book, which is `build_snapshot`'s job.
+  /// a freeze or announce a break, which is `build_snapshot`'s job.
   pub fn from_ledger(
     days: &HashMap<String, DayRecord>,
     previous: &StreakState,

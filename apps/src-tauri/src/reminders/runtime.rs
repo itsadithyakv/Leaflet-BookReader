@@ -139,6 +139,8 @@ fn tick<R: Runtime>(app: &AppHandle<R>) {
   // Marked as sent even if Windows refused it: a toast that failed once
   // would fail again every minute for the next hour.
   let _ = toast::show(&identifier(app), &due.reminder, expires);
+  // Pip on the desktop, if she is out there, holds up a sign for it.
+  crate::desktop_pip::runtime::nudge(app, &due.reminder);
   log.mark(due.reminder.kind, &due.reminder.date_key);
   for kind in &due.superseded {
     log.mark(*kind, &due.reminder.date_key);

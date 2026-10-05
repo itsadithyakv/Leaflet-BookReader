@@ -140,6 +140,24 @@ pub async fn community_inbox(since: Option<String>, state: State<'_, AppState>) 
   community(&state, Method::GET, "/v1/inbox".into(), query, None, CommunityAuth::Required).await
 }
 
+/// The readers this reader follows who read today, for a friend's Pip to come
+/// by in the Pip tab: at most a handful, each with what their public profile
+/// already shows. `None` from a server that has no such route yet.
+#[tauri::command]
+pub async fn community_visitors(state: State<'_, AppState>) -> Result<Option<serde_json::Value>, String> {
+  let today = local_today();
+  let week = iso_week_key(&today);
+  cloud::community_call_if_there(
+    &state.db,
+    Method::GET,
+    "/v1/visitors",
+    &[("day", today.as_str()), ("week", week.as_str())],
+    CommunityAuth::Required
+  )
+  .await
+  .map_err(|e| e.to_string())
+}
+
 /// Public readers whose handle starts with `query`.
 #[tauri::command]
 pub async fn community_search(query: String, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
