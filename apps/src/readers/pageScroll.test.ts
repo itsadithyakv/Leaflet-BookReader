@@ -5,16 +5,20 @@ import {
   currentPageAt,
   isJump,
   layOut,
+  lineKey,
   pageBox,
   pageIndexAt,
   pageScale,
   pagesNear,
   pagesWanted,
+  parseLineKey,
   placeAt,
+  placeToOpen,
   placeWithin,
   planDraw,
   positionOf,
   scrollForAnchor,
+  sharpEnough,
   type DrawState
 } from "./pageScroll";
 
@@ -170,6 +174,62 @@ describe("keeping the place", () => {
   });
 });
 
+describe("the reader's line as a key", () => {
+  it("names the page and how far down it, and reads back", () => {
+    expect(lineKey(150, 0.42230204)).toBe("150:0.4223");
+    expect(parseLineKey("150:0.4223")).toEqual({ page: 150, fraction: 0.4223 });
+    expect(parseLineKey(lineKey(1, 0))).toEqual({ page: 1, fraction: 0 });
+    expect(parseLineKey(lineKey(600, 1))).toEqual({ page: 600, fraction: 1 });
+  });
+
+  it("is the same key for the same line, so two jumps from one line are one place to go back to", () => {
+    expect(lineKey(12, 0.33331)).toBe(lineKey(12, 0.33334));
+  });
+
+  it("keeps what it is given inside a page", () => {
+    expect(lineKey(0, -3)).toBe("1:0");
+    expect(lineKey(7.4, 9)).toBe("7:1");
+    expect(lineKey(7, Number.NaN)).toBe("7:0");
+  });
+
+  it("makes nothing of what is not a line", () => {
+    expect(parseLineKey("epubcfi(/6/14!/4/2)")).toBeNull();
+    expect(parseLineKey("12")).toBeNull();
+    expect(parseLineKey("0:0.5")).toBeNull();
+    expect(parseLineKey("3:1.5")).toBeNull();
+    expect(parseLineKey(null)).toBeNull();
+  });
+});
+
+describe("where a book reopens", () => {
+  it("is the stored place when it was noted on the page the progress names", () => {
+    expect(placeToOpen({ page: 150, fraction: 0.42, extra: 0, current: 150 }, 150)).toEqual({ page: 150, fraction: 0.42, extra: 0 });
+    // The top of the window in the gap after the page before.
+    expect(placeToOpen({ page: 149, fraction: 1, extra: 6, current: 150 }, 150)).toEqual({ page: 149, fraction: 1, extra: 6 });
+  });
+
+  it("keeps a place whose window began several pages back (small pages, a zoom far out)", () => {
+    // At 25% on a tall window the line a third down is two or three pages below the top.
+    expect(placeToOpen({ page: 147, fraction: 0.6, extra: 0, current: 150 }, 150)).toEqual({ page: 147, fraction: 0.6, extra: 0 });
+  });
+
+  it("is the top of the page when the progress has moved on (another device)", () => {
+    expect(placeToOpen({ page: 150, fraction: 0.42, extra: 0, current: 150 }, 212)).toEqual({ page: 212, fraction: 0, extra: 0 });
+    expect(placeToOpen({ page: 150, fraction: 0.42, extra: 0, current: 150 }, 151)).toEqual({ page: 151, fraction: 0, extra: 0 });
+  });
+
+  it("takes a place stored before the page was kept with it by how near it is", () => {
+    expect(placeToOpen({ page: 149, fraction: 0.9, extra: 0 }, 150)).toEqual({ page: 149, fraction: 0.9, extra: 0 });
+    expect(placeToOpen({ page: 147, fraction: 0.9, extra: 0 }, 150)).toEqual({ page: 150, fraction: 0, extra: 0 });
+  });
+
+  it("makes nothing of what is not a place", () => {
+    expect(placeToOpen(null, 9)).toEqual({ page: 9, fraction: 0, extra: 0 });
+    expect(placeToOpen("page 3", 9)).toEqual({ page: 9, fraction: 0, extra: 0 });
+    expect(placeToOpen({ page: 9, fraction: Number.NaN, extra: 0, current: 9 }, 9)).toEqual({ page: 9, fraction: 0, extra: 0 });
+  });
+});
+
 describe("the place on a page shown on its own", () => {
   it("is how far down the page the top of the window is", () => {
     expect(placeWithin(150, 525, 1244)).toEqual({ page: 150, fraction: 525 / 1244, extra: 0 });
@@ -272,6 +332,31 @@ describe("what to draw and what to let go", () => {
     }
     expect(peak).toBeLessThanOrEqual(12 * MEGA);
     expect(drawn.size).toBeLessThanOrEqual(4);
+  });
+});
+
+describe("the page being read is drawn sharper than its neighbours", () => {
+  const NEAR = 1 << 23;
+  const READING = 1 << 24;
+  // A fit-width page on a 4K screen at 200%: 1,428 x 2,020 CSS pixels, 11.5M device pixels wanted.
+  const big = { width: 1428, height: 2020 };
+
+  it("is not sharp enough at its neighbours' cap, and is at its own", () => {
+    expect(sharpEnough(big, 2, NEAR, READING)).toBe(false);
+    expect(sharpEnough(big, 2, READING, READING)).toBe(true);
+    // Once drawn sharp it stays good when it is a neighbour again.
+    expect(sharpEnough(big, 2, READING, NEAR)).toBe(true);
+  });
+
+  it("needs no second drawing where the cap is not met: the same page at 150%, or a smaller one", () => {
+    expect(sharpEnough(big, 1.5, NEAR, READING)).toBe(true);
+    expect(sharpEnough({ width: 880, height: 1244 }, 2, NEAR, READING)).toBe(true);
+  });
+
+  it("is never sharp enough past both caps unless drawn at the higher", () => {
+    const poster = { width: 3180, height: 4495 };
+    expect(sharpEnough(poster, 1.5, NEAR, READING)).toBe(false);
+    expect(sharpEnough(poster, 1.5, READING, READING)).toBe(true);
   });
 });
 

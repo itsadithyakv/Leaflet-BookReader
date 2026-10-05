@@ -100,6 +100,40 @@ describe("searching a PDF", () => {
     expect(doc.read).toEqual([1, 2, 3]);
   });
 
+  it("finds a phrase that runs over a page break, and lists it under the page it begins on", async () => {
+    const doc = documentOf(["one two\nthese are the last words of the\n", "first page and they continue", "the first page again"]);
+    const found = await searchPdf("words of the first page", { ...doc, signal: live() });
+    expect(found.hits.map((hit) => [hit.page, hit.nth, hit.across ?? false])).toEqual([[1, 0, true]]);
+    expect(found.hits[0].snippet.match).toBe("words of the first page");
+    // A phrase wholly on a page is that page's, once.
+    const whole = await searchPdf("first page", { ...doc, signal: live() });
+    expect(whole.hits.map((hit) => [hit.page, hit.nth, hit.across ?? false])).toEqual([
+      [2, 0, false],
+      [3, 0, false]
+    ]);
+  });
+
+  it("numbers a match that runs on after the page's own matches", async () => {
+    const doc = documentOf(["the mill and the", "mill stood"]);
+    const found = await searchPdf("the mill", { ...doc, signal: live() });
+    expect(found.hits.map((hit) => [hit.page, hit.nth, hit.across ?? false])).toEqual([
+      [1, 0, false],
+      [1, 1, true]
+    ]);
+  });
+
+  it("finds one across the break before the page it began on, having come round", async () => {
+    const doc = documentOf(["hay", "ends with the wind", "mill begins here", "hay"]);
+    const found = await searchPdf("windmill", { ...doc, signal: live(), from: 3 });
+    expect(doc.read).toEqual([3, 4, 1, 2]);
+    expect(found.hits.map((hit) => [hit.page, hit.across ?? false])).toEqual([]);
+    const hyphened = await searchPdf("the wind mill", { ...doc, signal: live(), from: 3 });
+    expect(hyphened.hits.map((hit) => [hit.page, hit.across ?? false])).toEqual([[2, true]]);
+    // The last page and the first are not neighbours.
+    const round = await searchPdf("hay hay", { ...doc, signal: live() });
+    expect(round.hits).toEqual([]);
+  });
+
   it("tells a scan, which has no text, from a document where the phrase is not found", async () => {
     const scan = await searchPdf("napoleon", { ...documentOf(["", " \n ", ""]), signal: live() });
     expect(scan.hits).toEqual([]);

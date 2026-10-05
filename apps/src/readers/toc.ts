@@ -16,8 +16,13 @@ export const flattenToc = (items: TocItem[]) => {
   return result;
 };
 
-/** A contents entry as a place: the section it opens (its spine index, when it is in the book) and the anchor inside it, if any. */
-export type TocPlace = { spine: number | undefined; anchor: string | null };
+/**
+ * A contents entry as a place: the section it opens (its spine index, when it
+ * is in the book) and where inside it, if anywhere: an anchor (an id in the
+ * file), or a CFI for an entry with no id to point at (a chapter list made by
+ * Leaflet, several chapters to a file).
+ */
+export type TocPlace = { spine: number | undefined; anchor: string | null; cfi?: string | null };
 
 /**
  * The contents entry a place in the book is under: the last entry that
@@ -37,7 +42,9 @@ export const tocEntryAt = (entries: readonly TocPlace[], section: number, reache
     if (typeof entry.spine !== "number" || entry.spine > section || entry.spine < bestSpine) {
       return;
     }
-    if (entry.spine === section && entry.anchor && !reached(entry.anchor)) {
+    // An anchor or a CFI: `reached` is asked about either (a CFI begins "epubcfi(").
+    const within = entry.anchor || entry.cfi;
+    if (entry.spine === section && within && !reached(within)) {
       return;
     }
     best = index;
@@ -46,8 +53,8 @@ export const tocEntryAt = (entries: readonly TocPlace[], section: number, reache
   return best;
 };
 
-/** A contents link as a place. `spineIndexOf` knows a file's place in the book. */
-export const tocPlace = (href: string, spineIndexOf: (file: string) => number | undefined): TocPlace => {
+/** A contents link as a place. `spineIndexOf` knows a file's place in the book; `cfi` is the entry's place inside the file when it has no anchor. */
+export const tocPlace = (href: string, spineIndexOf: (file: string) => number | undefined, cfi?: string | null): TocPlace => {
   const hashAt = href.indexOf("#");
   let anchor: string | null = hashAt >= 0 ? href.slice(hashAt + 1) : null;
   try {
@@ -55,5 +62,7 @@ export const tocPlace = (href: string, spineIndexOf: (file: string) => number | 
   } catch {
     // A stray "%": the raw form is the only candidate.
   }
-  return { spine: spineIndexOf(hashAt >= 0 ? href.slice(0, hashAt) : href), anchor: anchor || null };
+  const place: TocPlace = { spine: spineIndexOf(hashAt >= 0 ? href.slice(0, hashAt) : href), anchor: anchor || null };
+  // (Left off when there is none, so a book's own contents read exactly as before.)
+  return cfi && !place.anchor ? { ...place, cfi } : place;
 };

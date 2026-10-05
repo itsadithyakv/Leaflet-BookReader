@@ -1,9 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  CLICK_MAX_MS,
+  CLICK_SLACK_PX,
   KEY_REPEAT_TURN_MS,
+  SWIPE_MAX_MS,
+  SWIPE_MIN_PX,
   WHEEL_AT_REST,
   WHEEL_QUIET_MS,
+  clickZone,
   keyTurns,
+  pressIsClick,
+  swipeTurn,
   pageAt,
   pageCount,
   pageHolding,
@@ -275,6 +282,96 @@ describe("turning pages", () => {
       expect(turned([[1000, 5, 80]])).toEqual([1]);
       expect(turned([[1000, -5, -80]])).toEqual([-1]);
       expect(turned([[1000, 80, -20]])).toEqual([1]);
+    });
+  });
+
+  describe("a click at the side of the page", () => {
+    // A page 677 wide whose left edge is 173 from the window's, with a margin of 28 each side.
+    const zone = (x: number, rtl = false) => clickZone(x, 173, 677, 28, rtl);
+
+    it("goes on from the right sixth and back from the left", () => {
+      expect(zone(173 + 676)).toBe(1);
+      expect(zone(173 + 677 - 112)).toBe(1);
+      expect(zone(173)).toBe(-1);
+      expect(zone(173 + 112)).toBe(-1);
+      // The sixth is 112.83 wide.
+      expect(zone(173 + 113)).toBeNull();
+      expect(zone(173 + 677 - 113)).toBeNull();
+      expect(zone(173 + 338)).toBeNull();
+    });
+
+    it("takes the gutter beside the page with the side it is on", () => {
+      expect(zone(20)).toBe(-1);
+      expect(zone(173 + 677 + 90)).toBe(1);
+    });
+
+    it("counts the whole of a margin wider than a sixth", () => {
+      // A narrow page with wide margins: 300 wide, 80 each side.
+      expect(clickZone(79, 0, 300, 80)).toBe(-1);
+      expect(clickZone(81, 0, 300, 80)).toBeNull();
+      expect(clickZone(220, 0, 300, 80)).toBe(1);
+      // Margins can never meet in the middle and leave no page.
+      expect(clickZone(149, 0, 300, 400)).toBe(-1);
+      expect(clickZone(150, 0, 300, 400)).toBe(1);
+    });
+
+    it("is mirrored in a right-to-left book", () => {
+      expect(zone(173 + 10, true)).toBe(1);
+      expect(zone(173 + 670, true)).toBe(-1);
+      expect(zone(173 + 338, true)).toBeNull();
+    });
+
+    it("has no zones without a page", () => {
+      expect(clickZone(10, 0, 0, 28)).toBeNull();
+    });
+
+    const plain = { button: 0, modified: false, moved: 0, ms: 90, count: 1, selection: false, covered: false, claimed: false };
+
+    it("is a click only when it is nothing else", () => {
+      expect(pressIsClick(plain)).toBe(true);
+      expect(pressIsClick({ ...plain, moved: CLICK_SLACK_PX })).toBe(true);
+      // A drag, a long press, another button, a modifier.
+      expect(pressIsClick({ ...plain, moved: CLICK_SLACK_PX + 1 })).toBe(false);
+      expect(pressIsClick({ ...plain, ms: CLICK_MAX_MS + 1 })).toBe(false);
+      expect(pressIsClick({ ...plain, button: 1 })).toBe(false);
+      expect(pressIsClick({ ...plain, modified: true })).toBe(false);
+      // The second click of a double-click, which selects a word.
+      expect(pressIsClick({ ...plain, count: 2 })).toBe(false);
+      // Text selected (the click lets it go), something open over the page, a link under the pointer.
+      expect(pressIsClick({ ...plain, selection: true })).toBe(false);
+      expect(pressIsClick({ ...plain, covered: true })).toBe(false);
+      expect(pressIsClick({ ...plain, claimed: true })).toBe(false);
+    });
+  });
+
+  describe("a swipe", () => {
+    const flick = { dx: -120, dy: 8, ms: 180, pointers: 1, pointerType: "touch", taken: false };
+
+    it("turns the page the way the finger went", () => {
+      expect(swipeTurn(flick)).toBe(1);
+      expect(swipeTurn({ ...flick, dx: 120 })).toBe(-1);
+      expect(swipeTurn({ ...flick, pointerType: "pen" })).toBe(1);
+      // A right-to-left book: the pages lie the other way.
+      expect(swipeTurn(flick, true)).toBe(-1);
+      expect(swipeTurn({ ...flick, dx: 120 }, true)).toBe(1);
+    });
+
+    it("has to be far enough, across, and quick", () => {
+      expect(swipeTurn({ ...flick, dx: -SWIPE_MIN_PX })).toBe(1);
+      expect(swipeTurn({ ...flick, dx: -(SWIPE_MIN_PX - 1) })).toBeNull();
+      // As much down as across is a scroll, not a turn.
+      expect(swipeTurn({ ...flick, dx: -100, dy: 60 })).toBeNull();
+      expect(swipeTurn({ ...flick, dx: -100, dy: 50 })).toBe(1);
+      expect(swipeTurn({ ...flick, ms: SWIPE_MAX_MS })).toBe(1);
+      // A long press and a drag is selecting text.
+      expect(swipeTurn({ ...flick, ms: SWIPE_MAX_MS + 1 })).toBeNull();
+      expect(swipeTurn({ ...flick, ms: Number.NaN })).toBeNull();
+    });
+
+    it("is not a pinch, a mouse drag, or a swipe that was something else's", () => {
+      expect(swipeTurn({ ...flick, pointers: 2 })).toBeNull();
+      expect(swipeTurn({ ...flick, pointerType: "mouse" })).toBeNull();
+      expect(swipeTurn({ ...flick, taken: true })).toBeNull();
     });
   });
 

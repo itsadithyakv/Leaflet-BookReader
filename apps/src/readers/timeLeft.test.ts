@@ -28,6 +28,17 @@ describe("time left", () => {
     expect(two?.bytes).toBe(90_000);
   });
 
+  it("leaves what is outside the story out of the sample, when told what the story is", () => {
+    // The notes (section 5: 12,000 bytes of lists, 900 words) hold far fewer words for their size than a chapter.
+    const inStory = (section: number) => section >= 1 && section <= 4;
+    const counted = new Map([[1, 9000], [5, 900]]);
+    expect(wordsPerByte(counted, bytes)?.ratio).toBeCloseTo(9900 / 72_000);
+    expect(wordsPerByte(counted, bytes, null, inStory)?.ratio).toBeCloseTo(0.15);
+    // Nothing of the story counted yet: no ratio from the notes alone (the remembered one, when there is one).
+    expect(wordsPerByte(new Map([[5, 900]]), bytes, null, inStory)).toBeNull();
+    expect(wordsPerByte(new Map([[5, 900]]), bytes, { ratio: 0.16, bytes: 150_000 }, inStory)?.ratio).toBe(0.16);
+  });
+
   it("keeps the ratio from an earlier visit until this one has counted more", () => {
     const remembered = { ratio: 0.16, bytes: 150_000 };
     expect(wordsPerByte(new Map(), bytes, remembered)?.ratio).toBe(0.16);
@@ -46,6 +57,23 @@ describe("time left", () => {
   it("follows a chapter over several files", () => {
     const left = wordsLeft({ weights, section: 2, within: 0, chapterEnd: 3, counted: new Map(), ratio: 0.1 });
     expect(left.chapter).toBeCloseTo(3000 + 9000);
+  });
+
+  it("stops at the next heading when chapters share a file", () => {
+    // Section 3 holds several chapters; the one being read runs from 20% to 50% of it.
+    const shared = wordsLeft({ weights, section: 3, within: 0.3, chapterEnd: 3, chapterEndWithin: 0.5, counted: new Map([[3, 10_000]]), ratio: 0.1 });
+    expect(shared.chapter).toBeCloseTo(2000);
+    // The book is still the rest of the file and what follows.
+    expect(shared.book).toBeCloseTo(7000 + 20_000 * 0.1);
+    // A heading already passed (or none) is no end: the chapter runs to the end of the file.
+    expect(wordsLeft({ weights, section: 3, within: 0.6, chapterEnd: 3, chapterEndWithin: 0.5, counted: new Map([[3, 10_000]]), ratio: 0.1 }).chapter).toBeCloseTo(4000);
+    expect(wordsLeft({ weights, section: 3, within: 0.6, chapterEnd: 3, chapterEndWithin: null, counted: new Map([[3, 10_000]]), ratio: 0.1 }).chapter).toBeCloseTo(4000);
+  });
+
+  it("counts the head of the next file when the chapter runs into it", () => {
+    // The chapter being read ends a quarter of the way down section 4.
+    const left = wordsLeft({ weights, section: 3, within: 0.9, chapterEnd: 3, chapterTail: { section: 4, within: 0.25 }, counted: new Map([[3, 10_000]]), ratio: 0.1 });
+    expect(left.chapter).toBeCloseTo(1000 + 20_000 * 0.1 * 0.25);
   });
 
   it("says nothing of the book past the end of the story, and counts the story from front matter", () => {

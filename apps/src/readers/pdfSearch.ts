@@ -8,13 +8,19 @@
  * search can be tested without a PDF.
  */
 
-import { findMatches, hasSearchableText, searchPattern, snippetAt, type Snippet } from "./pdfText";
+import { findMatches, hasSearchableText, matchAcross, searchPattern, snippetAt, type Snippet } from "./pdfText";
 
 export type PdfSearchHit = {
   /** 1-based. */
   page: number;
   /** Which match on its page this is, from 0. */
   nth: number;
+  /**
+   * The phrase begins on this page and runs on over the page break. It is
+   * the last of the page's matches, and its mark is in two parts, one on
+   * each page (readers/pdfText.ts `pageMatches`).
+   */
+  across?: boolean;
   snippet: Snippet;
 };
 
@@ -64,6 +70,24 @@ export const searchPdf = async (
   }
   const first = Number.isFinite(from) ? Math.min(pageCount, Math.max(1, Math.round(from))) : 1;
   let lastBreath = now();
+  // The page read before this one, and the one the search began on, for a
+  // phrase that runs from the foot of one page onto the head of the next.
+  type Read = { page: number; text: string; own: number };
+  let before: Read | null = null;
+  let opened: Read | null = null;
+  const across = (from: Read, onto: string) => {
+    const found = state.hits.length < limit ? matchAcross(from.text, onto, query) : null;
+    if (!found) {
+      return 0;
+    }
+    state.hits.push({
+      page: from.page,
+      nth: from.own,
+      across: true,
+      snippet: snippetAt(`${from.text}\n${onto}`, { start: found.start, end: from.text.length + 1 + found.end })
+    });
+    return 1;
+  };
   for (let read = 1; read <= pageCount; read += 1) {
     const page = ((first - 1 + read - 1) % pageCount) + 1;
     if (signal.aborted) {
@@ -85,6 +109,15 @@ export const searchPdf = async (
     matches.forEach((match, nth) => {
       state.hits.push({ page, nth, snippet: snippetAt(text, match) });
     });
+    const here: Read = { page, text, own: matches.length };
+    let crossed = before && before.page + 1 === page ? across(before, text) : 0;
+    if (read === 1) {
+      opened = here;
+    } else if (read === pageCount && opened && opened.page === page + 1) {
+      // The search has come round: this page runs on into the one it began on.
+      crossed += across(here, opened.text);
+    }
+    before = here;
     state.fraction = read / pageCount;
     if (state.hits.length >= limit) {
       state.capped = true;
@@ -92,7 +125,7 @@ export const searchPdf = async (
       return state;
     }
     // Told about every page that found something, and now and then otherwise.
-    if (matches.length > 0 || read === pageCount || read % 8 === 0) {
+    if (matches.length > 0 || crossed > 0 || read === pageCount || read % 8 === 0) {
       onProgress?.(state);
     }
     // Text already read comes back without a pause; a long run of such pages

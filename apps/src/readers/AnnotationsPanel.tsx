@@ -2,6 +2,7 @@ import { UiIcon } from "../components/UiIcon";
 import { useState } from "react";
 import type { Annotation } from "../services/annotationService";
 import { HIGHLIGHT_COLORS } from "./highlightColors";
+import { groupByChapter } from "../components/highlights/highlightsView";
 
 type Tab = "bookmarks" | "highlights";
 
@@ -54,7 +55,7 @@ export const AnnotationsPanel = ({
   );
 
   return (
-    <div className="absolute right-0 mt-3 w-80 rounded-xl border p-4 text-xs shadow-2xl reader-panel reader-border" role="dialog" aria-label="Notes">
+    <div className="reader-menu absolute right-0 mt-3 w-80 rounded-xl border p-4 text-xs shadow-2xl reader-panel reader-border" role="dialog" aria-label="Notes">
       <div className="flex items-center justify-between gap-2">
         <div role="tablist" aria-label="Notes" className="flex gap-1">
           {tabButton("bookmarks", "Bookmarks", bookmarks.length)}
@@ -102,8 +103,22 @@ export const AnnotationsPanel = ({
             </div>
           ))}
 
+        {/* Under their chapters, by place and not by name (two chapters called
+            "Tyrion" are two headings); in a set of books the book is named
+            once, above its chapters. As the Library's Highlights dialog. */}
         {tab === "highlights" &&
-          highlights.map((item) => (
+          groupByChapter(highlights).flatMap((group, at) => [
+            group.book && group.opensBook ? (
+              <div key={`book-${at}`} className="pt-1 text-[11px] font-semibold reader-text-color">
+                {group.book}
+              </div>
+            ) : null,
+            group.chapter ? (
+              <div key={`chapter-${at}`} className="pt-1 text-[10px] uppercase tracking-widest reader-muted">
+                {group.chapter}
+              </div>
+            ) : null,
+            ...group.items.map((item) => (
             <div key={item.id} className="rounded-lg border px-3 py-2 reader-border reader-pill">
               <div className="flex items-start gap-2">
                 <span
@@ -113,7 +128,6 @@ export const AnnotationsPanel = ({
                 />
                 <button type="button" className="min-w-0 flex-1 text-left reader-hover-accent" onClick={() => onOpen(item.cfi)}>
                   <span className="line-clamp-4 text-[12px] leading-snug reader-text-color">{item.text}</span>
-                  {item.chapter && <span className="mt-1 block text-[10px] uppercase tracking-widest reader-muted">{item.chapter}</span>}
                 </button>
                 <button type="button" className="reader-notes-remove" onClick={() => onRemove(item.id)} aria-label="Remove highlight">
                   <UiIcon name="close" size={14} />
@@ -155,7 +169,8 @@ export const AnnotationsPanel = ({
                 </button>
               )}
             </div>
-          ))}
+            ))
+          ])}
       </div>
     </div>
   );

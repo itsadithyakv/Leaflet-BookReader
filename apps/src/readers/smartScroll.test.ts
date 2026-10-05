@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planScrollStep, readingBand, stepDuration, type ReadingArea, screenStep, chapterEndTop } from "./smartScroll";
+import { planScrollStep, readingBand, stepDuration, type ReadingArea, screenStep, chapterEndTop, isPictureGap, pastPictureGap, isScrollCorrection } from "./smartScroll";
 
 // 18px type at 1.8 line height.
 const LINE = 32.4;
@@ -83,5 +83,47 @@ describe("the end of a chapter", () => {
 
   it("is the chapter's own start for one shorter than that", () => {
     expect(chapterEndTop(10_000, 300, 0, 768)).toBe(10_000);
+  });
+});
+
+describe("a picture in Smart Read's way", () => {
+  it("is a stretch with no words taller than half the window", () => {
+    // A chapter's last line ends at 460; a map of 855 px and the next heading at 1,436.
+    expect(isPictureGap(460, 1436, 768)).toBe(true);
+    // An ornament, a scene break, the gap above a chapter's heading.
+    expect(isPictureGap(460, 460 + 201, 768)).toBe(false);
+    expect(isPictureGap(460, 460 + 384, 768)).toBe(false);
+    expect(isPictureGap(460, 460 + 385, 768)).toBe(true);
+    // The next line of the same paragraph.
+    expect(isPictureGap(460, 471, 768)).toBe(false);
+    expect(isPictureGap(0, 5000, 0)).toBe(false);
+  });
+
+  it("is passed once the reader has scrolled the next line into the reading area", () => {
+    const area = { height: 768, lineHeight: 32.4, topInset: 8, bottomInset: 111 };
+    expect(pastPictureGap(1436, area)).toBe(false);
+    expect(pastPictureGap(640, area)).toBe(false);
+    expect(pastPictureGap(600, area)).toBe(true);
+    expect(pastPictureGap(-200, area)).toBe(true);
+  });
+});
+
+describe("epub.js keeping the text in place", () => {
+  it("is a correction when the scroll position changed and nothing moved on screen", () => {
+    // A chapter 1,315 px tall let go above the window; one 797 px tall fetched above it.
+    expect(isScrollCorrection(-1315, 0)).toBe(true);
+    expect(isScrollCorrection(797, 0)).toBe(true);
+    // (A fraction of a pixel on a scaled display.)
+    expect(isScrollCorrection(-1315.33, 0.34)).toBe(true);
+  });
+
+  it("is someone scrolling when the text moved with it, or when it cannot be told", () => {
+    expect(isScrollCorrection(120, -120)).toBe(false);
+    expect(isScrollCorrection(-600, 600)).toBe(false);
+    // One pixel of auto-scroll.
+    expect(isScrollCorrection(1, -1)).toBe(false);
+    expect(isScrollCorrection(3, 0)).toBe(false);
+    expect(isScrollCorrection(0, 0)).toBe(false);
+    expect(isScrollCorrection(-1315, null)).toBe(false);
   });
 });

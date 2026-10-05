@@ -27,13 +27,21 @@ const MIN_SAMPLE_BYTES = 2000;
 export const wordsPerByte = (
   counted: SectionWords,
   bytes: readonly number[],
-  remembered?: { ratio: number; bytes: number } | null
+  remembered?: { ratio: number; bytes: number } | null,
+  /**
+   * Whether a section is part of the story. Front and back matter are left
+   * out of the sample when this is given: a contents page holds a tenth of
+   * the words a chapter does for its size, an appendix of lists two thirds,
+   * and a reader who opened a novel at its title page was told six hours
+   * were left where seven and a half were.
+   */
+  inStory?: (section: number) => boolean
 ) => {
   let words = 0;
   let size = 0;
   counted.forEach((count, index) => {
     const sectionBytes = bytes[index] ?? 0;
-    if (sectionBytes >= MIN_SAMPLE_BYTES && count > 0) {
+    if (sectionBytes >= MIN_SAMPLE_BYTES && count > 0 && (inStory?.(index) ?? true)) {
       words += count;
       size += sectionBytes;
     }
@@ -51,6 +59,17 @@ export type PlaceInBook = {
   within: number;
   /** The last section of the chapter being read (a chapter may run over several files). */
   chapterEnd: number;
+  /**
+   * How far down this section the chapter ends, when the next chapter starts
+   * further down the same file (readers/chapterSpan.ts). Left out, the
+   * chapter runs to the end of `chapterEnd`.
+   */
+  chapterEndWithin?: number | null;
+  /**
+   * The head of the file after `chapterEnd` that is still this chapter (the
+   * next chapter starts part-way down it): that file, and how far down.
+   */
+  chapterTail?: { section: number; within: number } | null;
   counted: SectionWords;
   /** Words per byte, for the sections not counted. */
   ratio: number;
@@ -61,9 +80,13 @@ export type PlaceInBook = {
  * matter is not reading left, as it is not progress). `book` is null past the
  * end of the story, where "left in the book" means nothing.
  */
-export const wordsLeft = ({ weights, section, within, chapterEnd, counted, ratio }: PlaceInBook) => {
+export const wordsLeft = ({ weights, section, within, chapterEnd, chapterEndWithin, chapterTail, counted, ratio }: PlaceInBook) => {
   const wordsIn = (index: number) => counted.get(index) ?? (weights.bytes[index] ?? 0) * ratio;
-  const rest = wordsIn(section) * (1 - Math.min(1, Math.max(0, within)));
+  const at = Math.min(1, Math.max(0, within));
+  const rest = wordsIn(section) * (1 - at);
+  // Several chapters to a file: this one ends at the next heading, part-way
+  // down. (A novel of three files had "2 h 30 min left in the chapter".)
+  const endsHere = typeof chapterEndWithin === "number" && chapterEndWithin > at ? Math.min(1, chapterEndWithin) : null;
   const through = (last: number) => {
     let total = rest;
     for (let index = section + 1; index <= last; index += 1) {
@@ -72,7 +95,10 @@ export const wordsLeft = ({ weights, section, within, chapterEnd, counted, ratio
     return total;
   };
   return {
-    chapter: through(Math.max(section, chapterEnd)),
+    chapter:
+      endsHere !== null
+        ? wordsIn(section) * (endsHere - at)
+        : through(Math.max(section, chapterEnd)) + (chapterTail && chapterTail.section > section ? wordsIn(chapterTail.section) * Math.min(1, Math.max(0, chapterTail.within)) : 0),
     book: section > weights.hi ? null : through(weights.hi)
   };
 };

@@ -16,6 +16,8 @@
  * does the drawing.
  */
 
+import { canvasPixelRatio } from "./pageZoom";
+
 export type PageSize = { width: number; height: number };
 
 /** The space between one page and the next, in CSS pixels. */
@@ -144,6 +146,58 @@ export const placeWithin = (page: number, into: number, height: number): Place =
   return into <= height ? { page, fraction: into / height, extra: 0 } : { page, fraction: 1, extra: into - height };
 };
 
+/**
+ * A place as it is stored and passed about: the page counted from 1, and the
+ * page the reader was on when it was noted (`current`; the top of the window
+ * is often on a page before it).
+ */
+export type StoredPlace = { page: number; fraction: number; extra: number; current?: number };
+
+/**
+ * Where to open a book: the place stored for it when it was noted on the
+ * page the book's progress names, and the top of that page otherwise, as when
+ * the progress came from another device. A place stored before `current` was
+ * kept is taken when it is on that page or the one before (the top of the
+ * window being there); with small pages, or zoomed far out, the top of the
+ * window can be several pages before the reader's page, and such a place used
+ * to be thrown away.
+ */
+export const placeToOpen = (stored: unknown, page: number): StoredPlace => {
+  const place = stored as Partial<StoredPlace> | null | undefined;
+  if (
+    place &&
+    typeof place === "object" &&
+    Number.isInteger(place.page) &&
+    Number.isFinite(place.fraction) &&
+    Number.isFinite(place.extra) &&
+    (Number.isInteger(place.current)
+      ? place.current === page && Number(place.page) <= page
+      : Math.abs(Number(place.page) - page) <= 1)
+  ) {
+    return { page: Number(place.page), fraction: Number(place.fraction), extra: Number(place.extra) };
+  }
+  return { page, fraction: 0, extra: 0 };
+};
+
+/**
+ * The reader's line as one string, "150:0.4223": the page (from 1) across
+ * the line a third of the way down the window, and how far down that page.
+ * The form the jump history keeps its places in (readers/jumpHistory.ts).
+ */
+export const lineKey = (page: number, fraction: number) =>
+  `${Math.max(1, Math.round(page))}:${Number((Number.isFinite(fraction) ? Math.min(1, Math.max(0, fraction)) : 0).toFixed(4))}`;
+
+/** The line a key names, or null for what is not one. */
+export const parseLineKey = (key: string | null | undefined): { page: number; fraction: number } | null => {
+  const found = /^(\d+):(\d+(?:\.\d+)?)$/.exec(key ?? "");
+  if (!found) {
+    return null;
+  }
+  const page = Number(found[1]);
+  const fraction = Number(found[2]);
+  return page >= 1 && fraction >= 0 && fraction <= 1 ? { page, fraction } : null;
+};
+
 /** Where a place is down the column, in the layout given. */
 export const positionOf = (tops: Float64Array, place: Place, gap = PAGE_GAP) => {
   const count = pageCountOf(tops);
@@ -236,6 +290,21 @@ export const planDraw = (state: DrawState): DrawPlan => {
   }
   return { draw: next, release };
 };
+
+/**
+ * Whether a page drawn under one cap of pixels is as sharp as it would be
+ * under another. The page being read is allowed more pixels than the pages
+ * round it; a cap only matters to a page large enough to meet it, so most
+ * pages are as sharp under either and are not drawn again for the change.
+ */
+export const sharpEnough = (
+  box: { width: number; height: number },
+  devicePixelRatio: number,
+  drawnCap: number,
+  wantedCap: number
+) =>
+  canvasPixelRatio(box.width, box.height, devicePixelRatio, drawnCap) >=
+  canvasPixelRatio(box.width, box.height, devicePixelRatio, wantedCap) - 1e-9;
 
 /**
  * The pages wanted for a window on the column: those in view first, from the

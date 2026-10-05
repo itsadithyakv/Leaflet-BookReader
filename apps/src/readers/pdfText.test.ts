@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  currentMark,
   findMatches,
   foldAccents,
   hasSearchableText,
   joinTextItems,
+  matchAcross,
   matchRects,
   mendDropCaps,
+  pageMarks,
+  pageMatches,
   searchPattern,
   snippetAt,
   type TextItem
@@ -100,6 +104,97 @@ describe("finding a phrase", () => {
     expect(findMatches(text, "a")).toEqual([]);
     expect(findMatches("aa aa aa aa", "aa", 3)).toHaveLength(3);
     expect(findMatches("", "anything")).toEqual([]);
+  });
+});
+
+describe("a phrase that runs over a page break", () => {
+  const first = "R43 the right column\nR44 these are the last words of the\n";
+  const second = "first page and they continue here, M1\nM2 the left column";
+
+  it("is found from the foot of one page into the head of the next", () => {
+    const across = matchAcross(first, second, "words of the first page")!;
+    expect(first.slice(across.start)).toBe("words of the\n");
+    expect(second.slice(0, across.end)).toBe("first page");
+  });
+
+  it("breaks at a hyphen as a line does", () => {
+    const across = matchAcross("the well-known harness-", "room door", "harness-room")!;
+    expect(across).toEqual({ start: 15, end: 4 });
+    // The spacing a page ends or begins with is not in the way.
+    expect(matchAcross("an exam-\n", "\n ple of it", "example")).toEqual({ start: 3, end: 5 });
+  });
+
+  it("is not a phrase that is wholly on one of the two pages", () => {
+    expect(matchAcross(first, second, "last words")).toBeNull();
+    expect(matchAcross(first, second, "first page")).toBeNull();
+    expect(matchAcross(first, second, "the first")).not.toBeNull();
+    expect(matchAcross("", second, "first page")).toBeNull();
+    expect(matchAcross(first, second, "a")).toBeNull();
+  });
+
+  it("gives each page its part to mark: the first as its last match, the second as a head", () => {
+    const onFirst = pageMatches(first, "the last words of the first page and", Infinity, null, second);
+    expect(onFirst.own).toEqual([{ start: first.indexOf("the last"), end: first.length }]);
+    expect(onFirst.head).toBeNull();
+    const onSecond = pageMatches(second, "the last words of the first page and", Infinity, first, null);
+    expect(onSecond.own).toEqual([]);
+    expect(second.slice(0, onSecond.head!.end)).toBe("first page and");
+  });
+
+  it("puts the part that runs on after the page's own matches", () => {
+    const page = "the the\nand the";
+    const marked = pageMatches(page, "the", Infinity, null, "ory of it");
+    // Three of its own; nothing runs on ("the" + "ory" is not the phrase).
+    expect(marked.own).toHaveLength(3);
+    const running = pageMatches("the fox and the", "the windmill", Infinity, null, "windmill stood");
+    expect(running.own).toEqual([{ start: 12, end: 15 }]);
+  });
+});
+
+describe("marks for a phrase that runs over a page break", () => {
+  const page = (lines: Array<[string, number]>) => ({
+    joined: joinTextItems(lines.map(([str, y], index) => run(str, 100, y, str.length * 5, 10, index < lines.length - 1))),
+    transform: UPRIGHT,
+    width: 600,
+    height: 800
+  });
+  const first = page([
+    ["the mill by the hill", 700],
+    ["these are the last words of the", 100]
+  ]);
+  const second = page([
+    ["first page and they continue", 700],
+    ["the mill again", 680]
+  ]);
+
+  it("marks the foot of the first page as the last of its matches, and the head of the next apart", () => {
+    const onFirst = pageMarks(first, "words of the first page", 400, null, second.joined.text);
+    expect(onFirst.head).toBe(false);
+    expect(onFirst.rects).toHaveLength(1);
+    // The last line of the page, from "words" to its end.
+    expect(onFirst.rects[0][0].top).toBeGreaterThan(0.8);
+    const onSecond = pageMarks(second, "words of the first page", 400, first.joined.text, null);
+    expect(onSecond.head).toBe(true);
+    expect(onSecond.rects).toHaveLength(1);
+    expect(onSecond.rects[0][0].top).toBeLessThan(0.2);
+    expect(onSecond.rects[0][0].left).toBeCloseTo(100 / 600, 5);
+  });
+
+  it("says which mark is the result on show, on both of its pages", () => {
+    const onFirst = pageMarks(first, "the mill", 400, null, second.joined.text);
+    const onSecond = pageMarks(second, "the mill", 400, first.joined.text, null);
+    // "the mill" is once on each page and nowhere across the break.
+    expect([onFirst.rects.length, onFirst.head, onSecond.rects.length, onSecond.head]).toEqual([1, false, 1, false]);
+    const across = { page: 1, nth: 0, across: true };
+    const marksFirst = pageMarks(first, "of the first", 400, null, second.joined.text);
+    const marksSecond = pageMarks(second, "of the first", 400, first.joined.text, null);
+    expect(currentMark(across, 1, marksFirst)).toBe(0);
+    expect(currentMark(across, 2, marksSecond)).toBe(marksSecond.rects.length - 1);
+    expect(currentMark(across, 3, marksSecond)).toBeNull();
+    // An ordinary result is current on its own page only.
+    expect(currentMark({ page: 2, nth: 1 }, 2, marksSecond)).toBe(1);
+    expect(currentMark({ page: 1, nth: 0 }, 2, marksSecond)).toBeNull();
+    expect(currentMark(null, 2, marksSecond)).toBeNull();
   });
 });
 

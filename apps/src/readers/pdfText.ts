@@ -200,6 +200,78 @@ export const findMatches = (text: string, query: string, limit = Infinity): Text
   return matches;
 };
 
+/**
+ * A phrase that runs over the end of one page onto the next: where it begins
+ * in the first page's text and where it ends in the second's, or null. Only
+ * the foot of the one and the head of the other are looked at, joined as two
+ * lines are, so the page break may fall at a space or at a hyphen like any
+ * end of line. A phrase wholly on either page is that page's own match and
+ * is not found here.
+ */
+export const matchAcross = (before: string, after: string, query: string): { start: number; end: number } | null => {
+  if (!before || !after || !searchPattern(query)) {
+    return null;
+  }
+  const reach = Math.max(64, query.length * 3 + 16);
+  // The spacing a page ends and begins with is not part of the break: the two are joined as one line end.
+  const ended = before.trimEnd();
+  const foot = ended.slice(-reach);
+  const begun = after.trimStart();
+  const head = begun.slice(0, reach);
+  const found = findMatches(`${foot}\n${head}`, query).find(
+    (match) => match.start < foot.length && match.end > foot.length + 1
+  );
+  return found
+    ? {
+        start: ended.length - foot.length + found.start,
+        end: after.length - begun.length + found.end - foot.length - 1
+      }
+    : null;
+};
+
+/**
+ * What to mark on one page for a phrase: every match wholly on it, in order;
+ * then, last, the part on this page of a match that runs on over the page
+ * break (the search lists that match under this page, with that place among
+ * its matches); and apart from those, the end of a match that began on the
+ * page before.
+ */
+export const pageMatches = (
+  text: string,
+  query: string,
+  limit = Infinity,
+  textBefore: string | null = null,
+  textAfter: string | null = null
+): { own: TextMatch[]; head: TextMatch | null } => {
+  const own = findMatches(text, query, limit);
+  const onward = textAfter ? matchAcross(text, textAfter, query) : null;
+  if (onward) {
+    own.push({ start: onward.start, end: text.length });
+  }
+  const carried = textBefore ? matchAcross(textBefore, text, query) : null;
+  return { own, head: carried ? { start: 0, end: carried.end } : null };
+};
+
+/**
+ * Which of a page's marks is the result on show (`pageMarks` puts them in
+ * the search's order): the result's own place among its page's matches; on
+ * the page after a result that runs over the page break, the head; null
+ * where the result is on neither.
+ */
+export const currentMark = (
+  active: { page: number; nth: number; across?: boolean } | null,
+  page: number,
+  marks: { rects: PageRect[][]; head: boolean } | null | undefined
+): number | null => {
+  if (!active) {
+    return null;
+  }
+  if (active.page === page) {
+    return active.nth;
+  }
+  return active.across && active.page === page - 1 && marks?.head ? marks.rects.length - 1 : null;
+};
+
 export type Snippet = { before: string; match: string; after: string };
 
 const oneLine = (text: string) => text.replace(/-\n(?=\p{Ll})/gu, "").replace(/\s+/g, " ");
@@ -333,4 +405,30 @@ export const matchRects = (
     width: rect.width / pageWidth,
     height: rect.height / pageHeight
   }));
+};
+
+/** A page's text as the marks need it (readers/pageSources.ts `PdfPageText`). */
+type MarkedText = { joined: JoinedText; transform: number[]; width: number; height: number };
+
+/**
+ * A page's marks for a phrase: a list of rectangles for each match on it, in
+ * the order the search numbers them (`pageMatches`), and, when `head` says
+ * so, one more list at the end for the end of a match that began on the page
+ * before. `before` and `after` are the neighbouring pages' text, where they
+ * are known.
+ */
+export const pageMarks = (
+  text: MarkedText,
+  query: string,
+  limit: number,
+  before: string | null,
+  after: string | null,
+  measure?: MeasureText
+): { rects: PageRect[][]; head: boolean } => {
+  const { own, head } = pageMatches(text.joined.text, query, limit, before, after);
+  const rects = own.map((match) => matchRects(text.joined, match, text.transform, text.width, text.height, measure));
+  if (head) {
+    rects.push(matchRects(text.joined, head, text.transform, text.width, text.height, measure));
+  }
+  return { rects, head: head !== null };
 };

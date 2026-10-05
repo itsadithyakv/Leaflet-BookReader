@@ -19,6 +19,7 @@ export type ReaderAction =
   | "forward"
   | "shortcuts"
   | "bookmark"
+  | "contents"
   | "pageNext"
   | "pagePrev"
   | "chapterNext"
@@ -111,6 +112,14 @@ export const READER_BINDINGS: Binding[] = [
     group: "Finding and keeping"
   },
   {
+    action: "contents",
+    keys: ["C"],
+    // Ctrl+C stays copy.
+    matches: (press) => plain(press) && press.key.toLowerCase() === "c",
+    label: () => "Show or hide the chapter list",
+    group: "Moving about"
+  },
+  {
     action: "pagePrev",
     keys: ["←", "Page Up", "Shift+Space"],
     matches: (press) => plain(press) && (press.key === "ArrowLeft" || press.key === "PageUp" || (isSpace(press) && Boolean(press.shiftKey))),
@@ -201,32 +210,28 @@ export const READER_BINDINGS: Binding[] = [
     action: "bookStart",
     keys: ["Ctrl+Home"],
     matches: (press) => command(press) && !press.altKey && press.key === "Home",
-    when: scrolling,
-    label: () => "The start of the book",
+    label: ({ layout }) => (layout === "pages" ? "The first page of the book" : "The start of the book"),
     group: "Moving about"
   },
   {
     action: "bookEnd",
     keys: ["Ctrl+End"],
     matches: (press) => command(press) && !press.altKey && press.key === "End",
-    when: scrolling,
-    label: () => "The end of the book",
+    label: ({ layout }) => (layout === "pages" ? "The last page of the book" : "The end of the book"),
     group: "Moving about"
   },
   {
     action: "chapterStart",
     keys: ["Home"],
     matches: (press) => plain(press) && press.key === "Home",
-    when: scrolling,
-    label: () => "The start of this chapter",
+    label: ({ layout }) => (layout === "pages" ? "The first page of this chapter" : "The start of this chapter"),
     group: "Moving about"
   },
   {
     action: "chapterEnd",
     keys: ["End"],
     matches: (press) => plain(press) && press.key === "End",
-    when: scrolling,
-    label: () => "The end of this chapter",
+    label: ({ layout }) => (layout === "pages" ? "The last page of this chapter" : "The end of this chapter"),
     group: "Moving about"
   },
   {

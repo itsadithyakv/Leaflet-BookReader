@@ -27,6 +27,9 @@ export type StageMetrics = {
    */
   padTop?: number;
   padBottom?: number;
+  /** The same to the left and right of a page wider than the window. */
+  padLeft?: number;
+  padRight?: number;
 };
 
 export type KeyAction =
@@ -70,10 +73,16 @@ const horizontal = (stage: StageMetrics, side: "left" | "right", direction: Read
   if (end <= EDGE) {
     return turn;
   }
+  // As down the page (`vertical`): the page's own edge in view is its end,
+  // and the room beside it is not worth a press of its own.
   if (side === "right") {
-    return stage.scrollLeft >= end - EDGE ? turn : { kind: "scroll", left: Math.min(end, stage.scrollLeft + LINE_STEP) };
+    return stage.scrollLeft >= end - Math.max(0, stage.padRight ?? 0) - EDGE
+      ? turn
+      : { kind: "scroll", left: Math.min(end, stage.scrollLeft + LINE_STEP) };
   }
-  return stage.scrollLeft <= EDGE ? turn : { kind: "scroll", left: Math.max(0, stage.scrollLeft - LINE_STEP) };
+  return stage.scrollLeft <= Math.max(0, stage.padLeft ?? 0) + EDGE
+    ? turn
+    : { kind: "scroll", left: Math.max(0, stage.scrollLeft - LINE_STEP) };
 };
 
 /**
@@ -112,6 +121,22 @@ export const readingKeyAction = (
 };
 
 /**
+ * The arrow key a movement of the wheel stands for, by whichever way it moved
+ * more (down and right go on down or across the page), or null for none. What
+ * that key would do says whether the page is at the edge the wheel is pushing
+ * on, and which way a turn from there goes (right to left included).
+ */
+export const wheelKey = (deltaX: number, deltaY: number): "ArrowDown" | "ArrowUp" | "ArrowRight" | "ArrowLeft" | null => {
+  if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY) || (deltaX === 0 && deltaY === 0)) {
+    return null;
+  }
+  if (Math.abs(deltaY) >= Math.abs(deltaX)) {
+    return deltaY > 0 ? "ArrowDown" : "ArrowUp";
+  }
+  return deltaX > 0 ? "ArrowRight" : "ArrowLeft";
+};
+
+/**
  * A click on a comic's page: the left or right third turns, the middle does
  * nothing (it is where a reader rests the pointer). `x` is how far across the
  * page the click was, 0 to 1.
@@ -119,23 +144,13 @@ export const readingKeyAction = (
 export const clickTurn = (x: number, direction: ReadingDirection): 1 | -1 | 0 =>
   x < 1 / 3 ? sideStep("left", direction) : x > 2 / 3 ? sideStep("right", direction) : 0;
 
-/** What is typed into "go to page", as a page of the document, or null when it is not one. */
-export const parsePageEntry = (entry: string, pageCount: number): number | null => {
-  const text = entry.trim();
-  if (pageCount <= 0 || text.length === 0) {
-    return null;
-  }
-  // "40%" goes that far through the document.
-  const percent = /^(\d+(?:\.\d+)?)\s*%$/.exec(text);
-  if (percent) {
-    const share = Math.min(100, Number(percent[1])) / 100;
-    return Math.min(pageCount, Math.max(1, Math.round(share * (pageCount - 1)) + 1));
-  }
-  if (!/^\d+$/.test(text)) {
-    return null;
-  }
-  return Math.min(pageCount, Math.max(1, Number(text)));
-};
+/**
+ * What is typed into "go to page", as a page of the document, or null when
+ * it is not one: a page number, a percentage and, for a PDF that numbers its
+ * pages as the book prints them, a printed number (readers/pageLabels.ts,
+ * where the rule is).
+ */
+export { parsePageEntry } from "./pageLabels";
 
 /** How far through the document a page is, as a whole percentage. */
 export const pagePercent = (page: number, pageCount: number) =>

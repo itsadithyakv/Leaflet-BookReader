@@ -89,3 +89,40 @@ export const screenStep = (windowHeight: number, topInset: number, lineHeight: n
  */
 export const chapterEndTop = (top: number, height: number, room: number, windowHeight: number, share = 0.6) =>
   Math.round(Math.max(top, top + height - Math.max(0, room) - windowHeight * share));
+
+/**
+ * Whether what lies between two words in a row is something to stop at: a
+ * picture, or any stretch with no words, taller than half the window. Smart
+ * Read reads words, and took such a stretch in the same step that carried it
+ * to the next word: a full-page map between two chapters went by in under a
+ * second. `previousBottom` and `nextTop` are the bottom of the line just read
+ * and the top of the line to read next, on the same scale.
+ */
+export const isPictureGap = (previousBottom: number, nextTop: number, windowHeight: number) =>
+  windowHeight > 0 && nextTop - previousBottom > windowHeight / 2;
+
+/**
+ * Whether the reader has brought the text after such a stretch into the
+ * reading area by hand (its line's top, from the top of the window), which
+ * is them going on.
+ */
+export const pastPictureGap = (nextTop: number, area: ReadingArea) =>
+  nextTop <= area.height - Math.max(0, area.bottomInset) - Math.max(12, area.lineHeight);
+
+/**
+ * Whether a change of scroll position was epub.js keeping the text where it
+ * is, not anyone scrolling. When a chapter is let go above the window (or one
+ * is fetched in above it) the scroll position changes by that chapter's
+ * height and nothing moves on screen. A scroll by hand, a key or the reader's
+ * own steps moves the text as far as the position changed.
+ *
+ * `scrollDelta` is how far the scroll position changed; `movedOnScreen` how
+ * far a chapter that was in the window moved in it (null when that cannot be
+ * told: it is then taken for scrolling, as it always was).
+ *
+ * Such a correction used to read as the reader scrolling. Smart Read, whose
+ * next word lay below the window past a run of maps, took it for the reader
+ * going back to reread and waited ("Scroll back to Dotty") until Space.
+ */
+export const isScrollCorrection = (scrollDelta: number, movedOnScreen: number | null) =>
+  movedOnScreen !== null && Math.abs(scrollDelta) > 4 && Math.abs(movedOnScreen) <= 2;

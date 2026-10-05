@@ -40,6 +40,10 @@ const pressFor = (shown: string): KeyPress => {
     press.shiftKey = true;
     rest = rest.slice(6);
   }
+  if (rest.startsWith("Alt+")) {
+    press.altKey = true;
+    rest = rest.slice(4);
+  }
   press.key = NAMED[rest] ?? (rest.length === 1 ? rest.toLowerCase() : rest);
   return press;
 };
@@ -131,10 +135,23 @@ describe("the page reader's keys and its shortcuts sheet", () => {
     expect(pageActionFor({ key: "Spacebar" }, pdfPages)).toBe("screenDown");
   });
 
+  it("goes back to where a jump was made from, and forward again, with Alt and the arrows", () => {
+    for (const context of EVERY) {
+      expect(pageActionFor({ key: "ArrowLeft", altKey: true }, context)).toBe("back");
+      expect(pageActionFor({ key: "ArrowRight", altKey: true }, context)).toBe("forward");
+      // The arrows on their own are still the page's.
+      expect(pageActionFor({ key: "ArrowLeft" }, context)).toBe("left");
+    }
+    // Not reading keys: they are not worked out from where the page is.
+    expect(READING_ACTIONS.has("back")).toBe(false);
+    expect(rowsOf(pdfScroll).some((row) => row.keys.includes("Alt+←"))).toBe(true);
+  });
+
   it("leaves alone what is the window's or the system's", () => {
     expect(pageActionFor({ key: "c", ctrlKey: true }, pdfPages)).toBeNull();
     expect(pageActionFor({ key: "a", ctrlKey: true }, pdfPages)).toBeNull();
-    expect(pageActionFor({ key: "ArrowLeft", altKey: true }, pdfPages)).toBeNull();
+    expect(pageActionFor({ key: "ArrowUp", altKey: true }, pdfPages)).toBeNull();
+    expect(pageActionFor({ key: "ArrowLeft", altKey: true, ctrlKey: true }, pdfPages)).toBeNull();
     expect(pageActionFor({ key: "Escape", altKey: true }, pdfPages)).toBeNull();
     expect(pageActionFor({ key: "f" }, pdfPages)).toBeNull();
     expect(pageActionFor({ key: "Tab" }, pdfPages)).toBeNull();

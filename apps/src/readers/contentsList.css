@@ -1,0 +1,602 @@
+/* The chapter list of a set of books (readers/ContentsList.tsx), and the
+   handle on the window's left edge that says the list is there
+   (readers/contentsPanel.ts). A single work's list uses none of the set's
+   rules: it looks as it always did. */
+
+.reader-sidebar {
+  /* What the leather is, near enough, for a header that rows scroll under. */
+  --contents-surface: #14161b;
+  --contents-rule: rgba(255, 255, 255, 0.16);
+  --contents-band: rgba(255, 255, 255, 0.07);
+  --contents-meter: rgba(255, 255, 255, 0.14);
+  --contents-read: #7fc592;
+}
+
+:root[data-theme="dark"] .reader-sidebar {
+  --contents-surface: #e9e8e3;
+  --contents-rule: rgba(24, 32, 27, 0.2);
+  --contents-band: rgba(24, 32, 27, 0.07);
+  --contents-meter: rgba(24, 32, 27, 0.16);
+  --contents-read: #17683a;
+}
+
+/* ---- a set: one group per book ------------------------------------------ */
+
+.reader-toc-book {
+  margin-top: 14px;
+}
+
+.reader-toc-book:first-child {
+  margin-top: 0;
+}
+
+/* The header: a band with a rule above it, larger and heavier than a chapter
+   row, that stays at the top of the list while its chapters scroll. */
+.reader-toc-book-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 6px;
+  width: 100%;
+  margin: 0 0 8px;
+  padding: 10px 10px 9px 6px;
+  border: 0;
+  border-top: 2px solid var(--contents-rule);
+  border-radius: 0 0 8px 8px;
+  background:
+    linear-gradient(var(--contents-band), var(--contents-band)),
+    var(--contents-surface);
+  color: var(--reader-text);
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 6px 10px -8px rgba(0, 0, 0, 0.55);
+}
+
+.reader-toc-book-head:hover {
+  background:
+    linear-gradient(var(--chapter-hover-bg), var(--chapter-hover-bg)),
+    var(--contents-surface);
+}
+
+.reader-toc-book-head:focus-visible {
+  outline: 2px solid var(--reader-accent, #72ab44);
+  outline-offset: -2px;
+}
+
+.reader-toc-book[data-current="true"] > .reader-toc-book-head {
+  border-top-color: var(--contents-read);
+}
+
+.reader-toc-book-fold {
+  display: inline-flex;
+  color: var(--reader-muted);
+}
+
+.reader-toc-book-name {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.reader-toc-book-count {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--reader-muted);
+}
+
+.reader-toc-book-title {
+  font-family: var(--font-headline, inherit);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.reader-toc-book-standing {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  align-self: start;
+  margin-top: 1px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--reader-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.reader-toc-book[data-state="read"] .reader-toc-book-standing,
+.reader-toc-book[data-state="reading"] .reader-toc-book-standing {
+  color: var(--contents-read);
+}
+
+/* How far through: a hairline along the header's foot. */
+.reader-toc-book-meter {
+  grid-column: 1 / -1;
+  height: 3px;
+  margin-top: 8px;
+  border-radius: 999px;
+  background: var(--contents-meter);
+  overflow: hidden;
+}
+
+.reader-toc-book-meter > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--contents-read);
+}
+
+.reader-toc-book[data-state="unread"] .reader-toc-book-meter {
+  opacity: 0.55;
+}
+
+.reader-toc-book-body {
+  padding-left: 8px;
+  border-left: 1px solid var(--contents-rule);
+  margin-left: 8px;
+}
+
+/* A book's cover, maps and appendices, and the set's own pages: quieter than
+   chapters, so they do not read as more story. */
+.reader-toc-set .reader-chapter-link.reader-toc-quiet {
+  margin-bottom: 2px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  color: var(--reader-muted);
+}
+
+.reader-toc-set .reader-chapter-link.reader-toc-quiet.reader-chapter-active {
+  color: var(--chapter-active-ink, #f4fff7);
+}
+
+/* Where a book's story ends. */
+.reader-toc-end {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 8px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--reader-muted);
+}
+
+.reader-toc-end::before,
+.reader-toc-end::after {
+  flex: 1;
+  height: 1px;
+  background: var(--contents-rule);
+  content: "";
+}
+
+.reader-toc-end > span {
+  max-width: 78%;
+  text-align: center;
+}
+
+.reader-toc-loose {
+  margin-bottom: 6px;
+}
+
+.reader-toc-after {
+  margin-top: 16px;
+  padding-top: 10px;
+  border-top: 2px solid var(--contents-rule);
+}
+
+/* The row being read: a bar down its left edge as well as its band, in a
+   list of three hundred it has to be found at a glance. */
+.reader-toc-set .reader-chapter-active {
+  position: relative;
+  box-shadow:
+    inset 3px 0 var(--contents-read),
+    inset 0 1px var(--chapter-active-lip, rgba(255, 255, 255, 0.08));
+}
+
+/* ---- the handle on the left edge ---------------------------------------- */
+
+/* Always there while a book is open, toolbar or no toolbar: an icon and the
+   word, on a solid tab of the page's own colours, so it reads on paper and on
+   black alike. It sits in the margin beside the text and is never wider than
+   that margin (readers/contentsPanel.ts picks the size). */
+.reader-contents-handle {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  z-index: 39;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 30px;
+  min-height: 132px;
+  padding: 12px 0;
+  border: 1.5px solid color-mix(in srgb, var(--reader-page-ink, var(--reader-text)) 60%, var(--reader-page-bg, var(--reader-shell-bg, #000)));
+  border-left: 0;
+  border-radius: 0 12px 12px 0;
+  background: color-mix(in srgb, var(--reader-page-ink, var(--reader-text)) 15%, var(--reader-page-bg, var(--reader-shell-bg, #000)));
+  color: color-mix(in srgb, var(--reader-page-ink, var(--reader-text)) 92%, var(--reader-page-bg, var(--reader-shell-bg, #000)));
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.16);
+  cursor: pointer;
+  transform: translateY(-50%);
+  transition:
+    width 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease,
+    opacity 0.18s ease;
+}
+
+.reader-contents-handle-word {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+.reader-contents-handle:hover,
+.reader-contents-handle:focus-visible {
+  width: 36px;
+  background: color-mix(in srgb, var(--reader-page-ink, var(--reader-text)) 24%, var(--reader-page-bg, var(--reader-shell-bg, #000)));
+  color: var(--reader-page-ink, var(--reader-text));
+  outline: none;
+}
+
+.reader-contents-handle:focus-visible {
+  box-shadow:
+    0 0 0 2px var(--reader-page-bg, #000),
+    0 0 0 4px var(--reader-accent, #72ab44);
+}
+
+/* A margin too narrow for the word: the icon alone, still a tab and not a sliver. */
+.reader-contents-handle[data-size="icon"] {
+  width: 20px;
+  min-height: 96px;
+}
+
+.reader-contents-handle[data-size="icon"] .reader-contents-handle-word {
+  display: none;
+}
+
+.reader-contents-handle[data-size="icon"]:hover,
+.reader-contents-handle[data-size="icon"]:focus-visible {
+  width: 24px;
+}
+
+/* The list is open over it. */
+.reader-contents-handle.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* The list's own close button, for a list left open beside the page. */
+.reader-contents-close {
+  display: inline-flex;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  /* No taller than the caption beside it: the list starts where it always did. */
+  margin: -6px 2px -6px 0;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--contents-rule);
+  border-radius: 8px;
+  background: var(--contents-band);
+  color: var(--reader-icon);
+}
+
+.reader-contents-close:hover,
+.reader-contents-close:focus-visible {
+  color: var(--reader-text);
+  background: var(--chapter-hover-bg);
+}
+
+/* The chapter's name in the dock is the way to the list. */
+.reader-dock-contents {
+  display: inline-flex;
+  flex: 0 1 auto;
+  min-width: 2.5rem;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.reader-dock-contents:hover,
+.reader-dock-contents:focus-visible,
+.reader-dock-contents[aria-expanded="true"] {
+  border-color: var(--reader-border);
+  background: var(--reader-hover-bg);
+  color: var(--reader-accent);
+  outline: none;
+}
+
+.reader-dock-contents:hover .reader-dock-label,
+.reader-dock-contents:focus-visible .reader-dock-label,
+.reader-dock-contents[aria-expanded="true"] .reader-dock-label {
+  color: var(--reader-accent);
+}
+
+.reader-dock-contents > svg {
+  flex: none;
+  opacity: 0.8;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reader-contents-handle {
+    transition: none;
+  }
+
+  /* The list shows and hides; it does not slide. */
+  .reader-shell .reader-sidebar {
+    transition: none;
+  }
+}
+
+/* ---- the walkthrough's step about the list ------------------------------ */
+
+/* The page is left undimmed on that step: the real handle and the real list
+   are what it points at. */
+.reader-tour[data-clear="true"] {
+  background: transparent;
+}
+
+.reader-contents-handle.is-spotlit {
+  z-index: 73;
+  background: var(--reader-accent, #72ab44);
+  border-color: var(--reader-accent, #72ab44);
+  color: var(--reader-page-bg, #000);
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--reader-accent, #72ab44) 34%, transparent),
+    2px 0 14px rgba(0, 0, 0, 0.3);
+}
+
+.reader-tour-contents {
+  position: relative;
+  display: flex;
+  width: 78%;
+  align-items: center;
+  justify-content: center;
+  padding-left: 22px;
+}
+
+.reader-tour-contents .reader-tour-page {
+  width: 80%;
+  padding-left: 0;
+}
+
+.reader-tour-contents-tab {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  display: flex;
+  width: 14px;
+  height: 46px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0 6px 6px 0;
+  background: var(--reader-accent, #72ab44);
+  color: var(--reader-page-bg, #000);
+  transform: translateY(-50%);
+}
+
+/* Wider than a phone, the page behind a list opened to stay is not dimmed;
+   a click on it still shuts the list. */
+@media (min-width: 768px) {
+  .reader-sidebar-scrim.reader-sidebar-scrim-clear {
+    background: transparent;
+    cursor: default;
+  }
+}
+
+/* A set's list is long and has headers of its own: the cover is left out and
+   the set's (long) title kept to two lines, so the list has the height. */
+.reader-sidebar[data-set="true"] .book-cover-frame {
+  display: none;
+}
+
+.reader-sidebar[data-set="true"] > .mb-6 {
+  margin-bottom: 14px;
+  padding-right: 34px;
+}
+
+.reader-sidebar[data-set="true"] > .mb-6 h2 {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 15px;
+  line-height: 1.25;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.reader-contents-caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.reader-sidebar[data-set="true"] > .mb-6 {
+  padding-right: 0;
+}
+
+/* In a set the dock names the book and then the chapter. The book's name
+   shrinks first, and is left out of a narrow window. */
+.reader-dock-book {
+  flex: 0 100 auto;
+  min-width: 0;
+  max-width: min(16rem, 26vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reader-dock-sep {
+  flex: none;
+}
+
+@media (max-width: 720px) {
+  .reader-dock-book,
+  .reader-dock-sep {
+    display: none;
+  }
+}
+
+/* The set's own percentage, beside the book's. */
+.reader-outlook-set {
+  opacity: 0.72;
+  white-space: nowrap;
+}
+
+/* "Chapters found by Leaflet": the list was made for a book that came with none. */
+.reader-toc-made {
+  margin: 0 0 10px;
+  font-size: 10.5px;
+  font-style: italic;
+  letter-spacing: 0.02em;
+  color: var(--reader-muted);
+}
+
+/* ---- a set's search results, by book (readers/SearchPanel.tsx) ---------- */
+
+.reader-search-books > section + section {
+  margin-top: 6px;
+}
+
+/* A book's header: a band with a rule above it, as in the chapter list; it
+   stays at the top of the results while that book's rows scroll. */
+.reader-search-book {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  padding: 7px 8px 6px 6px;
+  border: 0;
+  border-top: 2px solid var(--reader-border);
+  border-radius: 0 0 8px 8px;
+  background:
+    linear-gradient(var(--reader-hover-bg), var(--reader-hover-bg)),
+    var(--reader-panel);
+  color: var(--reader-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.reader-search-book:hover,
+.reader-search-book:focus-visible {
+  color: var(--reader-accent);
+  outline: none;
+}
+
+.reader-search-book:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--reader-accent);
+}
+
+.reader-search-book-name {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.reader-search-book-count {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--reader-muted);
+}
+
+.reader-search-book-title {
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- a touch screen ------------------------------------------------------ */
+
+/* The handle is as narrow as the margin (20 px on a phone); a finger needs
+   44. The press is taken over a wider strip than is drawn: nothing more is
+   shown over the text. The dock's chapter name gets the same height. */
+@media (hover: none) and (pointer: coarse) {
+  .reader-contents-handle::after {
+    position: absolute;
+    top: -6px;
+    bottom: -6px;
+    left: 0;
+    width: 44px;
+    content: "";
+  }
+
+  .reader-dock-contents {
+    position: relative;
+    min-height: 28px;
+  }
+
+  .reader-dock-contents::after {
+    position: absolute;
+    top: -10px;
+    right: 0;
+    bottom: -10px;
+    left: 0;
+    content: "";
+  }
+
+  .reader-contents-close {
+    width: 44px;
+    height: 44px;
+    margin: -14px -6px -14px 0;
+  }
+}
+
+/* A window short of height (a phone on its side is 360 to 390 px): the list
+   has the height. The book's cover, title and author, which stand above the
+   list in a taller window, are not drawn here (the title is in the toolbar
+   and the chapter in the dock): with them the list had about three rows. */
+@media (max-height: 520px) {
+  .reader-shell .reader-sidebar {
+    padding-top: 0.75rem;
+    padding-bottom: 0.5rem;
+  }
+
+  .reader-sidebar > .mb-6 {
+    display: none;
+  }
+
+  .reader-sidebar .reader-toc-set {
+    margin-top: 0.5rem;
+  }
+
+  .reader-toc-book-head {
+    margin-bottom: 4px;
+    padding-top: 6px;
+    padding-bottom: 5px;
+  }
+}

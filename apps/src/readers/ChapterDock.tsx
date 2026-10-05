@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useState } from "react";
-import { ChevronsLeft, ChevronsRight, Redo2, Undo2 } from "lucide-react";
+import { ChevronsLeft, ChevronsRight, List, Redo2, Undo2 } from "lucide-react";
 import { ReadingOutlook, type Outlook } from "./ReadingOutlook";
 
 type ChapterDockProps = {
@@ -8,6 +8,11 @@ type ChapterDockProps = {
   /** Pages layout: the page showing and how many the chapter has ("12 of 50"). */
   pageOf?: { page: number; total: number } | null;
   label: string;
+  /** In a set of books (readers/innerBooks.ts): the book being read and the chapter in it, shown apart. `label` is still the whole name. */
+  inBook?: { book: string; chapter: string } | null;
+  /** Opens (or shuts) the chapter list: the chapter's name is then a button. */
+  onContents?: () => void;
+  contentsOpen?: boolean;
   onPrev: () => void;
   onNext: () => void;
   /** Pages layout only: the chapter before and after, beside the page arrows. */
@@ -34,11 +39,23 @@ type ChapterDockProps = {
  * the selection bar sit just above it, and the progress bar just below.
  */
 export const ChapterDock = forwardRef<HTMLDivElement, ChapterDockProps>(
-  ({ paged, pageOf, label, onPrev, onNext, onPrevChapter, onNextChapter, outlook, canGoBack, canGoForward, onBack, onForward, awake, onNearChange }, ref) => {
+  ({ paged, pageOf, label, inBook, onContents, contentsOpen, onPrev, onNext, onPrevChapter, onNextChapter, outlook, canGoBack, canGoForward, onBack, onForward, awake, onNearChange }, ref) => {
     const [open, setOpen] = useState(false);
     const [hovered, setHovered] = useState(false);
     const [focused, setFocused] = useState(false);
     const near = open || hovered || focused;
+    // In a set of books: the book's name, then the chapter's. The book's gives way first when there is no room for both.
+    const name = inBook ? (
+      <>
+        <span className="reader-dock-book text-[10px] reader-muted">{inBook.book}</span>
+        <span className="reader-dock-sep text-[10px] reader-muted" aria-hidden="true">
+          ·
+        </span>
+        <span className="reader-dock-label text-[10px] reader-muted">{inBook.chapter}</span>
+      </>
+    ) : (
+      <span className="reader-dock-label text-[10px] reader-muted">{label}</span>
+    );
     useEffect(() => {
       onNearChange?.(near);
     }, [near]);
@@ -105,7 +122,23 @@ export const ChapterDock = forwardRef<HTMLDivElement, ChapterDockProps>(
           >
             <span className="material-symbols-outlined text-base">chevron_left</span>
           </button>
-          <span className="reader-dock-label text-[10px] reader-muted">{label}</span>
+          {onContents ? (
+            // The chapter's name is what people press when they want the
+            // contents: it opens the chapter list, and says so.
+            <button
+              type="button"
+              className="reader-dock-contents"
+              onClick={onContents}
+              aria-expanded={Boolean(contentsOpen)}
+              aria-label={`Contents. Now reading: ${label}`}
+              title={`${label} · open the chapter list (C)`}
+            >
+              <List size={13} aria-hidden="true" />
+              {name}
+            </button>
+          ) : (
+            name
+          )}
           {paged && pageOf && (
             <span
               className="reader-dock-pages reader-muted"

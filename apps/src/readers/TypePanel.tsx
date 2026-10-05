@@ -78,7 +78,7 @@ export const TypePanel = ({
   onAlign
 }: TypePanelProps) => (
   <div
-    className="reader-type-panel absolute right-0 mt-3 rounded-xl border p-4 text-xs shadow-2xl reader-panel reader-border"
+    className="reader-type-panel reader-menu absolute right-0 mt-3 rounded-xl border p-4 text-xs shadow-2xl reader-panel reader-border"
     role="dialog"
     aria-label="Text settings"
   >

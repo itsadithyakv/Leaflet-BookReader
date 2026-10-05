@@ -37,11 +37,36 @@ describe("the reader's keys", () => {
       expect(actionFor(key("Home", { ctrlKey: true }), mode)).toBe("bookStart");
       expect(actionFor(key("End", { ctrlKey: true }), mode)).toBe("bookEnd");
     }
-    // With pages the Page keys turn pages, and Home and End are left alone.
-    expect(actionFor(key("Home"), pages)).toBeNull();
-    expect(actionFor(key("End", { ctrlKey: true }), pages)).toBeNull();
     // Alt with them is the system's.
     expect(actionFor(key("Home", { altKey: true }), scroll)).toBeNull();
+  });
+
+  it("goes to the first and last page of the chapter or the book with Home and End with pages", () => {
+    // The Page keys turn pages there; Home and End are the same four actions as when scrolling.
+    expect(actionFor(key("PageDown"), pages)).toBe("pageNext");
+    expect(actionFor(key("Home"), pages)).toBe("chapterStart");
+    expect(actionFor(key("End"), pages)).toBe("chapterEnd");
+    expect(actionFor(key("Home", { ctrlKey: true }), pages)).toBe("bookStart");
+    expect(actionFor(key("End", { ctrlKey: true }), pages)).toBe("bookEnd");
+    expect(actionFor(key("End", { altKey: true }), pages)).toBeNull();
+    // The sheet says "page" there.
+    const rows = (layout: "scroll" | "pages") =>
+      shortcutSections({ layout, mode: "standard" })
+        .flatMap((section) => section.rows)
+        .filter((row) => row.keys.some((shown) => /Home|End/.test(shown)) && !/progress bar/.test(row.label))
+        .map((row) => `${row.keys.join("/")}: ${row.label}`);
+    expect(rows("pages")).toEqual([
+      "Ctrl+Home: The first page of the book",
+      "Ctrl+End: The last page of the book",
+      "Home: The first page of this chapter",
+      "End: The last page of this chapter"
+    ]);
+    expect(rows("scroll")).toEqual([
+      "Ctrl+Home: The start of the book",
+      "Ctrl+End: The end of the book",
+      "Home: The start of this chapter",
+      "End: The end of this chapter"
+    ]);
   });
 
   it("goes a chapter back or on with Ctrl and an arrow in every layout", () => {
@@ -77,6 +102,21 @@ describe("the reader's keys", () => {
       expect(actionFor(key("f", { metaKey: true }), context)).toBe("search");
       expect(actionFor(key("?", { shiftKey: true }), context)).toBe("shortcuts");
       expect(actionFor(key("Escape"), context)).toBe("escape");
+    }
+  });
+
+  it("shows and hides the chapter list with C, in every layout and mode, and leaves Ctrl+C to copying", () => {
+    for (const context of [scroll, pages, { layout: "scroll", mode: "smart" } as const, { layout: "scroll", mode: "speed" } as const]) {
+      expect(actionFor(key("c"), context)).toBe("contents");
+      expect(actionFor(key("C", { shiftKey: true }), context)).toBe("contents");
+      expect(actionFor(key("c", { ctrlKey: true }), context)).toBeNull();
+      expect(actionFor(key("c", { metaKey: true }), context)).toBeNull();
+      expect(actionFor(key("c", { altKey: true }), context)).toBeNull();
+    }
+    // The sheet lists it, from the same table.
+    for (const context of [scroll, pages]) {
+      const rows = shortcutSections(context).flatMap((section) => section.rows);
+      expect(rows.find((row) => row.keys.includes("C"))?.label).toBe("Show or hide the chapter list");
     }
   });
 

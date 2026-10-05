@@ -146,6 +146,7 @@ button.reader-people-note-where:hover {
 }
 
 .reader-people-link {
+  min-height: 24px;
   border: 1px solid var(--reader-border);
   border-radius: 999px;
   background: var(--reader-pill);

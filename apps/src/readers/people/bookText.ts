@@ -198,7 +198,11 @@ const SLICE_MS = 8;
 
 const pause = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-export const mentionSearch = (book: any): MentionSearch => {
+/**
+ * `passOver` names sections that are not read for mentions at all: a
+ * contents page (readers/people/mentions.ts: isContentsPage).
+ */
+export const mentionSearch = (book: any, passOver: (section: number) => boolean = () => false): MentionSearch => {
   const texts = new Map<number, string>();
   const found = new Map<string, Map<number, RawMention[]>>();
   let counted: { key: string; counter: NameCounter } | null = null;
@@ -224,7 +228,7 @@ export const mentionSearch = (book: any): MentionSearch => {
     }
   };
 
-  const textOf = async (section: number) => texts.get(section) ?? (await load(section))?.index.text ?? "";
+  const textOf = async (section: number) => (passOver(section) ? "" : (texts.get(section) ?? (await load(section))?.index.text ?? ""));
 
   /** The place, as a chapter and how much of its text is at or before it. */
   const hereOf = async (place: Place): Promise<Here | null> => {

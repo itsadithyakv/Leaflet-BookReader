@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { clickTurn, pagePercent, parsePageEntry, readingKeyAction, sideStep, type StageMetrics } from "./pageKeys";
+import {
+  clickTurn,
+  pagePercent,
+  parsePageEntry,
+  readingKeyAction,
+  sideStep,
+  wheelKey,
+  type StageMetrics
+} from "./pageKeys";
 
 /** A window 800 tall on a page 2,000 tall, as wide as the window unless said. */
 const stage = (scrollTop: number, more: Partial<StageMetrics> = {}): StageMetrics => ({
@@ -66,8 +74,44 @@ describe("the room the stage keeps round the page", () => {
     expect(readingKeyAction({ key: "PageUp" }, padded(300))).toEqual({ kind: "scroll", top: 0 });
   });
 
+  it("is not a step across either: Left and Right turn once the page's own edge is in view", () => {
+    // A page 1,803 wide in a window 992 wide, 56 of room each side: the scroller ends at 924.
+    const wide = (scrollLeft: number) =>
+      stage(0, { scrollHeight: 800, scrollLeft, scrollWidth: 1916, clientWidth: 992, padLeft: 56, padRight: 56 });
+    expect(readingKeyAction({ key: "ArrowRight" }, wide(800))).toEqual({ kind: "scroll", left: 880 });
+    // 44 of the 56 are left: that used to be a press showing only the room beside the page.
+    expect(readingKeyAction({ key: "ArrowRight" }, wide(880))).toEqual({ kind: "turn", step: 1, land: "top" });
+    expect(readingKeyAction({ key: "ArrowLeft" }, wide(130))).toEqual({ kind: "scroll", left: 50 });
+    expect(readingKeyAction({ key: "ArrowLeft" }, wide(50))).toEqual({ kind: "turn", step: -1, land: "top" });
+    // Read right to left the page starts at its right edge and Left goes on.
+    expect(readingKeyAction({ key: "ArrowLeft" }, wide(40), "rtl")).toEqual({ kind: "turn", step: 1, land: "top" });
+  });
+
   it("is nothing where the stage holds a column of pages", () => {
     expect(readingKeyAction({ key: " " }, stage(1190))).toEqual({ kind: "scroll", top: 1200 });
+  });
+});
+
+describe("the wheel at a page's edge", () => {
+  it("stands for the arrow it moved most like", () => {
+    expect(wheelKey(0, 100)).toBe("ArrowDown");
+    expect(wheelKey(0, -3)).toBe("ArrowUp");
+    expect(wheelKey(40, 5)).toBe("ArrowRight");
+    expect(wheelKey(-40, 5)).toBe("ArrowLeft");
+    expect(wheelKey(0, 0)).toBeNull();
+    expect(wheelKey(Number.NaN, 4)).toBeNull();
+  });
+
+  it("is at the edge where that arrow would turn the page, and turns the way it would", () => {
+    const tall = (scrollTop: number) => stage(scrollTop, { scrollHeight: 1443, clientHeight: 768, padTop: 96, padBottom: 48 });
+    // Part way down a tall page the wheel is the page's to scroll.
+    expect(readingKeyAction({ key: wheelKey(0, 100)! }, tall(300))?.kind).toBe("scroll");
+    // At its foot a notch down turns on; at its head a notch up goes back to the foot of the page before.
+    expect(readingKeyAction({ key: wheelKey(0, 100)! }, tall(660))).toEqual({ kind: "turn", step: 1, land: "top" });
+    expect(readingKeyAction({ key: wheelKey(0, -100)! }, tall(20))).toEqual({ kind: "turn", step: -1, land: "bottom" });
+    // A page that fits is at both edges; a comic read right to left goes on with a push to the left.
+    expect(readingKeyAction({ key: wheelKey(0, 100)! }, fits)).toEqual({ kind: "turn", step: 1, land: "top" });
+    expect(readingKeyAction({ key: wheelKey(-60, 0)! }, fits, "rtl")).toEqual({ kind: "turn", step: 1, land: "top" });
   });
 });
 

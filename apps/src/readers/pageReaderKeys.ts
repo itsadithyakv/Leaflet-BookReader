@@ -24,6 +24,8 @@ export type PageAction =
   | "goTo"
   | "bookmark"
   | "shortcuts"
+  | "back"
+  | "forward"
   | "zoomIn"
   | "zoomOut"
   | "fitActual"
@@ -161,6 +163,20 @@ export const PAGE_BINDINGS: Binding[] = [
     keys: ["G", "Ctrl+G"],
     matches: (press) => (plain(press) || command(press)) && letter(press, "g"),
     label: () => "Go to a page: type its number, or how far through (40%)",
+    group: "Moving about"
+  },
+  {
+    action: "back",
+    keys: ["Alt+←"],
+    matches: (press) => Boolean(press.altKey) && !press.ctrlKey && !press.metaKey && press.key === "ArrowLeft",
+    label: () => "Back to where you were before a jump (go to, contents, a bookmark, a search result, a link)",
+    group: "Moving about"
+  },
+  {
+    action: "forward",
+    keys: ["Alt+→"],
+    matches: (press) => Boolean(press.altKey) && !press.ctrlKey && !press.metaKey && press.key === "ArrowRight",
+    label: () => "Forward again",
     group: "Moving about"
   },
   {

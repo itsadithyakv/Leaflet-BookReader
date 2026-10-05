@@ -44,6 +44,15 @@ export type MentionSummary = {
   recent: Mention[];
 };
 
+/**
+ * A contents page, by its name in the contents ("Contents", "A Clash of
+ * Kings · Contents"). It is a list of the chapters' names, and where chapters
+ * are named for the people who tell them it "mentions" each of them a dozen
+ * times: a boxed set gave a character's first appearance as the contents
+ * page of the first novel, and counted its three contents pages as mentions.
+ */
+export const isContentsPage = (chapter: string | null | undefined) => /(^|·\s*)(table of )?contents$/i.test((chapter ?? "").trim());
+
 /** Every mention in a chapter's text. `person` keeps only that person's. */
 export const mentionsIn = (
   text: string,

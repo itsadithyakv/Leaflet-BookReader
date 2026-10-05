@@ -7,6 +7,10 @@ type ProgressBarProps = {
   value: number;
   /** The chapter a fraction of the book falls in, for the label under the pointer. */
   chapterAt: (fraction: number) => string | null;
+  /** In a set of books (readers/innerBooks.ts): the book a fraction falls in, named above the chapter. */
+  bookAt?: (fraction: number) => string | null;
+  /** Where each book of a set begins along the bar (0 to 1): a small mark at each. */
+  marks?: { at: number; label: string }[];
   /** Go there. Called once, when the handle is let go (or the keys rest). */
   onSeek: (fraction: number) => void;
   /** The dock is awake (under the pointer, focused, opened or just jumped): the bar shows with it. */
@@ -24,7 +28,7 @@ const KEY_REST_MS = 450;
  * go goes there. A slider to the keyboard: arrows move a hundredth, Page Up
  * and Down a tenth, Home and End to the ends.
  */
-export const ProgressBar = ({ value, chapterAt, onSeek, shown, holdRef }: ProgressBarProps) => {
+export const ProgressBar = ({ value, chapterAt, bookAt, marks, onSeek, shown, holdRef }: ProgressBarProps) => {
   const track = useRef<HTMLDivElement | null>(null);
   /** Where the handle is being held, or the pointer rests; null when the bar just shows the place. */
   const [pending, setPending] = useState<number | null>(null);
@@ -117,6 +121,7 @@ export const ProgressBar = ({ value, chapterAt, onSeek, shown, holdRef }: Progre
   const showing = pending ?? value;
   const percent = Math.round(showing * 100);
   const chapter = chapterAt(showing);
+  const inBook = bookAt?.(showing) ?? null;
   const active = mode !== "idle";
   return (
     <div className={`reader-progress ${shown || active ? "is-shown" : ""} ${active ? "is-active" : ""}`}>
@@ -130,7 +135,7 @@ export const ProgressBar = ({ value, chapterAt, onSeek, shown, holdRef }: Progre
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={percent}
-        aria-valuetext={chapter ? `${percent}%, ${chapter}` : `${percent}%`}
+        aria-valuetext={[`${percent}%`, inBook, chapter].filter(Boolean).join(", ")}
         title="Drag to go anywhere in the book"
         onKeyDown={onKeyDown}
         onBlur={() => {
@@ -179,15 +184,21 @@ export const ProgressBar = ({ value, chapterAt, onSeek, shown, holdRef }: Progre
         <span className="reader-progress-line" aria-hidden="true">
           <span className="reader-progress-fill" style={{ width: `${value * 100}%` }} />
         </span>
+        {(marks ?? []).map((mark) => (
+          <span key={`${mark.at}-${mark.label}`} className="reader-progress-mark" style={{ left: `${mark.at * 100}%` }} aria-hidden="true" />
+        ))}
         <span className="reader-progress-handle" style={{ left: `${showing * 100}%` }} aria-hidden="true" />
       </div>
       {active && (
         <span
-          className="reader-progress-bubble reader-panel reader-border"
+          className={`reader-progress-bubble reader-panel reader-border ${inBook ? "has-book" : ""}`}
           style={{ left: `clamp(7rem, ${showing * 100}%, calc(100% - 7rem))` }}
           aria-hidden="true"
         >
-          <span className="reader-progress-chapter">{chapter ?? "The book"}</span>
+          <span className="reader-progress-where">
+            {inBook && <span className="reader-progress-book reader-muted">{inBook}</span>}
+            <span className="reader-progress-chapter">{chapter ?? "The book"}</span>
+          </span>
           <span className="tabular-nums reader-accent">{percent}%</span>
         </span>
       )}

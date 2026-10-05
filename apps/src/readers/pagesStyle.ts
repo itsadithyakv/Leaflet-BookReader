@@ -32,6 +32,11 @@ import { PAGE_TOP_PAD } from "./finish";
 export const PAGE_FOOT_PAD = 56;
 
 export const PAGES_CSS = `
+  /* A finger moving across the page is a page turn (readers/pageTurn.ts,
+     swipeTurn), not the browser's to pan with: it is left to the reader. */
+  html[data-leaflet-layout="pages"] {
+    touch-action: pan-y pinch-zoom;
+  }
   html[data-leaflet-layout="pages"] body {
     padding-bottom: ${PAGE_FOOT_PAD}px !important;
   }

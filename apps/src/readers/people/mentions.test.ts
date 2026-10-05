@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CONTEXT, mentionsIn, mentionsUpTo, type SectionMentions } from "./mentions";
+import { CONTEXT, isContentsPage, mentionsIn, mentionsUpTo, type SectionMentions } from "./mentions";
 import { nameMatcher } from "./names";
 
 const find = nameMatcher([
@@ -120,5 +120,18 @@ describe("what may be shown of them at a place", () => {
     expect(summary.first?.before).not.toMatch(/^…\S*a\S* (?!alpha|beta|gamma)/);
     expect(summary.first?.after.endsWith("…")).toBe(true);
     expect(`${summary.first?.before}${summary.first?.match}${summary.first?.after}`).not.toContain("\n");
+  });
+});
+
+describe("a contents page is not read for mentions", () => {
+  it("knows one by its name, alone or under its book's", () => {
+    expect(isContentsPage("Contents")).toBe(true);
+    expect(isContentsPage("CONTENTS")).toBe(true);
+    expect(isContentsPage("Table of Contents")).toBe(true);
+    expect(isContentsPage("A CLASH OF KINGS · CONTENTS")).toBe(true);
+    expect(isContentsPage("The Contents of the Chest")).toBe(false);
+    expect(isContentsPage("TYRION")).toBe(false);
+    expect(isContentsPage("A CLASH OF KINGS · TYRION")).toBe(false);
+    expect(isContentsPage(null)).toBe(false);
   });
 });

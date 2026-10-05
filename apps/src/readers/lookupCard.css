@@ -305,3 +305,21 @@
 .reader-lookup-info:hover {
   background: var(--reader-hover-bg);
 }
+
+/* "More on Wikipedia" and "Don't keep" are a line of text 16 px high: each
+   takes a press from 24 px, and the line stays where it is. */
+.reader-lookup-more,
+.reader-lookup-inline {
+  position: relative;
+}
+
+.reader-lookup-more::after,
+.reader-lookup-inline::after {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  left: 0;
+  height: 24px;
+  transform: translateY(-50%);
+  content: "";
+}

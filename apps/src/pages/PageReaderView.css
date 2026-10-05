@@ -44,6 +44,35 @@
   --mark: color-mix(in srgb, #ffa31a 40%, transparent);
 }
 
+/* A page's links (readers/PdfLinkAreas.tsx): under the text layer, so the
+   words of a link can still be selected; the pointer is matched against
+   them from the page, and the keyboard reaches them here. */
+.pdf-reader-links {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.pdf-reader-link {
+  position: absolute;
+  border-radius: 2px;
+  background: transparent;
+  pointer-events: none;
+}
+
+.pdf-reader-link:focus-visible {
+  outline: 2px solid var(--reader-accent);
+  outline-offset: 2px;
+  background: color-mix(in srgb, var(--reader-accent) 16%, transparent);
+}
+
+.pdf-reader-page.is-over-link,
+.pdf-reader-page.is-over-link .textLayer,
+.pdf-reader-page.is-over-link .textLayer :is(span, br) {
+  cursor: pointer;
+}
+
 .pdf-search-hit-current {
   background: var(--reader-pill);
   box-shadow: inset 2px 0 var(--reader-accent);
@@ -91,6 +120,14 @@
   outline-offset: 1px;
 }
 
+/* "Chapters found by Leaflet", over a list the PDF did not come with; and why there is none. */
+.page-reader-outline-made {
+  margin-top: 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--reader-muted);
+}
+
 .page-reader-outline-title {
   min-width: 0;
   flex: 1;
@@ -110,10 +147,12 @@
 /* "Page 12 of 300 · 4%" in the dock is the way in to "go to page". */
 .page-reader-place {
   min-width: 6rem;
+  /* As tall as the arrows beside it (24 px), in figures that can be read. */
+  min-height: 24px;
   border-radius: 6px;
   padding: 4px 8px;
   text-align: center;
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: inherit;
   text-transform: inherit;
   color: var(--reader-muted);
@@ -144,6 +183,14 @@
 
 .page-reader-goto[aria-invalid="true"] {
   border-color: #d2553f;
+}
+
+/* The way back after a jump, in the dock: the text reader's chip (readingOutlook.css `.reader-dock-back`). */
+.page-reader-back {
+  gap: 4px;
+  padding: 0 8px 0 6px;
+  font-size: 10px;
+  letter-spacing: 0.12em;
 }
 
 /* The three fits, in the page size panel. */

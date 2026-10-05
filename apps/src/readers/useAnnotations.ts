@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { annotationService, type Annotation, type AnnotationInput } from "../services/annotationService";
 import { useLibraryStore } from "../store/libraryStore";
+import { groupByChapter } from "../components/highlights/highlightsView";
 
 /** Where bookmarks lived before the database, per book. Moved once, then removed. */
 const legacyKey = (bookId: string) => `leaflet.bookmarks.${bookId}`;
@@ -123,18 +124,22 @@ export const highlightsMarkdown = (title: string, author: string | null | undefi
   if (author) {
     lines.push(`*${author}*`);
   }
-  let chapter: string | null | undefined;
-  for (const item of highlights) {
-    // As the highlights dialog groups them (`groupByChapter`): a label is what
-    // it reads as, so a line break in one cannot end its heading early.
-    const label = item.chapter?.replace(/\s+/g, " ").trim();
-    if (label && label !== chapter) {
-      chapter = label;
-      lines.push("", `## ${chapter}`);
+  // As the highlights dialog groups them (`groupByChapter`): a label is what
+  // it reads as, so a line break in one cannot end its heading early; two
+  // chapters of one name are two headings; and in a set of books the book is
+  // a heading of its own, above its chapters.
+  for (const group of groupByChapter(highlights)) {
+    if (group.book && group.opensBook) {
+      lines.push("", `## ${group.book}`);
     }
-    lines.push("", ...(item.text ?? "").split(/\r\n|\r|\n/).map((line) => `> ${literalLine(line)}`));
-    if (item.note) {
-      lines.push("", item.note);
+    if (group.chapter) {
+      lines.push("", `${group.book ? "###" : "##"} ${group.chapter}`);
+    }
+    for (const item of group.items) {
+      lines.push("", ...(item.text ?? "").split(/\r\n|\r|\n/).map((line) => `> ${literalLine(line)}`));
+      if (item.note) {
+        lines.push("", item.note);
+      }
     }
   }
   return `${lines.join("\n")}\n`;

@@ -5,6 +5,18 @@ export type TocItem = {
   label: string;
   href: string;
   subitems?: TocItem[];
+  /**
+   * A place inside the file, for an entry that has no id to point at (a
+   * chapter list made by Leaflet, several chapters to a file): `href` is then
+   * the bare file. See `tocPlace` in toc.ts.
+   */
+  cfi?: string;
+  /**
+   * This top-level entry is a whole book of a set, whatever it is called
+   * (readers/innerBooks.ts takes "Book One" by its name alone for a part of
+   * one novel).
+   */
+  book?: boolean;
 };
 
 export type ReaderDisplayMode = "paper" | "dark-paper" | "true-white" | "true-black" | "app";

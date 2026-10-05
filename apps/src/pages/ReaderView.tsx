@@ -22,7 +22,8 @@ import { watchForeground } from "../services/windowService";
 import { accountService } from "../services/accountService";
 import ztNatureBoldWoff2 from "../assets/fonts/ZTNature-Bold.woff2";
 import { formatSummary, getBookExtension, isReadableExtension } from "../constants/bookFormats";
-import { buildSectionWeights, endInView, isChapterLike, outsideStory, spineIndexForProgress, type SectionWeights } from "../readers/progress";
+import { buildSectionWeights, endReached, isChapterLike, onLastPage, outsideStory, progressToSave, spineIndexForProgress, type SectionWeights } from "../readers/progress";
+import { isFinished } from "../constants/books";
 import { highlightsMarkdown, useAnnotations } from "../readers/useAnnotations";
 import { AnnotationsPanel } from "../readers/AnnotationsPanel";
 import { SelectionBar } from "../readers/SelectionBar";
@@ -62,13 +63,29 @@ import {
   type ReadingProfile
 } from "../readers/paceModel";
 import { judgeCatchUp, PagePaceTracker, ScrollPaceTracker } from "../readers/paceTracker";
-import { chapterEndTop, easeInOutCubic, planScrollStep, readingBand, screenStep, stepDuration, type ReadingArea } from "../readers/smartScroll";
-import { ReaderTour, readerTourSeen, readStartMode } from "../readers/ReaderTour";
+import { chapterEndTop, easeInOutCubic, isPictureGap, isScrollCorrection, pastPictureGap, planScrollStep, readingBand, screenStep, stepDuration, type ReadingArea } from "../readers/smartScroll";
+import { ReaderTour, TOUR_CONTENTS_STEP, readerTourSeen, readStartMode } from "../readers/ReaderTour";
 import { toolbarTitleClass } from "../readers/titleFit";
-import { WHEEL_AT_REST, keyTurns, pageAt, pageHolding, pageTurnDuration, pageTurnTarget, strayPageTarget, wheelTurn } from "../readers/pageTurn";
+import {
+  DOUBLE_CLICK_MS,
+  WHEEL_AT_REST,
+  clickZone,
+  keyTurns,
+  pageAt,
+  pageCount,
+  pageHolding,
+  pageTurnDuration,
+  pageTurnTarget,
+  pressIsClick,
+  strayPageTarget,
+  swipeTurn,
+  wheelTurn
+} from "../readers/pageTurn";
+import { MARK_NAME } from "../readers/people/marks";
 import { dotIsStranded } from "../readers/readerDot";
 import { markOpenings, OPENINGS_CSS } from "../readers/dropCaps";
-import { PAGES_CSS } from "../readers/pagesStyle";
+import { PAGE_FOOT_PAD, PAGES_CSS } from "../readers/pagesStyle";
+import { BLOCKS_CSS, markBlocks, markListedLines, pictureRoom } from "../readers/bookBlocks";
 import { ChapterDock } from "../readers/ChapterDock";
 import type { Outlook } from "../readers/ReadingOutlook";
 import { chapterEndFor, minutesFor, steadyMinutes, wordsLeft, wordsPerByte } from "../readers/timeLeft";
@@ -77,6 +94,7 @@ import { sectionsFromArchive } from "../readers/archiveSections";
 import { NO_JUMPS, noteJump, stepBack, stepForward, type JumpHistory } from "../readers/jumpHistory";
 import { readingLineIn } from "../readers/readingPlace";
 import { glideFrame, glideSet, startGlide } from "../readers/glide";
+import { NOT_HELD, STILL_MS, holdsFetching, isOnScrollbar, letGo, pageScrolled, pressOn, type ScrollbarHold } from "../readers/scrollbarHold";
 import { firstTextFrom, lineAt } from "../readers/lineAt";
 import { isOutsideLink, resolveBookLink } from "../readers/bookLinks";
 import { classifyNoteLink, elementById, linkFacts, noteBlockOf, noteText, targetFacts, type NoteRun } from "../readers/footnotes";
@@ -85,6 +103,14 @@ import { markViewable, pictureAt, setInkOff } from "../readers/pictures";
 import { ImageViewer, type ViewedPicture } from "../readers/ImageViewer";
 import { ProgressBar } from "../readers/ProgressBar";
 import { fractionAt, seekTarget } from "../readers/seek";
+import { fullerToc, tocFromNcx } from "../readers/ncx";
+import { CONTENTS_KEY_PREFIX, decideContents, keepContents, placeKey, readKept, type KeptContents } from "../readers/autoContents";
+import { anchorElement, scanBook } from "../readers/contentsScan";
+import { beforeStory, chapterEndWithin, chapterPageRange, chapterTail, earlierEntry, entryAtShare, listedAgain, nextChapterEntry, pagesOfChapter, previousChapterEntry, type ChapterStart } from "../readers/chapterSpan";
+import { List as ListIcon, X as CloseIcon } from "lucide-react";
+import { ContentsList } from "../readers/ContentsList";
+import { PEEK_MIN_WIDTH, PEEK_MS, contentsSeen, handleSizeFor, leftOpen, listFitsBeside, marginBesideText, reopensWith, saveLeftOpen, setContentsSeen, shouldPeek } from "../readers/contentsPanel";
+import { bookOfSection, crossedStoryEnd, findInnerBooks, fractionOfBook, gapFollows, labelInBook, storyGaps, tocDepths, type ContentsRow, type InnerBook } from "../readers/innerBooks";
 import { actionFor, keyBelongsToControl, shortcutSections } from "../readers/readerKeys";
 import { escapeTarget } from "../readers/escapeOrder";
 import { ReaderAmbience, ReaderAmbienceRow, closeAmbiencePopover, useAmbiencePopoverOpen } from "../ambience";
@@ -146,6 +172,12 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
   };
   const scrollAdvanceTimerRef = useRef<number | null>(null);
   const scrollContainerRef = useRef<HTMLElement | null>(null);
+  // The scrollbar held (readers/scrollbarHold.ts): no chapter is fetched
+  // under it. The book's own documents call the let-go when the pointer is
+  // seen in them with no button down.
+  const scrollbarHoldRef = useRef<ScrollbarHold>(NOT_HELD);
+  const scrollbarResumeTimerRef = useRef<number | null>(null);
+  const scrollbarLetGoRef = useRef<() => void>(() => undefined);
   const autoScrollRafRef = useRef<number | null>(null);
   const lastWheelDownAtRef = useRef(0);
   const lastScrollTopRef = useRef<number | null>(null);
@@ -164,6 +196,8 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
   const readerDotEnabledRef = useRef(true);
   const readingEngineTimerRef = useRef<number | null>(null);
   const readingModeRef = useRef<ReadingMode>("standard");
+  /** The mode before this one, for what leaving it leaves behind. */
+  const modeBeforeRef = useRef<ReadingMode>("standard");
   const readingPausedRef = useRef(false);
   const speedReadWpmRef = useRef(260);
   const readerWordsRef = useRef<ReaderWord[]>([]);
@@ -408,6 +442,8 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
         return;
       }
       lastHandsOnAtRef.current = Date.now();
+      // (A key is never held up by a scrollbar that was not seen let go.)
+      scrollbarLetGoRef.current();
       // What the key does here comes from the one table the shortcuts sheet
       // is drawn from (readers/readerKeys.ts).
       const action = actionFor(event, { layout: layoutRef.current, mode: readingModeRef.current });
@@ -440,6 +476,12 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
             addBookmarkRef.current();
           }
           return;
+        case "contents":
+          // The chapter list, to stay until it is shut (readers/contentsPanel.ts).
+          if (!event.repeat) {
+            toggleContentsRef.current();
+          }
+          return;
         case "pageNext":
         case "pagePrev": {
           // One press, one page; a held key is paced (readers/pageTurn.ts).
@@ -448,7 +490,13 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
             return;
           }
           lastKeyTurnAtRef.current = pressedAt;
-          turnPageRef.current(action === "pagePrev" ? -1 : 1);
+          // In a right-to-left book the arrows follow the pages, as a click
+          // at the side does: Left goes on. Space and Page Down always do.
+          const on = action === "pagePrev" ? -1 : 1;
+          const mirrored =
+            (event.key === "ArrowLeft" || event.key === "ArrowRight") &&
+            (renditionRef.current?.manager as any)?.settings?.direction === "rtl";
+          turnPageRef.current(mirrored ? (on === 1 ? -1 : 1) : on, event.repeat);
           return;
         }
         case "chapterNext":
@@ -636,10 +684,20 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
   };
 
   const initialPrefs = readPrefs();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  // The chapter list (readers/contentsPanel.ts). Opened on purpose (its
+  // handle, the toolbar, the dock, the C key) it is pinned: it stays until it
+  // is shut, and the choice is remembered. Opened by resting the pointer on
+  // the window's edge it goes when the pointer does. A list left open comes
+  // back open with the book where it fits beside the text.
+  const [sidebarPinned, setSidebarPinned] = useState(() =>
+    reopensWith(leftOpen(initialPrefs?.sidebarOpen), marginBesideText(window.innerWidth, readMeasure(), initialPrefs?.fontSize ?? 18, readLayout()))
+  );
+  const [sidebarOpen, setSidebarOpen] = useState(sidebarPinned);
+  const [windowWidth, setWindowWidth] = useState(() => window.innerWidth);
   const [fontSize, setFontSize] = useState(initialPrefs?.fontSize ?? 18);
   const fontSizeRef = useRef(fontSize);
-  const sidebarRef = useRef(sidebarOpen);
+  // Whether the reader left the list open, as saved with the book.
+  const sidebarRef = useRef(leftOpen(initialPrefs?.sidebarOpen));
   const [fontPanelOpen, setFontPanelOpen] = useState(false);
   const fontPanelRef = useRef<HTMLDivElement | null>(null);
   const [autoScrollActive, setAutoScrollActive] = useState(false);
@@ -677,6 +735,23 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
     null
   );
   const [readingPaused, setReadingPaused] = useState(false);
+  // A book opened in Smart Read starts paused, with its pill up saying so.
+  // On a cover or a contents page there is nothing to set off: the pill is
+  // held back until the reading line is in the story (see `releasePill`).
+  const [pillHeld, setPillHeld] = useState(false);
+  const pillHeldRef = useRef(false);
+  const holdPill = (held: boolean) => {
+    if (pillHeldRef.current !== held) {
+      pillHeldRef.current = held;
+      setPillHeld(held);
+    }
+  };
+  // Once the reader has set Smart Read off, the pill is theirs again wherever they are.
+  useEffect(() => {
+    if (!readingPaused) {
+      holdPill(false);
+    }
+  }, [readingPaused]);
   const [speedReadWpm, setSpeedReadWpm] = useState(
     Math.min(1000, Math.max(120, initialPrefs?.speedReadWpm ?? 260))
   );
@@ -685,6 +760,15 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
   const [smartWpm, setSmartWpm] = useState(0);
   /** Smart Read is waiting for a reader who went back to reread. */
   const [smartWaiting, setSmartWaiting] = useState(false);
+  /**
+   * Smart Read is resting at a picture (or any stretch with no words taller
+   * than half the window: readers/smartScroll.ts) until the reader goes on.
+   * The ref holds the last word read before it; `passed` is the last such
+   * word gone on from, so the same picture is not stopped at twice.
+   */
+  const [smartAtPicture, setSmartAtPicture] = useState(false);
+  const smartPictureRef = useRef<{ before: ReaderWord } | null>(null);
+  const smartPicturePassedRef = useRef<ReaderWord | null>(null);
   const readerTheme = useAppearanceStore((state) => state.theme);
   const displayModeRef = useRef<ReaderDisplayMode>(displayMode);
   const readerThemeRef = useRef(readerTheme);
@@ -725,6 +809,12 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
   const [measure, setMeasure] = useState<ReaderMeasure>(readMeasure);
   const measureRef = useRef<ReaderMeasure>(measure);
   measureRef.current = measure;
+  // The margin beside the text (readers/contentsPanel.ts): what the handle on
+  // the edge may be, and whether the open list is beside the text or over it.
+  // Beside it, a list left open holds nothing up.
+  const textMargin = marginBesideText(windowWidth, measure, fontSize, layout);
+  const contentsBeside = sidebarOpen && sidebarPinned && listFitsBeside(textMargin);
+  const contentsOver = sidebarOpen && !contentsBeside;
   const chooseMeasure = (next: ReaderMeasure) => {
     try {
       localStorage.setItem(MEASURE_KEY, next);
@@ -844,7 +934,7 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
     covered: () =>
       searchOpen ||
       bookmarkPanelOpen ||
-      sidebarOpen ||
+      contentsOver ||
       tourOpen ||
       fontPanelOpen ||
       note !== null ||
@@ -890,6 +980,45 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
   // The contents' entries as places in the book, for naming where the reader is (readers/toc.ts).
   const tocPlacesRef = useRef<TocPlace[]>([]);
   const tocLabelsRef = useRef<string[]>([]);
+  // The share of its file before each entry of the contents (0 at its top): from the chapter finder (readers/contentsScan.ts).
+  const tocWithinRef = useRef<number[]>([]);
+  /**
+   * With pages: the contents entry the reader asked for by name (the chapter
+   * list, next or previous chapter, a link, Home), and the page it was shown
+   * on. A chapter that starts part-way down a page is named on that page
+   * only when it was asked for, and until another page comes up
+   * (readers/chapterSpan.ts: chapterOnPage).
+   */
+  const askedEntryRef = useRef<{ entry: number; at: string | null } | null>(null);
+  // The contents as rows with their depth, and the books inside a set (readers/innerBooks.ts); none for a single work.
+  const [contents, setContents] = useState<{ rows: ContentsRow[]; books: InnerBook[]; bytes: number[]; made?: boolean }>({ rows: [], books: [], bytes: [] });
+  const innerBooksRef = useRef<InnerBook[]>([]);
+  const contentsRowsRef = useRef<ContentsRow[]>([]);
+  /**
+   * Replaces the book's contents after it has opened (set where the contents
+   * are read, in the book-opening effect): for a chapter list made by Leaflet
+   * when the book came with none. `made` puts "Chapters found by Leaflet" at
+   * the list's head.
+   */
+  const applyContentsRef = useRef<(tree: TocItem[], made?: boolean) => void>(() => undefined);
+  // In a set: the stretches between two stories, as sections and as fractions of the set's story.
+  const storyGapsRef = useRef<{ from: number; to: number; start: number; end: number }[]>([]);
+  /**
+   * A look between two stories of a set from somewhere else in it (the third
+   * novel's map opened from its fortieth chapter, the first one's appendix
+   * from the second): the progress and the saved place stay where the
+   * reading is, as they do for a single novel's map (readers/innerBooks.ts:
+   * gapFollows). Reading through from the end of one novel to the start of
+   * the next is followed.
+   */
+  const lookingBetweenStories = (section: number) => {
+    const gap = storyGapsRef.current.find((between) => section >= between.from && section <= between.to);
+    if (!gap) {
+      return false;
+    }
+    const known = lastCfiProgressRef.current ?? (lastComputedProgressRef.current >= 0 ? lastComputedProgressRef.current : 0);
+    return !gapFollows(known, gap.start, gap.end);
+  };
   // Where to reopen: this device's own last line, unless the synced position
   // (read on another device) is further on, or this device has none.
   const lastCfiRef = useRef<string | null>(
@@ -939,6 +1068,7 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
   const chapterEntryRef = useRef(-1);
   const [chapterLabel, setChapterLabel] = useState("");
   /** The chapter as the book names it; the book's title where the contents name nothing (a cover, a book with no contents). */
+  const [chapterInBook, setChapterInBook] = useState<{ book: string; chapter: string } | null>(null);
   const formatChapterDisplay = () => chapterLabel || book.title;
 
   const coverSrc = useMemo(() => {
@@ -965,18 +1095,46 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
       : null
   );
   const tocSpineStartsRef = useRef<number[]>([]);
-  const shownMinutesRef = useRef<{ chapter: number | null; book: number | null }>({ chapter: null, book: null });
+  const shownMinutesRef = useRef<{ chapter: number | null; book: number | null; inner?: number | null }>({ chapter: null, book: null });
   /** How far through the book, and how long is left: shown in the chapter dock. */
   const [outlook, setOutlook] = useState<Outlook>({
     progress: typeof book.progress === "number" ? book.progress : null,
     chapter: null,
     book: null
   });
+  // The chapter list of a set says how each book in it stands: from the place the progress stands for.
+  const contentsPlace = useMemo(() => {
+    const weights = sectionWeightsRef.current;
+    return weights && contents.books.length > 0 && outlook.progress !== null ? seekTarget(weights, outlook.progress) : null;
+  }, [outlook.progress, contents]);
+  // A row of the list was chosen. The list stays when it is pinned beside the text; over the text it has done its work.
+  const goToContentsEntryRef = useRef<(item: TocItem) => void>(() => undefined);
+  goToContentsEntryRef.current = (item) => {
+    noteJumpFromHere();
+    // (With pages, the chapter asked for is named on the page it starts on: see askedEntryRef.)
+    askedEntryRef.current = layoutRef.current === "pages" && toc.indexOf(item) >= 0 ? { entry: toc.indexOf(item), at: null } : null;
+    if (item.cfi) {
+      // An entry that is a place in its file, not an id (a made chapter list).
+      goToPlace(item.cfi);
+    } else {
+      displayChapter(item.href, { useSaved: false });
+    }
+    if (!(sidebarPinnedRef.current && listFitsBeside(textMargin))) {
+      contentsPeekRef.current.showing = false;
+      setSidebarPinned(false);
+      setSidebarOpen(false);
+    }
+  };
+  const goToContentsEntry = useRef((item: TocItem) => goToContentsEntryRef.current(item)).current;
+  /** Which step of the walkthrough is showing (the chapter list's handle is lit on its own step). */
+  const [tourStep, setTourStep] = useState(-1);
   // Called from epub.js's relocation handler and the word index, both bound once.
   const updateOutlookRef = useRef<() => void>(() => undefined);
   // Back to where you were (readers/jumpHistory.ts): the lines left by jumps,
   // for this visit. The counts are what the dock draws.
   const jumpsRef = useRef<JumpHistory>(NO_JUMPS);
+  /** How far below the reading line each of those lines started (scrolling), by its place. */
+  const jumpBelowRef = useRef(new Map<string, number>());
   const [jumps, setJumps] = useState({ back: 0, forward: 0 });
   /** The dock is awake for a moment after a jump, so the way back is seen. */
   const [dockAwake, setDockAwake] = useState(false);
@@ -1026,6 +1184,7 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
     setMorePanelOpen(false);
     // Another book: its own places and its own words.
     jumpsRef.current = NO_JUMPS;
+    jumpBelowRef.current = new Map();
     setJumps({ back: 0, forward: 0 });
     sectionWordsRef.current = new Map();
     shownMinutesRef.current = { chapter: null, book: null };
@@ -1156,11 +1315,87 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
     if (sidebarCloseTimerRef.current) {
       window.clearTimeout(sidebarCloseTimerRef.current);
     }
+    // A list opened on purpose stays; one that showed itself goes with its own timer.
+    if (sidebarPinnedRef.current || contentsPeekRef.current.showing) {
+      return;
+    }
     sidebarCloseTimerRef.current = window.setTimeout(() => {
       setSidebarOpen(false);
       sidebarCloseTimerRef.current = null;
     }, 220);
   };
+
+  const sidebarPinnedRef = useRef(sidebarPinned);
+  sidebarPinnedRef.current = sidebarPinned;
+  const sidebarShownRef = useRef(sidebarOpen);
+  sidebarShownRef.current = sidebarOpen;
+  /** The one time the list shows itself (readers/contentsPanel.ts): whether it is doing so now, and its timers. */
+  const contentsPeekRef = useRef<{ showing: boolean; timers: number[] }>({ showing: false, timers: [] });
+
+  /** Opens or shuts the chapter list on purpose: it stays as put, and the choice is remembered for this book and this device. */
+  const pinContents = (open: boolean) => {
+    cancelReaderSidebarOpen();
+    if (sidebarCloseTimerRef.current) {
+      window.clearTimeout(sidebarCloseTimerRef.current);
+      sidebarCloseTimerRef.current = null;
+    }
+    contentsPeekRef.current.showing = false;
+    setSidebarPinned(open);
+    setSidebarOpen(open);
+    sidebarRef.current = open;
+    saveLeftOpen(open);
+    try {
+      persistReaderState();
+    } catch {
+      // The choice holds for this visit.
+    }
+  };
+  /** The handle, the toolbar button, the dock's chapter name and the C key: shut when it is open and pinned, else open and pin it. */
+  const toggleContents = () => pinContents(!(sidebarShownRef.current && sidebarPinnedRef.current));
+  const toggleContentsRef = useRef(toggleContents);
+  toggleContentsRef.current = toggleContents;
+
+  // The first book opened on this device: the list shows itself for a moment
+  // and tucks away again, so the reader sees where it lives. Once, ever (the
+  // walkthrough's own step about the list counts), and not in a window too
+  // narrow for it.
+  useEffect(() => {
+    // (Not while the walkthrough is still to come or is showing: it has a step for the list, and this waits for it to close.)
+    if (loading || tourOpen || !readerTourSeen() || !shouldPeek(contentsSeen(), window.innerWidth)) {
+      return;
+    }
+    setContentsSeen();
+    const peek = contentsPeekRef.current;
+    peek.timers.push(
+      window.setTimeout(() => {
+        if (!sidebarShownRef.current) {
+          peek.showing = true;
+          setSidebarOpen(true);
+        }
+      }, 700),
+      window.setTimeout(() => {
+        if (peek.showing) {
+          peek.showing = false;
+          if (!sidebarPinnedRef.current) {
+            setSidebarOpen(false);
+          }
+        }
+      }, 700 + PEEK_MS)
+    );
+  }, [loading, tourOpen]);
+  useEffect(
+    () => () => {
+      contentsPeekRef.current.timers.forEach((timer) => window.clearTimeout(timer));
+    },
+    []
+  );
+
+  // How wide the margin beside the text is: what the handle may be, and whether the open list covers the text.
+  useEffect(() => {
+    const onResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   const ensureSingleScrollContainer = () => {
     if (layoutRef.current === "pages") {
@@ -1834,9 +2069,11 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
       while (node && words.length < WORD_INDEX_LIMIT) {
         const textNode = node as Text;
         const parent = textNode.parentElement;
+        // (A footnote's marker is not a word of the text: "note" and its
+        // raised "1" used to be read, and flashed in SpeedRead, as "note1".)
         const hidden =
           !parent ||
-          Boolean(parent.closest("script, style, noscript, svg, [aria-hidden='true']")) ||
+          Boolean(parent.closest("script, style, noscript, svg, [aria-hidden='true'], sup a[href], a[href] > sup, a[role='doc-noteref'], a[epub\\:type~='noteref']")) ||
           parent.hidden;
         if (!hidden && textNode.data.trim()) {
           const block = parent.closest(READER_BLOCK_SELECTOR);
@@ -2019,6 +2256,11 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
       setReadingWord(buildReadingWordState(Math.min(activeWordIndexRef.current, lastIndex)));
       if (readingModeRef.current === "smart") {
         positionReaderDotAtWord(readerDotAnchorIndexRef.current);
+        // (Resting at a picture, Dotty stays beside it: the word to read
+        // next is below it, or has only just arrived with its chapter.)
+        if (smartPictureRef.current) {
+          placeDotAtPicture();
+        }
       }
     } else if (readerDotEnabledRef.current && words.length > 0) {
       if (readerDotElementRef.current) {
@@ -2222,6 +2464,52 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
   };
 
   /**
+   * With pages: the page showing as a page of its chapter, when the contents
+   * place several chapters in this file (readers/chapterSpan.ts). The pages
+   * the chapters start on are found once for a layout of the file.
+   */
+  const chapterPagesRef = useRef<{ key: string; starts: Array<{ entry: number; page: number; atTop: boolean }> }>({ key: "", starts: [] });
+  const chapterPagesHere = (section: number, page: number, total: number) => {
+    const starts = chapterStartsHere(section);
+    return starts ? pagesOfChapter(page, total, starts, askedEntryRef.current?.entry) : null;
+  };
+  /** The pages (from 1) the contents' entries inside this file start on, in page order; null when none does. */
+  const chapterStartsHere = (section: number) => {
+    const manager = renditionRef.current?.manager as any;
+    const container = manager?.container as HTMLElement | undefined;
+    const pageWidth = Number(manager?.layout?.delta) || 0;
+    if (!Number.isInteger(section) || !container || pageWidth <= 0 || manager?.settings?.direction === "rtl") {
+      return null;
+    }
+    const inside = tocPlacesRef.current.map((place, index) => ({ place, index })).filter(({ place, index }) => place.spine === section && (tocWithinRef.current[index] ?? 0) > 0);
+    if (inside.length === 0) {
+      return null;
+    }
+    const key = `${section}:${container.scrollWidth}:${pageWidth}:${inside.length}`;
+    if (chapterPagesRef.current.key !== key) {
+      const view = displayedViews().find((shown) => shown?.section?.index === section);
+      const doc = view?.contents?.document as Document | undefined;
+      const frame = doc?.defaultView?.frameElement?.getBoundingClientRect();
+      if (!doc || !frame) {
+        return null;
+      }
+      const box = container.getBoundingClientRect();
+      const starts: Array<{ entry: number; page: number; atTop: boolean }> = [];
+      for (const { place, index } of inside) {
+        const heading = anchorElement(doc, place.anchor || place.cfi || "");
+        const at = heading?.getBoundingClientRect();
+        if (at) {
+          const across = frame.left + at.left - box.left + container.scrollLeft;
+          starts.push({ entry: index, page: Math.floor((across + 1) / pageWidth) + 1, atTop: at.top <= PAGE_TOP_PAD + linePx() * 1.5 });
+        }
+      }
+      starts.sort((a, b) => a.page - b.page);
+      chapterPagesRef.current = { key, starts };
+    }
+    return chapterPagesRef.current.starts;
+  };
+
+  /**
    * A page came up (layout "pages"). When it is the page after the last one,
    * the last one was read: its words over the time it was up. Going back, or
    * jumping from the chapter list, starts the count over.
@@ -2232,9 +2520,21 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
     const total = Number(location?.start?.displayed?.total) || 0;
     const previous = pageShownRef.current;
     pageShownRef.current = { href, page, total };
-    // For the dock: "12 of 50".
+    // A chapter asked for by name keeps its page until another page comes up
+    // (the jump itself may pass through a page or two on its way).
+    const asked = askedEntryRef.current;
+    if (asked) {
+      const here = `${href}#${page}`;
+      if (asked.at === null || Date.now() < navigatingUntilRef.current) {
+        asked.at = here;
+      } else if (asked.at !== here) {
+        askedEntryRef.current = null;
+      }
+    }
+    // For the dock: "12 of 50". Of the chapter's pages, when chapters share a file.
+    const counted = (page > 0 && total > 0 ? chapterPagesHere(Number(location?.start?.index), page, total) : null) ?? { page, total };
     setPageOf((shown) =>
-      page > 0 && total > 0 ? (shown && shown.page === page && shown.total === total ? shown : { page, total }) : null
+      page > 0 && total > 0 ? (shown && shown.page === counted.page && shown.total === counted.total ? shown : counted) : null
     );
     if (!href || !page || awayRef.current) {
       return;
@@ -2353,7 +2653,72 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
   nudgeSmartPaceRef.current = nudgeSmartPace;
 
   /** Space, or the play button: go on after a reread, otherwise pause or carry on. */
+  /** Going on from a picture Smart Read stopped at: by Space, the play button, or scrolling past it by hand. */
+  const goOnFromPicture = () => {
+    const held = smartPictureRef.current;
+    if (!held) {
+      return false;
+    }
+    smartPicturePassedRef.current = held.before;
+    smartPictureRef.current = null;
+    setSmartAtPicture(false);
+    lastHandsOnAtRef.current = Date.now();
+    return true;
+  };
+
+  /**
+   * Smart Read comes to rest at a picture after the word `before`: the last
+   * line read goes to the top of the reading area, the picture under it, and
+   * Dotty beside the picture's top. False when that line cannot be found.
+   */
+  const restAtPicture = (before: ReaderWord) => {
+    const container = ensureScrollContainer();
+    const rect = getReaderWordRect(before);
+    if (!container || !rect) {
+      return false;
+    }
+    smartPictureRef.current = { before };
+    setSmartAtPicture(true);
+    const lineTop = rect.top - container.getBoundingClientRect().top;
+    placeDotAtPicture();
+    turnSmartPage(container, lineTop - readingBand(readingArea(container)).top);
+    return true;
+  };
+
+  /** Dotty beside the top of the picture Smart Read is resting at: half a line under the last line read. */
+  const placeDotAtPicture = () => {
+    const container = ensureScrollContainer();
+    const before = smartPictureRef.current?.before;
+    const rect = before ? getReaderWordRect(before) : null;
+    const dot = readerDotElementRef.current;
+    if (!container || !rect || !dot) {
+      return false;
+    }
+    const lineTop = rect.top - container.getBoundingClientRect().top;
+    moveReaderDot(dot, container, container.scrollTop + lineTop + rect.height + linePx() * 0.5, Number.parseFloat(dot.style.left) || 7);
+    return true;
+  };
+
+  /** Where the chapters on the page end, from the top of the window: the foot of a stretch with no words after the last word. */
+  const loadedEndTop = () => {
+    const container = ensureScrollContainer();
+    const view = displayedViews().pop();
+    const last = view?.element as HTMLElement | undefined;
+    if (!container || !last) {
+      return null;
+    }
+    // (Less the room kept below the last line of the book, which is no picture.)
+    const room = (view.contents?.document as Document | undefined)?.querySelector<HTMLElement>("[data-leaflet-end]")?.offsetHeight ?? 0;
+    return last.getBoundingClientRect().bottom - room - container.getBoundingClientRect().top;
+  };
+
   const toggleSmartPlay = () => {
+    if (goOnFromPicture()) {
+      smartManualOverrideUntilRef.current = 0;
+      readingPausedRef.current = false;
+      setReadingPaused(false);
+      return;
+    }
     if (smartRereadRef.current) {
       stopWaitingForReread();
       smartManualOverrideUntilRef.current = 0;
@@ -2418,6 +2783,17 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
     const container = ensureScrollContainer();
     const word = readerWordsRef.current[activeWordIndexRef.current];
     const rect = word ? getReaderWordRect(word) : null;
+    // Resting at a picture: the word to read next is below it, off the foot
+    // of the window (or in a chapter not yet on the page), which is not the
+    // reader going back to reread. Scrolling the text after the picture into
+    // the reading area is them going on.
+    if (smartPictureRef.current) {
+      const afterTop = container ? (rect ? rect.top - container.getBoundingClientRect().top : loadedEndTop()) : null;
+      if (container && afterTop !== null && pastPictureGap(afterTop, readingArea(container)) && goOnFromPicture()) {
+        smartStepHoldUntilRef.current = Date.now() + 700;
+      }
+      return;
+    }
     if (!container || !rect || !smartSessionRef.current) {
       return;
     }
@@ -2627,21 +3003,34 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
     return { section: index, within: Math.min(1, Math.max(0, (page - 1) / total)) };
   };
 
-  /** Scrolling: whether the story's last line is on screen. The book is read once it is (readers/progress.ts). */
-  const storyEndInView = () => {
+  /**
+   * Scrolling: where the bottom of the story's last line is, from the top of
+   * the window; null when its chapter is not on the page. (A chapter let go
+   * above keeps its box until it is trimmed, so one just scrolled past is
+   * still measured.)
+   */
+  const storyEndBottom = (): number | null => {
     const weights = sectionWeightsRef.current;
     const container = (renditionRef.current?.manager as any)?.container as HTMLElement | undefined;
     if (!weights || !container || layoutRef.current !== "scroll") {
-      return false;
+      return null;
     }
-    const view = displayedViews().find((shown) => shown?.section?.index === weights.last);
+    const views = ((renditionRef.current?.manager as any)?.views?._views ?? []) as any[];
+    const view = views.find((shown) => shown?.section?.index === weights.last && shown?.element?.isConnected);
     const element = view?.element as HTMLElement | undefined;
-    if (!element) {
-      return false;
+    if (!element || element.offsetHeight <= 0) {
+      return null;
     }
     const room = (view.contents?.document as Document | undefined)?.querySelector<HTMLElement>("[data-leaflet-end]");
-    const bottom = element.getBoundingClientRect().bottom - container.getBoundingClientRect().top - (room?.offsetHeight ?? 0);
-    return endInView(bottom, container.clientHeight);
+    return element.getBoundingClientRect().bottom - container.getBoundingClientRect().top - (room?.offsetHeight ?? 0);
+  };
+  /** The story's end was below the window when the page last settled (see endReached). */
+  const storyEndWasBelowRef = useRef(false);
+
+  /** Scrolling: whether the story's last line is on screen, or was just scrolled past. The book is read once it is (readers/progress.ts). */
+  const storyEndInView = () => {
+    const container = (renditionRef.current?.manager as any)?.container as HTMLElement | undefined;
+    return container ? endReached(storyEndBottom(), container.clientHeight, storyEndWasBelowRef.current) : false;
   };
 
   /**
@@ -2659,21 +3048,50 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
     const doc = view?.contents?.document as Document | undefined;
     const frame = doc?.defaultView?.frameElement as HTMLElement | null | undefined;
     const reached = (anchor: string) => {
-      const target = doc ? elementById(doc, anchor) : null;
+      // An id in the file, or a place in it for an entry with no id (a made chapter list): a CFI.
+      let target: { getBoundingClientRect: () => DOMRect } | null = null;
+      if (doc && anchor.startsWith("epubcfi(")) {
+        try {
+          // (The element there, not the range: a CFI that names an element comes back as an empty range, whose box is all zeros.)
+          target = anchorElement(doc, anchor);
+        } catch {
+          target = null;
+        }
+      } else if (doc) {
+        target = elementById(doc, anchor);
+      }
       if (!target || !frame || !container) {
         return false;
       }
       const box = container.getBoundingClientRect();
       const at = target.getBoundingClientRect();
       const within = frame.getBoundingClientRect();
-      return layoutRef.current === "scroll"
-        ? within.top + at.top - box.top <= PAGE_TOP_PAD + linePx()
-        : within.left + at.left - box.left < box.width;
+      if (layoutRef.current === "scroll") {
+        return within.top + at.top - box.top <= PAGE_TOP_PAD + linePx();
+      }
+      // With pages: on an earlier page, yes; on a later one, no. On the page
+      // showing, a page belongs to the chapter at its top (readers/
+      // chapterSpan.ts: chapterOnPage): a heading part-way down it is the
+      // next page's chapter, unless the reader asked for that chapter. (It
+      // used to count as soon as it was on the page: End, on a chapter's
+      // last page, named the chapter after.) A heading at the head of its
+      // file, with only a picture or space above it, is at the top.
+      const across = within.left + at.left - box.left;
+      if (across < 0 || across >= box.width) {
+        return across < 0;
+      }
+      const index = tocPlacesRef.current.findIndex((place) => place.spine === section && (place.anchor === anchor || place.cfi === anchor));
+      return (tocWithinRef.current[index] ?? 0) <= 0 || at.top <= PAGE_TOP_PAD + linePx() * 1.5 || askedEntryRef.current?.entry === index;
     };
     const entry = tocEntryAt(tocPlacesRef.current, section, reached);
     chapterEntryRef.current = entry;
     setChapterEntry(entry);
-    setChapterLabel(entry >= 0 ? (tocLabelsRef.current[entry] ?? "") : "");
+    // In a set of books the chapter is named with its book: "Tyrion" is in all four.
+    const inner = innerBooksRef.current[bookOfSection(innerBooksRef.current, section)];
+    const own = entry >= 0 ? (tocLabelsRef.current[entry] ?? "") : "";
+    setChapterLabel(labelInBook(inner?.label, own));
+    // For the dock, which shows the two apart (the book's name gives way first on a narrow window).
+    setChapterInBook(inner && labelInBook(inner.label, own) !== own ? { book: inner.label, chapter: own } : null);
   };
 
   /**
@@ -2682,10 +3100,36 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
    * until there is a pace to go on: this book's own, or five minutes of
    * reading anywhere.
    */
+  /**
+   * Lets the Smart Read pill show once the reading line is in the story, on
+   * a page with words (readers/chapterSpan.ts: beforeStory). Held from the
+   * opening of a book in Smart Read.
+   */
+  const releasePill = (place: { section: number } | null) => {
+    if (!pillHeldRef.current || !place) {
+      return;
+    }
+    const weights = sectionWeightsRef.current;
+    if (!weights) {
+      holdPill(false);
+      return;
+    }
+    const firstChapter = tocLabelsRef.current.findIndex((label) => isChapterLike(label));
+    if (beforeStory({ section: place.section, entry: chapterEntryRef.current }, { lo: weights.lo, firstChapter, firstChapterSection: tocPlacesRef.current[firstChapter]?.spine })) {
+      return;
+    }
+    // A page that is one picture (a part's title) is not text to set off on.
+    const view = displayedViews().find((shown) => shown?.section?.index === place.section);
+    if (((view?.contents?.document as Document | undefined)?.body?.textContent ?? "").trim().length >= 200) {
+      holdPill(false);
+    }
+  };
+
   const updateOutlook = () => {
     const weights = sectionWeightsRef.current;
     const place = sectionPlace();
     noteChapterHere(place?.section);
+    releasePill(place);
     // For Pip (pip/readingMoments.ts): how far through its chapter the reading line is, within the story.
     noteReadingPlace(
       book.id,
@@ -2697,7 +3141,25 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
     const paceKnown = Boolean(profile.books[book.id]) || readerPace(profile, Date.now()).minutes >= 5;
     let chapter: number | null = null;
     let whole: number | null = null;
-    const ratio = weights ? wordsPerByte(sectionWordsRef.current, weights.bytes, wordRatioRef.current) : null;
+    // In a set of books (readers/innerBooks.ts) "the book" is the novel being read.
+    const innerBooks = innerBooksRef.current;
+    // The place the percentage stands for: the reading line within the story;
+    // where the progress already is when the reader is looking outside it
+    // (front or back matter, or between two stories of a set).
+    const inStory = Boolean(weights && place && place.section >= weights.lo && place.section <= weights.hi && !lookingBetweenStories(place.section));
+    const known = lastCfiProgressRef.current ?? (lastComputedProgressRef.current >= 0 ? lastComputedProgressRef.current : null);
+    const standsAt = inStory || !weights || known === null ? place : seekTarget(weights, known);
+    const innerBook = standsAt && innerBooks.length > 0 ? innerBooks[bookOfSection(innerBooks, standsAt.section)] : undefined;
+    let innerMinutes: number | null = null;
+    // (From the story's own sections: contents pages and appendices hold far fewer words for their size.)
+    const ratio = weights
+      ? wordsPerByte(
+          sectionWordsRef.current,
+          weights.bytes,
+          wordRatioRef.current,
+          (section) => section >= weights.lo && section <= weights.hi && !storyGapsRef.current.some((gap) => section >= gap.from && section <= gap.to)
+        )
+      : null;
     if (ratio) {
       wordRatioRef.current = ratio;
     }
@@ -2707,6 +3169,9 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
         section: place.section,
         within: place.within,
         chapterEnd: chapterEndFor(place.section, tocSpineStartsRef.current, weights.bytes.length - 1),
+        // (Several chapters to a file: this one ends at the next heading. readers/chapterSpan.ts)
+        chapterEndWithin: nextHeadingShare(place.section, place.within),
+        chapterTail: chapterTail(chapterStarts(), place.section, chapterEntryRef.current),
         counted: sectionWordsRef.current,
         ratio: ratio.ratio
       });
@@ -2715,31 +3180,79 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
       const bookMinutes = left.book === null ? null : minutesFor(left.book, wpm);
       chapter = chapterMinutes === null ? null : steadyMinutes(shownMinutesRef.current.chapter, chapterMinutes);
       whole = bookMinutes === null ? null : steadyMinutes(shownMinutesRef.current.book, bookMinutes);
+      if (innerBook && standsAt) {
+        // To the end of this novel's own story: its appendices and the next novel are not what is left of it.
+        const leftInBook = wordsLeft({
+          weights: { ...weights, hi: innerBook.storyHi },
+          section: standsAt.section,
+          within: standsAt.within,
+          chapterEnd: standsAt.section,
+          counted: sectionWordsRef.current,
+          ratio: ratio.ratio
+        }).book;
+        const innerBookMinutes = leftInBook === null ? null : minutesFor(leftInBook, wpm);
+        innerMinutes = innerBookMinutes === null ? null : steadyMinutes(shownMinutesRef.current.inner ?? null, innerBookMinutes);
+      }
     }
-    shownMinutesRef.current = { chapter, book: whole };
+    shownMinutesRef.current = { chapter, book: whole, inner: innerMinutes };
     // Within the story, by the reading line: the bar's handle then sits
     // exactly where a place it went to is. Front and back matter show what
     // the book's progress is (they do not move it).
+    // (Short of 100% until the story's end is reached: readers/progress.ts.)
     const progress =
-      weights && place && place.section >= weights.lo && place.section <= weights.hi
-        ? storyEndInView()
-          ? 1
-          : fractionAt(weights, place.section, place.within)
-        : (lastCfiProgressRef.current ?? (lastComputedProgressRef.current >= 0 ? lastComputedProgressRef.current : null));
+      inStory && weights && place
+        ? progressToSave(
+            fractionAt(weights, place.section, place.within),
+            layoutRef.current === "scroll" ? storyEndInView() : place.section >= weights.last && place.within >= 1,
+            isFinished(lastProgressRef.current)
+          )
+        : known;
     const percent = (value: number | null) => (value === null ? null : Math.round(value * 100));
+    const inner = innerBook && weights && standsAt ? { label: innerBook.label, progress: fractionOfBook(innerBook, weights.bytes, standsAt) } : null;
+    const next: Outlook = inner ? { progress, chapter, book: innerMinutes, set: whole, inner } : { progress, chapter, book: whole };
     setOutlook((shown) =>
-      shown.chapter === chapter && shown.book === whole && percent(shown.progress) === percent(progress)
+      shown.chapter === next.chapter &&
+      shown.book === next.book &&
+      (shown.set ?? null) === (next.set ?? null) &&
+      percent(shown.progress) === percent(progress) &&
+      (shown.inner?.label ?? null) === (inner?.label ?? null) &&
+      percent(shown.inner?.progress ?? null) === percent(inner?.progress ?? null)
         ? shown
-        : { progress, chapter, book: whole }
+        : next
     );
+    // One quiet word when the reading passes the last line of a novel inside
+    // a set (readers/innerBooks.ts: crossedStoryEnd). Not for the last one:
+    // that is the book itself finished, which is said where it always was.
+    const passed = place ? crossedStoryEnd(innerBooks, outlookSectionRef.current, place.section) : -1;
+    outlookSectionRef.current = place?.section ?? outlookSectionRef.current;
+    if (passed >= 0 && passed < innerBooks.length - 1) {
+      showFocusToastRef.current(`${innerBooks[passed].label}: finished · book ${passed + 2} of ${innerBooks.length} is next`, 5200);
+    }
   };
   updateOutlookRef.current = updateOutlook;
+  /** The section the reading line was in at the last look, for telling a novel's end being read past. */
+  const outlookSectionRef = useRef<number | null>(null);
 
   // ---- back to where you were -------------------------------------------------------
 
   const applyJumps = (next: JumpHistory) => {
     jumpsRef.current = next;
     setJumps({ back: next.back.length, forward: next.forward.length });
+  };
+
+  /**
+   * The place being left, for the jump history. Scrolling, how far below the
+   * reading line its line started is kept beside it, so Back puts the line
+   * back where it was: it used to come back at the reading line itself, up
+   * to a line and a paragraph gap higher than it had been.
+   */
+  const placeLeft = (): string | null => {
+    const line = readingPlace();
+    if (!line) {
+      return readingPlaceCfi();
+    }
+    jumpBelowRef.current.set(line.cfi, Math.round(line.below));
+    return line.cfi;
   };
 
   /**
@@ -2753,7 +3266,7 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
     noteRequestRef.current += 1;
     setNote(null);
     const before = jumpsRef.current;
-    const next = noteJump(before, readingPlaceCfi());
+    const next = noteJump(before, placeLeft());
     if (next === before) {
       return;
     }
@@ -2769,7 +3282,7 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
   };
 
   /** Goes to a place and brings it down clear of the toolbar: bookmarks, highlights, back and forward. */
-  const goToPlace = (cfi: string) => {
+  const goToPlace = (cfi: string, below = 0) => {
     const rendition = renditionRef.current;
     if (!rendition) {
       return;
@@ -2782,7 +3295,7 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
     void rendition.display(cfi).then(
       () => {
         if (renditionRef.current === rendition) {
-          clearToolbar(cfi);
+          clearToolbar(cfi, below);
           settleOnPage(cfi);
         }
       },
@@ -3008,17 +3521,17 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
   };
 
   const goBack = () => {
-    const step = stepBack(jumpsRef.current, readingPlaceCfi());
+    const step = stepBack(jumpsRef.current, placeLeft());
     if (step) {
       applyJumps(step.history);
-      goToPlace(step.target);
+      goToPlace(step.target, jumpBelowRef.current.get(step.target) ?? 0);
     }
   };
   const goForward = () => {
-    const step = stepForward(jumpsRef.current, readingPlaceCfi());
+    const step = stepForward(jumpsRef.current, placeLeft());
     if (step) {
       applyJumps(step.history);
-      goToPlace(step.target);
+      goToPlace(step.target, jumpBelowRef.current.get(step.target) ?? 0);
     }
   };
   goBackRef.current = goBack;
@@ -3134,8 +3647,31 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
   /** The chapter a fraction of the book falls in, for the progress bar's label. */
   const chapterAtFraction = (fraction: number) => {
     const weights = sectionWeightsRef.current;
-    return weights ? chapterOfSection(seekTarget(weights, fraction).section) : null;
+    if (!weights) {
+      return null;
+    }
+    const target = seekTarget(weights, fraction);
+    // Several chapters to a file: the one that part of the file is in (readers/chapterSpan.ts).
+    if (tocWithinRef.current.some((share, index) => share > 0 && tocPlacesRef.current[index]?.spine === target.section)) {
+      const entry = entryAtShare(chapterStarts(), target.section, target.within);
+      const label = entry >= 0 ? tocLabelsRef.current[entry] : null;
+      if (label) {
+        return label;
+      }
+    }
+    return chapterNameOfSection(target.section);
   };
+  /** In a set of books: the book a fraction falls in, which the label names above the chapter. */
+  const bookAtFraction = (fraction: number) => {
+    const weights = sectionWeightsRef.current;
+    const books = innerBooksRef.current;
+    return weights && books.length > 0 ? (books[bookOfSection(books, seekTarget(weights, fraction).section)]?.label ?? null) : null;
+  };
+  /** In a set of books: where each one after the first begins along the bar. */
+  const bookMarks = useMemo(() => {
+    const weights = sectionWeightsRef.current;
+    return weights ? contents.books.slice(1).map((inner) => ({ at: fractionAt(weights, inner.first, 0), label: inner.label })) : [];
+  }, [contents]);
 
   /**
    * Goes to a fraction of the way through the book (the progress bar): the
@@ -3169,13 +3705,15 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
         if (layoutRef.current === "pages") {
           const container = manager?.container as HTMLElement | undefined;
           const pageWidth = Number(manager?.layout?.delta) || 0;
-          if (!container || pageWidth <= 0 || manager?.settings?.direction === "rtl") {
+          const rtl = manager?.settings?.direction === "rtl";
+          if (!container || pageWidth <= 0 || (rtl && manager.settings.rtlScrollType !== "negative")) {
             return;
           }
           const pages = Math.max(1, Math.round(container.scrollWidth / pageWidth));
           const page = Math.min(pages - 1, Math.floor(within * pages));
           if (page > 0) {
-            manager.scrollTo(page * pageWidth, 0, true);
+            // (A right-to-left book's frame counts down from nought.)
+            manager.scrollTo(rtl ? -page * pageWidth : page * pageWidth, 0, true);
             void rendition.reportLocation?.();
           }
           return;
@@ -3547,6 +4085,8 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
    * turn that never arrives cannot stop the pages for good.
    */
   const chapterTurnUntilRef = useRef(0);
+  /** The one turn pressed while a chapter was on its way, made when it is up. */
+  const queuedTurnRef = useRef<1 | -1 | null>(null);
   /**
    * Turns a page (layout "pages"). Through a ref, for the key handler bound
    * once. The page to turn to is worked out here (readers/pageTurn.ts):
@@ -3554,13 +4094,21 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
    * the page slides across; into another chapter, the new page comes in from
    * the side.
    */
-  const turnPage = (direction: 1 | -1) => {
+  const turnPage = (direction: 1 | -1, held = false) => {
     const rendition = renditionRef.current;
     if (!rendition) {
       return;
     }
     lastHandsOnAtRef.current = Date.now();
     if (Date.now() < chapterTurnUntilRef.current) {
+      // A chapter is on its way in. One press made meanwhile is kept and
+      // made when it is up (a reader who presses twice at a chapter's end
+      // means two pages); any more are dropped, as they always were, and so
+      // are the repeats of a held key, which would run on past short
+      // chapters unseen.
+      if (!held) {
+        queuedTurnRef.current ??= direction;
+      }
       return;
     }
     // A page read slowly is reading: the turn claims the time the page was
@@ -3655,6 +4203,7 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
       }
       const until = Date.now() + 4000;
       chapterTurnUntilRef.current = until;
+      queuedTurnRef.current = null;
       const shown = () => {
         chapterTurnUntilRef.current = 0;
         if (!viewer || viewer.dataset.turn !== "out") {
@@ -3667,12 +4216,27 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
           }
         }, 340);
       };
-      void Promise.resolve(direction > 0 ? rendition.next() : rendition.prev()).then(shown, shown);
+      const arrived = () => {
+        const stillComing = chapterTurnUntilRef.current === until;
+        shown();
+        // The press made while it was on its way, if there was one.
+        const queued = queuedTurnRef.current;
+        queuedTurnRef.current = null;
+        if (stillComing && queued !== null && renditionRef.current === rendition) {
+          turnPageRef.current(queued);
+        }
+      };
+      const failed = () => {
+        queuedTurnRef.current = null;
+        shown();
+      };
+      void Promise.resolve(direction > 0 ? rendition.next() : rendition.prev()).then(arrived, failed);
       // The page is hidden until the chapter arrives; one that never does
-      // must not leave it hidden (as with the turns dropped meanwhile).
+      // must not leave it hidden (as with the turns dropped meanwhile, and
+      // the one kept).
       window.setTimeout(() => {
         if (chapterTurnUntilRef.current === until) {
-          shown();
+          failed();
         }
       }, 4000);
       return;
@@ -3706,6 +4270,98 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
   };
   const turnPageRef = useRef(turnPage);
   turnPageRef.current = turnPage;
+  /** The ··· menu or the radio's controls are open (a click on the page is not a page turn then). */
+  const pagesMenuOpenRef = useRef(false);
+  pagesMenuOpenRef.current = morePanelOpen || soundPanelOpen;
+
+  /**
+   * Home, End, Ctrl+Home and Ctrl+End with pages: the first or the last page
+   * of the chapter on the page, or of the book. Jumps: Back returns. (The
+   * chapter is what the dock's "12 of 50" counts: the file, or the entry the
+   * reader is in when the contents place several in one file.)
+   */
+  const goToPageEdge = (edge: "chapterStart" | "chapterEnd" | "bookStart" | "bookEnd") => {
+    const rendition = renditionRef.current;
+    const epub = bookRef.current as any;
+    const manager = rendition?.manager as any;
+    const container = manager?.container as HTMLElement | undefined;
+    const pageWidth = Number(manager?.layout?.delta) || 0;
+    if (!rendition || !container || pageWidth <= 0 || layoutRef.current !== "pages") {
+      return;
+    }
+    const rtl = manager.settings?.direction === "rtl";
+    if (rtl && manager.settings.rtlScrollType !== "negative") {
+      return;
+    }
+    const toLast = edge === "chapterEnd" || edge === "bookEnd";
+    /** Home and End: the pages of the chapter the page showing is in, when the contents place several in this file. */
+    const chapterRange = () => {
+      const section = manager.views?.first?.()?.section?.index;
+      if ((edge !== "chapterStart" && edge !== "chapterEnd") || rtl || typeof section !== "number") {
+        return null;
+      }
+      const starts = chapterStartsHere(section);
+      const at = pageAt(Math.abs(container.scrollLeft), pageWidth, container.scrollWidth);
+      return starts ? chapterPageRange(at.page, at.total, starts, askedEntryRef.current?.entry) : null;
+    };
+    /** The first or the last page of the chapter on the page; false when it is showing already. */
+    const toPage = () => {
+      try {
+        manager.views?.first?.()?.expand?.();
+      } catch {
+        // The frame's own count stands.
+      }
+      // (The chapter's own first or last page, when chapters share the file: readers/chapterSpan.ts.)
+      const within = chapterRange();
+      const left = within ? ((toLast ? within.last : within.first) - 1) * pageWidth : toLast ? (pageCount(container.scrollWidth, pageWidth) - 1) * pageWidth : 0;
+      if (Math.abs(Math.abs(container.scrollLeft) - left) <= 1) {
+        return false;
+      }
+      manager.scrollTo(rtl ? -left : left, 0, true);
+      void rendition.reportLocation?.();
+      return true;
+    };
+    const leave = () => {
+      if (pageSlideRef.current) {
+        window.cancelAnimationFrame(pageSlideRef.current.frame);
+        pageSlideRef.current = null;
+      }
+      noteJumpFromHere();
+      if (selectionRef.current) {
+        clearSelectionRef.current();
+      }
+    };
+    const here = manager.views?.first?.()?.section;
+    const target = edge === "bookStart" ? epub?.spine?.first?.() : edge === "bookEnd" ? epub?.spine?.last?.() : here;
+    if (!target?.href) {
+      return;
+    }
+    if (here && target.index === here.index) {
+      const at = pageAt(Math.abs(container.scrollLeft), pageWidth, container.scrollWidth);
+      const within = chapterRange();
+      if (within ? at.page !== (toLast ? within.last : within.first) : toLast ? at.page < at.total : at.page > 1) {
+        leave();
+        // Home asks for this chapter's start: the page it starts on, shared or not, is its own (see askedEntryRef).
+        if (within && edge === "chapterStart") {
+          askedEntryRef.current = { entry: chapterEntryRef.current, at: null };
+        }
+        toPage();
+      }
+      return;
+    }
+    leave();
+    releaseUserReadingAnchor();
+    progressArmedRef.current = true;
+    markNavigating();
+    void rendition
+      .display(target.href)
+      .then(() => {
+        if (renditionRef.current === rendition && toLast) {
+          toPage();
+        }
+      })
+      .catch(() => undefined);
+  };
 
   // With pages the frame is moved a page at a time, by turnPage and by
   // epub.js. The browser moves it too: to bring into view a link the Tab key
@@ -3754,12 +4410,198 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
         later();
       }
     };
-    const down = () => {
-      pressed = true;
+    // A press, from the button (or finger) going down to its coming up: what
+    // a click at the side of the page and a swipe across it are told from.
+    let press: { x: number; y: number; at: number; selection: boolean; covered: boolean; sideways: boolean; fingers: number } | null = null;
+    const fingersDown = new Set<number>();
+    let clickTimer = 0;
+    const selecting = (doc: Document | null | undefined) => {
+      try {
+        const picked = doc?.defaultView?.getSelection?.();
+        return Boolean(picked && !picked.isCollapsed && picked.toString().trim());
+      } catch {
+        return false;
+      }
     };
-    const up = () => {
+    /** Something is open over the page: a click is for closing it, not for turning. */
+    const covered = () => interruptedRef.current || pagesMenuOpenRef.current;
+    const down = (event: PointerEvent) => {
+      pressed = true;
+      // A second press: a double-click, or the start of a selection.
+      window.clearTimeout(clickTimer);
+      clickTimer = 0;
+      if (event.isPrimary) {
+        // The first finger of a new touch: any still counted were let go out of sight.
+        fingersDown.clear();
+      }
+      fingersDown.add(event.pointerId);
+      if (fingersDown.size > 1) {
+        if (press) {
+          press.fingers = Math.max(press.fingers, fingersDown.size);
+        }
+        return;
+      }
+      const onto = event.target as Node | null;
+      let sideways = false;
+      for (let over = onto?.nodeType === 1 ? (onto as Element) : null; over && over !== over.ownerDocument.body; over = over.parentElement) {
+        const overflow = over.ownerDocument.defaultView?.getComputedStyle(over).overflowX;
+        if ((overflow === "auto" || overflow === "scroll") && over.scrollWidth > over.clientWidth + 1) {
+          sideways = true;
+          break;
+        }
+      }
+      press = {
+        x: event.clientX,
+        y: event.clientY,
+        at: performance.now(),
+        selection: selectionRef.current !== null || selecting(onto?.ownerDocument),
+        covered: covered(),
+        sideways,
+        fingers: 1
+      };
+    };
+    const up = (event?: PointerEvent) => {
       pressed = false;
       later();
+      if (!event || !fingersDown.delete(event.pointerId)) {
+        return;
+      }
+      // A swipe across the page with a finger or a pen turns it (readers/pageTurn.ts, `swipeTurn`).
+      if (event.type !== "pointerup" || fingersDown.size > 0 || !press || renditionRef.current !== rendition || layoutRef.current !== "pages") {
+        return;
+      }
+      const turn = swipeTurn(
+        {
+          dx: event.clientX - press.x,
+          dy: event.clientY - press.y,
+          ms: performance.now() - press.at,
+          pointers: press.fingers,
+          pointerType: event.pointerType,
+          taken: press.sideways || press.covered || press.selection || selecting((event.target as Node | null)?.ownerDocument)
+        },
+        (rendition.manager as any)?.settings?.direction === "rtl"
+      );
+      if (turn !== null) {
+        press = null;
+        turnPageRef.current(turn);
+      }
+    };
+    // A click (or a tap) at the side of the page turns it (readers/pageTurn.ts,
+    // `clickZone`, `pressIsClick`): the outer sixth each side, and beside the
+    // page. Only a click that is nothing else: not a drag or a selection, not
+    // on a link, a note, a picture, a marked name, a highlight or a control,
+    // and not while something is open over the page. On text it waits out a
+    // double-click, which selects a word.
+    const OWN_CLICK =
+      "a[href], area[href], [role='link'], [role='button'], [role='doc-noteref'], button, input, textarea, select, option, label, summary, details, audio, video, [contenteditable], [onclick], [data-leaflet-zoom]";
+    const within = (x: number, y: number, rects: Iterable<DOMRect>, slack = 2) => {
+      for (const rect of rects) {
+        if (x >= rect.left - slack && x <= rect.right + slack && y >= rect.top - slack && y <= rect.bottom + slack) {
+          return true;
+        }
+      }
+      return false;
+    };
+    /** What of the book's text is under a point of its document: whether any is, and whether it is a name the character tracker marked. */
+    const textAt = (doc: Document, x: number, y: number) => {
+      try {
+        const caret = (doc as any).caretRangeFromPoint?.(x, y) as Range | null;
+        const node = caret?.startContainer;
+        if (!caret || !node || node.nodeType !== 3) {
+          return { text: false, name: false };
+        }
+        const length = (node as Text).data.length;
+        const letters = doc.createRange();
+        letters.setStart(node, Math.max(0, caret.startOffset - 1));
+        letters.setEnd(node, Math.min(length, caret.startOffset + 1));
+        if (!within(x, y, Array.from(letters.getClientRects()))) {
+          return { text: false, name: false };
+        }
+        const marks = (doc.defaultView as any)?.CSS?.highlights?.get?.(MARK_NAME) as Iterable<Range> | undefined;
+        let name = false;
+        for (const mark of marks ?? []) {
+          if (mark.isPointInRange(node, caret.startOffset) && within(x, y, Array.from(mark.getClientRects()))) {
+            name = true;
+            break;
+          }
+        }
+        return { text: true, name };
+      } catch {
+        return { text: false, name: false };
+      }
+    };
+    /** Which way a click at this point of the page turns it, if it is in a zone; and the facts of where it landed. */
+    const clickPlace = (event: MouseEvent) => {
+      const frameNow = (rendition.manager as any)?.container === container ? container : null;
+      const onto = event.target as Node | null;
+      const target = onto?.nodeType === 1 ? (onto as Element) : (onto?.parentElement ?? null);
+      const doc = onto?.ownerDocument ?? null;
+      if (!frameNow || !doc || renditionRef.current !== rendition || layoutRef.current !== "pages") {
+        return null;
+      }
+      const inBook = doc !== document;
+      const viewer = viewerRef.current;
+      // Beside the page, only the bare frame: the dock, a bar or a card there has its own clicks.
+      if (!inBook && !(target === pageFrameElement || (viewer && target && viewer.contains(target)))) {
+        return null;
+      }
+      const box = container.getBoundingClientRect();
+      const held = inBook ? (doc.defaultView?.frameElement?.getBoundingClientRect() ?? null) : null;
+      const x = event.clientX + (held?.left ?? 0);
+      const y = event.clientY + (held?.top ?? 0);
+      const margin = inBook && doc.body ? parseFloat(doc.defaultView?.getComputedStyle(doc.body).paddingLeft ?? "") || 0 : 0;
+      const turn = clickZone(x, box.left, box.width, margin, (rendition.manager as any)?.settings?.direction === "rtl");
+      if (turn === null) {
+        return null;
+      }
+      const under = inBook ? textAt(doc, event.clientX, event.clientY) : { text: false, name: false };
+      const highlight = viewer ? within(x, y, Array.from(viewer.querySelectorAll(".leaflet-highlight rect"), (mark) => mark.getBoundingClientRect()), 0) : false;
+      return { turn, doc, inBook, onText: under.text, claimed: Boolean(target?.closest?.(OWN_CLICK)) || under.name || highlight };
+    };
+    const onClick = (event: MouseEvent) => {
+      const from = press;
+      press = null;
+      const place = clickPlace(event);
+      if (!place) {
+        return;
+      }
+      const plain = pressIsClick({
+        button: event.button,
+        modified: event.ctrlKey || event.metaKey || event.shiftKey || event.altKey,
+        moved: from ? Math.hypot(event.clientX - from.x, event.clientY - from.y) : 0,
+        ms: from ? performance.now() - from.at : 0,
+        // In the margin every click is its own (see onMouseDown); on text the second of two selects a word.
+        count: place.onText ? event.detail || 1 : 1,
+        selection: (from?.selection ?? false) || selectionRef.current !== null || selecting(place.doc),
+        covered: (from?.covered ?? false) || covered(),
+        claimed: event.defaultPrevented || place.claimed
+      });
+      if (!plain) {
+        return;
+      }
+      const turn = () => {
+        clickTimer = 0;
+        if (renditionRef.current === rendition && layoutRef.current === "pages" && !covered() && !selecting(place.doc)) {
+          turnPageRef.current(place.turn);
+        }
+      };
+      window.clearTimeout(clickTimer);
+      if (place.onText) {
+        clickTimer = window.setTimeout(turn, DOUBLE_CLICK_MS);
+      } else {
+        turn();
+      }
+    };
+    // Clicks made quickly in the margin are page turns, one each: the second
+    // of them must not select the nearest word of the page that has come up.
+    const onMouseDown = (event: MouseEvent) => {
+      if (event.detail < 2 || event.button !== 0) {
+        return;
+      }
+      const place = clickPlace(event);
+      if (place && place.inBook && !place.onText && !place.claimed) {
+        event.preventDefault();
+      }
     };
     // The wheel and the trackpad turn pages, one for a gesture however many
     // events it sends (readers/pageTurn.ts, `wheelTurn`). They used to do
@@ -3809,21 +4651,34 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
         doc.addEventListener("pointerup", up, { passive: true });
         doc.addEventListener("pointercancel", up, { passive: true });
         doc.addEventListener("wheel", onWheel, { passive: false });
+        // After the reader's own handlers and the book's links, which run first, capturing (as the names' own does).
+        doc.addEventListener("click", onClick);
+        doc.addEventListener("mousedown", onMouseDown);
       });
     };
     bind();
     rendition.on?.("rendered", bind);
-    window.addEventListener("pointerup", up);
+    const upAnywhere = () => up();
+    window.addEventListener("pointerup", upAnywhere);
     container.addEventListener("scroll", onScroll, { passive: true });
     // And beside the page: the reader's own frame, which is wider than the column.
     const pageFrameElement = viewerRef.current?.parentElement ?? null;
     pageFrameElement?.addEventListener("wheel", onWheel, { passive: false });
+    pageFrameElement?.addEventListener("pointerdown", down, { passive: true });
+    pageFrameElement?.addEventListener("pointerup", up, { passive: true });
+    pageFrameElement?.addEventListener("pointercancel", up, { passive: true });
+    pageFrameElement?.addEventListener("click", onClick);
     return () => {
       window.clearTimeout(timer);
+      window.clearTimeout(clickTimer);
       rendition.off?.("rendered", bind);
-      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointerup", upAnywhere);
       container.removeEventListener("scroll", onScroll);
       pageFrameElement?.removeEventListener("wheel", onWheel);
+      pageFrameElement?.removeEventListener("pointerdown", down);
+      pageFrameElement?.removeEventListener("pointerup", up);
+      pageFrameElement?.removeEventListener("pointercancel", up);
+      pageFrameElement?.removeEventListener("click", onClick);
     };
   }, [book.id, loading, layout]);
 
@@ -3955,7 +4810,7 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
         ? "Search is open"
         : bookmarkPanelOpen
           ? "Notes are open"
-          : sidebarOpen
+          : contentsOver
             ? "Chapters are open"
             : tourOpen
               ? "The walkthrough is open"
@@ -3977,7 +4832,7 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
     selection !== null ||
     searchOpen ||
     bookmarkPanelOpen ||
-    sidebarOpen ||
+    contentsOver ||
     tourOpen ||
     fontPanelOpen ||
     note !== null ||
@@ -4007,7 +4862,7 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
       notesPanel: bookmarkPanelOpen,
       moreMenu: morePanelOpen || soundPanelOpen,
       sidePanel: people.panelOpen,
-      chapters: sidebarOpen,
+      chapters: contentsOver,
       selection: selection !== null,
       speedRead: readingMode === "speed",
       playing: (readingMode === "standard" && autoScrollActive) || (readingMode === "smart" && !readingPaused)
@@ -4070,7 +4925,12 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
         people.closePanel();
         break;
       case "chapters":
-        setSidebarOpen(false);
+        if (sidebarPinnedRef.current) {
+          pinContents(false);
+        } else {
+          contentsPeekRef.current.showing = false;
+          setSidebarOpen(false);
+        }
         break;
       case "selection":
         clearSelection();
@@ -4107,17 +4967,26 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
   // ---- search ------------------------------------------------------------------
 
   /** The chapter a section falls under: the last contents entry at or before it. */
-  const chapterOfSection = (section: number) => {
+  const chapterNameOfSection = (section: number) => {
     let label: string | null = null;
     let best = -1;
     for (const item of toc) {
       const index = spineIndexByHrefRef.current[item.href.split("#")[0]];
-      if (typeof index === "number" && index <= section && index >= best) {
+      // (The first entry that opens the section: the file's own name, not the
+      // last of the anchors inside it. An appendix of ten houses was named
+      // for the tenth.)
+      if (typeof index === "number" && index <= section && index > best) {
         best = index;
         label = item.label;
       }
     }
     return label;
+  };
+  /** The same with its book's name, in a set of books: for a search result or a character's mention, where "Tyrion" alone is one of thirty-five. */
+  const chapterOfSection = (section: number) => {
+    const label = chapterNameOfSection(section);
+    const inner = innerBooksRef.current[bookOfSection(innerBooksRef.current, section)];
+    return inner ? labelInBook(inner.label, label ?? "") : label;
   };
 
   /**
@@ -4400,8 +5269,24 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
             if (manager.container && !manager.settings?.fullsize) {
               manager.scrollTop = manager.container.scrollTop;
             }
+            // The scrollbar is held (readers/scrollbarHold.ts): the chapters
+            // on the page are shown and hidden as they come into view, and
+            // none is fetched. Held at the bottom, the thumb used to fetch
+            // chapter after chapter and carry the reader half the book on.
+            if (holdsFetching(scrollbarHoldRef.current, Date.now())) {
+              manager.q?.enqueue?.(() => manager.update?.());
+              return Promise.resolve(false);
+            }
             return check(...args);
           };
+          // Nor is a chapter above taken away under a held scrollbar: that
+          // moves the scroll position, and the thumb with it. It goes once
+          // the thumb is let go (every look at the page asks again).
+          if (typeof manager.trim === "function") {
+            const trim = manager.trim.bind(manager);
+            manager.trim = (...args: unknown[]) =>
+              holdsFetching(scrollbarHoldRef.current, Date.now()) ? Promise.resolve() : trim(...args);
+          }
         });
         // Development only: lets a console (or a test driving the reader) see epub.js's state.
         if (import.meta.env.DEV) {
@@ -4412,7 +5297,17 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
             active: () => activeWordIndexRef.current,
             paceScale: () => readingPaceScaleRef.current,
             // Chapters held and names marked by the characters feature.
-            people: () => peopleMarkedRef.current()
+            people: () => peopleMarkedRef.current(),
+            // The contents: the section weights' story span and the books inside a set; and replacing them (a made chapter list).
+            story: () => ({
+              lo: sectionWeightsRef.current?.lo,
+              hi: sectionWeightsRef.current?.hi,
+              last: sectionWeightsRef.current?.last,
+              bytes: sectionWeightsRef.current?.bytes,
+              rows: contentsRowsRef.current,
+              books: innerBooksRef.current
+            }),
+            applyContents: (tree: TocItem[], made?: boolean) => applyContentsRef.current(tree, made)
           };
         }
         appliedHighlightsRef.current.clear();
@@ -4441,6 +5336,14 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
               markOpenings(doc);
             } catch {
               // An opening left unmarked is set at body size, as it was.
+            }
+            // And what the publisher did with whole blocks: centred lines,
+            // headings that are paragraphs, paragraphs that are divs, scene
+            // breaks made of space, insets (readers/bookBlocks.ts).
+            try {
+              markBlocks(doc);
+            } catch {
+              // A block left unmarked is set as running text, as it was.
             }
             const style = doc.createElement("style");
             style.id = "reader-font-scale";
@@ -4494,8 +5397,23 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
                  (<a id="page12"/>); read as HTML those never close, and the
                  paragraph after each one ended up inside it, in the accent. */
               html[data-reader-dark="1"] body a:any-link { color: #8cc95a !important; }
+              /* An anchor that is not a link takes the page's ink, like any
+                 other inline (a book's "a { color: navy }" reaches the text
+                 an unclosed <a id> swallowed). And the colour is the colour:
+                 a book that also sets -webkit-text-fill-color (which paints
+                 over "color") kept its navy links on a black page. */
+              html[data-reader-dark="1"] body a:not(:any-link) { color: inherit !important; }
+              body, body * { -webkit-text-fill-color: currentcolor !important; }
               html[data-reader-dark="1"] body :where(div, section, article, aside, p, blockquote, table, tr, td, th) { background-color: transparent !important; }
               p, div, section, article, blockquote, li { text-indent: 0 !important; margin-left: 0 !important; }
+              /* Lists. A bullet or a number sits beside its item's first
+                 line: a stylesheet that says "inside" with a paragraph in the
+                 item (<li><p>) leaves the marker alone on a line of its own,
+                 above its item. And a list inside a list is indented: reset
+                 to no padding, every level started at the same edge. */
+              body li { list-style-position: outside !important; }
+              body :where(ul, ol) { padding-left: 2em !important; margin-left: 0 !important; }
+              body li > :where(p, div):first-child { margin-top: 0 !important; }
               h1, h2, h3, h4, h5, h6 { font-family: "ZT Nature", "Segoe UI", sans-serif !important; font-weight: 700 !important; letter-spacing: -0.01em; }
               html[data-reader-finish="paper"] body { color: #30291f !important; }
               html[data-reader-finish="paper"] p,
@@ -4594,6 +5512,7 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
               /* A picture that opens in the viewer (readers/pictures.ts). */
               [data-leaflet-zoom] { cursor: zoom-in; }
               ${OPENINGS_CSS}
+              ${BLOCKS_CSS}
               ${PAGES_CSS}
             `;
             doc.head.appendChild(style);
@@ -4615,6 +5534,13 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
           const finishBackground = getReaderFinishBackground(finish);
           doc.documentElement.dataset.readerFinish = currentDisplayMode;
           doc.documentElement.dataset.readerDark = finish.themeName === "leaflet-dark" ? "1" : "0";
+          // Scrolling, a picture has the window's room and no more (readers/bookBlocks.ts).
+          doc.documentElement.style.setProperty(
+            "--leaflet-picture-room",
+            `${pictureRoom((((rendition.manager as any)?.container as HTMLElement | undefined) ?? viewerRef.current)?.clientHeight ?? 0, PAGE_TOP_PAD, PAGE_FOOT_PAD)}px`
+          );
+          // The lines of a flattened contents page that lead to a contents entry.
+          markListedLines(doc, tocLabelsRef.current);
           markInkImages(doc);
           markViewable(doc);
           doc.documentElement.style.backgroundColor = finish.background;
@@ -4820,6 +5746,25 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
         // leads on to the reading order around it; reading through the book
         // still passes it by.
         const sections: any[] = (epub.spine as any)?.spineItems ?? [];
+        // The same file twice in a row in the reading order (a title page a
+        // conversion listed as the cover too) is shown once: the second is
+        // passed by like any section outside the reading order, and links
+        // to the file lead to the first.
+        listedAgain(sections.map((section) => String(section?.href ?? ""))).forEach((at) => {
+          sections[at].linear = false;
+          const shown = Math.min(spineIndexByHref[sections[at].href] ?? at, at - 1);
+          spineIndexByHref[sections[at].href] = shown;
+          // epub.js keeps a table of its own, which named the last copy: a
+          // contents entry for the file opened the copy that is passed by.
+          const byHref = (epub.spine as any)?.spineByHref as Record<string, number> | undefined;
+          if (byHref) {
+            for (const key of Object.keys(byHref)) {
+              if (byHref[key] === at) {
+                byHref[key] = shown;
+              }
+            }
+          }
+        });
         sections.forEach((section, at) => {
           if (!section || section.linear) {
             return;
@@ -4871,62 +5816,202 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
         };
         // Labels come with the file's own line breaks and indentation, which
         // went into every bookmark and highlight made under them.
-        const flatToc = flattenToc(navigation.toc).map((item) => ({
-          ...item,
-          label: item.label.replace(/\s+/g, " ").trim(),
-          href: resolveTocHref(item.href)
-        }));
-        setToc(flatToc);
-        const chapterToc = flatToc.filter((item) => isChapterLike(item.label));
-        const indexMap: Record<string, number> = {};
-        // Chapters are counted per section file: a location reports its file,
-        // never the anchor inside it, so the keys drop the "#...".
-        let dedupIndex = 0;
-        const seenHrefs = new Set<string>();
-        chapterToc.forEach((item) => {
-          const file = item.href.split("#")[0];
-          if (seenHrefs.has(file)) {
+        // epub.js files an NCX's entries by id and loses every entry under a
+        // repeated one (readers/ncx.ts: half a boxed set's chapters). The
+        // file is read again by its nesting, and used when it holds more.
+        let tocTree = navigation.toc as TocItem[];
+        if (packaging?.ncxPath && !packaging?.navPath) {
+          try {
+            const ncx = await (epub as any).load(packaging.ncxPath);
+            tocTree = fullerToc(tocTree, tocFromNcx((ncx as Document | null)?.documentElement as any));
+          } catch {
+            // The contents as epub.js read them.
+          }
+          if (cancelled) {
             return;
           }
-          seenHrefs.add(file);
-          indexMap[file] = dedupIndex;
-          dedupIndex += 1;
-        });
-        tocPlacesRef.current = flatToc.map((item) => tocPlace(item.href, (file) => spineIndexByHref[file]));
-        tocLabelsRef.current = flatToc.map((item) => item.label);
+        }
         spineIndexByHrefRef.current = spineIndexByHref;
-        chapterSpineIndicesRef.current = Object.keys(indexMap)
-          .map((href) => spineIndexByHref[href])
-          .filter((value) => typeof value === "number")
-          .sort((a, b) => (a as number) - (b as number)) as number[];
-
-        tocSpineStartsRef.current = flatToc
-          .map((item) => spineIndexByHref[item.href.split("#")[0]])
-          .filter((value): value is number => typeof value === "number");
-
         // Section sizes, for progress by how much has been read. A quick call
         // (the archive's directory only); without it, the older estimates below.
         sectionWeightsRef.current = null;
+        let bookSections: Awaited<ReturnType<typeof bookService.epubSections>> = [];
         try {
-          let sections = await bookService.epubSections(book.id).catch(() => []);
+          bookSections = await bookService.epubSections(book.id).catch(() => []);
           if (cancelled) {
             return;
           }
           // No backend (the browser preview), or it could not read them: the
           // sizes are in the copy of the archive epub.js already holds.
-          if (sections.length === 0) {
-            sections = sectionsFromArchive(epub);
+          if (bookSections.length === 0) {
+            bookSections = sectionsFromArchive(epub);
           }
-          sectionWeightsRef.current = buildSectionWeights(
-            spineItems.map((item: any) => String(item?.href ?? "")),
-            sections,
-            flatToc,
-            (href) => spineIndexByHref[href.split("#")[0]]
-          );
         } catch {
-          sectionWeightsRef.current = null;
+          bookSections = [];
         }
-        setCanSeek(sectionWeightsRef.current !== null);
+        // Chapters are counted per section file: a location reports its file,
+        // never the anchor inside it, so the keys drop the "#...". (Read by
+        // the relocation handler below; refilled when the contents change.)
+        const indexMap: Record<string, number> = {};
+        /**
+         * Takes a contents tree as the book's contents: the flat list, the
+         * entries as places, the story's span among the sections, the books
+         * inside a set, the chapter list itself. Everything that hangs off
+         * the contents is redone here and nowhere else, so the contents can
+         * be replaced after the book has opened (a list made by Leaflet for a
+         * book that came with none: `made`).
+         */
+        const applyContents = (tree: TocItem[], made: boolean) => {
+          const flatToc = flattenToc(tree).map((item) => ({
+            ...item,
+            label: item.label.replace(/\s+/g, " ").trim(),
+            href: resolveTocHref(item.href)
+          }));
+          const flatDepths = tocDepths(tree);
+          setToc(flatToc);
+          const chapterToc = flatToc.filter((item) => isChapterLike(item.label));
+          for (const key of Object.keys(indexMap)) {
+            delete indexMap[key];
+          }
+          let dedupIndex = 0;
+          const seenHrefs = new Set<string>();
+          chapterToc.forEach((item) => {
+            const file = item.href.split("#")[0];
+            if (seenHrefs.has(file)) {
+              return;
+            }
+            seenHrefs.add(file);
+            indexMap[file] = dedupIndex;
+            dedupIndex += 1;
+          });
+          tocPlacesRef.current = flatToc.map((item) => tocPlace(item.href, (file) => spineIndexByHref[file], item.cfi));
+          tocLabelsRef.current = flatToc.map((item) => item.label);
+          chapterSpineIndicesRef.current = Object.keys(indexMap)
+            .map((href) => spineIndexByHref[href])
+            .filter((value) => typeof value === "number")
+            .sort((a, b) => (a as number) - (b as number)) as number[];
+
+          tocSpineStartsRef.current = flatToc
+            .map((item) => spineIndexByHref[item.href.split("#")[0]])
+            .filter((value): value is number => typeof value === "number");
+
+          try {
+            sectionWeightsRef.current = buildSectionWeights(
+              spineItems.map((item: any) => String(item?.href ?? "")),
+              bookSections,
+              flatToc,
+              (href) => spineIndexByHref[href.split("#")[0]]
+            );
+          } catch {
+            sectionWeightsRef.current = null;
+          }
+          setCanSeek(sectionWeightsRef.current !== null);
+          // The books inside, when the file is a set of them (readers/innerBooks.ts).
+          const contentsRows: ContentsRow[] = flatToc.map((item, index) => ({
+            label: item.label,
+            spine: tocPlacesRef.current[index]?.spine,
+            depth: flatDepths[index] ?? 0,
+            book: item.book
+          }));
+          const weighed = sectionWeightsRef.current;
+          contentsRowsRef.current = contentsRows;
+          innerBooksRef.current = weighed ? findInnerBooks(contentsRows, weighed.bytes) : [];
+          // The stretches between two of its stories (one book's appendices, the next one's cover and maps).
+          storyGapsRef.current = weighed
+            ? storyGaps(innerBooksRef.current, weighed.bytes.length - 1)
+                .filter((gap) => gap.before >= 0 && gap.after >= 0)
+                .map((gap) => ({ from: gap.from, to: gap.to, start: fractionAt(weighed, gap.from, 0), end: fractionAt(weighed, gap.to, 1) }))
+            : [];
+          setContents({ rows: contentsRows, books: innerBooksRef.current, bytes: weighed?.bytes ?? [], made });
+        };
+        applyContents(tocTree, false);
+        applyContentsRef.current = (tree, made = true) => {
+          if (cancelled || renditionRef.current !== rendition) {
+            return;
+          }
+          applyContents(tree, made);
+          // The chapter's name and the percentage are read from the contents: say them again.
+          updateOutlookRef.current();
+        };
+
+        // A chapter list for a book that came with none, or next to none
+        // (readers/autoContents.ts). What was found the last time the book
+        // was open is used at once. Otherwise the book is read for its
+        // headings once its first page is up, a section at a time between
+        // the page's own work (readers/contentsScan.ts), and the list
+        // changes when that is done. A book with honest contents keeps them.
+        const contentsKey = `${CONTENTS_KEY_PREFIX}${book.id}`;
+        const withinOf = (tree: TocItem[], within: Record<string, number>) =>
+          flattenToc(tree).map((item) => within[placeKey({ href: resolveTocHref(item.href), cfi: item.cfi })] ?? 0);
+        let keptContents: KeptContents | null = null;
+        try {
+          keptContents = readKept(localStorage.getItem(contentsKey), spineItems.length);
+        } catch {
+          keptContents = null;
+        }
+        if (keptContents) {
+          if (keptContents.toc) {
+            applyContents(keptContents.toc, true);
+          }
+          tocWithinRef.current = withinOf(keptContents.toc ?? tocTree, keptContents.within);
+        } else {
+          tocWithinRef.current = [];
+          let begun = false;
+          const findContents = async () => {
+            if (begun || cancelled) {
+              return;
+            }
+            begun = true;
+            const gone = {
+              get aborted() {
+                return cancelled || renditionRef.current !== rendition;
+              }
+            };
+            const scan = await scanBook(epub, { signal: gone, landmarks: (navigation as any)?.landmarks });
+            if (!scan || gone.aborted) {
+              return;
+            }
+            const placeOf = (href: string) => {
+              const at = tocPlace(resolveTocHref(href), (file) => spineIndexByHref[file]);
+              return { section: at.spine, anchor: at.anchor };
+            };
+            const decision = decideContents(tocTree, placeOf, scan.sections);
+            // Where in its file each entry with an anchor is: a chapter that
+            // shares its file with the next ends there (the time left in it).
+            const within: Record<string, number> = { ...decision.within };
+            flattenToc(decision.toc).forEach((item) => {
+              const href = resolveTocHref(item.href);
+              const at = placeOf(href);
+              if (!item.cfi && at.anchor && typeof at.section === "number") {
+                const share = scan.ids[at.section]?.get(at.anchor);
+                if (typeof share === "number" && share > 0) {
+                  within[href] = share;
+                }
+              }
+            });
+            try {
+              localStorage.setItem(contentsKey, JSON.stringify(keepContents(decision, spineItems.length, within)));
+            } catch {
+              // Found again the next time.
+            }
+            if (import.meta.env.DEV) {
+              (window as unknown as { __leafletContents?: unknown }).__leafletContents = { use: decision.use, reason: decision.reason, source: decision.source, ms: scan.ms, sections: scan.sections.length };
+            }
+            if (decision.use !== "own") {
+              applyContentsRef.current(decision.toc, true);
+            }
+            tocWithinRef.current = withinOf(decision.toc, within);
+            updateOutlookRef.current();
+            // The lines of a flattened contents page on the page now lead to the entries just made.
+            ((rendition.getContents?.() as any[] | undefined) ?? []).forEach((shown) => {
+              if (shown?.document) {
+                markListedLines(shown.document, tocLabelsRef.current);
+              }
+            });
+          };
+          (rendition as any).once?.("displayed", () => window.setTimeout(() => void findContents(), 900));
+          window.setTimeout(() => void findContents(), 8000);
+        }
 
         const onRelocated = (location: any) => {
           // A look at the map or the notes from the middle of the story
@@ -5009,13 +6094,23 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
               if (spineIndex > weights.hi) {
                 return outside("back");
               }
-              const within = sectionProgress();
-              if (spineIndex >= weights.last && within >= 0.98) {
-                return 1;
+              // Between two stories of a set, looked at from elsewhere: as front and back matter are.
+              if (lookingBetweenStories(spineIndex)) {
+                lookingOutside = true;
+                return null;
               }
+              const within = sectionProgress();
+              // Finished at the end of the story's last section and not
+              // before (readers/progress.ts): scrolling, that was settled
+              // above; with pages it is the section's last page. Until then
+              // the progress stops just short, however little is left. (It
+              // used to be finished from 98% of the way through that section,
+              // or as soon as the weights rounded past 99%.)
+              const displayed = location?.start?.displayed ?? location?.end?.displayed;
+              const atEnd = !line && onLastPage(spineIndex, weights.last, Number(displayed?.page) || 0, Number(displayed?.total) || 0);
               const span = weights.prefix[weights.hi + 1] - weights.prefix[weights.lo];
               const read = weights.prefix[spineIndex] - weights.prefix[weights.lo] + within * weights.bytes[spineIndex];
-              return Math.min(1, Math.max(0, read / span));
+              return progressToSave(read / span, atEnd, isFinished(lastProgressRef.current));
             }
 
             if (chapterTotal > 0 && typeof chapterIndex === "number") {
@@ -5030,7 +6125,7 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
                 return 1;
               }
               const progress = (chapterIndex + within) / chapterTotal;
-              return Math.min(1, Math.max(0, progress));
+              return progressToSave(progress, false, isFinished(lastProgressRef.current));
             }
 
             const cfi = location?.start?.cfi ?? location?.end?.cfi;
@@ -5055,6 +6150,13 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
           const percentage = resolveProgress();
           if (percentage !== null) {
             lastCfiProgressRef.current = percentage;
+          }
+          // For the next look: whether the story's end is still below the
+          // window. A jump is not reading through it.
+          if (layoutRef.current === "scroll") {
+            const endBottom = storyEndBottom();
+            const windowHeight = ((rendition.manager as any)?.container as HTMLElement | undefined)?.clientHeight ?? 0;
+            storyEndWasBelowRef.current = Date.now() >= navigatingUntilRef.current && endBottom !== null && endBottom > windowHeight + 1;
           }
           const now = Date.now();
           // The place saved is the reading line (readers/readingPlace.ts),
@@ -5151,6 +6253,7 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
               "pointerdown",
               (event) => {
                 handsOn();
+                scrollbarLetGoRef.current();
                 pressedAt = Date.now();
                 if (event.pointerType === "touch") {
                   revealChromeRef.current();
@@ -5179,6 +6282,16 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
                   event.preventDefault();
                   event.stopPropagation();
                   followBookLinkRef.current(anchor, contents?.sectionIndex);
+                  return;
+                }
+                // A line of a contents page that a conversion flattened into
+                // plain paragraphs, which names a contents entry: it goes
+                // there, as the link it once was did (readers/bookBlocks.ts).
+                const listed = anchor ? null : (event.target as Element | null)?.closest?.("[data-leaflet-jump]");
+                if (listed && !(doc.getSelection?.()?.toString() ?? "").trim()) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  goToListedLineRef.current(Number(listed.getAttribute("data-leaflet-jump")));
                   return;
                 }
                 if (!anchor) {
@@ -5223,7 +6336,17 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
               },
               { passive: true }
             );
-            doc.addEventListener("pointermove", () => markReadingActivity(), { passive: true });
+            doc.addEventListener(
+              "pointermove",
+              (event) => {
+                markReadingActivity();
+                // The pointer over the text with no button down: a scrollbar that was held has been let go.
+                if (event.buttons === 0) {
+                  scrollbarLetGoRef.current();
+                }
+              },
+              { passive: true }
+            );
             doc.addEventListener("selectionchange", () => selectionChangedRef.current());
           });
         };
@@ -5334,6 +6457,7 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
       // The place held for the pages belongs to the book and layout that are going.
       pagePlaceRef.current = null;
       pageRelayoutsRef.current = 0;
+      queuedTurnRef.current = null;
       setPageOf(null);
       if (viewerRef.current) {
         delete viewerRef.current.dataset.turn;
@@ -5471,6 +6595,53 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
       }, delay);
     };
 
+    // ---- the scrollbar, held (readers/scrollbarHold.ts) ----
+    // Fetching takes up again by itself once the page has been still, in
+    // case the letting go is never reported: asked for a moment after the
+    // hold lapses, and again at every scroll while it lasts.
+    const armScrollbarResume = () => {
+      if (scrollbarResumeTimerRef.current !== null) {
+        window.clearTimeout(scrollbarResumeTimerRef.current);
+      }
+      scrollbarResumeTimerRef.current = window.setTimeout(() => {
+        scrollbarResumeTimerRef.current = null;
+        loadFurther();
+      }, STILL_MS + 60);
+    };
+    /** Let go (or as good as): fetching goes on from where the thumb was left. */
+    const releaseScrollbar = () => {
+      if (!scrollbarHoldRef.current.pressed) {
+        return;
+      }
+      scrollbarHoldRef.current = letGo();
+      if (scrollbarResumeTimerRef.current !== null) {
+        window.clearTimeout(scrollbarResumeTimerRef.current);
+        scrollbarResumeTimerRef.current = null;
+      }
+      loadFurther();
+    };
+    /** A press on the scrolling container: on its scrollbar when it lands outside the container's own content box. */
+    const onContainerPress = (event: PointerEvent) => {
+      const container = event.currentTarget as HTMLElement | null;
+      // (Measured from the container's own box, not `offsetX`: under a zoomed
+      // page that is not always in the same pixels as the client width.)
+      const onScrollbar =
+        layoutRef.current === "scroll" &&
+        container !== null &&
+        event.target === container &&
+        isOnScrollbar(event.clientX - container.getBoundingClientRect().left - container.clientLeft, container.clientWidth);
+      scrollbarHoldRef.current = pressOn(onScrollbar, Date.now());
+      if (onScrollbar) {
+        armScrollbarResume();
+      }
+    };
+    /** The pointer moving with no button down: whatever was held has been let go. */
+    const onPointerAbout = (event: PointerEvent) => {
+      if (event.buttons === 0) {
+        releaseScrollbar();
+      }
+    };
+
     const onWheel = (event: WheelEvent) => {
       // scroll-only mode
       const target = event.currentTarget as HTMLElement;
@@ -5482,6 +6653,8 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
 
     const handleWheel = (target: HTMLElement, deltaY: number) => {
       markReadingActivity();
+      // The wheel is never held up by a scrollbar that was not seen let go.
+      releaseScrollbar();
       lastHandsOnAtRef.current = Date.now();
       cancelSmartPageTurn();
       programmaticScrollUntilRef.current = 0;
@@ -5501,6 +6674,8 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
       scheduleReaderDotUpdate();
     };
 
+    /** A chapter that was in the window at the last scroll, and where its top was in it. */
+    let inWindow: { element: HTMLElement; top: number } | null = null;
     const onScroll = (event: Event) => {
       // scroll-only mode
       const target = event.currentTarget as HTMLElement;
@@ -5514,6 +6689,24 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
       const last = lastScrollTopRef.current ?? target.scrollTop;
       const delta = target.scrollTop - last;
       lastScrollTopRef.current = target.scrollTop;
+      // epub.js keeping the text in place as a chapter is let go (or fetched)
+      // above the window is no one scrolling (readers/smartScroll.ts:
+      // isScrollCorrection): the chapter that was in the window has not moved.
+      const boxTop = target.getBoundingClientRect().top;
+      const moved = inWindow?.element.isConnected ? inWindow.element.getBoundingClientRect().top - boxTop - inWindow.top : null;
+      const corrected = isScrollCorrection(delta, moved);
+      const shown = (displayedViews() as any[])
+        .map((view) => view?.element as HTMLElement | undefined)
+        .find((element) => {
+          const box = element?.getBoundingClientRect();
+          return Boolean(box && box.bottom - boxTop > 0 && box.top - boxTop < target.clientHeight);
+        });
+      inWindow = shown ? { element: shown, top: shown.getBoundingClientRect().top - boxTop } : null;
+      // A held scrollbar is still being dragged.
+      if (scrollbarHoldRef.current.pressed) {
+        scrollbarHoldRef.current = pageScrolled(scrollbarHoldRef.current, now);
+        armScrollbarResume();
+      }
       // Only the reader's own scrolling heads for the next chapter: a Smart
       // Read page step that lands at the bottom still has lines left to read.
       if (delta > 0 && now >= programmaticScrollUntilRef.current) {
@@ -5522,7 +6715,7 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
       if (isAtScrollBottom(target, 2) && now - lastWheelDownAtRef.current < 700) {
         triggerScrollAdvance();
       }
-      if (now >= programmaticScrollUntilRef.current) {
+      if (now >= programmaticScrollUntilRef.current && !corrected) {
         if (readingModeRef.current === "smart") {
           smartManualOverrideUntilRef.current = now + 2200;
         }
@@ -5555,6 +6748,12 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
       framesObserver.observe(container, { childList: true, subtree: true });
       container.addEventListener("wheel", onWheel, { passive: true });
       container.addEventListener("scroll", onScroll, { passive: true });
+      container.addEventListener("pointerdown", onContainerPress, { passive: true });
+      window.addEventListener("pointerup", releaseScrollbar);
+      window.addEventListener("mouseup", releaseScrollbar);
+      window.addEventListener("blur", releaseScrollbar);
+      window.addEventListener("pointermove", onPointerAbout, { passive: true });
+      scrollbarLetGoRef.current = releaseScrollbar;
       contentWheelHandlerRef.current = (deltaY) => handleWheel(container, deltaY);
     };
 
@@ -5564,6 +6763,17 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
       }
       activeContainer.removeEventListener("wheel", onWheel);
       activeContainer.removeEventListener("scroll", onScroll);
+      activeContainer.removeEventListener("pointerdown", onContainerPress);
+      window.removeEventListener("pointerup", releaseScrollbar);
+      window.removeEventListener("mouseup", releaseScrollbar);
+      window.removeEventListener("blur", releaseScrollbar);
+      window.removeEventListener("pointermove", onPointerAbout);
+      scrollbarLetGoRef.current = () => undefined;
+      scrollbarHoldRef.current = NOT_HELD;
+      if (scrollbarResumeTimerRef.current !== null) {
+        window.clearTimeout(scrollbarResumeTimerRef.current);
+        scrollbarResumeTimerRef.current = null;
+      }
       contentWheelHandlerRef.current = null;
       resizeObserver?.disconnect();
       resizeObserver = null;
@@ -5811,6 +7021,9 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
       stopWaitingForReread();
       smartManualOverrideUntilRef.current = 0;
     }
+    smartPictureRef.current = null;
+    smartPicturePassedRef.current = null;
+    setSmartAtPicture(false);
     if (readingMode !== "standard") {
       // Hands-free from here: what was read by hand until now is kept.
       stopFreeReading();
@@ -5824,13 +7037,25 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
     startPausedRef.current = false;
     setReadingPaused(startPaused);
     readingPausedRef.current = startPaused;
+    holdPill(startPaused && readingMode === "smart");
     if (readingEngineTimerRef.current) {
       window.clearTimeout(readingEngineTimerRef.current);
       readingEngineTimerRef.current = null;
     }
+    const cameFrom = modeBeforeRef.current;
+    modeBeforeRef.current = readingMode;
     if (readingMode === "standard") {
       finishSmartSession();
       setReadingWord(null);
+      // Leaving SpeedRead or Smart Read: Dotty stays beside the last word
+      // read, for a minute, so the eye finds the place on the page. It used
+      // to go straight to the last visible line, most of a screen below.
+      const lastRead = readerWordsRef.current[Math.max(0, activeWordIndexRef.current - 1)];
+      if (cameFrom !== "standard" && readerDotEnabled && lastRead?.iframe.isConnected) {
+        readerDotUserAnchorUntilRef.current = Date.now() + 60_000;
+        positionReaderDotAtWord(Math.max(0, activeWordIndexRef.current - 1));
+        return;
+      }
       const cfi = renditionRef.current?.location?.end?.cfi ?? renditionRef.current?.location?.start?.cfi;
       if (readerDotEnabled && cfi) updateLastReadMarker(cfi);
       return;
@@ -5879,6 +7104,9 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
     // Words shown since SpeedRead set off or was last resumed: the first few
     // are held longer (rsvpRamp), so the eye is on the spot before the pace is.
     let shownSincePlay = 0;
+    // The word last read in this run: a picture is rested at only when the
+    // reading has come down to it, not when it starts just below one.
+    let lastRead: ReaderWord | null = null;
     const schedule = (delay: number) => {
       if (stopped) return;
       readingEngineTimerRef.current = window.setTimeout(() => {
@@ -5886,10 +7114,21 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
         // Smart Read waits, without counting the time, while a hand is on the
         // page, the reader went back to reread, a panel or selection covers
         // the text, or a page step is settling.
+        // Resting at a picture, unless the reading has gone elsewhere since
+        // (a jump, another chapter): then there is nothing to rest at.
+        const resting = smartPictureRef.current;
+        if (resting) {
+          const last = readerWordsRef.current[activeWordIndexRef.current - 1];
+          if (readingModeRef.current !== "smart" || !last || last.node !== resting.before.node || last.start !== resting.before.start) {
+            smartPictureRef.current = null;
+            setSmartAtPicture(false);
+          }
+        }
         const waiting =
           readingModeRef.current === "smart" &&
           (autoScrollHeldRef.current ||
             smartRereadRef.current ||
+            smartPictureRef.current !== null ||
             interruptedRef.current ||
             Date.now() < smartStepHoldUntilRef.current);
         if (readingPausedRef.current || waiting) {
@@ -5918,6 +7157,34 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
         const word = words[index];
         const now = Date.now();
         const mode = readingModeRef.current;
+        // A picture between the word just read and this one (a full-page map
+        // between two chapters, a plate): Smart Read rests at it until the
+        // reader goes on. It used to pass it in the one step that carried the
+        // page to the next word, in under a second.
+        const previous = index > 0 ? words[index - 1] : undefined;
+        const passed = smartPicturePassedRef.current;
+        if (
+          mode === "smart" &&
+          previous &&
+          lastRead &&
+          previous.node === lastRead.node &&
+          previous.start === lastRead.start &&
+          !(passed && passed.node === previous.node && passed.start === previous.start)
+        ) {
+          const before = getReaderWordRect(previous);
+          const after = getReaderWordRect(word);
+          const container = ensureScrollContainer();
+          if (
+            before &&
+            after &&
+            container &&
+            isPictureGap(before.top + before.height, after.top, container.clientHeight) &&
+            restAtPicture(previous)
+          ) {
+            schedule(180);
+            return;
+          }
+        }
         // Playing hands-free counts as reading for the same grace window as
         // auto-scroll. Past it, pause rather than play on to an empty room:
         // playback and credited time then always agree, and a reader who
@@ -5959,6 +7226,7 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
         scrollWordIntoReadingBand(index);
 
         activeWordIndexRef.current = index + 1;
+        lastRead = word;
         const paceMode = mode === "speed" ? "speed" : "smart";
         const paceDelay =
           (60000 / Math.max(70, wpm)) *
@@ -5986,6 +7254,33 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
           // A beat at the new chapter's heading.
           schedule(readingModeRef.current === "smart" ? 1200 : 600);
           return;
+        }
+        // The chapter's words have run out and a picture follows (a chapter
+        // that is all picture, a plate at a chapter's end): Smart Read rests
+        // at it until the reader goes on, and only then looks further.
+        if (readingModeRef.current === "smart") {
+          if (smartPictureRef.current || readingPausedRef.current) {
+            readingEngineTimerRef.current = window.setTimeout(waitForMore, 250);
+            return;
+          }
+          const words = readerWordsRef.current;
+          const last = words[words.length - 1];
+          const container = ensureScrollContainer();
+          const read = last ? getReaderWordRect(last) : null;
+          const end = loadedEndTop();
+          const passed = smartPicturePassedRef.current;
+          if (
+            last &&
+            read &&
+            container &&
+            end !== null &&
+            !(passed && passed.node === last.node && passed.start === last.start) &&
+            isPictureGap(read.top + read.height - container.getBoundingClientRect().top, end, container.clientHeight) &&
+            restAtPicture(last)
+          ) {
+            readingEngineTimerRef.current = window.setTimeout(waitForMore, 250);
+            return;
+          }
         }
         attempts += 1;
         if (hasFurtherSection() && attempts < 40) {
@@ -6129,6 +7424,66 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
     return displaySpine(index - 1, -1);
   };
 
+  /** The contents' entries as chapter starts (readers/chapterSpan.ts): the section each is in and how far down it. */
+  const chapterStarts = (): ChapterStart[] => tocPlacesRef.current.map((place, index) => ({ spine: place.spine, within: tocWithinRef.current[index] ?? 0 }));
+  /**
+   * How far down the file being read the next chapter starts, when it starts
+   * in this file: where the chapter being read ends (the time left in it).
+   * Scrolling, it is measured on the page, as the reading line is (a share
+   * of the file's height): by the text alone it was minutes out in a file of
+   * 200 KB. Measured once for a heading and a layout.
+   */
+  const headingShareRef = useRef<{ key: string; share: number | null }>({ key: "", share: null });
+  const nextHeadingShare = (section: number, within: number): number | null => {
+    const starts = chapterStarts();
+    const current = chapterEntryRef.current;
+    if (layoutRef.current !== "scroll") {
+      return chapterEndWithin(starts, section, current, within);
+    }
+    const index = starts.findIndex((start, at) => at > current && start.spine === section && start.within > 0);
+    if (index < 0) {
+      return null;
+    }
+    const view = displayedViews().find((shown) => shown?.section?.index === section);
+    const height = Number((view?.element as HTMLElement | undefined)?.offsetHeight) || 0;
+    const key = `${section}:${index}:${height}`;
+    if (headingShareRef.current.key === key) {
+      return headingShareRef.current.share;
+    }
+    const doc = view?.contents?.document as Document | undefined;
+    const place = tocPlacesRef.current[index];
+    const heading = doc && place ? anchorElement(doc, place.anchor || place.cfi || "") : null;
+    const share = heading && height > 0 ? Math.min(1, Math.max(0, heading.getBoundingClientRect().top / height)) : starts[index].within;
+    headingShareRef.current = { key, share };
+    return share;
+  };
+  /** Goes to a contents entry by its number, as choosing it in the list does. */
+  const goToEntry = (index: number) => {
+    // (From the entries as places, which are always the current contents: a
+    // key handler may hold this function from before a made list arrived.)
+    const place = tocPlacesRef.current[index];
+    const file = typeof place?.spine === "number" ? ((bookRef.current as any)?.spine?.get?.(place.spine)?.href as string | undefined) : undefined;
+    if (!place || !file) {
+      return false;
+    }
+    askedEntryRef.current = layoutRef.current === "pages" ? { entry: index, at: null } : null;
+    if (place.cfi) {
+      goToPlace(place.cfi);
+    } else {
+      displayChapter(`${file}${place.anchor ? `#${encodeURIComponent(place.anchor)}` : ""}`, { useSaved: false });
+    }
+    return true;
+  };
+
+  /** A click on a line of a flattened contents page (readers/bookBlocks.ts): to the entry it names, with Back. */
+  const goToListedLineRef = useRef<(entry: number) => void>(() => undefined);
+  goToListedLineRef.current = (entry) => {
+    if (Number.isInteger(entry) && entry >= 0) {
+      noteJumpFromHere();
+      goToEntry(entry);
+    }
+  };
+
   const goNextSection = () => {
     // A chapter skipped is a jump: the line left can be come back to.
     noteJumpFromHere();
@@ -6136,6 +7491,15 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
     const epub = bookRef.current as any;
     const location = rendition?.location;
     const index = location?.start?.index ?? location?.end?.index;
+    // The next heading, when the contents place it inside a file: several
+    // chapters to a file used to be skipped together (readers/chapterSpan.ts).
+    const reading = sectionPlace()?.section ?? index;
+    if (typeof reading === "number") {
+      const next = nextChapterEntry(chapterStarts(), reading, chapterEntryRef.current);
+      if (next !== null && goToEntry(next)) {
+        return;
+      }
+    }
     const href = location?.start?.href ?? location?.end?.href;
     if (href && epub?.spine?.get) {
       // From the chapter the reading line is in, which is the one the dock names.
@@ -6158,6 +7522,43 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
     const epub = bookRef.current as any;
     const location = rendition?.location;
     const index = location?.start?.index ?? location?.end?.index;
+    // The heading before, when it or this chapter starts inside a file.
+    const reading = sectionPlace()?.section ?? index;
+    if (typeof reading === "number") {
+      const starts = chapterStarts();
+      const before = previousChapterEntry(starts, reading, chapterEntryRef.current);
+      if (layoutRef.current === "pages" && before !== null) {
+        // With pages, a heading on a file's first page shares that page with
+        // the file's own entry: going "back" to the one from the other showed
+        // the same page again, for ever (an appendix of anchors, and every
+        // novel's cover in a boxed set). Entries that land on the page
+        // showing are stepped past, into the file before if need be
+        // (readers/chapterSpan.ts: earlierEntry).
+        const page = Number(location?.start?.displayed?.page) || 1;
+        const file = before === "top" && page > 1 ? epub?.spine?.get?.(reading)?.href : null;
+        if (file) {
+          displayChapter(file, { useSaved: false });
+          return;
+        }
+        const startPages = chapterStartsHere(reading) ?? [];
+        const lands = (entry: number) =>
+          starts[entry]?.spine === reading && (starts[entry].within > 0 ? startPages.find((start) => start.entry === entry)?.page : 1) === page;
+        const target = earlierEntry(starts, reading, before === "top" ? chapterEntryRef.current - 1 : before, lands);
+        if (target >= 0 && goToEntry(target)) {
+          return;
+        }
+        // Nothing earlier among the entries: the file before, below.
+      } else {
+        const file = before === "top" ? epub?.spine?.get?.(reading)?.href : null;
+        if (file) {
+          displayChapter(file, { useSaved: false });
+          return;
+        }
+        if (typeof before === "number" && goToEntry(before)) {
+          return;
+        }
+      }
+    }
     const href = location?.start?.href ?? location?.end?.href;
     if (href && epub?.spine?.get) {
       // From the chapter the reading line is in, which is the one the dock names.
@@ -6183,6 +7584,11 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
    * the file.)
    */
   const goToEdge = (edge: "chapterStart" | "chapterEnd" | "bookStart" | "bookEnd") => {
+    // With pages: the first or last page of the chapter or the book (goToPageEdge).
+    if (layoutRef.current === "pages") {
+      goToPageEdge(edge);
+      return;
+    }
     const rendition = renditionRef.current;
     const epub = bookRef.current as any;
     if (!rendition || !epub?.spine?.get || layoutRef.current !== "scroll") {
@@ -6196,8 +7602,46 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
         return;
       }
       noteJumpFromHere();
+      if (edge === "chapterStart" && entry?.cfi) {
+        // A heading with no id (a chapter list made by Leaflet): its place.
+        goToPlace(entry.cfi);
+        return;
+      }
       displayChapter(`${section.href}${entry?.anchor ? `#${encodeURIComponent(entry.anchor)}` : ""}`, { useSaved: false });
       return;
+    }
+    // A chapter that shares its file with the next ends at the next heading,
+    // not at the end of the file (readers/chapterSpan.ts): its last lines,
+    // with the heading after them low in the window.
+    if (edge === "chapterEnd" && typeof here === "number") {
+      const starts = chapterStarts();
+      const following = starts.findIndex((start, at) => at > chapterEntryRef.current && start.spine === here && start.within > 0);
+      const place = following >= 0 ? tocPlacesRef.current[following] : undefined;
+      const view = place ? displayedViews().find((shown) => shown?.section?.index === here) : null;
+      const doc = view?.contents?.document as Document | undefined;
+      const heading = doc && place ? anchorElement(doc, place.anchor || place.cfi || "") : null;
+      const container = ensureScrollContainer();
+      const frame = doc?.defaultView?.frameElement as HTMLElement | null | undefined;
+      if (heading && container && frame) {
+        const top = frame.getBoundingClientRect().top + heading.getBoundingClientRect().top - container.getBoundingClientRect().top;
+        if (top > container.clientHeight * 0.8) {
+          noteJumpFromHere();
+          releaseUserReadingAnchor();
+          markNavigating();
+          container.scrollTop = Math.max(0, container.scrollTop + top - container.clientHeight * 0.72);
+        }
+        // (Already in the window: this is the chapter's end.)
+        return;
+      }
+      // Or at a heading part-way down a later file, when the chapter runs on into it.
+      const tail = container ? chapterTail(starts, here, chapterEntryRef.current) : null;
+      const after = tail ? starts.findIndex((start, at) => at > chapterEntryRef.current && start.spine === tail.section && start.within === tail.within) : -1;
+      const afterCfi = after >= 0 ? tocPlacesRef.current[after]?.cfi : null;
+      if (container && afterCfi) {
+        noteJumpFromHere();
+        goToPlace(afterCfi, Math.round(container.clientHeight * 0.72 - PAGE_TOP_PAD));
+        return;
+      }
     }
     const lastOfBook: number | undefined = epub.spine.last?.()?.index;
     const last =
@@ -6250,13 +7694,34 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
   useEffect(() => {
     try {
       fontSizeRef.current = fontSize;
-      sidebarRef.current = sidebarOpen;
       persistReaderState();
     } catch {
       // ignore
     }
   }, [fontSize, sidebarOpen, displayMode, autoScrollSpeed, speedReadWpm, storageKey]);
 
+  /** The line the last change of type was anchored on (scrolling), and how far below the reading line it was put. */
+  const typeAnchorRef = useRef<{ cfi: string; below: number } | null>(null);
+  /** That anchor, if it is still where it was put: within two pixels. Null once the reader has moved. */
+  const heldTypeAnchor = (): { cfi: string; below: number } | null => {
+    const held = typeAnchorRef.current;
+    const container = ((renditionRef.current?.manager as any)?.container as HTMLElement | undefined) ?? null;
+    if (!held || !container || layoutRef.current !== "scroll") {
+      return null;
+    }
+    try {
+      const spinePos = (new EpubCFI(held.cfi) as unknown as { spinePos?: number }).spinePos;
+      const view = displayedViews().find((shown) => shown?.section?.index === spinePos);
+      const element = view?.element as HTMLElement | undefined;
+      const top = element ? Number(view.contents?.locationOf?.(held.cfi)?.top) : Number.NaN;
+      if (!element || !Number.isFinite(top)) {
+        return null;
+      }
+      return Math.abs(element.offsetTop + top - container.scrollTop - PAGE_TOP_PAD - held.below) <= 2 ? held : null;
+    } catch {
+      return null;
+    }
+  };
   const appliedFontSizeRef = useRef(fontSize);
   const appliedMeasureRef = useRef(measure);
   const appliedTypeRef = useRef(`${typeface}|${spacing}|${align}`);
@@ -6283,7 +7748,13 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
     }
     // (With pages, the reader's place: see pagePlaceRef.)
     // (Scrolling, the reading line and how far below it the line started: it goes back exactly there.)
-    const lineBefore = changed && layoutRef.current === "scroll" ? readingPlace() : null;
+    // The anchor of the change before this one is used again while it is
+    // still where it was put (the reader has not scrolled since). After a
+    // change the anchored word is in the middle of its line, and a fresh
+    // anchor is the first word of that line, a few words earlier: every
+    // change stepped the text a line down (Mistborn, word by word: 80, 116,
+    // 145, 152, 177px over six changes of size).
+    const lineBefore = changed && layoutRef.current === "scroll" ? (heldTypeAnchor() ?? readingPlace()) : null;
     const anchor: string | undefined = changed
       ? ((layoutRef.current === "pages" ? pagePlaceRef.current?.cfi : null) ?? lineBefore?.cfi ?? readingPlaceCfi() ?? undefined)
       : undefined;
@@ -6320,6 +7791,7 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
             if (renditionRef.current === rendition) {
               clearToolbar(anchor, lineBefore?.below ?? 0);
               settleOnPage(anchor);
+              typeAnchorRef.current = layoutRef.current === "scroll" ? { cfi: anchor, below: lineBefore?.below ?? 0 } : null;
             }
           },
           () => undefined
@@ -6390,6 +7862,21 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
   const tourStepRef = useRef(-1);
   const spotlightDotty = (step: number) => {
     tourStepRef.current = step;
+    setTourStep(step);
+    // On the chapter list's own step the list shows itself (where the window
+    // has room for it) and goes again with the step; its handle is lit.
+    if (step === TOUR_CONTENTS_STEP) {
+      setContentsSeen();
+      if (window.innerWidth >= PEEK_MIN_WIDTH && !sidebarShownRef.current) {
+        contentsPeekRef.current.showing = true;
+        setSidebarOpen(true);
+      }
+    } else if (contentsPeekRef.current.showing) {
+      contentsPeekRef.current.showing = false;
+      if (!sidebarPinnedRef.current) {
+        setSidebarOpen(false);
+      }
+    }
     if (step === 0 && !readerDotElementRef.current && readingModeRef.current === "standard") {
       const location = renditionRef.current?.location;
       const cfi = location?.end?.cfi ?? location?.start?.cfi;
@@ -6662,9 +8149,10 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
           <button
             type="button"
             className="reader-chapters-toggle reader-icon transition-colors reader-hover-accent"
-            onClick={() => setSidebarOpen((open) => !open)}
+            onClick={toggleContents}
             aria-expanded={sidebarOpen}
-            aria-label={sidebarOpen ? "Hide chapters" : "Show chapters"}
+            aria-label={sidebarOpen && sidebarPinned ? "Hide chapters" : "Show chapters"}
+            title="Contents (C)"
           >
             <span className="material-symbols-outlined">list</span>
           </button>
@@ -6673,7 +8161,9 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
           <h1 className={toolbarTitleClass(book.title)} title={book.title}>
             {book.title}
           </h1>
-          <span className="text-xs uppercase tracking-[0.2em] reader-muted">
+          {/* In a set of books the line under the title names the one being read: the set's own title is long and says nothing of where the reader is. */}
+          <span className="max-w-[46vw] truncate text-xs uppercase tracking-[0.2em] reader-muted">
+            {chapterInBook ? `${chapterInBook.book} · ` : ""}
             {book.author ?? "Unknown author"}
           </span>
         </div>
@@ -6790,7 +8280,7 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
             </button>
             {morePanelOpen && (
               <div
-                className="absolute right-0 mt-3 w-72 rounded-xl border p-4 text-xs shadow-2xl reader-panel reader-border"
+                className="reader-menu absolute right-0 mt-3 w-72 rounded-xl border p-4 text-xs shadow-2xl reader-panel reader-border"
                 onMouseEnter={() => {
                   if (morePanelCloseRef.current) {
                     window.clearTimeout(morePanelCloseRef.current);
@@ -6914,11 +8404,11 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
                           type="button"
                           className="reader-mini-control"
                           onClick={toggleSmartPlay}
-                          title={readingPaused || smartWaiting ? "Carry on (Space)" : "Pause (Space)"}
-                          aria-label={readingPaused || smartWaiting ? "Carry on" : "Pause"}
+                          title={readingPaused || smartWaiting || smartAtPicture ? "Carry on (Space)" : "Pause (Space)"}
+                          aria-label={readingPaused || smartWaiting || smartAtPicture ? "Carry on" : "Pause"}
                         >
                           <span className="material-symbols-outlined text-base">
-                            {readingPaused || smartWaiting ? "play_arrow" : "pause"}
+                            {readingPaused || smartWaiting || smartAtPicture ? "play_arrow" : "pause"}
                           </span>
                         </button>
                         <button
@@ -7017,24 +8507,37 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
           onMouseLeave={cancelReaderSidebarOpen}
           aria-hidden="true"
         />
+        {/* The way to the chapter list that is always there, toolbar or no
+            toolbar: a tab on the left edge with an icon and the word, in the
+            margin beside the text and never wider than it
+            (readers/contentsPanel.ts). It used to be a 16 px sliver with a
+            chevron, and people did not know the list existed. A click opens
+            the list to stay; it does not open under a resting pointer, so the
+            click meant for it never lands on a chapter instead. */}
         <button
           type="button"
-          className={`reader-sidebar-tab ${sidebarOpen ? "is-hidden" : ""}`}
-          onClick={openReaderSidebar}
-          onMouseEnter={scheduleReaderSidebarOpen}
-          onMouseLeave={cancelReaderSidebarOpen}
-          aria-label="Show chapters"
+          className={`reader-contents-handle ${sidebarOpen ? "is-hidden" : ""} ${tourStep === TOUR_CONTENTS_STEP && tourOpen ? "is-spotlit" : ""}`}
+          data-size={handleSizeFor(textMargin)}
+          onClick={() => pinContents(true)}
+          onMouseEnter={cancelReaderSidebarOpen}
+          aria-label="Contents: show the chapter list"
           aria-expanded={sidebarOpen}
-          title="Chapters"
+          title="Contents (C)"
           tabIndex={sidebarOpen ? -1 : 0}
         >
-          <span className="material-symbols-outlined" aria-hidden="true">
-            chevron_right
-          </span>
+          <ListIcon size={16} aria-hidden="true" />
+          <span className="reader-contents-handle-word">Contents</span>
         </button>
         <aside
           aria-hidden={!sidebarOpen}
-          onMouseEnter={openReaderSidebar}
+          aria-label="Contents"
+          data-beside={contentsBeside ? "true" : undefined}
+          data-set={contents.books.length > 0 ? "true" : undefined}
+          onMouseEnter={() => {
+            // The reader has taken hold of a list that showed itself.
+            contentsPeekRef.current.showing = false;
+            openReaderSidebar();
+          }}
           onMouseLeave={scheduleReaderSidebarClose}
           onFocus={openReaderSidebar}
           onBlur={(event) => {
@@ -7061,43 +8564,46 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
             </p>
             </div>
           </div>
-          <div className="text-xs uppercase tracking-[0.3em] reader-muted">Chapters</div>
-          <div className="mt-4 flex-1 overflow-y-auto pr-2">
-            {toc.length === 0 && (
-              <div className="text-xs reader-muted">
-                {loading ? "Loading chapters..." : "No chapters found."}
-              </div>
-            )}
-            {toc.map((item, entry) => {
-              const active = entry === chapterEntry;
-              return (
-              <button
-                key={`${item.href}-${item.label}`}
-                type="button"
-                className={`reader-chapter-link mb-2 w-full rounded-lg px-3 py-2 text-left text-sm transition reader-icon ${
-                  active ? "reader-chapter-active font-semibold" : ""
-                }`}
-                onClick={() => {
-                  noteJumpFromHere();
-                  displayChapter(item.href, { useSaved: false });
-                  setSidebarOpen(false);
-                }}
-              >
-                <span>{item.label}</span>
-              </button>
-              );
-            })}
+          <div className="reader-contents-caption">
+            <div className="text-xs uppercase tracking-[0.3em] reader-muted">Chapters</div>
+            <button
+              type="button"
+              className="reader-contents-close"
+              onClick={() => pinContents(false)}
+              aria-label="Hide the chapter list"
+              title="Hide the chapter list (C)"
+              tabIndex={sidebarOpen ? 0 : -1}
+            >
+              <CloseIcon size={15} aria-hidden="true" />
+            </button>
           </div>
+          {/* The list itself (readers/ContentsList.tsx): one run of rows for a
+              single work, grouped by book for a set (readers/innerBooks.ts). */}
+          <ContentsList
+            toc={toc}
+            rows={contents.rows}
+            books={contents.books}
+            bytes={contents.bytes}
+            active={chapterEntry}
+            place={contentsPlace}
+            finished={isFinished(outlook.progress ?? 0)}
+            open={sidebarOpen}
+            loading={loading}
+            made={contents.made}
+            onGo={goToContentsEntry}
+          />
         </aside>
 
         {/* Tapping the page is the expected way to dismiss a slide-over, and
             there is no hover-out to close it with on a touch screen. */}
-        {sidebarOpen && (
+        {/* A list opened to stay, over the text of a wider window: a click
+            on the page shuts it too (nothing is dimmed there). */}
+        {contentsOver && (
           <button
             type="button"
-            className="reader-sidebar-scrim md:hidden"
+            className={`reader-sidebar-scrim ${sidebarPinned ? "reader-sidebar-scrim-clear" : "md:hidden"}`}
             aria-label="Close chapters"
-            onClick={() => setSidebarOpen(false)}
+            onClick={() => (sidebarPinnedRef.current ? pinContents(false) : setSidebarOpen(false))}
           />
         )}
 
@@ -7279,6 +8785,8 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
                 <ProgressBar
                   value={outlook.progress}
                   chapterAt={chapterAtFraction}
+                  bookAt={bookAtFraction}
+                  marks={bookMarks}
                   onSeek={seekTo}
                   shown={dockNear || dockAwake}
                   holdRef={seekHoldRef}
@@ -7289,6 +8797,9 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
                 paged={paged}
                 pageOf={paged ? pageOf : null}
                 label={formatChapterDisplay()}
+                inBook={chapterInBook}
+                onContents={toggleContents}
+                contentsOpen={sidebarOpen}
                 onPrev={paged ? () => turnPage(-1) : goPrevSection}
                 onNext={paged ? () => turnPage(1) : goNextSection}
                 onPrevChapter={goPrevSection}
@@ -7326,6 +8837,10 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
           initialQuery={searchSeed}
           book={bookRef.current}
           chapterOf={chapterOfSection}
+          books={contents.books.map((inner) => inner.label)}
+          bookOf={(section) => bookOfSection(innerBooksRef.current, section)}
+          chapterNameOf={chapterNameOfSection}
+          readingBook={contents.books.findIndex((inner) => inner.label === chapterInBook?.book)}
           onOpen={openSearchHit}
           onClose={closeSearch}
         />
@@ -7550,8 +9065,8 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
         <div
           ref={pacePillRef}
           className={`reader-autoscroll-pill reader-panel reader-border ${
-            chromeVisible || autoScrollHeld || readingPaused || smartWaiting || holdReason ? "is-awake" : ""
-          } ${paceTouched % 2 === 1 ? "is-fresh" : ""}`}
+            chromeVisible || autoScrollHeld || (readingPaused && !pillHeld) || smartWaiting || smartAtPicture || holdReason ? "is-awake" : ""
+          } ${pillHeld ? "is-held" : ""} ${paceTouched % 2 === 1 ? "is-fresh" : ""}`}
           role="group"
           aria-label="Smart Read"
         >
@@ -7568,10 +9083,10 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
             type="button"
             className="reader-autoscroll-main reader-accent"
             onClick={toggleSmartPlay}
-            title={readingPaused || smartWaiting ? "Carry on (Space)" : "Pause (Space)"}
+            title={readingPaused || smartWaiting || smartAtPicture ? "Carry on (Space)" : "Pause (Space)"}
           >
             <UiIcon
-              name={readingPaused || smartWaiting ? "play" : autoScrollHeld || holdReason ? "hand" : "pause"}
+              name={readingPaused || smartWaiting || smartAtPicture ? "play" : autoScrollHeld || holdReason ? "hand" : "pause"}
               size={16}
             />
             <span className="tabular-nums">
@@ -7579,7 +9094,9 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
                 ? "Paused"
                 : smartWaiting
                   ? "Waiting for you"
-                  : autoScrollHeld
+                  : smartAtPicture
+                    ? "On hold"
+                    : autoScrollHeld
                     ? "Holding"
                     : holdReason
                       ? "On hold"
@@ -7600,13 +9117,15 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
               ? "Space to carry on"
               : smartWaiting
                 ? "Scroll back to Dotty, or Space to go on"
-                : holdReason ?? "Space pauses · read ahead and Dotty catches up"}
+                : smartAtPicture
+                  ? "A picture · Space to go on"
+                  : holdReason ?? "Space pauses · read ahead and Dotty catches up"}
           </span>
         </div>
       )}
 
       {focusToast && (
-        <div className="fixed bottom-6 right-6 z-[60]">
+        <div className="reader-toast fixed bottom-6 right-6 z-[60]" role="status">
           <div className="rounded-full border px-4 py-2 text-[10px] uppercase tracking-widest shadow-xl reader-panel reader-border reader-muted">
             {focusToast}
           </div>

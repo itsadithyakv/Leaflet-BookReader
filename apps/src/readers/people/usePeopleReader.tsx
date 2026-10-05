@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { EpubCFI } from "epubjs";
 import { selectedTextBox } from "../lookupPlacement";
 import { mentionSearch, sectionOfCfi } from "./bookText";
+import { isContentsPage } from "./mentions";
 import { CharacterCard, type CardTarget } from "./CharacterCard";
 import { peopleMarks } from "./marks";
 import { PeoplePanel } from "./PeoplePanel";
@@ -67,15 +68,19 @@ export const usePeopleReader = ({
   }, []);
 
   // The book's own text, read a chapter at a time when a card asks; dropped with the book.
-  const search = useMemo(() => (enabled && book ? mentionSearch(book) : null), [enabled, book]);
+  // (A contents page is not read for mentions: it lists the chapters' names.)
+  const chapterOfRef = useRef(chapterOf);
+  chapterOfRef.current = chapterOf;
+  const search = useMemo(
+    () => (enabled && book ? mentionSearch(book, (section) => isContentsPage(chapterOfRef.current(section))) : null),
+    [enabled, book]
+  );
   useEffect(() => () => search?.clear(), [search]);
 
   const placeRef = useRef(place);
   placeRef.current = place;
   const renditionRef = useRef(rendition);
   renditionRef.current = rendition;
-  const chapterOfRef = useRef(chapterOf);
-  chapterOfRef.current = chapterOf;
 
   /** The top of the screen, as the rendition last reported it (fresher than the last render). */
   const topNow = useCallback((): Place => {

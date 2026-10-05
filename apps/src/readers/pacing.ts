@@ -21,7 +21,17 @@ export const HANDS_FREE_GRACE_MS = 5 * 60_000;
 
 export const READER_BLOCK_SELECTOR =
   "p, li, blockquote, pre, h1, h2, h3, h4, h5, h6, dd, dt, td, th, figcaption, div, section, article, body";
-export const SENTENCE_END_PATTERN = /[.!?][”"')\]]*\s*$/;
+/**
+ * A word that ends a sentence, by what follows it up to the next word: a
+ * full stop, question or exclamation mark, any closing quotes or brackets,
+ * and then, after the space, any quote or bracket that opens what comes next.
+ * That last part belongs to the word before it in the index (text before the
+ * first word of a node does), so `said. “I will` leaves "said" with `. “`.
+ * Without it no sentence that was followed by speech counted as ended: 171
+ * of the 1,169 in one chapter of a novel, each read on into the speech with
+ * no pause. Nor did one closed by a single quote (’), as British books do.
+ */
+export const SENTENCE_END_PATTERN = /[.!?][”"’')\]]*\s*[“‘"'(\[]*\s*$/;
 
 /** True when nothing but inline markup separates the end of `a` from the start of `b`. */
 export const isInlineJoin = (a: Text, b: Text) => {

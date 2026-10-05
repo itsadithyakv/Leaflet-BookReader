@@ -107,3 +107,55 @@
     transition: none;
   }
 }
+
+/* A set of books: a small mark where each book begins, and the book's name
+   above the chapter's in the label. */
+.reader-progress-mark {
+  position: absolute;
+  bottom: 2px;
+  width: 2px;
+  height: 7px;
+  transform: translateX(-50%);
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--reader-page-ink, var(--reader-text)) 62%, var(--reader-page-bg, transparent));
+  pointer-events: none;
+}
+
+.reader-progress:hover .reader-progress-mark,
+.reader-progress.is-active .reader-progress-mark {
+  height: 9px;
+}
+
+.reader-progress-where {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.reader-progress-book {
+  overflow: hidden;
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+}
+
+.reader-progress-bubble.has-book {
+  max-width: 17rem;
+}
+
+/* The bar is 14 px tall to look at and 24 to press: a band behind the track
+   takes the pointer for the 10 px above it. The dock, which begins 16 px up,
+   stays in front, so its own buttons keep their presses. */
+.reader-progress-track::before {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 24px;
+  content: "";
+}
+
+.reader-progress ~ .reader-chapter-dock {
+  z-index: 32;
+}

@@ -48,4 +48,27 @@ describe("the contents entry a place is under", () => {
     expect(tocPlace("Text/ch3.xhtml#part%202", spineIndexOf)).toEqual({ spine: 3, anchor: "part 2" });
     expect(tocPlace("missing.xhtml#x", spineIndexOf)).toEqual({ spine: undefined, anchor: "x" });
   });
+
+  it("follows the reading line through a file whose chapters are places, not ids", () => {
+    // A chapter list made for a book with none: three chapters in one file, each a CFI.
+    const spineIndexOf = (file: string) => (file === "book.xhtml" ? 3 : file === "front.xhtml" ? 2 : undefined);
+    const made: TocPlace[] = [
+      tocPlace("front.xhtml", spineIndexOf),
+      tocPlace("book.xhtml", spineIndexOf, "epubcfi(/6/8!/4/2)"),
+      tocPlace("book.xhtml", spineIndexOf, "epubcfi(/6/8!/4/40)"),
+      tocPlace("book.xhtml", spineIndexOf, "epubcfi(/6/8!/4/90)")
+    ];
+    expect(made[1]).toEqual({ spine: 3, anchor: null, cfi: "epubcfi(/6/8!/4/2)" });
+    const asked: string[] = [];
+    const reached = (place: string) => {
+      asked.push(place);
+      return place !== "epubcfi(/6/8!/4/90)";
+    };
+    expect(tocEntryAt(made, 3, reached)).toBe(2);
+    expect(asked).toEqual(["epubcfi(/6/8!/4/2)", "epubcfi(/6/8!/4/40)", "epubcfi(/6/8!/4/90)"]);
+    expect(tocEntryAt(made, 3, never)).toBe(0);
+    expect(tocEntryAt(made, 4, never)).toBe(3);
+    // An entry with an anchor keeps its anchor; a CFI given with it is not needed.
+    expect(tocPlace("book.xhtml#c2", spineIndexOf, "epubcfi(/6/8!/4/40)")).toEqual({ spine: 3, anchor: "c2" });
+  });
 });

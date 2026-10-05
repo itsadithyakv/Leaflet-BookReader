@@ -26,17 +26,20 @@ import {
   placeAt,
   planDraw,
   scrollForAnchor,
+  sharpEnough,
   type Anchor,
   type PageSize,
-  type Place
+  type Place,
+  type StoredPlace
 } from "./pageScroll";
-import { canvasPixelRatio, scaleFor, type PageFit } from "./pageZoom";
+import { MAX_CANVAS_PIXELS, canvasPixelRatio, scaleFor, type PageFit } from "./pageZoom";
 import type { PdfSearchHit } from "./pdfSearch";
-import { findMatches, matchRects, type MeasureText, type PageRect } from "./pdfText";
+import { currentMark, pageMarks, type MeasureText, type PageRect } from "./pdfText";
+import { PdfLinkAreas, bindLinkPointer } from "./PdfLinkAreas";
+import type { PageLink } from "./pdfLinks";
 import { bindTextSelection } from "./pdfTextLayer";
 
-/** A place as it is stored and passed about: the page counted from 1. */
-export type StoredPlace = { page: number; fraction: number; extra: number };
+export { placeToOpen, type StoredPlace } from "./pageScroll";
 
 /**
  * Where the scroll opens. A stored place is where the top of the window was;
@@ -84,19 +87,29 @@ type PdfScrollPagesProps = {
   onPlace: (place: StoredPlace) => void;
   /** The reader scrolled: they are reading. */
   onActivity: () => void;
+  /** A link on a page was clicked, or followed from the keyboard. */
+  onLink: (link: PageLink) => void;
 };
 
 /**
  * A page's canvas holds no more than this many device pixels in this layout,
- * half what a page shown alone may, as several are held at once: a page
- * zoomed far in is drawn a little softer here than in the paged layout.
+ * half what a page shown alone may, as several are held at once...
  */
 const PAGE_PIXELS = 1 << 23;
 /**
- * Everything drawn, and the page being drawn counted twice (its sheet out of
- * sight and the copy toning reads back), stays within this: about 128 MB.
+ * ...except the page being read (the one across the reader's line), which
+ * may hold what a page shown alone may. On a 4K screen at 200% a page at fit
+ * width wants 11.5M pixels, and under the lower cap the page being read was
+ * drawn at 1.70 device pixels for each of the screen's 2.
  */
-const PIXEL_BUDGET = 1 << 25;
+const READING_PIXELS = MAX_CANVAS_PIXELS;
+/**
+ * Everything drawn, and the page being drawn counted twice (its sheet out of
+ * sight and the copy toning reads back), stays within this: 50.3M pixels,
+ * about 200 MB. It was 33.5M (134 MB) before the page being read was given
+ * more; nothing nears it unless a page is large enough to meet the caps.
+ */
+const PIXEL_BUDGET = 3 << 24;
 /** A page's top is put this far below the top of the window by "go to". */
 const TOP_INSET = 12;
 /** Drawing waits this long after a jump, in case another follows. */
@@ -105,8 +118,10 @@ const PLACE_SAVE_MS = 400;
 const ACTIVITY_EVERY_MS = 4000;
 const MARKS_PER_PAGE = 400;
 
-type Drawn = { pixels: number; key: string };
-type Marks = { query: string; pages: Map<number, PageRect[][]> };
+type Drawn = { pixels: number; key: string; cap: number };
+/** A page's marks: a list for each match, and whether the last is the end of one begun on the page before. */
+type PageMarks = { rects: PageRect[][]; head: boolean };
+type Marks = { query: string; pages: Map<number, PageMarks> };
 
 type ScrollPageProps = {
   index: number;
@@ -121,14 +136,30 @@ type ScrollPageProps = {
   failed: boolean;
   marks: PageRect[][] | undefined;
   currentMark: number | null;
+  links: PageLink[] | undefined;
+  onLink: (link: PageLink) => void;
   register: (index: number, canvas: HTMLCanvasElement | null, layer: HTMLDivElement | null) => void;
 };
+
+const NO_LINKS: PageLink[] = [];
 
 /** One page of the column: its canvas, the search's marks and its text layer. */
 const ScrollPage = memo((props: ScrollPageProps) => {
   const { index, register } = props;
   const canvas = useRef<HTMLCanvasElement>(null);
   const layer = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLDivElement>(null);
+  const links = props.links ?? NO_LINKS;
+  const linksRef = useRef(links);
+  linksRef.current = links;
+  const onLinkRef = useRef(props.onLink);
+  onLinkRef.current = props.onLink;
+
+  // A click on one of the page's links (readers/PdfLinkAreas.tsx).
+  useEffect(
+    () => (box.current ? bindLinkPointer(box.current, () => linksRef.current, (link) => onLinkRef.current(link)) : undefined),
+    []
+  );
 
   useEffect(() => {
     register(index, canvas.current, layer.current);
@@ -141,6 +172,7 @@ const ScrollPage = memo((props: ScrollPageProps) => {
 
   return (
     <div
+      ref={box}
       className="pdf-reader-page pdf-scroll-page"
       data-page={index + 1}
       data-dark={props.dark ? "true" : undefined}
@@ -176,6 +208,7 @@ const ScrollPage = memo((props: ScrollPageProps) => {
           ))
         )}
       </div>
+      {links.length > 0 && <PdfLinkAreas links={links} onFollow={props.onLink} />}
       <div ref={layer} className="textLayer" />
     </div>
   );
@@ -204,12 +237,13 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
   const [near, setNear] = useState({ first: 0, last: 0 });
   const [, bumpDrawn] = useReducer((version: number) => version + 1, 0);
   const [marks, setMarks] = useState<Marks>({ query: "", pages: new Map() });
+  const [links, setLinks] = useState<Map<number, PageLink[]>>(() => new Map());
 
   const canvasesRef = useRef(new Map<number, HTMLCanvasElement>());
   const layersRef = useRef(new Map<number, HTMLDivElement>());
   const drawnRef = useRef(new Map<number, Drawn>());
   const failedRef = useRef(new Set<string>());
-  const jobRef = useRef<{ index: number; key: string; job: PageJob<RenderedPage> } | null>(null);
+  const jobRef = useRef<{ index: number; key: string; cap: number; job: PageJob<RenderedPage> } | null>(null);
   const textJobsRef = useRef(new Map<number, PageJob<void>>());
   const anchorRef = useRef<Anchor | null>(null);
   // Across the page, for a zoom about the pointer: the page under it and how far across.
@@ -286,11 +320,23 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
   /** The top of the window, down the column. */
   const viewTop = useCallback(() => (stageRef.current?.scrollTop ?? 0) - columnTop(), [columnTop, stageRef]);
 
-  const pixelsOf = useCallback((index: number) => {
-    const box = boxOfRef.current(index);
-    const ratio = canvasPixelRatio(box.width, box.height, window.devicePixelRatio || 1, PAGE_PIXELS);
-    return Math.floor(box.width * ratio) * Math.floor(box.height * ratio);
-  }, []);
+  /** The most pixels a page's canvas may hold: more for the page being read. */
+  const capOf = useCallback((index: number) => (index === currentRef.current ? READING_PIXELS : PAGE_PIXELS), []);
+
+  /** Whether a drawing made under `cap` is as sharp as the page should now be. */
+  const sharp = useCallback(
+    (index: number, cap: number) => sharpEnough(boxOfRef.current(index), window.devicePixelRatio || 1, cap, capOf(index)),
+    [capOf]
+  );
+
+  const pixelsOf = useCallback(
+    (index: number) => {
+      const box = boxOfRef.current(index);
+      const ratio = canvasPixelRatio(box.width, box.height, window.devicePixelRatio || 1, capOf(index));
+      return Math.floor(box.width * ratio) * Math.floor(box.height * ratio);
+    },
+    [capOf]
+  );
 
   const layText = useCallback(
     (index: number) => {
@@ -351,10 +397,11 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
     );
     const running = jobRef.current;
     if (running) {
-      if (running.key === keyOf(running.index) && wanted.includes(running.index)) {
+      if (running.key === keyOf(running.index) && sharp(running.index, running.cap) && wanted.includes(running.index)) {
         return;
       }
-      // The page being drawn has scrolled away, or is for a size or finish no longer wanted.
+      // The page being drawn has scrolled away, or is for a size or finish no
+      // longer wanted, or has become the page being read and is owed more pixels.
       jobRef.current = null;
       running.job.cancel();
     }
@@ -363,7 +410,10 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
     const fresh = new Set<number>();
     drawnRef.current.forEach((record, index) => {
       drawn.set(index, record.pixels);
-      if (record.key === keyOf(index)) {
+      // A page drawn for its neighbours' cap is drawn again when it becomes
+      // the one being read, if that would make it sharper; its soft drawing
+      // stays up meanwhile. One drawn sharp is good for as long as it is kept.
+      if (record.key === keyOf(index) && sharp(index, record.cap)) {
         fresh.add(index);
       }
     });
@@ -388,19 +438,20 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
       return;
     }
     const key = keyOf(index);
+    const cap = capOf(index);
     const job = pdf.draw(index + 1, canvas, {
       scale: scaleOfRef.current(index),
       tone: toneRef.current,
-      maxPixels: PAGE_PIXELS
+      maxPixels: cap
     });
-    jobRef.current = { index, key, job };
+    jobRef.current = { index, key, cap, job };
     job.promise
       .then((page) => {
         if (jobRef.current?.job !== job) {
           return;
         }
         jobRef.current = null;
-        drawnRef.current.set(index, { pixels: canvas.width * canvas.height, key });
+        drawnRef.current.set(index, { pixels: canvas.width * canvas.height, key, cap });
         const known = sizesRef.current.get(index);
         if (!known || known.width !== page.width || known.height !== page.height) {
           sizesRef.current.set(index, { width: page.width, height: page.height });
@@ -420,7 +471,7 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
         }
         pump();
       });
-  }, [keyOf, layText, pdf, pixelsOf, release, stageRef, viewTop]);
+  }, [capOf, keyOf, layText, pdf, pixelsOf, release, sharp, stageRef, viewTop]);
 
   /**
    * Holds drawing back for a moment, because more of the same is likely to
@@ -477,7 +528,7 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
         placeTimerRef.current = null;
         const place = topPlaceRef.current;
         if (place) {
-          callbacks.current.onPlace({ ...place, page: place.page + 1 });
+          callbacks.current.onPlace({ ...place, page: place.page + 1, current: currentRef.current + 1 });
         }
       }, PLACE_SAVE_MS);
       // A jump (a drag of the scrollbar, a leap to a page) draws nothing
@@ -695,6 +746,38 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
     read(false);
   }, [read, viewportRevision]);
 
+  // The links of the pages in the document; let go of with the page.
+  useEffect(() => {
+    let stale = false;
+    setLinks((held) => {
+      let changed = false;
+      const kept = new Map<number, PageLink[]>();
+      held.forEach((value, index) => {
+        if (index >= near.first && index <= near.last) {
+          kept.set(index, value);
+        } else {
+          changed = true;
+        }
+      });
+      return changed ? kept : held;
+    });
+    for (let index = near.first; index <= near.last; index += 1) {
+      void pdf
+        .links(index + 1)
+        .then((found) => {
+          if (stale || found.length === 0) {
+            return;
+          }
+          setLinks((held) => (held.get(index) === found ? held : new Map(held).set(index, found)));
+        })
+        .catch(() => undefined);
+    }
+    return () => {
+      stale = true;
+    };
+  }, [near, pdf]);
+  const followLink = useCallback((link: PageLink) => callbacks.current.onLink(link), []);
+
   // What the search found on the pages in the document.
   const { searchQuery, activeHit } = props;
   useEffect(() => {
@@ -706,10 +789,17 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
     if (!measureContextRef.current) {
       measureContextRef.current = window.document.createElement("canvas").getContext("2d");
     }
+    // A phrase may run over a page break, so each page is marked with its neighbours' text to hand.
+    const textOf = (page: number) =>
+      page >= 1 && page <= pageCount
+        ? pdf.pageText(page).then(
+            (text) => text.joined.text,
+            () => null
+          )
+        : Promise.resolve(null);
     for (let index = near.first; index <= near.last; index += 1) {
-      void pdf
-        .pageText(index + 1)
-        .then((text) => {
+      void Promise.all([pdf.pageText(index + 1), textOf(index), textOf(index + 2)])
+        .then(([text, before, after]) => {
           if (stale) {
             return;
           }
@@ -725,12 +815,10 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
                 return context.measureText(piece).width;
               }
             : undefined;
-          const rects = findMatches(text.joined.text, searchQuery, MARKS_PER_PAGE).map((match) =>
-            matchRects(text.joined, match, text.transform, text.width, text.height, measure)
-          );
+          const found = pageMarks(text, searchQuery, MARKS_PER_PAGE, before, after, measure);
           setMarks((held) => {
-            const pages = held.query === searchQuery ? new Map(held.pages) : new Map<number, PageRect[][]>();
-            pages.set(index, rects);
+            const pages = held.query === searchQuery ? new Map(held.pages) : new Map<number, PageMarks>();
+            pages.set(index, found);
             return { query: searchQuery, pages };
           });
         })
@@ -739,7 +827,7 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
     return () => {
       stale = true;
     };
-  }, [near, pdf, searchQuery]);
+  }, [near, pageCount, pdf, searchQuery]);
 
   // The result chosen: its page is gone to by the reader's view; here its
   // mark is brought to the reader's line once the page's marks are known.
@@ -748,7 +836,7 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
       return;
     }
     const key = `${activeHit.page}:${activeHit.nth}:${searchQuery}`;
-    const rect = marks.pages.get(activeHit.page - 1)?.[activeHit.nth]?.[0];
+    const rect = marks.pages.get(activeHit.page - 1)?.rects[activeHit.nth]?.[0];
     const stage = stageRef.current;
     if (shownHitRef.current === key || !rect || !stage) {
       return;
@@ -845,7 +933,7 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
         placeTimerRef.current = null;
         const place = topPlaceRef.current;
         if (place) {
-          callbacks.current.onPlace({ ...place, page: place.page + 1 });
+          callbacks.current.onPlace({ ...place, page: place.page + 1, current: currentRef.current + 1 });
         }
       }
     };
@@ -898,8 +986,10 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
         dark={tone?.dark ?? false}
         drawn={record !== undefined}
         failed={failedRef.current.has(`${index}|${scaleOf(index)}|${toneKey}`)}
-        marks={marks.query === searchQuery ? marks.pages.get(index) : undefined}
-        currentMark={activeHit && activeHit.page === index + 1 ? activeHit.nth : null}
+        marks={marks.query === searchQuery ? marks.pages.get(index)?.rects : undefined}
+        currentMark={marks.query === searchQuery ? currentMark(activeHit, index + 1, marks.pages.get(index)) : null}
+        links={links.get(index)}
+        onLink={followLink}
         register={register}
       />
     );
@@ -917,24 +1007,3 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
   );
 });
 PdfScrollPages.displayName = "PdfScrollPages";
-
-/**
- * Where to open a book: the place stored for it when that is at the page its
- * progress names (or beside it: the top of the window is often on the page
- * before the one the reader is on), and the top of that page otherwise, as
- * when the progress came from another device.
- */
-export const placeToOpen = (stored: unknown, page: number): StoredPlace => {
-  const place = stored as Partial<StoredPlace> | null | undefined;
-  if (
-    place &&
-    typeof place === "object" &&
-    Number.isInteger(place.page) &&
-    Math.abs(Number(place.page) - page) <= 1 &&
-    Number.isFinite(place.fraction) &&
-    Number.isFinite(place.extra)
-  ) {
-    return { page: Number(place.page), fraction: Number(place.fraction), extra: Number(place.extra) };
-  }
-  return { page, fraction: 0, extra: 0 };
-};

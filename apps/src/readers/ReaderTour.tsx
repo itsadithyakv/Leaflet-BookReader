@@ -54,7 +54,24 @@ export const saveStartMode = (mode: StartMode) => {
   }
 };
 
-type Step = { title: string; body: ReactNode; art: ReactNode };
+type Step = { title: string; body: ReactNode; art: ReactNode; /** The page behind is left undimmed: the step points at something on it. */ clear?: boolean };
+
+/** The step about the chapter list. While it shows, the reader lights the list's handle and shows the list itself. */
+export const TOUR_CONTENTS_STEP = 1;
+
+/** A page with the Contents handle on its left edge. */
+const ContentsArt = () => (
+  <div className="reader-tour-contents" aria-hidden="true">
+    <span className="reader-tour-contents-tab">
+      <UiIcon name="list" size={11} />
+    </span>
+    <div className="reader-tour-page">
+      {[92, 100, 84, 97, 70].map((width, line) => (
+        <span key={line} className="reader-tour-line" style={{ width: `${width}%` }} />
+      ))}
+    </div>
+  </div>
+);
 
 /** A few lines of a page, with Dotty beside one of them. */
 const PageArt = ({ moving = false }: { moving?: boolean }) => (
@@ -96,6 +113,18 @@ export const ReaderTour = ({ paged, onStep, onClose, onTrySmartRead }: ReaderTou
         <>
           The glowing dot at the left of the page is Dotty. It keeps your place as you read, and you can drag it
           to any line to mark where you are.
+        </>
+      )
+    },
+    {
+      title: "The chapter list",
+      clear: true,
+      art: <ContentsArt />,
+      body: (
+        <>
+          The <strong>Contents</strong> tab on the left edge of the window opens the chapter list, and is always
+          there. So does a click on the chapter's name at the foot of the page, or <Keycap>C</Keycap>. Opened that
+          way the list stays until you shut it.
         </>
       )
     },
@@ -183,7 +212,7 @@ export const ReaderTour = ({ paged, onStep, onClose, onTrySmartRead }: ReaderTou
 
   const current = steps[step];
   return (
-    <div className="reader-tour" role="presentation" data-step={step} onKeyDown={onKeyDown}>
+    <div className="reader-tour" role="presentation" data-step={step} data-clear={current.clear ? "true" : undefined} onKeyDown={onKeyDown}>
       <div
         ref={cardRef}
         className="reader-tour-card reader-panel reader-border"

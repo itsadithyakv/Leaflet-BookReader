@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Book } from "@shared/models/book";
+import { accountService } from "../services/accountService";
 import { bookService } from "../services/bookService";
 import {
   createComicPageSource,
@@ -23,9 +24,12 @@ import {
   parsePageEntry,
   readingKeyAction,
   sideStep,
+  wheelKey,
+  type KeyAction,
   type ReadingDirection,
   type StageMetrics
 } from "../readers/pageKeys";
+import { WHEEL_AT_REST, WHEEL_QUIET_MS, wheelTurn, type WheelGesture } from "../readers/pageTurn";
 import {
   anchoredScroll,
   scaleFor,
@@ -44,6 +48,9 @@ import {
 } from "../readers/pageReaderKeys";
 import { pagesLabel, roomForSpread, turnFrom } from "../readers/pageSpread";
 import { currentOutlineIndex, type OutlineEntry } from "../readers/pdfOutline";
+import { CHAPTERS_KEY_PREFIX, packChapters, readChapters, unpackChapters } from "../readers/pdfChapters";
+import { entryFor, goToHint, pageName, pageTitle, placeLabel as printedPlace, usefulLabels } from "../readers/pageLabels";
+import { COVER_WIDTH } from "../readers/pageCover";
 import {
   PdfScrollPages,
   placeToOpen,
@@ -51,13 +58,17 @@ import {
   type ScrollPagesHandle,
   type StoredPlace
 } from "../readers/PdfScrollPages";
-import { placeWithin } from "../readers/pageScroll";
+import { lineKey, parseLineKey, placeWithin } from "../readers/pageScroll";
+import { NO_JUMPS, noteJump, stepBack, stepForward, type JumpHistory } from "../readers/jumpHistory";
+import { PdfLinkAreas, bindLinkPointer } from "../readers/PdfLinkAreas";
+import type { PageLink } from "../readers/pdfLinks";
 import { PdfSearchPanel } from "../readers/PdfSearchPanel";
 import type { PdfSearchHit } from "../readers/pdfSearch";
-import { findMatches, matchRects, type MeasureText, type PageRect } from "../readers/pdfText";
+import { currentMark, pageMarks, type MeasureText, type PageRect } from "../readers/pdfText";
 import { bindTextSelection } from "../readers/pdfTextLayer";
 import { ShortcutsSheet } from "../readers/ShortcutsSheet";
 import { ReaderAmbience, ReaderAmbienceRow, ambiencePopoverOpen, closeAmbiencePopover, useAmbiencePopoverOpen } from "../ambience";
+import { Redo2, Undo2 } from "lucide-react";
 import { UiIcon } from "../components/UiIcon";
 import { useAppearanceStore } from "../store/appearanceStore";
 import { useLibraryStore } from "../store/libraryStore";
@@ -130,9 +141,14 @@ const storedFit = (preferences: PageReaderPreferences | null, kind: string): Pag
 };
 
 /** The search's marks on one page: a list of rectangles for each match, in order. */
-type PageMarks = { page: number; rects: PageRect[][] };
+type PageMarks = { page: number; rects: PageRect[][]; head: boolean };
 
-const NO_MARKS: PageMarks = { page: 0, rects: [] };
+const NO_MARKS: PageMarks = { page: 0, rects: [], head: false };
+
+/** The links of one page (readers/pdfLinks.ts). */
+type PageLinks = { page: number; items: PageLink[] };
+
+const NO_PAGE_LINKS: PageLinks = { page: 0, items: [] };
 
 /** A place on the page to keep under a place in the window while the page changes size. */
 type ZoomAnchor = { fx: number; fy: number; px: number; py: number };
@@ -180,6 +196,14 @@ const readPageBookmarks = (key: string): PageBookmark[] => parsePageBookmarks(re
 // Rows are absolutely positioned so the sidebar can virtualize a
 // thousand-page PDF, or a table of contents as long, instead of mounting a
 // button for each.
+/**
+ * How long after a PDF with no contents of its own opens before its chapters
+ * are looked for: the first page is up and the reader's first turn is not
+ * queued behind the reading.
+ */
+const CHAPTERS_AFTER_MS = 1200;
+/** How long after a PDF with no cover opens before its first page is drawn for one. */
+const COVER_AFTER_MS = 2500;
 const PAGE_ROW_HEIGHT = 44;
 const PAGE_ROW_GAP = 8;
 const PAGE_ROW_OVERSCAN = 6;
@@ -231,6 +255,9 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
   const pendingProgressRef = useRef<number | null>(null);
   const lastKeyTurnRef = useRef(0);
   const clickedControlRef = useRef<Element | null>(null);
+  // Back to where you were (readers/jumpHistory.ts): the lines left by jumps, for this visit.
+  const [jumps, setJumps] = useState<JumpHistory>(NO_JUMPS);
+  const jumpsRef = useRef<JumpHistory>(NO_JUMPS);
   const pageListRef = useRef<HTMLDivElement>(null);
   // Which end of the next page to show: the top, or the bottom when the
   // reader came to it going backwards; or the line it was left at.
@@ -280,6 +307,12 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
   // What the sidebar lists. Not chosen yet: the PDF's contents when it has any.
   const [sidebarTab, setSidebarTab] = useState<"contents" | "pages" | null>(null);
   const [outline, setOutline] = useState<OutlineEntry[]>([]);
+  // The numbers printed on the pages, for a PDF that says them (readers/pageLabels.ts); null otherwise.
+  const [labels, setLabels] = useState<string[] | null>(null);
+  // A PDF with no contents of its own has its chapters looked for
+  // (readers/pdfChapters.ts). "made": the list is Leaflet's; otherwise what
+  // the sidebar says in place of one, if anything.
+  const [chapters, setChapters] = useState<"made" | "looking" | "none" | "scan" | null>(null);
   const [zoomPanelOpen, setZoomPanelOpen] = useState(false);
   const [bookmarkPanelOpen, setBookmarkPanelOpen] = useState(false);
   const [morePanelOpen, setMorePanelOpen] = useState(false);
@@ -290,6 +323,8 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
   const [searchQuery, setSearchQuery] = useState("");
   const [activeHit, setActiveHit] = useState<PdfSearchHit | null>(null);
   const [marks, setMarks] = useState<PageMarks>(NO_MARKS);
+  const [links, setLinks] = useState<PageLinks>(NO_PAGE_LINKS);
+  const pageBoxRef = useRef<HTMLDivElement>(null);
   const [goToOpen, setGoToOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [goToEntry, setGoToEntry] = useState("");
@@ -432,7 +467,7 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
     if (!(box.height > 0)) {
       return;
     }
-    pagePlaceRef.current = placeWithin(page, stage.getBoundingClientRect().top - box.top, box.height);
+    pagePlaceRef.current = { ...placeWithin(page, stage.getBoundingClientRect().top - box.top, box.height), current: page };
     if (pagePlaceTimerRef.current !== null) {
       window.clearTimeout(pagePlaceTimerRef.current);
     }
@@ -443,6 +478,143 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
       }
     }, PLACE_SAVE_MS);
   }, [savePlace]);
+
+  /**
+   * The reader's line now, as the jump history keeps it (readers/pageScroll.ts
+   * `lineKey`): the page across a third of the way down the window and how
+   * far down that page; null while there is no page to say it of.
+   */
+  const lineNow = useCallback((): string | null => {
+    if (scrolling) {
+      const line = scrollPagesRef.current?.line();
+      return line ? lineKey(line.page, line.fraction) : null;
+    }
+    const stage = scrollRef.current;
+    const box = canvasRef.current?.getBoundingClientRect();
+    const page = lastScrolledPageRef.current;
+    if (!stage || !box || !(box.height > 0) || page === null) {
+      return null;
+    }
+    return lineKey(page, (stage.getBoundingClientRect().top + stage.clientHeight / 3 - box.top) / box.height);
+  }, [scrolling]);
+
+  /** Puts a line back where it was read: a third of the way down the window. */
+  const goToLine = useCallback(
+    (key: string) => {
+      const line = parseLineKey(key);
+      if (!line || pageCount === 0) {
+        return;
+      }
+      markReadingActivity();
+      const page = Math.min(pageCount, line.page);
+      if (scrolling) {
+        setPageNumber(page);
+        // The column puts a page's very top by the top of the window; anything further down it, on the line.
+        scrollPagesRef.current?.goTo(page, Math.max(line.fraction, 1e-6));
+        return;
+      }
+      const stage = scrollRef.current;
+      const canvas = canvasRef.current;
+      if (stage && canvas && lastScrolledPageRef.current === page && page === pageNumber) {
+        // The page is already up: only its place in the window changes.
+        const box = canvas.getBoundingClientRect();
+        const pageStart = box.top - stage.getBoundingClientRect().top + stage.scrollTop;
+        stage.scrollTop = Math.max(0, pageStart + box.height * line.fraction - stage.clientHeight / 3);
+        notePagePlace();
+        return;
+      }
+      landRef.current = { fraction: line.fraction, extra: 0, atLine: true };
+      setPageNumber(page);
+    },
+    [markReadingActivity, notePagePlace, pageCount, pageNumber, scrolling]
+  );
+
+  const applyJumps = useCallback((next: JumpHistory) => {
+    jumpsRef.current = next;
+    setJumps(next);
+  }, []);
+
+  /**
+   * The reader is about to be taken elsewhere (go to a page, the contents, a
+   * bookmark, a search result, a link, Home or End): the line being left is
+   * kept, so Back returns to it. Turning pages and scrolling are reading, and
+   * add nothing.
+   */
+  const noteJumpFromHere = useCallback(() => {
+    const next = noteJump(jumpsRef.current, lineNow());
+    if (next !== jumpsRef.current) {
+      applyJumps(next);
+    }
+  }, [applyJumps, lineNow]);
+
+  /** Goes to a page as a jump: Back returns to the line it was made from. */
+  const jumpToPage = useCallback(
+    (page: number) => {
+      noteJumpFromHere();
+      goToPage(page);
+    },
+    [goToPage, noteJumpFromHere]
+  );
+
+  const goBack = useCallback(() => {
+    const step = stepBack(jumpsRef.current, lineNow());
+    if (step) {
+      applyJumps(step.history);
+      goToLine(step.target);
+    }
+  }, [applyJumps, goToLine, lineNow]);
+
+  const goForward = useCallback(() => {
+    const step = stepForward(jumpsRef.current, lineNow());
+    if (step) {
+      applyJumps(step.history);
+      goToLine(step.target);
+    }
+  }, [applyJumps, goToLine, lineNow]);
+
+  /**
+   * Follows a link on a page (readers/pdfLinks.ts). One inside the document
+   * is a jump, to the destination's height on its page when it gives one; a
+   * web address opens in the reader's browser, through the opener the text
+   * reader uses for a book's links, never in this window.
+   */
+  const followLink = useCallback(
+    (link: PageLink) => {
+      const target = link.target;
+      if (target.kind === "web") {
+        void accountService.openLink(target.url).catch(() => undefined);
+        return;
+      }
+      if (target.kind === "step") {
+        if (target.to === "next" || target.to === "prev") {
+          turnPage(target.to === "next" ? 1 : -1);
+        } else {
+          jumpToPage(target.to === "first" ? 1 : pageCount);
+        }
+        return;
+      }
+      if (!pdf) {
+        return;
+      }
+      // Noted now, while the line being left is still on the page.
+      noteJumpFromHere();
+      void pdf
+        .linkPlace(target)
+        .catch(() => null)
+        .then((fraction) => {
+          // The top of a page is the page: only a place further down it is put on the reader's line.
+          if (fraction === null || fraction < 0.02) {
+            goToPage(target.page);
+          } else {
+            goToLine(lineKey(target.page, fraction));
+          }
+        });
+    },
+    [goToLine, goToPage, jumpToPage, noteJumpFromHere, pageCount, pdf, turnPage]
+  );
+  const followLinkRef = useRef(followLink);
+  followLinkRef.current = followLink;
+  const linksRef = useRef<PageLink[]>([]);
 
   /** The room the page has: the stage, less its padding and the page's own border. */
   const measureRoom = useCallback(() => {
@@ -479,7 +651,9 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
       return {
         ...metrics,
         padTop: Number.parseFloat(style.paddingTop) || 0,
-        padBottom: Math.max(0, (Number.parseFloat(style.paddingBottom) || 0) - DOCK_CLEAR)
+        padBottom: Math.max(0, (Number.parseFloat(style.paddingBottom) || 0) - DOCK_CLEAR),
+        padLeft: Number.parseFloat(style.paddingLeft) || 0,
+        padRight: Number.parseFloat(style.paddingRight) || 0
       };
     },
     [scrolling]
@@ -598,9 +772,10 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
     if (pageCount === 0) {
       return;
     }
-    setGoToEntry(String(pageNumber));
+    // The page in view as the field would take it back: its printed number.
+    setGoToEntry(entryFor(pageNumber, pageCount, labels));
     setGoToOpen(true);
-  }, [pageCount, pageNumber]);
+  }, [labels, pageCount, pageNumber]);
 
   const openSearch = useCallback(() => {
     setSearchOpen(true);
@@ -617,9 +792,9 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
     (hit: PdfSearchHit) => {
       shownHitRef.current = null;
       setActiveHit(hit);
-      goToPage(hit.page);
+      jumpToPage(hit.page);
     },
-    [goToPage]
+    [jumpToPage]
   );
 
   const openReaderSidebar = useCallback(() => {
@@ -719,26 +894,120 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
 
   // The PDF's own table of contents. The one thing read from the whole
   // document on opening; a book closed meanwhile stops the lookups.
+  //
+  // A PDF without one has its chapters found from its pages: a contents page
+  // of links, or headings by their type. That reads every page's text, so it
+  // waits until the book is open and drawn, goes a page at a time between the
+  // reader's own page turns, stops when the book is closed, and is kept for
+  // the book on this device so it is done once.
   useEffect(() => {
     setOutline([]);
+    setChapters(null);
     if (!pdf) {
       return;
     }
     let wanted = true;
+    const findChapters = async () => {
+      const key = `${CHAPTERS_KEY_PREFIX}${book.id}`;
+      let kept: string | null = null;
+      try {
+        kept = localStorage.getItem(key);
+      } catch {
+        // Storage that cannot be read holds nothing.
+      }
+      let found = unpackChapters(kept, pageCount);
+      if (!found) {
+        setChapters("looking");
+        await new Promise((resolve) => window.setTimeout(resolve, CHAPTERS_AFTER_MS));
+        found = await readChapters({
+          pageCount,
+          factsOf: (page) => pdf.chapterFacts(page),
+          stillWanted: () => wanted,
+          breathe: () => new Promise((resolve) => window.setTimeout(resolve, 0))
+        });
+        if (!found || !wanted) {
+          return;
+        }
+        try {
+          localStorage.setItem(key, packChapters(found, pageCount));
+        } catch {
+          // Looked for again next time.
+        }
+      }
+      if (!wanted) {
+        return;
+      }
+      if (found.entries.length > 0) {
+        setOutline(found.entries);
+        setChapters("made");
+      } else {
+        setChapters(found.scan ? "scan" : "none");
+      }
+    };
     void pdf
       .outline(() => wanted)
       .then((entries) => {
-        if (wanted && entries && entries.length > 0) {
-          setOutline(entries);
+        if (!wanted || !entries) {
+          return undefined;
         }
+        if (entries.length > 0) {
+          setOutline(entries);
+          return undefined;
+        }
+        return findChapters();
       })
       .catch(() => {
         // A PDF whose outline cannot be read is one without an outline.
+        if (wanted) {
+          setChapters(null);
+        }
       });
     return () => {
       wanted = false;
     };
-  }, [pdf]);
+  }, [pdf, book.id, pageCount]);
+
+  // The page numbers as the book prints them, where the PDF says: the dock,
+  // "go to page" and the lists then speak in those.
+  useEffect(() => {
+    setLabels(null);
+    if (!pdf) {
+      return;
+    }
+    let wanted = true;
+    void pdf.pageLabels().then((found) => {
+      if (wanted) {
+        setLabels(usefulLabels(found, pageCount));
+      }
+    });
+    return () => {
+      wanted = false;
+    };
+  }, [pdf, pageCount]);
+
+  // A PDF with no cover takes its first page for one (readers/pageCover.ts):
+  // once a lookup has had its turn at finding the book's own, and a while
+  // after the book is open, so the page being read is drawn first. Saved
+  // through the backend's checks, and never in place of a cover.
+  const savePageCover = useLibraryStore((state) => state.savePageCover);
+  useEffect(() => {
+    if (!pdf || book.coverUrl || !book.metadataCheckedAt) {
+      return;
+    }
+    let wanted = true;
+    const timer = window.setTimeout(() => {
+      void pdf
+        .coverImage(COVER_WIDTH)
+        .then((image) => (wanted && image ? savePageCover(book.id, image) : undefined))
+        .catch(() => {
+          // Tried again the next time the book is opened.
+        });
+    }, COVER_AFTER_MS);
+    return () => {
+      wanted = false;
+      window.clearTimeout(timer);
+    };
+  }, [pdf, book.id, book.coverUrl, book.metadataCheckedAt, savePageCover]);
 
   useEffect(() => {
     if (!book.coverUrl) {
@@ -916,9 +1185,16 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
     if (!measureContextRef.current) {
       measureContextRef.current = window.document.createElement("canvas").getContext("2d");
     }
-    void pdf
-      .pageText(pageNumber)
-      .then((text) => {
+    // A phrase may run over a page break: the page is marked with its neighbours' text to hand.
+    const textOf = (page: number) =>
+      page >= 1 && page <= pageCount
+        ? pdf.pageText(page).then(
+            (text) => text.joined.text,
+            () => null
+          )
+        : Promise.resolve(null);
+    void Promise.all([pdf.pageText(pageNumber), textOf(pageNumber - 1), textOf(pageNumber + 1)])
+      .then(([text, before, after]) => {
         if (stale) {
           return;
         }
@@ -937,10 +1213,7 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
               return context.measureText(piece).width;
             }
           : undefined;
-        const rects = findMatches(text.joined.text, searchQuery, MARKS_PER_PAGE).map((match) =>
-          matchRects(text.joined, match, text.transform, text.width, text.height, measure)
-        );
-        setMarks({ page: pageNumber, rects });
+        setMarks({ page: pageNumber, ...pageMarks(text, searchQuery, MARKS_PER_PAGE, before, after, measure) });
       })
       .catch(() => {
         if (!stale) {
@@ -950,7 +1223,40 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
     return () => {
       stale = true;
     };
-  }, [pageNumber, pdf, scrolling, searchQuery]);
+  }, [pageCount, pageNumber, pdf, scrolling, searchQuery]);
+
+  // A page at a time: the links of the page asked for (the scroll's pages each have their own).
+  useEffect(() => {
+    if (!pdf || scrolling) {
+      setLinks(NO_PAGE_LINKS);
+      return;
+    }
+    let stale = false;
+    void pdf
+      .links(pageNumber)
+      .then((items) => {
+        if (!stale) {
+          setLinks({ page: pageNumber, items });
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      stale = true;
+    };
+  }, [pageNumber, pdf, scrolling]);
+
+  // A click on one of them (readers/PdfLinkAreas.tsx).
+  useEffect(() => {
+    const box = pageBoxRef.current;
+    if (!pdf || scrolling || !box) {
+      return;
+    }
+    return bindLinkPointer(
+      box,
+      () => linksRef.current,
+      (link) => followLinkRef.current(link)
+    );
+  }, [loading, pdf, scrolling]);
 
   // The result chosen is brought into view on a page too large for the window.
   useEffect(() => {
@@ -1004,6 +1310,54 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
     stage.addEventListener("wheel", onWheel, { passive: false });
     return () => stage.removeEventListener("wheel", onWheel);
   }, [error, source]);
+
+  // A page at a time: the wheel turns the page, one page a gesture, and only
+  // a gesture that began with the page already at that edge (so scrolling
+  // down a tall page stops at its foot, and the next push turns). The gesture
+  // rule is the text reader's (readers/pageTurn.ts `wheelTurn`): what a
+  // trackpad sends on after the fingers lift cannot turn a second page. The
+  // wheel used to do nothing at a page's end, and nothing at all on a page
+  // that fits the window.
+  const turnPageRef = useRef(turnPage);
+  turnPageRef.current = turnPage;
+  useEffect(() => {
+    const stage = scrollRef.current;
+    if (!stage || !source || scrolling) {
+      return;
+    }
+    let seenAt = -Infinity;
+    let edge: (KeyAction & { kind: "turn" }) | null = null;
+    let pushed = 0;
+    let gesture: WheelGesture = WHEEL_AT_REST;
+    const onWheel = (event: WheelEvent) => {
+      // With Ctrl the wheel zooms.
+      const key = event.ctrlKey || event.metaKey ? null : wheelKey(event.deltaX, event.deltaY);
+      if (!key) {
+        return;
+      }
+      const now = performance.now();
+      if (now - seenAt > WHEEL_QUIET_MS) {
+        // A new gesture: is the page already as far that way as it goes?
+        const action = readingKeyAction({ key }, stageForKeys(stage), direction);
+        edge = action?.kind === "turn" ? action : null;
+        pushed = key === "ArrowDown" || key === "ArrowRight" ? 1 : -1;
+        gesture = WHEEL_AT_REST;
+      }
+      seenAt = now;
+      if (!edge) {
+        // Scrolling the page: the browser's own.
+        return;
+      }
+      event.preventDefault();
+      const next = wheelTurn(gesture, now, event.deltaX, event.deltaY, event.deltaMode);
+      gesture = next.gesture;
+      if (next.turn === pushed) {
+        turnPageRef.current(edge.step, edge.land);
+      }
+    };
+    stage.addEventListener("wheel", onWheel, { passive: false });
+    return () => stage.removeEventListener("wheel", onWheel);
+  }, [direction, error, loading, scrolling, source, stageForKeys]);
 
   useEffect(() => {
     if (!source) {
@@ -1217,6 +1571,10 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
           toggleCurrentBookmark();
         } else if (pressed === "shortcuts") {
           setShortcutsOpen(true);
+        } else if (pressed === "back") {
+          goBack();
+        } else if (pressed === "forward") {
+          goForward();
         } else if (pressed === "zoomIn") {
           zoomBy(1);
         } else if (pressed === "zoomOut") {
@@ -1241,6 +1599,15 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
       }
       event.preventDefault();
       if (action.kind === "scroll") {
+        if (pressed === "screenDown" || pressed === "screenUp") {
+          // A held Space is paced like a held turn: thirty screens a second
+          // is faster than a page can be drawn, let alone seen.
+          const now = performance.now();
+          if (event.repeat && now - lastKeyTurnRef.current < KEY_REPEAT_TURN_MS) {
+            return;
+          }
+          lastKeyTurnRef.current = now;
+        }
         markReadingActivity();
         if (action.top !== undefined) {
           stage.scrollTop = action.top;
@@ -1257,7 +1624,7 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
         return;
       }
       if (action.kind === "goto") {
-        goToPage(action.page === "first" ? 1 : pageCount);
+        jumpToPage(action.page === "first" ? 1 : pageCount);
         return;
       }
       const now = performance.now();
@@ -1280,6 +1647,9 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
     morePanelOpen,
     openGoTo,
     openSearch,
+    goBack,
+    goForward,
+    jumpToPage,
     keyContext,
     pageCount,
     scrolling,
@@ -1307,24 +1677,25 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
   }, []);
 
   const submitGoTo = () => {
-    const page = parsePageEntry(goToEntry, pageCount);
+    const page = parsePageEntry(goToEntry, pageCount, labels);
     if (page === null) {
       return;
     }
     setGoToOpen(false);
-    goToPage(page);
+    jumpToPage(page);
   };
 
   const displayModeClass = getDisplayModeClass(displayMode);
   const openingLabel = kind === "comic" ? "Opening comic…" : "Opening PDF…";
-  const goToInvalid = goToEntry.trim().length > 0 && parsePageEntry(goToEntry, pageCount) === null;
+  const goToInvalid = goToEntry.trim().length > 0 && parsePageEntry(goToEntry, pageCount, labels) === null;
   const leftStep = sideStep("left", direction);
   const rightStep = sideStep("right", direction);
   const canStep = (step: 1 | -1) => {
     const next = turnFrom(shownPages, step);
     return next >= 1 && next <= pageCount;
   };
-  const placeLabel = pagesLabel(shownPages, pageCount);
+  // "Page 6 (20 of 321)" where the PDF says 6 is printed on its twentieth page.
+  const placeLabel = shownPages.length === 1 ? printedPlace(shownPages[0], pageCount, labels) : pagesLabel(shownPages, pageCount);
   const stepTitle = (step: 1 | -1) => (step > 0 ? "Next page" : "Previous page");
   const chapterOf = (page: number) => {
     const index = currentOutlineIndex(outline, page);
@@ -1332,6 +1703,10 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
   };
   // Marks are for the page the canvas shows, which is the page before until the next is drawn.
   const shownMarks = marks.page === drawnPage ? marks.rects : [];
+  const shownCurrent = marks.page === drawnPage ? currentMark(activeHit, drawnPage, marks) : null;
+  // And so are links: the page before's must not be followed from the next page's picture.
+  const shownLinks = links.page === drawnPage ? links.items : NO_PAGE_LINKS.items;
+  linksRef.current = shownLinks;
 
   return (
     <div
@@ -1421,7 +1796,7 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
             </button>
             {zoomPanelOpen && (
               <div
-                className="absolute right-0 mt-3 w-64 rounded-xl border p-4 text-xs shadow-2xl reader-panel reader-border"
+                className="reader-menu absolute right-0 mt-3 w-64 rounded-xl border p-4 text-xs shadow-2xl reader-panel reader-border"
                 role="group"
                 aria-label="Page size"
               >
@@ -1483,7 +1858,7 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
               <span className="material-symbols-outlined">bookmark</span>
             </button>
             {bookmarkPanelOpen && (
-              <div className="absolute right-0 mt-3 w-72 rounded-xl border p-4 text-xs shadow-2xl reader-panel reader-border">
+              <div className="reader-menu absolute right-0 mt-3 w-72 rounded-xl border p-4 text-xs shadow-2xl reader-panel reader-border">
                 <div className="flex items-center justify-between">
                   <span className="text-xs uppercase tracking-widest reader-muted">Bookmarks</span>
                   <button
@@ -1512,7 +1887,7 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
                           className="page-reader-bookmark min-w-0 flex-1 rounded-lg border px-3 py-2 text-left text-[11px] transition reader-border reader-pill reader-icon reader-hover-accent"
                           aria-current={here ? "page" : undefined}
                           onClick={() => {
-                            goToPage(bookmark.page);
+                            jumpToPage(bookmark.page);
                             setBookmarkPanelOpen(false);
                           }}
                         >
@@ -1573,7 +1948,7 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
               <span className="material-symbols-outlined">more_horiz</span>
             </button>
             {morePanelOpen && (
-              <div className="absolute right-0 mt-3 w-72 rounded-xl border p-4 text-xs shadow-2xl reader-panel reader-border">
+              <div className="reader-menu absolute right-0 mt-3 w-72 rounded-xl border p-4 text-xs shadow-2xl reader-panel reader-border">
                 <div className="text-xs uppercase tracking-widest reader-muted">Reader</div>
                 <label className="mt-3 block">
                   <span className="text-[10px] uppercase tracking-widest reader-muted">Page finish</span>
@@ -1746,6 +2121,19 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
           ) : (
             <div className="text-xs uppercase tracking-[0.3em] reader-muted">Pages</div>
           )}
+          {chapters === "made" && tab === "contents" ? (
+            <p className="page-reader-outline-made">Chapters found by Leaflet</p>
+          ) : chapters === "looking" ? (
+            <p className="page-reader-outline-made" role="status">
+              Looking for chapters…
+            </p>
+          ) : chapters === "scan" ? (
+            <p className="page-reader-outline-made">
+              This PDF is pictures of pages with no text in it, so Leaflet cannot find its chapters.
+            </p>
+          ) : chapters === "none" ? (
+            <p className="page-reader-outline-made">This PDF has no contents list, and Leaflet found no chapter headings in it.</p>
+          ) : null}
           <div
             ref={pageListRef}
             className="mt-4 flex-1 overflow-y-auto pr-2"
@@ -1773,19 +2161,19 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
                       active ? "reader-chapter-active font-semibold" : ""
                     }`}
                     aria-current={active ? (entry ? "location" : "page") : undefined}
-                    title={entry ? `${entry.title} (page ${entry.page})` : undefined}
+                    title={entry ? `${entry.title} (page ${pageName(labels, entry.page)})` : undefined}
                     onClick={() => {
-                      goToPage(page);
+                      jumpToPage(page);
                       setSidebarOpen(false);
                     }}
                   >
                     {entry ? (
                       <>
                         <span className="page-reader-outline-title">{entry.title}</span>
-                        <span className="page-reader-outline-page">{entry.page}</span>
+                        <span className="page-reader-outline-page">{pageName(labels, entry.page)}</span>
                       </>
                     ) : (
-                      `Page ${page}`
+                      pageTitle(labels, page)
                     )}
                   </button>
                 );
@@ -1844,10 +2232,12 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
                     onScale={noteScale}
                     onPlace={savePlace}
                     onActivity={markReadingActivity}
+                    onLink={followLink}
                   />
                 )}
                 {!loading && source && !scrolling && (
                   <div
+                    ref={pageBoxRef}
                     className={`pdf-reader-page ${rendering ? "pdf-reader-page-rendering" : ""} ${
                       kind === "comic" ? "is-clickable" : ""
                     }`}
@@ -1875,9 +2265,7 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
                             rects.map((rect, part) => (
                               <span
                                 key={`${nth}-${part}`}
-                                className={`pdf-reader-mark ${
-                                  activeHit && activeHit.page === drawnPage && activeHit.nth === nth ? "is-current" : ""
-                                }`}
+                                className={`pdf-reader-mark ${shownCurrent === nth ? "is-current" : ""}`}
                                 style={{
                                   left: `${rect.left * 100}%`,
                                   top: `${rect.top * 100}%`,
@@ -1888,6 +2276,7 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
                             ))
                           )}
                         </div>
+                        {shownLinks.length > 0 && <PdfLinkAreas links={shownLinks} onFollow={followLink} />}
                         <div ref={textLayerRef} className="textLayer" />
                       </>
                     )}
@@ -1914,6 +2303,30 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
               {source && (
                 <div className="reader-chapter-dock pointer-events-none absolute bottom-4 left-1/2 z-30 flex -translate-x-1/2 items-center">
                   <div className="pointer-events-auto flex items-center gap-2 rounded-lg border px-2 py-1.5 text-xs uppercase tracking-widest reader-pill reader-border">
+                    {/* The way back after a jump, as in the text reader's dock (readers/ChapterDock.tsx). */}
+                    {jumps.back.length > 0 && (
+                      <button
+                        type="button"
+                        className="reader-mini-control page-reader-back"
+                        onClick={goBack}
+                        title="Back to where you were (Alt+Left)"
+                        aria-label="Back to where you were"
+                      >
+                        <Undo2 size={14} aria-hidden="true" />
+                        <span>Back</span>
+                      </button>
+                    )}
+                    {jumps.forward.length > 0 && (
+                      <button
+                        type="button"
+                        className="reader-mini-control"
+                        onClick={goForward}
+                        title="Forward again (Alt+Right)"
+                        aria-label="Forward again"
+                      >
+                        <Redo2 size={14} aria-hidden="true" />
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="reader-mini-control"
@@ -1937,11 +2350,12 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
                           id="page-reader-goto"
                           ref={goToInputRef}
                           className="page-reader-goto"
-                          inputMode="numeric"
+                          inputMode={labels ? "text" : "numeric"}
                           autoComplete="off"
                           value={goToEntry}
                           aria-invalid={goToInvalid}
-                          aria-label={`Go to page, 1 to ${pageCount}. Enter goes, Escape cancels`}
+                          aria-label={goToHint(pageCount, labels)}
+                          title={labels ? "A printed page number, or # and a number for a page of the file" : undefined}
                           onChange={(event) => setGoToEntry(event.target.value)}
                           onKeyDown={(event) => {
                             if (event.key === "Escape") {
@@ -1951,7 +2365,8 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
                           }}
                           onBlur={() => setGoToOpen(false)}
                         />
-                        <span>of {pageCount}</span>
+                        {/* A printed number is not "of" the file's count: that stays beside it, as in the dock. */}
+                        <span>{labels ? `(${pageNumber} of ${pageCount})` : `of ${pageCount}`}</span>
                       </form>
                     ) : (
                       <button

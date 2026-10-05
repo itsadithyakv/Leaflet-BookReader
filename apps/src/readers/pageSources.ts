@@ -28,6 +28,9 @@ import {
 } from "./pageTone";
 import { PDF_ACTUAL_SCALE, canvasPixelRatio, scaleFor, type FitOptions } from "./pageZoom";
 import { spreadOf } from "./pageSpread";
+import { destFraction, pageLinks, type LinkAnnotation, type PageLink } from "./pdfLinks";
+import { COVER_QUALITY, coverScale, looksBlank } from "./pageCover";
+import { digestPage, type PageFacts } from "./pdfChapters";
 import { PDF_EMPTY, pdfOpenMessage } from "./pdfOpenError";
 import { resolveOutline, type OutlineEntry, type OutlineNode } from "./pdfOutline";
 import { joinTextItems, mendDropCaps, type JoinedText, type TextItem } from "./pdfText";
@@ -70,8 +73,35 @@ export type PdfExtras = {
    * `stillWanted` is asked as it goes; null when it said no.
    */
   outline(stillWanted: () => boolean): Promise<OutlineEntry[] | null>;
+  /**
+   * The number printed on each page, where the document says (its page
+   * labels): one a page, "" for a page without. Null for a document that
+   * says nothing. Read once (readers/pageLabels.ts decides what to show).
+   */
+  pageLabels(): Promise<string[] | null>;
+  /**
+   * The first page as a picture, for a book with no cover: a JPEG `data:`
+   * URL about `width` pixels wide, on white whatever the finish. Null for a
+   * first page with nothing on it (readers/pageCover.ts).
+   */
+  coverImage(width: number): Promise<string | null>;
   /** A page's text. Kept for a bounded number of pages. */
   pageText(page: number): Promise<PdfPageText>;
+  /**
+   * What finding a document's chapters keeps of a page (readers/pdfChapters.ts):
+   * its sizes of type, its first and last lines and, near the front, its
+   * links. The page's text is read for it and let go, not kept, so reading a
+   * whole book this way does not push the pages being read out of the cache.
+   */
+  chapterFacts(page: number): Promise<PageFacts>;
+  /**
+   * A page's links (readers/pdfLinks.ts), each with where it is on the page
+   * and where it goes; empty for a page with none, or whose annotations
+   * cannot be read. Kept for a bounded number of pages.
+   */
+  links(page: number): Promise<PageLink[]>;
+  /** How far down its page (0 to 1) a link's destination is, or null when it only names the page. */
+  linkPlace(target: { page: number; left: number | null; top: number | null }): Promise<number | null>;
   /**
    * Lays the page's text, transparent, over its canvas so it can be selected
    * and copied. `scale` is the one the page was drawn at. Superseded by the
@@ -310,6 +340,48 @@ export const createPdfPageSource = async (bookId: string): Promise<PageSource> =
     return reading;
   };
 
+  // Links are read like text: a page at a time, when the page comes into
+  // view, and kept for as many pages.
+  const links = new Map<number, Promise<PageLink[]>>();
+  const readLinks = (pageNumber: number) => {
+    const kept = links.get(pageNumber);
+    if (kept) {
+      links.delete(pageNumber);
+      links.set(pageNumber, kept);
+      return kept;
+    }
+    const reading = (async (): Promise<PageLink[]> => {
+      try {
+        const page = await document.getPage(pageNumber);
+        const annotations = (await page.getAnnotations({ intent: "display" })) as LinkAnnotation[];
+        const viewport = page.getViewport({ scale: 1 });
+        return await pageLinks(
+          annotations,
+          viewport.transform,
+          viewport.width,
+          viewport.height,
+          {
+            getDestination: (name) => document.getDestination(name),
+            getPageIndex: (ref) => document.getPageIndex(ref)
+          },
+          document.numPages
+        );
+      } catch {
+        // A page whose annotations cannot be read is a page without links.
+        return [];
+      }
+    })();
+    links.set(pageNumber, reading);
+    while (links.size > TEXT_CACHE_LIMIT) {
+      const oldest = links.keys().next().value;
+      if (oldest === undefined) {
+        break;
+      }
+      links.delete(oldest);
+    }
+    return reading;
+  };
+
   let textLayer: TextLayer | null = null;
   // The text layer's own token, for the same reason the render has one.
   let textGeneration = 0;
@@ -452,7 +524,66 @@ export const createPdfPageSource = async (bookId: string): Promise<PageSource> =
         stillWanted
       );
     },
+    async pageLabels() {
+      try {
+        return await document.getPageLabels();
+      } catch {
+        // Labels that cannot be read are no labels.
+        return null;
+      }
+    },
+    async coverImage(width) {
+      const page = await document.getPage(1);
+      const natural = page.getViewport({ scale: 1 });
+      const viewport = page.getViewport({ scale: coverScale(natural.width, natural.height, width) });
+      // A canvas of its own, out of the document: the reader's page is not touched.
+      const sheet = window.document.createElement("canvas");
+      sheet.width = Math.max(1, Math.round(viewport.width));
+      sheet.height = Math.max(1, Math.round(viewport.height));
+      const context = sheet.getContext("2d", { alpha: false, willReadFrequently: true });
+      if (!context) {
+        return null;
+      }
+      try {
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, sheet.width, sheet.height);
+        await page.render({ canvasContext: context, viewport }).promise;
+        const drawn = context.getImageData(0, 0, sheet.width, sheet.height);
+        return looksBlank(drawn.data, sheet.width, sheet.height) ? null : sheet.toDataURL("image/jpeg", COVER_QUALITY);
+      } finally {
+        // Let go of the pixels at once: a cover is drawn once in a book's life.
+        sheet.width = 0;
+        sheet.height = 0;
+      }
+    },
     pageText: readText,
+    async chapterFacts(pageNumber) {
+      // A printed contents page is at the front: links are read only there.
+      const linked = pageNumber <= CONTENTS_WITHIN ? await readLinks(pageNumber) : [];
+      const kept = texts.get(pageNumber);
+      if (kept) {
+        const text = await kept;
+        return digestPage(pageNumber, { items: text.joined.items, transform: text.transform, width: text.width, height: text.height }, linked);
+      }
+      const page = await document.getPage(pageNumber);
+      try {
+        const read = await page.getTextContent();
+        const viewport = page.getViewport({ scale: 1 });
+        return digestPage(
+          pageNumber,
+          { items: read.items as Array<Partial<TextItem>>, transform: viewport.transform, width: viewport.width, height: viewport.height },
+          linked
+        );
+      } finally {
+        page.cleanup();
+      }
+    },
+    links: readLinks,
+    async linkPlace(target) {
+      const page = await document.getPage(target.page);
+      const viewport = page.getViewport({ scale: 1 });
+      return destFraction(target, viewport.transform, viewport.width, viewport.height);
+    },
     async layText(pageNumber, container, scale) {
       cancelText();
       const token = textGeneration;
@@ -578,6 +709,7 @@ export const createPdfPageSource = async (bookId: string): Promise<PageSource> =
       renderTask?.cancel();
       cancelText();
       texts.clear();
+      links.clear();
       // pdf.js keeps a canvas in the document for measuring the text layer's
       // runs; with no layer being laid, this lets go of it.
       TextLayer.cleanup();
@@ -591,6 +723,8 @@ export const createPdfPageSource = async (bookId: string): Promise<PageSource> =
 
 /** How many pages' text is kept at once. */
 const TEXT_CACHE_LIMIT = 80;
+/** How far into a document a printed contents page is looked for (readers/pdfChapters.ts). */
+const CONTENTS_WITHIN = 40;
 
 /** Keeps a few decoded pages so paging back and forth does not re-decode. */
 const PAGE_CACHE_LIMIT = 6;
