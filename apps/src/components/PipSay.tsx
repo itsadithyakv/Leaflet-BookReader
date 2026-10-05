@@ -52,6 +52,19 @@ export const PipSay = forwardRef<HTMLSpanElement, PipSayProps>(
       return () => cancelAnimationFrame(frame);
     }, [text]);
 
+    // A word Pip leans on is written "*there*": the marks come off, and the
+    // word is set in italics. The line types out by its letters, not its marks.
+    const parts = text.split(/\*([^*]+)\*/);
+    const plain = parts.join("");
+    const typed = (from: number, to: number) => {
+      let at = 0;
+      return parts.map((part, index) => {
+        const piece = part.slice(Math.max(0, from - at), Math.max(0, to - at));
+        at += part.length;
+        return piece && index % 2 === 1 ? <em key={index}>{piece}</em> : piece;
+      });
+    };
+
     return (
       // A span, so the bubble is valid inside a button (the reader peek).
       <span
@@ -62,10 +75,10 @@ export const PipSay = forwardRef<HTMLSpanElement, PipSayProps>(
         role={children ? "dialog" : "status"}
         aria-live="polite"
       >
-        <span className="sr-only">{text}</span>
+        <span className="sr-only">{plain}</span>
         <span aria-hidden="true">
-          {text.slice(0, shown)}
-          <span className="pip-say-rest">{text.slice(shown)}</span>
+          {typed(0, shown)}
+          <span className="pip-say-rest">{typed(shown, plain.length)}</span>
         </span>
         {children && <span className="pip-say-actions">{children}</span>}
       </span>

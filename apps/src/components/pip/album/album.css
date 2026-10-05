@@ -1,0 +1,354 @@
+/* ---- Pip's album: what she brought back from her expeditions ----------------- */
+
+/* A rarity's own colour: a gem by its name, the edge of a found thing's key. */
+.pip-album,
+.wrapup-find {
+  --rarity-common: 138 126 100;
+  --rarity-uncommon: 63 143 84;
+  --rarity-rare: 63 122 200;
+  --rarity-epic: 136 84 208;
+  --rarity-legendary: 214 150 30;
+  --rarity: var(--rarity-common);
+}
+
+:root[data-theme="dark"] .pip-album,
+:root[data-theme="dark"] .wrapup-find {
+  --rarity-common: 176 166 142;
+  --rarity-uncommon: 120 196 136;
+  --rarity-rare: 124 174 240;
+  --rarity-epic: 184 144 244;
+  --rarity-legendary: 240 190 84;
+}
+
+.pip-album [data-rarity="common"],
+.wrapup-find[data-rarity="common"] {
+  --rarity: var(--rarity-common);
+}
+.pip-album [data-rarity="uncommon"],
+.wrapup-find[data-rarity="uncommon"] {
+  --rarity: var(--rarity-uncommon);
+}
+.pip-album [data-rarity="rare"],
+.wrapup-find[data-rarity="rare"] {
+  --rarity: var(--rarity-rare);
+}
+.pip-album [data-rarity="epic"],
+.wrapup-find[data-rarity="epic"] {
+  --rarity: var(--rarity-epic);
+}
+.pip-album [data-rarity="legendary"],
+.wrapup-find[data-rarity="legendary"] {
+  --rarity: var(--rarity-legendary);
+}
+
+/* The album's own inks, so it can sit on the app's paper (the dialog) or on
+   the HUD's faces (a card over Pip's room: data-skin="hud"). */
+.pip-album {
+  --album-ink: rgb(var(--color-on-surface));
+  --album-soft: rgb(var(--color-on-surface-variant));
+  --album-line: rgb(var(--color-outline-variant) / 0.45);
+  --album-well: rgb(var(--color-surface-high) / 0.6);
+  --album-face: rgb(var(--color-surface) / 0.85);
+  --album-pick: rgb(var(--color-primary));
+}
+
+.pip-album[data-skin="hud"] {
+  --album-ink: var(--hud-ink);
+  --album-soft: var(--hud-ink-soft);
+  --album-line: color-mix(in srgb, var(--hud-ink-soft) 45%, transparent);
+  --album-well: var(--hud-well);
+  --album-face: var(--hud-face);
+}
+
+.pip-album-dialog {
+  display: flex;
+  width: min(940px, 100%);
+  height: min(88vh, 760px);
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 20px;
+}
+
+.pip-album-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 20px 10px;
+  border-bottom: 1px solid rgb(var(--color-outline-variant) / 0.35);
+}
+
+.pip-album-head > div {
+  flex: 1;
+}
+
+/* The grid, and the thing selected beside it. In a narrow box (a card over
+   the room, a small window) the thing selected goes above the grid, so it is
+   in view whichever thing is chosen. */
+.pip-album {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) 17rem;
+  color: var(--album-ink);
+  container-type: inline-size;
+}
+
+.pip-album-main {
+  min-width: 0;
+  overflow-y: auto;
+  padding: 14px 20px 20px;
+}
+
+.pip-album-count {
+  font-size: 15px;
+}
+
+.pip-album-trips {
+  color: var(--album-soft);
+  font-size: 12px;
+}
+
+.pip-album .pip-line {
+  color: var(--album-ink);
+}
+
+.pip-album-empty {
+  margin-top: 6px;
+}
+
+.pip-album-row {
+  margin-top: 16px;
+}
+
+.pip-album-rarity {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.pip-album-tally {
+  margin-left: auto;
+  color: var(--album-soft);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* A square pixel gem in the rarity's colour. */
+.pip-album-gem {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  flex: none;
+  background: rgb(var(--rarity));
+  box-shadow: 0 0 0 2px rgb(var(--rarity) / 0.3);
+  transform: rotate(45deg);
+}
+
+.pip-album-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+}
+
+.pip-album-thing {
+  position: relative;
+  display: grid;
+  aspect-ratio: 1;
+  min-height: 60px;
+  place-items: center;
+  border: 1px dashed var(--album-line);
+  border-radius: 14px;
+  background: transparent;
+  transition: border-color 150ms ease, transform 150ms ease;
+}
+
+.pip-album-thing[data-found] {
+  border: 1px solid rgb(var(--rarity) / 0.6);
+  background: var(--album-well);
+}
+
+.pip-album-thing:hover {
+  border-color: var(--album-pick);
+  transform: translateY(-1px);
+}
+
+.pip-album-thing[aria-pressed="true"] {
+  border-style: solid;
+  border-color: var(--album-pick);
+  box-shadow: 0 0 0 2px rgb(var(--color-primary) / 0.45);
+}
+
+.pip-album-thing:focus-visible {
+  outline: 2px solid var(--album-pick);
+  outline-offset: 2px;
+}
+
+.pip-album-times {
+  position: absolute;
+  right: 4px;
+  bottom: 3px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--album-face);
+  color: var(--album-ink);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 15px;
+  box-shadow: 0 0 0 1px var(--album-line);
+}
+
+.pip-album-rule {
+  margin-top: 18px;
+  color: var(--album-soft);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.pip-album-detail {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  overflow-y: auto;
+  padding: 18px 18px 20px;
+  border-left: 1px solid var(--album-line);
+  background: var(--album-well);
+}
+
+.pip-album-detail-text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.pip-album-detail-empty {
+  margin: auto;
+  color: var(--album-soft);
+  font-size: 13px;
+  text-align: center;
+}
+
+.pip-album-detail-art {
+  display: grid;
+  width: 128px;
+  height: 128px;
+  flex: none;
+  place-items: center;
+  border-radius: 20px;
+  background: var(--album-face);
+  box-shadow: 0 0 0 2px rgb(var(--rarity) / 0.45);
+}
+
+/* The thing is drawn at two sizes, and the box shows the one that fits it. */
+.pip-album-detail-art .pip-album-art-small {
+  display: none;
+}
+
+.pip-album-name {
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.pip-album-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 9px 1px 7px;
+  border-radius: 999px;
+  background: rgb(var(--rarity) / 0.18);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.pip-album-when {
+  color: var(--album-soft);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+@container (max-width: 620px) {
+  .pip-album {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .pip-album-detail {
+    order: -1;
+    max-height: 40vh;
+    flex-direction: row;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--album-line);
+    border-left: 0;
+  }
+
+  .pip-album-detail-art {
+    width: 72px;
+    height: 72px;
+    border-radius: 14px;
+  }
+
+  .pip-album-detail-art .pip-album-art-large {
+    display: none;
+  }
+
+  .pip-album-detail-art .pip-album-art-small {
+    display: inline-block;
+  }
+
+  .pip-album-main {
+    padding-inline: 16px;
+  }
+}
+
+/* The end of a session: what she brought back. */
+.wrapup-find {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgb(var(--color-surface-high) / 0.7);
+  text-align: left;
+}
+
+.wrapup-find-art {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  flex: none;
+  place-items: center;
+  border-radius: 12px;
+  background: rgb(var(--color-surface) / 0.85);
+  box-shadow: 0 0 0 2px rgb(var(--rarity) / 0.45);
+}
+
+.wrapup-find-none {
+  margin-top: 12px;
+  color: rgb(var(--color-on-surface-variant));
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pip-album-thing {
+    transition: none;
+  }
+
+  .pip-album-thing:hover {
+    transform: none;
+  }
+}

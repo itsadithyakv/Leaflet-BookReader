@@ -148,15 +148,23 @@ export declare const FLOORS: PipFinish[];
 export declare const HOUSE_ITEMS: PipRoomItem[];
 export declare const NOD_ITEMS: PipRoomItem[];
 export declare const ALL_ITEMS: PipRoomItem[];
-/** What a floor has that is not decor (the bedroom's mini fridge, shut and open): never in the shop or the layout. */
+/** What a floor has that is not decor (the bedroom's mini fridge, shut and open, and its bookcase): never in the shop or the layout. */
 export declare const FIXTURES: PipRoomItem[];
+/** Where the notes go on the fridge's lower door (x, y, the magnet's colour), the newest first. */
+export declare const FRIDGE_NOTES: ReadonlyArray<readonly [number, number, string]>;
+/** The fridge's lower door, where the notes are, in the fridge's own pixels. */
+export declare const FRIDGE_DOOR: { x: number; y: number; w: number; h: number };
+/** The room above the bookcase kept for its tag: the case itself starts this far down its art. */
+export declare const BOOKCASE_TAG: number;
+/** Where the diary lies on the bookcase's art, in the art's own pixels. */
+export declare const BOOKCASE_DIARY: { x: number; y: number; w: number; h: number };
 export declare function placeAt(item: PipRoomItem, slot: { fits: string; x: number; y: number }): { x: number; y: number };
 export declare function renderLevel(
   levelId: string,
   frame: number,
   opts?: { wallpaper?: string; floor?: string; placed?: Array<{ slot: string; itemId: string }>; night?: boolean }
 ): ImageData;
-export declare function renderHouseItem(item: PipRoomItem | string, frame?: number): ImageData;
+export declare function renderHouseItem(item: PipRoomItem | string, frame?: number, data?: unknown): ImageData;
 export declare function renderSwatch(type: "wallpaper" | "floor", id: string, w?: number, h?: number, frame?: number): ImageData;
 
 /** Arcade art (games-art.js): Pip poses are move-shaped; sprites draw with the room Painter. */

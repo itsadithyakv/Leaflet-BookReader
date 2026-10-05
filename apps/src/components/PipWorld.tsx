@@ -5,7 +5,7 @@ import { usePipStore } from "../store/pipStore";
 import { ownedPremiumMoves, useEquippedPip, usePipWardrobeStore } from "../store/pipWardrobeStore";
 import { useHabitStore } from "../store/habitStore";
 import { pickBeat } from "../pip/moments";
-import { nodFor } from "../pip/bookNods";
+import { nodFor, nodOdds } from "../pip/bookNods";
 import { hasMove } from "../pip/core";
 import { TOUR, type TourStop } from "../pip/tour";
 import { usePipPresence } from "../pip/usePipPresence";
@@ -1233,10 +1233,10 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
     }
     const roll = Math.random();
     // Now and then, a scene from the book being read (a dragon for the
-    // dragon book), with its line.
+    // dragon book), with its line; rarer for a book known only by its genre.
     const reading = usePipStore.getState().bookNod;
-    const nod = reading && roll < 0.12 ? nodFor(reading) : null;
-    if (nod && hasMove(nod.move)) {
+    const nod = reading ? nodFor(reading) : null;
+    if (nod && roll < nodOdds(nod).idle && hasMove(nod.move)) {
       play(nod.move, 1);
       speak(nod.line);
       return;

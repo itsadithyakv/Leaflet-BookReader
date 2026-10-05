@@ -3,6 +3,13 @@ import { GAMES, GAME_H, GAME_W, type Controls, type Game, type GameId, type Game
 import { gameArt } from "./gameArt";
 import { pixelsPerArtPixel } from "../PixelImage";
 import { UiIcon } from "../../UiIcon";
+import { dayNumber } from "../../../pip/diary/seed";
+import type { SavedWord } from "../../../readers/words/rows";
+import { getDateKey } from "../../../services/habitService";
+import { wordService } from "../../../services/wordService";
+import { dueCount } from "./quiz/boxes";
+import { MyWords } from "./quiz/MyWords";
+import { WordQuiz } from "./quiz/WordQuiz";
 
 /** Simulation ticks per second: fixed, so a run plays the same at any frame rate. */
 const TICK = 1 / 120;
@@ -29,9 +36,12 @@ const readLocalBest = (): Record<string, number> => {
   }
 };
 
+/** The arcade's two pages that are not games on the canvas: the word quiz, and the words it is played with. */
+export type ArcadePage = "quiz" | "words";
+
 export type ArcadeOverlayProps = {
   /** The game to open on (the machine that was selected), or the list of them all. */
-  initial?: GameId | null;
+  initial?: GameId | ArcadePage | null;
   skin: string;
   outfit: readonly string[];
   /** Best scores from Rust (per device). */
@@ -54,9 +64,20 @@ export type ArcadeOverlayProps = {
  *
  * Games never earn seeds (those come only from reading in focus). A finished
  * game cheers Pip up a little, up to a daily cap, and keeps a best score.
+ *
+ * The word quiz (quiz/) is the fourth game: questions, not a canvas, made
+ * from the words the reader looked up. It earns nothing at all, mood
+ * included: it is not recorded as a game played. "My words" lists them.
  */
 export const ArcadeOverlay = ({ initial = null, skin, outfit, best, moodToday, moodCap, onFinished, onClose }: ArcadeOverlayProps) => {
   const [chosen, setChosen] = useState<GameInfo | null>(() => GAMES.find((game) => game.id === initial) ?? null);
+  const [page, setPage] = useState<ArcadePage | null>(initial === "quiz" || initial === "words" ? initial : null);
+  // The reader's words: fetched as the arcade opens, and again when one is removed or a round ends.
+  const [words, setWords] = useState<SavedWord[] | null>(null);
+  const loadWords = useCallback(() => {
+    wordService.list().then(setWords, () => setWords([]));
+  }, []);
+  useEffect(loadWords, [loadWords]);
   const [localBest, setLocalBest] = useState(readLocalBest);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const bestOf = (id: string) => Math.max(best[id] ?? 0, localBest[id] ?? 0);
@@ -101,7 +122,9 @@ export const ArcadeOverlay = ({ initial = null, skin, outfit, best, moodToday, m
         onKeyDown={(event) => {
           if (event.key === "Escape" && !chosen) {
             event.stopPropagation();
-            onClose();
+            // From the quiz or the words, back to the games; from the games, out.
+            if (page) setPage(null);
+            else onClose();
           }
         }}
       >
@@ -109,11 +132,25 @@ export const ArcadeOverlay = ({ initial = null, skin, outfit, best, moodToday, m
           <div>
             <p className="text-xs uppercase tracking-[0.2em] text-on-surface-variant">Attic Arcade</p>
             <h2 id="pip-arcade-title" className="page-title text-2xl text-on-surface">
-              {chosen ? chosen.name : "Pick a game"}
+              {chosen ? chosen.name : page === "quiz" ? "Word Quiz" : page === "words" ? "My words" : "Pick a game"}
             </h2>
           </div>
-          <button type="button" className="tactile-button px-3 py-1.5 text-xs" onClick={chosen ? () => setChosen(null) : onClose}>
-            {chosen ? "All games" : "Close"}
+          <button
+            type="button"
+            className="tactile-button px-3 py-1.5 text-xs"
+            onClick={
+              chosen
+                ? () => setChosen(null)
+                : page
+                  ? () => {
+                      setPage(null);
+                      // The list under it has changed size: focus stays in the dialog.
+                      dialogRef.current?.focus();
+                    }
+                  : onClose
+            }
+          >
+            {chosen || page ? "All games" : "Close"}
           </button>
         </div>
 
@@ -127,8 +164,12 @@ export const ArcadeOverlay = ({ initial = null, skin, outfit, best, moodToday, m
             onFinished={finished}
             onExit={() => setChosen(null)}
           />
+        ) : page === "quiz" ? (
+          <WordQuiz words={words} onChanged={loadWords} onMyWords={() => setPage("words")} skin={skin} outfit={outfit} />
+        ) : page === "words" ? (
+          <MyWords words={words} onChanged={loadWords} onOpened={onClose} />
         ) : (
-          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
             {GAMES.map((game) => (
               <button key={game.id} type="button" className="pip-arcade-pick" onClick={() => setChosen(game)}>
                 <span className="font-headline text-lg font-bold text-on-surface">{game.name}</span>
@@ -136,12 +177,25 @@ export const ArcadeOverlay = ({ initial = null, skin, outfit, best, moodToday, m
                 <span className="mt-auto text-[11px] font-semibold text-on-surface-variant">Best: {bestOf(game.id)}</span>
               </button>
             ))}
+            <button type="button" className="pip-arcade-pick" onClick={() => setPage("quiz")}>
+              <span className="font-headline text-lg font-bold text-on-surface">Word Quiz</span>
+              <span className="text-xs text-on-surface-variant">Pip holds up a word you looked up. Pick what it means.</span>
+              <span className="mt-auto text-[11px] font-semibold text-on-surface-variant">
+                {words === null ? "…" : words.length === 0 ? "No words yet" : `${words.length} ${words.length === 1 ? "word" : "words"}, ${dueCount(words, dayNumber(getDateKey()))} due`}
+              </span>
+            </button>
           </div>
+        )}
+        {!chosen && !page && (
+          <button type="button" className="tactile-button mt-3 px-3 py-1.5 text-xs" onClick={() => setPage("words")}>
+            My words{words && words.length > 0 ? ` (${words.length})` : ""}
+          </button>
         )}
 
         <p className="mt-4 text-xs text-on-surface-variant">
           Games don't earn seeds: those come only from reading in focus. Playing cheers Pip up a little
           {moodToday >= moodCap ? " (that's all the cheering games and play can do today)." : ` (games and play together, up to +${moodCap} mood a day).`}
+          {page ? " The word quiz earns neither." : ""}
         </p>
       </div>
     </div>

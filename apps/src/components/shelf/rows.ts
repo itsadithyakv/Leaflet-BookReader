@@ -52,6 +52,7 @@ export type Spine = {
   height: number;
   width: number;
   completed: boolean;
+  /** Burned for a broken streak by an earlier version (or a device still on one): nothing burns now. */
   burned: boolean;
   /** When the session started; for free reading, the day it was read. */
   start: Date;
@@ -203,7 +204,7 @@ export const buildRows = (
       completed ? "completed" : "ended early"
     ];
     if (burned) {
-      parts.push(`lost when a streak broke on ${shortDate(new Date(session.burnedAt as string), true)}`);
+      parts.push(`burned when a streak broke on ${shortDate(new Date(session.burnedAt as string), true)}`);
     }
     if (session.notes) {
       parts.push("has a note");

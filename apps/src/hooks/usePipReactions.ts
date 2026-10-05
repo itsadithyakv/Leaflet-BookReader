@@ -61,7 +61,8 @@ export const usePipReactions = (readerOpen: boolean) => {
 
   useEffect(() => {
     if (pendingBreak) {
-      const beat = pickBeat("streakLost", pendingBreak.brokeFrom);
+      // A break that gives her a cold (the same snapshot says so) is said with a sneeze, not a comeback speech.
+      const beat = pickBeat(useHabitStore.getState().snapshot.cold ? "streakLostCold" : "streakLost", pendingBreak.brokeFrom);
       react(beat.move, { loops: 1, line: beat.line });
     }
   }, [pendingBreak, react]);

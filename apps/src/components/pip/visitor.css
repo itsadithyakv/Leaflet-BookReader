@@ -1,0 +1,206 @@
+/* A visitor in Pip's house (VisitorPip.tsx): another Pip, placed from script
+   like Pip herself, at the room's scale; its @handle on a small tag under it;
+   a card about its reader when it is selected; and, when nobody was home, a
+   note pinned by the door. Colours are the HUD's, so both themes are covered. */
+.pip-visitor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  /* Behind Pip (2), so the two can pass each other with her in front. */
+  z-index: 1;
+  will-change: transform;
+}
+
+.pip-visitor[hidden] {
+  display: none;
+}
+
+.pip-visitor-button {
+  display: block;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  cursor: pointer;
+}
+
+.pip-visitor-button:focus-visible,
+.pip-visitor-note:focus-visible,
+.pip-visitor-card button:focus-visible {
+  outline: 2px solid rgb(var(--color-primary));
+  outline-offset: 3px;
+}
+
+.pip-visitor-flip {
+  display: block;
+}
+
+.pip-visitor-flip[data-facing="left"] {
+  transform: scaleX(-1);
+}
+
+/* At a half step the room's pixels are fractional and a sprite snaps to whole
+   ones: stretched to its box, as Pip's is, the visitor is Pip's size. */
+.pip-visitor-flip > .pip-sprite {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.pip-visitor-tag {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  max-width: 160px;
+  margin-top: 1px;
+  padding: 0 5px 1px;
+  overflow: hidden;
+  transform: translateX(-50%);
+  border-radius: 2px;
+  background: var(--hud-face, #fffbf0);
+  box-shadow: 0 0 0 2px var(--hud-line, #1f2a22);
+  color: var(--hud-ink, #1c261f);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* The knock: a bubble at the wall the door is in, its tail towards the door. */
+.pip-visitor-knock {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.pip-visitor-knock[data-side="right"] {
+  right: 14px;
+}
+
+.pip-visitor-knock[data-side="left"] {
+  left: 14px;
+}
+
+/* The note left when nobody was home: a scrap of paper pinned by the door. */
+.pip-visitor-note {
+  position: absolute;
+  z-index: 1;
+  display: block;
+  padding: 0;
+  border: 0;
+  background: #fff7d1;
+  box-shadow:
+    0 0 0 2px #1f2a22,
+    3px 3px 0 0 rgba(31, 42, 34, 0.25);
+  cursor: pointer;
+}
+
+/* The pin, and two lines of writing. */
+.pip-visitor-note::before {
+  content: "";
+  position: absolute;
+  top: -12%;
+  left: 50%;
+  width: 22%;
+  height: 22%;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: #d8453a;
+  box-shadow: 0 0 0 1px #1f2a22;
+}
+
+.pip-visitor-note::after {
+  content: "";
+  position: absolute;
+  inset: 34% 18% 22% 18%;
+  background: linear-gradient(#8a7f66 0 0) top / 100% 18% no-repeat, linear-gradient(#8a7f66 0 0) bottom / 70% 18% no-repeat;
+}
+
+.pip-house-room[data-night] .pip-visitor-note {
+  filter: brightness(0.72);
+}
+
+/* Who it is: a small card over the visitor, kept inside the room. */
+.pip-visitor-card {
+  position: absolute;
+  z-index: 4;
+  width: 190px;
+  padding: 7px 10px 9px;
+  border-radius: 3px;
+  background: var(--hud-face, #fffbf0);
+  box-shadow:
+    0 0 0 2px var(--hud-line, #1f2a22),
+    0 6px 0 2px var(--hud-drop, rgba(31, 42, 34, 0.18));
+  color: var(--hud-ink, #1c261f);
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: left;
+}
+
+.pip-visitor-card-name {
+  margin: 0;
+  padding-right: 20px;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pip-visitor-card-handle,
+.pip-visitor-card-why {
+  margin: 0;
+  color: var(--hud-ink-soft, #55604f);
+}
+
+.pip-visitor-card-figures {
+  display: flex;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pip-visitor-card-figures li {
+  flex: 1;
+  padding: 3px 6px;
+  border-radius: 2px;
+  background: var(--hud-well, #f3ecda);
+}
+
+.pip-visitor-card-figures b {
+  display: block;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pip-visitor-card-open {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--hud-line, #1f2a22);
+  color: var(--hud-face, #fffbf0);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.pip-visitor-card-close {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--hud-ink-soft, #55604f);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}

@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useHabitStore, wholeTodayMinutes, type SessionWrapUp as WrapUp } from "../store/habitStore";
 import { usePipStore } from "../store/pipStore";
@@ -10,6 +10,14 @@ import { CountUp } from "./community/CountUp";
 import { UiIcon } from "./UiIcon";
 import { FocusFlower, wiltReason } from "./FocusFlower";
 import { FOCUS_FLOWERS } from "../pip/focusFlower.js";
+import { buildAlbum, type Found } from "../pip/expedition";
+import { NOTHING_FOUND, broughtBackText } from "./pip/album/words";
+import { coldAfterSession } from "../pip/cold";
+import "./pip/album/album.css";
+
+// The find's picture is drawn with the house's art, which loads with the Pip
+// tab and not with the app: it is fetched when a wrap-up has one to show.
+const FindSprite = lazy(() => import("./pip/album/FindSprite"));
 
 /** Set once Pip has explained the garden (water, ripe plants, seeds), so it says it once. */
 const SEEDS_EXPLAINED_KEY = "leaflet.pip.seedsExplained";
@@ -87,6 +95,33 @@ const FlowerResult = ({ flower, blooms }: { flower: NonNullable<WrapUp["flower"]
 };
 
 /**
+ * What Pip brought back from the session (pip/expedition.ts): the thing, her
+ * line about it, how rare it is, how far she got, and whether it is new to
+ * her album. A session too short to find anything says so, kindly.
+ */
+const FindResult = ({ found, count, showPip }: { found: Found | null; count: number; showPip: boolean }) => {
+  if (!found) {
+    return <p className="wrapup-find-none">{NOTHING_FOUND}</p>;
+  }
+  const words = broughtBackText(found, count);
+  return (
+    <div className="wrapup-find" data-rarity={found.find.rarity}>
+      {/* The box has its size before the picture arrives, so nothing moves when it does. */}
+      <div className="wrapup-find-art">
+        <Suspense fallback={null}>
+          <FindSprite id={found.find.id} box={36} />
+        </Suspense>
+      </div>
+      <div className="min-w-0">
+        <p className="font-headline text-base font-bold text-on-surface">{words.headline}</p>
+        {showPip && <p className="pip-line text-sm">{found.find.line}</p>}
+        <p className="text-xs text-on-surface-variant">{words.detail}</p>
+      </div>
+    </div>
+  );
+};
+
+/**
  * Pip's reaction to a session, strongest news first. Goal beats are seeded by
  * the day, so the move matches the one the rest of the app would pick.
  */
@@ -134,6 +169,19 @@ export const SessionWrapUp = () => {
       ? state.snapshot.shelfCount
       : null
   );
+  // What she brought back, once the session is on the shelf: worked out from
+  // the shelf as the album works it out, so the card says what the album shows.
+  const sessions = useHabitStore((state) => state.snapshot.sessions);
+  const sessionId = wrapUp?.sessionId;
+  const brought = useMemo(() => {
+    if (!sessionId || !sessions.some((session) => session.id === sessionId)) {
+      return null;
+    }
+    const album = buildAlbum(sessions);
+    const found = album.finds.find((entry) => entry.sessionId === sessionId) ?? null;
+    return { found, count: album.entries.find((entry) => entry.find.id === found?.find.id)?.count ?? 0 };
+  }, [sessionId, sessions]);
+  const cardRef = useRef<HTMLDivElement | null>(null);
   const [note, setNote] = useState("");
   const [settled, setSettled] = useState(false);
   const equipped = useEquippedPip();
@@ -181,6 +229,15 @@ export const SessionWrapUp = () => {
     dismissWrapUp();
   };
 
+  // A card with everything on it (a flower, a find, the garden, a note) can be
+  // taller than a small window: its body scrolls then, over a foot that keeps
+  // Done in view, and opens at the top.
+  useEffect(() => {
+    if (cardRef.current) {
+      cardRef.current.scrollTop = 0;
+    }
+  }, [sessionId, brought]);
+
   // The reader and the library both listen for Space, arrows and Escape on the
   // window. Capturing here keeps those keys from paging the book or closing the
   // reader underneath; Escape closes this instead.
@@ -211,6 +268,7 @@ export const SessionWrapUp = () => {
   const minutes = Math.max(1, Math.round(wrapUp.minutes));
   const todayMinutes = wholeTodayMinutes(wrapUp.todayMinutes, wrapUp.todayMet);
   const goalProgress = wrapUp.goalMinutes > 0 ? Math.min(1, wrapUp.todayMinutes / wrapUp.goalMinutes) : 0;
+  const coldLine = coldAfterSession(wrapUp.cold, wrapUp.coldCured);
 
   return (
     <div
@@ -219,119 +277,131 @@ export const SessionWrapUp = () => {
       aria-modal="true"
       aria-labelledby="wrapup-title"
     >
-      <div className="modal-surface w-full max-w-md rounded-2xl p-6">
-        <div className="flex flex-col items-center gap-4 text-center sm:flex-row sm:items-center sm:text-left">
-          {showPip && (
-            <div className="pip-stage shrink-0">
-              <PipSprite
-                move={settled ? "idle" : move}
-                size={128}
-                skin={equipped.skin}
-                outfit={equipped.outfit}
-                loops={settled ? undefined : 2}
-                onDone={() => setSettled(true)}
-                label={`Pip: ${line}`}
-              />
+      <div className="modal-surface flex max-h-[calc(100dvh-1.5rem)] w-full max-w-md flex-col overflow-hidden rounded-2xl">
+        {/* The body scrolls when the card is taller than the window; the foot below it stays put. */}
+        <div ref={cardRef} className="wrapup-body min-h-0 flex-1 overflow-y-auto px-6 pb-1 pt-6">
+          <div className="flex flex-col items-center gap-4 text-center sm:flex-row sm:items-center sm:text-left">
+            {showPip && (
+              <div className="pip-stage shrink-0">
+                <PipSprite
+                  move={settled ? "idle" : move}
+                  size={128}
+                  skin={equipped.skin}
+                  outfit={equipped.outfit}
+                  loops={settled ? undefined : 2}
+                  onDone={() => setSettled(true)}
+                  label={`Pip: ${line}`}
+                />
+              </div>
+            )}
+            <div className="min-w-0">
+              <p className="text-xs uppercase tracking-widest text-on-surface-variant">
+                {wrapUp.reason === "completed" ? "Session complete" : "Session ended"}
+              </p>
+              <h2 id="wrapup-title" className="page-title mt-1 text-2xl text-on-surface">
+                {plural(minutes, "minute")}
+              </h2>
+              {wrapUp.title && (
+                <p className="mt-0.5 truncate text-sm text-on-surface-variant" title={wrapUp.title}>
+                  {wrapUp.title}
+                </p>
+              )}
+              {showPip && <p className="pip-line mt-2">{line}</p>}
+            </div>
+          </div>
+
+          {wrapUp.flower && <FlowerResult flower={wrapUp.flower} blooms={wrapUp.blooms} />}
+          {brought && <FindResult found={brought.found} count={brought.count} showPip={showPip} />}
+
+          <div className="mt-5 grid grid-cols-2 gap-3">
+            <div className="inset-field p-3">
+              <p className="text-[10px] uppercase tracking-[0.2em] text-on-surface-variant">Today</p>
+              <p className="mt-1 font-headline text-lg font-bold tabular-nums text-on-surface">
+                {todayMinutes}
+                <span className="text-sm font-normal text-on-surface-variant"> / {wrapUp.goalMinutes} min</span>
+              </p>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-outline-variant/30">
+                <div className="h-full rounded-full bg-primary" style={{ width: `${goalProgress * 100}%` }} />
+              </div>
+            </div>
+            <div className="inset-field p-3">
+              <p className="text-[10px] uppercase tracking-[0.2em] text-on-surface-variant">Streak</p>
+              <p className="mt-1 font-headline text-lg font-bold tabular-nums text-on-surface">
+                {plural(wrapUp.streak, "day")}
+              </p>
+              <p className="mt-1 text-[11px] text-on-surface-variant">
+                {wrapUp.newRecord ? "Your longest yet" : `${plural(wrapUp.freezes, "freeze")} banked`}
+              </p>
+            </div>
+          </div>
+          {/* Her cold, if a streak ended lately: cured by this session's reading, or how much more today would. */}
+          {coldLine && (
+            <p
+              className={`wrapup-cold mt-3 text-center ${wrapUp.coldCured ? "text-sm font-semibold text-on-surface" : "text-xs text-on-surface-variant"}`}
+            >
+              {coldLine}
+            </p>
+          )}
+          {(wrapUp.water > 0 || wrapUp.seeds > 0) && (
+            <div className="mt-3 flex flex-col items-center gap-1.5 text-center">
+              <p className="flex flex-wrap items-center justify-center gap-2">
+                {wrapUp.water > 0 && (
+                  <span className="seed-chip seed-chip-earned water-chip" aria-label={`${wrapUp.water} water for Pip's garden`}>
+                    <UiIcon name="water" size={15} />
+                    <span className="tabular-nums" aria-hidden="true">
+                      +<CountUp value={waterShown} />
+                    </span>
+                    <span aria-hidden="true">water</span>
+                  </span>
+                )}
+                {wrapUp.seeds > 0 && (
+                  <span className="seed-chip seed-chip-earned" aria-label={`${wrapUp.seeds} bonus seeds`}>
+                    <UiIcon name="seed" size={15} />
+                    <span className="tabular-nums" aria-hidden="true">
+                      +<CountUp value={seedsShown} />
+                    </span>
+                    <span aria-hidden="true">{wrapUp.seeds === 1 ? "seed" : "seeds"}</span>
+                  </span>
+                )}
+              </p>
+              {wrapUp.ripe > 0 && (
+                <p className="text-sm font-semibold text-on-surface">
+                  {wrapUp.newlyRipe > 0
+                    ? `${plural(wrapUp.newlyRipe, "plant")} just ripened!`
+                    : `${plural(wrapUp.ripe, "plant")} ripe in the garden.`}{" "}
+                  <span className="font-normal text-on-surface-variant">Pick {wrapUp.ripe === 1 ? "it" : "them"} on the Pip tab.</span>
+                </p>
+              )}
+              {explainSeeds && (
+                <p className={showPip ? "pip-line text-sm" : "text-xs text-on-surface-variant"}>
+                  {showPip
+                    ? "psst: reading waters my garden. when a plant ripens, pick it for seeds, then spend them on me."
+                    : "Reading in focus waters Pip's garden. Ripe plants are picked for seeds, to spend on Pip."}
+                </p>
+              )}
             </div>
           )}
-          <div className="min-w-0">
-            <p className="text-xs uppercase tracking-widest text-on-surface-variant">
-              {wrapUp.reason === "completed" ? "Session complete" : "Session ended"}
-            </p>
-            <h2 id="wrapup-title" className="page-title mt-1 text-2xl text-on-surface">
-              {plural(minutes, "minute")}
-            </h2>
-            {wrapUp.title && (
-              <p className="mt-0.5 truncate text-sm text-on-surface-variant" title={wrapUp.title}>
-                {wrapUp.title}
-              </p>
-            )}
-            {showPip && <p className="pip-line mt-2">{line}</p>}
-          </div>
+          {shelfCount !== null && shelfCount > 0 && (
+            <p className="mt-3 text-center text-xs text-on-surface-variant">Shelved as book #{shelfCount}</p>
+          )}
+
+          {notesEnabled && (
+            <>
+              <label htmlFor="wrapup-note" className="mt-5 block text-[10px] uppercase tracking-[0.2em] text-on-surface-variant">
+                Session note
+              </label>
+              <textarea
+                id="wrapup-note"
+                className="mt-1 h-24 w-full resize-none rounded-xl border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface"
+                placeholder="What did you read or learn?"
+                value={note}
+                onChange={(event) => setNote(event.target.value)}
+              />
+            </>
+          )}
         </div>
 
-        {wrapUp.flower && <FlowerResult flower={wrapUp.flower} blooms={wrapUp.blooms} />}
-
-        <div className="mt-5 grid grid-cols-2 gap-3">
-          <div className="inset-field p-3">
-            <p className="text-[10px] uppercase tracking-[0.2em] text-on-surface-variant">Today</p>
-            <p className="mt-1 font-headline text-lg font-bold tabular-nums text-on-surface">
-              {todayMinutes}
-              <span className="text-sm font-normal text-on-surface-variant"> / {wrapUp.goalMinutes} min</span>
-            </p>
-            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-outline-variant/30">
-              <div className="h-full rounded-full bg-primary" style={{ width: `${goalProgress * 100}%` }} />
-            </div>
-          </div>
-          <div className="inset-field p-3">
-            <p className="text-[10px] uppercase tracking-[0.2em] text-on-surface-variant">Streak</p>
-            <p className="mt-1 font-headline text-lg font-bold tabular-nums text-on-surface">
-              {plural(wrapUp.streak, "day")}
-            </p>
-            <p className="mt-1 text-[11px] text-on-surface-variant">
-              {wrapUp.newRecord ? "Your longest yet" : `${plural(wrapUp.freezes, "freeze")} banked`}
-            </p>
-          </div>
-        </div>
-        {(wrapUp.water > 0 || wrapUp.seeds > 0) && (
-          <div className="mt-3 flex flex-col items-center gap-1.5 text-center">
-            <p className="flex flex-wrap items-center justify-center gap-2">
-              {wrapUp.water > 0 && (
-                <span className="seed-chip seed-chip-earned water-chip" aria-label={`${wrapUp.water} water for Pip's garden`}>
-                  <UiIcon name="water" size={15} />
-                  <span className="tabular-nums" aria-hidden="true">
-                    +<CountUp value={waterShown} />
-                  </span>
-                  <span aria-hidden="true">water</span>
-                </span>
-              )}
-              {wrapUp.seeds > 0 && (
-                <span className="seed-chip seed-chip-earned" aria-label={`${wrapUp.seeds} bonus seeds`}>
-                  <UiIcon name="seed" size={15} />
-                  <span className="tabular-nums" aria-hidden="true">
-                    +<CountUp value={seedsShown} />
-                  </span>
-                  <span aria-hidden="true">{wrapUp.seeds === 1 ? "seed" : "seeds"}</span>
-                </span>
-              )}
-            </p>
-            {wrapUp.ripe > 0 && (
-              <p className="text-sm font-semibold text-on-surface">
-                {wrapUp.newlyRipe > 0
-                  ? `${plural(wrapUp.newlyRipe, "plant")} just ripened!`
-                  : `${plural(wrapUp.ripe, "plant")} ripe in the garden.`}{" "}
-                <span className="font-normal text-on-surface-variant">Pick {wrapUp.ripe === 1 ? "it" : "them"} on the Pip tab.</span>
-              </p>
-            )}
-            {explainSeeds && (
-              <p className={showPip ? "pip-line text-sm" : "text-xs text-on-surface-variant"}>
-                {showPip
-                  ? "psst: reading waters my garden. when a plant ripens, pick it for seeds, then spend them on me."
-                  : "Reading in focus waters Pip's garden. Ripe plants are picked for seeds, to spend on Pip."}
-              </p>
-            )}
-          </div>
-        )}
-        {shelfCount !== null && shelfCount > 0 && (
-          <p className="mt-3 text-center text-xs text-on-surface-variant">Shelved as book #{shelfCount}</p>
-        )}
-
-        {notesEnabled && (
-          <>
-            <label htmlFor="wrapup-note" className="mt-5 block text-[10px] uppercase tracking-[0.2em] text-on-surface-variant">
-              Session note
-            </label>
-            <textarea
-              id="wrapup-note"
-              className="mt-1 h-24 w-full resize-none rounded-xl border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface"
-              placeholder="What did you read or learn?"
-              value={note}
-              onChange={(event) => setNote(event.target.value)}
-            />
-          </>
-        )}
-
-        <div className="mt-5 flex items-center justify-end gap-3">
+        <div className="wrapup-foot flex shrink-0 items-center justify-end gap-3 px-6 pb-6 pt-4">
           {notesEnabled && note.trim().length > 0 && (
             <button type="button" className="tactile-button px-4 py-2 text-xs uppercase tracking-widest" onClick={() => close(false)}>
               Skip Note

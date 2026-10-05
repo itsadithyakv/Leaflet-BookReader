@@ -7,7 +7,13 @@
  */
 import { usePipStore } from "../store/pipStore";
 
-export type PipCue = { move: string; loops?: number; line?: string | null };
+export type PipCue = {
+  move: string;
+  loops?: number;
+  line?: string | null;
+  /** Only for a Pip in her house (a move from house-moves.js, a remark about the room): dropped when no house is on screen. */
+  houseOnly?: boolean;
+};
 
 type Listener = (cue: PipCue) => void;
 
@@ -27,5 +33,9 @@ export const cuePip = (cue: PipCue) => {
     listeners.forEach((listener) => listener(cue));
     return;
   }
+  if (cue.houseOnly) return;
   usePipStore.getState().react(cue.move, { loops: cue.loops ?? 1, line: cue.line ?? null });
 };
+
+/** Has Pip say a line when he is next free, with a small shift of his weight: for a remark that needs no move of its own. */
+export const pipSays = (line: string, houseOnly = true) => cuePip({ move: "shift", loops: 1, line, houseOnly });

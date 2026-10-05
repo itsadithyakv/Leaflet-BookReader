@@ -17,7 +17,7 @@
 import { holdMove, holdStart, holdStep, type Hold, type Sample } from "./play";
 import type { PipSound } from "./sound";
 
-export type FurnishKind = "curtains" | "picture" | "bed" | "window" | "books" | "lamp" | "fridge";
+export type FurnishKind = "curtains" | "picture" | "bed" | "window" | "books" | "lamp" | "fridge" | "bookcase" | "notes" | "calendar" | "clock" | "plant" | "radio" | "album" | "diary";
 
 /** What can be remembered about one furnishing. Each kind keeps only its own fields. */
 export type FurnishState = {
@@ -92,7 +92,108 @@ export const KINDS: Record<FurnishKind, KindSpec> = {
     cursor: "pointer",
     // An open door is not remembered: it is shut again by the time anyone comes back.
     remembers: []
+  },
+  bookcase: {
+    noun: "bookcase",
+    how: "Select to see the books you have finished: each one is a spine here, in its cover's colour.",
+    keys: "Enter opens the list.",
+    cursor: "pointer",
+    remembers: []
+  },
+  notes: {
+    noun: "notes",
+    how: "The fridge's lower door: select to read your latest highlights, pinned there, and open one in its book. (The top of the fridge opens the fridge.)",
+    keys: "Enter opens them.",
+    cursor: "pointer",
+    remembers: []
+  },
+  calendar: {
+    noun: "calendar",
+    how: "Select to open your reading calendar: the days you read, and the days you met your goal.",
+    keys: "Enter opens it.",
+    cursor: "pointer",
+    remembers: []
+  },
+  clock: {
+    noun: "clock",
+    how: "Select to see the time, and how long a focus session has left.",
+    keys: "Enter opens it.",
+    cursor: "pointer",
+    remembers: []
+  },
+  plant: {
+    noun: "plant",
+    how: "Select to see how the plant is, and what it wants. Only reading outside a focus session waters it.",
+    keys: "Enter opens it.",
+    cursor: "pointer",
+    remembers: []
+  },
+  radio: {
+    noun: "radio",
+    how: "Select to open the radio: rain, a fire or a cafe behind the page while you read.",
+    keys: "Enter opens it.",
+    cursor: "pointer",
+    remembers: []
+  },
+  album: {
+    noun: "album",
+    how: "Select to open the album of what Pip has brought home from her expeditions.",
+    keys: "Enter opens it.",
+    cursor: "pointer",
+    remembers: []
+  },
+  diary: {
+    noun: "diary",
+    how: "Select to read Pip's diary: a line a day about your reading.",
+    keys: "Enter opens it.",
+    cursor: "pointer",
+    remembers: []
   }
+};
+
+/** With notes on its lower door, how the fridge itself is opened: by the rest of it. */
+export const FRIDGE_HOW_WITH_NOTES = "The top of the fridge (its freezer door): select to open the fridge, or to shut it. Left open, it shuts itself after a few seconds. (The lower door opens the notes pinned to it.)";
+
+const CARDS: ReadonlySet<FurnishKind> = new Set<FurnishKind>(["bookcase", "notes", "calendar", "clock", "plant", "radio", "album", "diary"]);
+
+/** The kinds that open a card over the room when chosen (components/pip/roomThings.tsx says what is in it). */
+export const opensCard = (kind: FurnishKind) => CARDS.has(kind);
+
+/** What each of the room's own things is called, by its name among the fixtures. */
+export const THING_NAMES: Readonly<Record<string, string>> = {
+  minifridge: "Mini fridge",
+  fridgenotes: "Fridge notes",
+  bookcase: "Pip's bookcase",
+  calendar: "Wall calendar",
+  wallclock: "Wall clock",
+  plantpot: "Houseplant",
+  radio: "Radio",
+  corkboard: "Album board",
+  diary: "Pip's diary"
+};
+
+/**
+ * The least a thing that opens a card is to be chosen by, in CSS pixels a
+ * side, however small the room is drawn: its button is grown about the thing
+ * to this when the art is smaller.
+ */
+export const MIN_TARGET = 24;
+
+/**
+ * A thing's button, in CSS pixels, from its box in floor pixels at `scale`:
+ * the box itself, grown to `MIN_TARGET` about its middle when it is smaller
+ * (downwards only for `from: "top"`: the notes, which must not grow up over
+ * the freezer door).
+ */
+export const targetBox = (box: { x: number; y: number; w: number; h: number }, scale: number, from: "middle" | "top" = "middle") => {
+  const width = Math.max(MIN_TARGET, box.w * scale);
+  const height = Math.max(MIN_TARGET, box.h * scale);
+  return {
+    left: box.x * scale - (width - box.w * scale) / 2,
+    top: box.y * scale - (from === "top" ? 0 : (height - box.h * scale) / 2),
+    width,
+    height
+  };
 };
 
 /** The pieces of decor that can be used, and as what. Pictures: what hangs from one nail. */
@@ -127,7 +228,17 @@ const KIND_OF: Record<string, FurnishKind> = {
   candles: "lamp",
   // Not decor but a fixture of the bedroom (home.js, `fridgeBox`): every Pip has one.
   // (The Kitchen's Retro Fridge, "fridge", is decor, and is not one of these yet.)
-  minifridge: "fridge"
+  minifridge: "fridge",
+  // Fixtures too: the bookcase the reader's finished books stand in, what is pinned to the fridge's door,
+  // and the rest of what every bedroom has (pip/house-fixtures.js).
+  bookcase: "bookcase",
+  fridgenotes: "notes",
+  calendar: "calendar",
+  wallclock: "clock",
+  plantpot: "plant",
+  radio: "radio",
+  corkboard: "album",
+  diary: "diary"
 };
 
 export const kindOf = (itemId: string): FurnishKind | null => KIND_OF[itemId] ?? null;
@@ -407,3 +518,55 @@ export const fridgeStand = (box: { x: number; w: number }, floorW: number): { x:
   // No room on that side (a fridge by the left wall): the other, past the open door.
   return left >= 18 ? { x: left, face: 1 } : { x: Math.min(floorW - 18, Math.round(box.x + box.w + 15)), face: -1 };
 };
+
+// ---- the notes on the fridge ----------------------------------------------------------------
+//
+// The reader's latest highlights, pinned to the fridge's lower door under a
+// magnet each: up to three, one from each book while there are books to go
+// round. Chosen (the notes, not the door: the freezer door above them still
+// opens the fridge), they are read in a card, and one can be opened in its
+// book. Nothing is stored: they are the annotations the reader made.
+
+/** How many notes the door has room for (house.js draws them: `FRIDGE_NOTES`). */
+export const MAGNETS = 3;
+/** How many books' highlights are read to find the latest: the ones last open, where a new highlight would be. */
+export const NOTE_BOOKS = 6;
+
+/** What of an annotation a note needs. Character-sheet rows share the table, under other kinds, and are passed over. */
+export type Notable = { id: string; bookId: string; kind: string; cfi: string; text?: string | null; chapter?: string | null; color?: string | null; createdAt: string; deletedAt?: string | null };
+
+export type Pinned = { id: string; bookId: string; cfi: string; text: string; chapter: string | null; color: string | null; createdAt: string };
+
+const newestFirst = (a: Pinned, b: Pinned) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id);
+
+/**
+ * The notes on the door, the newest first: the latest highlight of each of
+ * the books highlighted most recently, then (with fewer books than magnets)
+ * the next latest of those there are.
+ */
+export const pinnedNotes = (annotations: readonly Notable[], max = MAGNETS): Pinned[] => {
+  const all = annotations
+    .filter((item) => item.kind === "highlight" && !item.deletedAt && Boolean(item.text?.trim()) && Boolean(item.cfi))
+    .map((item): Pinned => ({ id: item.id, bookId: item.bookId, cfi: item.cfi, text: (item.text ?? "").replace(/\s+/g, " ").trim(), chapter: item.chapter?.replace(/\s+/g, " ").trim() || null, color: item.color ?? null, createdAt: item.createdAt }))
+    .sort(newestFirst);
+  const books = new Set<string>();
+  const firsts = all.filter((item) => !books.has(item.bookId) && Boolean(books.add(item.bookId))).slice(0, max);
+  const rest = all.filter((item) => !firsts.includes(item)).slice(0, max - firsts.length);
+  return [...firsts, ...rest].sort(newestFirst);
+};
+
+/**
+ * The books whose highlights are worth reading for the door: those that have
+ * any, the most recently opened first, and no more than a handful.
+ */
+export const noteBooks = <T extends { id: string; lastOpened: string | null }>(books: readonly T[], counts: Readonly<Record<string, number>>, max = NOTE_BOOKS): T[] =>
+  books
+    .filter((book) => (counts[book.id] ?? 0) > 0)
+    .sort((a, b) => (b.lastOpened ?? "").localeCompare(a.lastOpened ?? "") || a.id.localeCompare(b.id))
+    .slice(0, max);
+
+/** A highlight's words as a note shows them: all of a short one, the start of a long one. */
+export const noteWords = (text: string, max = 280) => (text.length <= max ? text : `${text.slice(0, max).replace(/\s+\S*$/, "")}…`);
+
+/** What the notes say of themselves, for their label. */
+export const notesWords = (count: number) => (count === 1 ? "your latest highlight" : `your ${count} latest highlights`);

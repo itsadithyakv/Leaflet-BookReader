@@ -37,7 +37,9 @@ import "./SessionShelf.css";
  * - a gold band means the session ran to the end, cleanly
  * - a ribbon means the reader left a note
  * - a flower peeking out of the head is a focus flower that bloomed
- * - a charred spine was lost when a streak broke; it stays where it stood
+ * - a charred spine was burned when a streak broke, by an earlier version
+ *   (a broken streak burns nothing now: Pip catches a cold); it stays where
+ *   it stood, and the shelf only speaks of burning when it holds one
  * - loose pages are a day's reading outside any focus session (a free read)
  * - a gold bookend closes a week where the goal was met every day
  * - the wood itself levels up with the number of spines still standing
@@ -146,7 +148,7 @@ const TipCard = ({ tip }: { tip: Tip }) => {
       </p>
       {spine.bloomed && <p className="ss-tip-flower">A {spine.bloomed} bloomed: read to the end in full screen</p>}
       {session.notes && <p className="ss-tip-note">{session.notes}</p>}
-      {spine.burned && <p className="ss-tip-burned">Lost when a streak broke · {burnedOn}</p>}
+      {spine.burned && <p className="ss-tip-burned">Burned when a streak broke · {burnedOn}. Streaks no longer burn books.</p>}
     </div>
   );
 };
@@ -191,7 +193,7 @@ const WeekShelf = memo(({ row, dropId, showTip, hideTip }: WeekProps) => {
         <span className="ss-row-stats">
           {formatDuration(row.minutes)} read · {plural(row.sessions, "spine")}
           {row.freeMinutes > 0 && ` · ${formatDuration(row.freeMinutes)} free reading`}
-          {row.lost > 0 && <span className="ss-row-lost"> · {row.lost} lost</span>}
+          {row.lost > 0 && <span className="ss-row-lost"> · {row.lost} burned</span>}
         </span>
       </div>
       <div
@@ -300,7 +302,7 @@ export const SessionShelf = () => {
     [sessions, days, bookTitles, freeReads]
   );
   // Reading outside a focus session: on the shelf as loose pages, not counted
-  // among the spines (the wood, and what a broken streak burns, are sessions).
+  // among the spines (the wood counts focus sessions).
   const freeMinutes = useMemo(() => (freeReads ?? []).reduce((sum, free) => sum + free.minutes, 0), [freeReads]);
 
   const stats = useMemo(() => {
@@ -390,7 +392,10 @@ export const SessionShelf = () => {
           <p className="text-xs uppercase tracking-[0.25em] text-on-surface-variant">Your reading shelf</p>
           <h2 className="page-title mt-2 text-2xl">Session Bookshelf</h2>
         </div>
-        <div className="ss-wood-meter" title="The shelf wood improves as spines accumulate. Burned spines don't count.">
+        <div
+          className="ss-wood-meter"
+          title={`The shelf wood improves as spines accumulate.${stats.lost > 0 ? " Charred spines don't count." : ""}`}
+        >
           <span className="ss-wood-swatch" aria-hidden="true" />
           <div>
             <p className="text-sm font-semibold text-on-surface">{wood.name} shelf</p>
@@ -424,8 +429,8 @@ export const SessionShelf = () => {
           </div>
         )}
         {stats.lost > 0 && (
-          <div className="is-lost">
-            <dt>Lost to broken streaks</dt>
+          <div className="is-lost" title="An earlier version of Leaflet burned books when a streak broke. A broken streak burns nothing now.">
+            <dt>Burned by past streaks</dt>
             <dd>{plural(stats.lost, "book")}</dd>
           </div>
         )}
@@ -466,7 +471,9 @@ export const SessionShelf = () => {
           <li><span className="ss-key ss-key-cloth" />Colour: the book</li>
           <li><span className="ss-key ss-key-band" />Gold band: completed</li>
           <li><span className="ss-key ss-key-ribbon" />Ribbon: has a note</li>
-          <li><span className="ss-key ss-key-burned" />Charred: lost to a broken streak</li>
+          {stats.lost > 0 && (
+            <li><span className="ss-key ss-key-burned" />Charred: burned by a broken streak, which no longer happens</li>
+          )}
           <li><span className="ss-key ss-key-loose" />Loose pages: a free read, outside a focus session</li>
           <li><span className="ss-key ss-key-bookend" />Bookend: perfect week</li>
         </ul>

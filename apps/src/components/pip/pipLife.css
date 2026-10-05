@@ -139,3 +139,56 @@
 .pip-house-canvas[data-open-sky] {
   position: relative;
 }
+
+/* What Pip holds up over her head (a find, brought home): inside her button,
+   so it turns and flips with her. */
+.pip-house-pip-button {
+  position: relative;
+}
+
+.pip-held {
+  position: absolute;
+  display: block;
+  pointer-events: none;
+}
+
+/* The note she leaves on her pillow while she is out: a scrap of paper that
+   can be chosen, and says what it says. */
+.pip-away-note {
+  position: absolute;
+  z-index: 3;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.pip-away-note > .pip-sprite {
+  display: block;
+}
+
+.pip-away-note:focus-visible {
+  outline: 2px solid rgb(var(--color-primary));
+  outline-offset: 2px;
+}
+
+.pip-house-room[data-night] .pip-away-note > .pip-sprite {
+  filter: brightness(0.6) saturate(0.9);
+}
+
+.pip-away-note-say {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  width: max-content;
+  max-width: 220px;
+  pointer-events: none;
+}
+
+/* Her cold, in the mood panel: set a little apart, above the reasons. */
+.pip-mood-cold {
+  margin-top: 12px;
+  padding: 2px 12px 12px;
+  border-radius: 10px;
+  background: rgb(var(--color-primary) / 0.08);
+}

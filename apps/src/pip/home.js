@@ -20,9 +20,10 @@
    ALL_ITEMS / HOUSE_ITEMS  { id, name, kind, fits: [slot types], level, price, w, h, nod? }
    WALLPAPERS, FLOORS  [{ id, name, price }]; renderSwatch(type, id, w, h, f)
    renderHouseItem(item, f)
-   FIXTURES  [{ id, w, h, draw }]: what a floor has that is not decor (the
-     bedroom's mini fridge, shut and open); a level's `fridgeAt` lists the
-     places it may stand. */
+   FIXTURES  [{ id, w, h, draw(g, f, data) }]: what a floor has that is not
+     decor (the bedroom's mini fridge, shut and open, and its bookcase); a
+     level's `fridgeAt` lists the places the fridge may stand, and its
+     `fixturesAt` those of each other fixture. */
 import * as roomArt from "./room.js";
 
 let art = { ...roomArt };
@@ -172,6 +173,10 @@ const normaliseLevel = (level) => {
     garden,
     // Where this floor's mini fridge may stand, best first (left edges); none on most floors.
     fridgeAt: garden ? [] : list(level.fridgeAt).filter((x) => Number.isFinite(x)),
+    // Where each of its other fixtures may be (top-lefts, best first), by fixture id.
+    fixturesAt: garden || !level.fixturesAt ? {} : level.fixturesAt,
+    // The fixture that stands on its fridge, if one does.
+    onFridge: garden ? null : level.onFridge ?? null,
     defaults: [],
     fallback: false
   };
@@ -209,6 +214,8 @@ const fallbackBedroom = () => {
     arcade: false,
     garden: false,
     fridgeAt: [],
+    fixturesAt: {},
+    onFridge: null,
     defaults: list(art.ROOM_ITEMS)
       .filter((item) => item.starter || item.price === 0 || starterPiecesFor("bedroom").includes(item.id))
       .map((item) => ({ slot: item.id, itemId: item.id })),
@@ -357,10 +364,78 @@ export const fridgeBox = (level, decor) => {
   return { x, y: foot - item.h, w: item.w, h: item.h };
 };
 
-/** A floor's fixtures as renderHouseLevel draws them: the fridge, shut or `open`. */
-export const levelFixtures = (level, decor, open = false) => {
+/**
+ * The first of `candidates` (top-lefts) where something `w` by `h` overlaps
+ * nothing in `taken` (boxes); failing that, the one that overlaps least by
+ * area (the earlier of two as bad as each other). `freeSpot`, for a thing on
+ * the wall.
+ */
+export const freePlace = (candidates, w, h, taken) => {
+  let best = null;
+  let least = Infinity;
+  for (const [x, y] of candidates) {
+    const over = taken.reduce(
+      (sum, box) => sum + Math.max(0, Math.min(x + w, box.x + box.w) - Math.max(x, box.x)) * Math.max(0, Math.min(y + h, box.y + box.h) - Math.max(y, box.y)),
+      0
+    );
+    if (over < least) {
+      best = [x, y];
+      least = over;
+    }
+  }
+  return best;
+};
+
+/**
+ * Where this floor's other fixtures are with this decor, by fixture id: each
+ * in the first of its places (`fixturesAt`) that the reader's pieces, the
+ * fridge and the fixtures before it leave free, or the one they cover least;
+ * and what stands on the fridge (`onFridge`), on it. Each is the box of its
+ * art, with `hit`: the part of it that is the thing (all of it, for most).
+ * Empty on a floor without any.
+ */
+export const fixtureBoxes = (level, decor) => {
+  const out = {};
+  if (!level || level.fallback) return out;
+  const taken = list(decor?.placed).flatMap(({ slot: slotId, itemId }) => {
+    const slot = level.slots.find((entry) => entry.id === slotId);
+    const box = slot ? itemBox(itemId, slot) : null;
+    return box ? [box] : [];
+  });
+  const fridge = fridgeBox(level, decor);
+  if (fridge) taken.push(fridge);
+  const put = (item, x, y) => {
+    const hit = item.hit ?? { x: 0, y: 0, w: item.w, h: item.h };
+    out[item.id] = { x, y, w: item.w, h: item.h, hit: { x: x + hit.x, y: y + hit.y, w: hit.w, h: hit.h } };
+    taken.push(out[item.id].hit);
+  };
+  const riding = level.onFridge ? fixture(level.onFridge) : null;
+  // On top of the fridge: its foot on the cabinet, a pixel in from the fridge's edge.
+  if (riding && fridge) put(riding, fridge.x + 1, fridge.y - riding.h);
+  for (const [id, candidates] of Object.entries(level.fixturesAt ?? {})) {
+    const item = fixture(id);
+    if (!item) continue;
+    // It is the thing itself, not the room round it in its art, that must find a free place.
+    const hit = item.hit ?? { x: 0, y: 0, w: item.w, h: item.h };
+    const at = freePlace(list(candidates).map(([x, y]) => [x + hit.x, y + hit.y]), hit.w, hit.h, taken);
+    if (at) put(item, at[0] - hit.x, at[1] - hit.y);
+  }
+  return out;
+};
+
+/**
+ * A floor's fixtures as renderHouseLevel draws them: the fridge, shut or
+ * `open`, and the others where they are. `data` gives each what it shows, by
+ * fixture id (the books in the bookcase, the notes on the fridge's door);
+ * without it they are drawn bare.
+ */
+export const levelFixtures = (level, decor, open = false, data = {}) => {
+  const out = [];
+  const withData = (entry, id) => (data[id] === undefined ? entry : { ...entry, data: data[id] });
   const box = fridgeBox(level, decor);
-  return box ? [{ itemId: open ? "minifridge-open" : "minifridge", x: box.x, y: box.y }] : [];
+  if (box) out.push(withData({ itemId: open ? "minifridge-open" : "minifridge", x: box.x, y: box.y }, "minifridge"));
+  for (const [id, at] of Object.entries(fixtureBoxes(level, decor))) out.push(withData({ itemId: id, x: at.x, y: at.y }, id));
+  return out;
 };
 
 // ---- drawing ------------------------------------------------------------------------
@@ -424,9 +499,9 @@ export const itemBox = (itemOrId, slot) => {
   return { x: Math.round(anchored.x - w / 2), y: anchored.y - h, w, h };
 };
 
-/** One house item as its own sprite. */
-export const renderItem = (item, frame = 0) =>
-  typeof art.renderHouseItem === "function" ? art.renderHouseItem(item, frame) : art.renderRoomItem(item, frame);
+/** One house item as its own sprite (`data`: what a fixture shows). */
+export const renderItem = (item, frame = 0, data = undefined) =>
+  typeof art.renderHouseItem === "function" ? art.renderHouseItem(item, frame, data) : art.renderRoomItem(item, frame);
 
 /** A wallpaper or floor swatch for a shop tile, or null without the art. */
 export const renderFinish = (type, id, w = 32, h = 32) =>

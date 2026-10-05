@@ -8,24 +8,37 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
-  type PointerEvent as ReactPointerEvent
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode
 } from "react";
 import { itemBox, renderHouseLevel, renderItem, type HouseLevel, type HouseSlot, type LevelDecor } from "../../pip/home.js";
 import { LIB } from "../../pip/core";
 import {
+  PEEK_S,
   activityAt,
   bedtimeScroll,
+  bundled,
   caughtLine,
   chooseActivity,
+  coldPace,
+  coldRest,
   fidget,
   fidgetGap,
   fidgetsBetween,
   fridgeVisit,
   gazeAt,
   gazeMove,
+  goodbyeLine,
+  greetVisitor,
   innocentLine,
+  knockedLine,
   morningFridge,
   nightStir,
+  peekLine,
+  planActivity,
+  quiltLine,
+  spookedTonight,
+  stopForVisitor,
   scrollSession,
   scrollWindDown,
   shutOnHerLine,
@@ -37,8 +50,11 @@ import {
   type ActivityId,
   type ScrollBeat,
   type Spot,
-  type SpotKind
+  type SpotKind,
+  type World
 } from "../../pip/behaviour";
+import { markStopSaid, readStop, stopRemark } from "../../pip/readingMoments";
+import { setWorldStub, worldStub } from "../../pip/worldStub";
 import {
   HARD_LANDING,
   PIP_BOUNCE,
@@ -74,9 +90,11 @@ import { PipSay } from "../PipSay";
 import { UiIcon } from "../UiIcon";
 import { sceneScale } from "./sceneFit";
 import { floorPoint } from "./layout";
-import { useFurnishings, type FurnishPip, type Fridge, type RoomChange } from "./furnishings";
+import { fixtureKey, useFurnishings, type FurnishPip, type Fridge, type RoomChange } from "./furnishings";
+import { readingMove } from "../../pip/furnish-art.js";
 import { bedSleep, dark, fridgeFetch, fridgeHope, fridgeNothing, fridgeShutOnHer, fridgeStand, type Reaction } from "../../pip/furnish";
 import type { GameId } from "./arcade/games";
+import type { ArcadePage } from "./arcade/ArcadeOverlay";
 import { GardenSky } from "./GardenSky";
 import "./pipLife.css";
 import { banner, burst, centerOf, confetti, dropSeed, floatText, popOff, puff, rain, seedPixel, tossSeed, type Box, type Captured, type Point } from "./fx";
@@ -177,6 +195,30 @@ const HOPE_STAYS_MS = 6000;
 /** A piece of decor just put out is looked at once it has landed, and a beat. */
 const VISIT_AFTER_MS = DROP_MS + 350;
 
+/** Back from an expedition with nothing to show for it. */
+const HOME_LINES = ["i'm back.", "home again.", "nothing worth carrying. nice walk, though."];
+/** How far beyond the side wall she comes in from (and visitors too: pip/visitors.ts, `defaultDoor`). */
+const DOOR_BEYOND = 14;
+/** Where a thing held over her head sits in her 32 pixel frame: its foot on her raised hands, its middle over hers. */
+const HELD_FOOT = 13;
+
+/** A note left while she is out: a scrap of paper, a line of writing, a pin. Drawn once. */
+let notePaper: ImageData | null = null;
+const noteImage = () => {
+  if (notePaper) return notePaper;
+  const rows = ["..PPPPPPP", ".PWWWRWWP", ".PWWWWWWP", ".PWLLLLWP", ".PWWWWWWP", ".PWLLLWWP", ".PWWWWWWP", ".PPPPPPPP"];
+  const ink: Record<string, [number, number, number]> = { P: [94, 85, 68], W: [255, 246, 223], L: [179, 163, 131], R: [224, 57, 62] };
+  const image = new ImageData(9, rows.length);
+  rows.forEach((row, y) =>
+    [...row].forEach((mark, x) => {
+      const colour = ink[mark];
+      if (colour) image.data.set([...colour, 255], (y * 9 + x) * 4);
+    })
+  );
+  notePaper = image;
+  return image;
+};
+
 const GREETINGS = ["you're back! good chapter?", "there you are. how was the book?", "welcome back, reader.", "back already? tell me everything."];
 const RIPE_LINES = ["that one's ripe!", "ooh, pick that one.", "ripe and ready.", "seeds, right there."];
 /** Focus sessions done when Pip last said hello (a preference of this device). */
@@ -208,7 +250,7 @@ const pickOne = <T,>(items: readonly T[]) => items[Math.floor(Math.random() * it
  */
 type Errand = {
   /** `hope`: to a fridge the reader opened; `snack`: to the fridge herself, for the snack the reader is choosing. */
-  kind: "visit" | "ripe" | "bed" | "cue" | "yawn" | "hope" | "snack";
+  kind: "visit" | "ripe" | "bed" | "cue" | "yawn" | "hope" | "snack" | "back";
   /** Where to stand, in floor pixels; null: where he is. */
   x: number | null;
   /** Which way to face there. */
@@ -227,6 +269,8 @@ type Errand = {
   scroll?: ScrollBeat[];
   /** The fridge it is about (its name among the furnishings). */
   fridge?: string;
+  /** The move she walks there with, when it is not her stroll (`back`: the find held up). */
+  as?: string;
 };
 
 /**
@@ -301,6 +345,30 @@ export type HouseSceneHandle = {
   celebrate: (title: string, note: string) => void;
   /** Plays with Pip as the hand would: for the Play keys, so nothing needs a pointer. */
   playWith: (how: "pet" | "tickle" | "ball" | "toss" | "bed" | "snack") => void;
+  /** A visitor has knocked, has reached their place, or has left: she answers, if she is free to. */
+  visitor: (what: "knocked" | "arrived" | "left") => void;
+};
+
+/**
+ * The room, for something laid over it (a visitor, a note on the door): how
+ * big a floor pixel is on screen, the floor's size, and where Pip is. An
+ * overlay places itself in floor pixels times `scale`.
+ */
+export type RoomFrame = {
+  /** CSS pixels a floor pixel. */
+  scale: number;
+  /** The floor, in floor pixels. */
+  w: number;
+  h: number;
+  /** Where feet stand. */
+  walkY: number;
+  floorId: string;
+  /** The room is dimmed for the evening. */
+  night: boolean;
+  /** Pip, now: where her feet are (floor pixels), which way she faces, what she is at, and whether she is out of the house. */
+  pip: () => { x: number; y: number; facing: 1 | -1; phase: string; away: boolean };
+  /** What stands on the floor line (left edge and width, floor pixels): the bed, the pieces on the floor, the fridge. */
+  floor: () => Array<{ x: number; w: number }>;
 };
 
 /** Evenings (and nights) the house dims and its lamps glow. */
@@ -537,8 +605,8 @@ export type HouseSceneProps = {
   onSlot: (slot: HouseSlot) => void;
   /** Names what is in a slot, for its label. */
   slotLabel: (slot: HouseSlot) => string;
-  /** An arcade machine on this floor was selected: its game (or, with none of its own, the list). */
-  onArcade?: (game: GameId | null) => void;
+  /** An arcade machine on this floor was selected: its game (or, with none of its own, the list); or a page of the arcade's, for a thing that opens one (the word quiz). */
+  onArcade?: (game: GameId | ArcadePage | null) => void;
   /** The jukebox was selected: a dance. */
   onJukebox?: () => void;
   /** Pip is elsewhere (in a game): the room shows without it. */
@@ -551,6 +619,12 @@ export type HouseSceneProps = {
   plotLabel?: (plot: ScenePlot) => string;
   /** Room kept below the scene (the page's tool rail), in CSS pixels. */
   reserveBelow?: number;
+  /** What she knows of the reader's books and the world outside the room (pip/behaviour.ts, `World`): it colours what she does. */
+  world?: World;
+  /** Something laid over the room, in its own coordinates, under Pip: a visitor, a note. */
+  overlay?: (frame: RoomFrame) => ReactNode;
+  /** She has come in and shown what she brought back (`world.back`, by its key): the page files it. Called once a find. */
+  onWelcomed?: (key: string) => void;
   label: string;
 };
 
@@ -617,6 +691,9 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     onEmptyPlot,
     plotLabel,
     reserveBelow = 28,
+    world,
+    overlay,
+    onWelcomed,
     label
   },
   ref
@@ -631,7 +708,12 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
   // Whether the ball is out (its place is the loop's, on a ref).
   const [ballOut, setBallOut] = useState(false);
   const [per, setPer] = useState(3);
-  const base = mopey ? "mope" : "idle";
+  // Out of the house altogether (an expedition): no Pip, a note where she sleeps.
+  const out = Boolean(world?.away);
+  const outRef = useRef(out);
+  outRef.current = out;
+  // Resting, she stands as she feels: under a blanket with a cold, drooping when glum.
+  const base = bundled(world?.cold) ? "cold-idle" : mopey ? "mope" : "idle";
   const [view, setView] = useState<{ move: string; loops?: number; key: string | number; flip: boolean }>({ move: base, key: "rest", flip: false });
   // What is showing, for the loop to compare against without waiting for a render.
   const viewRef = useRef({ move: base });
@@ -749,10 +831,26 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     snoozed: false,
     snoozing: false,
     /** She has been to look in a fridge the reader opened, and is still by it until then: if it shuts, she has a word. */
-    hopedUntil: 0
+    hopedUntil: 0,
+    /** In bed, not to sleep: under the quilt, hiding from her book. */
+    hiding: false,
+    /** Asleep, but for a look out from under the quilt (the night after a horror). */
+    peeking: false,
+    /** The find she last came in with (its key), and whether the page has been told. */
+    welcomed: null as string | null,
+    toldWelcomed: null as string | null
   });
-  const live = useRef({ scale, level, base, repertoire, mood, onActDone, onPoke, onPlayed, ownBall, attentive, decor, plots, decorating });
-  live.current = { scale, level, base, repertoire, mood, onActDone, onPoke, onPlayed, ownBall, attentive, decor, plots, decorating };
+  const live = useRef({ scale, level, base, repertoire, mood, onActDone, onPoke, onPlayed, ownBall, attentive, decor, plots, decorating, world, onWelcomed });
+  live.current = { scale, level, base, repertoire, mood, onActDone, onPoke, onPlayed, ownBall, attentive, decor, plots, decorating, world, onWelcomed };
+  /** The world as she knows it now: the page's, under anything set by hand (pip/worldStub.ts; the page lays it over too, a render later). */
+  const worldNow = (): World | undefined => {
+    const stub = worldStub();
+    return stub ? { ...live.current.world, ...stub } : live.current.world;
+  };
+  // What she holds up over her head (a find brought home), while she does.
+  const [holding, setHolding] = useState<ImageData | null>(null);
+  const holdingRef = useRef<ImageData | null>(null);
+  holdingRef.current = holding;
 
   // Pip's own lines (a ripe plant pointed out, a wish come true); the page's
   // come first.
@@ -953,7 +1051,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       // The floor's fridge, where the furnishings stand it, shut or open; and the light of her phone, in bed.
       const fridges = furnishRef.current?.fixtures.current;
       const fixtures = fridges || phoneGlow.current ? [...(fridges ?? []), ...(phoneGlow.current ? [{ itemId: "phoneglow", ...phoneGlow.current }] : [])] : undefined;
-      const hidden = `${[...out].sort().join(",")}|${[...unlit].sort().join(",")}|${(fixtures ?? []).map((entry) => `${entry.itemId}@${entry.x}`).join(",")}`;
+      const hidden = `${[...out].sort().join(",")}|${[...unlit].sort().join(",")}|${(fixtures ?? []).map(fixtureKey).join(",")}`;
       if (now !== hour) {
         hour = now;
         kept = new Map();
@@ -1134,7 +1232,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     // Something waiting (a new piece to see, a cue) comes soon after; otherwise
     // she stands a few seconds before the next small thing, or the next activity.
     const waiting = s.queue.length > 0 ? Math.min(...s.queue.map((errand) => errand.after)) : null;
-    s.nextFree = waiting !== null ? Math.max(now + 600, waiting) : now + (prefersReducedMotion() ? STILL_GAP_MS : fidgetGap(Math.random) * 1000);
+    s.nextFree = waiting !== null ? Math.max(now + 600, waiting) : now + (prefersReducedMotion() ? STILL_GAP_MS : fidgetGap(Math.random) * 1000 * coldRest(worldNow()?.cold));
     s.gazeAt = 0;
     show(live.current.base, undefined, "rest");
   };
@@ -1155,9 +1253,14 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       hobbies: can.hobbies,
       recent: s.recent,
       justNow: { fed: now - s.fedAt < JUST_NOW_MS, played: now - s.playedAt < JUST_NOW_MS, gamed: now - s.gamedAt < JUST_NOW_MS },
-      reduced
+      reduced,
+      world: worldNow()
     };
   };
+
+  /** Her stroll, as she is: a shuffle in her blanket with a cold. And how fast she goes, as a share of her usual pace. */
+  const strollMove = () => (bundled(worldNow()?.cold) ? "shuffle" : "walk");
+  const paceNow = () => coldPace(worldNow()?.cold);
 
   /** The next step of the activity under way; past the last one, it is done. */
   const nextStep = () => {
@@ -1190,21 +1293,33 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
         return;
       }
       s.target = step.x;
-      s.pace = step.pace === "tiptoe" ? TIPTOE_SPEED : WALK_SPEED;
+      s.pace = (step.pace ? TIPTOE_SPEED : WALK_SPEED) * paceNow();
       face(step.x < s.x ? -1 : 1);
       s.phase = "walk";
-      show(step.pace === "tiptoe" ? "tiptoe" : "walk", undefined, "walk");
+      // Her stroll, unless the activity walks its own way (bent over a trail, on the march).
+      show(step.as ?? (step.pace === "tiptoe" ? "tiptoe" : strollMove()), undefined, "walk");
     } else if (step.kind === "face") {
       face(step.dir);
       nextStep();
     } else if (step.kind === "do") {
       s.phase = "doing";
-      show(step.move, loopsFor(step.move, step.seconds), `plan-${Date.now()}`);
+      // Reading, the book in her hands is the reader's own (pip/furnish-art.js).
+      const move = step.move === "read" ? readingMove() : step.move;
+      show(move, loopsFor(move, step.seconds), `plan-${Date.now()}`);
       say(step.line);
     } else if (step.kind === "use" && step.what === "sleep") {
       // Into bed for a nap; the plan goes on when she gets up (see the loop).
       s.napFor = step.seconds;
       tuck(prefersReducedMotion());
+    } else if (step.kind === "use" && step.what === "hide") {
+      // Into bed, but not to sleep: under the quilt a while, and then on with the plan, as after a nap.
+      s.napFor = step.seconds;
+      s.hiding = true;
+      tuck(prefersReducedMotion());
+    } else if (step.kind === "use" && step.what === "thing") {
+      // A thing in the room she is about to use: it is told, in its own word (the furnishings know what to do).
+      (furnishRef.current?.pipUse as undefined | ((key: string, what: string) => void))?.(step.id, step.verb);
+      nextStep();
     } else if (step.kind === "use" && (step.what === "scroll" || step.what === "bed")) {
       // Into bed, with the phone or back to sleep: the activity ends there, and the night goes on.
       s.recent = [plan.activity.id, ...s.recent].slice(0, 3);
@@ -1268,6 +1383,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     // The phone goes wherever phones go.
     s.abed = null;
     s.pendingScroll = null;
+    s.hiding = false;
+    s.peeking = false;
     s.tuckedAt = -Infinity;
     setPhoneGlow(false);
     if (lifted) return;
@@ -1298,7 +1415,11 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     const beats = s.pendingScroll;
     s.pendingScroll = null;
     if (beats) startScroll(beats);
-    else show("sleep", undefined, "sleep");
+    else if (s.hiding) {
+      // Not asleep at all: under the quilt, and up for a look each way.
+      show("quilt-hide", undefined, "hide");
+      say(quiltLine(Math.random));
+    } else show("sleep", undefined, "sleep");
   };
 
   // ---- the phone, in bed -----------------------------------------------------------
@@ -1381,11 +1502,23 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     const bed = bedBox(live.current.level, live.current.decor);
     if (!bed) {
       s.pendingScroll = null;
+      s.hiding = false;
       rest();
       return;
     }
     if (instant) {
       sleepIn(bed);
+      return;
+    }
+    if (stopForVisitor(worldNow()?.visitor, s.x, bed.x + BED_PIP_X) !== null) {
+      // A visitor stands between her and her bed: she does not leap over them. Bed can wait.
+      s.pendingScroll = null;
+      s.hiding = false;
+      s.napFor = null;
+      s.errand = null;
+      dropPlan(true);
+      s.wokeUntil = nowMs() + WOKEN_MS;
+      rest();
       return;
     }
     s.phase = "tuck";
@@ -1423,6 +1556,30 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     s.phase = "errand";
     show(errand.move, errand.loops, `errand-${Date.now()}`);
     say(errand.line);
+    if (errand.kind === "back") {
+      // In, and holding it up: that is the showing. The page is told, once.
+      playSound("chime", { pitch: 1.2, volume: 0.5 });
+      tellWelcomed();
+    }
+  };
+
+  /** The page hears that the find she came in with has been shown (or that she was called away with it in her hands). */
+  const tellWelcomed = () => {
+    const s = st.current;
+    if (!s.welcomed || s.toldWelcomed === s.welcomed) return;
+    s.toldWelcomed = s.welcomed;
+    live.current.onWelcomed?.(s.welcomed);
+  };
+
+  /** Asleep for the night, the night after a horror: a wide-eyed look out from under the quilt, and asleep again. She does not get up. */
+  const peek = () => {
+    const s = st.current;
+    if (s.phase !== "sleep" || s.abed || s.hiding) return;
+    s.peeking = true;
+    s.stirredAt = nowMs();
+    s.recent = ["spooked" as ActivityId, ...s.recent].slice(0, 3);
+    show("quilt-hide", loopsFor("quilt-hide", PEEK_S), `peek-${Date.now()}`);
+    say(peekLine(Math.random));
   };
 
   /** A move and a line where she stands, as her own answer to something (not an errand, not the page's). */
@@ -1445,10 +1602,10 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     dropPlan();
     if (errand.x !== null && !reduced && Math.abs(errand.x - s.x) > 2) {
       s.target = errand.x;
-      s.pace = errand.hurry ? RUN_SPEED : errand.tiptoe ? TIPTOE_SPEED : WALK_SPEED;
+      s.pace = (errand.hurry ? RUN_SPEED : errand.tiptoe ? TIPTOE_SPEED : WALK_SPEED) * paceNow();
       face(errand.x < s.x ? -1 : 1);
       s.phase = "walk";
-      show(errand.hurry ? "scamper" : errand.tiptoe ? "tiptoe" : "walk", undefined, "walk");
+      show(errand.as ?? (errand.hurry ? "scamper" : errand.tiptoe ? "tiptoe" : strollMove()), undefined, "walk");
       return;
     }
     // Without motion she is simply at the fridge, not on her way to it.
@@ -1546,6 +1703,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     s.pendingScroll = null;
     s.fridgeHold = null;
     s.snoozing = false;
+    s.hiding = false;
     s.tuckedAt = -Infinity;
     phoneGlow.current = null;
     setBallOut(false);
@@ -1585,6 +1743,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     () =>
       onPipCue((cue) => {
         const s = st.current;
+        // Out of the house: nobody to do it.
+        if (outRef.current) return;
         const after = nowMs() + 300;
         s.queue = [...s.queue.filter((errand) => errand.kind !== "cue" || errand.move !== cue.move), { kind: "cue", x: null, move: cue.move, loops: cue.loops ?? 1, line: cue.line ?? null, after }];
         if (s.phase === "rest") s.nextFree = Math.min(s.nextFree, after);
@@ -1609,6 +1769,11 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
   useEffect(() => {
     if (!act) return;
     const s = st.current;
+    if (outRef.current) {
+      // Out of the house: there is nobody to do it, and nothing waits on her.
+      live.current.onActDone();
+      return;
+    }
     // Out of the hand first: the page has something for her to do.
     dragEnd.current?.("cancel");
     untuck();
@@ -1687,6 +1852,12 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
         // She waited at the open door and no snack came.
         shutFridge();
         answer(fridgeNothing(Math.random));
+      } else if (errand?.kind === "back") {
+        // Shown: it goes in her pocket (and into the album), in a puff.
+        const head = headPoint();
+        if (head && holdingRef.current && !prefersReducedMotion()) puff({ x: head.x, y: head.y - 8 * live.current.scale }, { px: live.current.scale, count: 5, color: "#FFFFFF", edge: "#DCD6C8", spread: 24 });
+        setHolding(null);
+        rest();
       } else {
         // Done hoping at the reader's open fridge: she stays by it a little, in case.
         if (errand?.kind === "hope") s.hopedUntil = nowMs() + HOPE_STAYS_MS;
@@ -1701,6 +1872,10 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     } else if (s.phase === "sleep" && s.snoozing) {
       // Snoozed: asleep again, until the clock is looked at next.
       s.snoozing = false;
+      show("sleep", undefined, "sleep");
+    } else if (s.phase === "sleep" && s.peeking) {
+      // Nothing there: asleep again.
+      s.peeking = false;
       show("sleep", undefined, "sleep");
     }
   };
@@ -1727,12 +1902,37 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       last = time;
       const s = st.current;
       const { level: lv } = live.current;
+      if (outRef.current) {
+        // She is out: the room goes on without her.
+        stepBall(time, dt, reduced);
+        furnishRef.current?.step(dt, reduced);
+        return;
+      }
+      // Called away with the find still over her head (picked up, poked): it is put by, and counts as shown.
+      if (holdingRef.current && s.errand?.kind !== "back") {
+        setHolding(null);
+        tellWelcomed();
+      }
       if (s.phase === "walk") {
         const dir = s.target < s.x ? -1 : 1;
-        s.x += dir * s.pace * dt;
-        if ((dir < 0 && s.x <= s.target) || (dir > 0 && s.x >= s.target)) {
+        const next = s.x + dir * s.pace * dt;
+        // Not through a visitor: she stops at their side. What she was on her way to is beyond them, so it
+        // is given up (a plan, the fridge, her bed: see `tuck`); a thing she can do from where she stands, she does.
+        const stop = stopForVisitor(worldNow()?.visitor, s.x, dir < 0 ? Math.max(next, s.target) : Math.min(next, s.target));
+        if (stop !== null) {
+          s.x = stop;
+          if (s.errand && !s.errand.fridge) {
+            arrive();
+          } else {
+            s.errand = null;
+            dropPlan(true);
+            rest();
+          }
+        } else if ((dir < 0 && next <= s.target) || (dir > 0 && next >= s.target)) {
           s.x = s.target;
           arrive();
+        } else {
+          s.x = next;
         }
         place();
       } else if (s.phase === "fall") {
@@ -1808,6 +2008,10 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
         if (s.phase === "fetch" && (ball.state === "held" || ball.state === "air")) {
           // The reader has it again: she waits to see where it goes.
           rest();
+        } else if (Math.abs(to - s.x) > 6 && stopForVisitor(worldNow()?.visitor, s.x, clampX(s.x + dir * (s.phase === "fetch" ? RUN_SPEED : CARRY_SPEED) * dt)) !== null) {
+          // The ball (or the way back with it) is beyond the visitor: she leaves it, rather than run through them.
+          ball.home = ball.state === "carried" ? s.x : ball.body.x;
+          answer({ move: "shift", loops: 1, line: s.phase === "fetch" ? "it's behind our guest. yours!" : null });
         } else if (Math.abs(to - s.x) > 6) {
           face(dir);
           s.x = clampX(s.x + dir * (s.phase === "fetch" ? RUN_SPEED : CARRY_SPEED) * dt);
@@ -1874,7 +2078,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
         s.nightCheck = time + 30_000;
         // (Day, not just past bedtime: put to bed in the evening, she is in it for the night.)
         const hour = new Date().getHours();
-        if (!bedtime(hour) && !dark(hour) && snoozes(hour, s.snoozed || Boolean(s.abed))) {
+        if (!bedtime(hour) && !dark(hour) && snoozes(hour, s.snoozed || Boolean(s.abed) || s.hiding)) {
           // Day, and she knows it: the quilt goes back over her head, once.
           s.snoozed = true;
           s.snoozing = true;
@@ -1896,7 +2100,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
             then: morningFridge(Boolean(furnishRef.current?.fridge()), Math.random) ? "fridge" : undefined
           };
           arrive();
-        } else if (!s.abed && s.wakeAt === Infinity && !live.current.decorating && !live.current.attentive) {
+        } else if (!s.abed && !s.peeking && s.wakeAt === Infinity && !live.current.decorating && !live.current.attentive) {
           // Still night, and she is asleep for it: now and then something has her up (pip/behaviour.ts, `nightStir`;
           // never within a while of the reader tucking her in).
           const minutes = (since: number) => (time - since) / 60_000;
@@ -1907,12 +2111,14 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
               asleepFor: minutes(s.sleptAt),
               tuckedAgo: s.tuckedAt > -Infinity ? minutes(s.tuckedAt) : null,
               stirredAgo: s.stirredAt > -Infinity ? minutes(s.stirredAt) : null,
-              recent: s.recent
+              recent: s.recent,
+              spooked: spookedTonight(worldNow())
             },
             Math.random
           );
           if (stir === "fridge") raid();
           else if (stir === "scroll") startScroll(scrollSession(hour, Math.random, reduced));
+          else if (stir === "peek") peek();
         }
       } else if (s.phase === "rest" && s.ball && (s.ball.state === "roll" || s.ball.state === "still") && Math.abs(s.ball.body.x - s.ball.home) > 14 && !reduced) {
         // The ball is down, away from where it was thrown: after it.
@@ -1930,7 +2136,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
         } else if (s.fidgets > 0 && !reduced) {
           // A small thing while standing about.
           s.fidgets -= 1;
-          const small = fidget({ mood: live.current.mood, hour: new Date().getHours() }, s.lastFidget, Math.random);
+          const small = fidget({ mood: live.current.mood, hour: new Date().getHours(), world: worldNow() }, s.lastFidget, Math.random);
           s.lastFidget = small.move;
           s.phase = "fidget";
           show(small.move, loopsFor(small.move, small.seconds), `fidget-${Date.now()}`);
@@ -2015,6 +2221,13 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
           recent: s.recent.join(","),
           errand: s.errand?.kind ?? null,
           abed: s.abed ? `${s.abed.beats[s.abed.index]?.beat ?? "?"} ${s.abed.index + 1}/${s.abed.beats.length}` : null,
+          hiding: s.hiding,
+          peeking: s.peeking,
+          away: outRef.current,
+          holding: holdingRef.current ? `${holdingRef.current.width}x${holdingRef.current.height}` : null,
+          welcomed: s.toldWelcomed,
+          pace: fixed(s.pace, 1),
+          label: s.plan?.activity.label ?? null,
           glow: phoneGlow.current,
           tucked: s.tuckedAt > -Infinity,
           line: ownLineRef.current,
@@ -2032,10 +2245,11 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
         };
       },
       poke: () => {
-        pokePip();
+        if (!outRef.current) pokePip();
         return hook.state();
       },
       play: (how: "pet" | "tickle" | "ball" | "toss") => {
+        if (outRef.current) return hook.state();
         if (how === "pet") touchPip("pet", 2600);
         else if (how === "tickle") touchPip("tickle", 2200);
         else if (how === "ball") throwBall();
@@ -2050,8 +2264,9 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
         return hook.state();
       },
       /** The night, on demand: up for the fridge, or (in bed) out with the phone. */
-      night: (what: "fridge" | "scroll") => {
+      night: (what: "fridge" | "scroll" | "peek") => {
         if (what === "fridge") raid();
+        else if (what === "peek") peek();
         else startScroll(scrollSession(new Date().getHours(), Math.random, prefersReducedMotion()));
         return hook.state();
       },
@@ -2065,6 +2280,31 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
         fetchSnack();
         return hook.state();
       },
+      /** What she knows of the world, set by hand (over what the page gives); null: the page's again. */
+      world: (patch?: World | null) => {
+        if (patch !== undefined) setWorldStub(patch);
+        return worldNow() ?? null;
+      },
+      /** A visitor's knock, arrival or leaving, as the visitors' layer reports it. */
+      visitor: (what: "knocked" | "arrived" | "left") => {
+        company(what);
+        return hook.state();
+      },
+      /** Starts an activity by name, from where she stands, as if she had chosen it. */
+      choose: (id: ActivityId) => {
+        const s = st.current;
+        if (!TOUCHABLE.has(s.phase) || s.phase === "sleep" || s.phase === "tuck") return hook.state();
+        const reduced = prefersReducedMotion();
+        s.errand = null;
+        s.touch = null;
+        dropPlan();
+        s.fidgets = 0;
+        s.plan = { activity: planActivity(id, outlook(nowMs(), reduced), Math.random), index: -1 };
+        nextStep();
+        return hook.state();
+      },
+      /** The plan under way, step by step. */
+      plan: () => st.current.plan?.activity ?? null,
       scene: st
     };
     (window as unknown as { __pipHouse?: typeof hook }).__pipHouse = hook;
@@ -2086,11 +2326,139 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     const timer = window.setTimeout(() => {
       writeNumber(GREETED_KEY, sessionsDone);
       const pip = usePipStore.getState();
-      if (seen === null || pip.reaction || pip.queue.length > 0) return;
+      // (Not while she is out, and not over a find she is bringing in: that is her hello.)
+      if (seen === null || pip.reaction || pip.queue.length > 0 || outRef.current || worldNow()?.back) return;
       pip.react("welcome", { loops: 1, line: pickOne(GREETINGS) });
     }, 800);
     return () => window.clearTimeout(timer);
   }, [sessionsDone, suspended, hidePip]);
+
+  // ---- out, and back with something in hand -----------------------------------------------
+  // An expedition (the world says so: `away`, then `back`): she is not in the
+  // house at all while she is out, a note left on her pillow, the room
+  // otherwise alive; and she comes back in from the side with what she found
+  // held up over her head, shows it, and it goes into the album (the page is
+  // told: `onWelcomed`). A find not yet shown when the tab opens is brought
+  // in the same way. Without motion she is simply back, holding it up.
+
+  /** In through the side: with the find held up, or (nothing found) just home. */
+  const comeIn = (found: NonNullable<World["back"]> | null) => {
+    const s = st.current;
+    const lv = live.current.level;
+    const reduced = prefersReducedMotion();
+    dragEnd.current?.("cancel");
+    untuck();
+    dropPlan();
+    s.errand = null;
+    s.touch = null;
+    s.fidgets = 0;
+    const to = clampX(Math.round(lv.w * 0.7));
+    s.x = reduced ? to : lv.w + DOOR_BEYOND;
+    s.y = lv.walkY;
+    s.vy = 0;
+    s.facing = -1;
+    place();
+    if (found) {
+      s.welcomed = found.key;
+      setHolding(found.image ?? null);
+      startErrand({ kind: "back", x: to, move: "show", loops: 3, line: found.line ?? "look what i found!", after: 0, as: "bring" }, reduced);
+    } else {
+      startErrand({ kind: "cue", x: to, move: "welcome", loops: 1, line: pickOne(HOME_LINES), after: 0 }, reduced);
+    }
+  };
+
+  const wasOut = useRef(false);
+  const backKey = world?.back?.key ?? null;
+  useEffect(() => {
+    const s = st.current;
+    if (out) {
+      if (!wasOut.current) {
+        // Off she goes: out of the hand, out of bed, whatever she was at dropped, the ball put away.
+        dragEnd.current?.("cancel");
+        untuck();
+        shutFridge();
+        dropPlan();
+        s.errand = null;
+        s.touch = null;
+        s.queue = [];
+        s.ball = null;
+        setBallOut(false);
+        setHolding(null);
+        s.phase = "rest";
+      }
+      wasOut.current = true;
+      return;
+    }
+    // (In a game: she comes in when the room is hers again.)
+    if (hidePip) return;
+    const came = wasOut.current;
+    wasOut.current = false;
+    const found = world?.back ?? null;
+    if (found && s.welcomed !== found.key) comeIn(found);
+    else if (came) comeIn(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [out, backKey, hidePip]);
+
+  // The note she leaves: selecting it (or resting on it) shows what it says.
+  const [noteOpen, setNoteOpen] = useState(false);
+  useEffect(() => {
+    if (!out) setNoteOpen(false);
+  }, [out]);
+
+  // ---- company -------------------------------------------------------------------------------
+  // A friend's Pip visits (components/pip/Visitors.tsx, laid over the room by
+  // the page; the world says where they stand). She hears the knock, goes over
+  // to say hello and reads beside them (pip/behaviour.ts plans it), and waves
+  // them off. Her walks stop at the visitor's side (see the loop).
+  const company = (what: "knocked" | "arrived" | "left") => {
+    const s = st.current;
+    if (outRef.current) return;
+    const free = () => TOUCHABLE.has(s.phase) && s.phase !== "sleep" && s.phase !== "tuck" && s.phase !== "petted" && s.errand?.kind !== "back" && !live.current.decorating;
+    if (what === "knocked") {
+      if (!free()) return;
+      s.errand = null;
+      dropPlan();
+      // Towards the door (the right-hand wall, as the visitors have it).
+      face(1);
+      answer({ move: "boop", loops: 2, line: knockedLine(Math.random) });
+    } else if (what === "arrived") {
+      // A moment, so the world has heard where they stand.
+      later(200, () => {
+        if (!free() || !worldNow()?.visitor) return;
+        const reduced = prefersReducedMotion();
+        s.errand = null;
+        s.touch = null;
+        dropPlan();
+        s.fidgets = 0;
+        s.plan = { activity: greetVisitor(outlook(nowMs(), reduced), Math.random), index: -1 };
+        nextStep();
+      });
+    } else if (free()) {
+      const after = nowMs() + 300;
+      s.queue = [...s.queue.filter((errand) => errand.kind !== "cue" || errand.move !== "welcome"), { kind: "cue", x: null, face: 1, move: "welcome", loops: 1, line: goodbyeLine(Math.random), after }];
+      if (s.phase === "rest") s.nextFree = Math.min(s.nextFree, after);
+    }
+  };
+
+  // ---- "you stopped there?" ----------------------------------------------------------------
+  // The reader closed a book in the middle of a chapter (the reader leaves the
+  // record: pip/readingMoments.ts) and has come to see Pip within the hour:
+  // she has a word about it, once, when she is next free. Not from her bed:
+  // a sleeping Pip says nothing, and the stop keeps for a later visit.
+  useEffect(() => {
+    if (suspended || hidePip) return;
+    const timer = window.setTimeout(() => {
+      const s = st.current;
+      const stop = readStop();
+      const remark = stopRemark(stop, Date.now(), Math.random);
+      if (!stop || !remark || s.phase === "sleep" || s.phase === "tuck" || outRef.current) return;
+      markStopSaid(stop);
+      const after = nowMs() + 300;
+      s.queue = [...s.queue, { kind: "cue", x: null, move: "look", loops: 1, line: remark, after }];
+      if (s.phase === "rest") s.nextFree = Math.min(s.nextFree, after);
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [suspended, hidePip]);
 
   // ---- the rain barrel -----------------------------------------------------------------
   // On a garden floor: the water reading poured while nothing grew, waiting for
@@ -2211,7 +2579,10 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       confetti(box, { px: live.current.scale, count: 48 });
       banner(box, title, note);
     },
+    visitor: (what) => company(what),
     playWith: (how) => {
+      // Out of the house: there is nobody to play with.
+      if (outRef.current) return;
       if (how === "pet") touchPip("pet", 2600);
       else if (how === "tickle") touchPip("tickle", 2200);
       else if (how === "ball") throwBall();
@@ -2256,6 +2627,17 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       s.abed.beats.splice(s.abed.index + 1, 0, { beat: "innocent", seconds: 3, line: innocentLine(Math.random) });
       playSound("squeak", { pitch: 0.9, volume: 0.6 });
       nextBeat();
+      return;
+    }
+    if ((s.phase === "sleep" || s.phase === "tuck") && s.hiding) {
+      // Under the quilt, and something touched her: out of bed in one go. (The hiding is over; it still counts as done.)
+      dropPlan(true);
+      untuck();
+      s.poke = null;
+      s.phase = "fidget";
+      show("boop", 2);
+      say(pickOne(["eep! ...oh. it's you.", "aah! don't do that.", "not a monster. good. hi."]));
+      playSound("squeak", { pitch: 1.4 });
       return;
     }
     if (s.phase === "sleep" || s.phase === "tuck") {
@@ -2679,13 +3061,14 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     dropPlan();
     face(dir);
     s.target = Math.max(18, Math.min(lv.w - 18, s.x + dir * 24));
-    s.pace = WALK_SPEED;
+    s.pace = WALK_SPEED * paceNow();
     s.phase = prefersReducedMotion() ? "rest" : "walk";
     if (s.phase === "rest") {
-      s.x = s.target;
+      // (Not through a visitor: as far as their side, and no further.)
+      s.x = stopForVisitor(worldNow()?.visitor, s.x, s.target) ?? s.target;
       place();
     }
-    show(s.phase === "walk" ? "walk" : live.current.base, undefined, s.phase === "walk" ? "walk" : "rest");
+    show(s.phase === "walk" ? strollMove() : live.current.base, undefined, s.phase === "walk" ? "walk" : "rest");
   };
 
   // ---- the room under the hand -----------------------------------------------------
@@ -2842,14 +3225,15 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
   };
 
   furnishPip.current = {
-    react: reactTo,
-    bed: putToBed,
-    fridge: fridgeChanged,
-    asleep: () => st.current.phase === "sleep" || st.current.phase === "tuck",
+    // (Out of the house, she answers nothing done to her room.)
+    react: (reaction, x, what) => (outRef.current ? undefined : reactTo(reaction, x, what)),
+    bed: () => (outRef.current ? say(null) : putToBed()),
+    fridge: (what, fridge) => (outRef.current ? undefined : fridgeChanged(what, fridge)),
+    asleep: () => !outRef.current && (st.current.phase === "sleep" || st.current.phase === "tuck"),
     go: (what, spot) => {
       // Called over to a thing: she drops what she was at and comes, unless she is in the hand, the air, or bed.
       const s = st.current;
-      if (!TOUCHABLE.has(s.phase) || s.phase === "sleep" || s.phase === "tuck") return;
+      if (outRef.current || !TOUCHABLE.has(s.phase) || s.phase === "sleep" || s.phase === "tuck") return;
       const reduced = prefersReducedMotion();
       s.errand = null;
       s.touch = null;
@@ -2859,7 +3243,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       say(what === "read" ? pickOne(["ooh, that one.", "a chapter? yes.", "good choice."]) : pickOne(["let's see what's out there.", "coming to look."]));
       nextStep();
     },
-    wake: () => wake("morning! is that the sun?"),
+    wake: () => !outRef.current && wake("morning! is that the sun?"),
     clock: nowMs,
     redraw: () => redraw.current?.()
   };
@@ -2880,6 +3264,31 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
   const busyWith = st.current.plan?.activity.label ?? null;
   const night = nightNow(level);
   const now = nowMs();
+  const frame: RoomFrame = {
+    scale,
+    w: level.w,
+    h: level.h,
+    walkY: level.walkY,
+    floorId: level.id,
+    night,
+    pip: () => ({ x: st.current.x, y: st.current.y, facing: st.current.facing < 0 ? -1 : 1, phase: st.current.phase, away: outRef.current }),
+    floor: () => {
+      const lv = live.current.level;
+      const standing = live.current.decor.placed.flatMap((entry) => {
+        const slot = lv.slots.find((candidate) => candidate.id === entry.slot);
+        const box = slot && slot.fits === "stand" ? itemBox(entry.itemId, slot) : null;
+        return box ? [{ x: box.x, w: box.w }] : [];
+      });
+      const fridge = furnishRef.current?.fridge();
+      return fridge ? [...standing, { x: fridge.box.x, w: fridge.box.w }] : standing;
+    }
+  };
+  // Where the note goes while she is out: on her pillow, or in the middle of the floor on a floor with no bed.
+  const noteBed = out ? bedBox(level, decor) : null;
+  const noteAt = noteBed ? { x: noteBed.x + 6, y: noteBed.y + 2 } : { x: Math.round(level.w / 2) - 4, y: level.walkY - 9 };
+  const noteText = world?.away?.note ?? "out. back soon.";
+  // Said aloud, a line loses the marks that lean on a word ("you stopped *there*?").
+  const spoken = shownLine?.replace(/\*/g, "") ?? null;
 
   return (
     <div ref={stageRef} className="pip-house-stage">
@@ -3006,7 +3415,30 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
             />
           ))}
 
-        {!hidePip && (
+        {overlay?.(frame)}
+
+        {out && !hidePip && (
+          <button
+            type="button"
+            className="pip-away-note"
+            style={{ left: noteAt.x * scale, top: noteAt.y * scale }}
+            onClick={() => setNoteOpen((open) => !open)}
+            onMouseEnter={() => setNoteOpen(true)}
+            onMouseLeave={() => setNoteOpen(false)}
+            onBlur={() => setNoteOpen(false)}
+            aria-label={`Pip is out. She left a note: “${noteText}”`}
+            title="A note from Pip"
+          >
+            <SceneArt image={noteImage()} scale={scale} />
+            {noteOpen && (
+              <span className="pip-away-note-say" aria-hidden="true">
+                <PipSay text={noteText} tailAt={14} />
+              </span>
+            )}
+          </button>
+        )}
+
+        {!hidePip && !out && (
           <div ref={pipRef} className="pip-house-pip" style={{ width: pipSize, height: pipSize }}>
             <div ref={spinRef} className="pip-house-pip-spin">
               <div ref={turnRef} className="pip-house-pip-turn">
@@ -3027,14 +3459,20 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
                 onKeyDown={onKeyDown}
                 title="Poke me, stroke me, or pick me up by my leaf"
                 aria-label={
-                  shownLine
-                    ? `Pip says “${shownLine}” ${PIP_HOW}`
+                  spoken
+                    ? `Pip says “${spoken}” ${PIP_HOW}`
                     : tucked
-                      ? `Pip, ${st.current.abed ? "in bed with her phone" : "asleep in bed"}. ${PIP_HOW}`
+                      ? `Pip, ${st.current.abed ? "in bed with her phone" : st.current.hiding ? "hiding under the quilt" : "asleep in bed"}. ${PIP_HOW}`
                       : `Pip${busyWith ? `, ${busyWith}` : ""}. ${PIP_HOW}`
                 }
               >
                 <PipSprite move={view.move} size={pipSize} skin={look.skin} outfit={look.outfit} loops={view.loops} playKey={view.key} onDone={onSpriteDone} />
+                {/* What she holds up over her head: a find, brought home. */}
+                {holding && (
+                  <span className="pip-held" style={{ left: (16 - holding.width / 2) * scale, top: (HELD_FOOT - holding.height) * scale }} aria-hidden="true">
+                    <SceneArt image={holding} scale={scale} />
+                  </span>
+                )}
               </button>
               </div>
             </div>
@@ -3047,7 +3485,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
         )}
 
         {/* The ball: thrown from the Play keys or by hand, fetched by Pip. Placed by the loop. */}
-        {ballOut && !hidePip && (
+        {ballOut && !hidePip && !out && (
           <button
             ref={ballRef}
             type="button"

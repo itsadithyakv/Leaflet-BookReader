@@ -19,7 +19,7 @@
  */
 import { useSyncExternalStore } from "react";
 
-export type PipSound = "pick" | "pop" | "chime" | "coin" | "place" | "splash" | "squeak" | "giggle" | "purr" | "whee" | "bounce" | "swish" | "click" | "hum" | "shut";
+export type PipSound = "pick" | "pop" | "chime" | "coin" | "place" | "splash" | "squeak" | "giggle" | "purr" | "whee" | "bounce" | "swish" | "click" | "hum" | "shut" | "knock";
 
 const KEY = "leaflet.pip.sound";
 /** The loudest any voice gets, before the per-sound levels below. */
@@ -183,6 +183,13 @@ const RECIPES: Record<PipSound, (ctx: AudioContext, out: AudioNode, at: number, 
     tone(ctx, out, { type: "square", from: 1100 * pitch, to: 600 * pitch, at, length: 0.025, peak: 0.1, attack: 0.002 });
     tone(ctx, out, { type: "sine", from: 120 * pitch, to: 60 * pitch, at: at + 0.04, length: 0.16, peak: 0.6 });
     hiss(ctx, out, { at: at + 0.04, length: 0.06, peak: 0.1, freq: 500, q: 0.8 });
+  },
+  // A visitor at the door: three small raps on wood.
+  knock: (ctx, out, at, pitch) => {
+    for (let index = 0; index < 3; index += 1) {
+      tone(ctx, out, { type: "sine", from: 260 * pitch, to: 130 * pitch, at: at + index * 0.17, length: 0.07, peak: 0.7, attack: 0.003 });
+      hiss(ctx, out, { at: at + index * 0.17, length: 0.03, peak: 0.12, freq: 1100, q: 1 });
+    }
   }
 };
 
@@ -190,7 +197,7 @@ const RECIPES: Record<PipSound, (ctx: AudioContext, out: AudioNode, at: number, 
  * The same sound again this soon is dropped: a dozen seeds landing are a
  * patter, not a dozen coins at once.
  */
-const GAP_MS: Record<PipSound, number> = { pick: 90, pop: 60, chime: 280, coin: 50, place: 90, splash: 220, squeak: 70, giggle: 320, purr: 380, whee: 260, bounce: 70, swish: 200, click: 80, hum: 1000, shut: 200 };
+const GAP_MS: Record<PipSound, number> = { pick: 90, pop: 60, chime: 280, coin: 50, place: 90, splash: 220, squeak: 70, giggle: 320, purr: 380, whee: 260, bounce: 70, swish: 200, click: 80, hum: 1000, shut: 200, knock: 900 };
 const lastPlayed = new Map<PipSound, number>();
 
 /** Whether a sound may play at `now`, given when it last did. Pure, for the tests. */

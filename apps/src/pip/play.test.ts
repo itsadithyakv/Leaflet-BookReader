@@ -303,17 +303,20 @@ describe("Pip thrown", () => {
     const floor: number[] = [];
     let walls = 0;
     let landedAt = -1;
+    let outside: null | { t: number; x: number; y: number } = null;
     for (let t = frame; t <= 4000 && landedAt < 0; t += frame) {
       const next = flyStep(body, frame / 1000, room, PIP_BOUNCE, true);
       if (next.impact > 0) floor.push(next.impact);
       else if (next.hit) walls += 1;
       body = next.body;
-      expect(body.x).toBeGreaterThanOrEqual(room.left);
-      expect(body.x).toBeLessThanOrEqual(room.right);
-      expect(body.y).toBeGreaterThanOrEqual(room.top);
-      expect(body.y).toBeLessThanOrEqual(room.floor);
+      // Inside the room at every step. Checked by hand and asserted once a
+      // flight: four `expect`s a step, over the six hundred flights of the
+      // frame-rate test, were a few hundred thousand calls, and on a busy
+      // machine that alone ran past the test's time limit.
+      if (!outside && (body.x < room.left || body.x > room.right || body.y < room.top || body.y > room.floor)) outside = { t, x: body.x, y: body.y };
       if (next.landed) landedAt = t;
     }
+    expect(outside, `left the room: ${JSON.stringify(outside)}`).toBeNull();
     return { body, floor, walls, landedAt };
   };
 

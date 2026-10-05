@@ -18,14 +18,21 @@
    scroll..., phone...                    on her phone, in bed and on her feet
    innocent          tapped while on her phone: what phone?
    snooze            morning, in bed: not yet
+   glance, quilt-hide, underbed           a horror on the go
+   inspect, trail                         a mystery: the magnifying glass
+   knight, march, swordplay               a fantasy: cape and wooden sword
+   hangover, dust                         a book just finished; a book left too long
+   bring, show                            back from an expedition, the find held up
+   cold-idle, sniffle, tissue, shuffle    a cold
 
  The ones with no category (the eight ways of looking, the ball on its own)
  are parts, not moves to show off: the design kit (scripts/pip-kit.mjs) lists
  only moves that have one. */
 import { drawPip, rgba } from "./engine.js";
-import { def, fx, kit } from "./anims.js";
+import { def, fx, prop, kit } from "./anims.js";
+import { cape } from "./skins.js";
 
-const { TAU, wave, lerp, hop, tl, blink, GOLD, WHITE, SKY } = kit;
+const { TAU, wave, lerp, eo, hop, tl, blink, GOLD, WHITE, SKY } = kit;
 
 // ------------------------------------------------------------ watching the pointer
 // The idle, with the eyes (and the face, a pixel) turned one of eight ways.
@@ -541,3 +548,418 @@ def("snooze", "Snooze", "House", 48, "Morning, in bed: Pip wakes, hits snooze, a
     fx.z(g, 22 + t * 5, 14 - t * 9, t > 0.4);
   }
 }, 16);
+
+// ------------------------------------------------------------ the book on the go
+// What the reader is reading gets into her head (pip/behaviour.ts, "the book
+// on the go"): a horror has her glancing behind her and, after dark, under
+// the quilt and checking beneath the bed; a mystery has the magnifying glass
+// out; a fantasy is a cape and a wooden sword. She faces right in all of
+// them; the scene turns her.
+
+def("glance", "Over Her Shoulder", "House", 36, "A horror on the go: Pip is sure she heard something behind her.", (g, f) => {
+  const s = tl(f, [4, 14, 6, 12]);
+  g.shadow(16, s.k === 0 ? 5 : 6);
+  if (s.k === 0) {
+    drawPip(g, { y: 28 + hop(s.t, 2), sq: -0.1, eyes: "wide", brows: "up", mouth: "o", la: 0, ll: 1.1, hands: (A) => [{ x: A.handL[0] - 1, y: A.cy - 2 }, { x: A.handR[0] + 1, y: A.cy - 2 }] });
+    g.text("!", 26, 2, GOLD);
+    return;
+  }
+  // Back over her shoulder, slowly; eyes front; and one more quick look to be sure.
+  const back = s.k === 1 || (s.k === 3 && s.n >= 3 && s.n < 9);
+  drawPip(g, {
+    lean: back ? 0.8 : 0,
+    sq: 0.03 + wave(f, 6, 0.012),
+    fdx: back ? -1 : 1,
+    look: [back ? -1 : 1, 0],
+    eyes: "wide",
+    brows: back ? "up" : "sad",
+    mouth: back ? "tiny" : "wavy",
+    blush: false,
+    la: back ? 54 : 10 + wave(f, 4, 3),
+    // Hands held close, under her chin.
+    hands: (A) => [{ x: A.fc - 2.5, y: A.ey + 7 }, { x: A.fc + 2.5, y: A.ey + 7 }]
+  });
+  if (s.k === 1 && s.n >= 4) fx.drop(g, 26, 10 + (s.n - 4) * 0.5, SKY);
+}, 10);
+
+// In bed, as when asleep (the scene lays her there and draws the quilt over
+// her): down under it, shaking, then up far enough for a look each way.
+def("quilt-hide", "Under the Quilt", "House", 48, "A horror on the go, after dark: under the quilt, and up for a look each way.", (g, f) => {
+  const s = tl(f, [12, 4, 22, 4, 6]);
+  const up = s.k === 0 ? 0 : s.k === 1 ? s.t : s.k === 2 ? 1 : s.k === 3 ? 1 - s.t : 0;
+  const side = s.k === 2 ? (s.n < 8 ? -1 : s.n < 17 ? 1 : 0) : 0;
+  drawPip(g, {
+    x: 16 + (up < 1 ? wave(f, 3, 0.5) : 0),
+    // Under it, only the top of her head and her leaf are out; up, her eyes are.
+    y: 36 - 5 * up,
+    sq: 0.08,
+    fdx: side,
+    look: [side, 0],
+    eyes: up > 0.6 ? "wide" : "squeeze",
+    brows: up > 0.6 ? "up" : null,
+    mouth: "tiny",
+    blush: false,
+    la: up < 1 ? 70 + wave(f, 3, 9) : 20 + side * 14,
+    hands: false
+  });
+  if (s.k === 2 && s.n >= 17 && s.n < 21) g.text("?", 25, 6, WHITE);
+}, 20);
+
+/** A small torch held out, and what it lights: a cone ahead of it and down, faint. */
+const torch = (g, x, y, on) => {
+  x = Math.round(x); y = Math.round(y);
+  g.stamp((l) => l.rect(x, y, 3, 2, "#C9D1DB").px(x + 3, y, "#FFE36B").px(x + 3, y + 1, "#FFE36B"), "#2A3340");
+  if (!on) return;
+  for (let i = 1; i <= 7; i++) for (let j = -Math.ceil(i / 3); j <= Math.ceil(i / 2); j++) {
+    const px = x + 4 + i, py = y + 1 + j + Math.floor(i / 3);
+    if (!g.L.get(px, py)) g.px(px, py, i < 4 ? "#FFF3A688" : "#FFF3A650");
+  }
+};
+
+def("underbed", "Just Checking", "House", 48, "A horror on the go, after dark: down low with a torch, for a look beneath the bed.", (g, f) => {
+  const s = tl(f, [6, 28, 14]);
+  // Down on her haunches, the torch going slowly along; then up, and breathing again.
+  const low = s.k === 0 ? eo(s.t) : s.k === 1 ? 1 : 1 - eo(Math.min(1, s.t * 2));
+  const sweep = s.k === 1 ? wave(s.n, 28, 1.5) : 0;
+  const relief = s.k === 2 && s.n >= 5;
+  g.shadow(16, 6 + low);
+  const A = drawPip(g, {
+    sq: 0.2 * low,
+    lean: 1.5 * low,
+    fdx: 1,
+    look: [1, low > 0.5 ? 1 : 0],
+    eyes: relief ? "closed" : "wide",
+    brows: relief ? null : "up",
+    mouth: relief ? "o" : "tiny",
+    blush: relief ? "big" : false,
+    la: relief ? 60 : -26 + wave(f, 4, 3),
+    hands: (A) => [{ x: A.handL[0], y: A.handL[1] }, { x: A.cx + 9, y: A.cy + 3 + sweep * 0.5 }]
+  });
+  if (!relief) torch(g, A.cx + 10, A.cy + 2 + sweep * 0.5, s.k === 1);
+  else fx.puff(g, A.fc + 7 + (s.n - 5) * 0.5, A.ey + 4 - (s.n - 5) * 0.3, 1.3);
+}, 18);
+
+// The magnifying glass: a brass ring, its glass, and a handle off towards her hand.
+const lens = (g, x, y, r, toX, toY, eyeIn) => {
+  g.stamp((l) => {
+    l.line(x + (toX - x) * 0.45, y + (toY - y) * 0.45, toX, toY, "#6B3A1E");
+    l.ell(x, y, r, r, (nx, ny) => (nx * nx + ny * ny > 0.58 ? "#C79A4A" : nx + ny < -0.45 ? "#FFFFFF" : "#CFEFFF"));
+    // Her eye, through it: twice the size.
+    if (eyeIn) l.rect(Math.round(x) - 1, Math.round(y) - 1, 2, 3, "#1A1A22").px(Math.round(x) - 1, Math.round(y) - 1, "#FFFFFF");
+  }, "#3A2A12");
+};
+
+def("inspect", "A Clue", "House", 36, "A mystery on the go: the magnifying glass up, and one very large eye.", (g, f) => {
+  const s = tl(f, [6, 22, 8]);
+  const up = s.k === 0 ? eo(s.t) : 1;
+  const peer = s.k === 1 ? wave(s.n, 22, 0.6) : 0;
+  g.shadow(16, 6);
+  const A = drawPip(g, {
+    lean: 0.6 * up + peer * 0.4,
+    sq: wave(f, 18, 0.02),
+    fdx: 1,
+    look: [1, 0],
+    eyes: s.k === 2 && s.n >= 2 ? "wide" : "open",
+    brows: s.k === 2 ? "up" : "focus",
+    mouth: s.k === 2 ? "o" : "flat",
+    la: 24 + peer * 10,
+    // The other hand behind her back, like someone who has read how it is done.
+    hands: (A) => [{ x: A.cx - 6, y: A.cy + 4 }, { x: A.cx + 8.5, y: lerp(A.cy + 3, A.cy + 2, up) }]
+  });
+  lens(g, A.fc + 3 + peer, lerp(A.ey + 6, A.ey - 0.5, up), 3.3, A.cx + 8.5, lerp(A.cy + 3, A.cy + 2, up), up > 0.9);
+  if (s.k === 2 && s.n >= 2) g.text("!", 27, 2, GOLD);
+}, 14);
+
+def("trail", "On the Trail", "House", 16, "A mystery on the go: bent over the glass, following something along the floor.", (g, f) => {
+  const a = f % 16 < 8;
+  const lift = Math.sin(((f % 8) / 8) * Math.PI);
+  g.shadow(15, 6);
+  const A = drawPip(g, {
+    x: 15,
+    y: 28 - lift * 0.5,
+    sq: 0.1,
+    lean: 2,
+    fdx: 1,
+    fdy: 1,
+    look: [1, 1],
+    eyes: blink(f, 16, 12) ? "blink" : "open",
+    brows: "focus",
+    mouth: "flat",
+    la: -30 + wave(f, 16, 5),
+    feet: (A) => [[A.cx - 3.5 + (a ? 0 : 1.4 * lift), A.bottom + 1.1 - (a ? 0 : 1.2 * lift)], [A.cx + 3.5 + (a ? 1.4 * lift : 0), A.bottom + 1.1 - (a ? 1.2 * lift : 0)]],
+    hands: (A) => [{ x: A.cx - 6, y: A.cy + 3 }, { x: A.cx + 9, y: A.cy + 3 }]
+  });
+  lens(g, A.cx + 12 + wave(f, 16, 0.6), A.bottom - 2.5, 3, A.cx + 9, A.cy + 3, false);
+}, 2);
+
+// The wooden sword: a pale blade from her hand along (dx, dy), a crosspiece, a pommel.
+const sword = (g, hx, hy, dx, dy, len = 9) => {
+  const n = Math.hypot(dx, dy) || 1, ux = dx / n, uy = dy / n;
+  g.stamp((l) => {
+    l.line(hx + ux * 1.5, hy + uy * 1.5, hx + ux * len, hy + uy * len, "#D9B26A");
+    l.line(hx + ux * 1.5 - uy, hy + uy * 1.5 + ux, hx + ux * (len - 1.5) - uy, hy + uy * (len - 1.5) + ux, "#B88A48");
+    l.line(hx + ux * 1.5 - uy * 2, hy + uy * 1.5 + ux * 2, hx + ux * 1.5 + uy * 2, hy + uy * 1.5 - ux * 2, "#8A5A34");
+    l.px(hx - ux, hy - uy, "#8A5A34");
+  }, "#3D2612");
+};
+const CAPE = ["#C8453B", "#8E2F28", "#FFD23F"];
+
+def("knight", "For the Realm", "House", 24, "A fantasy on the go: cape on, wooden sword held high.", (g, f) => {
+  const lift = wave(f, 24, 0.6);
+  g.shadow(16, 6);
+  let hand = null;
+  const A = drawPip(g, {
+    sq: -0.04 + wave(f, 12, 0.015),
+    fdx: 1,
+    look: [1, -1],
+    eyes: "determined",
+    brows: "focus",
+    mouth: f % 24 < 14 ? "open" : "smile",
+    la: 12 + wave(f, 12, 6),
+    // One hand on her hip, the other up with the sword.
+    hands: (A) => {
+      hand = { x: A.cx + A.rx + 1, y: A.cy - 6 + lift };
+      return [{ x: A.cx - A.rx + 1, y: A.cy + 3 }, hand];
+    }
+  });
+  sword(g, hand.x, hand.y - 1, 0.25, -1, 10);
+  cape(g, A, ...CAPE);
+  fx.twinkle(g, hand.x + 3, hand.y - 12, (f % 24) / 24, WHITE);
+}, 6);
+
+def("march", "Questing", "House", 8, "A fantasy on the go: off across the room, cape out behind, sword at the ready.", (g, f) => {
+  const a = f % 8 < 4;
+  g.shadow(16, 6);
+  let hand = null;
+  const A = drawPip(g, {
+    y: 28 - (f % 4 < 2 ? 0 : 0.7),
+    lean: 0.6,
+    fdx: 1,
+    look: [1, 0],
+    eyes: "determined",
+    brows: "focus",
+    mouth: "smile",
+    la: -24 + wave(f, 8, 6),
+    feet: (A) => [[A.cx - 3 + (a ? 1.8 : -1.8), A.bottom + 1.1 - (a ? 0.9 : 0)], [A.cx + 3 + (a ? -1.8 : 1.8), A.bottom + 1.1 - (a ? 0 : 0.9)]],
+    hands: (A) => {
+      hand = { x: A.cx + A.rx + 1, y: A.cy - 1 - (a ? 1 : 0) };
+      return [{ x: A.handL[0] + (a ? 1 : -1), y: A.handL[1] }, hand];
+    }
+  });
+  sword(g, hand.x, hand.y - 1, 0.6, -1, 9);
+  cape(g, A, ...CAPE);
+}, 2);
+
+def("swordplay", "Have at Thee", "House", 48, "A fantasy on the go: a thrust, a parry and a great swing at something only she can see.", (g, f) => {
+  const s = tl(f, [6, 8, 6, 8, 8, 12]);
+  // Back foot, lunge; guard up; a wind-up and the swing; and a flourish.
+  let o, dir, reach = 9, x = 16, arc = false;
+  if (s.k === 0) { x = 13; o = { lean: -0.8, sq: 0.05, mouth: "flat" }; dir = [0.5, -1]; }
+  else if (s.k === 1) { x = 9 + 3 * eo(Math.min(1, s.t * 2)); o = { lean: 2, sq: 0.04, mouth: "shout" }; dir = [1, 0]; }
+  else if (s.k === 2) { x = 15; o = { lean: -0.5, mouth: "grit" }; dir = [0.2, -1]; }
+  else if (s.k === 3) { x = 14; o = { lean: -1.2, sq: -0.05, mouth: "flat" }; dir = [-0.7, -1]; }
+  else if (s.k === 4) { x = 13 + 2 * eo(s.t); o = { lean: 1.6, sq: 0.06, mouth: "shout" }; dir = [Math.cos(lerp(-2.2, 0.5, eo(s.t))), Math.sin(lerp(-2.2, 0.5, eo(s.t)))]; arc = true; }
+  else { o = { y: 28 + hop(Math.min(1, s.t * 2), 2), sq: -0.04, mouth: "open", eyes: "happy" }; dir = [0.1, -1]; reach = 10; }
+  g.shadow(x, 6);
+  let hand = null;
+  const A = drawPip(g, {
+    x,
+    fdx: 1,
+    look: [1, 0],
+    eyes: "determined",
+    brows: "angry",
+    la: -10 + wave(f, 8, 8),
+    ...o,
+    hands: (A) => {
+      hand = { x: A.cx + A.rx + 1 + dir[0] * 1.5, y: A.cy + dir[1] * 3 };
+      return [{ x: A.handL[0] - 0.5, y: A.cy + 1 }, hand];
+    }
+  });
+  sword(g, hand.x, hand.y, dir[0], dir[1], reach);
+  cape(g, A, ...CAPE);
+  // The swing leaves its mark on the air.
+  if (arc && s.n >= 2) for (let i = 0; i < 5; i++) { const t = lerp(-1.9, 0.2, i / 4); g.px(hand.x + Math.cos(t) * 11, hand.y + Math.sin(t) * 11, i > 2 ? WHITE : "#FFFFFFAA"); }
+  if (s.k === 1 && s.n >= 3) fx.speed(g, 1, 20, 4);
+  if (s.k === 5 && s.n < 8) fx.star(g, 27, 5, 1);
+}, 10);
+
+// ------------------------------------------------------------ the books behind her
+// A book finished today: flat on her back on the floor, its closed cover on
+// her chest, eyes on the ceiling (`hangover`). A book left a fortnight: the
+// dust off it, and a long look (`dust`). pip/readingMoments.ts says when.
+
+def("hangover", "Book Hangover", "House", 96, "The day after a book ends: flat on the floor, the closed book on her chest, staring at the ceiling.", (g, f) => {
+  const sigh = f >= 60 && f < 74;
+  const breath = wave(f, 48, 0.02);
+  g.shadow(16, 9);
+  const A = drawPip(g, {
+    y: 29,
+    sq: 0.24 + breath,
+    look: [f >= 30 && f < 50 ? 1 : 0, -1],
+    eyes: blink(f, 48, 40) ? "blink" : "dot",
+    mouth: sigh ? "o" : "flat",
+    mouthDy: -2,
+    blush: false,
+    // The leaf flat out on the floor beside her.
+    la: 118 + wave(f, 96, 3),
+    // Arms and legs wherever they fell.
+    feet: (A) => [[A.cx - A.rx + 0.5, A.bottom + 0.9, 2], [A.cx + A.rx - 0.5, A.bottom + 0.9, 2]],
+    hands: (A) => [{ x: A.cx - A.rx - 1.2, y: A.bottom - 2 }, { x: A.cx + A.rx + 1.2, y: A.bottom - 2 }],
+    over: (g, A) => prop.closedBook(g, A.cx - 4, A.bottom - 3 - (breath > 0 ? 1 : 0), 8, 3, "#2F6FD6")
+  });
+  if (sigh) fx.puff(g, A.fc + 3 + (f - 60) * 0.35, A.ey + 2 - (f - 60) * 0.5, 1 + (f - 60) * 0.06);
+}, 12);
+
+def("dust", "Dusting It Off", "House", 60, "A book left a fortnight: Pip dusts it off, and looks at it a while.", (g, f) => {
+  const s = tl(f, [30, 30]);
+  const dusting = s.k === 0;
+  const flick = dusting ? wave(s.n, 6, 1) : 0;
+  g.shadow(16, 6);
+  let hand = null;
+  const A = drawPip(g, {
+    sq: wave(f, 30, 0.02),
+    fdx: 1,
+    look: [1, 1],
+    eyes: dusting ? (blink(f, 30, 20) ? "blink" : "open") : "sad",
+    brows: dusting ? null : "sad",
+    mouth: dusting ? "flat" : s.n >= 12 && s.n < 22 ? "o" : "smile",
+    la: dusting ? 30 + flick * 6 : 64,
+    // The book held out in one hand; the duster in the other, until it is put by.
+    hold: (g, A) => prop.closedBook(g, A.cx + 3, A.cy + 1 - (dusting ? 0 : 1), 7, 5, "#7A4BD6"),
+    hands: (A) => {
+      hand = dusting ? { x: A.cx + 4 + flick * 2, y: A.cy - 3 } : { x: A.cx - 2, y: A.cy + 4 };
+      return [hand, { x: A.cx + 9.5, y: A.cy + 4 - (dusting ? 0 : 1) }];
+    }
+  });
+  if (dusting) {
+    // A feather duster, wagging; and what comes off the cover.
+    g.stamp((l) => {
+      l.line(hand.x, hand.y, hand.x + 2, hand.y + 2, "#6B3A1E");
+      l.ell(hand.x + 3.5 + flick * 0.5, hand.y + 3.2, 2.2, 1.6, (nx, ny) => (nx + ny < -0.3 ? "#FFE9A8" : nx > 0.2 ? "#E8A23A" : "#FFC53D"));
+    }, "#4A3100");
+    for (let i = 0; i < 2; i++) { const t = ((s.n + i * 8) % 16) / 16; fx.puff(g, A.cx + 6 + i * 3 + t * 2, A.cy - 1 - t * 7, 0.9 + t * 0.9); }
+  }
+}, 8);
+
+// ------------------------------------------------------------ back from an expedition
+// She comes in from the side with what she found held up over her head (the
+// scene draws the thing itself above her hands: any find, one pose), stops,
+// and shows it off.
+for (const still of [false, true]) {
+  def(still ? "show" : "bring", still ? "Look What I Found" : "Bringing It Home", still ? "House" : "", still ? 24 : 8, still ? "Back from an expedition: the find held up for the reader to see." : "Back from an expedition, the find held up over her head.", (g, f) => {
+    const a = f % 8 < 4;
+    const up = still ? Math.abs(wave(f, 12, 1)) : f % 4 < 2 ? 0 : 0.6;
+    g.shadow(16, 6);
+    drawPip(g, {
+      y: 28 - (still ? 0 : up),
+      sq: still ? -0.03 + wave(f, 12, 0.02) : 0,
+      fdx: still ? 0 : 1,
+      look: still ? [0, -1] : [1, 0],
+      eyes: "happy",
+      mouth: "open",
+      blush: "big",
+      la: still ? 62 + wave(f, 12, 6) : -34 + wave(f, 8, 6),
+      feet: still ? null : (A) => [[A.cx - 3 + (a ? 1.6 : -1.6), A.bottom + 1.1 - (a ? 0.8 : 0)], [A.cx + 3 + (a ? -1.6 : 1.6), A.bottom + 1.1 - (a ? 0 : 0.8)]],
+      // Both hands up, a little apart: the thing sits on them (HouseScene, HELD_AT).
+      hands: (A) => [{ x: A.cx - 4, y: A.top.y - (still ? up : 0) }, { x: A.cx + 4, y: A.top.y - (still ? up : 0) }]
+    });
+    if (still && f % 12 < 8) fx.twinkle(g, 27, 4, (f % 12) / 8, WHITE);
+  }, still ? 6 : 2);
+}
+
+// ------------------------------------------------------------ a cold
+// A streak ended and she caught a chill (pip/behaviour.ts, "a cold"): a
+// blanket round her shoulders, a pink nose, tissues. It eases as the reader
+// reads: the blanket goes first, then the sniffles.
+
+const BLANKET = ["#6FA8DC", "#4F86C0", "#2C4F7A"];
+/** The blanket: behind her like a shawl, and its hem across her front. */
+const blanketBack = (g, A) =>
+  g.stamp((l) => l.ell(A.cx, A.cy + 1.5, A.rx + 2.2, A.ry + 1.2, (nx, ny, x, y) => ((x + y) % 4 === 0 || (x - y + 64) % 4 === 0 ? BLANKET[1] : BLANKET[0])), BLANKET[2]);
+const blanketHem = (g, A) =>
+  g.stamp((l) => {
+    for (let y = Math.round(A.bottom - 3); y <= A.bottom; y++) for (let x = Math.round(A.cx - A.rx - 1); x <= Math.round(A.cx + A.rx + 1); x++) l.px(x, y, (x + y) % 4 === 0 ? BLANKET[1] : BLANKET[0]);
+  }, BLANKET[2]);
+/** A nose gone pink, and now and then a drip from it. */
+const pinkNose = (g, A, drip) => {
+  g.px(A.fc - 1, A.ey + 2, "#FF8FA3").px(A.fc, A.ey + 2, "#FF8FA3");
+  if (drip >= 0) g.px(A.fc, A.ey + 3 + Math.round(drip), SKY);
+};
+
+def("cold-idle", "Under the Weather", "House", 48, "Pip has a cold: a blanket round her shoulders, a pink nose, and a sniff now and then.", (g, f) => {
+  const sniff = f >= 30 && f < 36;
+  g.shadow(16, 7);
+  const A = drawPip(g, {
+    sq: 0.05 + (sniff ? -0.05 : wave(f, 48, 0.02)),
+    la: 88 + wave(f, 48, 5),
+    eyes: blink(f, 48, 20) ? "blink" : "half",
+    mouth: sniff ? "o" : "wavy",
+    blush: "big",
+    behind: blanketBack,
+    hands: false
+  });
+  blanketHem(g, A);
+  pinkNose(g, A, f >= 36 ? -1 : f >= 18 && f < 30 ? (f - 18) / 6 : -1);
+}, 8);
+
+def("sniffle", "Sniffle", "House", 36, "Pip has a cold: a sniff, and the back of a hand across her nose.", (g, f) => {
+  const s = tl(f, [10, 6, 12, 8]);
+  g.shadow(16, 6);
+  const A = drawPip(g, {
+    sq: s.k === 1 ? -0.07 : 0.03,
+    la: s.k === 1 ? 40 : 76 + wave(f, 18, 4),
+    eyes: s.k === 1 ? "squeeze" : s.k === 2 ? "closed" : "half",
+    mouth: s.k === 1 ? "o" : "wavy",
+    blush: "big",
+    // The wipe: one hand up across her face, and down again.
+    hands: (A) => [{ x: A.handL[0], y: A.handL[1] }, s.k === 2 ? { x: A.fc + 2 - s.t * 4, y: A.ey + 2 } : { x: A.handR[0], y: A.handR[1] }]
+  });
+  pinkNose(g, A, s.k === 0 ? s.t * 1.5 : -1);
+  if (s.k === 1) g.px(A.fc + 4, A.ey - 1, WHITE).px(A.fc + 6, A.ey + 1, WHITE);
+}, 4);
+
+def("tissue", "Honk", "House", 48, "Pip has a cold: a tissue from the box, and a good blow.", (g, f) => {
+  const s = tl(f, [8, 22, 18]);
+  const blow = s.k === 1 && s.n % 8 < 5;
+  g.shadow(14, 7);
+  // The box, on the floor beside her, a tissue standing out of it.
+  g.stamp((l) => l.rect(24, 25, 7, 4, "#F2A0B5").rect(24, 25, 7, 1, "#FFD0DC").rect(26, 24, 3, 1, "#C9607A"), "#5A1F30");
+  if (s.k !== 1) g.stamp((l) => l.rect(26, 21, 3, 3, WHITE).px(27, 20, WHITE), "#8A93A0");
+  const A = drawPip(g, {
+    x: 14,
+    sq: 0.05 + (blow ? -0.06 : 0),
+    la: blow ? 30 : 84,
+    eyes: s.k === 1 ? "squeeze" : "half",
+    mouth: s.k === 1 ? "none" : "wavy",
+    blush: "big",
+    behind: blanketBack,
+    // Reaching for the box; then both hands to her face.
+    hands: (A) => (s.k === 0 ? [{ x: A.cx + 9 + s.t * 2, y: A.cy + 2 - s.t * 2 }] : s.k === 1 ? [{ x: A.fc - 3, y: A.ey + 3 }, { x: A.fc + 3, y: A.ey + 3 }] : [])
+  });
+  blanketHem(g, A);
+  if (s.k === 1) g.stamp((l) => l.rect(A.fc - 3, A.ey + 1, 6, 4, WHITE).px(A.fc - 3, A.ey + 1, "#E6EAF0"), "#8A93A0");
+  else pinkNose(g, A, -1);
+  if (blow) g.text("HONK", 13, 1, WHITE);
+}, 12);
+
+def("shuffle", "Shuffling", "", 16, "Pip has a cold: from here to there in her blanket, slowly.", (g, f) => {
+  const a = f % 16 < 8;
+  const lift = Math.sin(((f % 8) / 8) * Math.PI);
+  g.shadow(16, 7);
+  const A = drawPip(g, {
+    y: 28 - lift * 0.4,
+    sq: 0.05,
+    lean: 0.5,
+    fdx: 1,
+    look: [1, 1],
+    la: 84 + wave(f, 16, 4),
+    eyes: blink(f, 16, 12) ? "blink" : "half",
+    mouth: "wavy",
+    blush: "big",
+    behind: blanketBack,
+    feet: (A) => [[A.cx - 3.5 + (a ? 0 : lift), A.bottom + 1.1 - (a ? 0 : 0.7 * lift)], [A.cx + 3.5 + (a ? lift : 0), A.bottom + 1.1 - (a ? 0.7 * lift : 0)]],
+    hands: false
+  });
+  blanketHem(g, A);
+  pinkNose(g, A, -1);
+}, 2);

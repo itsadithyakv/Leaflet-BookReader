@@ -49,3 +49,226 @@
   opacity: 0;
   pointer-events: none;
 }
+
+/* ---- the card a thing in the room opens (components/pip/RoomCard.tsx) ----
+   By the thing, over the whole window; the HUD's own face and line, like the
+   seed packets over a plot. */
+.pip-room-card {
+  position: fixed;
+  z-index: 65;
+  display: flex;
+  flex-direction: column;
+  width: min(300px, calc(100vw - 16px));
+  max-height: min(70vh, 460px);
+  padding: 8px 8px 10px;
+  background: var(--hud-face);
+  color: var(--hud-ink);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 8px 0 0 var(--hud-drop);
+}
+
+.pip-room-card[data-size="wide"] {
+  width: min(560px, calc(100vw - 16px));
+  max-height: min(80vh, 620px);
+}
+
+.pip-room-card::after {
+  position: absolute;
+  top: 100%;
+  left: calc(var(--tail-at, 50%) - 5px);
+  width: 10px;
+  height: 8px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='8' shape-rendering='crispEdges'%3E%3Cpath fill='%231f2a22' d='M0 0h2v2H0zM8 0h2v2H8zM2 2h2v2H2zM6 2h2v2H6zM4 4h2v4H4z'/%3E%3Cpath fill='%23fffbf0' d='M2 0h6v2H2zM4 2h2v2H4z'/%3E%3C/svg%3E") no-repeat;
+  content: "";
+}
+
+.pip-room-card[data-side="below"]::after {
+  top: auto;
+  bottom: 100%;
+  transform: rotate(180deg);
+}
+
+/* Beside its thing, it does not point. */
+.pip-room-card[data-side="beside"]::after {
+  content: none;
+}
+
+:root[data-theme="dark"] .pip-room-card::after {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='8' shape-rendering='crispEdges'%3E%3Cpath fill='%23090a0c' d='M0 0h2v2H0zM8 0h2v2H8zM2 2h2v2H2zM6 2h2v2H6zM4 4h2v4H4z'/%3E%3Cpath fill='%2330343c' d='M2 0h6v2H2zM4 2h2v2H4z'/%3E%3C/svg%3E");
+}
+
+.pip-room-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 2px 7px 4px;
+}
+
+.pip-room-card-title {
+  font-size: 13px;
+  font-weight: 800;
+  outline: none;
+}
+
+.pip-room-card-note {
+  margin-top: 1px;
+  color: var(--hud-ink-soft);
+  font-size: 11px;
+}
+
+.pip-room-card-close {
+  display: grid;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  color: var(--hud-ink-soft);
+}
+
+.pip-room-card-close:hover {
+  color: var(--hud-ink);
+}
+
+.pip-room-card-body {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.pip-room-card-empty {
+  padding: 10px 6px 8px;
+  color: var(--hud-ink-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.pip-room-card button:focus-visible {
+  outline: 2px solid rgb(var(--color-primary));
+  outline-offset: 1px;
+}
+
+/* The bookcase's card: the finished books, each a row with its spine's colour. */
+.pip-shelf-list {
+  display: grid;
+  gap: 2px;
+}
+
+.pip-shelf-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  text-align: left;
+}
+
+.pip-shelf-row:hover,
+.pip-shelf-row:focus-visible {
+  background: var(--hud-face-hover);
+}
+
+.pip-shelf-spine {
+  flex: none;
+  width: 6px;
+  height: 26px;
+  box-shadow: 0 0 0 1px var(--hud-line);
+}
+
+.pip-shelf-title,
+.pip-shelf-author {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pip-shelf-title {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.pip-shelf-author {
+  color: var(--hud-ink-soft);
+  font-size: 11px;
+}
+
+.pip-shelf-does {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  color: var(--hud-ink-soft);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* The fridge notes' card: each highlight on its own paper, under its book. */
+.pip-notes-list {
+  display: grid;
+  gap: 8px;
+  padding: 0 2px 2px;
+}
+
+.pip-note {
+  padding: 8px 9px;
+  border-left: 4px solid var(--note-paper, #f4c542);
+  background: var(--hud-well);
+}
+
+.pip-note-words {
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.pip-note-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.pip-note-from {
+  min-width: 0;
+  color: var(--hud-ink-soft);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.pip-note-open {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px;
+  background: var(--hud-face);
+  font-size: 11px;
+  font-weight: 800;
+  box-shadow: 0 0 0 2px var(--hud-line);
+}
+
+.pip-note-open:hover {
+  background: var(--hud-face-hover);
+}
+
+/* A card of a few plain lines (the time, the plant): the first said large. */
+.pip-room-lines {
+  display: grid;
+  gap: 6px;
+  padding: 2px 6px 6px;
+  color: var(--hud-ink-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.pip-room-lead {
+  color: var(--hud-ink);
+  font-size: 15px;
+  font-weight: 800;
+}

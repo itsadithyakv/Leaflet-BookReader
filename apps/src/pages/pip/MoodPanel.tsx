@@ -1,4 +1,5 @@
 import type { MoodReport } from "../../pip/mood";
+import type { ColdWords } from "../../pip/cold";
 import { UiIcon } from "../../components/UiIcon";
 
 type MoodPanelProps = {
@@ -9,6 +10,8 @@ type MoodPanelProps = {
   onPlay: () => void;
   /** Opens Pip's snacks. */
   onSnacks: () => void;
+  /** She has a cold: why, what cures it and when it passes, in pip/cold.ts's words, and how far the cure has come (0 to 100). Null or left out: she is well. */
+  cold?: (ColdWords & { percent: number }) | null;
 };
 
 const TONE_ICON = { down: "down", up: "up", plain: "moon" } as const;
@@ -18,7 +21,7 @@ const TONE_ICON = { down: "down", up: "up", plain: "moon" } as const;
  * what changed it last, and what would lift it. Every line comes from
  * pip/mood.ts, which only puts Rust's numbers into words.
  */
-export const MoodPanel = ({ report, hearts, onPlay, onSnacks }: MoodPanelProps) => (
+export const MoodPanel = ({ report, hearts, onPlay, onSnacks, cold = null }: MoodPanelProps) => (
   <div className="pip-mood">
     <p className="pip-mood-now">
       <span className="font-headline text-3xl font-bold text-on-surface">{report.word}</span>
@@ -35,6 +38,21 @@ export const MoodPanel = ({ report, hearts, onPlay, onSnacks }: MoodPanelProps) 
     <div className="pip-mood-meter" role="img" aria-label={`Mood ${report.level} out of 100`}>
       <span style={{ width: `${report.level}%` }} />
     </div>
+
+    {cold && (
+      // Her cold, beside the mood and apart from it: why she has it, what cures it, and that it takes nothing.
+      <section className="pip-mood-cold" aria-label={cold.headline}>
+        <h3 className="pip-mood-heading">{cold.headline}</h3>
+        <p className="pip-mood-text">{cold.why}</p>
+        <p className="pip-mood-text">{cold.lift}</p>
+        <div className="pip-mood-meter" role="img" aria-label={`On the mend: ${cold.percent} percent`}>
+          <span style={{ width: `${cold.percent}%` }} />
+        </div>
+        <p className="pip-mood-text">
+          {cold.passes} {cold.mood}
+        </p>
+      </section>
+    )}
 
     <h3 className="pip-mood-heading">Why</h3>
     <ul className="pip-mood-list">

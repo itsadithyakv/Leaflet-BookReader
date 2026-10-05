@@ -1,0 +1,355 @@
+/* Pip's diary (DiaryBook.tsx): a little book over the house. Drawn like the
+   HUD (a hard pixel outline with notched corners, keys that sink), with the
+   page itself ruled like paper and its words in the app's own lettering at a
+   size to be read. Paper in the light theme, slate in the dark. */
+
+.pip-diary-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.pip-diary {
+  --diary-rule: rgba(31, 42, 34, 0.14);
+  --diary-read: #6aa841;
+  --diary-read-ink: #0f2410;
+  width: min(680px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  margin: 4px;
+  padding: 16px 18px 18px;
+  background: var(--hud-face);
+  color: var(--hud-ink);
+  outline: none;
+  box-shadow:
+    0 -4px 0 0 var(--hud-line),
+    0 4px 0 0 var(--hud-line),
+    -4px 0 0 0 var(--hud-line),
+    4px 0 0 0 var(--hud-line),
+    0 10px 0 0 var(--hud-lip),
+    0 14px 0 0 var(--hud-line);
+}
+
+.pip-diary-pages {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  outline: none;
+}
+
+/* In a card that has its own frame (the diary in Pip's room): the pages alone. */
+.pip-diary.pip-diary-panel {
+  width: auto;
+  max-height: none;
+  margin: 0;
+  padding: 2px;
+  overflow: visible;
+  background: none;
+  box-shadow: none;
+}
+
+/* The green of a day read keeps its dark lettering in both themes: pale
+   letters on it are too faint at this size. */
+:root[data-theme="dark"] .pip-diary {
+  --diary-rule: rgba(243, 245, 248, 0.12);
+}
+
+.pip-diary-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.pip-diary-title {
+  margin-right: auto;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.pip-diary-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.pip-diary-tabs > .pip-key[aria-pressed="true"] {
+  background: linear-gradient(#e7f3d8, #cfe6b6);
+  color: #1d3a16;
+}
+
+:root[data-theme="dark"] .pip-diary-tabs > .pip-key[aria-pressed="true"] {
+  background: linear-gradient(#3d5a33, #2f4827);
+  color: #e9f7df;
+}
+
+/* The page: ruled, with a margin line, the words sitting on the rules. */
+.pip-diary-page {
+  position: relative;
+  min-height: 196px;
+  padding: 14px 16px 14px 34px;
+  background:
+    linear-gradient(90deg, transparent 0 22px, rgba(200, 80, 80, 0.4) 22px 24px, transparent 24px),
+    repeating-linear-gradient(transparent 0 27px, var(--diary-rule) 27px 28px),
+    var(--hud-well);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line);
+}
+
+.pip-diary-date {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  min-height: 28px;
+}
+
+.pip-diary-date h3 {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  line-height: 28px;
+  text-transform: uppercase;
+  color: var(--hud-ink-soft);
+}
+
+.pip-diary-today {
+  padding: 1px 7px 2px;
+  background: var(--diary-read);
+  color: var(--diary-read-ink);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 16px;
+}
+
+.pip-diary-lines {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.pip-diary-lines > .pip-sprite {
+  flex: none;
+  margin-top: 4px;
+}
+
+.pip-diary-entry {
+  min-width: 0;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 28px;
+  overflow-wrap: anywhere;
+}
+
+/* A day off: the same page, quieter. */
+.pip-diary-page[data-rest] .pip-diary-entry {
+  color: var(--hud-ink-soft);
+  font-weight: 500;
+}
+
+.pip-diary-page[data-rest] .pip-diary-lines > .pip-sprite {
+  opacity: 0.7;
+}
+
+.pip-diary-figures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pip-diary-figures li {
+  padding: 2px 8px 3px;
+  background: var(--hud-face);
+  color: var(--hud-ink-soft);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 18px;
+  box-shadow: 0 0 0 1px var(--diary-rule);
+}
+
+.pip-diary-turn {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+/* "Later" points the other way with the same arrow. */
+.pip-diary-flip {
+  display: inline-flex;
+  transform: scaleX(-1);
+}
+
+.pip-diary-month select {
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 0;
+  background: var(--hud-face);
+  color: var(--hud-ink);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line);
+}
+
+/* The month: a square a day. Read is green, a day off is greyed, and a day
+   the diary does not cover is only a number. */
+.pip-diary-days {
+  display: grid;
+  grid-template-columns: repeat(7, 34px);
+  justify-content: center;
+  gap: 6px;
+}
+
+.pip-diary-dayhead {
+  color: var(--hud-ink-soft);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.pip-diary-day {
+  width: 34px;
+  height: 28px;
+  background: var(--hud-well);
+  color: var(--hud-ink-soft);
+  font-size: 12px;
+  font-weight: 800;
+  opacity: 0.62;
+  box-shadow:
+    0 -2px 0 0 var(--hud-lip),
+    0 2px 0 0 var(--hud-lip),
+    -2px 0 0 0 var(--hud-lip),
+    2px 0 0 0 var(--hud-lip);
+}
+
+.pip-diary-day[data-read] {
+  background: var(--diary-read);
+  color: var(--diary-read-ink);
+  opacity: 1;
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line);
+}
+
+.pip-diary-day:disabled {
+  background: transparent;
+  box-shadow: none;
+  cursor: default;
+  opacity: 0.35;
+}
+
+.pip-diary-day:hover:not(:disabled) {
+  opacity: 1;
+}
+
+.pip-diary-day[aria-current="date"] {
+  opacity: 1;
+  box-shadow:
+    0 -3px 0 0 #e8b43a,
+    0 3px 0 0 #e8b43a,
+    -3px 0 0 0 #e8b43a,
+    3px 0 0 0 #e8b43a;
+}
+
+.pip-diary :is(.pip-key, .pip-diary-day, select):focus-visible {
+  outline: 2px solid rgb(var(--color-primary));
+  outline-offset: 4px;
+}
+
+.pip-diary-note {
+  color: var(--hud-ink-soft);
+  font-size: 11px;
+  line-height: 1.45;
+  text-align: center;
+}
+
+/* The week: the postcard, and beside it what can be done with it. */
+.pip-diary-week {
+  display: grid;
+  grid-template-columns: minmax(0, 280px) minmax(0, 1fr);
+  align-items: start;
+  gap: 18px;
+}
+
+.pip-diary-card {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1200 / 1500;
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line);
+}
+
+.pip-diary-week-side {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.pip-diary-week-side .pip-diary-turn {
+  justify-content: flex-start;
+}
+
+.pip-diary-week-side .pip-diary-note {
+  text-align: left;
+}
+
+.pip-diary-week-title {
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.pip-diary-share {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.pip-diary-said {
+  min-height: 18px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+@media (max-width: 560px) {
+  .pip-diary-week {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pip-diary-card {
+    max-width: 260px;
+    margin: 0 auto;
+  }
+
+  .pip-diary-days {
+    grid-template-columns: repeat(7, 30px);
+  }
+
+  .pip-diary-day {
+    width: 30px;
+  }
+}

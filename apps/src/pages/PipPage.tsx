@@ -25,10 +25,16 @@ import { UndoToast } from "../components/pip/UndoToast";
 import { PacketPicker } from "../components/pip/PacketPicker";
 import { Walkthrough } from "../components/pip/Walkthrough";
 import { WALK, markWalkSeen, walkSeen, type WalkStep, type WalkTarget } from "../components/pip/walkSteps";
-import { ArcadeOverlay } from "../components/pip/arcade/ArcadeOverlay";
+import { ArcadeOverlay, type ArcadePage } from "../components/pip/arcade/ArcadeOverlay";
 import type { GameId } from "../components/pip/arcade/games";
 import { MOOD_LOW, aOrAn, errorText, moodWord, pickOne, priceOf, storage, wait, type Drawer, type FinishPanel } from "./pip/common";
 import { usePipActs } from "./pip/usePipActs";
+import { usePipWorld } from "./pip/usePipWorld";
+import { Visitors, prepareVisitorProfile } from "../components/pip/Visitors";
+import { useVisitorStore } from "../pip/useVisitors";
+import { cuePip } from "../pip/life";
+import { missedLine } from "../pip/behaviour";
+import { coldWords } from "../pip/cold";
 import { usePipLook } from "./pip/usePipLook";
 import { purchaseFlow, useGrace, useStandIns } from "./pip/purchaseFlow";
 import { usePipHouse } from "./pip/usePipHouse";
@@ -73,6 +79,8 @@ const chosenArt = (clicked: Element | null): Captured | null => {
 
 export type PipPageProps = {
   showToast: (message: string) => void;
+  /** Shows the Social page (a visitor's card has a way to their profile). Left out, the card has no such button. */
+  openSocial?: () => void;
 };
 
 /**
@@ -99,7 +107,7 @@ export type PipPageProps = {
  * each thing does, the shop's entries, the tabs of Pip's things, the HUD, the
  * rail and the drawers.
  */
-export const PipPage = ({ showToast }: PipPageProps) => {
+export const PipPage = ({ showToast, openSocial }: PipPageProps) => {
   const { overview, load, buy, setLook, feed, plant, harvest, gamePlayed, played } = usePipWardrobeStore(
     useShallow((state) => ({
       overview: state.overview,
@@ -140,8 +148,9 @@ export const PipPage = ({ showToast }: PipPageProps) => {
   const [pickerPlot, setPickerPlot] = useState<number | null>(null);
   // The arcade's games, open; and the game a machine opened it at, if one did.
   const [arcadeOpen, setArcadeOpen] = useState(false);
-  const [arcadeGame, setArcadeGame] = useState<GameId | null>(null);
-  const openArcade = (game: GameId | null = null) => {
+  // (Or one of its other pages: a thing in the room may open it straight onto the word quiz, or "My words".)
+  const [arcadeGame, setArcadeGame] = useState<GameId | ArcadePage | null>(null);
+  const openArcade = (game: GameId | ArcadePage | null = null) => {
     setArcadeGame(game);
     setArcadeOpen(true);
   };
@@ -212,6 +221,17 @@ export const PipPage = ({ showToast }: PipPageProps) => {
   const ripe = overview?.garden.plants.filter((entry) => entry.ripe && !entry.harvested).length ?? 0;
 
   const { act, line, play, duringAct, onActDone, repertoire, poke } = usePipActs({ reaction, suspended, finishReaction, overview, signature, actTimers, setHeldMood });
+  // What she knows of the world outside her room (the reader's books, an expedition, a visitor, a cold): it colours what she does.
+  const { world, markSeen } = usePipWorld({ books });
+  // A friend came by while she was asleep or out and left a note: once she is about, she says so (once a note, a visit to the tab).
+  const visitorNote = useVisitorStore((state) => state.note?.record.from ?? null);
+  const remarked = useRef<number | null>(null);
+  const pipOut = Boolean(world.away);
+  useEffect(() => {
+    if (visitorNote === null || pipOut || remarked.current === visitorNote) return;
+    remarked.current = visitorNote;
+    cuePip({ move: "look", loops: 1, line: missedLine(Math.random), houseOnly: true });
+  }, [visitorNote, pipOut]);
 
   const { skin, wearing, withAccessory, wearAccessory, shownVariant, shownOutfit, artFor } = usePipLook({
     variant,
@@ -672,6 +692,7 @@ export const PipPage = ({ showToast }: PipPageProps) => {
                 body: (
                   <MoodPanel
                     report={moodReport()}
+                    cold={world.cold ? { ...coldWords(world.cold), percent: Math.floor(Math.max(0, Math.min(1, world.cold.cure)) * 100) } : null}
                     hearts={hearts}
                     onPlay={() => {
                       setDrawer(null);
@@ -789,6 +810,25 @@ export const PipPage = ({ showToast }: PipPageProps) => {
             onEmptyPlot={level.garden ? (plot) => setPickerPlot(plot.plot) : undefined}
             plotLabel={plotLabel}
             reserveBelow={reserve}
+            world={world}
+            onWelcomed={markSeen}
+            overlay={(frame) => (
+              <Visitors
+                frame={frame}
+                taken={frame.floor()}
+                busy={decorating || arcadeOpen}
+                away={pipOut}
+                onEvent={(event) => sceneRef.current?.visitor(event.type)}
+                onOpenProfile={
+                  openSocial
+                    ? (handle) => {
+                        prepareVisitorProfile(handle);
+                        openSocial();
+                      }
+                    : undefined
+                }
+              />
+            )}
             label={`The ${level.name}, with Pip in ${SKINS.find((entry) => entry.id === shownVariant)?.name ?? "its"} outfit. ${moodWord(shownMood)}.`}
           />
 

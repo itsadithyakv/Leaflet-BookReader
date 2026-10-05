@@ -22,6 +22,7 @@ export type PipMoment =
   | "backup"
   | "welcomeBack"
   | "streakLost"
+  | "streakLostCold"
   | "dustyBook"
   | "poke"
   | "awayReturn"
@@ -96,6 +97,13 @@ const POOLS: Record<PipMoment, Beat[]> = {
   backup: [{ move: "backup", line: () => "library backed up to drive. safe and sound." }],
   welcomeBack: [{ move: "welcome", line: (v) => `${plural(v.days ?? 3, "day")}! i missed you. one page?` }],
   streakLost: [{ move: "streaklost", line: () => "streak ended. comeback arc starts now." }],
+  // The same moment when a cold comes with it (a streak of three days or more:
+  // pip/cold.ts). She says what happened and what helps, and blames nobody.
+  streakLostCold: [
+    { move: "sneeze", line: () => "achoo. streak ended. i'm fine. read to me?" },
+    { move: "sneeze", line: () => "achoo. a streak ended and i caught a cold." },
+    { move: "sneeze", line: () => "sniff. streak's over. stories will fix me." }
+  ],
   dustyBook: [{ move: "sneeze", line: (v) => `achoo. ${plural(v.days ?? 30, "day")} on the shelf. welcome back.` }],
   // Focus. Coming back from another app mid-session: the clock waited, and
   // Pip is (theatrically) cross with the other app, never with the reader.

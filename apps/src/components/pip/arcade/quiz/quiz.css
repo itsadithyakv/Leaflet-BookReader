@@ -1,0 +1,294 @@
+/* The word quiz and "My words", in the Attic Arcade's dialog (WordQuiz.tsx,
+   MyWords.tsx). Drawn like the HUD: hard pixel outlines, keys that sink, and
+   the words themselves in the app's own lettering at a size to be read. */
+
+.pip-quiz {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 14px;
+  color: var(--hud-ink);
+  outline: none;
+}
+
+.pip-quiz-count {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgb(var(--color-on-surface-variant));
+}
+
+/* One square a question: done, this one, still to come. */
+.pip-quiz-marks {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.pip-quiz-marks > span {
+  width: 10px;
+  height: 10px;
+  background: var(--hud-track);
+  box-shadow: 0 0 0 1px var(--hud-line);
+}
+
+.pip-quiz-marks > span[data-done] {
+  background: #6aa841;
+}
+
+.pip-quiz-marks > span[data-at] {
+  box-shadow: 0 0 0 2px #e8b43a;
+}
+
+.pip-quiz-stage {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+}
+
+.pip-quiz-stage > .pip-sprite {
+  flex: none;
+}
+
+/* What Pip holds up: her line, then the word (or the meaning), big. */
+.pip-quiz-card {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  padding: 12px 16px 14px;
+  background: var(--hud-face);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 5px 0 0 var(--hud-lip);
+}
+
+.pip-quiz-says {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--hud-ink-soft);
+}
+
+.pip-quiz-prompt {
+  margin-top: 4px;
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+/* A meaning held up, not a word: a sentence, so smaller. */
+.pip-quiz-prompt[data-long] {
+  font-size: 18px;
+  line-height: 1.35;
+}
+
+.pip-quiz-from {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--hud-ink-soft);
+}
+
+.pip-quiz-options {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pip-quiz-option {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--hud-face);
+  color: var(--hud-ink);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: left;
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 5px 0 0 var(--hud-lip);
+  transition: transform 90ms ease, background-color 120ms ease;
+}
+
+.pip-quiz-option > span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pip-quiz-option > kbd {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  background: var(--hud-well);
+  color: var(--hud-ink-soft);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 22px;
+  text-align: center;
+  box-shadow: 0 0 0 1px var(--hud-line);
+}
+
+.pip-quiz-option:hover:not([aria-disabled]) {
+  background: var(--hud-face-hover);
+}
+
+.pip-quiz-option:active:not([aria-disabled]) {
+  transform: translateY(3px);
+}
+
+.pip-quiz-option[aria-disabled] {
+  cursor: default;
+}
+
+/* Once answered: the right one green (and ticked), the one picked wrongly red, the rest quiet.
+   Told by the tick and the words under the answers too, not by colour alone. */
+.pip-quiz-option[data-state="right"] {
+  background: #cfe6b6;
+  color: #12300c;
+}
+
+.pip-quiz-option[data-state="wrong"] {
+  background: #f1c9c2;
+  color: #4a100c;
+}
+
+.pip-quiz-option[data-state="other"] {
+  opacity: 0.55;
+}
+
+.pip-quiz :is(.pip-quiz-option, .pip-key):focus-visible {
+  outline: 2px solid rgb(var(--color-primary));
+  outline-offset: 4px;
+}
+
+.pip-quiz-foot {
+  display: flex;
+  min-height: 44px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pip-quiz-result {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: rgb(var(--color-on-surface));
+}
+
+.pip-quiz-menu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.pip-quiz-note,
+.pip-words-empty {
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgb(var(--color-on-surface-variant));
+}
+
+.pip-words-empty {
+  font-size: 14px;
+}
+
+/* My words: a card a word. */
+.pip-words {
+  display: grid;
+  gap: 12px;
+  max-height: min(56vh, 520px);
+  margin: 0;
+  padding: 4px 4px 8px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.pip-word {
+  padding: 10px 12px 12px;
+  background: var(--hud-face);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line);
+}
+
+.pip-word-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.pip-word-name {
+  font-size: 18px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.pip-word-part,
+.pip-word-box,
+.pip-word-where {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--hud-ink-soft);
+}
+
+.pip-word-box {
+  margin-left: auto;
+}
+
+.pip-word-meaning {
+  margin-top: 4px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.pip-word-where {
+  margin-top: 4px;
+  font-weight: 600;
+}
+
+.pip-word-keys {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.pip-word-ask {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+@media (max-width: 520px) {
+  .pip-quiz-stage > .pip-sprite {
+    display: none;
+  }
+
+  .pip-quiz-prompt {
+    font-size: 22px;
+  }
+}

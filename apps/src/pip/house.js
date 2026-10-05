@@ -4,7 +4,7 @@
 
  LEVELS
    HOUSE_LEVELS: [{ id, name, w, h, floorY, price, unlock, unlockText, night,
-                    wallpaper, floor, blurb, slots, decor(g, f), fridgeAt? }]
+                    wallpaper, floor, blurb, slots, decor(g, f), fridgeAt?, fixturesAt? }]
      w x h is 240 x 120 for every level (draw it scaled up, pixelated).
      price is seeds; unlock = { after: <level id>|null, sessions: n } — the
      level before it must be owned and n focus sessions completed.
@@ -23,6 +23,8 @@
    { id, name, kind: "furniture"|"wall"|"floor"|"window"|"light"|"ceiling",
      fits: [slot types], level: <level id>|"any", price, w, h, draw(g, f),
      glow?: [[x, y, r, colour]] or (f) => [...]  (light it casts, item coords) }
+   FIXTURES: the same, never for sale: draw(g, f, data) and glow(f, data) are
+   handed what the thing shows; `hit` is the part of the art that is the thing.
    Windows show the sky for the frame: pass f = skyFrame(hour) (room.js) to
    match the real time of day.
 
@@ -31,11 +33,13 @@
  RENDER
    renderLevel(levelId, f, { wallpaper?, floor?, placed?, night?, sky? }) -> ImageData
      placed: [{ slot, itemId }] (snapped) or [{ itemId, x, y }] (free, top-left);
-       `off: true` on one draws a light switched off: unlit, casting no glow.
+       `off: true` on one draws a light switched off: unlit, casting no glow;
+       `data` on one is handed to its draw (a fixture's: the books in the
+       bookcase, the notes on the fridge).
      night: dim the room and let lights glow (defaults to level.night).
      sky: false leaves the garden's glass clear (transparent), for the living
      sky (sky.js) to be laid under the floor's picture.
-   renderHouseItem(itemOrId, f) -> ImageData(item.w, item.h)
+   renderHouseItem(itemOrId, f, data?) -> ImageData(item.w, item.h)
    renderSwatch("wallpaper"|"floor", id, w = 32, h = 32, f) -> ImageData (shop tiles) */
 import { Painter, skyAt, flame, rnd, blend, ROOM_ITEMS, paintSky, lerpC, withSkyHour } from "./room.js";
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
@@ -43,6 +47,7 @@ import { rgba, FONT } from "./engine.js";
 import { NOD_ITEMS as NODS_BOOKS } from "./house-nods.js";
 import { NOD_ITEMS_2 } from "./house-nods2.js";
 import { NOD_ITEMS_3, NOD_WALLPAPERS } from "./house-nods3.js";
+import { ROOM_FIXTURES } from "./house-fixtures.js";
 /** Every book-nod item: the first set, then the literary artefacts. */
 export const NOD_ITEMS = [...NODS_BOOKS, ...NOD_ITEMS_2, ...NOD_ITEMS_3];
 
@@ -107,6 +112,17 @@ export const HOUSE_LEVELS = [
     ],
     // Where the mini fridge may stand (its left edge), best first: in the gaps the floor spots leave between them.
     fridgeAt: [169, 115, 63],
+    // Where each of the floor's other fixtures may be (its top-left), best first: wall no slot reaches
+    // (between the poster and the window, over the bed, under the window), and the gaps on the floor.
+    fixturesAt: {
+      bookcase: [[62, 30]],
+      calendar: [[18, 58], [48, 58], [33, 58]],
+      wallclock: [[40, 61], [12, 61], [26, 61]],
+      corkboard: [[108, 67]],
+      radio: [[63, 84], [115, 84], [169, 84]]
+    },
+    // What stands on the fridge, wherever the fridge is.
+    onFridge: "plantpot",
     decor(g) { shelf(g, 172, 228, 68); }
   },
   {
@@ -842,16 +858,35 @@ const fridgeCabinet = (l) => {
   l.rect(10, 2, 1, 16, c.shade).rect(1, 17, 10, 1, c.shade);
   l.rect(2, 18, 2, 1, c.foot).rect(8, 18, 2, 1, c.foot);
 };
+/** Where the notes go on the fridge's lower door (each 3 x 3, the newest first), and the magnet that holds each. */
+export const FRIDGE_NOTES = [[6, 8, "#E0584E"], [2, 13, "#2F80E6"], [6, 13, "#8E5CFF"]];
+/** The lower door, where the notes are: the part of the fridge that is theirs to be chosen by (fridge pixels). */
+export const FRIDGE_DOOR = { x: 0, y: 7, w: 12, h: 12 };
+
+// The bookcase: four shelves in a case 26 wide, hung on the wall, with room
+// above it for a tag. What stands on the shelves is the reader's own finished
+// books (pip/bookSpines.ts says which, where and in what colour).
+/** The room above the bookcase kept for its tag, in pixels: the case itself starts this far down its art. */
+export const BOOKCASE_TAG = 8;
+const CASE = { top: BOOKCASE_TAG, shelf: 10, books: 2, stack: 7 };
+
 export const FIXTURES = [
-  it("minifridge", "Mini Fridge", "furniture", ["stand"], "bedroom", 0, 12, 20, (g) => {
+  // `data.notes`: the paper colour of each note on the door (none: a magnet waiting for one).
+  it("minifridge", "Mini Fridge", "furniture", ["stand"], "bedroom", 0, 12, 20, (g, f, data) => {
     const c = FRIDGE;
+    const notes = (data && data.notes) || [];
     g.shadow(6, 6, 19);
     g.stamp((l) => {
       fridgeCabinet(l);
-      // The freezer's seam, a handle for each door, and what is stuck to the front: a magnet and a note.
+      // The freezer's seam, a handle for each door, and what is stuck to the front.
       l.rect(1, 6, 10, 1, c.shade);
       l.rect(3, 3, 1, 2, c.chrome).rect(3, 8, 1, 5, c.chrome).px(3, 8, "#FFFFFF");
-      l.px(8, 9, "#E0584E").rect(6, 11, 3, 3, "#FFE36B").px(7, 12, "#C9A227").px(6, 13, "#F2CF4A");
+      if (notes.length === 0) l.px(7, 9, FRIDGE_NOTES[0][2]);
+      notes.slice(0, FRIDGE_NOTES.length).forEach((paper, i) => {
+        // A note under its magnet, with a line of writing on it.
+        const [x, y, magnet] = FRIDGE_NOTES[i];
+        l.rect(x, y, 3, 3, paper).px(x + 1, y, magnet).rect(x, y + 2, 2, 1, lerpC(paper, "#3A2A1E", 0.35));
+      });
     }, c.edge);
   }),
   it("minifridge-open", "Mini Fridge, open", "furniture", ["stand"], "bedroom", 0, 17, 20, (g, f) => {
@@ -876,8 +911,51 @@ export const FIXTURES = [
     if (f % 48 !== 7) g.px(5, 3, "#FFE36B").px(6, 3, "#FFE36B");
   }, { glow: [[6, 10, 36, "#E4F3FF"]] }),
   // The light of Pip's phone, late, in bed: nothing to draw (she holds the phone), only what it throws on the pillow and the wall after dark.
-  it("phoneglow", "Phone glow", "furniture", ["stand"], "bedroom", 0, 1, 1, () => {}, { glow: [[0, 0, 12, "#BFDFFF"]] })
+  it("phoneglow", "Phone glow", "furniture", ["stand"], "bedroom", 0, 1, 1, () => {}, { glow: [[0, 0, 12, "#BFDFFF"]] }),
+  // `data.shelves`: top shelf first, each `{ standing: [[colour, tall]] }` or `{ stacks: [[colour]] }`;
+  // `data.count`: the number on the tag, or null for no tag; `data.diary`: `{ today }`, her diary lying
+  // on top of the case (a ribbon out of it once today's page is written). Empty without data.
+  it("bookcase", "Pip's Bookcase", "wall", ["wall"], "bedroom", 0, 26, 52, (g, f, data) => {
+    const top = CASE.top;
+    g.stamp((l) => {
+      l.rect(1, top + 1, 24, 42, "#6B4226").rect(1, top + 1, 24, 1, "#8E5C36").rect(1, top + 1, 1, 42, "#8E5C36");
+      l.rect(2, top + 2, 22, 40, "#3E2614");
+      for (let row = 0; row < 4; row++) l.rect(2, top + 2 + row * CASE.shelf + 9, 22, 1, row === 3 ? "#6B4226" : "#8A5A34");
+    }, "#1E120A");
+    const shelves = (data && data.shelves) || [];
+    shelves.slice(0, 4).forEach((shelf, row) => {
+      // The lowest clear row of this shelf: what stands on it stands here.
+      const foot = top + 2 + row * CASE.shelf + 8;
+      (shelf.standing || []).slice(0, 11).forEach(([c, tall], i) => {
+        const x = 2 + i * CASE.books, h = Math.max(4, Math.min(8, tall));
+        g.rect(x, foot - h + 1, 1, h, c).rect(x + 1, foot - h + 1, 1, h, lerpC(c, "#000000", 0.24)).px(x, foot - h + 1, lerpC(c, "#FFFFFF", 0.4));
+      });
+      (shelf.stacks || []).slice(0, 3).forEach((pile, s) => {
+        // Lying flat, the newest on top: a stripe each, its pages showing at one end.
+        const n = Math.min(8, pile.length);
+        for (let j = 0; j < n; j++) {
+          const x = 2 + s * CASE.stack + (j % 2), y = foot - (n - 1 - j);
+          g.rect(x, y, 5, 1, pile[j]).px(x + 5, y, "#F2E3C2");
+        }
+      });
+    });
+    if (data && data.count != null) {
+      // A tag propped on top, at the right (the diary lies at the left): how many books there are in all.
+      const text = data.count >= 1000 ? `${Math.min(9, Math.floor(data.count / 1000))}K+` : String(data.count), w = text.length * 4 + 3, x = 25 - w;
+      g.stamp((l) => l.rect(x, 1, w, 7, "#FFF6DF").rect(x, 7, w, 1, "#E8DCC4"), "#1E120A");
+      g.text(text, x + 2, 2, "#3A2A1E", false);
+    }
+    if (data && data.diary) {
+      g.stamp((l) => l.rect(1, 5, 8, 3, "#7A4BB0").rect(1, 5, 8, 1, "#9C6FD0").px(8, 6, "#F2E3C2").rect(3, 6, 3, 1, "#FFD23F"), "#1E120A");
+      if (data.diary.today) g.px(9, 6, "#E0393E").px(9, 7, "#E0393E");
+    }
+    void f;
+  }, { hit: { x: 0, y: BOOKCASE_TAG, w: 26, h: 52 - BOOKCASE_TAG } }),
+  ...ROOM_FIXTURES
 ];
+
+/** Where the diary lies on the bookcase's art, to be chosen by: the left of the room above the case. */
+export const BOOKCASE_DIARY = { x: 0, y: 0, w: 12, h: BOOKCASE_TAG + 1 };
 
 const ITEM = new Map([...ALL_ITEMS, ...FIXTURES].map((i) => [i.id, i]));
 const LEVEL = new Map(HOUSE_LEVELS.map((l) => [l.id, l]));
@@ -924,16 +1002,16 @@ export function renderLevel(levelId, f = 0, opts = {}) {
     if (slot) { pos = placeAt(item, slot); type = slot.fits; }
     else if (p.x != null) { pos = { x: Math.round(p.x), y: Math.round(p.y) }; type = (item.fits && item.fits[0]) || "stand"; }
     else continue;
-    list.push({ item, pos, type, off: Boolean(p.off) });
+    list.push({ item, pos, type, off: Boolean(p.off), data: p.data });
   }
   list.sort((a, b) => ORDER[a.type] - ORDER[b.type] || (a.pos.y + a.item.h) - (b.pos.y + b.item.h));
   const glows = [];
-  for (const { item, pos, off } of list) {
+  for (const { item, pos, off, data } of list) {
     const s = new Painter(item.w, item.h, f);
-    item.draw(s, f);
+    item.draw(s, f, data);
     if (off) unlight(s.C.d);
     g.C.blit(s.C, pos.x, pos.y);
-    const gl = off ? null : typeof item.glow === "function" ? item.glow(f) : item.glow;
+    const gl = off ? null : typeof item.glow === "function" ? item.glow(f, data) : item.glow;
     if (gl) for (const [x, y, r, c] of gl) glows.push([pos.x + x, pos.y + y, r, rgba(c)]);
   }
   if (L.glow) for (const [x, y, r, c] of L.glow) glows.push([x, y, r, rgba(c)]);
@@ -978,10 +1056,10 @@ function nightLight(g, glows) {
 }
 
 /** One decor item (old or new) as its own sprite. */
-export function renderHouseItem(item, f = 0) {
+export function renderHouseItem(item, f = 0, data) {
   const i = typeof item === "string" ? ITEM.get(item) : item;
   const g = new Painter(i.w, i.h, f);
-  i.draw(g, f);
+  i.draw(g, f, data);
   return g.toImageData();
 }
 
