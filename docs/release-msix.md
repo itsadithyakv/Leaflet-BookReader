@@ -271,3 +271,10 @@ closed; opening it withdraws them.
 
 "Send a Test" in the card shows a toast immediately, which is the quickest way
 to see the wording, the image and whether Windows is letting it through.
+
+## Pip on the desktop
+
+Pip on the desktop is a second window of the same full-trust process. No
+capability, no manifest entry, no background task; she is not there when
+Leaflet is closed. It has not been tried in a package: sideload one and run
+the checklist in HANDOFF.md.

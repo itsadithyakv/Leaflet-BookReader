@@ -19,7 +19,7 @@ From that rule:
 - No real money anywhere (the desktop app is free; the mobile app is paid
   up front). No loot boxes, no timers that charge you to skip.
 - No punishment for being away. Things pause; nothing dies, rots or is
-  taken away. A broken streak already costs shelf spines; the game adds no
+  taken away. A broken streak takes nothing (Pip catches a cold; it used to cost shelf spines); the game adds no
   second penalty.
 - Offline progress is earned progress: the world "catches up" on what you
   read elsewhere (other device, paper books logged later), never on wall
@@ -83,7 +83,7 @@ is a little map with four stops at 25/50/75/100% of the book. Your progress
 through the book moves Pip along the path.
 
 - Each stop gives loot: seeds, petals, and at the end a **souvenir**, a
-  unique pixel keepsake from that book's world. For the 60 famous books Pip
+  unique pixel keepsake from that book's world. For the 549 books and series Pip
   already has scenes for, souvenirs are specific (a dragon egg, an owl
   feather, a gold ring, a green light in a jar, a potato from Mars). Every
   other book gets a souvenir by genre (a map, a magnifying glass, a
@@ -204,7 +204,7 @@ enforced in Rust.
 1. **Now (in progress):** seeds, shop, full-page house with floors, decor,
    mini-games.
 2. **Expeditions + souvenirs.** The highest value: it ties the game to
-   finishing books and reuses the 51 book scenes already drawn.
+   finishing books and reuses the 71 book scenes already drawn.
 3. **Garden + petals.** The idle engine; seasonal content later.
 4. **Critters + upgrades.** Depth for regular readers.
 5. **Seasons + the Chronicle.** The monthly keepsake and share image.

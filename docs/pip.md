@@ -44,6 +44,17 @@ There is exactly one Pip on screen at any time. Its home is the **header logo**:
 | `src/pages/PipPage.tsx`, `src/components/pip/` | The Pip tab: Pip's house (floors and the lift, decorating, the garden), the HUD (seeds, mood, a pinned goal, the tool rail), the shop, Pip's things, and the arcade. |
 | `src/pip/house.js`, `house-nods.js`, `games-art.js` | The house's floors, decor, wallpapers and floors, the book-nod items, and the arcade's art. |
 | `src/pip/home.js`, `src/pip/garden.js` | The house as the app sees it (normalised from the art), and the garden's plots and plants. |
+| `src/pip/bookNods.ts`, `src/pip/books/*.js` | The table of book nods (`NODS`), `nodFor(book, seed)` returning `{ move, line, known }`, the genre fallback (`nodGenre`, `GENRE_NODS`) and how often a nod plays (`NOD_ODDS`); the 71 scenes (`fantasy`, `classics`, `classics2`, `modern`, `romance`, `popular`). Not shop items and not in the catalogue. |
+| `src/pip/genre.ts`, `readingMoments.ts`, `src/pages/pip/usePipWorld.ts` | Pip knows your book: a book's genres to a mood, the reading moments, and the one `world` input the house scene is given. `worldStub.ts` sets it by hand in development. |
+| `src/pip/bookSpines.ts`, `houseplant.ts`, `roomTime.ts`, `house-fixtures.js` | Her shelf (finished books, a cover's one colour, the ribbon's place), the plant's rule, what the calendar and clock show, and the bedroom's fixtures with a job. |
+| `src/components/pip/roomThings.tsx`, `RoomCard.tsx` | What the room's things show that is the reader's own, what each offers Pip, and the card each opens. |
+| `src/pip/diary/`, `src/components/pip/diary/` | Pip's diary: the day's facts, her lines, the week's postcard (`openPipDiary`). |
+| `src/pip/expedition.ts`, `expedition-art.js`, `src/components/pip/album/` | Expeditions: what each focus session found (derived, never stored), the 44 sprites, the album, and `useExpedition` (she is out / back with a find). |
+| `src/pip/cold.ts` | The cold's level for drawing and its words for the mood panel (the rule is Rust's, `habit::cold`). |
+| `src/pip/visitors.ts`, `useVisitors.ts`, `src/components/pip/Visitors.tsx`, `VisitorPip.tsx` | Visitors: the pure rules and timeline, the store and driver, the layer mounted over the room. Sound `knock` in `pip/sound.ts`. |
+| `src/components/pip/arcade/quiz/` | The Word Quiz, "Who is this?" and My words. |
+| `src/ambience/` | The radio: `scenes.ts` (each scene as data), `schedule.ts` (seeded, pure), `grains.ts`, `engine.ts` (the Web Audio graph), `state.ts` (when it sounds), `ambience.ts` (the store), `ReaderAmbience.tsx`, `AmbiencePanel.tsx`, `measure.ts`. |
+| `src/desktop-pip/`, `src-tauri/src/desktop_pip/` | Pip on the desktop: her page and brain (poses `sit` and `holdup` in `moves.js` load only in her window), and the window, its thread and the Win32 calls. |
 
 ## The Pip tab: Pip's house
 
@@ -73,7 +84,10 @@ Pip side.
   `behaviour.ts` and walked by `HouseScene`: the midnight snack, the phone in
   bed (its light is a glow in the room's own picture), snooze in the morning.
   The moves are in `house-moves.js`: tiptoe, fridge-stare, nibble, caught,
-  scroll-* / phone-* (the phone, in bed and standing), innocent, snooze. A Pip
+  scroll-* / phone-* (the phone, in bed and standing), innocent, snooze;
+  and for her book life and the rest: glance, quilt-hide, underbed, inspect,
+  trail, knight, march, swordplay, hangover, dust, bring, show, cold-idle,
+  sniffle, tissue, shuffle. A Pip
   the reader tucked in is left asleep for 20 minutes. None of it touches mood,
   seeds or the shop.
 - **Decorating** snaps items into each floor's slots (`fits`: ceiling, wall,
@@ -165,7 +179,10 @@ wandering.
 | Dusty book (30+ days) | Sneeze, in the reader |
 | Manual backup | Backup beam |
 | Back after 3+ days | Welcome wave |
-| Streak lost | Comeback arc |
+| Streak lost | Comeback arc; with a cold to follow, a sneeze ("achoo. streak ended. i'm fine. read to me?") |
+| A streak of 3+ days breaks | A cold for up to three days; reading to the daily goal cures it |
+| A focus session | She is out on an expedition; back with a find held up |
+| A reader you follow read today, as you did | Their Pip visits; she greets them and reads beside them |
 | Clicked | One of 14 poke reactions |
 | Back from another app mid-session (30 s+) | Steamed, lock-in, alarm |
 | Reaching for the exit under focus lock | Swat (a rolled-up newspaper), whistle |

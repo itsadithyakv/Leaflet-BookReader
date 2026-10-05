@@ -286,11 +286,31 @@ cd src-tauri\msix
 ```
 
 Leave `VITE_ENABLE_MULTI_DEVICE` and `VITE_ENABLE_FULL_PIP_HOUSE` unset for 1.0.
+Leave `VITE_ENABLE_DESKTOP_PIP` unset too until Pip on the desktop has been
+tried on a real desktop (the checklist is in HANDOFF.md).
 The script warns about any required value that is missing; a warning here is a
 feature missing from the release, so stop and set it.
 
 Output: `D:\Leaflet\apps\src-tauri\target\msix\Leaflet_<version>.0_x64.msix`
 (`Leaflet_1.2.0.0_x64.msix` for 1.2.0).
+
+### 7b. A Mac build (optional, untried) — *github.com*
+
+A Mac build cannot be made on Windows. `.github/workflows/macos.yml` makes one
+on a GitHub Mac: push the branch, open the repository's **Actions** tab, pick
+**macOS build**, **Run workflow** on that branch, and download
+`Leaflet-macOS-universal` (a `.dmg` for Apple silicon and Intel) from the run
+when it finishes. To include Google Drive backup, add
+`LEAFLET_GOOGLE_CLIENT_ID` and `LEAFLET_GOOGLE_CLIENT_SECRET` as repository
+secrets first (Settings → Secrets and variables → Actions).
+
+Know before you run it: the workflow has not been run, and Leaflet has only
+ever been built for Windows, so the first run may stop on code that does not
+compile for macOS (its log says where). The build is not signed or notarised
+(that needs an Apple Developer ID), so macOS refuses a double click: right-click
+the app and choose Open the first time. Its icon is still the old logo
+(`icons/icon.icns` was not regenerated). Reminders, Pip on the desktop and the
+Store packaging are Windows-only.
 
 ## 8. Try the package on this PC first (recommended)
 

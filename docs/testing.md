@@ -111,7 +111,26 @@ book; `fixture.epub` has drop caps, every kind of note reference, pictures and
 eight sections; `rsvp-run.txt`, `rsvp-geometry.txt` and `rsvp-holds.txt` re-run
 the SpeedRead measurements; `people-harness.txt` seeds a character sheet;
 `long.pdf`, `scanbook.pdf` and `dropcaps.pdf` (each with its generator) are
-for the page reader.
+for the page reader. For Pip: `life-harness.txt` (`__life.boot(hour)`, `act`,
+`reduced`, `count`), `room-harness.txt`, `memory-boot.js`, `trail-boot.js`,
+`visit-test.html` (a page that does not reload under the test; `window.__vt`
+mounts `VisitorPip` with a clock that can be stopped; in the app,
+`window.__pipVisitors.stub()`), `sound-bench.txt` and `sound-measure.txt`
+(`__soundTen()`, `__soundLong(ids, seconds, seeds)`). The house's dev hook
+(`__pipHouse`) has `world(patch)`, `choose(id)`, `plan()`, `night("peek")`,
+`visitor(type)` and `state()` fields `away`, `holding`, `welcomed`, `pace`,
+`peeking`; its loop does not run in a hidden pane, step it with `advance`.
+
+The radio is measured, not heard: `sound-measure.txt` renders each scene
+offline and reports level, peak, spectrum and steadiness. The preview pane is
+hidden and unfocused, so the radio rests there after 2 s unless
+`document.visibilityState` and `hasFocus` are overridden; with them overridden
+it plays through the speakers, so store a volume of 0.05 first.
+
+`http://localhost:1421/desktop-pip.html` runs desktop Pip's page against a
+stand-in host; `window.__desktopPip.log` is every call it made and
+`.tell(event)` plays an event from Rust. In a hidden pane her 12 fps ticker is
+paused: override `document.hidden` and dispatch `visibilitychange` first.
 
 In a hidden pane the reader does not run at all without help: epub.js queues
 its work on `requestAnimationFrame`, which never fires there, and no scroll

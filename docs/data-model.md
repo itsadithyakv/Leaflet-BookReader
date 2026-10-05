@@ -42,7 +42,10 @@ check for whether the book's bytes are on *this* device.
 | `freeze_used`, `grace_used` | Whether a missed day was paid for |
 
 The streak is **derived** from these rows rather than stored, so it can never
-drift from the minutes that earned it.
+drift from the minutes that earned it. Pip's cold is derived from them too
+(`habit::cold`): no column, no table. The per-device streak state in
+`settings` carries `brokeOn`, the day the last break was found, so grace
+refilled by a break is not spent on the gap that caused it.
 
 ### `focus_sessions` — the shelf
 
@@ -56,8 +59,12 @@ ledger minutes less its sessions'; a session takes from its end day, then its
 start day) and the habit snapshot carries it as `freeReads`.
 
 `style_seed` replaces a persisted decoration blob — the shelf's appearance is
-derived deterministically from the seed at render time. `burned_at` tombstones a
-session when a streak breaks, rather than deleting it.
+derived deterministically from the seed at render time. `burned_at` is a
+tombstone from earlier versions, which burned the newest sessions when a
+streak broke. Nothing writes it now; it is kept, synced and never cleared.
+
+Pip's album has no table: each session's find is derived from its
+`style_seed`, `minutes`, `ended_reason` and `clean` (`pip/expedition.ts`).
 
 `flower` is the focus flower a session started in full screen grew (`tulip`,
 `daisy`, `sunflower`, `rose`; NULL for other sessions) and `flower_bloomed`
@@ -120,6 +127,28 @@ so highlights, bookmarks and their counts never see these rows. Removing a
 book from the library leaves its sheet rows, as it leaves its highlights;
 Delete All Data takes them.
 
+Words looked up are rows here too, kind `word`. `id` is
+`word:<language>:<the word, lower case>` (one row a word, on every device);
+`note` the word; `cfi` and `chapter` the place it was last looked up at; `text`
+a JSON object: `p` (fraction of the book), `m` (the meaning shown, 300
+characters at most), `n` (times looked up), `at` (when last), `l` (language),
+`pos` (part of speech, optional), and the quiz's `b` (box, 0 to 5) and `d` (day
+next due, days since 1970). Written only through `word_record`,
+`words_review` and `words_delete` (`commands/words.rs`): a word of 1 to 80
+characters with a non-empty meaning, a book and `p` in 0..1; an id held by a
+row of another kind is refused; the JSON is refused over 2,000 bytes, never
+clipped; a review takes box 0..5 and a day 0..60,000 for words still kept, a
+batch all or nothing; delete tombstones words only. `readers/words/rows.ts` is
+the only app code that knows the shape. Sync is "newest row wins", so the same
+word looked up on two devices while both are offline merges to one count, not
+the sum.
+
+`annotations_list` returns every kind for a book; its readers filter by kind
+(`annotationService.list` itself returns only bookmarks and highlights).
+`annotation_save` and `annotation_delete` act only on bookmarks and
+highlights: an id held by a row of another kind is refused. Pip's diary reads
+`highlight`, `person` and `word` rows (`diary_sources`) and stores nothing.
+
 ### `reading_sessions`
 
 `UNIQUE(book_id, date_key)`, written as a side effect of `update_progress`.
@@ -134,6 +163,18 @@ pace profile (`reading_profile`, JSON; see the sync document below), and the
 book copies folder (`library_copy_enabled`, `library_copy_folder`,
 `library_copy_index`, `library_copy_problem`), which is this device's alone:
 never in the sync document or the backup.
+
+**Device-only keys in the webview's storage** added in 1.2, none synced, all
+removed by Delete All Data (`services/deviceData.ts`): `leaflet.pip.lastStop`
+(the last book closed, when, how far through its chapter, how long it was
+open), `leaflet.pip.spines` (a cover's colour per finished book;
+recomputable), `leaflet.pip.findSeen` (the session whose find Pip last
+showed), `leaflet.pip.visits` (today's visitor log; also cleared at
+sign-out), `leaflet.ambience` (the radio's `{ on, scene, volume, thunder }`),
+`leaflet.reader.keepWords` ("0" = do not keep looked-up words),
+`leaflet.desktopPip.enabled` and `leaflet.desktopPip.hiddenOn`. On the server,
+`profiles.readDay` (the local date last read on) is held for public profiles
+only. `Book.progressUpdatedAt` is now read by the front end.
 
 The Drive **refresh** token is not here — it goes to the OS keychain, with this
 table as the fallback where no keychain exists.
@@ -231,7 +272,8 @@ Book files live beside it as `books/<sha256>.<ext>` and are fetched on demand.
   the other's time overlapped its own, and a sum would let repeated syncing
   inflate a streak.
 - **Freeze / grace** — OR'd. Spending it on one device spends it everywhere.
-- **Sessions** — union by id; a burn is a tombstone and sticks.
+- **Sessions** — union by id; a burn (written only by older versions) is a
+  tombstone and sticks.
 - **Purchases, plantings, harvests** — unions by id; they never change once made.
 - **Pip's state** — newest `updatedAt` wins, whole; a tie is settled by content.
 - **Annotations, collections** — per id, newest `updatedAt` wins, whole; a delete
