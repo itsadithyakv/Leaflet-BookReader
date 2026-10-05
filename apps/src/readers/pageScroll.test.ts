@@ -11,6 +11,7 @@ import {
   pagesNear,
   pagesWanted,
   placeAt,
+  placeWithin,
   planDraw,
   positionOf,
   scrollForAnchor,
@@ -166,6 +167,30 @@ describe("keeping the place", () => {
   it("takes what was stored, whatever it is", () => {
     expect(positionOf(even, { page: 99, fraction: Number.NaN, extra: Number.NaN })).toBe(9 * STEP);
     expect(positionOf(even, { page: -4, fraction: 7, extra: 0 })).toBe(1000);
+  });
+});
+
+describe("the place on a page shown on its own", () => {
+  it("is how far down the page the top of the window is", () => {
+    expect(placeWithin(150, 525, 1244)).toEqual({ page: 150, fraction: 525 / 1244, extra: 0 });
+    expect(placeWithin(3, 1244, 1244)).toEqual({ page: 3, fraction: 1, extra: 0 });
+  });
+
+  it("is kept in pixels above the page and below it, where the stage's own room is", () => {
+    expect(placeWithin(1, -96, 1244)).toEqual({ page: 1, fraction: 0, extra: -96 });
+    expect(placeWithin(1, 1250, 1244)).toEqual({ page: 1, fraction: 1, extra: 6 });
+  });
+
+  it("means the same in the column: a page closed part way down reopens there in either layout", () => {
+    // Page 4 (index 3) of the even column, 250 down it.
+    const single = placeWithin(3, 250, 1000);
+    expect(single).toEqual(placeAt(even, 3 * STEP + 250));
+    expect(positionOf(even, single)).toBe(3 * STEP + 250);
+  });
+
+  it("is the top of the page when the page has no size yet", () => {
+    expect(placeWithin(7, 300, 0)).toEqual({ page: 7, fraction: 0, extra: 0 });
+    expect(placeWithin(7, Number.NaN, 900)).toEqual({ page: 7, fraction: 0, extra: 0 });
   });
 });
 

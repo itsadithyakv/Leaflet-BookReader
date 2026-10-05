@@ -158,3 +158,16 @@ export const outsideStory = (side: "front" | "back", progress: number) => {
   }
   return { progress: null as number | null, placeFollows: known >= 1 - AT_AN_END };
 };
+
+/**
+ * Scrolling: whether the story's last line is in the window, given where the
+ * bottom of its last section's text is from the top of the window. The book
+ * is read once it is, however short that last section.
+ *
+ * Progress used to reach 100% only with the top of the window inside the
+ * last section, on its last screenful: a last chapter shorter than the window
+ * never got there (the page cannot scroll that far), so such a book stayed at
+ * 95% and was never finished.
+ */
+export const endInView = (endBottom: number | null, windowHeight: number) =>
+  endBottom !== null && endBottom > 0 && endBottom <= windowHeight + 1;

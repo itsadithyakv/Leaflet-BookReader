@@ -45,3 +45,66 @@ export const readingLineIn = (chapters: readonly ChapterBox[], line: number, win
  */
 export const placeToSave = (layout: "scroll" | "pages", readingLineCfi: string | null, topCfi: string | null) =>
   layout === "scroll" ? (readingLineCfi ?? topCfi) : topCfi;
+
+/**
+ * A piece of a chapter in reading order: a run of text (one text node) or a
+ * picture. Tops and bottoms are in the chapter's own pixels.
+ */
+export type LinePiece = {
+  /** Where its box is; null when it has none (hidden text). */
+  box: { top: number; bottom: number } | null;
+  /** How many words it holds; 0 for a picture. */
+  words: number;
+  /** The top of the line the nth word is drawn on; null for a word that is not drawn. */
+  wordTop: (word: number) => number | null;
+};
+
+/** A picture cut by the reading line is still the place while this much of it shows below the line. */
+export const PICTURE_SHOWING = 40;
+
+/**
+ * Where the reading line starts: the first word drawn at or below `start`
+ * (which piece, and which of its words), or the first picture there (`word`
+ * is -1).
+ *
+ * epub.js names a line by the space before its first word, which is drawn at
+ * the end of the line above, and when a text node's last line is cut by the
+ * reading line it names the start of the node, however many lines up. Either
+ * way a place put back by that name showed an earlier line: at about a third
+ * of scroll positions the saved place, Back and a bookmark crept back one to
+ * six lines.
+ */
+export const firstAtLine = (pieces: Iterable<LinePiece>, start: number): { piece: number; word: number } | null => {
+  let at = -1;
+  for (const piece of pieces) {
+    at += 1;
+    const box = piece.box;
+    if (!box || box.bottom <= start) {
+      continue;
+    }
+    if (piece.words === 0) {
+      if (box.top >= start || box.bottom - start >= PICTURE_SHOWING) {
+        return { piece: at, word: -1 };
+      }
+      continue;
+    }
+    // Lines run down the page, so the words' tops never decrease: the first
+    // at or below the line is found by halving. A word not drawn counts as above.
+    let low = 0;
+    let high = piece.words;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      const top = piece.wordTop(middle);
+      if (top !== null && top >= start) {
+        high = middle;
+      } else {
+        low = middle + 1;
+      }
+    }
+    if (low < piece.words) {
+      return { piece: at, word: low };
+    }
+    // Its last line is cut by the reading line: the place is in what follows.
+  }
+  return null;
+};

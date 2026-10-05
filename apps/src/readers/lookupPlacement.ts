@@ -73,6 +73,43 @@ export const placeCard = ({ barTop, barCentre, ceiling, cardWidth, windowWidth, 
   return usual;
 };
 
+/** How near the selection bar may come to the selected words. */
+export const BAR_GAP = 10;
+
+type BarRoom = {
+  /** Where the bar's foot usually is: above the chapter dock, or above the pace controls. */
+  usualFoot: number;
+  barHeight: number;
+  barLeft: number;
+  barRight: number;
+  /** The highest the bar's top may go: under the reader's toolbar. */
+  ceiling: number;
+  selection?: Box | null;
+};
+
+/**
+ * Where the selection bar's foot goes (from the top of the window). The bar
+ * sits at the foot of the page, which is also where the last lines of text
+ * are: words selected there were covered by the very bar offering to
+ * highlight them (a word at 658 to 678 px under a bar at 663 to 704). When
+ * the bar would lie on the selection it goes just above it instead; the
+ * cards that open from the bar open above it there as anywhere. A selection
+ * that fills the page to the toolbar cannot be cleared, and the bar keeps its
+ * usual place.
+ */
+export const placeBar = ({ usualFoot, barHeight, barLeft, barRight, ceiling, selection }: BarRoom) => {
+  if (!selection) {
+    return usualFoot;
+  }
+  const beside = selection.right <= barLeft || selection.left >= barRight;
+  const clear = selection.bottom + BAR_GAP <= usualFoot - barHeight || selection.top >= usualFoot + BAR_GAP;
+  if (beside || clear) {
+    return usualFoot;
+  }
+  const above = Math.round(selection.top - BAR_GAP);
+  return above - barHeight >= ceiling ? above : usualFoot;
+};
+
 /**
  * Where the selected text is in the window. The text lives in the book's own
  * frames (epub.js `Contents`), so its place there is moved by where its frame

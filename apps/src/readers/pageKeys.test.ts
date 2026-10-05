@@ -41,6 +41,36 @@ describe("the reading keys on a page taller than the window", () => {
   });
 });
 
+describe("the room the stage keeps round the page", () => {
+  // As measured at fit width in a 1024 x 768 window: 96px above the page, 104
+  // below (48 of it clear of the dock), a page 1,244 tall.
+  const padded = (scrollTop: number) =>
+    stage(scrollTop, { scrollHeight: 1443, clientHeight: 768, padTop: 96, padBottom: 48 });
+
+  it("is not a screen to scroll to: the page turns once its last line is in view", () => {
+    expect(readingKeyAction({ key: " " }, padded(0))).toEqual({ kind: "scroll", top: 660.48 });
+    // 14.5px of padding are left below. That used to be a press of its own, showing nothing new.
+    expect(readingKeyAction({ key: " " }, padded(660.48))).toEqual({ kind: "turn", step: 1, land: "top" });
+    expect(readingKeyAction({ key: "ArrowDown" }, padded(630))).toEqual({ kind: "turn", step: 1, land: "top" });
+  });
+
+  it("still shows the foot of the page before turning", () => {
+    // 100px of the page are below the window: one more press shows them, the next turns.
+    expect(readingKeyAction({ key: " " }, padded(471))).toEqual({ kind: "scroll", top: 675 });
+    expect(readingKeyAction({ key: " " }, padded(675))).toEqual({ kind: "turn", step: 1, land: "top" });
+  });
+
+  it("goes back from the top of the page, not from the top of the room above it", () => {
+    expect(readingKeyAction({ key: " ", shiftKey: true }, padded(14.5))).toEqual({ kind: "turn", step: -1, land: "bottom" });
+    expect(readingKeyAction({ key: "PageUp" }, padded(96))).toEqual({ kind: "turn", step: -1, land: "bottom" });
+    expect(readingKeyAction({ key: "PageUp" }, padded(300))).toEqual({ kind: "scroll", top: 0 });
+  });
+
+  it("is nothing where the stage holds a column of pages", () => {
+    expect(readingKeyAction({ key: " " }, stage(1190))).toEqual({ kind: "scroll", top: 1200 });
+  });
+});
+
 describe("the reading keys on a page that fits", () => {
   it("turns at once", () => {
     expect(readingKeyAction({ key: " " }, fits)).toEqual({ kind: "turn", step: 1, land: "top" });

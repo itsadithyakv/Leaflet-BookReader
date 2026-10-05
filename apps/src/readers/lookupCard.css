@@ -269,8 +269,15 @@
   line-height: 1.45;
 }
 
-.reader-lookup-note {
+/* The foot's words: that the word was kept (always in view, whatever the
+   answer's length), and the note on what is sent. */
+.reader-lookup-foot-words {
   flex: 1 1 auto;
+  min-width: 0;
+}
+
+.reader-lookup-kept,
+.reader-lookup-note {
   margin: 3px 0;
 }
 

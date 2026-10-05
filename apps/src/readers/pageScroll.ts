@@ -128,6 +128,22 @@ export const placeAt = (tops: Float64Array, y: number, gap = PAGE_GAP): Place =>
     : { page, fraction: 1, extra: into - height };
 };
 
+/**
+ * The same for a page on its own, as the paged layout shows it: `into` pixels
+ * of a page `height` tall are above the top of the window (fewer than none
+ * while the room above the page is in view). Kept in the same form so a book
+ * closed in one layout reopens at the same line in either.
+ */
+export const placeWithin = (page: number, into: number, height: number): Place => {
+  if (!(height > 0) || !Number.isFinite(into)) {
+    return { page, fraction: 0, extra: 0 };
+  }
+  if (into <= 0) {
+    return { page, fraction: 0, extra: into };
+  }
+  return into <= height ? { page, fraction: into / height, extra: 0 } : { page, fraction: 1, extra: into - height };
+};
+
 /** Where a place is down the column, in the layout given. */
 export const positionOf = (tops: Float64Array, place: Place, gap = PAGE_GAP) => {
   const count = pageCountOf(tops);

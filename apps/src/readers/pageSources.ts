@@ -28,6 +28,7 @@ import {
 } from "./pageTone";
 import { PDF_ACTUAL_SCALE, canvasPixelRatio, scaleFor, type FitOptions } from "./pageZoom";
 import { spreadOf } from "./pageSpread";
+import { PDF_EMPTY, pdfOpenMessage } from "./pdfOpenError";
 import { resolveOutline, type OutlineEntry, type OutlineNode } from "./pdfOutline";
 import { joinTextItems, mendDropCaps, type JoinedText, type TextItem } from "./pdfText";
 
@@ -236,7 +237,20 @@ export const createPdfPageSource = async (bookId: string): Promise<PageSource> =
     // `new Function` probe, which the CSP would block and report.
     isEvalSupported: false
   });
-  const document: PDFDocumentProxy = await loadingTask.promise;
+  let document: PDFDocumentProxy;
+  try {
+    document = await loadingTask.promise;
+  } catch (failure) {
+    loadingTask.destroy().catch(() => undefined);
+    // In the reader's words where the reason is known (readers/pdfOpenError.ts).
+    const message = pdfOpenMessage(failure);
+    throw message ? new Error(message) : failure;
+  }
+  if (document.numPages === 0) {
+    // No source is handed out, so nothing else would let go of the document.
+    loadingTask.destroy().catch(() => undefined);
+    throw new Error(PDF_EMPTY);
+  }
   let renderTask: RenderTask | null = null;
   // Bumped by every render and cancel. A render that finds it moved on after
   // an await stops there, so a page turn during getPage() can never start a
@@ -495,6 +509,10 @@ export const createPdfPageSource = async (bookId: string): Promise<PageSource> =
 
       const page = await document.getPage(pageNumber);
       let task: RenderTask | null = null;
+      // Drawn out of sight and shown when finished. pdf.js paints a page
+      // piece by piece: on the canvas in view that was a flash of white
+      // before a dark page, and a blank between one page and the next.
+      const sheet = window.document.createElement("canvas");
       try {
         if (token !== generation) {
           throw superseded();
@@ -503,10 +521,6 @@ export const createPdfPageSource = async (bookId: string): Promise<PageSource> =
         const scale = scaleFor(baseViewport, options, PDF_ACTUAL_SCALE);
         const viewport = page.getViewport({ scale });
         const tone = options.tone ?? null;
-        // Drawn out of sight and shown when finished. pdf.js paints a page
-        // piece by piece: on the canvas in view that was a flash of white
-        // before a dark page, and a blank between one page and the next.
-        const sheet = window.document.createElement("canvas");
         const { context, pixelRatio } = prepareCanvas(sheet, viewport.width, viewport.height, tone !== null);
         const pictures = tone?.dark ? watchPictures(context) : null;
 
@@ -533,11 +547,13 @@ export const createPdfPageSource = async (bookId: string): Promise<PageSource> =
         }
         const shown = prepareCanvas(canvas, viewport.width, viewport.height);
         shown.context.drawImage(sheet, 0, 0);
-        // Let go of the sheet's memory now rather than at the next collection.
-        sheet.width = 0;
-        sheet.height = 0;
         return { scale, width: baseViewport.width, height: baseViewport.height };
       } finally {
+        // Let go of the sheet's memory now rather than at the next
+        // collection, finished or given up: a render overtaken by a page
+        // turn or a zoom used to leave its sheet (up to 16.7M pixels) behind.
+        sheet.width = 0;
+        sheet.height = 0;
         // Only the render that owns the slot may clear it; a newer one may
         // already have replaced it.
         if (task && renderTask === task) {
@@ -639,16 +655,39 @@ export const createComicPageSource = async (bookId: string): Promise<PageSource>
             pages = answer.pages;
             break;
           }
-          await loadPage(answer.need);
+          try {
+            await loadPage(answer.need);
+          } catch (failure) {
+            if (answer.need === pageNumber) {
+              throw failure;
+            }
+            // A neighbour that cannot be read is taken for an ordinary page,
+            // so the pairing can go on without it.
+            wide.set(answer.need, false);
+          }
           if (disposed || token !== generation) {
             throw superseded();
           }
         }
       }
-      const images = await Promise.all(pages.map((page) => loadPage(page)));
+      // A page that cannot be decoded must not take the page beside it down
+      // with it: the page asked for is then shown alone. (It used to fail
+      // too, under an error naming the other page, and was never seen.)
+      const loaded = await Promise.all(
+        pages.map((page) =>
+          loadPage(page).catch((failure) => {
+            if (page === pageNumber) {
+              throw failure;
+            }
+            return null;
+          })
+        )
+      );
       if (disposed || token !== generation) {
         throw superseded();
       }
+      pages = pages.filter((_, index) => loaded[index] !== null);
+      const images = loaded.filter((image): image is HTMLImageElement => image !== null);
       // Facing pages are drawn to one height, edge to edge, as in the book.
       const tallest = Math.max(...images.map((image) => image.naturalHeight || 1));
       const widths = images.map((image) => ((image.naturalWidth || 1) * tallest) / (image.naturalHeight || 1));

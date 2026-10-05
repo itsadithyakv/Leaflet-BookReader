@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { KEY_REPEAT_TURN_MS, keyTurns, pageCount, pageTurnDuration, pageTurnTarget } from "./pageTurn";
+import {
+  KEY_REPEAT_TURN_MS,
+  WHEEL_AT_REST,
+  WHEEL_QUIET_MS,
+  keyTurns,
+  pageAt,
+  pageCount,
+  pageHolding,
+  pageTurnDuration,
+  pageTurnTarget,
+  strayPageTarget,
+  wheelTurn
+} from "./pageTurn";
 
 /**
  * A chapter of `pages` pages as the browser holds it: a scroll position lands
@@ -127,6 +139,60 @@ describe("turning pages", () => {
     }
   });
 
+  it("numbers the page showing, whatever the display's scaling", () => {
+    // epub.js's own numbering: the scroll position rounded down to a page.
+    const asEpubJs = (left: number, pageWidth: number) => Math.floor(left / pageWidth) + 1;
+    for (const scale of [1, 1.25, 1.5, 1.75, 2]) {
+      for (const pageWidth of [677, 678, 1248, 1473, 415, 1001]) {
+        for (const pages of [1, 2, 6, 19, 40]) {
+          const { contentWidth, settle } = chapter(pages, pageWidth, pageWidth, scale);
+          for (let page = 1; page <= pages; page += 1) {
+            expect(pageAt(settle((page - 1) * pageWidth), pageWidth, contentWidth)).toEqual({ page, total: pages });
+          }
+        }
+      }
+    }
+    // Measured in the preview at 150%, six pages of 677px: the last page sits
+    // at 3384.67 (it cannot scroll to 3385.33), and epub.js called it page 5.
+    expect(asEpubJs(3384.67, 677)).toBe(5);
+    expect(pageAt(3384.67, 677, 4062)).toEqual({ page: 6, total: 6 });
+    // At 125% the second page sits at 676.8: epub.js called it page 1.
+    const { settle } = chapter(6, 677, 677, 1.25);
+    expect(settle(677)).toBeCloseTo(676.8);
+    expect(asEpubJs(settle(677), 677)).toBe(1);
+    expect(pageAt(settle(677), 677, 4062).page).toBe(2);
+    // A chapter of one page is on its last page.
+    expect(pageAt(0, 677, 677)).toEqual({ page: 1, total: 1 });
+    expect(pageAt(0, 0, 677)).toEqual({ page: 1, total: 1 });
+  });
+
+  it("finds the page that holds a place", () => {
+    expect(pageHolding(0, 677)).toBe(0);
+    expect(pageHolding(676, 677)).toBe(677);
+    expect(pageHolding(28, 677)).toBe(0);
+    // The first word of the fourth page, drawn 28px into it.
+    expect(pageHolding(3 * 677 + 28, 677)).toBe(2031);
+    // Drawn a fraction of a pixel short of its page.
+    expect(pageHolding(2030.6, 677)).toBe(2031);
+    expect(pageHolding(-3, 677)).toBe(0);
+    expect(pageHolding(500, 0)).toBe(0);
+  });
+
+  it("brings a frame left between two pages back onto a whole one", () => {
+    // Measured: focus moved to a link on the fourth of six pages, and the
+    // browser scrolled the frame to 1763.33, 2.6 pages in.
+    expect(strayPageTarget(1763.33, 677, 4062)).toBe(2031);
+    expect(strayPageTarget(3114, 677, 4062)).toBe(3385);
+    // On a page already, give or take what a scaled display leaves.
+    expect(strayPageTarget(2031, 677, 4062)).toBeNull();
+    expect(strayPageTarget(2031.33, 677, 4062)).toBeNull();
+    expect(strayPageTarget(3384.67, 677, 4062)).toBeNull();
+    expect(strayPageTarget(0, 677, 677)).toBeNull();
+    // Never past the chapter's last page.
+    expect(strayPageTarget(3900, 677, 4062)).toBe(3385);
+    expect(strayPageTarget(100, 0, 4062)).toBeNull();
+  });
+
   it("turns one page for a press, and paces a held key", () => {
     // A press of its own, however soon after the last.
     expect(keyTurns(false, 0)).toBe(true);
@@ -145,6 +211,71 @@ describe("turning pages", () => {
       }
     }
     expect(turns).toBe(7);
+  });
+
+  describe("the wheel", () => {
+    /** The pages turned by a run of wheel events, each `[at, deltaY, deltaX?, deltaMode?]`. */
+    const turned = (events: Array<[number, number, number?, number?]>) => {
+      let gesture = WHEEL_AT_REST;
+      const turns: number[] = [];
+      for (const [at, deltaY, deltaX = 0, deltaMode = 0] of events) {
+        const step = wheelTurn(gesture, at, deltaX, deltaY, deltaMode);
+        gesture = step.gesture;
+        if (step.turn !== null) {
+          turns.push(step.turn);
+        }
+      }
+      return turns;
+    };
+
+    it("turns one page for a notch", () => {
+      expect(turned([[1000, 100]])).toEqual([1]);
+      expect(turned([[1000, -100]])).toEqual([-1]);
+      // A wheel that reports lines, not pixels.
+      expect(turned([[1000, 3, 0, 1]])).toEqual([1]);
+    });
+
+    it("turns one page for a flick on a trackpad, inertia and all", () => {
+      // Twenty events over 600 ms, dying away, down to fractions of a pixel.
+      const flick: Array<[number, number]> = Array.from({ length: 20 }, (_, index) => [1000 + index * 30, 60 * 0.8 ** index]);
+      expect(flick[19][0] - flick[0][0]).toBe(570);
+      expect(flick[19][1]).toBeLessThan(1);
+      expect(turned(flick)).toEqual([1]);
+      // A long spin of a free wheel: one page, however long it runs.
+      expect(turned(Array.from({ length: 60 }, (_, index) => [1000 + index * 40, 100] as [number, number]))).toEqual([1]);
+    });
+
+    it("turns again for a second notch once the wheel has been quiet", () => {
+      expect(turned([[1000, 100], [1400, 100]])).toEqual([1, 1]);
+      expect(turned([[1000, 100], [1000 + WHEEL_QUIET_MS, 100]])).toEqual([1, 1]);
+      // Too soon: still the same gesture, and it keeps the quiet from starting.
+      expect(turned([[1000, 100], [1200, 100], [1400, 100]])).toEqual([1]);
+      expect(turned([[1000, 100], [1200, 100], [1400, 100], [1700, 100]])).toEqual([1, 1]);
+    });
+
+    it("does not turn back for a wheel that changes its mind mid-gesture", () => {
+      // Down, then up within the quiet: one page on. Up again after it: one back.
+      expect(turned([[1000, 100], [1100, -100]])).toEqual([1]);
+      expect(turned([[1000, 100], [1100, -100], [1500, -100]])).toEqual([1, -1]);
+      expect(turned([[1000, 100], [1400, -100], [1800, 100], [2200, -100]])).toEqual([1, -1, 1, -1]);
+    });
+
+    it("leaves a resting finger alone", () => {
+      expect(turned([[1000, 1]])).toEqual([]);
+      expect(turned([[1000, 2], [1900, -1], [2800, 3]])).toEqual([]);
+      // Slow, steady movement adds up to a turn.
+      expect(turned([[1000, 3], [1050, 3], [1100, 3], [1150, 3]])).toEqual([1]);
+      // Jitter either way does not.
+      expect(turned([[1000, 3], [1050, -3], [1100, 3], [1150, -3]])).toEqual([]);
+      expect(turned([[1000, 0]])).toEqual([]);
+    });
+
+    it("goes by the way the wheel moved more", () => {
+      // A swipe sideways: right is on, left is back.
+      expect(turned([[1000, 5, 80]])).toEqual([1]);
+      expect(turned([[1000, -5, -80]])).toEqual([-1]);
+      expect(turned([[1000, 80, -20]])).toEqual([1]);
+    });
   });
 
   it("has nowhere to go without a page width", () => {

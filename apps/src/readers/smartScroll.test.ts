@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planScrollStep, readingBand, stepDuration, type ReadingArea } from "./smartScroll";
+import { planScrollStep, readingBand, stepDuration, type ReadingArea, screenStep, chapterEndTop } from "./smartScroll";
 
 // 18px type at 1.8 line height.
 const LINE = 32.4;
@@ -52,5 +52,36 @@ describe("Smart Read's page steps", () => {
     expect(stepDuration(40, false)).toBe(320);
     expect(stepDuration(3000, false)).toBe(720);
     expect(stepDuration(900, true)).toBe(0);
+  });
+});
+
+describe("a screen at a time", () => {
+  it("moves the window less the toolbar's strip and two lines, so the foot of one screen heads the next", () => {
+    // 768 px window, 80 px under the toolbar, 32.4 px lines.
+    const step = screenStep(768, 80, 32.4);
+    expect(step).toBe(623);
+    // The line that was second from the bottom lands just under the reading line.
+    const lineTop = 768 - 2 * 32.4;
+    expect(lineTop - step).toBeGreaterThanOrEqual(80);
+    expect(lineTop - step).toBeLessThan(80 + 32.4);
+  });
+
+  it("still moves three lines in a window too short for that", () => {
+    expect(screenStep(200, 80, 50)).toBe(150);
+  });
+});
+
+describe("the end of a chapter", () => {
+  it("puts its last line six tenths of the way down the window", () => {
+    // A chapter of 6,000 px starting at 10,000.
+    expect(chapterEndTop(10_000, 6000, 0, 768)).toBe(Math.round(16_000 - 768 * 0.6));
+  });
+
+  it("does not count the blank kept below the last line of the book", () => {
+    expect(chapterEndTop(10_000, 6000, 384, 768)).toBe(Math.round(16_000 - 384 - 768 * 0.6));
+  });
+
+  it("is the chapter's own start for one shorter than that", () => {
+    expect(chapterEndTop(10_000, 300, 0, 768)).toBe(10_000);
   });
 });

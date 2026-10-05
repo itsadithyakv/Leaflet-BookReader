@@ -20,7 +20,10 @@ import {
   type LookupResult,
   type LookupSummary
 } from "../services/lookupService";
+import { wordService } from "../services/wordService";
 import { CARD_GAP, CARD_HEIGHT, placeCard, type Box, type CardPlace } from "./lookupPlacement";
+import { keepLookup, type LookupPlace } from "./words/keep";
+import type { SavedWord } from "./words/rows";
 import "./lookupCard.css";
 
 type LookupCardProps = {
@@ -31,6 +34,12 @@ type LookupCardProps = {
   onClose: () => void;
   /** Where the selected text is in the window, so the card can keep off it. */
   avoid?: () => Box | null;
+  /**
+   * The book and the place the selection is at. With it, a word that gets an
+   * answer is kept for "My words" and the quiz (unless the reader has turned
+   * that off in Settings); without it nothing is kept.
+   */
+  place?: LookupPlace | null;
 };
 
 type State =
@@ -78,10 +87,13 @@ const Entries = ({ entries }: { entries: LookupEntry[] }) => (
  * Only the selected words are sent, and only because the reader pressed Look
  * up; the note at the foot says so the first time.
  *
+ * A word that gets an answer is kept, with the meaning shown and the place
+ * (readers/words/): the card says so, and can take it back.
+ *
  * A dialog: focus moves in and stays in, and Escape or a click anywhere else
  * closes it and puts focus back where it was.
  */
-export const LookupCard = ({ term, language, onClose, avoid }: LookupCardProps) => {
+export const LookupCard = ({ term, language, onClose, avoid, place: wordPlace }: LookupCardProps) => {
   const shown = lookupTerm(term);
   const [state, setState] = useState<State>({ status: shown ? "loading" : "refused" });
   const [attempt, setAttempt] = useState(0);
@@ -89,6 +101,13 @@ export const LookupCard = ({ term, language, onClose, avoid }: LookupCardProps) 
   // The first time on this device the note is open; after that it is behind the "i".
   const [noteOpen, setNoteOpen] = useState(() => !noteSeen());
   const [linkFailed, setLinkFailed] = useState(false);
+  // The word as it was kept, and whether the reader then took it back.
+  const [kept, setKept] = useState<SavedWord | null>(null);
+  const [unkept, setUnkept] = useState(false);
+  const wordPlaceRef = useRef(wordPlace);
+  wordPlaceRef.current = wordPlace;
+  /** The term already counted, so "Try again" is not a second look-up of it. */
+  const countedRef = useRef<string | null>(null);
   const card = useRef<HTMLDivElement | null>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -116,6 +135,11 @@ export const LookupCard = ({ term, language, onClose, avoid }: LookupCardProps) 
       (result) => {
         if (current) {
           setState({ status: "done", result });
+          if (countedRef.current !== shown) {
+            countedRef.current = shown;
+            setUnkept(false);
+            void keepLookup(result, language, wordPlaceRef.current).then((saved) => current && setKept(saved));
+          }
         }
       },
       (cause) => {
@@ -233,6 +257,14 @@ export const LookupCard = ({ term, language, onClose, avoid }: LookupCardProps) 
   const open = (url: string) => {
     setLinkFailed(false);
     accountService.openLink(url).catch(() => setLinkFailed(true));
+  };
+
+  const unkeep = () => {
+    if (!kept) {
+      return;
+    }
+    setUnkept(true);
+    wordService.remove([kept.id]).catch(() => setUnkept(false));
   };
 
   const more = (label: string, url: string) => (
@@ -393,10 +425,27 @@ export const LookupCard = ({ term, language, onClose, avoid }: LookupCardProps) 
       </div>
 
       <div className="reader-lookup-foot reader-border reader-muted">
-        <p id={noteId} className="reader-lookup-note" hidden={!noteOpen}>
-          Only the words you selected are sent to Wiktionary and Wikipedia, and only when you press Look up. Nothing about
-          you or your book goes with them.
-        </p>
+        <div className="reader-lookup-foot-words">
+          {/* In the foot, not under the answer: a long answer scrolls, and this is always in view. */}
+          {kept && sections.length > 0 && (
+            <p className="reader-lookup-kept" role="status">
+              {unkept ? (
+                "Not kept."
+              ) : (
+                <>
+                  Kept in My words{kept.count > 1 ? `, looked up ${kept.count} times` : ""}.{" "}
+                  <button type="button" className="reader-lookup-inline" onClick={unkeep}>
+                    Don’t keep
+                  </button>
+                </>
+              )}
+            </p>
+          )}
+          <p id={noteId} className="reader-lookup-note" hidden={!noteOpen}>
+            Only the words you selected are sent to Wiktionary and Wikipedia, and only when you press Look up. Nothing
+            about you or your book goes with them.
+          </p>
+        </div>
         <button
           type="button"
           className="reader-lookup-info"

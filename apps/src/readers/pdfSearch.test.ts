@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { searchPdf, type PdfSearchState } from "./pdfSearch";
+import { hitsInPageOrder, nextHitIndex, searchPdf, type PdfSearchHit, type PdfSearchState } from "./pdfSearch";
 
 /** A document of pages of text, noting which pages were read. */
 const documentOf = (pages: string[]) => {
@@ -72,6 +72,34 @@ describe("searching a PDF", () => {
     expect(doc.read.length).toBe(4);
   });
 
+  it("begins at the reader's page and comes round to the pages before it", async () => {
+    const doc = documentOf(["clover", "hay", "clover", "clover", "hay"]);
+    const found = await searchPdf("clover", { ...doc, signal: live(), from: 3 });
+    expect(doc.read).toEqual([3, 4, 5, 1, 2]);
+    expect(found.hits.map((hit) => hit.page)).toEqual([3, 4, 1]);
+    expect(found.fraction).toBe(1);
+    expect(found.capped).toBe(false);
+  });
+
+  it("cut short, has what comes next from where the reader is, not the start of the book", async () => {
+    // A word on every page of 600, the reader on page 400: the first 200 used
+    // to be pages 1 to 200, none of them anywhere near.
+    const doc = documentOf(Array.from({ length: 600 }, () => "windmill"));
+    const found = await searchPdf("windmill", { ...doc, signal: live(), limit: 200, from: 400 });
+    expect(found.capped).toBe(true);
+    expect(found.hits[0].page).toBe(400);
+    expect(found.hits[199].page).toBe(599);
+  });
+
+  it("takes a page outside the document as its nearest end", async () => {
+    const doc = documentOf(["a b", "c d", "e f"]);
+    await searchPdf("zz", { ...doc, signal: live(), from: 99 });
+    expect(doc.read).toEqual([3, 1, 2]);
+    doc.read.length = 0;
+    await searchPdf("zz", { ...doc, signal: live(), from: Number.NaN });
+    expect(doc.read).toEqual([1, 2, 3]);
+  });
+
   it("tells a scan, which has no text, from a document where the phrase is not found", async () => {
     const scan = await searchPdf("napoleon", { ...documentOf(["", " \n ", ""]), signal: live() });
     expect(scan.hits).toEqual([]);
@@ -119,5 +147,51 @@ describe("searching a PDF", () => {
     }
     expect(breaths).toBeGreaterThan(5);
     expect(breaths).toBeLessThan(30);
+  });
+});
+
+describe("stepping through what was found", () => {
+  const hit = (page: number, nth = 0): PdfSearchHit => ({ page, nth, snippet: { before: "", match: "x", after: "" } });
+  // As a search begun on page 400 finds them: on to the end, then round to the start.
+  const found = [hit(400), hit(400, 1), hit(520), hit(7), hit(120)];
+  const ordered = hitsInPageOrder(found);
+
+  it("lists the results in page order", () => {
+    expect(ordered.map((each) => [each.page, each.nth])).toEqual([
+      [7, 0],
+      [120, 0],
+      [400, 0],
+      [400, 1],
+      [520, 0]
+    ]);
+    // The search's own list is left as it was.
+    expect(found[0].page).toBe(400);
+  });
+
+  it("starts from the reader's page: Enter to the first result on or after it", () => {
+    expect(nextHitIndex(ordered, null, 1, 400)).toBe(2);
+    expect(nextHitIndex(ordered, null, 1, 121)).toBe(2);
+    expect(nextHitIndex(ordered, null, 1, 1)).toBe(0);
+    // Past the last result, round to the first.
+    expect(nextHitIndex(ordered, null, 1, 560)).toBe(0);
+  });
+
+  it("starts from the reader's page going back: Shift+Enter to the last result before it", () => {
+    expect(nextHitIndex(ordered, null, -1, 400)).toBe(1);
+    expect(nextHitIndex(ordered, null, -1, 600)).toBe(4);
+    // Before the first result, round to the last.
+    expect(nextHitIndex(ordered, null, -1, 3)).toBe(4);
+  });
+
+  it("goes on from the result on show, round the ends", () => {
+    expect(nextHitIndex(ordered, hit(400), 1, 1)).toBe(3);
+    expect(nextHitIndex(ordered, hit(520), 1, 1)).toBe(0);
+    expect(nextHitIndex(ordered, hit(7), -1, 1)).toBe(4);
+    // A result no longer in the list (the phrase changed) is no place to go on from.
+    expect(nextHitIndex(ordered, hit(33), 1, 130)).toBe(2);
+  });
+
+  it("has nowhere to go with nothing found", () => {
+    expect(nextHitIndex([], null, 1, 10)).toBe(-1);
   });
 });

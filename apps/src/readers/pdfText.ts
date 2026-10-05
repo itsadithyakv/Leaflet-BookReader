@@ -139,13 +139,26 @@ export const hasSearchableText = (text: string) => /[\p{L}\p{N}]/u.test(text);
 const escapeForPattern = (char: string) => char.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
- * The pattern a phrase is looked for with. Case is ignored; a space in the
+ * Letters without their accents, for comparing: "café" as "cafe", "Zürich"
+ * as "Zurich". One character for one, so a place in the folded text is the
+ * same place in the text itself; a letter that does not come apart into a
+ * letter and its accent (ß, æ, ø) is left as it is.
+ */
+export const foldAccents = (text: string) =>
+  text.replace(/[À-ɏḀ-ỿ]/g, (char) => {
+    const base = char.normalize("NFD").replace(/\p{M}+/gu, "");
+    return base.length === 1 ? base : char;
+  });
+
+/**
+ * The pattern a phrase is looked for with. Case and accents are ignored (the
+ * text searched is folded the same way, `findMatches`); a space in the
  * phrase matches any run of spacing, so a phrase is found where the line
  * breaks inside it; and a word is found where it was hyphenated over the end
  * of a line ("exam-" / "ple").
  */
 export const searchPattern = (query: string): RegExp | null => {
-  const words = query.trim().split(/\s+/).filter(Boolean);
+  const words = foldAccents(query).trim().split(/\s+/).filter(Boolean);
   if (words.join(" ").length < MIN_QUERY) {
     return null;
   }
@@ -175,7 +188,9 @@ export const findMatches = (text: string, query: string, limit = Infinity): Text
   if (!pattern || !text) {
     return matches;
   }
-  for (let found = pattern.exec(text); found && matches.length < limit; found = pattern.exec(text)) {
+  // "cafe" finds "café": most of what is searched for is typed without its accents.
+  const plain = foldAccents(text);
+  for (let found = pattern.exec(plain); found && matches.length < limit; found = pattern.exec(plain)) {
     if (found[0].length === 0) {
       pattern.lastIndex += 1;
       continue;

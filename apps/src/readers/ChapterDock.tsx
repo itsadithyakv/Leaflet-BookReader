@@ -1,13 +1,18 @@
 import { forwardRef, useEffect, useState } from "react";
-import { Redo2, Undo2 } from "lucide-react";
+import { ChevronsLeft, ChevronsRight, Redo2, Undo2 } from "lucide-react";
 import { ReadingOutlook, type Outlook } from "./ReadingOutlook";
 
 type ChapterDockProps = {
   /** Pages layout: the arrows turn pages rather than chapters. */
   paged: boolean;
+  /** Pages layout: the page showing and how many the chapter has ("12 of 50"). */
+  pageOf?: { page: number; total: number } | null;
   label: string;
   onPrev: () => void;
   onNext: () => void;
+  /** Pages layout only: the chapter before and after, beside the page arrows. */
+  onPrevChapter?: () => void;
+  onNextChapter?: () => void;
   outlook: Outlook;
   /** Places to go back and forward to (readers/jumpHistory.ts). */
   canGoBack: boolean;
@@ -21,14 +26,15 @@ type ChapterDockProps = {
 };
 
 /**
- * The chapter dock at the foot of the page: previous and next, the chapter's
- * name, how far through the book and how long is left, and the way back after
+ * The chapter dock at the foot of the page: previous and next (chapters when
+ * scrolling; pages, with the chapters either side of them, in the pages
+ * layout), the chapter's name, how far through the book and how long is left, and the way back after
  * a jump. Small and faint until the pointer or the keyboard reaches it. It
  * is one row and grows sideways: auto-scroll's and Smart Read's controls and
  * the selection bar sit just above it, and the progress bar just below.
  */
 export const ChapterDock = forwardRef<HTMLDivElement, ChapterDockProps>(
-  ({ paged, label, onPrev, onNext, outlook, canGoBack, canGoForward, onBack, onForward, awake, onNearChange }, ref) => {
+  ({ paged, pageOf, label, onPrev, onNext, onPrevChapter, onNextChapter, outlook, canGoBack, canGoForward, onBack, onForward, awake, onNearChange }, ref) => {
     const [open, setOpen] = useState(false);
     const [hovered, setHovered] = useState(false);
     const [focused, setFocused] = useState(false);
@@ -79,25 +85,57 @@ export const ChapterDock = forwardRef<HTMLDivElement, ChapterDockProps>(
               <Redo2 size={14} aria-hidden="true" />
             </button>
           )}
+          {paged && onPrevChapter && (
+            <button
+              type="button"
+              className="reader-mini-control"
+              onClick={onPrevChapter}
+              title="Previous chapter (Ctrl+Left)"
+              aria-label="Previous chapter"
+            >
+              <ChevronsLeft size={16} aria-hidden="true" />
+            </button>
+          )}
           <button
             type="button"
             className="reader-mini-control"
             onClick={onPrev}
-            title={paged ? "Previous page (Left arrow)" : "Previous chapter"}
+            title={paged ? "Previous page (Left arrow)" : "Previous chapter (Left arrow)"}
             aria-label={paged ? "Previous page" : "Previous chapter"}
           >
             <span className="material-symbols-outlined text-base">chevron_left</span>
           </button>
           <span className="reader-dock-label text-[10px] reader-muted">{label}</span>
+          {paged && pageOf && (
+            <span
+              className="reader-dock-pages reader-muted"
+              role="img"
+              aria-label={`Page ${pageOf.page} of ${pageOf.total} in this chapter`}
+              title={`Page ${pageOf.page} of ${pageOf.total} in this chapter`}
+            >
+              {pageOf.page} of {pageOf.total}
+            </span>
+          )}
           <button
             type="button"
             className="reader-mini-control"
             onClick={onNext}
-            title={paged ? "Next page (Right arrow or Space)" : "Next chapter"}
+            title={paged ? "Next page (Right arrow or Space)" : "Next chapter (Right arrow)"}
             aria-label={paged ? "Next page" : "Next chapter"}
           >
             <span className="material-symbols-outlined text-base">chevron_right</span>
           </button>
+          {paged && onNextChapter && (
+            <button
+              type="button"
+              className="reader-mini-control"
+              onClick={onNextChapter}
+              title="Next chapter (Ctrl+Right)"
+              aria-label="Next chapter"
+            >
+              <ChevronsRight size={16} aria-hidden="true" />
+            </button>
+          )}
           <ReadingOutlook outlook={outlook} open={open} onToggle={() => setOpen((value) => !value)} />
         </div>
       </div>

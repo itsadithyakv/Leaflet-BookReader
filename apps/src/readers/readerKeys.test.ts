@@ -28,6 +28,33 @@ describe("the reader's keys", () => {
     expect(actionFor(key("-"), smart)).toBe("slower");
   });
 
+  it("moves a screen with the Page keys and to a chapter's or the book's ends with Home and End when scrolling", () => {
+    for (const mode of [scroll, { layout: "scroll", mode: "smart" } as const]) {
+      expect(actionFor(key("PageDown"), mode)).toBe("screenDown");
+      expect(actionFor(key("PageUp"), mode)).toBe("screenUp");
+      expect(actionFor(key("Home"), mode)).toBe("chapterStart");
+      expect(actionFor(key("End"), mode)).toBe("chapterEnd");
+      expect(actionFor(key("Home", { ctrlKey: true }), mode)).toBe("bookStart");
+      expect(actionFor(key("End", { ctrlKey: true }), mode)).toBe("bookEnd");
+    }
+    // With pages the Page keys turn pages, and Home and End are left alone.
+    expect(actionFor(key("Home"), pages)).toBeNull();
+    expect(actionFor(key("End", { ctrlKey: true }), pages)).toBeNull();
+    // Alt with them is the system's.
+    expect(actionFor(key("Home", { altKey: true }), scroll)).toBeNull();
+  });
+
+  it("goes a chapter back or on with Ctrl and an arrow in every layout", () => {
+    for (const context of [scroll, smart, speed, pages]) {
+      expect(actionFor(key("ArrowLeft", { ctrlKey: true }), context)).toBe("chapterPrev");
+      expect(actionFor(key("ArrowRight", { ctrlKey: true }), context)).toBe("chapterNext");
+      expect(actionFor(key("ArrowLeft", { metaKey: true }), context)).toBe("chapterPrev");
+    }
+    // The plain arrows keep their own meaning with pages, and Alt is still Back.
+    expect(actionFor(key("ArrowLeft"), pages)).toBe("pagePrev");
+    expect(actionFor(key("ArrowLeft", { altKey: true }), pages)).toBe("back");
+  });
+
   it("paces nothing with pages: + and - and the vertical arrows are left alone", () => {
     for (const name of ["+", "=", "-", "_", "ArrowDown", "ArrowUp"]) {
       expect(actionFor(key(name), pages)).toBeNull();
@@ -55,7 +82,7 @@ describe("the reader's keys", () => {
 
   it("leaves the browser's and the system's own chords alone", () => {
     expect(actionFor(key("b", { ctrlKey: true }), scroll)).toBeNull();
-    expect(actionFor(key("ArrowRight", { ctrlKey: true }), scroll)).toBeNull();
+    expect(actionFor(key("ArrowUp", { ctrlKey: true }), scroll)).toBeNull();
     expect(actionFor(key(" ", { ctrlKey: true }), scroll)).toBeNull();
     expect(actionFor(key("d"), scroll)).toBeNull();
     expect(actionFor(key("f"), scroll)).toBeNull();
@@ -77,7 +104,9 @@ describe("the reader's keys", () => {
     expect(labels(smart)).toContain("Pause Smart Read, or carry on");
     expect(labels(speed)).toContain("SpeedRead 20 words a minute faster");
     expect(labels(pages)).toContain("Next page");
-    expect(labels(pages)).not.toContain("Next chapter");
+    // Pages has a way to the chapters too, beside its page keys.
+    expect(labels(pages)).toContain("Next chapter");
+    expect(labels(pages)).toContain("Previous chapter");
     expect(labels(pages).some((label) => /Dotty/.test(label))).toBe(false);
   });
 

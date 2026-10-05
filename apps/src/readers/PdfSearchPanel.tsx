@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { UiIcon } from "../components/UiIcon";
 import { MIN_QUERY } from "./pdfText";
-import { searchPdf, type PdfSearchHit, type PdfSearchState } from "./pdfSearch";
+import { hitsInPageOrder, nextHitIndex, searchPdf, type PdfSearchHit, type PdfSearchState } from "./pdfSearch";
 
 type PdfSearchPanelProps = {
   pageCount: number;
+  /** The page the reader is on: where the search begins, and where Enter starts from. */
+  page: number;
   /** A page's searchable text; asked for a page at a time as the search reaches it. */
   textOf: (page: number) => Promise<string>;
   /** The result on show, marked in the list. */
@@ -27,9 +29,15 @@ const sameHit = (a: PdfSearchHit | null, b: PdfSearchHit) => a !== null && a.pag
  * (SearchPanel.tsx): type, and results arrive page by page as the document is
  * read. Choosing one goes to its page and marks the words there. Enter goes
  * to the next result and Shift+Enter to the one before; Escape closes.
+ *
+ * The search begins at the reader's page and comes round to the pages before
+ * it, and Enter starts from that page: it used to begin at page 1 and stop at
+ * 200 results, so a common word could not be found from the middle of a book
+ * at all. The list is in page order all the same.
  */
 export const PdfSearchPanel = ({
   pageCount,
+  page,
   textOf,
   active,
   focusToken,
@@ -39,6 +47,8 @@ export const PdfSearchPanel = ({
 }: PdfSearchPanelProps) => {
   const [query, setQuery] = useState("");
   const [found, setFound] = useState<PdfSearchState | null>(null);
+  // The page the search on show began at.
+  const [began, setBegan] = useState(1);
   const input = useRef<HTMLInputElement | null>(null);
   const list = useRef<HTMLOListElement | null>(null);
   // Read by the search effect without restarting it when a parent re-renders.
@@ -46,6 +56,8 @@ export const PdfSearchPanel = ({
   textOfRef.current = textOf;
   const onQueryRef = useRef(onQuery);
   onQueryRef.current = onQuery;
+  const pageRef = useRef(page);
+  pageRef.current = page;
 
   useEffect(() => {
     input.current?.focus();
@@ -62,6 +74,8 @@ export const PdfSearchPanel = ({
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       onQueryRef.current(words);
+      const from = Math.min(Math.max(1, pageRef.current), Math.max(1, pageCount));
+      setBegan(from);
       const show = (state: PdfSearchState) => {
         if (!controller.signal.aborted) {
           setFound({ ...state, hits: [...state.hits] });
@@ -73,6 +87,7 @@ export const PdfSearchPanel = ({
         textOf: (page) => textOfRef.current(page),
         signal: controller.signal,
         limit: LIMIT,
+        from,
         onProgress: show
       }).then((state) => show({ ...state, fraction: 1 }));
     }, DEBOUNCE_MS);
@@ -91,16 +106,14 @@ export const PdfSearchPanel = ({
   }, [active]);
 
   const words = query.trim();
-  const hits = found?.hits ?? [];
+  const hits = useMemo(() => hitsInPageOrder(found?.hits ?? []), [found]);
   const searching = found !== null && found.fraction < 1;
 
   const step = (by: 1 | -1) => {
-    if (hits.length === 0) {
-      return;
+    const next = nextHitIndex(hits, active, by, page);
+    if (next >= 0) {
+      onOpen(hits[next]);
     }
-    const at = hits.findIndex((hit) => sameHit(active, hit));
-    const next = at < 0 ? (by > 0 ? 0 : hits.length - 1) : (at + by + hits.length) % hits.length;
-    onOpen(hits[next]);
   };
 
   const status =
@@ -112,7 +125,11 @@ export const PdfSearchPanel = ({
           ? found.sawText
             ? "No matches"
             : "This PDF has no text to search"
-          : `${found.capped ? `First ${hits.length}` : hits.length} ${hits.length === 1 ? "match" : "matches"}`;
+          : found.capped
+            ? began > 1
+              ? `${hits.length} matches from page ${began} on`
+              : `First ${hits.length} matches`
+            : `${hits.length} ${hits.length === 1 ? "match" : "matches"}`;
 
   return (
     <div

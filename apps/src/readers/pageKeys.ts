@@ -20,6 +20,13 @@ export type StageMetrics = {
   scrollLeft: number;
   scrollWidth: number;
   clientWidth: number;
+  /**
+   * The room the stage keeps above and below the page, with nothing in it to
+   * read (its padding; below, less what the dock covers). Left out where the
+   * stage holds a whole column of pages.
+   */
+  padTop?: number;
+  padBottom?: number;
 };
 
 export type KeyAction =
@@ -39,14 +46,20 @@ const EDGE = 2;
 export const sideStep = (side: "left" | "right", direction: ReadingDirection): 1 | -1 =>
   (side === "right") === (direction === "ltr") ? 1 : -1;
 
+/**
+ * The page is turned once its own end is in view, not the scroller's: the
+ * stage has room round the page, and a press that only moved the page a few
+ * pixels into that room showed the reader nothing and looked like a key that
+ * had not worked (at fit width, one such press on every page).
+ */
 const vertical = (stage: StageMetrics, step: 1 | -1, amount: number): KeyAction => {
   const end = Math.max(0, stage.scrollHeight - stage.clientHeight);
   if (step > 0) {
-    return stage.scrollTop >= end - EDGE
+    return stage.scrollTop >= end - Math.max(0, stage.padBottom ?? 0) - EDGE
       ? { kind: "turn", step: 1, land: "top" }
       : { kind: "scroll", top: Math.min(end, stage.scrollTop + amount) };
   }
-  return stage.scrollTop <= EDGE
+  return stage.scrollTop <= Math.max(0, stage.padTop ?? 0) + EDGE
     ? { kind: "turn", step: -1, land: "bottom" }
     : { kind: "scroll", top: Math.max(0, stage.scrollTop - amount) };
 };

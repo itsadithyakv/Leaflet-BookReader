@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CARD_GAP, CARD_HEIGHT, CARD_MIN_HEIGHT, placeCard, selectedTextBox, type Box } from "./lookupPlacement";
+import { CARD_GAP, CARD_HEIGHT, CARD_MIN_HEIGHT, placeCard, selectedTextBox, type Box, BAR_GAP, placeBar } from "./lookupPlacement";
 
 /** A 1280x800 window: toolbar to 76, the selection bar's top at 700, centred. */
 const room = { barTop: 700, barCentre: 640, ceiling: 84, cardWidth: 400, windowWidth: 1280 };
@@ -125,5 +125,35 @@ describe("finding the selected text", () => {
     expect(selectedTextBox([frame(0, 0, { ...rect, width: 0, height: 0 })])).toBeNull();
     const gone = { window: { getSelection: () => { throw new Error("frame gone"); } } };
     expect(selectedTextBox([gone])).toBeNull();
+  });
+});
+
+describe("the selection bar and the words it is for", () => {
+  // A window of 768: the bar 41 px high, its foot at 704, 310 to 714 across.
+  const room = { usualFoot: 704, barHeight: 41, barLeft: 310, barRight: 714, ceiling: 86 };
+
+  it("keeps its place at the foot when the selected words are higher up the page", () => {
+    expect(placeBar({ ...room, selection: { top: 300, bottom: 320, left: 400, right: 520 } })).toBe(704);
+    expect(placeBar({ ...room, selection: null })).toBe(704);
+  });
+
+  it("goes just above words selected on the last lines, which it used to cover", () => {
+    // The word at 658 to 678, the bar at 663 to 704.
+    const foot = placeBar({ ...room, selection: { top: 658, bottom: 678, left: 420, right: 500 } });
+    expect(foot).toBe(658 - BAR_GAP);
+    expect(foot).toBeLessThan(658);
+  });
+
+  it("stays put for words beside it, or below it", () => {
+    expect(placeBar({ ...room, selection: { top: 670, bottom: 690, left: 120, right: 300 } })).toBe(704);
+    expect(placeBar({ ...room, selection: { top: 720, bottom: 740, left: 420, right: 500 } })).toBe(704);
+  });
+
+  it("goes above the whole of a selection that runs down to the foot", () => {
+    expect(placeBar({ ...room, selection: { top: 400, bottom: 700, left: 150, right: 820 } })).toBe(390);
+  });
+
+  it("keeps its place when the selection fills the page and there is nowhere above it", () => {
+    expect(placeBar({ ...room, selection: { top: 100, bottom: 700, left: 150, right: 820 } })).toBe(704);
   });
 });

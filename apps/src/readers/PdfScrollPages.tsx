@@ -38,6 +38,13 @@ import { bindTextSelection } from "./pdfTextLayer";
 /** A place as it is stored and passed about: the page counted from 1. */
 export type StoredPlace = { page: number; fraction: number; extra: number };
 
+/**
+ * Where the scroll opens. A stored place is where the top of the window was;
+ * `atLine` says the place is the reader's line instead (a third of the way
+ * down the window), as when the paged layout hands its page over.
+ */
+export type OpenPlace = StoredPlace & { atLine?: boolean };
+
 export type ScrollPagesHandle = {
   /** Scrolls to a page (from 1): its top, or `fraction` of the way down it, a third down the window. */
   goTo(page: number, fraction?: number): void;
@@ -48,6 +55,8 @@ export type ScrollPagesHandle = {
    * (the pointer; the reader's line when absent) is to stay where it is.
    */
   holdAt(about?: { x: number; y: number }): void;
+  /** The reader's line: the page (from 1) across a third of the way down the window, and how far down it. */
+  line(): { page: number; fraction: number } | null;
 };
 
 type PdfScrollPagesProps = {
@@ -63,8 +72,8 @@ type PdfScrollPagesProps = {
   measureRoom: () => { availableWidth: number; availableHeight: number };
   /** Bumped when the stage changes size. */
   viewportRevision: number;
-  /** Where to open: the top of the window is here. */
-  initialPlace: StoredPlace;
+  /** Where to open: the top of the window is here, or the reader's line (`atLine`). */
+  initialPlace: OpenPlace;
   /** The phrase a search is marking, and the result chosen. */
   searchQuery: string;
   activeHit: PdfSearchHit | null;
@@ -218,6 +227,10 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
   const topPlaceRef = useRef<Place | null>(null);
   const measureContextRef = useRef<CanvasRenderingContext2D | null>(null);
   const openedRef = useRef(false);
+  // The scale (and the width no page is drawn past) the pages were last laid out at.
+  const scaleKeyRef = useRef<string | null>(null);
+  // The column's width, and the scale and room it is the width for.
+  const widestRef = useRef({ key: "", width: 0 });
   // The latest callbacks, for listeners and timers that outlive a render.
   const callbacks = useRef(props);
   callbacks.current = props;
@@ -409,6 +422,23 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
       });
   }, [keyOf, layText, pdf, pixelsOf, release, stageRef, viewTop]);
 
+  /**
+   * Holds drawing back for a moment, because more of the same is likely to
+   * follow: a drag of the scrollbar, a pinch, a window being resized. What is
+   * drawn meanwhile stays up, stretched to its page.
+   */
+  const holdDrawing = useCallback(() => {
+    if (settleRef.current !== null) {
+      window.clearTimeout(settleRef.current);
+    }
+    jobRef.current?.job.cancel();
+    jobRef.current = null;
+    settleRef.current = window.setTimeout(() => {
+      settleRef.current = null;
+      pump();
+    }, SETTLE_MS);
+  }, [pump]);
+
   /** Reads where the window is: which pages are near, which page the reader is on, and what to draw. */
   const read = useCallback(
     (byReader: boolean) => {
@@ -455,23 +485,30 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
       const jumped = isJump(lastTopRef.current, top, height);
       lastTopRef.current = top;
       if (jumped) {
-        if (settleRef.current !== null) {
-          window.clearTimeout(settleRef.current);
-        }
-        jobRef.current?.job.cancel();
-        jobRef.current = null;
-        settleRef.current = window.setTimeout(() => {
-          settleRef.current = null;
-          pump();
-        }, SETTLE_MS);
+        holdDrawing();
       } else {
         // While a jump is settling this does nothing: a page taking its size
         // on the way must not start the drawing the jump is holding back.
         pump();
       }
     },
-    [pump, stageRef, viewTop]
+    [holdDrawing, pump, stageRef, viewTop]
   );
+
+  /** Puts the point held across the page back under its place in the window; false when none is held. */
+  const applyAcross = useCallback(() => {
+    const stage = stageRef.current;
+    const across = acrossRef.current;
+    if (!stage || !across) {
+      return false;
+    }
+    const page = columnRef.current?.querySelector<HTMLElement>(`[data-page="${across.page + 1}"]`);
+    if (page) {
+      const box = page.getBoundingClientRect();
+      stage.scrollLeft += box.left + box.width * across.fraction - across.x;
+    }
+    return true;
+  }, [stageRef]);
 
   /** Puts the anchored place back at its height in the window. Never animated. */
   const applyAnchor = useCallback(() => {
@@ -481,16 +518,9 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
       return;
     }
     stage.scrollTop = scrollForAnchor(topsRef.current, anchor) + columnTop();
-    const across = acrossRef.current;
-    if (across) {
-      const page = columnRef.current?.querySelector<HTMLElement>(`[data-page="${across.page + 1}"]`);
-      if (page) {
-        const box = page.getBoundingClientRect();
-        stage.scrollLeft += box.left + box.width * across.fraction - across.x;
-      }
-    }
+    applyAcross();
     ownScrollRef.current = stage.scrollTop;
-  }, [columnTop, stageRef]);
+  }, [applyAcross, columnTop, stageRef]);
 
   const register = useCallback(
     (index: number, canvas: HTMLCanvasElement | null, layer: HTMLDivElement | null) => {
@@ -509,6 +539,14 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
       release(index);
       canvasesRef.current.delete(index);
       layersRef.current.delete(index);
+      // A page that could not be drawn is tried again when the reader comes
+      // back to it: it used to stay "could not be drawn" for the whole
+      // sitting, whatever had been wrong, until the zoom or finish changed.
+      failedRef.current.forEach((failure) => {
+        if (failure.startsWith(`${index}|`)) {
+          failedRef.current.delete(failure);
+        }
+      });
     },
     [pump, release]
   );
@@ -553,7 +591,13 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
       const pageTop = initialPlace.fraction === 0 && initialPlace.extra === 0;
       anchorRef.current = {
         place: { page: initialPlace.page - 1, fraction: initialPlace.fraction, extra: initialPlace.extra },
-        offset: !pageTop ? 0 : initialPlace.page <= 1 ? columnTop() : TOP_INSET
+        offset: initialPlace.atLine
+          ? (stageRef.current?.clientHeight ?? 0) / 3
+          : !pageTop
+            ? 0
+            : initialPlace.page <= 1
+              ? columnTop()
+              : TOP_INSET
       };
     }
     // Text laid for a page's old size would sit off the stretched page until it is redrawn.
@@ -567,10 +611,18 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
       [...drawnRef.current.keys()].forEach(release);
       bumpDrawn();
     }
+    // A pinch or a window being dragged changes the scale sixty times a
+    // second, and each change used to start every page in view drawing again
+    // (57 drawings begun in a one-second pinch, none of them finished).
+    const scaleKey = `${scale}|${limit}`;
+    if (scaleKeyRef.current !== null && scaleKeyRef.current !== scaleKey) {
+      holdDrawing();
+    }
+    scaleKeyRef.current = scaleKey;
     applyAnchor();
     read(false);
     callbacks.current.onScale(scale, reference ?? { width: 595, height: 842 });
-  }, [applyAnchor, clearText, columnTop, keyOf, read, reference, release, scale, toneKey, tops]);
+  }, [applyAnchor, clearText, columnTop, holdDrawing, keyOf, limit, read, reference, release, scale, stageRef, toneKey, tops]);
 
   // Pages come into the document as they come near: draw what is new.
   useEffect(() => {
@@ -702,10 +754,14 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
       return;
     }
     shownHitRef.current = key;
-    // In the middle of the window, clear of the toolbar above and the dock below, as in the paged layout.
+    // On the reader's line, a third of the way down: clear of the toolbar
+    // above and the dock below, and the page the dock names is then the
+    // result's own. (In the middle of the window, a result near the top of
+    // its page left the line on the page before: "Page 399" for a result
+    // listed under page 400.)
     anchorRef.current = {
       place: { page: activeHit.page - 1, fraction: rect.top + rect.height / 2, extra: 0 },
-      offset: stage.clientHeight / 2
+      offset: stage.clientHeight / 3
     };
     acrossRef.current = null;
     applyAnchor();
@@ -746,17 +802,28 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
         const place = placeAt(topsRef.current, viewTop() + offset);
         anchorRef.current = { place, offset };
         acrossRef.current = null;
-        if (about) {
-          const page = columnRef.current?.querySelector<HTMLElement>(`[data-page="${place.page + 1}"]`);
-          const pageBoxNow = page?.getBoundingClientRect();
-          if (pageBoxNow && pageBoxNow.width > 0) {
-            acrossRef.current = {
-              page: place.page,
-              fraction: Math.min(1, Math.max(0, (about.x - pageBoxNow.left) / pageBoxNow.width)),
-              x: about.x
-            };
-          }
+        // Across the page too: under the pointer, or else the middle of the
+        // window. (With no pointer nothing was held across, and a page going
+        // from a fit to 100% beside a wider one was left with its right edge
+        // off the window.)
+        const x = about ? about.x : box.left + stage.clientWidth / 2;
+        const page = columnRef.current?.querySelector<HTMLElement>(`[data-page="${place.page + 1}"]`);
+        const pageBoxNow = page?.getBoundingClientRect();
+        if (pageBoxNow && pageBoxNow.width > 0) {
+          acrossRef.current = {
+            page: place.page,
+            fraction: Math.min(1, Math.max(0, (x - pageBoxNow.left) / pageBoxNow.width)),
+            x
+          };
         }
+      },
+      line() {
+        const stage = stageRef.current;
+        if (!stage || topsRef.current.length < 2) {
+          return null;
+        }
+        const place = placeAt(topsRef.current, viewTop() + stage.clientHeight / 3);
+        return { page: place.page + 1, fraction: place.fraction };
       }
     }),
     [applyAnchor, columnTop, pageCount, read, stageRef, viewTop]
@@ -784,16 +851,36 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
     };
   }, []);
 
-  if (!reference) {
-    return null;
-  }
-
-  const room = measureRoom();
-  let widest = room.availableWidth + 2;
+  // How wide the column is: the room, or the widest page met so far at this
+  // scale. It only grows: it used to be the widest page in the document just
+  // then, and every page is centred in it, so at a chosen zoom the page being
+  // read moved sideways (315px, measured) each time a landscape page came
+  // near or left. When it does grow, the scroll is moved by the same half.
+  const roomWidth = measureRoom().availableWidth;
+  const widthKey = `${scale}|${limit}|${roomWidth}`;
+  let widest = roomWidth + 2;
   for (let index = near.first; index <= Math.min(near.last, pageCount - 1); index += 1) {
     widest = Math.max(widest, boxOf(index).width);
   }
   widest = Math.max(widest, boxOf(0).width);
+  if (widestRef.current.key === widthKey) {
+    widest = Math.max(widest, widestRef.current.width);
+  }
+  useLayoutEffect(() => {
+    const held = widestRef.current;
+    const stage = stageRef.current;
+    // A point already held across the page is put back where it was; with
+    // none held, every page has moved right by half of what was added.
+    if (stage && held.key === widthKey && widest > held.width && !applyAcross()) {
+      stage.scrollLeft += (widest - held.width) / 2;
+    }
+    widestRef.current = { key: widthKey, width: widest };
+  }, [applyAcross, stageRef, widest, widthKey]);
+
+  if (!reference) {
+    return null;
+  }
+
   const pages = [];
   for (let index = near.first; index <= Math.min(near.last, pageCount - 1); index += 1) {
     const box = boxOf(index);

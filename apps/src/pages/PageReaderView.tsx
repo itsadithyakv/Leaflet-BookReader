@@ -23,7 +23,8 @@ import {
   parsePageEntry,
   readingKeyAction,
   sideStep,
-  type ReadingDirection
+  type ReadingDirection,
+  type StageMetrics
 } from "../readers/pageKeys";
 import {
   anchoredScroll,
@@ -46,14 +47,17 @@ import { currentOutlineIndex, type OutlineEntry } from "../readers/pdfOutline";
 import {
   PdfScrollPages,
   placeToOpen,
+  type OpenPlace,
   type ScrollPagesHandle,
   type StoredPlace
 } from "../readers/PdfScrollPages";
+import { placeWithin } from "../readers/pageScroll";
 import { PdfSearchPanel } from "../readers/PdfSearchPanel";
 import type { PdfSearchHit } from "../readers/pdfSearch";
 import { findMatches, matchRects, type MeasureText, type PageRect } from "../readers/pdfText";
 import { bindTextSelection } from "../readers/pdfTextLayer";
 import { ShortcutsSheet } from "../readers/ShortcutsSheet";
+import { ReaderAmbience, ReaderAmbienceRow, ambiencePopoverOpen, closeAmbiencePopover, useAmbiencePopoverOpen } from "../ambience";
 import { UiIcon } from "../components/UiIcon";
 import { useAppearanceStore } from "../store/appearanceStore";
 import { useLibraryStore } from "../store/libraryStore";
@@ -111,11 +115,18 @@ const storedLayout = (preferences: PageReaderPreferences | null, kind: PageReade
 
 const FITS: PageFit[] = ["width", "page", "actual", "free"];
 
-const storedFit = (preferences: PageReaderPreferences | null): PageFit => {
+// A comic never opened before fits the whole page: its arrows and clicks turn
+// the page at once, so at fit width the foot of every page (42% of it on a
+// 1024 x 768 window) went by unseen. A PDF's keys scroll before they turn, so
+// it opens at fit width, where its text is largest.
+const storedFit = (preferences: PageReaderPreferences | null, kind: string): PageFit => {
   if (preferences?.fit && FITS.includes(preferences.fit)) {
     return preferences.fit;
   }
-  return preferences?.fitWidth === false ? "free" : "width";
+  if (preferences?.fitWidth === false) {
+    return "free";
+  }
+  return kind === "comic" && preferences?.fitWidth === undefined ? "page" : "width";
 };
 
 /** The search's marks on one page: a list of rectangles for each match, in order. */
@@ -126,7 +137,22 @@ const NO_MARKS: PageMarks = { page: 0, rects: [] };
 /** A place on the page to keep under a place in the window while the page changes size. */
 type ZoomAnchor = { fx: number; fy: number; px: number; py: number };
 
+/**
+ * Where a page newly on show is put: at its top; at its bottom, when the
+ * reader came to it going backwards; or with a point of it (a share of its
+ * height, and pixels beyond that) at the top of the window, or a third of the
+ * way down it (`atLine`), when the book reopens or the layout changes.
+ */
+type Landing = "top" | "bottom" | { fraction: number; extra: number; atLine: boolean };
+
+/** The place in a page is saved this long after the reader stops moving it. */
+const PLACE_SAVE_MS = 400;
+
+/** A page changing size (a pinch, the window being dragged) is drawn again this long after the last change. */
+const RESIZE_SETTLE_MS = 120;
+
 const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
+
 
 const resolveErrorMessage = (error: unknown, kind: PageReaderKind) => {
   if (error instanceof Error && error.message.trim()) {
@@ -166,6 +192,9 @@ const KEY_REPEAT_TURN_MS = 150;
 /** A search marks at most this many matches on one page. */
 const MARKS_PER_PAGE = 400;
 
+/** What the dock covers at the foot of the stage: a page's last line is shown clear of it. */
+const DOCK_CLEAR = 56;
+
 const getDisplayModeClass = (displayMode: ReaderDisplayMode) => {
   if (displayMode === "paper") {
     return "reader-paper-finish";
@@ -201,14 +230,20 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
   const lastScrolledPageRef = useRef<number | null>(null);
   const pendingProgressRef = useRef<number | null>(null);
   const lastKeyTurnRef = useRef(0);
+  const clickedControlRef = useRef<Element | null>(null);
   const pageListRef = useRef<HTMLDivElement>(null);
   // Which end of the next page to show: the top, or the bottom when the
-  // reader came to it going backwards.
-  const landRef = useRef<"top" | "bottom">("top");
+  // reader came to it going backwards; or the line it was left at.
+  const landRef = useRef<Landing>("top");
+  // Pages: where the top of the window is on the page, and the timer that stores it.
+  const pagePlaceRef = useRef<StoredPlace | null>(null);
+  const pagePlaceTimerRef = useRef<number | null>(null);
   // The size of the page on show at scale 1, and the scale it is (or is about
   // to be) shown at. Refs, because zooming reads them between renders.
   const naturalRef = useRef<{ width: number; height: number } | null>(null);
   const scaleRef = useRef(1);
+  // The scale the canvas was last drawn at; `scaleRef` runs ahead of it while a zoom is stretched.
+  const drawnScaleRef = useRef(0);
   const anchorRef = useRef<ZoomAnchor | null>(null);
   const measureContextRef = useRef<CanvasRenderingContext2D | null>(null);
   const shownHitRef = useRef<string | null>(null);
@@ -225,7 +260,7 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
   const [drawnPage, setDrawnPage] = useState(0);
   const [zoom, setZoom] = useState(initialPreferences?.zoom ?? 1.15);
   const [effectiveZoom, setEffectiveZoom] = useState(initialPreferences?.zoom ?? 1.15);
-  const [fit, setFit] = useState<PageFit>(() => storedFit(initialPreferences));
+  const [fit, setFit] = useState<PageFit>(() => storedFit(initialPreferences, kind));
   const [displayMode, setDisplayMode] = useState<ReaderDisplayMode>(
     initialPreferences?.displayMode ?? "paper"
   );
@@ -237,7 +272,7 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
   const scrollPagesRef = useRef<ScrollPagesHandle>(null);
   // Where the scroll was last, as stored; and where the scroll opens, set when the book (or the layout) does.
   const placeRef = useRef<StoredPlace | null>(initialPreferences?.place ?? null);
-  const [openPlace, setOpenPlace] = useState<StoredPlace | null>(null);
+  const [openPlace, setOpenPlace] = useState<OpenPlace | null>(null);
   // The pages the canvas shows, and the page they were drawn for: a comic's
   // facing pages are two.
   const [shown, setShown] = useState<{ for: number; pages: number[] }>({ for: 0, pages: [] });
@@ -248,6 +283,8 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
   const [zoomPanelOpen, setZoomPanelOpen] = useState(false);
   const [bookmarkPanelOpen, setBookmarkPanelOpen] = useState(false);
   const [morePanelOpen, setMorePanelOpen] = useState(false);
+  /** The radio's popover (ambience/ReaderAmbience.tsx), opened from the ··· menu or its mark on the toolbar. */
+  const soundPanelOpen = useAmbiencePopoverOpen();
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchFocusToken, setSearchFocusToken] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
@@ -261,7 +298,7 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
     visible: chromeVisible,
     reveal: revealChrome,
     hover: hoverChrome
-  } = useAutoHideChrome(zoomPanelOpen || bookmarkPanelOpen || morePanelOpen || searchOpen);
+  } = useAutoHideChrome(zoomPanelOpen || bookmarkPanelOpen || morePanelOpen || soundPanelOpen || searchOpen);
   const [bookmarks, setBookmarks] = useState<PageBookmark[]>(
     () => readPageBookmarks(bookmarksKey)
   );
@@ -350,13 +387,62 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
   /** Turns on from the last page on show, or back from the first. */
   const turnPage = useCallback(
     (step: 1 | -1, land: "top" | "bottom" = "top") => {
+      // A page read slowly is reading: with a page at a time, the turn claims
+      // the time the page was up and nothing was touched (hooks/slowPage.ts),
+      // four minutes at most. (Also at the last page, where nothing turns.)
+      if (!scrolling) {
+        markReadingActivity.pageTurned();
+      }
       const next = turnFrom(shownPages, step);
       if (next >= 1 && next <= pageCount) {
         goToPage(next, land);
       }
     },
-    [goToPage, pageCount, shownPages]
+    [goToPage, markReadingActivity, pageCount, scrolling, shownPages]
   );
+
+  /** Where the reader is in the page or the scroll, kept beside the book's other preferences as it moves and on closing. */
+  const savePlace = useCallback(
+    (place: StoredPlace) => {
+      placeRef.current = place;
+      try {
+        const stored = readJson<PageReaderPreferences>(storageKey) ?? {};
+        window.localStorage.setItem(storageKey, JSON.stringify({ ...stored, place }));
+      } catch {
+        // Local preferences are optional.
+      }
+    },
+    [storageKey]
+  );
+
+  /**
+   * A page at a time: notes where the top of the window is on the page on
+   * show, in the form the scroll keeps its place (readers/pageScroll.ts), and
+   * stores it a moment after the reader stops. A page taller than the window
+   * used to reopen at its top whatever line it was closed on.
+   */
+  const notePagePlace = useCallback(() => {
+    const stage = scrollRef.current;
+    const canvas = canvasRef.current;
+    const page = lastScrolledPageRef.current;
+    if (!stage || !canvas || page === null) {
+      return;
+    }
+    const box = canvas.getBoundingClientRect();
+    if (!(box.height > 0)) {
+      return;
+    }
+    pagePlaceRef.current = placeWithin(page, stage.getBoundingClientRect().top - box.top, box.height);
+    if (pagePlaceTimerRef.current !== null) {
+      window.clearTimeout(pagePlaceTimerRef.current);
+    }
+    pagePlaceTimerRef.current = window.setTimeout(() => {
+      pagePlaceTimerRef.current = null;
+      if (pagePlaceRef.current) {
+        savePlace(pagePlaceRef.current);
+      }
+    }, PLACE_SAVE_MS);
+  }, [savePlace]);
 
   /** The room the page has: the stage, less its padding and the page's own border. */
   const measureRoom = useCallback(() => {
@@ -369,6 +455,55 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
     return {
       availableWidth: Math.max(320, stage.clientWidth - px(style.paddingLeft) - px(style.paddingRight) - 2),
       availableHeight: Math.max(240, stage.clientHeight - px(style.paddingTop) - px(style.paddingBottom) - 2)
+    };
+  }, []);
+
+  /**
+   * The stage as the reading keys see it (readers/pageKeys.ts). With one page
+   * in it, the room it keeps round the page is not somewhere to scroll to.
+   */
+  const stageForKeys = useCallback(
+    (stage: HTMLElement): StageMetrics => {
+      const metrics: StageMetrics = {
+        scrollTop: stage.scrollTop,
+        scrollHeight: stage.scrollHeight,
+        clientHeight: stage.clientHeight,
+        scrollLeft: stage.scrollLeft,
+        scrollWidth: stage.scrollWidth,
+        clientWidth: stage.clientWidth
+      };
+      if (scrolling) {
+        return metrics;
+      }
+      const style = window.getComputedStyle(stage);
+      return {
+        ...metrics,
+        padTop: Number.parseFloat(style.paddingTop) || 0,
+        padBottom: Math.max(0, (Number.parseFloat(style.paddingBottom) || 0) - DOCK_CLEAR)
+      };
+    },
+    [scrolling]
+  );
+
+  /** The point of the page under `about` (the pointer; the middle of the window when absent), to be kept there. */
+  const anchorAt = useCallback((about?: { x: number; y: number }): ZoomAnchor | null => {
+    const stage = scrollRef.current;
+    const canvas = canvasRef.current;
+    if (!stage || !canvas) {
+      return null;
+    }
+    const stageBox = stage.getBoundingClientRect();
+    const box = canvas.getBoundingClientRect();
+    if (!(box.width > 0) || !(box.height > 0)) {
+      return null;
+    }
+    const x = about?.x ?? stageBox.left + stage.clientWidth / 2;
+    const y = about?.y ?? stageBox.top + stage.clientHeight / 2;
+    return {
+      fx: clamp01((x - box.left) / box.width),
+      fy: clamp01((y - box.top) / box.height),
+      px: x - stageBox.left,
+      py: y - stageBox.top
     };
   }, []);
 
@@ -412,17 +547,9 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
         return;
       }
       if (stage && canvas && natural && source) {
-        const stageBox = stage.getBoundingClientRect();
-        const box = canvas.getBoundingClientRect();
-        if (box.width > 0 && box.height > 0) {
-          const x = about?.x ?? stageBox.left + stage.clientWidth / 2;
-          const y = about?.y ?? stageBox.top + stage.clientHeight / 2;
-          anchorRef.current = {
-            fx: clamp01((x - box.left) / box.width),
-            fy: clamp01((y - box.top) / box.height),
-            px: x - stageBox.left,
-            py: y - stageBox.top
-          };
+        const anchor = anchorAt(about);
+        if (anchor) {
+          anchorRef.current = anchor;
           const scale = scaleFor(natural, { fit: nextFit, zoom: nextZoom, ...measureRoom() }, source.actualScale);
           canvas.style.width = `${Math.floor(natural.width * scale)}px`;
           canvas.style.height = `${Math.floor(natural.height * scale)}px`;
@@ -435,7 +562,7 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
       setFit(nextFit);
       setZoom(nextZoom);
     },
-    [fit, measureRoom, restoreAnchor, scrolling, source, zoom]
+    [anchorAt, fit, measureRoom, restoreAnchor, scrolling, source, zoom]
   );
 
   const zoomBy = useCallback(
@@ -562,9 +689,16 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
           created.pageCount,
           Math.max(1, Math.round(book.progress * Math.max(0, created.pageCount - 1)) + 1)
         );
+        const open = placeToOpen(placeRef.current, restoredPage);
         setSource(created);
         setPageNumber(restoredPage);
-        setOpenPlace(placeToOpen(placeRef.current, restoredPage));
+        setOpenPlace(open);
+        // A page at a time: the page is shown from the line it was left at,
+        // not from its top (at fit width that was most of a screen away).
+        landRef.current =
+          open.page === restoredPage && (open.fraction !== 0 || open.extra !== 0)
+            ? { fraction: open.fraction, extra: open.extra, atLine: false }
+            : "top";
       })
       .catch((loadError) => {
         if (!disposed) {
@@ -656,59 +790,100 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
         ? { rtl: direction === "rtl" }
         : null;
 
-    void source
-      .render(pageNumber, canvas, { fit, zoom, ...room, tone, spread })
-      .then((drawn) => {
-        if (disposed) {
-          return;
-        }
-        naturalRef.current = { width: drawn.width, height: drawn.height };
-        scaleRef.current = drawn.scale;
-        setEffectiveZoom(drawn.scale);
-        setDrawnPage(pageNumber);
-        setShown({ for: pageNumber, pages: drawn.pages ?? [pageNumber] });
-        setRendering(false);
-        const stage = scrollRef.current;
-        if (stage && lastScrolledPageRef.current !== pageNumber) {
-          // A new page is shown from its top, or from its bottom when the
-          // reader came back to it; a right-to-left page starts at its right.
-          lastScrolledPageRef.current = pageNumber;
-          stage.scrollTop = landRef.current === "bottom" ? stage.scrollHeight : 0;
-          stage.scrollLeft = direction === "rtl" ? stage.scrollWidth : 0;
-          landRef.current = "top";
-        } else {
-          restoreAnchor();
-        }
-        anchorRef.current = null;
-        const layer = textLayerRef.current;
-        if (source.pdf && layer) {
-          // A page whose text cannot be laid is still a page to read.
-          void source.pdf.layText(pageNumber, layer, drawn.scale).catch(() => undefined);
-        }
-      })
-      .catch((failure) => {
-        if (disposed) {
-          return;
-        }
-        setRendering(false);
-        // A cancelled render is a page turn overtaking it, not a failure.
-        if (!isRenderCancelled(failure)) {
-          setRenderError(resolveErrorMessage(failure, kind));
-        }
-      });
+    // The window changed size under a fit, so the page on show is about to
+    // change size with it: the part of it in the middle of the window stays
+    // there. The scroll position used to be kept as it was, in pixels, and
+    // the lines moved up or down the window by the difference.
+    const natural = naturalRef.current;
+    const samePage = natural !== null && lastScrolledPageRef.current === pageNumber;
+    const wanted = natural ? scaleFor(natural, { fit, zoom, ...room }, source.actualScale) : 0;
+    if (samePage && !anchorRef.current && wanted !== scaleRef.current) {
+      anchorRef.current = anchorAt();
+    }
+    // The page on show is only changing size. A pinch or a window being
+    // dragged asks for a new size sixty times a second (52 renders begun in
+    // a one-second pinch, each given up for the next): the drawing waits for
+    // the hand to stop. A zoom has already stretched the page to its size.
+    const resizing = samePage && wanted !== drawnScaleRef.current;
+
+    const draw = () => {
+      waiting = null;
+      void source
+        .render(pageNumber, canvas, { fit, zoom, ...room, tone, spread })
+        .then((drawn) => {
+          if (disposed) {
+            return;
+          }
+          naturalRef.current = { width: drawn.width, height: drawn.height };
+          scaleRef.current = drawn.scale;
+          drawnScaleRef.current = drawn.scale;
+          setEffectiveZoom(drawn.scale);
+          setDrawnPage(pageNumber);
+          setShown({ for: pageNumber, pages: drawn.pages ?? [pageNumber] });
+          setRendering(false);
+          const stage = scrollRef.current;
+          if (stage && lastScrolledPageRef.current !== pageNumber) {
+            // A new page is shown from its top, from its bottom when the reader
+            // came back to it, or from the line it was left at; a right-to-left
+            // page starts at its right.
+            lastScrolledPageRef.current = pageNumber;
+            const land = landRef.current;
+            if (typeof land === "object") {
+              const box = canvas.getBoundingClientRect();
+              const pageStart = box.top - stage.getBoundingClientRect().top + stage.scrollTop;
+              stage.scrollTop = Math.max(
+                0,
+                pageStart + box.height * land.fraction + land.extra - (land.atLine ? stage.clientHeight / 3 : 0)
+              );
+            } else {
+              stage.scrollTop = land === "bottom" ? stage.scrollHeight : 0;
+            }
+            stage.scrollLeft = direction === "rtl" ? stage.scrollWidth : 0;
+            landRef.current = "top";
+            notePagePlace();
+          } else {
+            restoreAnchor();
+          }
+          anchorRef.current = null;
+          const layer = textLayerRef.current;
+          if (source.pdf && layer) {
+            // A page whose text cannot be laid is still a page to read.
+            void source.pdf.layText(pageNumber, layer, drawn.scale).catch(() => undefined);
+          }
+        })
+        .catch((failure) => {
+          if (disposed) {
+            return;
+          }
+          setRendering(false);
+          // A cancelled render is a page turn overtaking it, not a failure.
+          if (!isRenderCancelled(failure)) {
+            setRenderError(resolveErrorMessage(failure, kind));
+          }
+        });
+    };
+    let waiting: number | null = resizing ? window.setTimeout(draw, RESIZE_SETTLE_MS) : null;
+    if (waiting === null) {
+      draw();
+    }
 
     return () => {
       disposed = true;
+      if (waiting !== null) {
+        window.clearTimeout(waiting);
+      }
       source.cancelPending();
     };
     // `direction` decides where a new page starts, which needs no redraw; and
     // which side the first of two pages is on, which does (`spreadRtl`).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    anchorAt,
     fit,
     kind,
     loading,
     measureRoom,
+    notePagePlace,
     pageNumber,
     renderAttempt,
     restoreAnchor,
@@ -874,38 +1049,66 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
     }
   }, [direction, displayMode, fit, kind, layout, sidebarOpen, storageKey, twoPages, zoom]);
 
-  /** Where the scroll is, kept beside the book's other preferences as it moves and on closing. */
-  const savePlace = useCallback(
-    (place: StoredPlace) => {
-      placeRef.current = place;
-      try {
-        const stored = readJson<PageReaderPreferences>(storageKey) ?? {};
-        window.localStorage.setItem(storageKey, JSON.stringify({ ...stored, place }));
-      } catch {
-        // Local preferences are optional.
-      }
-    },
-    [storageKey]
-  );
-
   const noteScale = useCallback((scale: number, reference: { width: number; height: number }) => {
     scaleRef.current = scale;
     naturalRef.current = reference;
     setEffectiveZoom(scale);
   }, []);
 
-  /** Pages or scroll: the page in view stays the page in view. */
+  /**
+   * Pages or scroll: the line being read stays where it is, a third of the
+   * way down the window. (Either way used to go to the top of the page: at
+   * fit width, most of a screen from the line.)
+   */
   const chooseLayout = useCallback(
     (next: PageLayout) => {
+      const stage = scrollRef.current;
       if (next === "scroll") {
-        setOpenPlace({ page: pageNumber, fraction: 0, extra: 0 });
+        const box = canvasRef.current?.getBoundingClientRect();
+        const line =
+          stage && box && box.height > 0 && lastScrolledPageRef.current === pageNumber
+            ? clamp01((stage.getBoundingClientRect().top + stage.clientHeight / 3 - box.top) / box.height)
+            : null;
+        setOpenPlace({ page: pageNumber, fraction: line ?? 0, extra: 0, atLine: line !== null });
       } else {
-        // The page is drawn afresh and shown from its top.
+        const line = scrollPagesRef.current?.line() ?? null;
+        // The page is drawn afresh. At the very top or bottom of the scroll
+        // the page counted as current need not be the one across the line.
         lastScrolledPageRef.current = null;
+        landRef.current =
+          line === null || line.page < pageNumber
+            ? "top"
+            : line.page > pageNumber
+              ? "bottom"
+              : { fraction: line.fraction, extra: 0, atLine: true };
       }
       setLayout(next);
     },
     [pageNumber]
+  );
+
+  // A page at a time: the place in the page follows the reader's scrolling of it.
+  useEffect(() => {
+    const stage = scrollRef.current;
+    if (!stage || !source || scrolling) {
+      return;
+    }
+    stage.addEventListener("scroll", notePagePlace, { passive: true });
+    return () => stage.removeEventListener("scroll", notePagePlace);
+  }, [loading, notePagePlace, scrolling, source]);
+
+  // The place still owed to storage is kept when the reader closes.
+  useEffect(
+    () => () => {
+      if (pagePlaceTimerRef.current !== null) {
+        window.clearTimeout(pagePlaceTimerRef.current);
+        pagePlaceTimerRef.current = null;
+        if (pagePlaceRef.current) {
+          savePlace(pagePlaceRef.current);
+        }
+      }
+    },
+    [savePlace]
   );
 
   useEffect(() => {
@@ -943,6 +1146,16 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
     }
   }, [goToOpen]);
 
+  // The button the mouse last pressed, if it was one: it has the focus, but
+  // not because the reader means to work it from the keyboard.
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      clickedControlRef.current = event.target instanceof Element ? event.target.closest("button, a, summary") : null;
+    };
+    window.addEventListener("pointerdown", onPointerDown, true);
+    return () => window.removeEventListener("pointerdown", onPointerDown, true);
+  }, []);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       // The shortcuts sheet is over the page: a key behind it does nothing.
@@ -957,6 +1170,10 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
       }
       const target = event.target as HTMLElement | null;
       const tag = target?.tagName;
+      if (event.key === "Tab") {
+        // The keyboard is moving the focus: where it lands is the keyboard's.
+        clickedControlRef.current = null;
+      }
       const typing = tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || Boolean(target?.isContentEditable);
       // Which key does what is one table, which the shortcuts sheet is drawn from (readers/pageReaderKeys.ts).
       const pressed = pageActionFor(event, keyContext);
@@ -970,17 +1187,23 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
         // Escape closes what is open before it leaves the book.
         if (searchOpen) {
           closeSearch();
-        } else if (zoomPanelOpen || bookmarkPanelOpen || morePanelOpen) {
+        } else if (zoomPanelOpen || bookmarkPanelOpen || morePanelOpen || ambiencePopoverOpen()) {
           setZoomPanelOpen(false);
           setBookmarkPanelOpen(false);
           setMorePanelOpen(false);
+          closeAmbiencePopover();
         } else {
           exitGuard.escape(event);
         }
         return;
       }
-      // Space and Enter on a button press the button.
-      const onControl = tag === "BUTTON" || tag === "A" || tag === "SUMMARY";
+      // Space and Enter on a button press the button: one the keyboard went
+      // to. A button clicked with the mouse keeps the focus, and Space then
+      // pressed it again: after a click on the dock's arrow, Space turned the
+      // page a second time, and the page between was never seen. (The
+      // browser's own :focus-visible is no help: it turns true on this press.)
+      const onControl =
+        (tag === "BUTTON" || tag === "A" || tag === "SUMMARY") && target !== clickedControlRef.current;
       if (onControl && (event.key === " " || event.key === "Enter")) {
         return;
       }
@@ -1012,7 +1235,7 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
       if (!stage) {
         return;
       }
-      const action = readingKeyAction(event, stage, direction);
+      const action = readingKeyAction(event, stageForKeys(stage), direction);
       if (!action) {
         return;
       }
@@ -1062,6 +1285,7 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
     scrolling,
     searchOpen,
     shortcutsOpen,
+    stageForKeys,
     toggleCurrentBookmark,
     turnPage,
     zoomBy,
@@ -1320,6 +1544,8 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
             )}
           </div>
 
+          <ReaderAmbience />
+
           <div
             className="relative"
             onMouseEnter={() => {
@@ -1416,6 +1642,7 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
                   <span>App theme</span>
                   <span className="reader-toggle" data-on={readerTheme === "light"} />
                 </button>
+                <ReaderAmbienceRow onOpen={() => setMorePanelOpen(false)} />
                 <button
                   type="button"
                   className="mt-3 flex w-full items-center justify-between rounded-lg border px-3 py-2 text-xs uppercase tracking-widest transition reader-border reader-pill reader-icon reader-hover-accent"
@@ -1451,6 +1678,7 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
       {searchOpen && pdf && (
         <PdfSearchPanel
           pageCount={pageCount}
+          page={pageNumber}
           textOf={(page) => pdf.pageText(page).then((text) => text.joined.text)}
           active={activeHit}
           focusToken={searchFocusToken}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   findMatches,
+  foldAccents,
   hasSearchableText,
   joinTextItems,
   matchRects,
@@ -68,6 +69,25 @@ describe("finding a phrase", () => {
     const [match] = findMatches(text, "harness-room");
     expect(text.slice(match.start, match.end)).toBe("harness-\nroom");
     expect(findMatches("exam-\nple", "example")).toEqual([{ start: 0, end: 9 }]);
+  });
+
+  it("finds a word typed without its accents, and one typed with them", () => {
+    const menu = "Café Zürich: naïve façade, École. A cafe too.";
+    const found = (query: string) => findMatches(menu, query).map((match) => menu.slice(match.start, match.end));
+    expect(found("cafe")).toEqual(["Café", "cafe"]);
+    expect(found("café")).toEqual(["Café", "cafe"]);
+    expect(found("zurich")).toEqual(["Zürich"]);
+    expect(found("ECOLE")).toEqual(["École"]);
+    expect(found("facade, ecole")).toEqual(["façade, École"]);
+  });
+
+  it("folds an accent off one character for one, so a match is where it was found", () => {
+    expect(foldAccents("Brontë – Ångström")).toBe("Bronte – Angstrom");
+    // Letters that are not a letter and an accent stay themselves.
+    expect(foldAccents("Straße æon Søren")).toBe("Straße æon Søren");
+    const text = "ééé résumé";
+    expect(foldAccents(text)).toHaveLength(text.length);
+    expect(findMatches(text, "resume")).toEqual([{ start: 4, end: 10 }]);
   });
 
   it("treats what is typed as words, not as a pattern", () => {

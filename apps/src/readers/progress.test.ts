@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSectionWeights, isChapterLike, spineIndexForProgress, outsideStory } from "./progress";
+import { buildSectionWeights, isChapterLike, spineIndexForProgress, outsideStory, endInView } from "./progress";
 
 const section = (href: string, bytes: number, linear = true) => ({ href, bytes, linear });
 const spine = (items: { href: string }[]) => items.map((item) => item.href);
@@ -133,5 +133,21 @@ describe("a look outside the story", () => {
   it("lets the place follow into the back matter once the story is finished", () => {
     expect(outsideStory("back", 1)).toEqual({ progress: null, placeFollows: true });
     expect(outsideStory("back", 0.99)).toEqual({ progress: null, placeFollows: true });
+  });
+});
+
+describe("the end of the story, scrolling", () => {
+  it("is reached when the last line is in the window", () => {
+    // A last chapter of 400 px under a window of 768: its end sits at the bottom edge.
+    expect(endInView(768, 768)).toBe(true);
+    expect(endInView(300, 768)).toBe(true);
+    // A scroll position between pixels.
+    expect(endInView(768.6, 768)).toBe(true);
+  });
+
+  it("is not reached while the last line is still below the window, or has gone above it", () => {
+    expect(endInView(1400, 768)).toBe(false);
+    expect(endInView(-20, 768)).toBe(false);
+    expect(endInView(null, 768)).toBe(false);
   });
 });

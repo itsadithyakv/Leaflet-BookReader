@@ -27,6 +27,12 @@ export type ReaderAction =
   | "slower"
   | "scrollDown"
   | "scrollUp"
+  | "screenDown"
+  | "screenUp"
+  | "chapterStart"
+  | "chapterEnd"
+  | "bookStart"
+  | "bookEnd"
   | "playPause";
 
 /** As much of a keyboard event as the table reads. */
@@ -120,19 +126,37 @@ export const READER_BINDINGS: Binding[] = [
     label: () => "Next page",
     group: "Moving about"
   },
+  // Ctrl with an arrow is a chapter in every layout, so the pages layout,
+  // whose plain arrows turn pages, has a way to the chapter before too.
   {
     action: "chapterNext",
-    keys: ["→"],
-    matches: (press) => plain(press) && press.key === "ArrowRight",
+    keys: ["→", "Ctrl+→"],
+    matches: (press) => !press.altKey && press.key === "ArrowRight",
     when: scrolling,
     label: () => "Next chapter",
     group: "Moving about"
   },
   {
     action: "chapterPrev",
-    keys: ["←"],
-    matches: (press) => plain(press) && press.key === "ArrowLeft",
+    keys: ["←", "Ctrl+←"],
+    matches: (press) => !press.altKey && press.key === "ArrowLeft",
     when: scrolling,
+    label: () => "Previous chapter",
+    group: "Moving about"
+  },
+  {
+    action: "chapterNext",
+    keys: ["Ctrl+→"],
+    matches: (press) => command(press) && !press.altKey && press.key === "ArrowRight",
+    when: paged,
+    label: () => "Next chapter",
+    group: "Moving about"
+  },
+  {
+    action: "chapterPrev",
+    keys: ["Ctrl+←"],
+    matches: (press) => command(press) && !press.altKey && press.key === "ArrowLeft",
+    when: paged,
     label: () => "Previous chapter",
     group: "Moving about"
   },
@@ -150,6 +174,59 @@ export const READER_BINDINGS: Binding[] = [
     matches: (press) => plain(press) && press.key === "ArrowUp",
     when: scrolling,
     label: () => "Scroll up a little",
+    group: "Moving about"
+  },
+  // The scrolling layout used to leave these four to the browser, which
+  // scrolled only when the keyboard was inside the book's text (and did
+  // nothing after a click on the toolbar), by its own idea of a screen, and
+  // took Home and End to the top and bottom of whichever chapters happened
+  // to be loaded.
+  {
+    action: "screenDown",
+    keys: ["Page Down"],
+    matches: (press) => plain(press) && press.key === "PageDown",
+    when: scrolling,
+    label: () => "Down a screen, less a line or two",
+    group: "Moving about"
+  },
+  {
+    action: "screenUp",
+    keys: ["Page Up"],
+    matches: (press) => plain(press) && press.key === "PageUp",
+    when: scrolling,
+    label: () => "Up a screen",
+    group: "Moving about"
+  },
+  {
+    action: "bookStart",
+    keys: ["Ctrl+Home"],
+    matches: (press) => command(press) && !press.altKey && press.key === "Home",
+    when: scrolling,
+    label: () => "The start of the book",
+    group: "Moving about"
+  },
+  {
+    action: "bookEnd",
+    keys: ["Ctrl+End"],
+    matches: (press) => command(press) && !press.altKey && press.key === "End",
+    when: scrolling,
+    label: () => "The end of the book",
+    group: "Moving about"
+  },
+  {
+    action: "chapterStart",
+    keys: ["Home"],
+    matches: (press) => plain(press) && press.key === "Home",
+    when: scrolling,
+    label: () => "The start of this chapter",
+    group: "Moving about"
+  },
+  {
+    action: "chapterEnd",
+    keys: ["End"],
+    matches: (press) => plain(press) && press.key === "End",
+    when: scrolling,
+    label: () => "The end of this chapter",
     group: "Moving about"
   },
   {

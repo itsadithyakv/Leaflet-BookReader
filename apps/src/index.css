@@ -1379,7 +1379,7 @@ body::before {
   color: #3e8a3a;
 }
 
-/* Lost to a broken streak: charred in place */
+/* Burned for a broken streak (an earlier version did this; nothing burns now): charred in place */
 .ss-spine.is-burned .ss-cloth {
   color: #9b9088;
   background:
@@ -2442,8 +2442,12 @@ body::before {
   color: var(--rsvp-muted);
 }
 
-/* Auto-scroll's floating control. Faint while reading, awake when the toolbar
-   is, when a hand is on the page, or under the pointer. */
+/* Auto-scroll's and Smart Read's floating control. It is there to be reached
+   for, not read beside: awake when the toolbar is, when a hand is on the
+   page, when paused or on hold, or under the pointer or the keyboard; left
+   alone it lingers a moment and then fades out completely. A change of pace
+   shows it again for a moment (`is-fresh`, which only renames the animation
+   so that it starts over). */
 .reader-autoscroll-pill {
   position: fixed;
   left: 50%;
@@ -2461,12 +2465,40 @@ body::before {
   transform: translateX(-50%);
   opacity: 0.3;
   transition: opacity 0.3s ease;
+  animation: reader-pill-fade 3.4s ease forwards;
+}
+
+.reader-autoscroll-pill.is-fresh {
+  animation-name: reader-pill-fade-again;
 }
 
 .reader-autoscroll-pill:hover,
 .reader-autoscroll-pill:focus-within,
 .reader-autoscroll-pill.is-awake {
   opacity: 1;
+  animation: none;
+}
+
+/* In view for the first two seconds, then gone. Two names for one animation:
+   switching between them is how a change of pace starts it again. */
+@keyframes reader-pill-fade {
+  0%,
+  60% {
+    opacity: 0.85;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes reader-pill-fade-again {
+  0%,
+  60% {
+    opacity: 0.85;
+  }
+  100% {
+    opacity: 0;
+  }
 }
 
 .reader-autoscroll-button {
@@ -3384,6 +3416,14 @@ body::before {
   z-index: 56;
   pointer-events: none;
   transform: translate3d(-9999px, 0, 0);
+}
+
+/* A bubble holding buttons (the tour, the shortcut menu) takes the pointer.
+   This has to come after the rule above: both are one class, so the later one
+   wins, and with `none` winning the tour's Next and Skip did nothing and the
+   click went to whatever was under the bubble. */
+.pip-say-world.pip-say-interactive {
+  pointer-events: auto;
 }
 
 /* ---- The reader peek: bottom-right margin, clear of the text column ---- */

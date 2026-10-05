@@ -34,6 +34,12 @@ type SearchOptions = {
   textOf: (page: number) => Promise<string>;
   signal: AbortSignal;
   limit?: number;
+  /**
+   * The page to begin at (1-based; the reader's own). The search goes on to
+   * the end and round to the pages before it, so when it stops at `limit`
+   * what it has is what comes next from where the reader is.
+   */
+  from?: number;
   onProgress?: (state: PdfSearchState) => void;
   /** A clock, for tests. */
   now?: () => number;
@@ -49,15 +55,17 @@ const BREATHE_AFTER_MS = 12;
  */
 export const searchPdf = async (
   query: string,
-  { pageCount, textOf, signal, limit = 200, onProgress, now = () => performance.now() }: SearchOptions
+  { pageCount, textOf, signal, limit = 200, from = 1, onProgress, now = () => performance.now() }: SearchOptions
 ): Promise<PdfSearchState> => {
   const state: PdfSearchState = { hits: [], fraction: 0, sawText: false, capped: false };
   if (!searchPattern(query) || pageCount <= 0) {
     state.fraction = 1;
     return state;
   }
+  const first = Number.isFinite(from) ? Math.min(pageCount, Math.max(1, Math.round(from))) : 1;
   let lastBreath = now();
-  for (let page = 1; page <= pageCount; page += 1) {
+  for (let read = 1; read <= pageCount; read += 1) {
+    const page = ((first - 1 + read - 1) % pageCount) + 1;
     if (signal.aborted) {
       return state;
     }
@@ -77,14 +85,14 @@ export const searchPdf = async (
     matches.forEach((match, nth) => {
       state.hits.push({ page, nth, snippet: snippetAt(text, match) });
     });
-    state.fraction = page / pageCount;
+    state.fraction = read / pageCount;
     if (state.hits.length >= limit) {
       state.capped = true;
       onProgress?.(state);
       return state;
     }
     // Told about every page that found something, and now and then otherwise.
-    if (matches.length > 0 || page === pageCount || page % 8 === 0) {
+    if (matches.length > 0 || read === pageCount || read % 8 === 0) {
       onProgress?.(state);
     }
     // Text already read comes back without a pause; a long run of such pages
@@ -95,4 +103,41 @@ export const searchPdf = async (
     }
   }
   return state;
+};
+
+/** The results in page order, however the search came by them. */
+export const hitsInPageOrder = (hits: ReadonlyArray<PdfSearchHit>) =>
+  [...hits].sort((a, b) => a.page - b.page || a.nth - b.nth);
+
+/**
+ * Which result Enter (`by` 1) or Shift+Enter (-1) goes to, among results in
+ * page order; -1 when there are none. From the result on show it is the next
+ * or the one before, round the ends. With none on show yet it is the first on
+ * or after the reader's page (or the last before it, going back): a reader on
+ * page 400 used to be taken to the first match in the book, on page 1.
+ */
+export const nextHitIndex = (
+  hits: ReadonlyArray<PdfSearchHit>,
+  active: PdfSearchHit | null,
+  by: 1 | -1,
+  page: number
+) => {
+  if (hits.length === 0) {
+    return -1;
+  }
+  const at = active ? hits.findIndex((hit) => hit.page === active.page && hit.nth === active.nth) : -1;
+  if (at >= 0) {
+    return (at + by + hits.length) % hits.length;
+  }
+  if (by > 0) {
+    const ahead = hits.findIndex((hit) => hit.page >= page);
+    return ahead >= 0 ? ahead : 0;
+  }
+  let behind = -1;
+  hits.forEach((hit, index) => {
+    if (hit.page < page) {
+      behind = index;
+    }
+  });
+  return behind >= 0 ? behind : hits.length - 1;
 };

@@ -68,3 +68,24 @@ export const stepDuration = (distance: number, reducedMotion: boolean) =>
 
 /** Ease in and out, so a long scroll starts and lands gently. */
 export const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
+
+/**
+ * How far Page Down and Page Up move the scrolling layout: the window less
+ * the strip the toolbar floats over, less two lines, so the last lines of one
+ * screen are the first of the next (just under the reading line) and no line
+ * is passed unseen. Never less than three lines, on a very short window.
+ */
+export const screenStep = (windowHeight: number, topInset: number, lineHeight: number) => {
+  const line = Math.max(12, lineHeight);
+  return Math.round(Math.max(line * 3, windowHeight - Math.max(0, topInset) - line * 2));
+};
+
+/**
+ * Where to put the scroll position to show the end of a chapter: its last
+ * line `share` of the way down the window (the next chapter's opening below
+ * it), and never above the chapter's own start. `top` and `height` are the
+ * chapter's frame in the scrolling container; `room` is blank kept below the
+ * last line of the book.
+ */
+export const chapterEndTop = (top: number, height: number, room: number, windowHeight: number, share = 0.6) =>
+  Math.round(Math.max(top, top + height - Math.max(0, room) - windowHeight * share));

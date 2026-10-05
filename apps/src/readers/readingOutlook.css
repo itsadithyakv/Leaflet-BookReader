@@ -65,6 +65,16 @@
   white-space: nowrap;
 }
 
+/* Pages: "12 of 50", as quiet as the percentage. It keeps its width; the
+   chapter's name gives way. */
+.reader-dock-pages {
+  flex: none;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
 .reader-chapter-dock button:focus-visible {
   outline: 2px solid var(--reader-accent);
   outline-offset: 1px;
