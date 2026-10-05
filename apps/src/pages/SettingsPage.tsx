@@ -8,6 +8,7 @@ import { bookService } from "../services/bookService";
 import { clearSmartReadProfiles } from "../services/smartReadService";
 import { ReadingPaceCard } from "../components/ReadingPaceCard";
 import { CharactersSetting } from "../readers/people/CharactersSetting";
+import { WordsSetting } from "../readers/words/WordsSetting";
 import { UiIcon } from "../components/UiIcon";
 import { RemindersCard } from "../components/RemindersCard";
 import { ConverterCard } from "../components/ConverterCard";
@@ -28,6 +29,7 @@ import { pickBeat } from "../pip/moments";
 import { playSound, useSoundOn } from "../pip/sound";
 import { SegmentedTabs, panelId, tabId, type SegmentedTab } from "../components/ui/SegmentedTabs";
 import { readSettingsSection, rememberSettingsSection, type SettingsSection } from "./settingsSection";
+import { DesktopPipSetting } from "../desktop-pip/DesktopPipSetting";
 
 const PIP_MODES: Array<{ mode: PipMode; label: string; detail: string; preview: string }> = [
   { mode: "chatty", label: "Chatty", detail: "Pip lives out in the app: it wanders, naps, celebrates, and can be picked up and thrown. Select the logo to call it home.", preview: "look" },
@@ -387,6 +389,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
               <span>Sounds in Pip's house</span>
               {renderToggle(pipSounds)}
             </button>
+            <DesktopPipSetting renderToggle={renderToggle} />
           </section>
         </div>
       )}
@@ -396,6 +399,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
           <div className={column}>
             <ReadingPaceCard key={wiped} showToast={showToast} renderToggle={renderToggle} />
             <CharactersSetting key={`characters-${wiped}`} renderToggle={renderToggle} />
+            <WordsSetting key={`words-${wiped}`} renderToggle={renderToggle} />
           </div>
           <div className={column}>
               <div className="paper-surface rounded-xl p-5">

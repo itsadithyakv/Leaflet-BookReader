@@ -22,6 +22,11 @@ export type Book = {
   /** Its number in the series (2.5 for a novella between two books). */
   seriesIndex?: number | null;
   lastOpened: string | null;
+  /**
+   * When `progress` (or the place) last really moved: not when the book was
+   * opened. Missing on a book that has never moved, or one made by hand.
+   */
+  progressUpdatedAt?: string | null;
   createdAt: string;
   // Last time metadata enrichment ran for this book, successful or not.
   metadataCheckedAt?: string | null;

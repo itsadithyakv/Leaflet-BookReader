@@ -88,6 +88,18 @@ describe("what Delete All Data removes from the webview", () => {
     expect(storage.getItem("leaflet.reader.characters")).toBeNull();
   });
 
+  /**
+   * The radio (ambience/prefs.ts): whether it plays while a book is open,
+   * the scene and the volume are settings of this device.
+   */
+  it("forgets the radio's choices with the settings, and keeps them without", () => {
+    storage.setItem("leaflet.ambience", '{"on":true,"scene":"cafe","volume":0.4,"thunder":true}');
+    forgetBooksOnThisDevice(false);
+    expect(storage.getItem("leaflet.ambience")).not.toBeNull();
+    forgetBooksOnThisDevice();
+    expect(storage.getItem("leaflet.ambience")).toBeNull();
+  });
+
   it("does nothing, quietly, when storage cannot be read", () => {
     vi.stubGlobal("localStorage", {
       get length(): number {

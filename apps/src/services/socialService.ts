@@ -317,5 +317,18 @@ export const socialService = {
       return [];
     }
     return (await call<{ results: SearchResult[] }>("community_search", { query })).results;
+  },
+
+  /**
+   * The readers this one follows who read today, for a friend's Pip to come
+   * by (see `pip/visitors.ts`): the server's answer as it came, or null when
+   * there is nothing to ask (the browser preview) or the server has no such
+   * route yet (one deployed before visitors), which is not an error.
+   */
+  async visitors(): Promise<unknown | null> {
+    if (!isTauri()) {
+      return null;
+    }
+    return call<unknown | null>("community_visitors");
   }
 };

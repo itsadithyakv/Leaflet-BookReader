@@ -12,7 +12,7 @@ const PER_BOOK_PREFIXES = ["leaflet.reader.", "leaflet.bookmarks."];
  * `leaflet.people.preview` is the browser preview's character sheets (the app
  * keeps them in the database, which the delete clears).
  */
-const LISTS = ["leaflet.pip.nodsSeen", "leaflet.shelf.lastSeen", "leaflet.people.preview"];
+const LISTS = ["leaflet.pip.nodsSeen", "leaflet.shelf.lastSeen", "leaflet.people.preview", "leaflet.words.preview", "leaflet.pip.lastStop", "leaflet.pip.spines", "leaflet.pip.visits", "leaflet.pip.findSeen"];
 /**
  * How the reader likes every book laid out, and what the reader has already
  * been shown once: settings. Most are kept under the per-book prefix; the
@@ -25,7 +25,14 @@ const READER_SETTINGS = [
   "leaflet.reader.startMode",
   "leaflet.reader.tourSeen",
   "leaflet.reader.characters",
-  "leaflet.lookup.noteSeen"
+  // Whether words looked up are kept (readers/words/wordPrefs.ts).
+  "leaflet.reader.keepWords",
+  "leaflet.lookup.noteSeen",
+  // The radio: on or off, the scene, the volume (ambience/prefs.ts).
+  "leaflet.ambience",
+  // Pip on the desktop: the switch, and the day she was hidden for (desktop-pip/setting.ts).
+  "leaflet.desktopPip.enabled",
+  "leaflet.desktopPip.hiddenOn"
 ];
 
 /**

@@ -12,6 +12,12 @@ type HighlightsState = {
   /** Highlights per book id. A book with none is not in it. */
   counts: Record<string, number>;
   loadCounts: () => Promise<void>;
+  /**
+   * A book asked to be opened from somewhere with no way to open one itself
+   * (a note on Pip's fridge): at a highlight's place (`cfi`), or where
+   * reading stopped (null). The app opens it the usual way and clears this.
+   */
+  opening: { bookId: string; cfi: string | null } | null;
 };
 
 /**
@@ -22,6 +28,7 @@ type HighlightsState = {
 export const useHighlightsStore = create<HighlightsState>((set) => ({
   view: null,
   counts: {},
+  opening: null,
   async loadCounts() {
     try {
       const counts = await annotationService.highlightCounts();
@@ -40,3 +47,6 @@ export const openHighlights = (bookId: string) =>
 export const openHighlightsList = () => useHighlightsStore.setState({ view: { kind: "books" } });
 
 export const showHighlightsView = (view: HighlightsView | null) => useHighlightsStore.setState({ view });
+
+/** "Open in book" from outside the dialog: the app opens the book at `cfi` (App.tsx, the dialog's own way in). */
+export const openInBook = (bookId: string, cfi: string | null = null) => useHighlightsStore.setState({ opening: { bookId, cfi } });

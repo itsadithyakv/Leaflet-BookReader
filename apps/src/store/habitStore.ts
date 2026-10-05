@@ -4,7 +4,8 @@ import {
   getDateKey,
   habitService,
   type FocusSessionRecord,
-  type HabitSnapshot
+  type HabitSnapshot,
+  type PipCold
 } from "../services/habitService";
 import type { FocusFlowerKind } from "../pip/focusFlower.js";
 import { usePipWardrobeStore } from "./pipWardrobeStore";
@@ -69,6 +70,8 @@ export type ActiveSession = {
   seedsAtStart?: number;
   /** Garden water poured before the session began, for "+N water" at the end. */
   waterAtStart?: number;
+  /** Pip had a cold when the session began, so the wrap-up can say this session's reading cured it. */
+  coldAtStart?: boolean;
   /**
    * The focus flower, planted when a session starts in full screen. It grows
    * as the session is read and blooms when the session completes. Leaving
@@ -129,6 +132,10 @@ export type SessionWrapUp = {
   flower: (FocusFlower & { bloomed: boolean }) | null;
   /** Focus flowers bloomed so far, this one included. */
   blooms: number;
+  /** Pip's cold as the session left it: still there (and how far the cure has come), or null. */
+  cold: PipCold | null;
+  /** She had a cold when the session began and its reading cured it. */
+  coldCured: boolean;
 };
 
 type HabitState = {
@@ -137,7 +144,7 @@ type HabitState = {
   activeSession: ActiveSession | null;
   focusSettings: FocusSettings;
   /** Set when an evaluation detects a break, so the UI can show it once. */
-  pendingBreak: { brokeFrom: number; burned: string[] } | null;
+  pendingBreak: { brokeFrom: number } | null;
   /** The session that just ended, until the wrap-up screen is dismissed. */
   wrapUp: SessionWrapUp | null;
   /** When Leaflet lost the foreground during a session; null while in front. */
@@ -156,7 +163,7 @@ type HabitState = {
    * The reading heartbeat counted `ms` of reading, with or without a focus
    * session: it is held for the day's ledger until the next flush.
    */
-  addReading: (ms: number) => void;
+  addReading: (ms: number, dateKey?: string) => void;
   /**
    * Writes the held reading to the ledger, under the day it was read on, and
    * returns the ledger's answer. `show` false leaves the snapshot on screen
@@ -267,7 +274,7 @@ let loadedDay: string | null = null;
  */
 const breakFound = (snapshot: HabitSnapshot | null) =>
   snapshot && snapshot.brokeFrom !== null
-    ? { pendingBreak: { brokeFrom: snapshot.brokeFrom, burned: snapshot.justBurned } }
+    ? { pendingBreak: { brokeFrom: snapshot.brokeFrom } }
     : {};
 
 /**
@@ -353,7 +360,7 @@ export const useHabitStore = create<HabitState>((set, get) => ({
     // Leaflet was closed in the middle of a read: its last minute counts
     // first. It can be the minute that met yesterday's goal, and a streak
     // judged before it lands spends grace or a freeze on a day that was met,
-    // or burns the shelf for it.
+    // or breaks for it.
     await get().flushReading();
     try {
       const migrated = await migrateLegacy();
@@ -361,7 +368,7 @@ export const useHabitStore = create<HabitState>((set, get) => ({
       set({ snapshot, loading: false });
       loadedDay = getDateKey();
       if (snapshot.brokeFrom !== null) {
-        set({ pendingBreak: { brokeFrom: snapshot.brokeFrom, burned: snapshot.justBurned } });
+        set({ pendingBreak: { brokeFrom: snapshot.brokeFrom } });
       }
     } catch {
       set({ loading: false });
@@ -376,11 +383,13 @@ export const useHabitStore = create<HabitState>((set, get) => ({
     }
   },
 
-  addReading(ms) {
+  addReading(ms, dateKey) {
     if (!(ms > 0)) {
       return;
     }
-    const today = getDateKey();
+    // (A page read slowly across midnight is claimed, when it is turned, for
+    // the day each part of it was read on: hooks/slowPage.ts.)
+    const today = dateKey ?? getDateKey();
     const held = get().pendingReading;
     // Read on past midnight: what was read yesterday goes to yesterday.
     if (held && held.dateKey !== today) {
@@ -444,7 +453,7 @@ export const useHabitStore = create<HabitState>((set, get) => ({
     // the walk from Start to a book is not counted.
     let next: ActiveSession = { ...session, readMs: session.readMs ?? 0 };
     if (next.seedsAtStart === undefined && snapshot !== EMPTY_SNAPSHOT) {
-      next = { ...next, seedsAtStart: snapshot.seedsEarned, waterAtStart: snapshot.gardenWater };
+      next = { ...next, seedsAtStart: snapshot.seedsEarned, waterAtStart: snapshot.gardenWater, coldAtStart: Boolean(snapshot.cold) };
     }
     // Starting in full screen plants a flower. One started without it has
     // none, and turning full screen on later does not plant one: a bloom is
@@ -633,7 +642,11 @@ export const useHabitStore = create<HabitState>((set, get) => ({
             // Counted from the shelf when the ledger recorded this session;
             // without it (a browser build) this bloom is added by hand.
             blooms:
-              countBlooms(after) + (bloomed && !after.sessions.some((session) => session.id === id) ? 1 : 0)
+              countBlooms(after) + (bloomed && !after.sessions.some((session) => session.id === id) ? 1 : 0),
+            cold: after.cold ?? null,
+            // The goal is usually met by a flush in the middle of the session, so
+            // this goes by how she was when it began, not by the snapshot before.
+            coldCured: Boolean(active.coldAtStart ?? before.cold) && !after.cold && after.todayMet
           }
         : null;
     // One update, so anything watching for "goal met" sees the wrap-up in the
@@ -748,13 +761,13 @@ export const buildDateRange = (days: number) => {
   );
 };
 
-/** Days on the shelf, newest first, excluding books lost to a broken streak. */
+/** Days on the shelf, newest first, excluding books an earlier version burned for a broken streak. */
 export const shelfSessions = (snapshot: HabitSnapshot) =>
   snapshot.sessions.filter((session) => !session.burnedAt);
 
 /**
- * Focus flowers bloomed, ever. A bloom stays counted even if a broken streak
- * later scorches its book: the flower was grown.
+ * Focus flowers bloomed, ever. A bloom stays counted even on a book that was
+ * burned for a broken streak (an earlier version did that): the flower was grown.
  */
 export const countBlooms = (snapshot: HabitSnapshot) =>
   snapshot.sessions.filter((session) => session.flower && session.flowerBloomed).length;

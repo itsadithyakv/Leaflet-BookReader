@@ -15,7 +15,7 @@ import { PipWorld, type PipAction } from "./components/PipWorld";
 import { usePipStore } from "./store/pipStore";
 import { usePipWardrobeStore } from "./store/pipWardrobeStore";
 import { pickBeat } from "./pip/moments";
-import { nodFor } from "./pip/bookNods";
+import { nodFor, nodOdds } from "./pip/bookNods";
 import { loadBookScenes } from "./pip/core";
 
 /** A book untouched this long gets dusted off when it is opened again. */
@@ -293,8 +293,9 @@ const App = () => {
   };
 
   /**
-   * A famous book gets a little scene from Pip when it is opened: always the
-   * first time, then about one open in four, so it stays a surprise.
+   * A book Pip knows gets a little scene from her when it is opened: always
+   * the first time, then about one open in four, so it stays a surprise. One
+   * she knows only by its genre gets that genre's scene, less often (NOD_ODDS).
    */
   const showBookNod = (book: Book) => {
     const nod = nodFor(book);
@@ -308,15 +309,17 @@ const App = () => {
       seen = [];
     }
     const first = !seen.includes(book.id);
-    if (!first && Math.random() > 0.25) {
-      return;
-    }
+    const odds = nodOdds(nod);
+    const show = Math.random() < (first ? odds.first : odds.again);
     if (first) {
       try {
         localStorage.setItem(NODS_SEEN_KEY, JSON.stringify([...seen, book.id].slice(-500)));
       } catch {
         // Only means the first-time scene may play again.
       }
+    }
+    if (!show) {
+      return;
     }
     // After the page has had a moment to appear.
     const ready = loadBookScenes();
@@ -416,6 +419,19 @@ const App = () => {
   const openBookAt = useCallback((target: Book, cfi: string) => {
     handleOpenBookRef.current(target, cfi);
   }, []);
+  // The same, asked for from somewhere with no way in of its own (a note on
+  // Pip's fridge, a spine in her bookcase: `openInBook`).
+  const opening = useHighlightsStore((state) => state.opening);
+  useEffect(() => {
+    if (!opening) {
+      return;
+    }
+    useHighlightsStore.setState({ opening: null });
+    const target = useLibraryStore.getState().books.find((book) => book.id === opening.bookId);
+    if (target) {
+      handleOpenBookRef.current(target, opening.cfi);
+    }
+  }, [opening]);
 
   const openAssociatedPaths = useCallback(
     async (paths: string[]) => {
@@ -777,9 +793,9 @@ const App = () => {
   // Pip's idle time sometimes plays the current book's scene.
   useEffect(() => {
     usePipStore.getState().setBookNod(
-      nowReading && nodFor(nowReading) ? { title: nowReading.title, author: nowReading.author ?? null } : null
+      nowReading && nodFor(nowReading) ? { title: nowReading.title, author: nowReading.author ?? null, genres: nowReading.genres ?? null } : null
     );
-  }, [nowReading?.id, nowReading?.title, nowReading?.author]);
+  }, [nowReading?.id, nowReading?.title, nowReading?.author, nowReading?.genres?.join("|")]);
   const [nowReadingFallback, setNowReadingFallback] = useState<string | null>(null);
   const nowReadingCover =
     nowReading?.coverUrl && nowReading.coverUrl.startsWith("http") ? nowReading.coverUrl : null;
@@ -986,7 +1002,7 @@ const App = () => {
                 }}
               />
             )}
-            {activeTab === "pip" && <PipPage showToast={showToast} />}
+            {activeTab === "pip" && <PipPage showToast={showToast} openSocial={() => setActiveTab("social")} />}
             {activeTab === "settings" && <SettingsPage showToast={showToast} />}
           </Suspense>
         </main>

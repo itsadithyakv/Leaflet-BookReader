@@ -42,12 +42,23 @@ const previewWrite = (all: Annotation[]) => {
   }
 };
 
+/**
+ * A row of the annotations table as the backend lists it. The table also
+ * holds rows of other kinds (a character sheet's `person...`, a `word` looked
+ * up), which `annotations_list` returns with the rest.
+ */
+export type AnnotationRow = Omit<Annotation, "kind"> & { kind: string };
+
+/** Whether a row is a bookmark or a highlight, and not one of the other kinds. */
+export const isAnnotation = (row: AnnotationRow): row is Annotation => row.kind === "bookmark" || row.kind === "highlight";
+
 export const annotationService = {
+  /** A book's bookmarks and highlights, and only those: rows of other kinds are left out here, once, for every caller. */
   async list(bookId: string): Promise<Annotation[]> {
     if (!isTauri()) {
-      return previewAll().filter((item) => item.bookId === bookId && !item.deletedAt);
+      return (previewAll() as AnnotationRow[]).filter((item) => item.bookId === bookId && !item.deletedAt).filter(isAnnotation);
     }
-    return invoke<Annotation[]>("annotations_list", { bookId });
+    return (await invoke<AnnotationRow[]>("annotations_list", { bookId })).filter(isAnnotation);
   },
 
   /**

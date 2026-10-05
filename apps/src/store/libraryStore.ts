@@ -347,10 +347,18 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     set({ metadataRefreshing: false });
   },
   updateBookProgress(id, progress, position) {
+    // Stamped as the database stamps it (db `update_progress`): only when the
+    // place really moved, so this copy says the same as the next one loaded.
+    const moved = (book: Book) => Math.abs((book.progress ?? 0) - progress) > 1e-6 || (position != null && position !== book.position);
     set({
       books: get().books.map((book) =>
         book.id === id
-          ? { ...book, progress, position: position === undefined ? book.position : position }
+          ? {
+              ...book,
+              progress,
+              position: position === undefined ? book.position : position,
+              progressUpdatedAt: moved(book) ? new Date().toISOString() : book.progressUpdatedAt
+            }
           : book
       )
     });

@@ -9,7 +9,12 @@ export type DayRecord = {
   graceUsed: boolean;
 };
 
-/** One entry on the shelf. `burnedAt` marks a book lost to a broken streak. */
+/**
+ * One entry on the shelf. `burnedAt` marks a book lost to a broken streak:
+ * an earlier version burned the newest books when a streak broke. This one
+ * burns nothing (Pip catches a cold instead), but a book already burned, or
+ * burned by a device still on the old version, keeps its mark.
+ */
 export type FocusSessionRecord = {
   id: string;
   startedAt: string;
@@ -38,6 +43,26 @@ export type FreeReadRecord = {
   minutes: number;
 };
 
+/**
+ * Pip's cold: what a broken streak does now, in place of burning books.
+ * She catches it when a streak of three days or more breaks, and has it from
+ * the day after the missed day until the daily goal is met on any day since,
+ * or for three days, whichever is sooner (`habit::cold` in habit/mod.rs). It
+ * does not touch her mood.
+ */
+export type PipCold = {
+  /** The day the streak broke: the first day missed. Local, YYYY-MM-DD. */
+  since: string;
+  /** How many days the streak had run. */
+  brokeFrom: number;
+  /** How far the cure has come, 0 to 1: today's reading against today's goal. Under 1 while she has it. */
+  cure: number;
+  /** Whole minutes of reading today that would cure it. */
+  minutesLeftToday: number;
+  /** Days until it passes by itself, today included: 3, 2 or 1. */
+  daysLeft: number;
+};
+
 export type HabitSnapshot = {
   streak: number;
   longestStreak: number;
@@ -52,10 +77,10 @@ export type HabitSnapshot = {
   freeReads: FreeReadRecord[];
   shelfCount: number;
   peakShelf: number;
-  /** Set on the one evaluation that detects a break. */
+  /** Set on the one evaluation that detects a break. Nothing is taken from the shelf for it. */
   brokeFrom: number | null;
-  /** Ids burned by that evaluation, for the UI to animate. Empty afterwards. */
-  justBurned: string[];
+  /** Pip's cold, while she has one: worked out from the ledger each time, never stored. */
+  cold: PipCold | null;
   /** Every seed ever earned (Pip's currency; see habit/seeds.rs). The balance is on the Pip tab. */
   seedsEarned: number;
   /** All the water reading has poured on Pip's garden, and the plants ripe to pick. */
@@ -91,7 +116,7 @@ export const EMPTY_SNAPSHOT: HabitSnapshot = {
   shelfCount: 0,
   peakShelf: 0,
   brokeFrom: null,
-  justBurned: [],
+  cold: null,
   seedsEarned: 0,
   gardenWater: 0,
   gardenRipe: 0

@@ -263,10 +263,10 @@ describe("reading held for the ledger", () => {
   it("shows a streak found broken by a credit, not only by opening Leaflet", async () => {
     // Leaflet sat open for days: the first minute read is what asks the ledger.
     useHabitStore.setState({ pendingBreak: null });
-    credit.mockResolvedValue({ ...EMPTY_SNAPSHOT, brokeFrom: 5, justBurned: ["s1", "s2"] });
+    credit.mockResolvedValue({ ...EMPTY_SNAPSHOT, brokeFrom: 5 });
     store().addReading(60_000);
     await store().flushReading();
-    expect(store().pendingBreak).toEqual({ brokeFrom: 5, burned: ["s1", "s2"] });
+    expect(store().pendingBreak).toEqual({ brokeFrom: 5 });
   });
 
   it("counts the held reading before a session is recorded, and shows it with the wrap-up", async () => {
@@ -299,17 +299,57 @@ describe("reading held for the ledger", () => {
     expect(store().pendingReading).toBeNull();
   });
 
+  it("says in the wrap-up that a session's reading cured Pip's cold, however the goal was met", async () => {
+    const ill = { since: "2026-10-01", brokeFrom: 5, cure: 0.5, minutesLeftToday: 10, daysLeft: 3 };
+    let ledger = 10;
+    const answer = () => ({ ...EMPTY_SNAPSHOT, todayMinutes: ledger, todayMet: ledger >= 20, cold: ledger >= 20 ? null : ill });
+    useHabitStore.setState({ snapshot: answer(), wrapUp: null, pendingBreak: null });
+    credit.mockImplementation(async (minutes) => {
+      ledger += minutes;
+      return answer();
+    });
+    vi.spyOn(habitService, "recordSession").mockImplementation(async () => answer());
+
+    // The goal is met by a flush in the middle of the session, as it usually
+    // is: by the time the session stops, the snapshot already has no cold.
+    store().startSession({ startedAt: new Date().toISOString(), durationMinutes: 20 });
+    store().addReading(10 * MINUTE);
+    await store().flushReading();
+    expect(store().snapshot.cold).toBeNull();
+    store().addSessionReading(12 * MINUTE);
+    await store().stopSession({ reason: "completed", cleanSession: true });
+    expect(store().wrapUp).toMatchObject({ cold: null, coldCured: true });
+
+    // The next session the same day has nothing to cure.
+    store().startSession({ startedAt: new Date().toISOString(), durationMinutes: 20 });
+    store().addSessionReading(5 * MINUTE);
+    await store().stopSession({ reason: "manual_end", cleanSession: false });
+    expect(store().wrapUp).toMatchObject({ cold: null, coldCured: false });
+  });
+
+  it("says in the wrap-up how far the cure has come when the session did not finish it", async () => {
+    const ill = { since: "2026-10-01", brokeFrom: 5, cure: 0.4, minutesLeftToday: 12, daysLeft: 2 };
+    const answer = { ...EMPTY_SNAPSHOT, todayMinutes: 8, cold: ill };
+    useHabitStore.setState({ snapshot: answer, wrapUp: null, pendingBreak: null });
+    credit.mockResolvedValue(answer);
+    vi.spyOn(habitService, "recordSession").mockResolvedValue(answer);
+    store().startSession({ startedAt: new Date().toISOString(), durationMinutes: 20 });
+    store().addSessionReading(8 * MINUTE);
+    await store().stopSession({ reason: "manual_end", cleanSession: false });
+    expect(store().wrapUp).toMatchObject({ cold: ill, coldCured: false });
+  });
+
   it("takes the ledger's answer to a goal change, a break it found included", async () => {
     // Lowered to what has been read, today is met on the change itself.
     useHabitStore.setState({ pendingBreak: null });
     const answer = { ...EMPTY_SNAPSHOT, goalMinutes: 20, todayMinutes: 26, todayMet: true };
-    const setGoal = vi.spyOn(habitService, "setGoal").mockResolvedValue({ ...answer, brokeFrom: 3, justBurned: ["s1"] });
+    const setGoal = vi.spyOn(habitService, "setGoal").mockResolvedValue({ ...answer, brokeFrom: 3 });
     const snapshot = vi.spyOn(habitService, "snapshot").mockResolvedValue(answer);
     await store().setGoalMinutes(20);
     expect(setGoal).toHaveBeenCalledWith(20);
     expect(setGoal.mock.invocationCallOrder[0]).toBeLessThan(snapshot.mock.invocationCallOrder[0]);
     expect(store().snapshot.todayMet).toBe(true);
-    expect(store().pendingBreak).toEqual({ brokeFrom: 3, burned: ["s1"] });
+    expect(store().pendingBreak).toEqual({ brokeFrom: 3 });
   });
 
   it("asks the ledger again once the day has changed", async () => {
