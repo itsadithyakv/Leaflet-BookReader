@@ -6,3 +6,5 @@ import "./fantasy.js";
 import "./classics.js";
 import "./classics2.js";
 import "./modern.js";
+import "./romance.js";
+import "./popular.js";

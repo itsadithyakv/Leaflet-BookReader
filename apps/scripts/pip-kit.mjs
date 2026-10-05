@@ -432,7 +432,7 @@ Categories: ${[...byCat.keys()].join(", ")}.
 
 ## Not included
 
-Pip's 51 book-nod scenes (dragons, watchful eyes and other nods to famous books)
+Pip's 71 book-nod scenes (dragons, watchful eyes and other nods to famous books)
 stay in the app. They riff on other people's stories, which is fine as an
 in-app easter egg but riskier on marketing material.
 `

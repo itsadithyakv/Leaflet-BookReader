@@ -16,7 +16,7 @@ export { ACCESSORIES, SLOT_ORDER } from "./accessories.js";
 import { dress as wear } from "./accessories.js";
 
 /**
- * The book scenes (51 of them) are only needed now and then, so they load in
+ * The book scenes (71 of them) are only needed now and then, so they load in
  * their own chunk after start-up rather than with the app. Importing the
  * module adds them to LIB; this resolves once that has happened.
  */
