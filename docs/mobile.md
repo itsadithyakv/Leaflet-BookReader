@@ -61,9 +61,13 @@ show on the first day with a phone.
 | **Sync runs on launch and when a book closes.** | Android stops a background app without warning: the last half hour never leaves the phone. | Also sync when the app goes to the background and when it comes back, and pull before offering a place. |
 | **Seeds spent on both devices offline can overdraw** (shows as 0, the garden refills). | Rare; harmless. | Leave. |
 
-Also in this stage: split `ReaderView.tsx` (about 7,500 lines). Every phone
-change to the reader lands in it, and it is already the file most likely to
-lose work.
+Also in this stage: split `ReaderView.tsx`. **Done 2026-10-05**: the reader
+is now a page of 150 lines over 24 hook files and 8 components in
+`apps/src/readers/text/` ([features.md](features.md), "Where its own code
+lives"). A phone change to the reader now lands in the file for its concern:
+the keys in `useReaderKeys.ts`, page turns and their gestures in
+`usePageTurning.ts`, the toolbar and its menu in `ReaderToolbar.tsx` and
+`ReaderMoreMenu.tsx`, SpeedRead's stage in `SpeedReadStage.tsx`.
 
 **Done when:** two copies of the desktop app on two Windows accounts, signed
 in to the same accounts, pass a written two-device script (read on both in one

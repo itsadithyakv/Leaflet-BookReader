@@ -158,3 +158,47 @@ One caveat worth knowing when measuring animation: if the browser pane is
 hidden, the document timeline is frozen, so a CSS transition sits pinned at its
 start value and a transform will look like it is not applying at all. Bypass the
 transition (`el.style.transition = "none"`) before measuring geometry.
+
+**Checking a move of the text reader's code.** The reader has no component
+tests, so a change that should change nothing (the split of `ReaderView.tsx`
+into `readers/text/`, 2026-10-05) is checked by walking the same book the same
+way before and after, and comparing every number. Two walks are kept with the
+other aids in `apps/node_modules/.leaflet-test/`:
+
+- `split-measure.txt`: Mistborn in both layouts (`__split.run(stage, tag)`,
+  stages `scrollA` to `scrollE` and `pagesA` to `pagesC`): opening, scrolling
+  across chapter ends, the keys, back and forward, Smart Read, reopening at
+  the saved line, opening at 40%, and what is saved on leaving. 48 readings.
+- `split-more.txt`: what that does not touch (`__more.run(stage, tag)`,
+  stages `moreA` to `moreF`): the chapter list, the shortcuts sheet, a
+  bookmark, search, type size, page colour, scrolling to pages, auto-scroll,
+  SpeedRead, a footnote and a picture in the fixture book, a selection and a
+  highlight. 58 readings.
+
+`__split.diff(a, b)` and `__more.diff(a, b)` list what differs between two
+tagged runs. The readings are kept in `localStorage` under `splitmeasure.`,
+so they outlive a reload (and should be removed when done). Compared like
+with like, two runs of the same code agree on every reading. What "like with
+like" took to learn:
+
+- **The same page history.** A chapter measures a pixel taller at the end of
+  a long session than on a page just loaded (16223 against 16222 for
+  Mistborn's chapter 14). Load the page afresh before each side's run.
+- **The same stored state.** The preview keeps bookmarks, the learned pace
+  and the last auto-scroll speed in `localStorage`, so one run moves where
+  the next starts. `__base.keep()` once; `__base.restore()` and a reload
+  before each side.
+- **The same display scale.** `devicePixelRatio` went from 1.5 to 1 under a
+  run (the machine had slept) and every box moved by a pixel. Read it with
+  each run.
+- **Not beside a timer.** The toolbar hides 2.6 s after its menu shuts; a
+  reading taken 2.55 s after came out both ways. How far Smart Read has got
+  after a timed second is a count by the clock, and varies by a word or two
+  between runs of the same code.
+- **One stage a call** when a call nears 45 s: one that times out carries on
+  in the page, and the next runs on top of it.
+
+To find a read of the scope made too early (see features.md, "Where its own
+code lives"), wrap `reader` in a `Proxy` in `ReaderView.tsx` for the length of
+a test, noting any string key read that is not yet in the object. Over about a
+thousand renders of both walks there were none.

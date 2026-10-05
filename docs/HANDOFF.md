@@ -11,6 +11,9 @@ is in [deploy.md](deploy.md) (the checklist) and
 pushed to GitHub (2026-10-05; `main` is untouched): the first two days' work, "Pip round two", the reader bug pass and
 "The third round", each described below. No 1.2.0 package has been built.
 If you are a new session picking the work up, go to "Start here" next.**
+**The split of `ReaderView.tsx` (item 1 of "Start here") was done later on
+2026-10-05, and the owner chose to ship 1.2 with it: it is committed on
+`release/1.2` and pushed, two commits after `8078ca2`.**
 The owner tested
 1.1.0 and sent a long list of bugs and wishes, then asked for a set of new
 Pip features. The packages in `target\msix` are 1.1.0 and older.
@@ -19,7 +22,7 @@ Pip features. The packages in `target\msix` are 1.1.0 and older.
 | --- | --- |
 | `main` | Pushed to GitHub at `399f6c4` |
 | `release/1.1` | Two commits on `main`, not pushed as a branch of its own: `8eb6a1e` version 1.1.0, `51b0341` release docs without a fixed version |
-| `release/1.2` | 24 commits on `release/1.1`, **pushed** as `origin/release/1.2` (which carries `release/1.1`'s two commits with it); the last five are the third round (backend, readers, Pip, app, docs) |
+| `release/1.2` | 26 commits on `release/1.1`, **pushed** as `origin/release/1.2` (which carries `release/1.1`'s two commits with it); five are the third round (backend, readers, Pip, app, docs), the last two the reader split (`apps/src/pages/ReaderView.tsx` from 9,137 lines to 148, `apps/src/readers/text/` new) and its docs |
 | Working tree | Clean, bar the untracked `.claude/` (the preview's launch file) |
 
 The commits are split by folder, not by change, because the big files
@@ -40,16 +43,38 @@ owner". The 1.2 release does not wait on anything in the list below.
 
 **To build, in order:**
 
-1. **Split `apps/src/pages/ReaderView.tsx`** (about 8,000 lines). Do it
-   alone, before anything else touches the readers, with nobody else editing:
-   it is a move of code, not a change of behaviour, and must leave every test
-   and every measurement where it was. Natural seams, by what the file
-   already keeps apart: the book-opening effect (contents, the content hook,
-   themes), places and progress, the key and pointer handlers, Smart Read /
-   SpeedRead / auto-scroll, the chapter list and dock wiring, the toolbar and
-   menus (JSX). Hooks under `apps/src/readers/`, each with the refs it owns.
-   Check with the preview harnesses that Mistborn (`final-empire.epub`)
-   measures the same in both layouts before and after.
+1. **Split `apps/src/pages/ReaderView.tsx`: done 2026-10-05, in 1.2.**
+   The file was one component of 9,000 lines (9,137, not "about 8,000"). It
+   is now 148 lines: a list of hook calls round a frame of JSX. Its state and
+   behaviour are in `apps/src/readers/text/`: 24 hook files, each with the
+   refs it owns, 8 components for what is drawn, and `scope.ts`. The map of
+   files and the three rules that hold them together are in
+   [features.md](features.md), "Where its own code lives". **Read those rules
+   before changing the reader**: the hooks share one object a render, the
+   effects are called in a fixed order, and a hook reaches a later hook only
+   through `reader.name` inside something that runs later.
+   - *It is a move.* Every one of the 523 statements is in its new file token
+     for token (checked with the TypeScript compiler), changed in one way
+     only: 49 reads of something a later hook adds (25 names) are written
+     `reader.name`.
+     The effects run in their old order. Four comments that sat above the
+     wrong statement were put above the right one, the one file's section
+     rules (`// ---- reading pace ----`) went, and two notes on code no
+     longer there were dropped ("flip mode removed", "no auto-advance
+     listeners").
+   - *It measures the same.* 106 readings over 14 stages, original against
+     split: Mistborn in both layouts (at two display scales, 1.5 and 1), and
+     a second walk over the chapter list, search, bookmarks, type size, page
+     colours, switching layout, auto-scroll, SpeedRead, footnotes, a picture,
+     a selection and a highlight. All the same. How, and what made two runs
+     comparable, is in [testing.md](testing.md).
+   - `tsc` clean, 2,111 app tests, `vite build` succeeds. No Rust changed.
+   - *Not done:* nothing was seen on a screen (the pane was hidden, as
+     before), and the installed app was not run. The book-opening effect is
+     still one effect of 1,300 lines (`useBookOpening.ts`): taking it apart
+     would be a change, not a move. Three functions nothing calls came across
+     as they were: `applyContentFlowStyles` (`useReaderLook.ts`),
+     `displayNextSpine` and `displayPrevSpine` (`useChapters.ts`).
 2. **The phone, stage 0** ([mobile.md](mobile.md)): tokens kept on Android
    (the `keyring` crate has no Android store), minutes per device in a ledger
    day (`sync/merge.rs` takes the larger of two devices' minutes, not their
@@ -137,8 +162,8 @@ cd D:\Leaflet\apps\src-tauri\msix
 
 Details for every item are in [features.md](features.md); this is the map.
 
-**Text reader** (`pages/ReaderView.tsx`, now about 6,800 lines, with its parts
-in `src/readers/`):
+**Text reader** (`pages/ReaderView.tsx`; since the split its state and
+behaviour are in `src/readers/text/`, its helpers in `src/readers/`):
 
 - Scrolling is one continuous book (epub.js `continuous` manager): no more
   jumping to the next chapter before its end is read. The chapter list and
@@ -385,7 +410,8 @@ everything under "For the phone" in features.md and in [mobile.md](mobile.md).
 
 **Deliberately not done in this round:** splitting `ReaderView.tsx` (no
 reader-visible gain, real risk before a release: do it first thing after 1.2
-ships), and the two-device faults in the phone plan's stage 0 (they change
+ships; it has since been done, before 1.2 was built, and ships in it:
+"Waiting on the owner", 0), and the two-device faults in the phone plan's stage 0 (they change
 the sync document, which copies of 1.0 and 1.1 already installed would not
 understand: they go out with the phone release).
 
@@ -395,10 +421,18 @@ small edits, twice in the bug pass and five more times in the third round,
 each time against a written rule. Every time the result was checked and the
 tests passed, but with several engineers in one file it is the thing most
 likely to lose work silently. **Split the file before the next round**; the
-phone plan says the same.
+phone plan says the same. (Done 2026-10-05: "Start here", item 1. The rule
+still stands for the other shared files, `lib.rs` and `index.css`.)
 
 ## Waiting on the owner
 
+0. **1.2 ships with the reader split** (the owner's choice, 2026-10-05; it
+   had been planned for "first thing after 1.2 ships"). It changes nothing a
+   reader can see, and was measured so ("Start here", item 1); what it has
+   not had is a look in the installed app, so the text reader comes first in
+   the list below: open a book in each layout, turn pages, start Smart Read,
+   make a highlight, close and reopen at the line. To build 1.2 without it
+   instead, build from `8078ca2`.
 1. **Look at it.** In order of risk:
    - In the installed app (the preview has no backend): import through the
      dialog and read its summary; a PDF with no cover taking its first page;

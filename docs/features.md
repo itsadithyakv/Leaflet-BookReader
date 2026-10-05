@@ -253,6 +253,71 @@ The reader's helpers live beside it in `src/readers/`: progress
 and pacing, page turns (`pageTurn.ts`), the notes panel, search and the
 selection bar.
 
+**Where its own code lives.** Until 2026-10-05 the reader was one component
+of 9,000 lines. The page file is now a list of hook calls round a frame of
+JSX (about 150 lines); its state and behaviour are in `src/readers/text/`, a
+file a concern:
+
+| File | What it holds |
+| --- | --- |
+| `useReaderCore.ts` | The page's elements, the book and its rendition, the reading mode, what was saved with the book, the toast |
+| `useReaderLook.ts` | Type size and face, line length, scrolling or pages, page colours; putting them into the book's documents (and the effects for a change of theme and of type) |
+| `useReaderScroll.ts` | The scrolling window: finding it, moving it, asking for the next chapter (and the effect that watches it) |
+| `useReaderPlace.ts` | The reading line, the saved place, a page's place in the pages layout, going to a place (and the relayout on resize) |
+| `useReaderPrefs.ts` | What is saved with the book on this device |
+| `useReaderWords.ts` | The words on the page, indexed for Dotty, Smart Read and SpeedRead |
+| `useReaderDot.ts` | Dotty, and the mark on the last line read |
+| `useReadingPace.ts` | The reader's pace: learning it, keeping it |
+| `useAutoScroll.ts` | Auto-scroll and its engine |
+| `useSmartRead.ts` | Smart Read's pace and the reader's say in it |
+| `useReadingModes.ts` | Asking for and starting Smart Read and SpeedRead; the engine that runs them word by word; what hands-free reading waits on |
+| `useChapters.ts` | The contents as places; chapters, edges, the progress bar, back and forward |
+| `useReaderOutlook.ts` | The chapter being read, how far through, how long left |
+| `useContentsList.ts` | The chapter list: pinned, peeking, showing itself once |
+| `usePageTurning.ts` | Turning pages, and the pages layout's own clicks, drags and wheel |
+| `useReaderMarks.ts` | Bookmarks, highlights, the selection, search |
+| `useNotesAndPictures.ts` | Footnotes shown in place, pictures opened large |
+| `useReaderPanels.ts` | The type panel, the ··· menu, the shortcuts sheet, the walkthrough |
+| `useReaderKeys.ts` | The key handler, and what Escape closes first |
+| `useReaderSession.ts` | The focus session: progress, checkpoints, leaving mid-session |
+| `useReaderChrome.ts` | The toolbar hiding itself; the characters feature's hook |
+| `useReaderCover.ts` | The cover |
+| `useReaderLifecycle.ts` | Closing the reader; another book in the same reader |
+| `useBookOpening.ts` | The book-opening effect: one effect of 1,300 lines, as it always was |
+| `ReaderToolbar.tsx`, `ReaderMoreMenu.tsx`, `ReaderContentsPanel.tsx`, `ReaderPage.tsx`, `SpeedReadStage.tsx`, `ReaderDialogs.tsx`, `ReaderSessionMarks.tsx`, `ReaderPaceControls.tsx` | What is drawn. They take the scope and hold no state |
+| `scope.ts`, `constants.ts` | The scope's types; a constant two files share |
+
+The split moved code and changed none: the same statements, in files. What
+holds them together, and has to be kept:
+
+- **One scope a render.** `ReaderView` makes a plain object, `reader`, on
+  every render. Each hook takes what it needs out of it at the top, and adds
+  what it owns (`Object.assign(reader, useX(reader))`); a hook returns only
+  what another file uses. Made afresh each render, it gives a function or an
+  effect the values of the render that made it, as the one closure did.
+- **Two blocks of hooks, and the second has an order.** The first block
+  declares (refs, state, functions) and runs no effects, so its order is free
+  apart from what a hook reads while rendering. The second holds every effect
+  and is called in the order those effects have always run: effects run in
+  the order they are declared, and the reader leans on it. Do not reorder it;
+  a new effect goes where it should run among the others. (A subscription to
+  a store, `useLibraryStore` and its kind, is not an effect in this sense and
+  sits with the declarations.)
+- **Reaching a hook called later.** The parts call each other in circles (the
+  word index moves Dotty, Dotty asks the word index where a word is), so a
+  hook may use what a later hook adds, but only inside something that runs
+  later: an effect, a handler, a function. It is written `reader.name` where
+  it is used, never taken out at the top, with the name in the hook's
+  `Later<...>` and its type in `ReaderLater` (`scope.ts`). TypeScript checks
+  the type where `ReaderView` hands the scope over. Nothing checks that the
+  read is late: `reader.name` while rendering is `undefined`. There are 25
+  such names.
+- **Where a new thing goes.** In the hook whose concern it is; into that
+  hook's `return` only if another file needs it.
+
+How the split was checked is in [testing.md](testing.md) ("Checking a move of
+the text reader's code").
+
 **Scrolling is one continuous book** (epub.js's `continuous` manager, flow
 `scrolled`). The chapters follow each other down the page: the next one is
 fetched as its neighbour's end comes within 500 px, the one before as its top
@@ -733,7 +798,7 @@ book before this one in its series can be brought in as known from the first
 page. Nothing leaves the device. Turning the switch off stops all of it and
 deletes nothing. Storage: [data-model.md](data-model.md#annotations).
 
-In the reader, ReaderView mounts `usePeopleReader` and gives it the book, the
+In the reader, `readers/text/useReaderChrome.ts` mounts `usePeopleReader` and gives it the book, the
 rendition, the reader's place and its own jump. The card shares the selection
 bar's dock (above the chapter dock and the pace pill); the panel sits beside
 search, and opening one closes the other. A card or the panel pins the
@@ -1313,7 +1378,9 @@ image toggles the original.
 **Where:** `readers/paceModel.ts` (the pace), `readers/paceTracker.ts` (turning
 reading into samples), `readers/smartScroll.ts` (page steps),
 `readers/ReaderTour.tsx`, `services/readingProfileService.ts`,
-`sync/reading.rs`, `components/ReadingPaceCard.tsx`, and `ReaderView.tsx`
+`sync/reading.rs`, `components/ReadingPaceCard.tsx`, and in `readers/text/`:
+`useSmartRead.ts`, `useReadingModes.ts` (the engine), `useReaderWords.ts`,
+`useReaderDot.ts`, `useReadingPace.ts`
 
 A dot, **Dotty**, paces the reader through the text at their own pace; an RSVP
 overlay (SpeedRead) can present one word at a time. With no pin Dotty follows
