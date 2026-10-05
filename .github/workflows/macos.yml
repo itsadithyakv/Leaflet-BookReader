@@ -1,0 +1,58 @@
+# Builds Leaflet for macOS (a universal .dmg: Apple silicon and Intel) on a
+# GitHub Mac, because a Mac build cannot be made on Windows. Run it by hand
+# from the Actions tab ("Run workflow") on the branch to build; the .dmg is
+# attached to the run as an artifact. Nothing is published or deployed.
+#
+# The build is NOT signed or notarised (that needs an Apple Developer ID), so
+# macOS will refuse to open it on a double click: right-click the app and
+# choose Open the first time, or run `xattr -cr /Applications/Leaflet.app`.
+#
+# This workflow has not been run yet. The app has only ever been built for
+# Windows, so the first run may stop on code that does not compile for macOS;
+# its log will say where.
+name: macOS build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dmg:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: apps
+    env:
+      # Compiled into the app, like the Windows release (see docs/deploy.md).
+      # The two Google values are optional repository secrets: without them
+      # the app builds and runs, and Google Drive backup is unavailable in it.
+      LEAFLET_GOOGLE_CLIENT_ID: ${{ secrets.LEAFLET_GOOGLE_CLIENT_ID }}
+      LEAFLET_GOOGLE_CLIENT_SECRET: ${{ secrets.LEAFLET_GOOGLE_CLIENT_SECRET }}
+      VITE_ENABLE_ACCOUNTS: "true"
+      VITE_ENABLE_COMMUNITY: "true"
+      LEAFLET_API_BASE: https://leafletapp.duckdns.org
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/package-lock.json
+      - run: npm ci
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/src-tauri
+      # tauri.conf.json lists the Windows installers; --bundles asks for the
+      # Mac ones for this run without changing that file.
+      - name: Build the app and its disk image
+        run: npm run tauri build -- --target universal-apple-darwin --bundles app,dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Leaflet-macOS-universal
+          path: apps/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error
