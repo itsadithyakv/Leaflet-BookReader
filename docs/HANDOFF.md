@@ -1,4 +1,4 @@
-# Handoff — 2026-10-04
+# Handoff — 2026-10-05
 
 A snapshot for the next session, not permanent documentation. Delete it once
 acted on. The durable reference is [docs/README.md](README.md); how to release
@@ -8,8 +8,10 @@ is in [deploy.md](deploy.md) (the checklist) and
 ## Read this first
 
 **The version is 1.2.0. Everything is committed on `release/1.2` (not
-pushed): the first two days' work, "Pip round two" below, and the reader bug
-pass below it. No 1.2.0 package has been built.** The owner tested
+pushed): the first two days' work, "Pip round two", the reader bug pass and
+"The third round", each described below. No 1.2.0 package has been built.
+If you are a new session picking the work up, go to "Start here" next.**
+The owner tested
 1.1.0 and sent a long list of bugs and wishes, then asked for a set of new
 Pip features. The packages in `target\msix` are 1.1.0 and older.
 
@@ -17,23 +19,98 @@ Pip features. The packages in `target\msix` are 1.1.0 and older.
 | --- | --- |
 | `main` | Pushed to GitHub at `399f6c4` |
 | `release/1.1` | Two commits on `main`, **not pushed**: `8eb6a1e` version 1.1.0, `51b0341` release docs without a fixed version |
-| `release/1.2` | Nine commits on `release/1.1`, **not pushed**: version, logo, server, backend, Pip, readers, app, docs, handoff |
+| `release/1.2` | 24 commits on `release/1.1`, **not pushed**; the last five are the third round (backend, readers, Pip, app, docs) |
 | Working tree | Clean, bar the untracked `.claude/` (the preview's launch file) |
 
 The commits are split by folder, not by change, because the big files
 (`ReaderView.tsx`, `lib.rs`, `index.css`) carry several themes each. Only the
-tip was checked: a commit in the middle of the eight may not type-check alone.
+tip was checked: a commit in the middle of a round may not type-check alone.
 
 Suggested next step: the owner looks at it (list below), builds the package,
 redeploys the server, then fast-forwards `main` and pushes.
 
-## Current state (all run together after the bug pass, 2026-10-05)
+## Start here: what is left to build
+
+Two different lists. The first is the owner's and no session can do it; the
+second is the building that remains, in the order to do it.
+
+**The owner's (do not attempt):** build the package, look at the app, redeploy
+the server and publish the legal pages, push. All under "Waiting on the
+owner". The 1.2 release does not wait on anything in the list below.
+
+**To build, in order:**
+
+1. **Split `apps/src/pages/ReaderView.tsx`** (about 8,000 lines). Do it
+   alone, before anything else touches the readers, with nobody else editing:
+   it is a move of code, not a change of behaviour, and must leave every test
+   and every measurement where it was. Natural seams, by what the file
+   already keeps apart: the book-opening effect (contents, the content hook,
+   themes), places and progress, the key and pointer handlers, Smart Read /
+   SpeedRead / auto-scroll, the chapter list and dock wiring, the toolbar and
+   menus (JSX). Hooks under `apps/src/readers/`, each with the refs it owns.
+   Check with the preview harnesses that Mistborn (`final-empire.epub`)
+   measures the same in both layouts before and after.
+2. **The phone, stage 0** ([mobile.md](mobile.md)): tokens kept on Android
+   (the `keyring` crate has no Android store), minutes per device in a ledger
+   day (`sync/merge.rs` takes the larger of two devices' minutes, not their
+   sum), a document version so an older app does not write a newer document,
+   sync when the app goes to the background, and a written two-device test
+   run on two copies of the desktop app. This changes the sync document:
+   design it so that 1.0, 1.1 and 1.2, which are in readers' hands and know
+   none of it, cannot lose data when they meet it, and write that design down
+   before coding. During this stage, run the one-hour Drive experiment in
+   mobile.md ("Signing in"), which needs the owner's Google project.
+3. **The phone, stages 1 to 6**, as mobile.md orders them. The owner can
+   build for Android on this machine today (mobile.md, "Building it today":
+   the SDK, NDK and JDK 21 are installed; three environment variables are
+   not set). A measured list of what breaks at 360 x 800 with touch is in
+   features.md, "The readers' chrome", last bullet.
+4. **Small things left**, any time, none blocking:
+   - a very large PDF page zoomed far in is soft: draw only the part in view
+     (a second drawing mode in both PDF layouts; features.md has the numbers);
+   - links on the two light page finishes are the browser's blue: give them a
+     reader's accent as the dark finishes have (it recolours every book's
+     links, so ask the owner first);
+   - a PDF's subject and keywords are not read as genres;
+   - bookmarks, search results and link tooltips in a PDF give the file's
+     page count, not the printed number;
+   - converting the owner's three Kindle files has never been tried: Calibre
+     is not installed on this machine (do not install it; ask);
+   - the Relations drawing with real people, the page reader's Back chip and
+     the dock with a very long chapter name at 380 wide were never measured;
+   - "Known gaps" and "Decide" below.
+
+**How the owner works, learned the slow way:**
+
+- **Decide, do not ask**, on judgement calls; say what was decided and how to
+  undo it. Ask only where the choice is the owner's alone (money, the store,
+  anything that recolours or re-lays every book).
+- **Commit only when asked**, on `release/1.2` or a branch off it, in themed
+  commits; never push.
+- **The owner deploys and builds releases.** Never touch the server, the
+  database, secrets, `.env` or the signing key; never run the MSIX build or
+  launch the desktop app. Health checks by `curl` are fine.
+- **`D:\Books` is the owner's library: read only**, never quoted beyond a few
+  words. Copies for testing are in
+  `apps/node_modules/.leaflet-test/library/`. No network calls made by hand
+  with the books' titles, and the installed app's database is not to be read.
+- **Reports in plain words, with numbers**, bugs first, and always what was
+  not checked and what only eyes can judge. Nothing in this whole round was
+  seen on a screen: the preview pane is hidden, so everything was measured by
+  script ([testing.md](testing.md) says how).
+- **Several engineers at once** worked well with: a written brief per
+  engineer, one owner per file, a shared `CHANGES.md` line before touching a
+  shared function, notes saved as they go, and the rule "small edits only,
+  never a script that reads and rewrites a shared file", which was broken
+  seven times and never cost work, by luck. Item 1 above removes the reason.
+
+## Current state (all run together after the third round, 2026-10-05)
 
 | | |
 | --- | --- |
 | `npx tsc --noEmit -p .` in `apps/` | clean |
-| App tests (`npx vitest run` in `apps/`) | 117 files, 1779 passing |
-| Rust tests (`cargo test --lib`) | 511 passing, 2 ignored |
+| App tests (`npx vitest run` in `apps/`) | 135 files, 2111 passing |
+| Rust tests (`cargo test --lib`) | 549 passing, 3 ignored (one reads `D:\Books` and skips where it is absent) |
 | `LEAFLET_STORE_BUILD=1 cargo check` | clean |
 | Server tests (`npm test` in `server/`) | 88 passing |
 | `npm run build` | succeeds; it now emits two pages, `index.html` and `desktop-pip.html` |
@@ -251,22 +328,89 @@ the postcard at thumbnail size.
   start and end when scrolling (Ctrl for the book); a plain `<hr>` now shows
   as a hairline in every book.
 
-**Left from the bug pass, most worth doing first:** the native scrollbar's
-runaway when its thumb is held at an end (hide it, or fetch only on release);
-click zones and swipe to turn pages; links inside a PDF are not clickable;
-no Back after a jump in the PDF reader; a full-page picture flies past in
-Smart Read; "finished" (99%) arrives a little before the story's last page;
-Scroll in the PDF reader is a little soft on a 4K display at 200%.
+## The third round (uncommitted)
 
-**Process note:** twice an engineer changed `ReaderView.tsx` with a script
-that rewrote the whole file instead of small edits. Each time the result was
-checked (34 markers of the other's work, all present) and the tests passed,
-but with several engineers in one 7,000-line file it is the thing most likely
-to lose work silently. The file needs splitting before the next round.
+Everything here is in features.md with its numbers; this is the map.
+
+- **"Fix them all"**: what the bug pass had left. The scrollbar's runaway when
+  its thumb is held (`readers/scrollbarHold.ts`); click zones, swipes and the
+  wheel to turn pages, right-to-left books; links in a PDF, Back and Forward
+  there, sharper zoom; Smart Read rests at a full-page picture; "finished"
+  arrives at the story's last line; sentences followed by speech now pause.
+- **Responsive**: every screen measured by script at thirteen window sizes
+  from 380 x 480 to 3440 x 1440 (features.md, "Responsive layout"): the cover
+  grid counts its own width, pages have a widest size, dialogs fit, the Pip
+  tab's room no longer shrinks itself, the readers' popovers scroll and stay
+  in the window. The readers' chrome was swept at all thirteen sizes in both
+  readers and both layouts (78 runs). Settings gained a **Habit** tab (the
+  daily goal, focus and reminders), because Reading's five cards fitted no
+  1366 x 768 window.
+- **The owner's real library** (`D:\Books`, 19 files; read only, copies under
+  `apps/node_modules/.leaflet-test/library/`). Three engineers:
+  - *Import*: 8 of 19 were named wrongly (site tags, "Last, First", a file
+    name as the title); no book had ever had a genre (Open Library stopped
+    sending subjects unasked); Kindle headers read without Calibre; chapters
+    found for a PDF with no outline.
+  - *The four-novel set*: half its contents were missing (a repeated id in
+    the NCX), its last novel counted as back matter, search stopped at 200
+    matches. The chapter list now groups by book.
+  - *The other EPUBs*: nearly every real book lost its centring, its heading
+    sizes and its scene breaks, because the one novel earlier passes used
+    happens to mark them in the one way the reader spared
+    (`readers/bookBlocks.ts`). A chapter list is made for a book without one
+    (`readers/autoContents.ts`), and chapters that share a file are chapters
+    for every purpose (`readers/chapterSpan.ts`).
+- **The chapter list is findable**: the owner's demo readers could not tell it
+  existed. A "Contents" handle on the left edge, the dock's chapter name as a
+  button, the C key, a first showing once per device.
+- **The phone plan**: [mobile.md](mobile.md). Not started. Its stage 0 names
+  three faults that exist today and only show with two devices (the session
+  token is not kept on Android; a day read on two devices counts once; an
+  older version drops newer fields from the document).
+
+- **The left-overs of all that** were then fixed too: a PDF's own title and
+  author, its first page as a cover, printed page numbers, mail links, a
+  summary after importing through the dialog; verse, hanging indents, ink
+  pictures of any shape, the dock's chapter on a page two chapters share,
+  highlights grouped by the chapter's place, search without accents; press
+  areas for everything in Pip's room, the room following a change of display
+  scaling, and the 77 kB table of book nods loaded on demand (the main chunk
+  went from 365 to 290 kB).
+
+**Left, most worth doing first:** converting the three Kindle files was never
+tried (no Calibre on this machine); a very large PDF page zoomed far in is
+soft (a second drawing mode: features.md has the numbers); links on the light
+page finishes are the browser's blue; a PDF's subject is not read as a genre;
+everything under "For the phone" in features.md and in [mobile.md](mobile.md).
+
+**Deliberately not done in this round:** splitting `ReaderView.tsx` (no
+reader-visible gain, real risk before a release: do it first thing after 1.2
+ships), and the two-device faults in the phone plan's stage 0 (they change
+the sync document, which copies of 1.0 and 1.1 already installed would not
+understand: they go out with the phone release).
+
+**Process note:** engineers changed `ReaderView.tsx` (now about 8,000 lines)
+or another shared file with a script that rewrote the whole file, instead of
+small edits, twice in the bug pass and five more times in the third round,
+each time against a written rule. Every time the result was checked and the
+tests passed, but with several engineers in one file it is the thing most
+likely to lose work silently. **Split the file before the next round**; the
+phone plan says the same.
 
 ## Waiting on the owner
 
 1. **Look at it.** In order of risk:
+   - In the installed app (the preview has no backend): import through the
+     dialog and read its summary; a PDF with no cover taking its first page;
+     a mail link in a PDF; The J Curve gaining its colon and four books being
+     renamed on the first launch; Pip's nod on opening a book she knows.
+   - New in the third round: the "Contents" handle (is it a control or
+     clutter) and the list grouped by book in the boxed set; a book whose
+     chapters Leaflet found (does the list changing a second after opening
+     read as a flicker); Red Rising, Dune and The Alchemist for centring,
+     heading sizes, scene breaks and covers; chapter-number pictures on the
+     dark finishes in Project Hail Mary; the four renamed books and genres
+     after the first launch; any page at 125% and 150% scaling.
    - Text reader: scroll across several chapter ends both ways by wheel,
      scrollbar, auto-scroll and Smart Read; change the type near a chapter's
      end; reopen and check the line. Pages at 125% scaling: every page shows.
@@ -356,7 +500,8 @@ to lose work silently. The file needs splitting before the next round.
 
 `apps/node_modules/.leaflet-test/` (inside `node_modules`, so git-ignored)
 holds the harnesses and fixtures the measurements used, described in
-[testing.md](testing.md). It includes copies of two of the owner's own files
-(`mistborn.epub`, `test.pdf`). Delete the folder whenever; nothing builds
+[testing.md](testing.md). It includes copies of the owner's own files
+(`mistborn.epub`, `test.pdf`, and 16 books under `library/`), and
+`shell-sweep.html`, which runs the app in frames of thirteen window sizes. Delete the folder whenever; nothing builds
 from it. Development builds publish `window.__leafletRendition` and
 `window.__leafletReader`, both behind `import.meta.env.DEV`.

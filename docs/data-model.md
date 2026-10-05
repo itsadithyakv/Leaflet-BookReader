@@ -172,7 +172,12 @@ recomputable), `leaflet.pip.findSeen` (the session whose find Pip last
 showed), `leaflet.pip.visits` (today's visitor log; also cleared at
 sign-out), `leaflet.ambience` (the radio's `{ on, scene, volume, thunder }`),
 `leaflet.reader.keepWords` ("0" = do not keep looked-up words),
-`leaflet.desktopPip.enabled` and `leaflet.desktopPip.hiddenOn`. On the server,
+`leaflet.desktopPip.enabled` and `leaflet.desktopPip.hiddenOn`,
+`leaflet.contents.<book id>` (the chapter list made for an EPUB that came
+without one; recomputable), `leaflet.pdfChapters.<book id>` (the same for a
+PDF with no outline), `leaflet.reader.contentsSeen` (the chapter list has
+shown itself once on this device) and `leaflet.reader.contentsOpen` (whether
+the reader left it open). On the server,
 `profiles.readDay` (the local date last read on) is held for public profiles
 only. `Book.progressUpdatedAt` is now read by the front end.
 

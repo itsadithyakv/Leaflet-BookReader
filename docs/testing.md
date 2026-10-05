@@ -73,6 +73,21 @@ Highest-value things to cover next:
   `estimateRsvpPauseMultiplier`, `getAdaptiveWpm`)
 - `constants/bookFormats` staying in step with `formats/mod.rs`
 
+**Real books.** The readers were built on made-up fixtures and one real
+novel, and that novel happens to mark its headings, centring and scene breaks
+in the one way the reader already handled; a pass over nineteen real files
+found faults in nearly every other book. Real books are not in the
+repository. Copies for the preview go under
+`apps/node_modules/.leaflet-test/library/` (git-ignored, served by the dev
+server), and each fault found is pinned by a test on a small made-up sample
+of the markup, never the book's own text (`bookBlocks.test.ts`,
+`autoContents.test.ts`, `ncx.test.ts`, `innerBooks.test.ts`,
+`chapterSpan.test.ts`, `normalize.rs`). The import rules can be run over a
+folder of real files with an ignored test that only reads and skips where the
+folder is absent: `cargo test --lib real_library -- --ignored --nocapture`.
+When a new kind of book misbehaves, look inside the file first (its OPF, its
+contents in both forms, a chapter's markup, its stylesheet).
+
 **Drive sync has never run against Google.** Everything beneath the transport is
 covered and the folder transport is verified end to end, but no test touches the
 real API — that needs an OAuth client tied to a Google account.

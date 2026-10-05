@@ -65,6 +65,69 @@ site names. Results are cached with a `metadata_checked_at` stamp and a **14-day
 cooldown** — some books simply have no match upstream, and without the cooldown
 the app re-queried them on every launch forever.
 
+**What a book is called** (`metadata/normalize.rs`, `identify`). The title,
+author, series and genres come from what the file says about itself (an EPUB's
+package, a Kindle book's header: `storage/epub.rs`, `storage/mobi.rs`) and,
+failing that, from its file's name. Both are tidied by rule: a site's tag and
+the author come off a Z-Library name, the first two fields are taken from an
+Anna's Archive name, a title that is a catalogue's file name ("Author - Series
+02 - Title") is read as one, "(Series, Book 1)" moves to the series, "Last,
+First" is turned round, several writers are joined with "&" (translators,
+editors and illustrators are skipped by role), and a site's name or "Unknown"
+is nobody. A real title is left whole (18 shapes tested: brackets, dashes,
+numbers, a colon, "(2nd Edition)"). A catalogue's title replaces a file-name
+title only when the words agree ("Dune" is not renamed by "Dune Messiah").
+Readers cannot edit a title, so `scan_series` (version 2) reads every book
+already in the library again, once. Checked against the owner's 19 real files
+with an ignored test that skips where the folder is absent
+(`cargo test --lib real_library -- --ignored --nocapture`): 8 were named
+wrongly, none now.
+
+**Genres** are the book's own subjects (codes, catalogue tags and site names
+dropped, eight at most); a lookup adds to them and is made only for a book with
+no genres, cover or author. The Open Library search asks for `subject` by name:
+it stopped sending it unasked, so for a time no book had a genre, the genre
+filter was empty, Pip's genre moods never fired, and every book was looked up
+again each 14 days. Initials are dropped from the author in a query ("Daniel
+L. Everett" found nothing).
+
+**A file that is not what its name says** (a PDF named .epub, a sign-in page
+saved as a book) is refused at import in words that say what it is; a file
+another program holds open, or one that has gone, is explained rather than
+shown as a system error.
+
+**A PDF's own title and author** are read at import (`storage/pdf.rs`, no new
+dependency): the Info dictionary, or XMP where that is empty, found through
+the file's cross-reference tables without reading the file (0.8 ms for a
+small one; an encrypted or damaged file gives nothing, and the tests cut a
+file at every byte). It is the word of whatever program made the file, so it
+is believed only when it reads like a title (not "Microsoft Word - ...",
+"untitled", "Slide 1", a file name or a path) and, where the file's name is
+clearly a title, shares a word with it. The file name's author comes first;
+the PDF's fills a gap unless it is an account's or a program's name
+("Administrator", "Adobe Acrobat 7.0"). For a book already in the library
+(`scan_series` version 3) the PDF's title is taken only where it is the
+stored one written properly, as when a site's file name lost a colon.
+
+**A PDF with no cover takes its first page** (`readers/pageCover.ts`,
+`save_page_cover`): drawn once, 600 px wide, 2.5 s after the book is first
+opened once a lookup has had its turn, saved as every cover is (a real image,
+the thumbnail made) and never in place of one. A blank first page is not
+used. A cover that exists is always kept, so a lookup that succeeds later
+does not replace a first page.
+
+**The import dialog says what happened**, as a drop does
+(`import_books_report`, `library/importSummary.ts`): how many books were
+added, which were already in the library by title, and each file that was not
+added by name with why (two named, the rest counted). A drop hands over every
+file, so a picture among the books is named instead of vanishing. A toast
+stays up for as long as its length needs (`toastMs`: as before to 45
+characters, then 55 ms a character, 14 s at most).
+
+Known and left: the same book in two formats is two books with separate
+progress, listed under "Possible duplicates" and counted once in its series;
+a PDF's subject and keywords are not read as genres.
+
 Covers come **from inside the book first**: at import, the EPUB's own cover
 image (the EPUB 3 `cover-image` item, the EPUB 2 `<meta name="cover">`, or an
 image named like a cover) is saved as its cover, found through
@@ -163,6 +226,11 @@ Android, and the download-and-unpack path cannot run there. The Settings card an
 the open-book prompt both say so rather than offering a dead-end install. A
 Calibre-only format opened once on a desktop syncs to a phone as a normal EPUB,
 because the conversion is cached by hash.
+
+A Kindle book's title, authors and cover are read from its header at import,
+without Calibre (`storage/mobi.rs`). One locked to an account (DRM) says so
+when opened instead of asking for Calibre first. Converting the owner's three
+Kindle files was not tried: Calibre is not installed on the build machine.
 
 ---
 
@@ -320,11 +388,28 @@ with odd and even page widths (`readers/pageTurn.ts`, `readers/pagesStyle.ts`):
   camelCase keys (`overflowX`, `whiteSpace`), which epub.js writes out as they
   are, so they never applied.
 
-Known and left: no click zones at the page's edges and no swipe; "finished"
-(99%) arrives a little before the story's last page; in a right-to-left book
-Right is still "next"; a book last read in Smart Read stays in standard
-reading after a visit to pages; presses made while a chapter is arriving are
-dropped for about 150 ms.
+- **A click at the side of the page turns it** (`clickZone`, `pressIsClick`):
+  the outer sixth each side and the gutter beside the page; right goes on,
+  left goes back. Only a click that is nothing else: not a drag, a long press
+  or a selection, not with a modifier, not on a link, a note reference, a
+  picture, a marked name, a highlight or a control, and not while anything is
+  open over the page. In the margin it turns at once; on text it waits 220
+  ms, so a double-click still selects the word.
+- **A swipe turns it too** on a touch screen or with a pen (`swipeTurn`): 48
+  px or more, twice as far across as down, within half a second, one finger.
+- **One press made while a chapter is arriving is kept** and made when it is
+  up, so two presses at a chapter's end are two pages; more are dropped, as
+  are a held key's repeats.
+- **Home and End** go to the first and last page of the chapter with pages,
+  **Ctrl+Home and Ctrl+End** to the book's; Back returns.
+- **In a right-to-left book** the pages run the other way: the left side of
+  the page, the Left arrow and a swipe to the right go on; Space and Page Down
+  always do. The dock's arrows and the shortcuts sheet are not mirrored.
+
+Known and left: a book last read in Smart Read stays in standard reading
+after a visit to pages; the book's time left can step up by one rounding
+step on turning into a new chapter (the words-per-byte estimate is refined as
+chapters are counted).
 
 **Search** (the magnifier, or Ctrl+F): every section in reading order, loaded,
 searched with epub.js's `find` and unloaded, one at a time. Results arrive
@@ -408,7 +493,11 @@ end) (`outsideStory` in `readers/progress.ts`). Opening the map from chapter
 **The place saved** is the reading line, the first line clear of the toolbar
 (`readers/readingPlace.ts`), so open, close, open lands on the same line; it
 used to creep back about 70 px each time. A type change keeps that same line
-(it used to drift about 47 px over ten changes). With pages a restored place
+(it used to drift about 47 px over ten changes; it then drifted again, a line
+a change, 80 to 177 px over six, because each change re-anchored on the first
+word of a line that the change before had left mid-line: the line anchored by
+one change is now used again by the next while it is still where it was put,
+79.8 to 80.3 px over eight changes). With pages a restored place
 is shown on the page holding its first word.
 
 What the bug pass of 1.2 settled when scrolling, each measured before and
@@ -465,12 +554,42 @@ after (`readers/lineAt.ts`, `glide.ts`, `toc.ts`, `smartScroll.ts`,
   keys (a hairline above `h1` / `h2`, a gap under `li`) are left inert on
   purpose: switching them on would change how every book looks.
 
-Known and left: holding the native scrollbar's thumb at an end keeps fetching
-chapters (17 in 5 seconds, 29% to 66% of the book), because the thumb only
-knows what is loaded; the progress bar is the way across a book. A selection
-cannot cross a chapter boundary (separate documents). A full-page picture
-goes past in one step in Smart Read. Progress follows the reader backwards
-when they go back to re-read.
+- **The scrollbar, held** (`readers/scrollbarHold.ts`, a pure state machine
+  with tests). While the scrollbar is pressed and the page is scrolling under
+  it, chapters on the page are shown and hidden but none is fetched or taken
+  away (epub.js's `check` and `trim` are held); fetching goes on when it is
+  let go, or by itself once the page has been still for 1.5 s, because
+  browsers do not always report the release. A wheel, a key or a press in the
+  text ends a hold. Held at the bottom, the thumb used to fetch chapter after
+  chapter: 17 in 5 seconds, the reader carried from 29% to 66%. The press is
+  told from `clientX` against the container's box.
+- **Finished means the end was reached** (`progressToSave` in `progress.ts`).
+  Until the story's last line is on screen (scrolling) or its last section's
+  last page is showing (pages), the progress saved stops at 98.5%, however
+  little is left by weight: Mistborn's epilogue used to pass 99% some eleven
+  screens before its end. A finished book stays finished while the reader is
+  back among its last pages; going further back un-finishes it, as before.
+- **Back** returns a line to the height it was left at, not to the reading
+  line.
+- **A picture in Smart Read.** At a picture, or any stretch with no words
+  taller than half the window, Dotty rests beside it and the control says "A
+  picture · Space to go on"; Space, the play button or scrolling past it
+  carries on. It used to go past in one step. Auto-scroll glides over a
+  picture at its set pace, as before.
+- Leaving SpeedRead or Smart Read leaves Dotty on the last word read for a
+  minute.
+- **A sentence ends before speech too** (`said. “I will`), and when closed by
+  a single quote (`SENTENCE_END_PATTERN`): 171 of the 1,169 sentence ends in
+  one chapter of a novel had no pause in Smart Read or SpeedRead. A
+  footnote's marker is not read as part of the word before it. The first
+  moves a chapter's difficulty estimate slightly (0.992 to 0.972 there), so
+  its predicted pace rises about 2%.
+
+Known and left: a selection cannot cross a chapter boundary (separate
+documents). Progress follows the reader backwards when they go back to
+re-read. A resize during Smart Read can put the place one word back. In
+SpeedRead a web address goes by in pieces, and an opening quote is shown at
+the end of the word before it.
 
 **Highlights, notes and bookmarks.** Selecting text offers four highlight
 colours, a highlight with a note, or copy (`readers/SelectionBar.tsx`). The bar
@@ -677,6 +796,28 @@ and comics are never toned.
   list (Contents | Pages), each entry with its page and the current one
   marked (`pdfOutline.ts`). It is the only thing read from the whole document
   on opening.
+- **A PDF with no outline has its chapters found** (`readers/pdfChapters.ts`):
+  from a printed contents page whose lines are links, or from headings set
+  larger than the body at the top of a page, with running heads excluded by
+  their repeating on nearby pages. It reads every page's text once, a page at
+  a time, starting 1.2 s after the book is open (600 pages in about 1.4 s),
+  stops when the book is closed, and is kept per book on this device
+  (`leaflet.pdfChapters.<book id>`). The list is used as a real outline is,
+  under "Chapters found by Leaflet". Fewer than three headings, headings that
+  disagree in size or height, or one on most pages (slides) make no list, and
+  the sidebar says why; a scan is said to be one. A PDF's own outline is
+  always kept. Tested on two real PDFs with their outlines hidden: 12 and 13
+  entries, the same as their own top level, on the same pages.
+- **Printed page numbers** (`readers/pageLabels.ts`, 13 tests). Where a PDF
+  says what is printed on its pages, the dock reads "Page 6 (20 of 321)" (a
+  page labelled with a word is called by it: "Cover (1 of 20)"), the contents
+  and page lists show printed numbers, and "go to page" takes them: `#20` is
+  the twentieth page of the file; `40%` a share of the way; a printed number
+  goes to the page that has it (so a plain number that is also printed goes
+  there); any other plain number is a page of the file. The field opens
+  holding the page in view, written so that Enter stays put. A PDF without
+  labels is unchanged. Bookmarks, search results and link tooltips still give
+  the file's count.
 - **Go to a page.** The dock's "Page 12 of 300 · 4%" is a button: click it, or
   press G, to type a page number or a percentage. Home and End go to the first
   and last page.
@@ -747,11 +888,47 @@ What the bug pass of 1.2 settled, each measured before and after
   side by side, a page that cannot be decoded is shown as an error on its own
   and the page beside it alone.
 
-Known and left: the wheel does nothing at a page's end in Pages; no Back
-after a jump in this reader; links inside a PDF are not clickable (there is no
-annotation layer); Scroll is a little soft on a 4K display at 200% and on
-very large pages zoomed in (the per-page pixel cap); a one-page PDF is 100%
-read on opening.
+- **Links (PDF)**, in both layouts (`pdfLinks.ts`, `PdfLinkAreas.tsx`). A
+  page's links are read with it and laid over it as fractions of the page,
+  under the text layer so a link's words can still be selected (a drag
+  selects, a click follows). Each can be reached with Tab and says where it
+  goes. A destination in the document is a jump, to its height on the page
+  when it gives one; the named actions presentations use (next, previous,
+  first, last page) are followed too. An http or https address opens in the
+  browser through `accountService.openLink` (http as https), with the address
+  as the tooltip. A `mailto:` link opens the reader's mail program with the
+  address alone (anything after it, a subject or a body, is dropped). Every
+  other scheme (`javascript:`, `file:`, `tel:`), launch actions and other
+  files get no area: the opener (`openable_link`, `commands/account.rs`)
+  takes https and one plain mail address only.
+- **Back after a jump.** Go to page, the contents, a bookmark, a search
+  result, a link, Home and End leave the line they were made from in
+  `jumpHistory.ts` (the page and a share of its height). Alt+Left and the
+  dock's Back chip return to it, a third of the way down the window;
+  Alt+Right goes forward again. Ordinary reading adds nothing.
+- **The wheel turns the page in Pages**, one page a gesture (`wheelTurn` in
+  `pageTurn.ts`), and only a gesture that began with the page already at that
+  edge, so scrolling down a tall page stops at its foot. A comic read right
+  to left goes on with a push left.
+- **Left and Right turn once the page's own side edge is in view**; a held
+  Space or Page Down is paced at 150 ms like a held turn (it ran 30 screens a
+  second in Scroll).
+- **A phrase that runs over a page break is found**, listed under the page it
+  begins on, and marked in two parts.
+- **Sharpness in Scroll.** The page across the reader's line gets the paged
+  layout's cap (16.7M pixels), its neighbours 8.4M, so the page being read is
+  as sharp as in Pages: 2.00 device pixels at 200% on a 4K screen, where it
+  was 1.70. The budget is 50.3M pixels in all (about 200 MB at most; the peak
+  measured through 58 pages was 144 MB). On such a display a page is drawn
+  twice, once as a neighbour and once sharp; at 150% and below nothing
+  changed. The place is stored with the page the reader was on.
+
+Known and left: a very large page zoomed far in is still soft: a page is
+drawn whole on one canvas of at most 16.7 million pixels (an A0 poster on a
+1.5x screen is at 72% of the screen's resolution at 100%, 48% at 150%, 18% at
+400%; an A4 page is sharp to about 300%), and drawing only the part in view
+would be a second drawing mode in both layouts; a one-page PDF is 100% read
+on opening.
 
 **Continuous scrolling (PDF)** — `readers/PdfScrollPages.tsx`, arithmetic in
 `readers/pageScroll.ts` (with tests). All the pages in one column in the
@@ -782,10 +959,10 @@ paged, and two pages side by side is not offered in Scroll.
   up. A move of more than a window at once is a jump, and nothing is drawn
   until it settles, so dragging the scrollbar across a book starts no renders
   on the way.
-- **Memory**: 33.5 M pixels in all, the page being drawn counted twice (the
-  off-screen sheet and the toning read-back); 8.4 M per page, half the paged
-  cap, so a page zoomed far in is a little softer here than in Pages. The
-  furthest pages are let go first, never a nearer one for a further.
+- **Memory**: 50.3 M pixels in all, the page being drawn counted twice (the
+  off-screen sheet and the toning read-back); 8.4 M a page, and the paged
+  layout's 16.7 M for the page across the reader's line. The furthest pages
+  are let go first, never a nearer one for a further.
 - **The current page** is the one across a line a third of the way down the
   window; it drives progress, the outline, bookmarks and the dock. The top of
   the window is stored as `place` in `leaflet.reader.<book id>` (with `layout`)
@@ -832,11 +1009,265 @@ never bring it back: that is reading. It is **pinned** while one of its own
 panels is open. The chapter list is not one of them: it opens under a hidden
 bar and reaches the top of the window.
 
-**The chapter list** slides wholly out of sight, and only a 6 px hover strip
-said it was there. A tab now stays on the left edge, half way down (faint,
-plain under the pointer; a click or a rest of the pointer opens the list), and
-the toolbar's chapters button shows on every screen, not only narrow and touch
-ones.
+**Finding the chapter list** (`readers/contentsPanel.ts`,
+`readers/ContentsList.tsx`). The list used to slide wholly out of sight with a
+6 px hover strip, then had a faint tab; readers shown the app still could not
+tell it was there. Now:
+
+- A **"Contents" handle** stays on the left edge, outside the toolbar and
+  never hidden with it: 30 x 132 px, an icon and the word set upright, at full
+  opacity (the word on the tab is 7.3:1 to 11.5:1 on the four finishes, the
+  tab's edge on the page 3.7:1 to 6.6:1). It is sized to the margin beside the
+  text and is icon-only on a phone-width window; the text clears it by 5 px at
+  390 wide and 57 px at 800. It opens on a click, not under a resting pointer
+  (a click meant for it would land on a chapter); the 10 px edge strip still
+  opens on hover.
+- The **dock's chapter name is a button**, the **C key** toggles the list
+  (on the `?` sheet), the toolbar's chapters button shows on every screen, and
+  the list has its own X.
+- **Opened on purpose it stays**, is remembered for the book and then for the
+  device, and comes back open where it fits beside the text (a margin of 288
+  px or more, about 1,190 px of window at the default line length). Narrower,
+  it opens over the text and is not reopened by itself. Beside the text it
+  does not hold Smart Read or take Escape; over the text it does both.
+- It **shows itself once per device** (`leaflet.reader.contentsSeen`): 0.7 s
+  after the first book opens, for 2.8 s; with the walkthrough pending it waits
+  for it, and the walkthrough has a step that lights the handle.
+- The list opens centred on the current row (a bar and `aria-current`) and
+  follows the reading.
+
+**Books within a book** (`readers/innerBooks.ts`, 19 tests). A set of novels
+in one file is found from its contents: top-level entries that each hold a
+cover, title page or appendix of their own and a share of the file (or, in a
+flat list, a title page listed more than once). Numbered divisions ("Part
+One", "Book Two") are parts of one novel, and a single novel is unchanged.
+
+- The chapter list groups by book under headers that stay in view ("Book 2 of
+  4", the title, Read / 46% / Not started, a meter) and fold (`aria-expanded`,
+  Left and Right); past 60 rows the books not being read start folded. Front
+  matter and appendices are set quieter, and each story's end is marked.
+- The dock names book and chapter with the book's percentage beside the set's
+  ("A CLASH OF KINGS · TYRION 46% · set 34%"); the progress bar marks where
+  each book begins and its bubble has two lines; "left in this book" is the
+  novel being read.
+- A look at another book's map or appendix moves neither progress nor the
+  saved place; reading through from one novel into the next does
+  (`gapFollows`).
+- A list replaced after the book is open (chapters found by Leaflet, below)
+  keeps its scroll, its folds and its current row.
+
+**A chapter list for a book without one** (`readers/autoContents.ts`,
+`contentsScan.ts`; 36 tests). When a book's contents are missing, one entry,
+all one place, or only front matter, Leaflet makes the list; when they are
+real but thin (three or more files that open with a heading are unlisted, and
+outnumber the chapters listed), the book's entries stay as the top level with
+what was found beneath. Sources in order of trust: the book's own contents
+page (a page of links), headings the book marks, lines that read as chapter
+headings and are set as one ("Chapter 12", "XII", "Part Two", with the title
+on the next line joined: "Chapter 3 · The Road"), paragraphs in a style kept
+for the head of a section, then one entry per section. A number lost from a
+run is supplied only when the lines between two numbered chapters are exactly
+as many as the numbers missing. Front and back matter are named plainly. The
+book is read once, in the background, 0.9 s after its first page is up (48 ms
+to 0.35 s for a novel, 1.6 s for 320 sections), and the result kept in
+`leaflet.contents.<book id>`; the list says "Chapters found by Leaflet". A
+heading with no id is reached by CFI (`TocItem.cfi`). Of the owner's 14 EPUBs
+one had its list made (one entry, "Start", became a cover, a contents page and
+21 chapters with their titles), one had it filled in (five headed files
+unlisted), and twelve kept their own untouched; against those twelve the
+finders agree with the book's own list (55 of 55, 101 of 102, 106 of 107 from
+the in-book contents page).
+
+**Chapters that share a file** (`readers/chapterSpan.ts`, 13 tests). Next and
+previous chapter, Home and End, the time left in the chapter and the progress
+bar's label follow the headings inside a file, not the file, where the scan
+found an entry part-way down one. A novel of three files and 21 chapters had
+"2 h 30 min left in the chapter" (the book's) and five stops for "next
+chapter"; now each list entry lands with its heading 80 px down (on the
+showing page, with pages) and the dock and the list agree for all 21. Ordinary
+books, a chapter a file, are unchanged. With pages the dock's "12 of 50", Home
+and End go by the chapter's own pages ("CHAPTER 2 ... 1 OF 93" in a file of
+178), and previous chapter steps past entries on the page already showing: at
+an appendix whose entries are anchors in one file, and at each novel's cover
+in a set, it used to stay where it was.
+
+**Lists.** A marker sits beside its item's first line
+(`list-style-position: outside`), and lists are padded 2em so nested ones
+indent: a stylesheet that said `inside` with a paragraph in the item left each
+bullet alone on a line above its item. **A list flattened into paragraphs**
+(three or more lone bullets, each followed by a short line: one real novel's
+contents page is 21 of them) loses its bullets, for Smart Read's word index
+too, and a line that names a contents entry goes there on a click.
+
+**What the publisher did with blocks is kept** (`readers/bookBlocks.ts`, 28
+tests; read from the book's own styles before the reader's stylesheet goes in,
+like drop caps). The reader's stylesheet set every paragraph's alignment and
+spared only a class called `.center`, which the one novel earlier passes were
+tested on happens to use; in nearly every other real book chapter numbers and
+titles, dedications and epigraph credits were pushed to the left at body size.
+
+- Centred and right-aligned lines stay so, and a picture alone in one is
+  centred with it.
+- A short paragraph set larger than the running text from first word to last
+  is a heading and keeps its size (1.15x to 1.6x, so nothing outranks a real
+  `h1`).
+- A `div` that holds words is spaced as a paragraph: a novel made of
+  `<div><span>` was a wall of text (535 of 757 blocks with no gap and no
+  indent).
+- An inset block keeps both margins as shares of the column (the left one was
+  zeroed and the right kept), unless most of the page is inset, which is the
+  book's own page margin.
+- A paragraph set apart by space alone has the publisher's room, one to two
+  ems, above the reader's gap: margins collapsed, and a scene break measured
+  32 px against 28.8 px for any two paragraphs. A blank rule between two plain
+  paragraphs gets a scene break's room; a rule the book draws itself is not
+  drawn again. A line that is only a link (a contents page) is not a break.
+- The baseline novel, section by section: 13 of 19 identical to the pixel; the
+  others are its cover (fits the window), four space-only scene breaks it had
+  all along, and centred lines on its last pages.
+
+**Pictures.** Scrolling, a picture is no taller than the window's room
+(`--leaflet-picture-room`): every calibre SVG cover was about 612 x 930 with
+632 px to show it in. Heights given in `vh` are undone (epub.js's own
+`max-height: 0` with a `95vh` box in a content-sized frame made a cover 0 by
+0, a blank band at the head of the book). An SVG wrapper told to stretch is
+told to fit. With pages, a page that is one picture has nothing around it (a
+title picture after an empty paragraph went to a column that was never
+counted, and the page showed blank). Flat-grey artwork (outlined letters with
+a tint, a grey ornament) counts as ink on the dark finishes (`inkKind`,
+`readers/inkImages.ts`): 31 of one novel's 36 pictures were chapter numbers
+left as white boxes; a shaded drawing or a photograph stays as drawn.
+
+**Links** take the reader's colour whatever `-webkit-text-fill-color` the book
+set (107 contents links were navy on black); an anchor that is not a link
+takes the page's ink on a dark page.
+
+**A file listed twice in a row in the spine** is shown once, and contents
+entries for it open the copy that is shown.
+
+**Verse** (`verseRuns`, `readers/bookBlocks.ts`). Lines of a poem or song set
+as a paragraph each, with nothing between them, follow one another at the
+line spacing of the text (they were a paragraph's gap apart, 29 px under
+every line); a stanza keeps its gap, and the paragraph's gap comes after the
+last line. Told from prose by how the book sets them: short (100 characters
+or fewer), no first-line indent, and either inset or centred (two lines are
+enough), or, in a book that indents its prose, three or more of which most do
+not end as sentences. Dialogue in short paragraphs is prose; a book with
+neither indent nor gap gives nothing to tell by and is left alone.
+
+**Hanging indents** (`keptHang`) are kept as the book set them, whatever the
+page-margin rule says: a glossary's entries, a contents page, a cast list,
+verse whose long lines turn over. A `text-indent` given in % is resolved
+against the block's width (the browser reports the percentage).
+
+**Ink pictures.** An ink picture is blended on a dark page when it is a
+banner, or no larger than 480 px either way, or a link (the viewer's switch
+cannot reach a link); only a large drawing the viewer can open stays as
+drawn.
+
+**A page shared by two chapters, with pages** (`chapterOnPage`,
+`readers/chapterSpan.ts`). A page belongs to the chapter at its top; a
+chapter that starts part-way down is named from the next page, unless the
+reader asked for it by name (the list, next or previous chapter, a link,
+Home), in which case it is named on its page until another comes up. End
+shows a chapter's last page under that chapter's name.
+
+**Search finds a word whose accents were not typed**
+(`readers/searchFold.ts`): epub.js lowers the case and nothing else, so a
+name spelt with a tilde gave 1,231 matches and the same name typed plainly
+none. Typed with a mark, the words are matched as typed.
+
+**Highlights are grouped by the chapter's place** (`groupByChapter`,
+`components/highlights/highlightsView.ts`): two chapters of the same name are
+two headings (a set of novels has 35 chapters called by one name); one
+chapter running over two files is one. In a set the book is named once, above
+its chapters, in the notes panel, the Library's Highlights dialog and the
+Markdown copy. The notes panel had no headings before; each row carried its
+own chapter line.
+
+Checked and fine on a real non-fiction book with notes: the footnote popup,
+Go to note and Back (to within 1 px, and to the same page with pages); a
+selection and a highlight across a heading mark and a raised initial, before
+and after a type-size change; the two light finishes (lowest text contrast
+12.8 and 18.6).
+
+Known and left: links on the light finishes are the browser's blue or the
+publisher's own (readable, 7.8:1 on paper, but not the reader's accent as on
+dark); a fully selected centred line is highlighted the column's width; a
+chapter whose highlights are two files apart is listed under two headings of
+its name.
+
+**Smart Read's pill** is held back at open while the page is before the
+story's first chapter or is a picture, and comes up when the story reaches the
+reading line.
+
+What the real-library pass of 1.2 settled on a four-novel set (320 sections,
+1.38 million words, 378 contents entries):
+
+- **Half the contents were missing** (211 of 378 shown; every chapter of two
+  of the novels). epub.js files NCX entries by id and finds parents by id, so
+  an id used twice orphans what is under it. `readers/ncx.ts` reads the NCX by
+  its nesting and is used when it holds more entries than epub.js's tree.
+- **The story "ended" at 77%.** Chapters named for people did not read as
+  chapters, so the whole last novel was back matter: 100% on every page, and
+  neither progress nor place saved. `storySpan` (`readers/progress.ts`) runs
+  the story on, after the last "Prologue" / "Chapter N" entry, through named
+  entries up to the first back-matter label when they are a tenth of the
+  sections. A label that is a number, or a number and a title ("12", "12: The
+  Road"), is a chapter too: two real novels had one chapter-like label each,
+  so their story was the whole file, adverts and all.
+- **Search stopped at 200 matches**: a common name gave 200 hits from the
+  first nine chapters and nothing after. It keeps 4 a section and counts them
+  all (`searchBook.ts`): 2,510 matches in 183 chapters, 1.5 to 5.2 s, the
+  longest stall 129 ms; chapter headings carry their count.
+- A file holding several contents entries was named for the last of them in
+  search headings, the bar's bubble and mentions; a character "first appeared"
+  on a contents page (`isContentsPage`, `people/mentions.ts`).
+- Fine as found: 0.7 to 1.2 s to the first page, reopening at 90% in 0.5 s on
+  the same line; memory flat over 55 chapters (one or two held, heap 111 to
+  115 MB); "Who is this?" at 60% in 0.7 s the first time and 9 ms after.
+
+- **Smart Read stopped with "Waiting for you" after a run of maps** between
+  two novels, until Space was pressed again. When epub.js lets a chapter go
+  above the window it moves the scroll position by that chapter's height
+  (1,315 px here) to keep the text still, and the scroll handler took that for
+  the reader going back. A scroll that moves nothing on screen is not the
+  reader's (`isScrollCorrection`, `readers/smartScroll.ts`); a real scroll
+  back still makes Dotty wait.
+- **Time left was understated from front matter**: opened on a novel's
+  contents page the dock said "about 6 hours left in this book" where a
+  chapter said 7 h 30 min (8.3 h by the files). A contents page holds 7 to 9%
+  of a chapter's words for its size, an appendix 58 to 70%, so words per byte
+  is learned from the story's own sections (`wordsPerByte`'s `inStory`,
+  `readers/timeLeft.ts`). "Left in this book" is now within 2.1% a novel.
+- **A collection of stories** was finished only at the foot of its last
+  section. When no contents entry reads as a chapter, the story runs from the
+  first entry not named as front matter to before the closing back matter,
+  less unlisted files named for back matter (`spanByOutsideLabels`,
+  `isBackMatterFile`, `readers/progress.ts`).
+- **Search in a set folds by book**, with a count on each header
+  (`groupByBook`): 164 rows drawn for a common name instead of 547; 40 rows or
+  fewer open unfolded, and a single novel keeps its flat list.
+- **A novel of a set finished** says so once, quietly, when read through and
+  not on a jump ("A CLASH OF KINGS: FINISHED · BOOK 3 OF 4 IS NEXT",
+  `crossedStoryEnd`). The set is one book for the shelf, the diary and the
+  profile, finished at its last story's end.
+- Fine as found across the seam between two novels: auto-scroll and SpeedRead
+  carry on and name every stop; a bookmark and a highlight keep "book ·
+  chapter" and go back to the right one of 35 same-named chapters; with pages
+  a resize and a type-size change in a 74-page appendix hold the same word;
+  the scrollbar held for 5 s fetches nothing; 318 names marked over two
+  chapters in 1.36 s; the relations drawing with 40 people in 21 ms.
+- **On a touch screen** the Contents handle, the dock's chapter name and the
+  list's close button take a 44 px press (the handle's was 20 px wide at 360
+  wide). The list does not show itself under 768 px.
+
+Known and left: named groups with no cover, title page or appendix of their
+own are not taken for books, so such a set stays a flat list; the list opens
+over the text, not beside it, under about 1,190 px; on a landscape phone (800
+x 360) the open list has about three rows under its header; a run of pictures
+is one Smart Read stop; the highlights view puts neighbouring highlights from
+two same-named chapters under one heading.
 
 ### Page colours
 
@@ -1170,7 +1601,7 @@ Rules worth knowing:
 
 ### Focus lock
 
-Settings → Focus → **Focus lock** (stored as `kioskMode`). During a session the
+Settings → Habit → **Focus lock** (stored as `kioskMode`). During a session the
 window goes fullscreen, and leaving the book takes intent:
 
 - **Back** gets Pip: it pops up beside the button and swats at the cursor
@@ -2245,15 +2676,21 @@ The reader has its own finishes on top: paper, dark paper, true white, true blac
 ## Settings
 
 `pages/SettingsPage.tsx`. A few short sections behind tabs (**General**,
-**Reading**, **Library**, **Account**, **About**), each of which fits a
-1366×768 window without scrolling. It used to be one page about three screens
+**Reading**, **Habit**, **Library**, **Account**, **About**), each meant to
+fit a 1366×768 window without scrolling. Habit was part of Reading until that
+made five cards, which no arrangement fitted (three columns left it 1,112 px
+tall where 690 show). Measured at 1366×768, both end about 607 px down with
+nothing to scroll; on a 1366×768 laptop at 125% (1093×614) Reading scrolls by
+41 px and Habit by 25 (Reading scrolled by 343). The preview cannot draw the
+Reminders card, which is about as tall as the card beside it. It used to be one page about three screens
 long. Each section is two columns of cards from `lg` up, every card as tall as
 what is in it.
 
 | Section | Cards |
 | --- | --- |
 | General | Appearance; Pip (how much it moves, the tour, sounds) |
-| Reading | Reading pace; Daily goal and focus; Reminders |
+| Reading | Reading pace; Characters; Keep the words I look up |
+| Habit | Daily goal and focus; Reminders |
 | Library | Backup; Book copies; Optional book converter |
 | Account | Account; Leaderboards (only in builds with accounts or the community) |
 | About | Rate, policies, diagnostics; Danger zone |
@@ -2283,6 +2720,145 @@ touch: { raw: "(hover: none) and (pointer: coarse)" }
 | Phone, upright | Bottom tab bar | Wordmark + sync badge; search lives on the Library page |
 | Phone, landscape | Sidebar rail — a bottom bar would cost scarce height | Compressed to ~56 px |
 | Tablet / desktop | Sidebar rail | Full, with search |
+
+What a display means for the layout is the window's size in CSS pixels, and
+Windows scaling divides it: a 1366x768 laptop at 125% gives the app about
+1093x614, a 1080p laptop at 200% only 960x540, an ultrawide 3440x1440. The
+pages were measured at thirteen sizes from 380x480 (the smallest the window
+goes) to 3440x1440, by a script, since the preview cannot be looked at.
+
+**A page has a widest size.** The Library and Collections stop at 2,240 px and
+Social and Settings at 1,480 px, centred, so a 4K or ultrawide window gets more
+covers to a row rather than larger ones and a settings card never runs a line
+across the screen. The Pip tab fills the window.
+
+**The cover grid counts its own width, not the window's**
+(`library/gridColumns.ts`, used by `BookGrid` for both the plain and the
+virtualised grid): 2 columns under 520 px of grid, 3 from 520, 4 from 760, 5
+from 1,040 (a desktop window), and past 1,500 as many as keep a cover at or
+under 270 px. A cover is between about 150 and 275 px wide from 520 px of grid
+up; it used to be 150 px at 1024 wide and 633 px on an ultrawide.
+
+**Height is a breakpoint too.** The Library's hero and import box sit side by
+side from `md`. In a window at least 768 px wide and at most 820 px high
+(1366x768, 1093x614, 960x540) the hero gives up padding, its title drops to 36
+px and the import box drops its formats line (`@media (min-width: 768px) and
+(max-height: 820px)` in `index.css`), so the first row of covers starts on the
+first screen: at 1093x614 it began 962 px down and now begins at 510.
+
+**Nothing makes the page scroll sideways.** Filters are capped and truncated
+(an author select was as wide as its longest name), list rows wrap, and grid
+and flex items that hold long text have `min-w-0`.
+
+**Dialogs fit the window.** `.dialog-fit` caps a dialog at `100dvh - 1.5rem`
+and scrolls it inside itself; the account dialog scrolls in its overlay and is
+centred with `m-auto` (a centred flex item that overflows cannot be scrolled
+to its top).
+
+**Fixed bars are cleared.** `.dock-clear` on a page adds 84 px under its last
+row while the "now reading" bar exists; `.app-toast` sits above that bar under
+1,536 px and above the bottom bar on a narrow window, and is never wider than
+the window.
+
+Tailwind's `min-[..]` / `max-[..]` variants are unavailable here (the `short`,
+`tall` and `touch` screens are raw queries): write
+`[@media(min-width:1900px)]:`. Pill tabs (`ui/SegmentedTabs`) wrap to a second
+row rather than scroll.
+
+**The Pip tab.**
+
+- The room is drawn at the largest whole or half number of device pixels per
+  art pixel that fits the page's width and the height left under the HUD and
+  over the rail (`sceneFit.ts`): 240 x 120 at 380 x 480, 600 x 300 at 800 x 600
+  and 960 x 540, 672 x 336 on a 1366 x 768 laptop at 125%, 1320 x 660 in the
+  default window, 2280 x 1140 on a 3440 x 1440 ultrawide (height-bound,
+  centred).
+- The HUD and the rail line up with the room but are never narrower than
+  `min(100%, 800px)` (`--bar-width`): following a small room they wrapped,
+  took its height, and it shrank again (at 800 x 600 and 960 x 540 the room
+  was 360 x 180 where 600 x 300 fits). Under 900 px wide or 620 px tall the
+  first steps show their count only.
+- A drawer stands beside the house from 900 px wide, and from 768 px on a
+  window 520 px tall or less; it is a sheet at the bottom (44dvh) only under
+  that. The rail shares one row whenever it is under 560 px wide (a container
+  query), and Play's eight keys shrink to their names before they wrap.
+- The shop's tabs are one scrolling row under 900 px wide or 620 px tall; its
+  detail goes under the grid only under 700 px.
+- Cards over the room (and a visitor's card) are laid over the whole window
+  and placed by `cardPlace.ts`, so a small room never clips them. The album
+  lays itself out by its card's width: the card is the container, not the
+  album (its container query never applied, at any size).
+- Pip outside her tab: her floor is the top of the bottom tab bar when it
+  shows; a tour bubble that fits neither side of her goes over or under her
+  (at 380 x 480 it sat 189 px off the window with its buttons out of reach).
+- Every thing in the room is pressed in an area of its own (`pressAreas`,
+  `pip/furnish.ts`): its art grown to 24 px a side (44 under a finger), inside
+  the room, and never over another's. Two that would overlap are divided
+  halfway between their art; where art overlaps (the diary on the bookcase)
+  the one on top keeps its own; a thing with room to spare stands back for a
+  neighbour that has none. The art is untouched: the gold edge is drawn round
+  the thing, not the area. With a pointer every thing is at least 24 x 24
+  from one pixel a pixel (380 x 480, where the fridge was 12 x 20 and its
+  press overlapped the plant's by 30%). The smallest window at 125% (a 192 x
+  96 room) leaves the fridge 24 x 22 and the plant 24 x 19; with notes
+  pinned, the freezer door is as tall as it is drawn. Under a finger every
+  area is 44 x 44 from room scale 2 (800 x 600) up; a 240 x 120 room cannot
+  hold twelve of them.
+- Under a finger the lift's keys are 44 px. It shows one floor sooner, and
+  in a room under 144 px tall it is one key whose list reaches every floor.
+  A diary day is pressed in the 44 px about its square.
+- The room is measured again when the display's scaling changes, not only on
+  resize (`watchPixelRatio`, `components/pip/pixelRatio.ts`): moved to a
+  monitor with other scaling it kept its old size for some seconds.
+- The table of Pip's nods to books (`pip/bookNods.ts`, 77 kB built) is fetched
+  when a nod is first looked up (`pip/nods.ts`, 7 to 12 ms), not with the app:
+  the main chunk went from 365 to 289 kB.
+
+**The readers' chrome** (both readers; CSS and class names only).
+
+- A toolbar popover (`.reader-menu`: text settings, search, characters, notes,
+  page size, "···") is never taller than the window less the toolbar less
+  1rem and scrolls inside itself: the "···" menu is 546 to 597 px tall and its
+  foot was at 609 in a 540 px window. Under 640 px wide the popover is fixed
+  8 px from each side (text settings began 116 px off the left of a 380 px
+  window).
+- The toolbar's title is no wider than `min(46vw, 100vw - 39rem)`
+  (`readers/titleFit.ts`; six buttons on the right when the radio's mark
+  shows): a 200-character title at 800 wide lay over the chapters button. Under 768 px the title is hidden and "Back to Library" is
+  its arrow, so five to seven buttons fit a 380 px window.
+- Things pressed are 24 px with a pointer (44 px on touch for the toolbar's
+  buttons, the Contents handle, the dock's chapter name and the list's close):
+  toolbar buttons, line-width options, the notes and characters tabs, the
+  dock's percent and the page reader's "Page 1 of 600". The 18 px highlight
+  dots, the bookmark's cross, the look-up card's two text links and the 14 px
+  progress bar keep their look with a 24 px press area behind them. The
+  dock's and SpeedRead's small labels are 11 px.
+- The reader's toast (`.reader-toast`) sits above the dock under 1,400 px
+  wide, and above the pace control while one shows: its longest line lay over
+  the dock at every size from 380 to 1366 wide.
+- Under 520 px of height the chapter list drops the book's cover, title and
+  author, so the list has the height (155 to 282 px of scrolling list at
+  844 x 390).
+- Measured by script at all thirteen sizes, in both readers and both layouts,
+  on a four-novel set, a novel and a 600-page PDF (78 runs, each in a frame of
+  the wanted size: `shell-sweep.html` among the test aids). The dock's long
+  line in a set ("A CLASH OF KINGS · ARYA 1 of 26 14% · set 26%") is one line
+  at every size, its arrows inside.
+- Not reached: the Relations drawing with people in it, the page reader's
+  Back chip, the dock with a very long chapter name at 380 wide with pages.
+- Left: the dock at rest is drawn at 86%, so its 28 px controls measure 24
+  until the pointer is on it.
+- For the phone (report only, 360 x 800 with touch): seven toolbar buttons at
+  44 px do not fit 360 px (the "···" button is outside the window); the dock's
+  controls, the selection bar's ten and most of the Characters panel are under
+  44 px; the progress bar, the time left, the strip that brings the toolbar
+  back and the dock's resting state all wait for a hover. See
+  [mobile.md](mobile.md).
+
+Known and left: a 380-wide window gets the sidebar rail (the `short` rule),
+leaving 264 px of content, which everything now fits; Settings' Reading tab is
+longer than a 1366x768 window and scrolls with the page; a window resized by
+dragging its edge was not verified (the preview sends no resize events).
 
 Also: safe-area insets for notches, 44 px minimum touch targets, `100dvh` for the
 shell (a definite height — `min-height` gives `flex-1` no free space to divide,
