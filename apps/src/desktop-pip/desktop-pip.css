@@ -1,0 +1,116 @@
+/* Desktop Pip's window (desktop-pip.html). The app's stylesheet is not loaded
+   here: the page under her must be see-through, and index.css paints paper.
+   Sizes are in art pixels (--art is one of them in CSS pixels, set by the
+   page from the display's scale), so every edge lands on a device pixel. */
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+}
+
+body {
+  font-family: "Segoe UI", system-ui, sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+.dp-stage {
+  --art: 2px;
+  --ink: #302a21;
+  --paper: #f6eeda;
+  position: fixed;
+  inset: 0;
+}
+
+/* Pip: bottom middle, exactly the sprite's canvas. */
+.dp-pip {
+  position: absolute;
+  bottom: 0;
+  left: calc(50% - var(--art) * 16);
+  display: block;
+  width: calc(var(--art) * 32);
+  height: calc(var(--art) * 32);
+  padding: 0;
+  border: 0;
+  background: none;
+  outline: none;
+  cursor: grab;
+  /* A finger on her carries her; it must not scroll or zoom the page. */
+  touch-action: none;
+  -webkit-user-drag: none;
+}
+
+.dp-pip:active {
+  cursor: grabbing;
+}
+
+.pip-sprite {
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.dp-flip .pip-sprite {
+  transform: scaleX(-1);
+}
+
+/* The placard's board, sat on top of the sprite; its post is in the sprite. */
+.dp-sign {
+  position: absolute;
+  bottom: calc(var(--art) * 32);
+  left: calc(50% - var(--art) * 31);
+  box-sizing: border-box;
+  width: calc(var(--art) * 62);
+  height: calc(var(--art) * 15);
+  padding: 0;
+  border: var(--art) solid var(--ink);
+  background: var(--paper);
+  color: var(--ink);
+  font: 700 calc(var(--art) * 6.2) / 1 "Segoe UI", system-ui, sans-serif;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.dp-sign:hover,
+.dp-sign:focus-visible {
+  background: #fffaf0;
+  outline: none;
+}
+
+/* Her menu, above her. */
+.dp-menu {
+  position: absolute;
+  top: 0;
+  left: calc(50% - var(--art) * 43);
+  box-sizing: border-box;
+  display: grid;
+  grid-auto-rows: 1fr;
+  width: calc(var(--art) * 86);
+  height: calc(var(--art) * 48);
+  padding: var(--art);
+  border: var(--art) solid var(--ink);
+  background: var(--paper);
+}
+
+.dp-menu-item {
+  padding: 0 calc(var(--art) * 3);
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: 600 calc(var(--art) * 6.4) / 1 "Segoe UI", system-ui, sans-serif;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.dp-menu-item:hover,
+.dp-menu-item:focus-visible {
+  background: var(--ink);
+  color: var(--paper);
+  outline: none;
+}

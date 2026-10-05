@@ -5,6 +5,7 @@ import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { installAppGuards } from "./platform/desktop/appGuards";
 import { diagnosticsService } from "./services/diagnosticsService";
+import { startDesktopPip } from "./desktop-pip/sync";
 import "./index.css";
 
 // Only the packaged app: `tauri dev` keeps F5 and the inspector, and a plain
@@ -15,6 +16,9 @@ if (import.meta.env.PROD && isTauri()) {
 
 // Errors in the interface go to the log file; the release build has no console.
 diagnosticsService.install();
+
+// Pip on the desktop: tells Rust whether the reader has switched her on.
+startDesktopPip();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

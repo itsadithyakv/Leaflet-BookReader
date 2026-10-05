@@ -99,6 +99,12 @@ export default defineConfig({
     // Maps would ship the whole source inside the package for no one to use.
     sourcemap: false,
     rollupOptions: {
+      // Two pages: the app, and desktop Pip's own small window (Rust opens
+      // it as `desktop-pip.html`; it loads the sprite and none of the app).
+      input: {
+        main: fileURLToPath(new URL("./index.html", import.meta.url)),
+        "desktop-pip": fileURLToPath(new URL("./desktop-pip.html", import.meta.url))
+      },
       output: {
         // The libraries every screen uses (React, state, icons, the list
         // virtualiser) in a chunk of their own, apart from the app's code.

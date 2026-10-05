@@ -25,5 +25,12 @@ export const FEATURES = {
    * decor: enough to make a home, small enough that reading stays the point.
    * Everything bought stays owned and placed either way.
    */
-  fullPipHouse: flag(import.meta.env.VITE_ENABLE_FULL_PIP_HOUSE)
+  fullPipHouse: flag(import.meta.env.VITE_ENABLE_FULL_PIP_HOUSE),
+  /**
+   * Pip on the desktop: a second window that stands on the Windows taskbar.
+   * Built and unit-tested, but its window has not been tried on a real
+   * desktop, so it stays out of a release until someone has run the checklist
+   * in docs/HANDOFF.md.
+   */
+  desktopPip: flag(import.meta.env.VITE_ENABLE_DESKTOP_PIP)
 } as const;
