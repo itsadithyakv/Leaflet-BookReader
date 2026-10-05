@@ -7,8 +7,8 @@ is in [deploy.md](deploy.md) (the checklist) and
 
 ## Read this first
 
-**The version is 1.2.0. Everything is committed on `release/1.2` (not
-pushed): the first two days' work, "Pip round two", the reader bug pass and
+**The version is 1.2.0. Everything is committed on `release/1.2` and
+pushed to GitHub (2026-10-05; `main` is untouched): the first two days' work, "Pip round two", the reader bug pass and
 "The third round", each described below. No 1.2.0 package has been built.
 If you are a new session picking the work up, go to "Start here" next.**
 The owner tested
@@ -18,8 +18,8 @@ Pip features. The packages in `target\msix` are 1.1.0 and older.
 | Branch | State |
 | --- | --- |
 | `main` | Pushed to GitHub at `399f6c4` |
-| `release/1.1` | Two commits on `main`, **not pushed**: `8eb6a1e` version 1.1.0, `51b0341` release docs without a fixed version |
-| `release/1.2` | 24 commits on `release/1.1`, **not pushed**; the last five are the third round (backend, readers, Pip, app, docs) |
+| `release/1.1` | Two commits on `main`, not pushed as a branch of its own: `8eb6a1e` version 1.1.0, `51b0341` release docs without a fixed version |
+| `release/1.2` | 24 commits on `release/1.1`, **pushed** as `origin/release/1.2` (which carries `release/1.1`'s two commits with it); the last five are the third round (backend, readers, Pip, app, docs) |
 | Working tree | Clean, bar the untracked `.claude/` (the preview's launch file) |
 
 The commits are split by folder, not by change, because the big files
@@ -86,7 +86,7 @@ owner". The 1.2 release does not wait on anything in the list below.
   undo it. Ask only where the choice is the owner's alone (money, the store,
   anything that recolours or re-lays every book).
 - **Commit only when asked**, on `release/1.2` or a branch off it, in themed
-  commits; never push.
+  commits; push only when asked, and never to `main`.
 - **The owner deploys and builds releases.** Never touch the server, the
   database, secrets, `.env` or the signing key; never run the MSIX build or
   launch the desktop app. Health checks by `curl` are fine.
