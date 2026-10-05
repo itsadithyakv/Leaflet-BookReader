@@ -334,6 +334,19 @@ impl Database {
     Ok(())
   }
 
+  /// Writes a title, author and genres worked out again from the book by
+  /// today's rules (`commands::scan_series`). Stamped, unlike the series
+  /// above: a device still on the old rules holds the old title under the old
+  /// stamp, and on a tie the merge could keep either.
+  pub fn retitle(&self, id: &str, title: &str, author: Option<&str>, genres: &[String]) -> Result<()> {
+    let genres_json = serde_json::to_string(genres).ok();
+    self.conn.execute(
+      "UPDATE books SET title = ?1, author = ?2, genres = ?3, metadata_updated_at = ?4 WHERE id = ?5",
+      params![title, author, genres_json, now_iso(), id]
+    )?;
+    Ok(())
+  }
+
   /// Every book row including tombstones. Only sync wants these: a deletion
   /// has to travel to the other devices before its row can be forgotten.
   pub fn list_books_for_sync(&self) -> Result<Vec<BookRecord>> {

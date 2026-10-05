@@ -36,7 +36,13 @@ pub struct Package {
   /// The package's path inside the archive, e.g. `OEBPS/content.opf`.
   opf_path: String,
   pub title: Option<String>,
+  /// The first of `authors`, as written.
   pub author: Option<String>,
+  /// Everyone the book credits as a writer, as written, in the book's order.
+  /// A translator, an editor or an illustrator is not one (see `pick_authors`).
+  pub authors: Vec<String>,
+  /// The book's `dc:subject`s, as written.
+  pub subjects: Vec<String>,
   manifest: HashMap<String, Item>,
   spine: Vec<Itemref>,
   /// EPUB 2: `<meta name="cover" content="item-id"/>`.
@@ -54,6 +60,58 @@ struct PropertyMeta {
   refines: Option<String>,
   property: String,
   value: String
+}
+
+/// A `dc:title` or `dc:creator` as it is being read.
+struct Named {
+  id: Option<String>,
+  /// EPUB 2 says a creator's part on the element itself: `opf:role="trl"`.
+  role: Option<String>,
+  text: String
+}
+
+/// The book's main title: the one EPUB 3 marks `title-type` `main`, or the
+/// first written (a subtitle or a series title may come before it).
+fn pick_title(titles: &[Named], metas: &[PropertyMeta]) -> Option<String> {
+  let kind = |title: &Named| {
+    let id = title.id.as_deref()?;
+    metas
+      .iter()
+      .find(|meta| meta.refines.as_deref() == Some(id) && meta.property == "title-type")
+      .map(|meta| meta.value.as_str())
+  };
+  titles
+    .iter()
+    .find(|title| kind(title) == Some("main"))
+    .or_else(|| titles.first())
+    .map(|title| title.text.clone())
+}
+
+/// The creators who wrote the book: those with the role `aut`, or with none
+/// (EPUB 2 says it on the element, EPUB 3 in a `role` meta that refines it).
+/// A book that credits only others (an anthology's editor) keeps its first
+/// creator. The first creator used to be the author whoever they were, and
+/// the only one.
+fn pick_authors(creators: &[Named], metas: &[PropertyMeta]) -> Vec<String> {
+  let role = |creator: &Named| {
+    creator.role.clone().or_else(|| {
+      let id = creator.id.as_deref()?;
+      metas
+        .iter()
+        .find(|meta| meta.refines.as_deref() == Some(id) && meta.property == "role")
+        .map(|meta| meta.value.clone())
+    })
+  };
+  let wrote = |creator: &&Named| match role(creator) {
+    Some(role) => role.trim().is_empty() || role.trim().eq_ignore_ascii_case("aut"),
+    None => true
+  };
+  let writers: Vec<String> = creators.iter().filter(wrote).map(|creator| creator.text.clone()).collect();
+  if writers.is_empty() {
+    creators.first().map(|creator| vec![creator.text.clone()]).unwrap_or_default()
+  } else {
+    writers
+  }
 }
 
 /// A series number as written ("3", "2.5", "03"). Anything else, or a number no
@@ -179,6 +237,8 @@ fn parse(opf_path: String, xml: &str) -> Package {
     opf_path,
     title: None,
     author: None,
+    authors: Vec::new(),
+    subjects: Vec::new(),
     manifest: HashMap::new(),
     spine: Vec::new(),
     cover_id: None,
@@ -188,7 +248,12 @@ fn parse(opf_path: String, xml: &str) -> Package {
   let mut reader = Reader::from_str(xml);
   reader.trim_text(true);
   let mut buf = Vec::new();
-  let mut capture: Option<&'static str> = None;
+  // The `dc:title`, `dc:creator` or `dc:subject` being read and its text so
+  // far: an entity or a comment splits one text into several events (the last
+  // piece used to be taken for the whole).
+  let mut capture: Option<(&'static str, Named)> = None;
+  let mut titles: Vec<Named> = Vec::new();
+  let mut creators: Vec<Named> = Vec::new();
   let mut metas: Vec<PropertyMeta> = Vec::new();
   // The `<meta property>` whose text is being read.
   let mut open_meta: Option<PropertyMeta> = None;
@@ -199,8 +264,14 @@ fn parse(opf_path: String, xml: &str) -> Package {
     let is_start = matches!(event, Ok(Event::Start(_)));
     match event {
       Ok(Event::Start(e)) | Ok(Event::Empty(e)) => match local(e.name().as_ref()).as_str() {
-        "title" if package.title.is_none() => capture = Some("title"),
-        "creator" if package.author.is_none() => capture = Some("creator"),
+        kind @ ("title" | "creator" | "subject") if is_start => {
+          let kind = match kind {
+            "title" => "title",
+            "creator" => "creator",
+            _ => "subject"
+          };
+          capture = Some((kind, Named { id: attr(&e, "id"), role: attr(&e, "role"), text: String::new() }));
+        }
         "item" => {
           if let (Some(id), Some(href)) = (attr(&e, "id"), attr(&e, "href")) {
             package.manifest.insert(
@@ -245,18 +316,32 @@ fn parse(opf_path: String, xml: &str) -> Package {
         if let Some(meta) = open_meta.as_mut() {
           meta.value = text.unescape().map(|value| value.trim().to_string()).unwrap_or_default();
         }
-        if let Some(kind) = capture {
-          let value = text.unescape().map(|value| value.trim().to_string()).unwrap_or_default();
-          if !value.is_empty() {
-            match kind {
-              "title" => package.title = Some(value),
-              _ => package.author = Some(value)
-            }
+        if let Some((_, named)) = capture.as_mut() {
+          // An entity XML does not know (`&nbsp;`, `&eacute;`) fails the
+          // whole text, which used to lose the title; it is kept as written,
+          // and `metadata::normalize` undoes what it can.
+          match text.unescape() {
+            Ok(value) => named.text.push_str(&value),
+            Err(_) => named.text.push_str(&String::from_utf8_lossy(&text))
           }
         }
       }
+      Ok(Event::CData(text)) => {
+        if let Some((_, named)) = capture.as_mut() {
+          named.text.push_str(&String::from_utf8_lossy(&text));
+        }
+      }
       Ok(Event::End(_)) => {
-        capture = None;
+        if let Some((kind, mut named)) = capture.take() {
+          named.text = named.text.split_whitespace().collect::<Vec<_>>().join(" ");
+          if !named.text.is_empty() {
+            match kind {
+              "title" => titles.push(named),
+              "creator" => creators.push(named),
+              _ => package.subjects.push(named.text)
+            }
+          }
+        }
         if let Some(meta) = open_meta.take() {
           metas.push(meta);
         }
@@ -266,6 +351,9 @@ fn parse(opf_path: String, xml: &str) -> Package {
     }
     buf.clear();
   }
+  package.title = pick_title(&titles, &metas);
+  package.authors = pick_authors(&creators, &metas);
+  package.author = package.authors.first().cloned();
   let (series, series_index) = pick_series(&metas, calibre_series, calibre_index);
   package.series = series;
   package.series_index = series_index;
@@ -409,6 +497,57 @@ mod tests {
     assert!(!package.spine[1].linear);
     // EPUB 3's cover-image wins over EPUB 2's meta, and the href is decoded.
     assert_eq!(package.cover_path().as_deref(), Some("OEBPS/images/Cover Art.png"));
+  }
+
+  #[test]
+  fn reads_every_writer_and_no_one_else() {
+    // EPUB 2: the role is on the element.
+    let opf = OPF.replace(
+      "<dc:creator>J. R. R. Tolkien</dc:creator>",
+      r#"<dc:creator opf:role="trl" opf:file-as="Roe, Jane">Jane Roe</dc:creator>
+        <dc:creator opf:role="aut" opf:file-as="Marx, Karl">Karl Marx</dc:creator>
+        <dc:creator opf:file-as="Engels, Friedrich">Friedrich Engels</dc:creator>
+        <dc:creator opf:role="ill">An Illustrator</dc:creator>
+        <dc:subject>Politics</dc:subject>
+        <dc:subject> FIC055000 Fiction / Dystopian </dc:subject>"#
+    );
+    let package = parse("content.opf".into(), &opf);
+    assert_eq!(package.authors, ["Karl Marx", "Friedrich Engels"]);
+    assert_eq!(package.author.as_deref(), Some("Karl Marx"));
+    assert_eq!(package.subjects, ["Politics", "FIC055000 Fiction / Dystopian"]);
+
+    // EPUB 3: the role refines the creator.
+    let opf = OPF.replace(
+      "<dc:creator>J. R. R. Tolkien</dc:creator>",
+      r##"<dc:creator id="c1">Jane Roe</dc:creator>
+        <meta refines="#c1" property="role" scheme="marc:relators">trl</meta>
+        <dc:creator id="c2">Brown, Pierce</dc:creator>
+        <opf:meta refines="#c2" property="role" scheme="marc:relators">aut</opf:meta>"##
+    );
+    assert_eq!(parse("content.opf".into(), &opf).authors, ["Brown, Pierce"]);
+
+    // Only an editor is credited: better them than no one.
+    let opf = OPF.replace("<dc:creator>J. R. R. Tolkien</dc:creator>", r#"<dc:creator opf:role="edt">An Editor</dc:creator>"#);
+    assert_eq!(parse("content.opf".into(), &opf).authors, ["An Editor"]);
+  }
+
+  #[test]
+  fn reads_the_main_title_whole() {
+    // A subtitle written first; an entity XML does not know; a comment inside.
+    let opf = OPF.replace(
+      "<dc:title>The Hobbit</dc:title>",
+      r##"<dc:title id="sub">There and Back Again</dc:title>
+        <meta refines="#sub" property="title-type">subtitle</meta>
+        <dc:title id="main">Salt &amp; Iron<!-- x -->: Caf&eacute; Days</dc:title>
+        <meta refines="#main" property="title-type">main</meta>"##
+    );
+    let package = parse("content.opf".into(), &opf);
+    assert_eq!(package.title.as_deref(), Some("Salt & Iron: Caf&eacute; Days"));
+    let opf = OPF.replace("<dc:title>The Hobbit</dc:title>", "<dc:title><![CDATA[Fish & Chips]]></dc:title><dc:title>Second</dc:title>");
+    assert_eq!(parse("content.opf".into(), &opf).title.as_deref(), Some("Fish & Chips"));
+    // An empty title is no title.
+    let opf = OPF.replace("<dc:title>The Hobbit</dc:title>", "<dc:title/><dc:title>  </dc:title>");
+    assert_eq!(parse("content.opf".into(), &opf).title, None);
   }
 
   #[test]

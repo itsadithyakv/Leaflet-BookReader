@@ -13,15 +13,34 @@ use regex::Regex;
 
 pub mod epub;
 pub mod library_copy;
+pub mod mobi;
+pub mod pdf;
+#[cfg(test)]
+mod library_probe;
 
 #[cfg(desktop)]
 static CONVERTER_INSTALL_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+/// What a book's file says about itself, as written: `metadata::normalize`
+/// makes a title and an author a person would recognise out of it.
+#[derive(Debug, Default)]
 pub struct BasicMetadata {
   pub title: Option<String>,
-  pub author: Option<String>,
+  /// Everyone credited as a writer, one entry a credit.
+  pub authors: Vec<String>,
+  pub subjects: Vec<String>,
   pub series: Option<String>,
-  pub series_index: Option<f32>
+  pub series_index: Option<f32>,
+  /// The title and authors are the word of whatever program made the file (a
+  /// PDF's Info), which is as often "Microsoft Word - draft3.doc" and
+  /// "Administrator" as a book and its writer. `metadata::normalize` weighs
+  /// them against the file's name before it believes them.
+  pub doubtful: bool
+}
+
+/// The Kindle family: one container (`storage/mobi.rs`) under several names.
+fn is_kindle(ext: &str) -> bool {
+  matches!(ext, "mobi" | "azw" | "azw3" | "azw4" | "prc")
 }
 
 /// Where the library lives, set once at startup from Tauri's path resolver.
@@ -74,14 +93,84 @@ pub fn hash_file(path: &Path) -> Result<String> {
 /// a book that could never open, and every later empty file, of any format,
 /// was taken for that book.
 pub fn hash_for_import(path: &Path) -> Result<String> {
-  let metadata = fs::metadata(path)?;
+  let metadata = fs::metadata(path).map_err(|error| anyhow::anyhow!(describe_read_failure(&error)))?;
   if metadata.is_dir() {
     anyhow::bail!("That is a folder, not a book file.");
   }
   if metadata.len() == 0 {
     anyhow::bail!("That file is empty (0 bytes), so there is nothing to read. If you downloaded it, the download may not have finished.");
   }
-  hash_file(path)
+  check_kind(path)?;
+  hash_file(path).map_err(|error| match error.downcast::<std::io::Error>() {
+    Ok(error) => anyhow::anyhow!(describe_read_failure(&error)),
+    Err(other) => other
+  })
+}
+
+/// Why a file could not be read, in the reader's words. The system's own
+/// ("The process cannot access the file because it is being used by another
+/// process. (os error 32)") used to be shown as it came.
+fn describe_read_failure(error: &std::io::Error) -> String {
+  // Windows: 32 a sharing violation, 33 a lock on part of the file.
+  let in_use = cfg!(windows) && matches!(error.raw_os_error(), Some(32) | Some(33));
+  if in_use {
+    return "That file is open in another program, which is keeping it to itself. Close it there (or wait for the download to finish) and add it again.".to_string();
+  }
+  match error.kind() {
+    std::io::ErrorKind::NotFound => "That file is no longer there: it was moved, renamed or deleted after it was picked.".to_string(),
+    std::io::ErrorKind::PermissionDenied => "Leaflet is not allowed to read that file. Copy it somewhere of your own (Documents, say) and add it from there.".to_string(),
+    _ => format!("That file could not be read: {error}")
+  }
+}
+
+/// What the first bytes of a file say it is, where they say anything.
+fn looks_like(head: &[u8]) -> Option<&'static str> {
+  let window = &head[..head.len().min(1024)];
+  if head.starts_with(b"PK\x03\x04") || head.starts_with(b"PK\x05\x06") {
+    Some("zip")
+  } else if window.windows(5).any(|bytes| bytes == b"%PDF-") {
+    Some("pdf")
+  } else if head.get(60..68) == Some(b"BOOKMOBI".as_slice()) {
+    Some("mobi")
+  } else if head.starts_with(b"Rar!") {
+    Some("rar")
+  } else {
+    let text = String::from_utf8_lossy(window).to_ascii_lowercase();
+    (text.contains("<!doctype html") || text.contains("<html")).then_some("html")
+  }
+}
+
+/// Refuses a file that is not what its name says, for the formats where the
+/// first bytes settle it: an EPUB and a CBZ are zip archives, a PDF says so.
+/// Such a file used to come in as a book that could then never be opened (a
+/// web page saved as `book.epub` when a download link led to a sign-in page
+/// is the usual one).
+fn check_kind(path: &Path) -> Result<()> {
+  let ext = normalized_ext(path);
+  let wanted = match ext.as_str() {
+    "epub" | "cbz" => "zip",
+    "pdf" => "pdf",
+    _ => return Ok(())
+  };
+  let mut head = Vec::with_capacity(1024);
+  fs::File::open(path)
+    .and_then(|file| file.take(1024).read_to_end(&mut head))
+    .map_err(|error| anyhow::anyhow!(describe_read_failure(&error)))?;
+  let found = looks_like(&head);
+  if found == Some(wanted) {
+    return Ok(());
+  }
+  let label = ext.to_uppercase();
+  let article = if label.starts_with('E') { "an" } else { "a" };
+  let really = match found {
+    Some("pdf") => " It is a PDF: rename it to end in .pdf and add it again.",
+    Some("zip") if ext == "pdf" => " It is a zip archive (an EPUB, perhaps): check what it should be called.",
+    Some("mobi") => " It is a Kindle book: rename it to end in .mobi and add it again.",
+    Some("html") => " It is a web page, which is what a download that needed signing in leaves behind: download the book again.",
+    Some("rar") => " It is a RAR archive: unpack it first.",
+    _ => " It may be damaged, or the download may not have finished."
+  };
+  anyhow::bail!("That file is named .{ext} but it is not {article} {label}.{really}")
 }
 
 /// One book file is put in place at a time. Two imports of the same file at
@@ -526,6 +615,9 @@ impl std::fmt::Display for ConversionError {
   }
 }
 
+#[cfg(desktop)]
+const DRM_MESSAGE: &str = "This book is DRM-protected, so it cannot be converted. Open it in the app it was purchased from.";
+
 /// Calibre is slow on large books but should never run forever; a hung process
 /// used to leave the reader spinning with no way back.
 const CONVERSION_TIMEOUT: Duration = Duration::from_secs(15 * 60);
@@ -614,8 +706,7 @@ fn describe_converter_failure(stderr: &[u8], stdout: &[u8]) -> String {
   let lowered = combined.to_lowercase();
 
   if lowered.contains("drm") {
-    return "This book is DRM-protected, so it cannot be converted. Open it in the app it was purchased from."
-      .to_string();
+    return DRM_MESSAGE.to_string();
   }
   if lowered.contains("no such file") || lowered.contains("does not exist") {
     return "The original book file is missing. Re-import it to read it again.".to_string();
@@ -771,6 +862,11 @@ fn convert_with_external(
   target: &Path,
   app: Option<&AppHandle>
 ) -> std::result::Result<PathBuf, ConversionError> {
+  // A book locked to an account cannot be converted by anyone: say so now
+  // rather than after the reader has installed Calibre to find out.
+  if is_kindle(&normalized_ext(source)) && mobi::info(source).is_ok_and(|info| info.encrypted) {
+    return Err(ConversionError::Failed(DRM_MESSAGE.to_string()));
+  }
   let converter = resolve_converter_path(app).ok_or(ConversionError::ConverterMissing)?;
 
   // Convert to a scratch path and rename on success. Writing straight to the
@@ -917,14 +1013,27 @@ pub fn remove_book_extras(hash: &str, book_path: &Path) {
   }
 }
 
-/// The cover inside an EPUB, saved as the book's cover. `None` for other
-/// formats, or a book without one.
+/// The cover inside the book, saved as its cover: an EPUB's, a Kindle
+/// book's, or, for any other format that has been opened once, the cover of
+/// the EPUB it was converted to. `None` for a book without one.
 pub fn store_embedded_cover(book_path: &Path, hash: &str) -> Option<PathBuf> {
-  if normalized_ext(book_path) != "epub" {
-    return None;
-  }
-  let bytes = epub::cover(book_path).ok().flatten()?;
+  let bytes = embedded_cover(book_path, converted_epub_path(hash).ok().as_deref())?;
   store_cover_bytes(&bytes, hash).ok()
+}
+
+fn embedded_cover(book_path: &Path, converted: Option<&Path>) -> Option<Vec<u8>> {
+  let ext = normalized_ext(book_path);
+  let own = if ext == "epub" {
+    epub::cover(book_path).ok().flatten()
+  } else if is_kindle(&ext) {
+    mobi::cover(book_path).ok().flatten()
+  } else {
+    None
+  };
+  own.or_else(|| {
+    let converted = converted.filter(|path| *path != book_path && path.exists())?;
+    epub::cover(converted).ok().flatten()
+  })
 }
 
 pub fn extract_basic_metadata(path: &Path) -> Result<BasicMetadata> {
@@ -934,21 +1043,30 @@ pub fn extract_basic_metadata(path: &Path) -> Result<BasicMetadata> {
       return Ok(metadata);
     }
   }
-  Ok(BasicMetadata {
-    title: None,
-    author: None,
-    series: None,
-    series_index: None
-  })
+  if is_kindle(&ext) {
+    if let Ok(info) = mobi::info(path) {
+      return Ok(BasicMetadata { title: info.title, authors: info.authors, subjects: info.subjects, ..BasicMetadata::default() });
+    }
+  }
+  if ext == "pdf" {
+    if let Ok(info) = pdf::info(path) {
+      return Ok(BasicMetadata { title: info.title, authors: info.author.into_iter().collect(), doubtful: true, ..BasicMetadata::default() });
+    }
+  }
+  // A comic, a text file, or a book whose metadata cannot be read: the
+  // file's name is all there is.
+  Ok(BasicMetadata::default())
 }
 
 fn extract_epub_metadata(path: &Path) -> Result<BasicMetadata> {
   let package = epub::package(path)?;
   Ok(BasicMetadata {
     title: package.title,
-    author: package.author,
+    authors: package.authors,
+    subjects: package.subjects,
     series: package.series,
-    series_index: package.series_index
+    series_index: package.series_index,
+    doubtful: false
   })
 }
 
@@ -1077,13 +1195,111 @@ mod tests {
     let empty = dir.join("unfinished download.epub");
     fs::write(&empty, b"").expect("empty");
     let book = dir.join("book.epub");
-    fs::write(&book, b"the whole book").expect("book");
+    fs::write(&book, b"PK the whole book").expect("book");
 
     assert!(hash_for_import(&empty).unwrap_err().to_string().contains("empty"));
     assert!(hash_for_import(&dir.join("A Folder.epub")).unwrap_err().to_string().contains("folder"));
     assert!(hash_for_import(&dir.join("gone.epub")).is_err(), "a file that vanished after it was picked");
     assert_eq!(hash_for_import(&book).expect("hash"), hash_file(&book).expect("hash"));
 
+    let _ = fs::remove_dir_all(&dir);
+  }
+
+  /// A file that is not what its name says is refused in words that say what
+  /// it is; one that is, or whose format the first bytes cannot settle, is not.
+  #[test]
+  fn a_file_that_is_not_what_its_name_says_is_refused_plainly() {
+    let dir = std::env::temp_dir().join(format!("leaflet-kind-test-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("dir");
+    let put = |name: &str, bytes: &[u8]| {
+      let path = dir.join(name);
+      fs::write(&path, bytes).expect("write");
+      path
+    };
+    let refused = |name: &str, bytes: &[u8]| hash_for_import(&put(name, bytes)).expect_err(name).to_string();
+
+    let message = refused("really a pdf.epub", b"%PDF-1.4 and so on");
+    assert!(message.contains("named .epub") && message.contains("not an EPUB") && message.contains("rename it to end in .pdf"), "{message}");
+    let message = refused("sign-in page.epub", b"<!DOCTYPE html><html><body>Please sign in</body></html>");
+    assert!(message.contains("web page") && message.contains("download the book again"), "{message}");
+    let message = refused("really an epub.pdf", b"PK\x03\x04mimetypeapplication/epub+zip");
+    assert!(message.contains("not a PDF") && message.contains("zip archive"), "{message}");
+    let message = refused("noise.epub", &[7u8; 300]);
+    assert!(message.contains("damaged"), "{message}");
+    let message = refused("cut short.pdf", b"%PD");
+    assert!(message.contains("not a PDF"), "{message}");
+    let mut kindle = vec![0u8; 100];
+    kindle[60..68].copy_from_slice(b"BOOKMOBI");
+    assert!(refused("kindle.epub", &kindle).contains(".mobi"));
+
+    // What they say they are, as far as the first bytes go.
+    for (name, bytes) in [
+      ("book.epub", &b"PK\x03\x04mimetype"[..]),
+      ("BOOK.EPUB", b"PK\x03\x04mimetype"),
+      ("comic.cbz", b"PK\x03\x04page1.jpg"),
+      ("paper.pdf", b"%PDF-1.7"),
+      // A PDF may open with a few stray bytes; readers allow it.
+      ("mailed.pdf", b"\xEF\xBB\xBF\r\n%PDF-1.4"),
+      // Formats with no signature to check are taken at their word.
+      ("notes.txt", b"%PDF- is how a PDF starts"),
+      ("old.mobi", b"anything"),
+      ("page.html", b"PK is not markup")
+    ] {
+      assert!(hash_for_import(&put(name, bytes)).is_ok(), "{name}");
+    }
+    let _ = fs::remove_dir_all(&dir);
+  }
+
+  /// Paths as real libraries have them: an apostrophe, a typographic one,
+  /// Chinese, a name over 200 characters in a folder deep enough to pass
+  /// Windows' 260.
+  #[test]
+  fn awkward_paths_import_like_any_other() {
+    let root = std::env::temp_dir().join(format!("leaflet-path-test-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let deep = root.join("Don't Wake").join("Anna’s shelf 万千书友聚集地").join("a".repeat(60));
+    fs::create_dir_all(&deep).expect("dir");
+    let name = format!("Don't Wake, There Are Wolves_ {} -- Ellison, Mara -- ©2008 -- 万千 -- Anna’s Archive.epub", "long ".repeat(34));
+    let source = deep.join(&name);
+    assert!(name.chars().count() > 200 && source.to_string_lossy().chars().count() > 300, "the path is long enough to matter");
+    fs::write(&source, b"PK\x03\x04 not much of a book").expect("write");
+
+    let hash = hash_for_import(&source).expect("hash");
+    let stored = store_book_file_in(&root.join("books"), &source, &hash).expect("store");
+    assert_eq!(fs::read(&stored).expect("read"), b"PK\x03\x04 not much of a book");
+    // Not a real EPUB inside: nothing is read from it, and nothing panics.
+    let basic = extract_basic_metadata(&stored).expect("metadata");
+    assert_eq!(basic.title, None);
+    assert_eq!(embedded_cover(&stored, None), None);
+    assert!(epub::sections(&stored).is_err());
+    let stem = source.file_stem().and_then(|value| value.to_str()).expect("stem");
+    let identity = crate::metadata::normalize::identify(stem, &basic);
+    assert_eq!(identity.author.as_deref(), Some("Mara Ellison"));
+    assert!(identity.title.starts_with("Don't Wake, There Are Wolves: long long"), "{}", identity.title);
+    let _ = fs::remove_dir_all(&root);
+  }
+
+  /// A file another program holds open for itself: said in plain words, not
+  /// "os error 32".
+  #[cfg(windows)]
+  #[test]
+  fn a_file_another_program_holds_is_explained() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let dir = std::env::temp_dir().join(format!("leaflet-locked-test-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("dir");
+    let path = dir.join("still downloading.epub");
+    fs::write(&path, b"PK\x03\x04 half a book").expect("write");
+    let held = fs::OpenOptions::new().read(true).write(true).share_mode(0).open(&path).expect("hold");
+    let message = hash_for_import(&path).expect_err("held").to_string();
+    assert!(message.contains("open in another program"), "{message}");
+    assert!(!message.contains("os error"), "{message}");
+    drop(held);
+    assert!(hash_for_import(&path).is_ok());
+
+    let message = hash_for_import(&dir.join("gone.epub")).expect_err("gone").to_string();
+    assert!(message.contains("no longer there"), "{message}");
     let _ = fs::remove_dir_all(&dir);
   }
 

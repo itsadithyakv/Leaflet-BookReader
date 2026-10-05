@@ -2,26 +2,54 @@
 
 use super::*;
 
+/// A file that was not added, and why, in words for the reader.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportFailure {
+  /// The file's name, without its folder.
+  pub name: String,
+  pub reason: String
+}
+
+/// What became of the files handed over: the books (one a file that came in,
+/// so the same book can be there twice) and the files that did not come in.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportReport {
+  pub books: Vec<BookRecord>,
+  pub failed: Vec<ImportFailure>
+}
+
+/// A failure as the reader is told of it. `reason` is `None` for a format
+/// Leaflet does not open.
+fn import_failure(path: &str, reason: Option<String>) -> ImportFailure {
+  let file = std::path::Path::new(path);
+  let name = file.file_name().and_then(|name| name.to_str()).unwrap_or(path).to_string();
+  let reason = reason.unwrap_or_else(|| {
+    let ext = formats::extension_of(file);
+    if ext.is_empty() {
+      "It has no extension (.epub, .pdf), so Leaflet cannot tell what kind of book it is.".to_string()
+    } else {
+      format!("Leaflet does not open .{ext} files.")
+    }
+  });
+  ImportFailure { name, reason }
+}
+
 /// Imports books, one file at a time. A file that fails (unreadable, damaged,
 /// a disk error) is logged and skipped; the others still come in. It used to
 /// abort the whole batch after the earlier books were already saved, so the
-/// library showed "Import failed" while holding half of them. Only when
-/// nothing at all came in is the last error returned.
-#[tauri::command]
-pub async fn import_books(
-  paths: Vec<String>,
-  state: State<'_, AppState>,
-  app: AppHandle
-) -> Result<Vec<BookRecord>, String> {
-  let mut imported = Vec::new();
-  let mut last_error = None;
+/// library showed "Import failed" while holding half of them.
+async fn import_each(paths: Vec<String>, state: &State<'_, AppState>, app: &AppHandle) -> ImportReport {
+  let mut books = Vec::new();
+  let mut failed = Vec::new();
   for path in paths {
-    match import_one(&path, &state).await {
-      Ok(Some(book)) => imported.push(book),
-      Ok(None) => {}
+    match import_one(&path, state).await {
+      Ok(Some(book)) => books.push(book),
+      Ok(None) => failed.push(import_failure(&path, None)),
       Err(error) => {
         crate::diag::error(&format!("import failed for {path}: {error}"));
-        last_error = Some(error);
+        failed.push(import_failure(&path, Some(error)));
       }
     }
   }
@@ -30,11 +58,39 @@ pub async fn import_books(
   // book already in the library counts too: opening it again is how one gets
   // its copy when the option was turned on later. Done after the import, in
   // the background: the books are in the library whatever happens to the copy.
-  keep_copies_later(&app, imported.clone());
+  keep_copies_later(app, books.clone());
+  ImportReport { books, failed }
+}
+
+/// The books that came in. Only when nothing at all did is an error returned
+/// (the last file's); a file that failed among others is passed over. Kept
+/// for callers that only want the books: `import_books_report` says which
+/// files failed and why.
+#[tauri::command]
+pub async fn import_books(
+  paths: Vec<String>,
+  state: State<'_, AppState>,
+  app: AppHandle
+) -> Result<Vec<BookRecord>, String> {
+  let report = import_each(paths, &state, &app).await;
+  // A format Leaflet does not open is passed over here, as it always was.
+  let last_error = report.failed.iter().rev().find(|failure| failure.reason != import_failure(&failure.name, None).reason);
   match last_error {
-    Some(error) if imported.is_empty() => Err(error),
-    _ => Ok(imported)
+    Some(failure) if report.books.is_empty() => Err(failure.reason.clone()),
+    _ => Ok(report.books)
   }
+}
+
+/// `import_books`, with every file that was not added named and explained.
+/// The dialog used to say nothing at all, and a drop said only that "one file
+/// couldn't be read".
+#[tauri::command]
+pub async fn import_books_report(
+  paths: Vec<String>,
+  state: State<'_, AppState>,
+  app: AppHandle
+) -> Result<ImportReport, String> {
+  Ok(import_each(paths, &state, &app).await)
 }
 
 /// One file: `None` for a format the reader cannot open.
@@ -95,11 +151,12 @@ pub(crate) async fn import_one(path: &str, state: &State<'_, AppState>) -> Resul
       }
     }
 
-    let (stored, mut basic, embedded_cover) = {
+    let (stored, basic, embedded_cover) = {
       let source = source.clone();
       let hash = hash.clone();
       tauri::async_runtime::spawn_blocking(move || -> anyhow::Result<_> {
-        let stored = storage::store_book_file(&source, &hash)?;
+        let stored = storage::store_book_file(&source, &hash)
+          .map_err(|error| anyhow::anyhow!("It could not be copied into your library: {error}"))?;
         let basic = storage::extract_basic_metadata(&stored)?;
         let cover = storage::store_embedded_cover(&stored, &hash);
         Ok((stored, basic, cover))
@@ -115,32 +172,26 @@ pub(crate) async fn import_one(path: &str, state: &State<'_, AppState>) -> Resul
       .unwrap_or("Untitled")
       .to_string();
 
-    let mut title = basic.title.take().unwrap_or_else(|| filename.clone());
-    let mut author = basic.author.take();
-    let genres = Vec::new();
+    // What the book says about itself, and failing that what its file is
+    // called, made into a title and an author a person would recognise.
+    let identity = normalize::identify(&filename, &basic);
     let cover_url = embedded_cover.map(|path| path.to_string_lossy().to_string());
-
-    let normalized = normalize::normalize_query(&title, author.as_deref());
-    if normalize::is_noisy_title(&title) && !normalized.title.trim().is_empty() {
-      title = normalized.title.clone();
-    }
-    if author.is_none() {
-      author = normalized.author.clone();
-    }
 
     let book = BookRecord {
       id: hash.clone(),
-      title,
-      author,
-      genres,
+      title: identity.title,
+      author: identity.author,
+      // The book's own subjects. A lookup adds to them, and is only made for
+      // a book that has none (or no cover, or no author).
+      genres: identity.genres,
       cover_url,
       local_path: stored.to_string_lossy().to_string(),
       file_hash: hash,
       progress: 0.0,
       position: None,
       // What the book says about itself; the app works out the rest.
-      series: basic.series.take(),
-      series_index: basic.series_index,
+      series: identity.series,
+      series_index: identity.series_index,
       last_opened: None,
       created_at: db::now_iso(),
       metadata_checked_at: None,
@@ -183,35 +234,38 @@ pub async fn refresh_metadata(book_id: String, state: State<'_, AppState>) -> Re
       .ok_or_else(|| "Book not found".to_string())?
   };
 
+  // Only a title that came from a file name (noisy, or with no author to its
+  // name) is replaced; a book's own title and author, read from inside it,
+  // are the reader's and stay. A match still fills in genres and the cover.
+  // A PDF, a comic or a text file says nothing about itself that is read:
+  // its title is always its file's name, tidied.
+  let names_itself = matches!(formats::extension_of(std::path::Path::new(&book.local_path)).as_str(), "epub" | "mobi" | "azw" | "azw3" | "azw4" | "prc");
+  let from_file_name = normalize::is_noisy_title(&book.title) || book.author.is_none() || !names_itself;
   let normalized = normalize::normalize_query(&book.title, book.author.as_deref());
-  if normalize::is_noisy_title(&book.title) && !normalized.title.trim().is_empty() {
-    book.title = normalized.title.clone();
-  }
-  if book.author.is_none() {
-    book.author = normalized.author.clone();
-  }
+  // What an older version stored ("Title (Author) (z-library.sk, ...)",
+  // "Brown, Pierce") is put through today's rules whether or not a catalogue
+  // answers: offline, this is all the tidying the book gets.
+  let tidy = normalize::identify_stored(&book.title, book.author.as_deref());
+  book.title = tidy.title;
+  book.author = tidy.author;
 
-  // Only a title that came from a file name (noisy) is replaced; a book's own
-  // title and author, read from inside it, are the reader's and stay. A
-  // match still fills in genres and the cover.
-  let from_file_name = normalize::is_noisy_title(&book.title) || book.author.is_none();
   if let Ok(Some(meta)) = open_library::fetch_metadata(&normalized.title, normalized.author.as_deref(), normalized.isbn.as_deref()).await {
-    if from_file_name {
+    // The catalogue's title only when it is this title written properly: a
+    // search for "Dune" that finds only "Dune Messiah" is a match by its
+    // first word, and used to rename the book.
+    if from_file_name && (normalized.isbn.is_some() || open_library::title_similarity(&normalized.title, &meta.title) >= 0.6) {
       book.title = meta.title;
       if meta.author.is_some() {
         book.author = meta.author;
       }
     }
-    book.genres = meta.subjects;
+    // Added after the book's own subjects, never in place of them.
+    book.genres = normalize::merge_genres(&book.genres, &meta.subjects);
     if let Some(url) = meta.cover_url {
       if let Ok(path) = storage::store_cover(&url, &book.file_hash).await {
         book.cover_url = Some(path.to_string_lossy().to_string());
       }
     }
-  }
-
-  if book.author.is_none() {
-    book.author = normalized.author.clone();
   }
 
   if book.cover_url.is_none() {
@@ -261,13 +315,9 @@ pub async fn fetch_cover(book_id: String, state: State<'_, AppState>) -> Result<
     return Ok(Some(book));
   }
 
+  // Looking for a cover renames nothing (it used to hand back a title cut for
+  // the search, which the library showed until the next launch).
   let normalized = normalize::normalize_query(&book.title, book.author.as_deref());
-  if normalize::is_noisy_title(&book.title) && !normalized.title.trim().is_empty() {
-    book.title = normalized.title.clone();
-  }
-  if book.author.is_none() {
-    book.author = normalized.author.clone();
-  }
   if let Ok(Some(meta)) = open_library::fetch_metadata(&normalized.title, normalized.author.as_deref(), normalized.isbn.as_deref()).await {
     if let Some(url) = meta.cover_url {
       if let Ok(path) = storage::store_cover(&url, &book.file_hash).await {
@@ -291,6 +341,62 @@ pub async fn fetch_cover(book_id: String, state: State<'_, AppState>) -> Result<
   }
 
   Ok(None)
+}
+
+/// The most a page drawn for a cover may weigh, as it arrives (base64).
+const MAX_PAGE_COVER_CHARS: usize = 8 * 1024 * 1024;
+
+/// The picture in what the reader's page-drawing hands over: a `data:` URL of
+/// a JPEG or PNG. Anything else is refused before it is written anywhere.
+fn page_cover_bytes(image: &str) -> Result<Vec<u8>, String> {
+  if image.len() > MAX_PAGE_COVER_CHARS {
+    return Err("That picture is too large to keep as a cover.".to_string());
+  }
+  let encoded = image
+    .strip_prefix("data:image/jpeg;base64,")
+    .or_else(|| image.strip_prefix("data:image/png;base64,"))
+    .ok_or_else(|| "A cover must be a JPEG or PNG picture.".to_string())?;
+  let bytes = base64::engine::general_purpose::STANDARD
+    .decode(encoded.trim())
+    .map_err(|_| "That cover could not be read.".to_string())?;
+  match storage::sniff_image_mime(&bytes) {
+    Some("image/jpeg") | Some("image/png") => Ok(bytes),
+    _ => Err("A cover must be a JPEG or PNG picture.".to_string())
+  }
+}
+
+/// A PDF's first page as its cover, for a PDF that has none: nothing is read
+/// from inside a PDF at import, and a lookup finds a cover only for a book a
+/// catalogue knows. The page reader draws the page the first time the book is
+/// opened and hands it over here. Saved the way every cover is (a real image,
+/// its thumbnail made), and never in place of a cover the book already has:
+/// `None` then, and for a book that is not a PDF.
+#[tauri::command]
+pub async fn save_page_cover(book_id: String, image: String, state: State<'_, AppState>) -> Result<Option<BookRecord>, String> {
+  let mut book = {
+    let db = state.db.guard();
+    db.find_by_id(&book_id)
+      .map_err(|e| e.to_string())?
+      .ok_or_else(|| "Book not found".to_string())?
+  };
+  if book.cover_url.is_some() || formats::extension_of(std::path::Path::new(&book.local_path)) != "pdf" {
+    return Ok(None);
+  }
+  let bytes = page_cover_bytes(&image)?;
+  let hash = book.file_hash.clone();
+  let saved = tauri::async_runtime::spawn_blocking(move || -> anyhow::Result<std::path::PathBuf> {
+    let cover = storage::store_cover_bytes(&bytes, &hash)?;
+    // Made now, so the library's card has it the moment the reader goes back.
+    let _ = storage::cover_thumbnail(&cover, &hash);
+    Ok(cover)
+  })
+  .await
+  .map_err(|e| format!("Cover task failed: {e}"))?
+  .map_err(|e| e.to_string())?;
+  book.cover_url = Some(saved.to_string_lossy().to_string());
+  let db = state.db.guard();
+  db.update_cover(&book.id, book.cover_url.clone()).map_err(|e| e.to_string())?;
+  Ok(Some(book))
 }
 
 /// The EPUB's sections in reading order with their sizes, for progress by how
@@ -501,6 +607,31 @@ pub fn clear_all_data(app: AppHandle, state: State<'_, AppState>) -> Result<(), 
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// A file that is not added is named, without its folder, and says why.
+  #[test]
+  fn a_file_that_was_not_added_is_named_and_explained() {
+    let failure = import_failure("/home/mara/Downloads/Don't Wake (Mara Ellison).epub", Some("That file is empty (0 bytes).".into()));
+    assert_eq!(failure, ImportFailure { name: "Don't Wake (Mara Ellison).epub".into(), reason: "That file is empty (0 bytes).".into() });
+    assert_eq!(import_failure("/home/mara/notes.xyz", None).reason, "Leaflet does not open .xyz files.");
+    assert_eq!(import_failure("/home/mara/README", None), ImportFailure { name: "README".into(), reason: "It has no extension (.epub, .pdf), so Leaflet cannot tell what kind of book it is.".into() });
+  }
+
+  /// Only a real JPEG or PNG is kept as a cover, whatever the label says.
+  #[test]
+  fn a_page_cover_must_be_a_real_picture() {
+    let encode = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
+    let jpeg = [0xFF, 0xD8, 0xFF, 0xE0, 0, 16, b'J', b'F', b'I', b'F'];
+    assert_eq!(page_cover_bytes(&format!("data:image/jpeg;base64,{}", encode(&jpeg))), Ok(jpeg.to_vec()));
+    let png = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2];
+    assert_eq!(page_cover_bytes(&format!("data:image/png;base64,{}", encode(&png))), Ok(png.to_vec()));
+    // A web page under a picture's label; a picture under another label; not base64; nothing; far too much.
+    assert!(page_cover_bytes(&format!("data:image/jpeg;base64,{}", encode(b"<html>Not found</html>"))).is_err());
+    assert!(page_cover_bytes(&format!("data:text/html;base64,{}", encode(&jpeg))).is_err());
+    assert!(page_cover_bytes("data:image/jpeg;base64,@@@@").is_err());
+    assert!(page_cover_bytes("").is_err());
+    assert!(page_cover_bytes(&format!("data:image/jpeg;base64,{}", "A".repeat(MAX_PAGE_COVER_CHARS))).is_err());
+  }
 
   /// The bug this guards: "Delete All Data" emptied `library.db` and left the
   /// copies made before each upgrade beside it, each one the whole library.

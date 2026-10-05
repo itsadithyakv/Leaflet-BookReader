@@ -34,6 +34,12 @@ pub fn needs_converter(
   if already_converted {
     return Ok(false);
   }
+  // A Kindle book locked to an account cannot be converted by Calibre either.
+  // Opening it says so (`ensure_epub_version`); asking the reader to install
+  // Calibre first would be 200 MB for nothing.
+  if storage::mobi::info(&source).is_ok_and(|info| info.encrypted) {
+    return Ok(false);
+  }
 
   Ok(!storage::converter_installed(&app))
 }

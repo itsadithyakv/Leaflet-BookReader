@@ -121,12 +121,74 @@ pub fn open_store_review(app: tauri::AppHandle) -> Result<(), String> {
     .map_err(|error| format!("Could not open the Microsoft Store: {error}"))
 }
 
+/// What may be handed to the system to open, as it will be handed over: an
+/// https address, or `mailto:` and one plain mail address (a PDF's "write to
+/// us" link). Everything else is refused: `http`, `file`, `javascript`, a
+/// program's own scheme. A mail link's `?subject=...&body=...&attach=...` is
+/// dropped, so a link in a book can start a letter but not write or load one.
+fn openable_link(url: &str) -> Result<String, String> {
+  let url = url.trim();
+  if url.starts_with("https://") {
+    return Ok(url.to_string());
+  }
+  let refused = || "Only https links and mail addresses can be opened.".to_string();
+  let (scheme, rest) = url.split_once(':').ok_or_else(refused)?;
+  if !scheme.eq_ignore_ascii_case("mailto") {
+    return Err(refused());
+  }
+  let address = rest.split('?').next().unwrap_or("");
+  let (name, host) = address.split_once('@').ok_or_else(refused)?;
+  let plain = |part: &str, extra: &str| !part.is_empty() && part.chars().all(|ch| ch.is_ascii_alphanumeric() || extra.contains(ch));
+  let host_ok = host.contains('.') && host.split('.').all(|label| plain(label, "-") && !label.starts_with('-') && !label.ends_with('-'));
+  if address.len() > 254 || !plain(name, "._%+-") || !host_ok {
+    return Err(refused());
+  }
+  Ok(format!("mailto:{address}"))
+}
+
 #[tauri::command]
 pub fn open_public_link(url: String, app: tauri::AppHandle) -> Result<(), String> {
-  if !url.starts_with("https://") {
-    return Err("Only https links can be opened.".to_string());
-  }
+  let url = openable_link(&url)?;
   tauri_plugin_opener::OpenerExt::opener(&app)
     .open_url(&url, None::<&str>)
-    .map_err(|error| format!("Could not open your browser: {error}"))
+    .map_err(|error| format!("Could not open that link: {error}"))
+}
+
+#[cfg(test)]
+mod link_tests {
+  use super::openable_link;
+
+  /// The whole list of what the app will open from a link in a book or a page.
+  #[test]
+  fn only_https_and_a_plain_mail_address_are_opened() {
+    assert_eq!(openable_link("https://example.org/a?b=c#d").as_deref(), Ok("https://example.org/a?b=c#d"));
+    assert_eq!(openable_link("mailto:business@example.org").as_deref(), Ok("mailto:business@example.org"));
+    assert_eq!(openable_link(" MAILTO:first.last+books@mail.example.co.uk ").as_deref(), Ok("mailto:first.last+books@mail.example.co.uk"));
+    // What follows the address is not passed on.
+    assert_eq!(openable_link("mailto:a@example.org?subject=Hi&body=x&attach=C:/secret.txt").as_deref(), Ok("mailto:a@example.org"));
+    for refused in [
+      "http://example.org/",
+      "HTTPS://example.org/",
+      "file:///C:/Windows/system32/calc.exe",
+      "javascript:alert(1)",
+      "ms-settings:privacy",
+      "tel:+15551234567",
+      "data:text/html,hi",
+      "C:\\Windows\\notepad.exe",
+      "example.org",
+      "",
+      "mailto:",
+      "mailto:nobody",
+      "mailto:a@b",
+      "mailto:a@-example.org",
+      "mailto:a b@example.org",
+      "mailto:a@example.org,b@example.org",
+      "mailto:a@example.org%0Abcc:x@example.org",
+      "mailto:\"quoted\"@example.org",
+      "mailto:?to=a@example.org",
+      "mailto://example.org/a@b.c"
+    ] {
+      assert!(openable_link(refused).is_err(), "{refused}");
+    }
+  }
 }

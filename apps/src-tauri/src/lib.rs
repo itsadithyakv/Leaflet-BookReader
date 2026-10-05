@@ -235,6 +235,8 @@ pub fn run() {
       desktop_pip::runtime::desktop_pip_frame,
       desktop_pip::runtime::desktop_pip_act,
       commands::import_books,
+      commands::import_books_report,
+      commands::save_page_cover,
       commands::list_books,
       commands::refresh_metadata,
       commands::fetch_cover,
