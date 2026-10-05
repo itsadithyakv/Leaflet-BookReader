@@ -338,6 +338,66 @@ text, features and "what's new" are ready in
 [store-listing.md](store-listing.md); the rest of the form is in
 [release-msix.md → Submit](release-msix.md#submit).
 
+## Releasing an update — the short run sheet
+
+For 1.1, 1.2 and every release after the first. Steps 2 to 6 above are done
+once and are not repeated.
+
+**What gets signed, and with what.** Three different things, easy to mix up:
+
+| | Signed with | When |
+| --- | --- | --- |
+| The package you upload | **Nothing.** The Store signs it. Upload the unsigned `.msix` | Every release |
+| A copy to install on this PC first | The self-signed test certificate, `CN=30ED0224-8255-4781-8ACD-EE3EF146115F` (made once, below) | Every release, if you test it installed |
+| `config.json` on the website | `C:\Users\Adi\.leaflet\config-signing-key.pem` (`node site/sign-config.mjs`) | Only when the API's address changes. Not part of a release |
+
+1. **The version.** `apps/package.json`, both places in
+   `apps/package-lock.json`, `apps/src-tauri/Cargo.toml`, the `leaflet` entry
+   of `Cargo.lock`, `apps/src-tauri/tauri.conf.json`. Each upload needs a
+   higher one than the last.
+2. **Build** (step 7's commands, in one PowerShell window that you keep open
+   for step 3): the five values, then `.\build-msix.ps1`. No warnings about a
+   missing value. Output:
+   `apps\src-tauri\target\msix\Leaflet_<version>.0_x64.msix`, unsigned.
+3. **Try it installed** (same window). The script signs the package where it
+   lies, so **the signed file takes the upload's name**: sign, move the
+   signed copy aside, and pack the unsigned one again.
+   ```powershell
+   # The test certificate, if this PC still has it (it was made for 1.1):
+   $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object Subject -eq "CN=30ED0224-8255-4781-8ACD-EE3EF146115F" | Select-Object -First 1
+   # Nothing printed by `$cert`? Make it: release-msix.md, "Test it locally",
+   # the New-SelfSignedCertificate and Import-PfxCertificate lines (the import
+   # needs an administrator PowerShell, once per certificate).
+   $password = ConvertTo-SecureString -String "leaflet-test" -Force -AsPlainText
+   Export-PfxCertificate -Cert $cert -FilePath "$env:TEMP\leaflet-test.pfx" -Password $password
+
+   .\build-msix.ps1 -SkipBuild -CertificatePath "$env:TEMP\leaflet-test.pfx" -CertificatePassword "leaflet-test"
+   Move-Item ..\target\msix\Leaflet_1.2.0.0_x64.msix ..\target\msix\Leaflet_1.2.0.0_x64.test-signed.msix -Force
+   .\build-msix.ps1 -SkipBuild        # the unsigned one again, for the Store
+
+   Get-AppxPackage *LeafletBookReader* | Remove-AppxPackage   # only if a test copy is installed; it removes that copy's library
+   Add-AppxPackage ..\target\msix\Leaflet_1.2.0.0_x64.test-signed.msix
+   ```
+   Then step 8's list in the installed app, and what HANDOFF.md asks to be
+   looked at for this release. If the Store's own Leaflet is installed on
+   this PC, the test copy replaces it only when its version is higher.
+4. **The server**, if `server/` changed (step 5's one command), then
+   `https://leafletapp.duckdns.org/health`.
+5. **The code and the website.** Fast-forward `main` and tag; the push
+   publishes `site/` and `docs/legal/` (privacy policy, terms) by itself.
+   ```powershell
+   cd D:\Leaflet
+   git switch main
+   git merge --ff-only release/1.2
+   git push origin main
+   git tag v1.2.0
+   git push origin v1.2.0
+   ```
+6. **Partner Center** → Leaflet → **Update** (a new submission): Packages →
+   upload the **unsigned** `.msix` and remove the older package from the
+   submission; Store listing → "What's new in this version"; submit.
+   Certification usually takes a day or two.
+
 ## After launch
 
 | To… | Do |
