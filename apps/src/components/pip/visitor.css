@@ -68,6 +68,13 @@
   pointer-events: none;
 }
 
+/* A small room has no floor left under the visitor's feet for it: over their head. */
+.pip-visitor-tag[data-above] {
+  top: auto;
+  bottom: 100%;
+  margin: 0 0 1px;
+}
+
 /* The knock: a bubble at the wall the door is in, its tail towards the door. */
 .pip-visitor-knock {
   position: absolute;
@@ -122,11 +129,12 @@
   filter: brightness(0.72);
 }
 
-/* Who it is: a small card over the visitor, kept inside the room. */
+/* Who it is: a small card by the visitor, over the whole window as the room's
+   own cards are (it is placed from script, and a room 120 px tall cannot hold it). */
 .pip-visitor-card {
-  position: absolute;
-  z-index: 4;
-  width: 190px;
+  position: fixed;
+  z-index: 65;
+  width: min(190px, calc(100vw - 16px));
   padding: 7px 10px 9px;
   border-radius: 3px;
   background: var(--hud-face, #fffbf0);
@@ -141,7 +149,7 @@
 
 .pip-visitor-card-name {
   margin: 0;
-  padding-right: 20px;
+  padding-right: 22px;
   overflow: hidden;
   font-size: 14px;
   font-weight: 700;
@@ -192,10 +200,10 @@
 
 .pip-visitor-card-close {
   position: absolute;
-  top: 5px;
-  right: 6px;
-  width: 20px;
-  height: 20px;
+  top: 3px;
+  right: 4px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: 0;
   background: none;
@@ -203,4 +211,18 @@
   font-size: 15px;
   line-height: 1;
   cursor: pointer;
+}
+
+/* Under a finger the cross is a thumb's size, and the name leaves it the room. */
+@media (hover: none) and (pointer: coarse) {
+  .pip-visitor-card-close {
+    top: 0;
+    right: 0;
+    width: 44px;
+    height: 44px;
+  }
+
+  .pip-visitor-card-name {
+    padding-right: 36px;
+  }
 }

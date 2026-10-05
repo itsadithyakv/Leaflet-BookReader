@@ -42,7 +42,7 @@ type PipState = {
   queue: PipReaction[];
   /** A celebration inside the reader: Pip peeks over the corner, then leaves. */
   peek: PipReaction | null;
-  /** The book being read, for its scene in Pip's idle time (see pip/bookNods). */
+  /** The book being read, for its scene in Pip's idle time if she knows it (PipWorld looks it up: pip/nods, pip/bookNods). */
   bookNod: { title: string; author: string | null; genres?: string[] | null } | null;
   setBookNod: (book: { title: string; author: string | null; genres?: string[] | null } | null) => void;
   setMode: (mode: PipMode) => void;

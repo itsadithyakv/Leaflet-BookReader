@@ -2,11 +2,18 @@
    each, the art of what is not as the room drew it, and the shade drawn
    curtains cast. Beside index.css's house rules, which place the room. */
 
-/* The button over a usable furnishing. It says it can be used: a gold edge
-   when pointed at or focused, and a cursor for what the hand does to it. */
+/* The button over a usable furnishing: where it is pressed, which on a small
+   room is more than its art (pip/furnish.ts, `pressAreas`) and shows nothing.
+   The ring inside it is the thing itself, and says it can be used: a gold
+   edge when pointed at or focused, and a cursor for what the hand does to it. */
 .pip-furnish {
-  border-radius: 2px;
   touch-action: none;
+}
+
+.pip-furnish-ring {
+  position: absolute;
+  border-radius: 2px;
+  pointer-events: none;
 }
 
 .pip-furnish[data-cursor="ew-resize"] {
@@ -21,11 +28,21 @@
   cursor: grabbing;
 }
 
-.pip-furnish:hover,
-.pip-furnish:focus-visible {
+.pip-furnish:hover > .pip-furnish-ring,
+.pip-furnish:focus-visible > .pip-furnish-ring {
   box-shadow:
     0 0 0 2px #ffd23f,
     0 0 0 4px var(--hud-line);
+}
+
+/* The keyboard's outline goes round the thing too, not round its press area. */
+.pip-house-hotspot.pip-furnish:focus-visible {
+  outline: none;
+}
+
+.pip-furnish:focus-visible > .pip-furnish-ring {
+  outline: 2px solid rgb(var(--color-primary));
+  outline-offset: 4px;
 }
 
 /* A furnishing's own art, over the room's picture, placed from script. */
@@ -134,9 +151,36 @@
   color: var(--hud-ink);
 }
 
+/* Under a finger it is a thumb's size. */
+@media (hover: none) and (pointer: coarse) {
+  .pip-room-card-close {
+    width: 44px;
+    height: 44px;
+  }
+}
+
 .pip-room-card-body {
   min-height: 0;
   overflow-y: auto;
+}
+
+/* The reading calendar brings its own paper and margin (it is the Social
+   page's). On the narrowest window its twelve weeks, 296 px, were 3 px wider
+   than what that margin left of a 364 px card, and scrolled sideways for it. */
+@media (max-width: 420px) {
+  .pip-room-card-body > .paper-surface {
+    padding: 16px 14px;
+  }
+}
+
+/* The radio in a card: its slider a full 24 px to take hold of (18 px in the
+   reader's own panel, which is the reader's), its caption at 11 px. */
+.pip-room-card .ambience-volume input[type="range"] {
+  min-height: 24px;
+}
+
+.pip-room-card .ambience-label {
+  font-size: 11px;
 }
 
 .pip-room-card-empty {

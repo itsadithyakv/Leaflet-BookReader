@@ -135,6 +135,8 @@ export const PipShop = ({ categories, balance, request, goal, onGoal, onBuy, onP
   const switchTab = (to: number) => {
     setTab(categories[to].id);
     setChosen(null);
+    // Where the tabs are one scrolling row, a tab chosen at its edge comes into view whole.
+    tabRefs.current[to]?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   };
 
   const onTabKey = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
@@ -241,7 +243,16 @@ export const PipShop = ({ categories, balance, request, goal, onGoal, onBuy, onP
           </button>
         </header>
 
-        <div className="pip-shop-tabs" role="tablist" aria-label="Kinds of things">
+        <div
+          className="pip-shop-tabs"
+          role="tablist"
+          aria-label="Kinds of things"
+          // On a small window the tabs are one row that scrolls sideways: a mouse's wheel turns it.
+          onWheel={(event) => {
+            const strip = event.currentTarget;
+            if (event.deltaX === 0 && strip.scrollWidth > strip.clientWidth) strip.scrollLeft += event.deltaY;
+          }}
+        >
           {categories.map((entry, index) => (
             <button
               key={entry.id}

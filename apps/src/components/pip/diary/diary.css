@@ -219,7 +219,7 @@
 
 .pip-diary-dayhead {
   color: var(--hud-ink-soft);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.06em;
   text-align: center;
@@ -351,5 +351,36 @@
 
   .pip-diary-day {
     width: 30px;
+  }
+}
+
+/* Under a finger a day is pressed in the 44 px about its square. The squares
+   are no bigger: they stand 44 px apart instead (seven of them are 308 px,
+   which the narrowest card has), and each one's press area fills its place. */
+@media (hover: none) and (pointer: coarse) {
+  .pip-diary-days {
+    grid-template-columns: repeat(7, 44px);
+    gap: 0;
+  }
+
+  .pip-diary-day {
+    position: relative;
+    margin: 8px 5px;
+  }
+
+  .pip-diary-day::after {
+    position: absolute;
+    inset: -8px -5px;
+    content: "";
+  }
+}
+
+@media (hover: none) and (pointer: coarse) and (max-width: 560px) {
+  .pip-diary-day {
+    margin: 8px 7px;
+  }
+
+  .pip-diary-day::after {
+    inset: -8px -7px;
   }
 }

@@ -17,7 +17,9 @@ import {
   FRIDGE_HUM_S,
   FURNISH_STORE,
   KINDS,
+  MIN_TARGET,
   THING_NAMES,
+  TOUCH_TARGET,
   crookedReaction,
   curtainPull,
   curtainReaction,
@@ -38,10 +40,10 @@ import {
   nudge,
   opensCard,
   parseRemembered,
+  pressAreas,
   roomShade,
   slideTo,
   straighten,
-  targetBox,
   withRemembered,
   withinSpan,
   type FurnishKind,
@@ -59,6 +61,7 @@ import { playSound } from "../../pip/sound";
 import { floorPoint } from "./layout";
 import { RoomCard } from "./RoomCard";
 import { useRoomThings } from "./roomThings";
+import { useCoarsePointer } from "./useCoarsePointer";
 import "./furnishings.css";
 
 /** How far the pointer moves before a press on a furnishing becomes a drag (the same as for Pip). */
@@ -317,6 +320,11 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
   };
   const canvases = useRef(new Map<string, HTMLCanvasElement>());
   const buttons = useRef(new Map<string, HTMLButtonElement>());
+  // How far along the wall each picture hung when its button was last placed: the button is laid out there, and
+  // carried the rest of the way while the picture is slid.
+  const placedDx = useRef(new Map<string, number>());
+  // A finger's press areas are a thumb's size.
+  const touch = useCoarsePointer();
   const shadeRef = useRef<HTMLDivElement | null>(null);
   // Counted up when something settles, so labels and pressed states follow.
   const [, setSettled] = useState(0);
@@ -371,7 +379,8 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
     if (thing.kind === "picture") {
       const slide = `translateX(${(state.hang.dx * k).toFixed(2)}px)`;
       const button = buttons.current.get(thing.key);
-      if (button) button.style.transform = slide;
+      // Its button was laid out where it hung then: only what it has moved since.
+      if (button) button.style.transform = `translateX(${((state.hang.dx - (placedDx.current.get(thing.key) ?? 0)) * k).toFixed(2)}px)`;
       if (!canvas) return;
       const show = off(thing, state);
       canvas.style.visibility = show ? "visible" : "hidden";
@@ -726,6 +735,17 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
   // The thing whose card is open, while it is still there to be by (a note taken down, another floor: no card).
   const opened = card ? usable.find((thing) => thing.key === card && opensCard(thing.kind)) ?? null : null;
   const openedCard = opened ? views[opened.itemId]?.card ?? null : null;
+  // What of each is seen, to be pressed: its box (a picture's, where it hangs now). With notes on its lower door
+  // the fridge is its freezer door, and the rest of it is the notes'.
+  const noted = usable.some((thing) => thing.kind === "notes");
+  const seen = usable.map((thing) => {
+    const dx = thing.kind === "picture" ? liveOf(thing).hang.dx : 0;
+    placedDx.current.set(thing.key, dx);
+    return { x: thing.box.x + dx, y: thing.box.y, w: thing.box.w, h: thing.kind === "fridge" && noted ? FRIDGE_DOOR.y : thing.box.h };
+  });
+  // Where each is pressed: its art, grown to a pointer's or a thumb's least where the room is drawn small, and no
+  // two over each other (pip/furnish.ts, `pressAreas`). The art is not touched; the ring shows it, not the area.
+  const areas = decorating ? [] : pressAreas(seen, scale, touch ? TOUCH_TARGET : MIN_TARGET, { w: level.w, h: level.h });
 
   const layer: ReactNode = (
     <>
@@ -754,7 +774,7 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
           );
         })}
       {!decorating &&
-        usable.map((thing) => (
+        usable.map((thing, index) => (
           <button
             key={thing.key}
             ref={(node) => {
@@ -772,15 +792,22 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
             aria-pressed={pressed(thing)}
             aria-haspopup={opensCard(thing.kind) ? "dialog" : undefined}
             aria-expanded={opensCard(thing.kind) ? card === thing.key : undefined}
-            // A thing that opens a card is never too small to choose, however small the room is drawn.
-            style={opensCard(thing.kind) ? targetBox(thing.box, scale, thing.kind === "notes" ? "top" : "middle") : { left: thing.box.x * scale, top: thing.box.y * scale, width: thing.box.w * scale, height: thing.box.h * scale }}
+            // Never too small to choose, however small the room is drawn, and never under another's.
+            style={areas[index]}
             onPointerDown={onPointerDown(thing)}
             // Pointer presses on a thing that can be dragged are handled on release; the click is then the keyboard's.
             onClick={(event) => choose(thing, event.detail === 0)}
             onKeyDown={thing.kind === "picture" ? (event) => onPictureKey(thing, event) : undefined}
             aria-label={label(thing)}
             title={how(thing)}
-          />
+          >
+            {/* The thing itself, for the edge that says it is pointed at or has the keyboard: the press area round it shows nothing. */}
+            <span
+              className="pip-furnish-ring"
+              aria-hidden="true"
+              style={{ left: seen[index].x * scale - areas[index].left, top: seen[index].y * scale - areas[index].top, width: seen[index].w * scale, height: seen[index].h * scale }}
+            />
+          </button>
         ))}
       <div ref={shadeRef} className="pip-room-shade" aria-hidden="true" />
       {opened && openedCard && !decorating && (

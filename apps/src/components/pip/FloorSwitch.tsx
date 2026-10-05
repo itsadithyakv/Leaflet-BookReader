@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { HouseLevel } from "../../pip/home.js";
 import { UiIcon } from "../UiIcon";
-import { liftShowsAll } from "./layout";
+import { liftShowsAll, liftShowsArrows } from "./layout";
+import { useCoarsePointer } from "./useCoarsePointer";
 
 type Props = {
   levels: HouseLevel[];
@@ -30,7 +31,11 @@ export const FloorSwitch = ({ levels, current, unlocked, lockReason, priceOf, on
   const index = Math.max(0, levels.findIndex((level) => level.id === current.id));
   const above = levels[index + 1];
   const below = levels[index - 1];
-  const showAll = liftShowsAll(levels.length, height);
+  // Under a finger every key is 44 px (index.css), so fewer fit: the lift folds to one floor sooner, and in a room
+  // too short for three such keys it is the one key alone (its list reaches every floor, as the arrows did).
+  const touch = useCoarsePointer();
+  const showAll = liftShowsAll(levels.length, height, touch);
+  const arrows = showAll || liftShowsArrows(height, touch);
 
   useEffect(() => {
     if (!open) return;
@@ -94,16 +99,18 @@ export const FloorSwitch = ({ levels, current, unlocked, lockReason, priceOf, on
       aria-label="Lift: the floors of Pip's house"
       data-compact={!showAll || undefined}
     >
-      <button
-        type="button"
-        className="pip-lift-arrow"
-        onClick={() => above && go(above)}
-        disabled={!above}
-        aria-label={above ? `Up to the ${above.name}${unlocked(above) ? "" : " (locked)"}` : "Top floor"}
-        title={above ? `Up: ${above.name}` : "Top floor"}
-      >
-        <UiIcon name="up" size={18} />
-      </button>
+      {arrows && (
+        <button
+          type="button"
+          className="pip-lift-arrow"
+          onClick={() => above && go(above)}
+          disabled={!above}
+          aria-label={above ? `Up to the ${above.name}${unlocked(above) ? "" : " (locked)"}` : "Top floor"}
+          title={above ? `Up: ${above.name}` : "Top floor"}
+        >
+          <UiIcon name="up" size={18} />
+        </button>
+      )}
       {showAll ? (
         <ol className="pip-lift-shaft" style={{ "--floors": levels.length, "--at": index } as CSSProperties}>
           {/* The car rides to the floor Pip is on (a transition, so a switch is a ride). */}
@@ -135,16 +142,18 @@ export const FloorSwitch = ({ levels, current, unlocked, lockReason, priceOf, on
           )}
         </div>
       )}
-      <button
-        type="button"
-        className="pip-lift-arrow"
-        onClick={() => below && go(below)}
-        disabled={!below}
-        aria-label={below ? `Down to the ${below.name}` : "Ground floor"}
-        title={below ? `Down: ${below.name}` : "Ground floor"}
-      >
-        <UiIcon name="down" size={18} />
-      </button>
+      {arrows && (
+        <button
+          type="button"
+          className="pip-lift-arrow"
+          onClick={() => below && go(below)}
+          disabled={!below}
+          aria-label={below ? `Down to the ${below.name}` : "Ground floor"}
+          title={below ? `Down: ${below.name}` : "Ground floor"}
+        >
+          <UiIcon name="down" size={18} />
+        </button>
+      )}
     </nav>
   );
 };

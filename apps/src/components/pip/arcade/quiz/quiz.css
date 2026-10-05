@@ -216,6 +216,8 @@
 /* My words: a card a word. */
 .pip-words {
   display: grid;
+  /* As wide as the list, never as wide as the longest unbroken word in it. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   max-height: min(56vh, 520px);
   margin: 0;
@@ -263,6 +265,8 @@
   margin-top: 4px;
   font-size: 14px;
   line-height: 1.45;
+  /* A meaning may hold a word longer than the card is wide. */
+  overflow-wrap: anywhere;
 }
 
 .pip-word-where {

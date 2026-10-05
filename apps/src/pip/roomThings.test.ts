@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as pip from "./index";
 import { fixtureBoxes, houseItems, houseLevels, levelDecor, levelFixtures, registerHouseArt, withLevelDecor, type HouseLevel } from "./home.js";
 import { catalogue } from "./shop";
-import { KINDS, MIN_TARGET, THING_NAMES, kindOf, opensCard, targetBox, type FurnishKind } from "./furnish";
+import { KINDS, MIN_TARGET, THING_NAMES, TOUCH_TARGET, kindOf, opensCard, pressAreas, type FurnishKind, type PressArea } from "./furnish";
 import { PLANT, plantLines, plantNow, plantOf, plantReport, plantWants, type FreeDay } from "./houseplant";
 import { FIND_ART_IDS } from "./expedition-art.js";
 import { calendarArt, calendarLines, calendarWords, clockArt, clockLines, clockTime, clockWords, minutesLeft, sessionWords, wedge, type LedgerDay } from "./roomTime";
@@ -119,27 +119,139 @@ describe("the room's own things", () => {
     expect(KINDS.notes.how).toMatch(/top of the fridge opens the fridge/);
   });
 
-  it("are never too small to choose, however small the room is drawn", () => {
-    const door = { x: 169, y: 99, w: 12, h: 12 };
-    // At the smallest scale the house is drawn at (one pixel a pixel), and at each step up.
-    for (const scale of [1, 1.5, 2, 2.5, 3, 3.5, 5]) {
-      for (const box of [door, { x: 62, y: 30, w: 12, h: 9 }, { x: 40, y: 61, w: 13, h: 13 }, { x: 170, y: 80, w: 10, h: 12 }]) {
-        const target = targetBox(box, scale);
-        expect(target.width).toBeGreaterThanOrEqual(MIN_TARGET);
-        expect(target.height).toBeGreaterThanOrEqual(MIN_TARGET);
-        // Still about the thing: its middle is the box's.
-        expect(target.left + target.width / 2).toBeCloseTo((box.x + box.w / 2) * scale, 5);
-        expect(target.top + target.height / 2).toBeCloseTo((box.y + box.h / 2) * scale, 5);
+  // The bedroom as it comes: its own things, and the decor a new house has out (the bed, the window, a poster, the book tower).
+  const fixed = fixtureBoxes(bedroom(), levelDecor({}, bedroom()));
+  const fridge = { x: 169, y: 92, w: 12, h: 20 };
+  const room = { w: 240, h: 120 };
+  /** What is pressed, in the order the room lays it out; with notes pinned the fridge is its freezer door, and the notes its lower one. */
+  const pressed = (notes: boolean) => ({
+    bed: { x: 13, y: 88, w: 42, h: 24 },
+    curtains: { x: 102, y: 25, w: 36, h: 30 },
+    picture: { x: 27, y: 23, w: 18, h: 22 },
+    books: { x: 177, y: 50, w: 14, h: 18 },
+    fridge: notes ? { ...fridge, h: pip.FRIDGE_DOOR.y } : fridge,
+    ...(notes ? { notes: { x: fridge.x + pip.FRIDGE_DOOR.x, y: fridge.y + pip.FRIDGE_DOOR.y, w: pip.FRIDGE_DOOR.w, h: pip.FRIDGE_DOOR.h } } : {}),
+    plant: fixed.plantpot.hit,
+    bookcase: fixed.bookcase.hit,
+    calendar: fixed.calendar.hit,
+    clock: fixed.wallclock.hit,
+    album: fixed.corkboard.hit,
+    radio: fixed.radio.hit,
+    diary: { x: fixed.bookcase.x + pip.BOOKCASE_DIARY.x, y: fixed.bookcase.y + pip.BOOKCASE_DIARY.y, w: pip.BOOKCASE_DIARY.w, h: pip.BOOKCASE_DIARY.h }
+  });
+  const shared = (a: PressArea, b: PressArea) =>
+    Math.max(0, Math.min(a.left + a.width, b.left + b.width) - Math.max(a.left, b.left)) * Math.max(0, Math.min(a.top + a.height, b.top + b.height) - Math.max(a.top, b.top));
+  // Every scale the house is drawn at in a window: 0.8 (the smallest window at 125%) up.
+  const SCALES = [0.8, 1, 1.5, 2, 2.5, 2.8, 3.5, 5.5];
+
+  it("are each pressed where no other is, at every scale, with a pointer and under a finger", () => {
+    for (const least of [MIN_TARGET, TOUCH_TARGET]) {
+      for (const notes of [false, true]) {
+        for (const scale of SCALES) {
+          const boxes = pressed(notes);
+          const names = Object.keys(boxes);
+          const areas = pressAreas(Object.values(boxes), scale, least, room);
+          for (let a = 0; a < areas.length; a += 1) {
+            // In the room.
+            expect(areas[a].left).toBeGreaterThanOrEqual(-1e-6);
+            expect(areas[a].top).toBeGreaterThanOrEqual(-1e-6);
+            expect(areas[a].left + areas[a].width).toBeLessThanOrEqual(room.w * scale + 1e-6);
+            expect(areas[a].top + areas[a].height).toBeLessThanOrEqual(room.h * scale + 1e-6);
+            for (let b = a + 1; b < areas.length; b += 1) {
+              expect(shared(areas[a], areas[b]), `${names[a]} and ${names[b]} at ${scale}, least ${least}`).toBeLessThan(0.01);
+            }
+          }
+        }
       }
-      // The notes grow downwards only: never up over the freezer door, which opens the fridge.
-      const notes = targetBox(door, scale, "top");
-      expect(notes.top).toBe(door.y * scale);
-      expect(notes.height).toBeGreaterThanOrEqual(MIN_TARGET);
-      expect(notes.width).toBeGreaterThanOrEqual(MIN_TARGET);
     }
-    // Big enough already: exactly the art.
-    expect(targetBox(door, 4)).toEqual({ left: 676, top: 396, width: 48, height: 48 });
+  });
+
+  it("are pressed on themselves: each area holds its own art (the bookcase all but the row the diary lies over)", () => {
+    for (const least of [MIN_TARGET, TOUCH_TARGET]) {
+      for (const notes of [false, true]) {
+        for (const scale of SCALES) {
+          const boxes = pressed(notes);
+          const areas = pressAreas(Object.values(boxes), scale, least, room);
+          Object.entries(boxes).forEach(([name, box], index) => {
+            const art: PressArea = { left: box.x * scale, top: box.y * scale, width: box.w * scale, height: box.h * scale };
+            const held = shared(art, areas[index]) / (art.width * art.height);
+            expect(held, `${name} at ${scale}, least ${least}`).toBeGreaterThanOrEqual(name === "bookcase" ? 0.97 : 0.999);
+          });
+        }
+      }
+    }
+  });
+
+  it("are never under 24 px a side with a pointer, from one pixel a pixel up", () => {
+    for (const scale of SCALES.filter((entry) => entry >= 1)) {
+      const boxes = pressed(false);
+      const areas = pressAreas(Object.values(boxes), scale, MIN_TARGET, room);
+      Object.keys(boxes).forEach((name, index) => {
+        expect(areas[index].width, `${name} at ${scale}`).toBeGreaterThanOrEqual(MIN_TARGET - 1e-6);
+        expect(areas[index].height, `${name} at ${scale}`).toBeGreaterThanOrEqual(MIN_TARGET - 1e-6);
+      });
+    }
+    // The plant, hemmed in by the fridge it stands on, is given the ground under the book tower's shelf: the tower
+    // stands back to its own art and grows upwards instead (at one pixel a pixel: 44 to 68, and the plant 68 to 92).
+    const names = Object.keys(pressed(false));
+    const small = pressAreas(Object.values(pressed(false)), 1, MIN_TARGET, room);
+    expect(small[names.indexOf("books")]).toEqual({ left: 172, top: 44, width: 24, height: 24 });
+    expect(small[names.indexOf("plant")]).toEqual({ left: 163, top: 68, width: 24, height: 24 });
+    expect(small[names.indexOf("fridge")]).toEqual({ left: 163, top: 92, width: 24, height: 24 });
+    // The diary and the bookcase it lies on: the line between them is the diary's foot.
+    expect(small[names.indexOf("diary")].top + small[names.indexOf("diary")].height).toBe(39);
+    expect(small[names.indexOf("bookcase")].top).toBe(39);
+  });
+
+  it("have what there is where there is not 24 px for each: the smallest window at 125%, and a fridge with notes on it", () => {
+    // At 0.8 the plant and the fridge under it have 41.6 px between the book tower's foot and the floor: all of it, no more.
+    const names = Object.keys(pressed(false));
+    const tiny = pressAreas(Object.values(pressed(false)), 0.8, MIN_TARGET, room);
+    const short = names.filter((_, index) => tiny[index].width < MIN_TARGET - 1e-6 || tiny[index].height < MIN_TARGET - 1e-6);
+    expect(short.sort()).toEqual(["fridge", "plant"]);
+    expect(tiny[names.indexOf("plant")].height + tiny[names.indexOf("fridge")].height).toBeCloseTo(41.6, 5);
+    expect(tiny[names.indexOf("plant")].width).toBe(MIN_TARGET);
+    // With notes pinned the fridge is three things one over another in 32 floor pixels. The freezer door between the
+    // plant and the notes is as tall as it is drawn (7 floor pixels) and a full 24 px wide; the notes have the door and
+    // the floor under it.
+    const noted = pressed(true);
+    const at = Object.keys(noted).indexOf("fridge");
+    for (const scale of SCALES) {
+      const areas = pressAreas(Object.values(noted), scale, MIN_TARGET, room);
+      expect(areas[at].height).toBeCloseTo(7 * scale, 5);
+      expect(areas[at].width).toBeGreaterThanOrEqual(MIN_TARGET - 1e-6);
+      const notes = areas[Object.keys(noted).indexOf("notes")];
+      expect(notes.top).toBeCloseTo(99 * scale, 5);
+      expect(notes.height).toBeCloseTo(Math.max(12 * scale, Math.min(MIN_TARGET, 21 * scale)), 5);
+    }
     expect(MIN_TARGET).toBe(24);
+    expect(TOUCH_TARGET).toBe(44);
+  });
+
+  it("are a thumb's size under a finger where the room has it, and never less than a pointer's where it has not", () => {
+    for (const scale of SCALES) {
+      const boxes = pressed(false);
+      const names = Object.keys(boxes);
+      const pointer = pressAreas(Object.values(boxes), scale, MIN_TARGET, room);
+      const finger = pressAreas(Object.values(boxes), scale, TOUCH_TARGET, room);
+      names.forEach((name, index) => {
+        // What a pointer has of 24 px, a finger has too (the clock, between the calendar and the bookcase, had 23).
+        expect(finger[index].width, `${name} across at ${scale}`).toBeGreaterThanOrEqual(Math.min(MIN_TARGET, pointer[index].width) - 1e-6);
+        expect(finger[index].height, `${name} down at ${scale}`).toBeGreaterThanOrEqual(Math.min(MIN_TARGET, pointer[index].height) - 1e-6);
+        // From two pixels a pixel (a 480 px room) every one is 44 px a side.
+        if (scale >= 2) {
+          expect(finger[index].width, `${name} across at ${scale}`).toBeGreaterThanOrEqual(TOUCH_TARGET - 1e-6);
+          expect(finger[index].height, `${name} down at ${scale}`).toBeGreaterThanOrEqual(TOUCH_TARGET - 1e-6);
+        }
+      });
+    }
+  });
+
+  it("are exactly their art once that is big enough and nothing is in the way", () => {
+    const boxes = pressed(false);
+    const areas = pressAreas(Object.values(boxes), 5.5, MIN_TARGET, room);
+    const bed = Object.keys(boxes).indexOf("bed");
+    expect(areas[bed]).toEqual({ left: 13 * 5.5, top: 88 * 5.5, width: 42 * 5.5, height: 24 * 5.5 });
   });
 });
 

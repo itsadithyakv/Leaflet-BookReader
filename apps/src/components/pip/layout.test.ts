@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LIFT_ARROW, LIFT_STOP, floorPoint, liftShowsAll, placeNear } from "./layout";
+import { LIFT_ARROW, LIFT_STOP, LIFT_TOUCH, floorPoint, liftShowsAll, liftShowsArrows, placeNear } from "./layout";
 
 const screen = { left: 0, top: 0, width: 1000, height: 800 };
 const size = { width: 300, height: 150 };
@@ -49,6 +49,26 @@ describe("the lift", () => {
     expect(liftShowsAll(7, 180)).toBe(false);
     // A phone's room, 120 px tall: up, the floor, down.
     expect(liftShowsAll(2, 120)).toBe(false);
+  });
+
+  it("wants 44 px a key under a finger", () => {
+    // Three floors and two arrows: 174 px with a pointer, 232 under a finger.
+    expect(liftShowsAll(3, 180)).toBe(true);
+    expect(liftShowsAll(3, 180, true)).toBe(false);
+    expect(liftShowsAll(3, 3 * LIFT_TOUCH + 2 * LIFT_TOUCH + 12, true)).toBe(true);
+    expect(LIFT_TOUCH).toBe(44);
+  });
+
+  it("showing one floor, drops its arrows under a finger where three 44 px keys do not fit", () => {
+    // With a pointer the arrows always fit.
+    expect(liftShowsArrows(96)).toBe(true);
+    expect(liftShowsArrows(120)).toBe(true);
+    // The smallest room (120 px tall, 96 at 125%): the one key, and its list.
+    expect(liftShowsArrows(96, true)).toBe(false);
+    expect(liftShowsArrows(120, true)).toBe(false);
+    expect(liftShowsArrows(143, true)).toBe(false);
+    expect(liftShowsArrows(144, true)).toBe(true);
+    expect(liftShowsArrows(180, true)).toBe(true);
   });
 });
 

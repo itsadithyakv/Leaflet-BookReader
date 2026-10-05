@@ -21,6 +21,7 @@ import {
   lampReaction,
   nudge,
   parseRemembered,
+  pressAreas,
   roomShade,
   slideTo,
   straighten,
@@ -263,5 +264,79 @@ describe("the rest of the room", () => {
     expect(lampReaction(false, 14)).toBeNull();
     expect(lampReaction(true, 22)?.move).toBe("squint");
     expect(lampReaction(false, 22)?.line).toMatch(/better/);
+  });
+});
+
+describe("where the things in a room are pressed", () => {
+  const box = (x: number, y: number, w: number, h: number) => ({ x, y, w, h });
+
+  it("is the art itself where that is big enough", () => {
+    expect(pressAreas([box(10, 10, 30, 40)], 1)).toEqual([{ left: 10, top: 10, width: 30, height: 40 }]);
+    expect(pressAreas([box(10, 10, 30, 40)], 2.5)).toEqual([{ left: 25, top: 25, width: 75, height: 100 }]);
+  });
+
+  it("is grown about the art to the least a pointer wants, or a thumb", () => {
+    expect(pressAreas([box(100, 50, 10, 12)], 1)).toEqual([{ left: 93, top: 44, width: 24, height: 24 }]);
+    expect(pressAreas([box(100, 50, 10, 12)], 1, 44)).toEqual([{ left: 83, top: 34, width: 44, height: 44 }]);
+    // Only the way it is short.
+    expect(pressAreas([box(100, 50, 40, 12)], 1)).toEqual([{ left: 100, top: 44, width: 40, height: 24 }]);
+  });
+
+  it("stays in the room: against a wall it grows the other way", () => {
+    expect(pressAreas([box(0, 110, 10, 10)], 1, 24, { w: 240, h: 120 })).toEqual([{ left: 0, top: 96, width: 24, height: 24 }]);
+    expect(pressAreas([box(232, 0, 8, 8)], 1, 24, { w: 240, h: 120 })).toEqual([{ left: 216, top: 0, width: 24, height: 24 }]);
+  });
+
+  it("divides the ground between two side by side at the middle of the gap, and each grows away from it", () => {
+    // Ten wide each, four apart: grown to 24 they would overlap by ten.
+    const [left, right] = pressAreas([box(50, 50, 10, 10), box(64, 50, 10, 10)], 1);
+    expect(left.left + left.width).toBe(62);
+    expect(right.left).toBe(62);
+    expect(left).toEqual({ left: 38, top: 43, width: 24, height: 24 });
+    expect(right).toEqual({ left: 62, top: 43, width: 24, height: 24 });
+  });
+
+  it("divides one over another the same way, along the way they lie furthest apart", () => {
+    const [upper, lower] = pressAreas([box(50, 20, 10, 10), box(52, 36, 10, 10)], 1);
+    expect(upper.top + upper.height).toBe(33);
+    expect(lower.top).toBe(33);
+    // Across, each is as it would be alone.
+    expect(upper.left).toBe(43);
+    expect(lower.left).toBe(45);
+  });
+
+  it("gives a thing drawn over another its own art, and the other what shows beside it", () => {
+    // A book lying on a case, its foot a pixel into the case's top: the later is on top.
+    const [bookcase, diary] = pressAreas([box(62, 38, 26, 44), box(62, 30, 12, 9)], 1);
+    expect(diary.top + diary.height).toBe(39);
+    expect(bookcase.top).toBe(39);
+    // As tall as it was, a pixel lower: what it lost under the book it has under its own foot.
+    expect(bookcase.height).toBe(44);
+    // The other way round (the case drawn after): the case keeps its own.
+    const [book, shelf] = pressAreas([box(62, 30, 12, 9), box(62, 38, 26, 44)], 1);
+    expect(shelf.top).toBe(38);
+    expect(book.top + book.height).toBe(38);
+  });
+
+  it("has a neighbour with room to spare stand back for one that has none, never past its own art", () => {
+    // Three in a column in a room: the middle one is hemmed in below, the top one is free above.
+    const [top, middle, bottom] = pressAreas([box(100, 50, 14, 18), box(100, 80, 10, 12), box(100, 92, 12, 20)], 1, 24, { w: 240, h: 120 });
+    expect(bottom).toEqual({ left: 94, top: 92, width: 24, height: 24 });
+    expect(middle).toEqual({ left: 93, top: 68, width: 24, height: 24 });
+    // Stood back to its own foot (68), and grown up instead.
+    expect(top).toEqual({ left: 95, top: 44, width: 24, height: 24 });
+  });
+
+  it("leaves what there is between two close neighbours, and never lets two overlap", () => {
+    // Four pixels of art between two others, in a room with nowhere else to go.
+    const areas = pressAreas([box(0, 0, 20, 30), box(20, 0, 4, 30), box(24, 0, 20, 30)], 1, 24, { w: 44, h: 30 });
+    expect(areas[1]).toEqual({ left: 20, top: 0, width: 4, height: 30 });
+    for (let a = 0; a < areas.length; a += 1) {
+      for (let b = a + 1; b < areas.length; b += 1) {
+        const across = Math.min(areas[a].left + areas[a].width, areas[b].left + areas[b].width) - Math.max(areas[a].left, areas[b].left);
+        const down = Math.min(areas[a].top + areas[a].height, areas[b].top + areas[b].height) - Math.max(areas[a].top, areas[b].top);
+        expect(across > 0.01 && down > 0.01).toBe(false);
+      }
+    }
   });
 });

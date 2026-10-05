@@ -23,7 +23,7 @@ export const shortfall = (price: number, balance: number) => {
 
 export const Group = ({ title, note, tally, children }: { title: string; note?: string; tally?: Tally; children: ReactNode }) => (
   <div className="mt-5 first:mt-0">
-    <p className="flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] text-on-surface-variant">
+    <p className="flex items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-on-surface-variant">
       {title}
       {tally && (
         <span className="pip-tally" data-complete={isComplete(tally) || undefined} aria-label={tallyLabel(tally)}>

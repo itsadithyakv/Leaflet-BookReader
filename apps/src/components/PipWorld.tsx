@@ -5,7 +5,7 @@ import { usePipStore } from "../store/pipStore";
 import { ownedPremiumMoves, useEquippedPip, usePipWardrobeStore } from "../store/pipWardrobeStore";
 import { useHabitStore } from "../store/habitStore";
 import { pickBeat } from "../pip/moments";
-import { nodFor, nodOdds } from "../pip/bookNods";
+import { loadNods, nodsNow } from "../pip/nods";
 import { hasMove } from "../pip/core";
 import { TOUR, type TourStop } from "../pip/tour";
 import { usePipPresence } from "../pip/usePipPresence";
@@ -279,11 +279,15 @@ const readBounds = (): Bounds => {
   const scrollbar = main ? main.offsetWidth - main.clientWidth : 0;
   const sidebar = document.querySelector<HTMLElement>(".leaflet-sidebar");
   const sidebarShown = sidebar !== null && sidebar.offsetParent !== null;
+  // An upright phone's bottom bar lies over the foot of the page: the floor is its top edge, not the page's
+  // (at 480 x 800 Pip walked 59 px under it, across the tabs).
+  const bar = document.querySelector(".mobile-nav")?.getBoundingClientRect();
+  const barTop = bar && bar.height > 0 ? bar.top : Infinity;
   return {
     left: sidebarShown ? sidebar.getBoundingClientRect().left + SIDEBAR_COLLAPSED : mainRect?.left ?? 0,
     right: (mainRect?.right ?? window.innerWidth) - scrollbar,
     top: header ? Math.max(0, header.bottom) : 0,
-    floor: mainRect?.bottom ?? window.innerHeight
+    floor: Math.min(mainRect?.bottom ?? window.innerHeight, barTop)
   };
 };
 
@@ -351,7 +355,10 @@ const perchFor = (stop: TourStop, b: Bounds, size: number): Perch | null => {
     return { x: facing > 0 ? r.left + inset : r.right - inset, y: r.top, pose: "point", facing, rect: r };
   }
   const reach = size * 0.36;
-  return { x: r.left + r.width / 2 - facing * reach, y: r.bottom + size * 0.95 + 4, pose: "pointup", facing, rect: r };
+  // Beside the thing's middle, and all of her in the window: under the logo and the profile button, which sit
+  // at its two edges, she stood 15 px over the edge.
+  const x = Math.max(size / 2, Math.min(window.innerWidth - size / 2, r.left + r.width / 2 - facing * reach));
+  return { x, y: r.bottom + size * 0.95 + 4, pose: "pointup", facing, rect: r };
 };
 
 type PipWorldProps = {
@@ -1234,9 +1241,14 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
     const roll = Math.random();
     // Now and then, a scene from the book being read (a dragon for the
     // dragon book), with its line; rarer for a book known only by its genre.
+    // The table of nods is fetched the first time there is a book to look up (pip/nods.ts): no scene until it is here.
     const reading = usePipStore.getState().bookNod;
-    const nod = reading ? nodFor(reading) : null;
-    if (nod && roll < nodOdds(nod).idle && hasMove(nod.move)) {
+    const nods = reading ? nodsNow() : null;
+    if (reading && !nods) {
+      void loadNods().catch(() => undefined);
+    }
+    const nod = reading && nods ? nods.nodFor(reading) : null;
+    if (nod && nods && roll < nods.nodOdds(nod).idle && hasMove(nod.move)) {
       play(nod.move, 1);
       speak(nod.line);
       return;
@@ -1510,10 +1522,14 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
       let top: number;
       let tail: PipSayTail;
       let tailAt: number;
-      if (s.bubble === "side") {
-        // Beside Pip, so the bubble never covers what Pip is pointing at.
-        const right = s.x + size * 0.46;
-        const fitsRight = right + bw < window.innerWidth - 8;
+      // Beside Pip, so the bubble never covers what Pip is pointing at: where there is a side it fits on. A window
+      // narrower than the bubble and Pip together (under 650 px with her in the middle of it) has none, and the
+      // bubble, put to her left regardless, was off the window with its buttons (by 189 px at 380 wide): there it
+      // goes over her head, or under her feet, as her other lines do.
+      const right = s.x + size * 0.46;
+      const fitsRight = right + bw < window.innerWidth - 8;
+      const fitsLeft = s.x - size * 0.46 - bw - 8 >= 8;
+      if (s.bubble === "side" && (fitsRight || fitsLeft)) {
         left = fitsRight ? right + 8 : s.x - size * 0.46 - bw - 8;
         top = Math.max(8, Math.min(window.innerHeight - bh - 8, s.y - size * 0.62 - bh / 2));
         tail = fitsRight ? "left" : "right";
@@ -1523,7 +1539,8 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
         top = s.y - size * 0.92 - bh - 12;
         tail = "down";
         if (top < 8) {
-          top = s.y + 10;
+          // Under her, and never past the foot of the window.
+          top = Math.max(8, Math.min(window.innerHeight - bh - 8, s.y + 10));
           tail = "up";
         }
         tailAt = Math.max(12, Math.min(88, ((s.x - left) / bw) * 100));

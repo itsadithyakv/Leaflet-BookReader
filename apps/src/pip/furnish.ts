@@ -173,27 +173,130 @@ export const THING_NAMES: Readonly<Record<string, string>> = {
 };
 
 /**
- * The least a thing that opens a card is to be chosen by, in CSS pixels a
- * side, however small the room is drawn: its button is grown about the thing
- * to this when the art is smaller.
+ * The least a thing in the room is pressed by, in CSS pixels a side, however
+ * small the room is drawn: with a pointer, and under a finger.
  */
 export const MIN_TARGET = 24;
+export const TOUCH_TARGET = 44;
+
+/** Where a thing is pressed, in CSS pixels from the room's corner. */
+export type PressArea = { left: number; top: number; width: number; height: number };
+
+type Reach = { lo: number; hi: number };
 
 /**
- * A thing's button, in CSS pixels, from its box in floor pixels at `scale`:
- * the box itself, grown to `MIN_TARGET` about its middle when it is smaller
- * (downwards only for `from: "top"`: the notes, which must not grow up over
- * the freezer door).
+ * Where each thing in a room is pressed: its art (`arts`, in floor pixels, in
+ * the order they are drawn: a later one lies over an earlier), at `scale` CSS
+ * pixels a floor pixel, grown about its middle to `least` a side where the art
+ * is smaller. The art itself is not touched: these are the areas a press is
+ * heard in, and a press goes to the thing seen under it.
+ *
+ * No two overlap. Where two would, the ground between them is divided by a
+ * line along the way they lie furthest apart: halfway between the two pieces
+ * of art, so each keeps all of its own art and the nearer half of the gap.
+ * Where the art itself overlaps (a diary lying on a bookcase), the one drawn
+ * on top keeps its own and the other has what shows beside it. A thing cut
+ * short on one side grows on the other instead, as far as the room (`room`,
+ * floor pixels) and its other neighbours let it. One still short of `least`
+ * (the plant, with the fridge under it) is given ground by a neighbour that
+ * has more than it needs, which stands back as far as its own art at most;
+ * between two close neighbours it is what is left, and that may be less.
  */
-export const targetBox = (box: { x: number; y: number; w: number; h: number }, scale: number, from: "middle" | "top" = "middle") => {
-  const width = Math.max(MIN_TARGET, box.w * scale);
-  const height = Math.max(MIN_TARGET, box.h * scale);
-  return {
-    left: box.x * scale - (width - box.w * scale) / 2,
-    top: box.y * scale - (from === "top" ? 0 : (height - box.h * scale) / 2),
-    width,
-    height
+export const pressAreas = (arts: ReadonlyArray<{ x: number; y: number; w: number; h: number }>, scale: number, least = MIN_TARGET, room?: { w: number; h: number }): PressArea[] => {
+  // Each thing's art along each axis (across, then down), and how far it may reach: the room, less what a neighbour has.
+  const art = arts.map((box): [Reach, Reach] => [
+    { lo: box.x * scale, hi: (box.x + box.w) * scale },
+    { lo: box.y * scale, hi: (box.y + box.h) * scale }
+  ]);
+  const reach = arts.map((): [Reach, Reach] => [
+    { lo: room ? 0 : -Infinity, hi: room ? room.w * scale : Infinity },
+    { lo: room ? 0 : -Infinity, hi: room ? room.h * scale : Infinity }
+  ]);
+  /** A thing's area along one axis: its art, grown to `least` about its middle, slid to stay within its reach. */
+  const along = (index: number, axis: 0 | 1): Reach => {
+    const own = art[index][axis];
+    const may = reach[index][axis];
+    const size = Math.max(0, Math.min(Math.max(least, own.hi - own.lo), may.hi - may.lo));
+    const lo = Math.max(may.lo, Math.min(may.hi - size, (own.lo + own.hi) / 2 - size / 2));
+    return { lo, hi: lo + size };
   };
+  /** The lines drawn between two things whose art does not overlap: which way, who is on which side, where, and how far it may move. */
+  const lines: Array<{ axis: 0 | 1; first: number; second: number; at: number; from: number; to: number }> = [];
+  /** Every two that overlap, divided. A pair is divided once and cannot overlap again, so this ends within a pass a pair. */
+  const divide = () => {
+    for (let pass = arts.length * arts.length; pass > 0; pass -= 1) {
+      const now = arts.map((_, index): [Reach, Reach] => [along(index, 0), along(index, 1)]);
+      let divided = false;
+      for (let a = 0; a < arts.length && !divided; a += 1) {
+        for (let b = a + 1; b < arts.length && !divided; b += 1) {
+          if (!([0, 1] as const).every((axis) => now[a][axis].hi > now[b][axis].lo + 0.01 && now[b][axis].hi > now[a][axis].lo + 0.01)) continue;
+          // Along the way their art lies furthest apart (or, overlapping, overlaps least).
+          const apart = (axis: 0 | 1) => Math.max(art[b][axis].lo - art[a][axis].hi, art[a][axis].lo - art[b][axis].hi);
+          const axis = apart(0) >= apart(1) ? 0 : 1;
+          const [first, second] = art[a][axis].lo + art[a][axis].hi <= art[b][axis].lo + art[b][axis].hi ? [a, b] : [b, a];
+          const from = art[first][axis].hi;
+          const to = art[second][axis].lo;
+          // Halfway between them; or, their art overlapping, at the edge of the one drawn on top (the later), which keeps its own.
+          const at = to >= from ? (from + to) / 2 : second > first ? to : from;
+          reach[first][axis].hi = Math.min(reach[first][axis].hi, at);
+          reach[second][axis].lo = Math.max(reach[second][axis].lo, at);
+          if (to >= from) lines.push({ axis, first, second, at, from, to });
+          divided = true;
+        }
+      }
+      if (!divided) return;
+    }
+  };
+  /** How much less than `want` a side (or its own art, if that is more) a thing has along an axis (more than it needs: below nought). */
+  const short = (index: number, axis: 0 | 1, want: number) => Math.max(want, art[index][axis].hi - art[index][axis].lo) - (reach[index][axis].hi - reach[index][axis].lo);
+  /**
+   * A line moved over for the one of its two that is short of `want` and has
+   * the line for its edge: by what it lacks, as far as the other can spare
+   * (all of the ground the other does not reach anyway, a nearer neighbour of
+   * its own having stopped it short of the line), and never into the other's
+   * art. Says whether any moved.
+   */
+  const ease = (want: number) => {
+    let moved = false;
+    for (const line of lines) {
+      const { axis, first, second } = line;
+      const before = reach[first][axis];
+      const after = reach[second][axis];
+      if (before.hi === line.at && short(first, axis, want) > 0.01) {
+        const by = Math.min(short(first, axis, want), after.lo - line.at + Math.max(0, -short(second, axis, want)), line.to - line.at);
+        if (by > 0.01) {
+          line.at += by;
+          before.hi = line.at;
+          after.lo = Math.max(after.lo, line.at);
+          moved = true;
+        }
+      } else if (after.lo === line.at && short(second, axis, want) > 0.01) {
+        const by = Math.min(short(second, axis, want), line.at - before.hi + Math.max(0, -short(first, axis, want)), line.at - line.from);
+        if (by > 0.01) {
+          line.at -= by;
+          after.lo = line.at;
+          before.hi = Math.min(before.hi, line.at);
+          moved = true;
+        }
+      }
+    }
+    return moved;
+  };
+  // Divided, eased, and divided again: a thing that stood back for one neighbour may have come up against another.
+  // Under a finger, where few have 44 px to spare, once more by a pointer's least: none is left with less than
+  // that while its neighbour has more.
+  for (const want of least > MIN_TARGET ? [least, MIN_TARGET] : [least]) {
+    for (let round = 0; round < 6; round += 1) {
+      divide();
+      if (!ease(want)) break;
+    }
+  }
+  divide();
+  return arts.map((_, index) => {
+    const across = along(index, 0);
+    const down = along(index, 1);
+    return { left: across.lo, top: down.lo, width: across.hi - across.lo, height: down.hi - down.lo };
+  });
 };
 
 /** The pieces of decor that can be used, and as what. Pictures: what hangs from one nail. */

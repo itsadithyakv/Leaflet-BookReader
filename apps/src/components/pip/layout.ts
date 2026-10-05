@@ -36,13 +36,25 @@ export const placeNear = (anchor: Rect, size: Size, bounds: Rect, { gap = 10, pr
 /** One floor's stop in the lift, and an arrow button, in CSS pixels. */
 export const LIFT_STOP = 34;
 export const LIFT_ARROW = 30;
+/** Under a finger each is a thumb's size (index.css gives them it on the same media query the hook asks). */
+export const LIFT_TOUCH = 44;
 
 /**
  * Whether every floor fits as its own stop in a lift this tall (with the up
  * and down arrows). When not (a short room, a tall house), the lift shows
- * just the floor it is on, and a list opens from it.
+ * just the floor it is on, and a list opens from it. `touch`: the stops and
+ * the arrows are 44 px each.
  */
-export const liftShowsAll = (floors: number, height: number) => floors * LIFT_STOP + LIFT_ARROW * 2 + 12 <= height;
+export const liftShowsAll = (floors: number, height: number, touch = false) =>
+  floors * (touch ? LIFT_TOUCH : LIFT_STOP) + (touch ? LIFT_TOUCH : LIFT_ARROW) * 2 + 12 <= height;
+
+/**
+ * Whether a lift showing only the floor it is on has room for its arrows too.
+ * With a pointer, always (30 + 28 + 30 in the shortest room, 96 px). Under a
+ * finger three 44 px keys want 144 px, and a room shorter than that has the
+ * one key, whose list reaches every floor.
+ */
+export const liftShowsArrows = (height: number, touch = false) => !touch || LIFT_TOUCH * 3 + 12 <= height;
 
 /**
  * Where a pointer is in the room, in floor pixels: measured from the room's

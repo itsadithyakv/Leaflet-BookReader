@@ -89,6 +89,7 @@ import { PipSprite } from "../PipSprite";
 import { PipSay } from "../PipSay";
 import { UiIcon } from "../UiIcon";
 import { sceneScale } from "./sceneFit";
+import { watchPixelRatio } from "./pixelRatio";
 import { floorPoint } from "./layout";
 import { fixtureKey, useFurnishings, type FurnishPip, type Fridge, type RoomChange } from "./furnishings";
 import { readingMove } from "../../pip/furnish-art.js";
@@ -707,7 +708,10 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
   const ballRef = useRef<HTMLButtonElement | null>(null);
   // Whether the ball is out (its place is the loop's, on a ref).
   const [ballOut, setBallOut] = useState(false);
-  const [per, setPer] = useState(3);
+  // How big the room is drawn: device pixels per art pixel, and the display's scaling that was worked out for.
+  // The two are kept together: the scaling can change on its own (the window dragged to another monitor), and a
+  // room that read it afresh at each render kept its old size until something else made it render.
+  const [{ per, ratio }, setFit] = useState(() => ({ per: 3, ratio: window.devicePixelRatio || 1 }));
   // Out of the house altogether (an expedition): no Pip, a note where she sleeps.
   const out = Boolean(world?.away);
   const outRef = useRef(out);
@@ -732,19 +736,24 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       const top = stage.getBoundingClientRect().top;
       const height = Math.max(220, window.innerHeight - Math.max(0, top) - reserveBelow);
       lastRoomBox.current = roomRef.current?.getBoundingClientRect() ?? null;
-      if (width > 0) setPer(sceneScale(level.w, level.h, width, height, window.devicePixelRatio || 1));
+      if (width <= 0) return;
+      const now = window.devicePixelRatio || 1;
+      const fits = sceneScale(level.w, level.h, width, height, now);
+      setFit((was) => (was.per === fits && was.ratio === now ? was : { per: fits, ratio: now }));
     };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(stage);
     window.addEventListener("resize", measure);
+    // A change of scaling does not always come with a resize: measured again at once (pixelRatio.ts).
+    const unwatch = watchPixelRatio(measure);
     return () => {
       observer.disconnect();
       window.removeEventListener("resize", measure);
+      unwatch();
     };
   }, [level.w, level.h, reserveBelow]);
 
-  const ratio = window.devicePixelRatio || 1;
   const scale = per / ratio;
 
   // Pip's own state, and what the loop and the effects read without re-rendering.

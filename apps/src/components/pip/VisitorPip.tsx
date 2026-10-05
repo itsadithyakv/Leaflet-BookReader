@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { createPortal } from "react-dom";
 import { PipSprite } from "../PipSprite";
 import { PipSay } from "../PipSay";
 import { avatarLook } from "../community/PipAvatar";
@@ -15,6 +16,8 @@ import {
   type VisitRecord,
   type VisitorCandidate
 } from "../../pip/visitors";
+import { placeCard } from "./cardPlace";
+import type { Rect } from "./layout";
 import "./visitor.css";
 
 /**
@@ -27,6 +30,8 @@ export type VisitorFrame = {
   scale: number;
   /** The floor's width, in floor pixels. */
   w: number;
+  /** Its height, when the room says (a tag under a visitor's feet has to fit above the room's foot). */
+  h?: number;
   /** Where feet stand. */
   walkY: number;
 };
@@ -38,32 +43,46 @@ type CardProps = {
   visitor: VisitorCandidate;
   /** A line under the handle: why they are here, or that they came by. */
   why: string;
-  frame: VisitorFrame;
-  /** The floor x the card sits over. */
-  x: number;
+  /** What it is about (the visitor, the note on the door), on screen now; null once that is gone. */
+  anchor: () => Rect | null;
   onClose: () => void;
   onOpenProfile?: (handle: string) => void;
 };
 
-const CARD_W = 190;
-
 /**
  * Who the visitor is: only what their public profile already shows (name,
  * handle, streak, this week's minutes), and a way to their card on the Social
- * page. Over the visitor where there is room above it, and always inside the
- * room (which clips); Escape or the cross closes it.
+ * page. By the visitor, placed as the room's own cards are (cardPlace.ts) and
+ * laid over the whole window like them: inside the room, which clips, its
+ * last button was cut off wherever the room is under 150 px tall. Escape or
+ * the cross closes it.
  */
-const VisitorCard = ({ visitor, why, frame, x, onClose, onOpenProfile }: CardProps) => {
+const VisitorCard = ({ visitor, why, anchor, onClose, onOpenProfile }: CardProps) => {
   const card = useRef<HTMLDivElement | null>(null);
   const close = useRef<HTMLButtonElement | null>(null);
+  const anchorRef = useRef(anchor);
+  anchorRef.current = anchor;
   // Its height is its text's, so its place is found once it is laid out.
-  const [top, setTop] = useState<number | null>(null);
-  const above = (frame.walkY - 30) * frame.scale - 8;
+  const [place, setPlace] = useState<{ left: number; top: number } | null>(null);
   useLayoutEffect(() => {
-    setTop(Math.max(6, above - (card.current?.offsetHeight ?? 0)));
-  }, [above, visitor.handle]);
+    const measure = () => {
+      const box = anchorRef.current();
+      const root = card.current;
+      if (!box || !root) return;
+      const viewport = { left: 8, top: 8, width: window.innerWidth - 16, height: window.innerHeight - 16 };
+      const { left, top } = placeCard(box, { width: root.offsetWidth, height: root.offsetHeight }, viewport);
+      setPlace((was) => (was && was.left === left && was.top === top ? was : { left, top }));
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+    return () => {
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("scroll", measure, true);
+    };
+  }, [visitor.handle]);
   // Focus moves in once the card is placed (while it is being measured it is not shown, and cannot take it).
-  const placed = top !== null;
+  const placed = place !== null;
   useEffect(() => {
     if (placed) close.current?.focus();
   }, [placed]);
@@ -73,14 +92,13 @@ const VisitorCard = ({ visitor, why, frame, x, onClose, onOpenProfile }: CardPro
       onClose();
     }
   };
-  const left = Math.max(6, Math.min(frame.w * frame.scale - CARD_W - 6, x * frame.scale - CARD_W / 2));
-  return (
+  return createPortal(
     <div
       ref={card}
       className="pip-visitor-card"
       role="dialog"
       aria-label={`${at(visitor.handle)}, visiting`}
-      style={{ left, top: top ?? 6, visibility: top === null ? "hidden" : undefined }}
+      style={{ left: place?.left ?? 0, top: place?.top ?? 0, visibility: place === null ? "hidden" : undefined }}
       onKeyDown={onKeyDown}
     >
       <button ref={close} type="button" className="pip-visitor-card-close" onClick={onClose} aria-label="Close">
@@ -102,7 +120,8 @@ const VisitorCard = ({ visitor, why, frame, x, onClose, onOpenProfile }: CardPro
           Open profile
         </button>
       )}
-    </div>
+    </div>,
+    document.body
   );
 };
 
@@ -212,6 +231,11 @@ export const VisitorPip = ({ visitor, record, frame, spot, door, hostX, onPhase,
   const look = avatarLook(visitor.pipSeed, visitor.avatar);
   const size = 32 * scale;
   const reading = view.phase === "read";
+  // The tag is the room's to clip. Under the visitor's feet it needs 20 px of floor below them, which a room
+  // drawn under two pixels a pixel does not have (at one, half of it was cut off): it goes over their head there.
+  // And it is no wider than the room either side of where they stand.
+  const tagAbove = frame.h !== undefined && (frame.h - walkY - 2) * scale < 20;
+  const tagWidth = Math.min(160, Math.max(48, 2 * Math.min(spot, frame.w - spot) * scale - 6));
   const closeCard = () => {
     setOpen(false);
     button.current?.focus();
@@ -240,12 +264,18 @@ export const VisitorPip = ({ visitor, record, frame, spot, door, hostX, onPhase,
             <PipSprite move={view.move} size={size} skin={look.skin} outfit={look.outfit} still={reduced} />
           </span>
         </button>
-        <span className="pip-visitor-tag" aria-hidden="true">
+        <span className="pip-visitor-tag" data-above={tagAbove || undefined} style={{ maxWidth: tagWidth }} aria-hidden="true">
           {at(visitor.handle)}
         </span>
       </div>
       {open && view.shown && (
-        <VisitorCard visitor={visitor} why="Read today, like you." frame={frame} x={spot} onClose={closeCard} onOpenProfile={onOpenProfile} />
+        <VisitorCard
+          visitor={visitor}
+          why="Read today, like you."
+          anchor={() => button.current?.getBoundingClientRect() ?? null}
+          onClose={closeCard}
+          onOpenProfile={onOpenProfile}
+        />
       )}
     </>
   );
@@ -268,12 +298,14 @@ export type VisitorNoteProps = {
  */
 export const VisitorNote = ({ visitor, frame, door, onRead, onOpenProfile }: VisitorNoteProps) => {
   const [open, setOpen] = useState(false);
+  const note = useRef<HTMLButtonElement | null>(null);
   const { scale, walkY, w } = frame;
   // By the wall the door is in, at about Pip's eye level.
   const x = door.side === "right" ? w - 16 : 7;
   return (
     <>
       <button
+        ref={note}
         type="button"
         className="pip-visitor-note"
         style={{ left: x * scale, top: (walkY - 46) * scale, width: 9 * scale, height: 10 * scale }}
@@ -287,8 +319,7 @@ export const VisitorNote = ({ visitor, frame, door, onRead, onOpenProfile }: Vis
         <VisitorCard
           visitor={visitor}
           why="Came by while Pip was away."
-          frame={frame}
-          x={x}
+          anchor={() => note.current?.getBoundingClientRect() ?? null}
           onClose={() => {
             setOpen(false);
             onRead();

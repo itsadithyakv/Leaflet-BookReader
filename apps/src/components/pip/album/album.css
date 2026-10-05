@@ -90,6 +90,15 @@
   flex: 1;
   grid-template-columns: minmax(0, 1fr) 17rem;
   color: var(--album-ink);
+}
+
+/* The album lays itself out by the width of the box it is in. The box is the
+   container, not the album: an element cannot answer its own query, and with
+   the album as its own container the rule for its columns never applied (in
+   the room's card the thing selected stood in a column to the left, 70 px
+   wide at 380, and scrolled away with the list). */
+.pip-room-card-body:has(> .pip-album),
+.pip-album-dialog {
   container-type: inline-size;
 }
 
@@ -198,7 +207,7 @@
   border-radius: 999px;
   background: var(--album-face);
   color: var(--album-ink);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   line-height: 15px;
   box-shadow: 0 0 0 1px var(--album-line);
@@ -284,6 +293,10 @@
   }
 
   .pip-album-detail {
+    /* In the room's card the card scrolls, not the list: the thing selected stays at the top of it. */
+    position: sticky;
+    top: 0;
+    z-index: 1;
     order: -1;
     max-height: 40vh;
     flex-direction: row;
@@ -291,6 +304,7 @@
     padding: 12px 16px;
     border-bottom: 1px solid var(--album-line);
     border-left: 0;
+    background: linear-gradient(var(--album-well), var(--album-well)), var(--album-face);
   }
 
   .pip-album-detail-art {
