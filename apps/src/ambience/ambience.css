@@ -1,0 +1,261 @@
+/* The radio's controls (ambience/ReaderAmbience.tsx in the readers,
+   ambience/AmbiencePanel.tsx in Pip's room). One set of rules for both places:
+   each wrapper says which colours it is among, and the parts are drawn from
+   those, so the popover fits every page finish and the panel fits both app
+   themes. */
+.ambience[data-where="reader"] {
+  --amb-accent: var(--reader-accent);
+  --amb-text: var(--reader-text);
+  --amb-muted: var(--reader-muted);
+  --amb-border: var(--reader-border);
+  --amb-fill: var(--reader-pill);
+  --amb-hover: var(--reader-hover-bg);
+}
+
+/* In Pip's room the panel sits in a card drawn like her HUD: its colours. */
+.ambience[data-where="room"] {
+  --amb-accent: rgb(var(--pip-accent));
+  --amb-text: var(--hud-ink);
+  --amb-muted: var(--hud-ink-soft);
+  --amb-border: color-mix(in srgb, var(--hud-ink-soft) 50%, transparent);
+  --amb-fill: var(--hud-well);
+  --amb-hover: var(--hud-face-hover);
+}
+
+/* The mark on a reader's toolbar while the radio is on: lit in the accent,
+   its bars moving while it sounds. */
+.ambience-mark {
+  display: inline-flex;
+  align-items: center;
+}
+
+.ambience-mark[data-on="true"] {
+  color: var(--reader-accent);
+}
+
+.ambience-mark[data-playing="true"] svg path {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ambience-bar 1.5s ease-in-out infinite;
+}
+
+.ambience-mark[data-playing="true"] svg path:nth-child(2n) {
+  animation-duration: 1.1s;
+  animation-delay: -0.4s;
+}
+
+.ambience-mark[data-playing="true"] svg path:nth-child(3n) {
+  animation-duration: 1.9s;
+  animation-delay: -0.9s;
+}
+
+@keyframes ambience-bar {
+  0%,
+  100% {
+    transform: scaleY(1);
+  }
+  50% {
+    transform: scaleY(0.55);
+  }
+}
+
+.ambience-mark:focus-visible,
+.ambience button:focus-visible,
+.ambience input:focus-visible {
+  outline: 2px solid var(--amb-accent, var(--reader-accent));
+  outline-offset: 2px;
+}
+
+.ambience-popover {
+  z-index: 60;
+  width: 17.5rem;
+  max-width: calc(100vw - 2rem);
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.ambience-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.ambience-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ambience-label {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--amb-muted);
+}
+
+.ambience-note {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--amb-muted);
+}
+
+/* The scenes: a row of choices, the chosen one lit. */
+.ambience-scenes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.ambience-scene {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  min-height: 52px;
+  border: 1px solid var(--amb-border);
+  border-radius: 8px;
+  padding: 8px 4px 6px;
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--amb-muted);
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.ambience-scene:hover {
+  background: var(--amb-hover);
+  color: var(--amb-text);
+}
+
+.ambience-scene[aria-checked="true"] {
+  border-color: var(--amb-accent);
+  color: var(--amb-text);
+}
+
+.ambience-scene[aria-checked="true"][data-lit="true"] {
+  background: color-mix(in srgb, var(--amb-accent) 14%, transparent);
+  color: var(--amb-accent);
+}
+
+/* On and off: a switch, drawn like the reader's own toggles. */
+.ambience-switch {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+  color: var(--amb-text);
+}
+
+.ambience-switch-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ambience-toggle {
+  position: relative;
+  flex: none;
+  width: 38px;
+  height: 20px;
+  border: 1px solid var(--amb-border);
+  border-radius: 9999px;
+  background: var(--amb-border);
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.ambience-toggle::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: var(--amb-text);
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.ambience-switch[aria-checked="true"] .ambience-toggle {
+  border-color: var(--amb-accent);
+  background: var(--amb-accent);
+}
+
+.ambience-switch[aria-checked="true"] .ambience-toggle::after {
+  transform: translateX(18px);
+  background: #ffffff;
+}
+
+/* The volume: the browser's own slider, in the accent. */
+.ambience-volume {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--amb-muted);
+}
+
+.ambience-volume input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  height: 18px;
+  cursor: pointer;
+  accent-color: var(--amb-accent);
+}
+
+.ambience-volume output {
+  min-width: 2.6em;
+  text-align: right;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Listen, in Pip's room: one round key. */
+.ambience-listen {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--amb-border);
+  border-radius: 9999px;
+  padding: 6px 14px 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--amb-text);
+  background: var(--amb-fill);
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.ambience-listen:hover {
+  background: var(--amb-hover);
+}
+
+.ambience-listen[aria-pressed="true"] {
+  border-color: var(--amb-accent);
+  color: var(--amb-accent);
+}
+
+.ambience-panel .ambience-scene {
+  min-height: 56px;
+}
+
+/* Under a finger: the slider and the Listen key get room to be hit. */
+@media (hover: none) and (pointer: coarse) {
+  .ambience-volume input[type="range"] {
+    height: 44px;
+  }
+
+  .ambience-listen {
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ambience-mark[data-playing="true"] svg path {
+    animation: none;
+  }
+
+  .ambience-scene,
+  .ambience-toggle,
+  .ambience-toggle::after,
+  .ambience-listen {
+    transition: none;
+  }
+}
