@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { duels, events, follows, kudos, profiles } from "./db.js";
 import { isoWeekKey, weekIsOver } from "./week.js";
 import { avatarView } from "./avatars.js";
@@ -38,6 +39,27 @@ export const personView = (profile) => ({
 
 export const isPublic = (profile) =>
   Boolean(profile && profile.visibility === "public" && typeof profile.handle === "string");
+
+/** How many friends a day's visitors are picked from. A handful: one visits at a time. */
+export const VISITOR_LIMIT = 5;
+
+/**
+ * At most `limit` of `rows`, for one reader and one day.
+ *
+ * Ordered by a hash of the day, the reader asking and each friend, so the
+ * same handful is given all day (a visitor does not change between two
+ * requests), a different one tomorrow, and nobody is favoured for their
+ * minutes or their place in the alphabet.
+ */
+export function pickVisitors(rows, dayKey, readerId, limit = VISITOR_LIMIT) {
+  const me = readerId.toHexString();
+  const order = (row) => createHash("sha256").update(`${dayKey}:${me}:${row._id.toHexString()}`).digest("hex");
+  return rows
+    .map((row) => ({ row, at: order(row) }))
+    .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0))
+    .slice(0, limit)
+    .map((entry) => entry.row);
+}
 
 /** Public profiles by id, in one query. */
 export async function publicProfilesById(db, ids) {

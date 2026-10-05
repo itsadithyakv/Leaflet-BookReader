@@ -76,6 +76,9 @@ export function defaultLimits() {
     social: { limit: 60, windowMs: 15 * MINUTE },
     // Handle searches per IP. Debounced typing is a handful per lookup.
     search: { limit: 120, windowMs: 5 * MINUTE },
+    // "Which friends read today" per account. The app asks every ten minutes
+    // while the Pip tab is open.
+    visitors: { limit: 30, windowMs: 15 * MINUTE },
     // Password-reset emails: per address asking, and per email address asked
     // about. Each one is a real email from a Gmail with a daily quota.
     resetIp: { limit: 10, windowMs: 60 * MINUTE },

@@ -65,7 +65,7 @@ Authenticated routes take `Authorization: Bearer <token>`. Errors are
 | `PUT /v1/state` | ✓ | `{version, state}`. `version` is the one last read (0 = none). `409` with the current document if another device wrote first. Up to 2 MB. |
 | `DELETE /v1/state` | ✓ | Removes the stored state. |
 | `GET /v1/profile/me` | ✓ | The reader's own profile, private fields included. |
-| `PUT /v1/profile/me` | ✓ | `handle`, `displayName`, `visibility`, `weekKey` + `weekMinutes`, `streak`, `booksFinished`, `shelf`. The reading figures (everything from `weekKey` on) are kept only for a public profile: sent for a private one they are checked, answered `200` and not stored, and `visibility: "private"` removes the ones held. The answer is the profile as it now stands, so a client can see from `visibility` that its figures were not kept. Names and shelf titles are stored as one line of visible text (no control characters, right-to-left overrides or zero-width spaces); `displayName: ""` clears the name. |
+| `PUT /v1/profile/me` | ✓ | `handle`, `displayName`, `visibility`, `weekKey` + `weekMinutes`, `streak`, `booksFinished`, `shelf`, `readDay` (the reader's local date on which they last read, like `2026-09-27`; a date no clock could be in is a `400`, `null` clears it). The reading figures (everything from `weekKey` on) are kept only for a public profile: sent for a private one they are checked, answered `200` and not stored, and `visibility: "private"` removes the ones held. The answer is the profile as it now stands, so a client can see from `visibility` that its figures were not kept. Names and shelf titles are stored as one line of visible text (no control characters, right-to-left overrides or zero-width spaces); `displayName: ""` clears the name. |
 | `DELETE /v1/profile/me` | ✓ | Removes the profile and all community data (follows both ways, kudos sent and received, duels, inbox events). |
 | `GET /v1/leaderboard?week=2026-W39&scope=everyone` | optional | Top 100 public profiles for that ISO week (default: the server's). Rows: `{rank, handle, displayName, pipSeed, avatar, weekMinutes, streak, booksFinished, isYou}`. With a token, `you` is the reader's own row and rank even outside the top 100 (public profiles only: a private reader gets `null`, and the app draws their own row from the minutes on their device). `sharedReaders` counts the public profiles there are, read this week or not, so an empty board can say why it is empty. |
 | `GET /v1/leaderboard?week=…&scope=following` | ✓ | The reader plus the public readers they follow, zeros included. |
@@ -73,6 +73,7 @@ Authenticated routes take `Authorization: Bearer <token>`. Errors are
 | `POST /v1/follows/:handle` | ✓ | Follow. Idempotent. The follower must be public (`403`), the target public (`404`), not yourself (`400`). Up to 500. |
 | `DELETE /v1/follows/:handle` | ✓ | Unfollow (works whatever either side's visibility). |
 | `GET /v1/follows` | ✓ | `{following: [{handle, displayName, pipSeed, avatar}], followerCount}` (public ones only). |
+| `GET /v1/visitors?day=2026-09-27&week=2026-W39` | ✓ | Whose Pip could come by today: `{day, visitors: [{handle, displayName, pipSeed, avatar, weekMinutes, streak}]}`, at most 5 of the public readers the caller follows whose `readDay` is `day` (the caller's own local date; `400` if no clock could be in it). Never the caller. Which five is a hash of the day, the caller and each friend, so it is the same handful all day and nobody is favoured. A caller whose own profile is not public gets an empty list. `readDay` itself is never returned by any route. Kept 30 s per caller; any profile change, and the caller's own follow or unfollow, clears it. |
 | `POST /v1/kudos/:handle` | ✓ | `{dayKey: "2026-09-27", weekKey: "2026-W39"}` (the reader's local day and week). Once per reader per day (`409`). `201 {sent, kudosThisWeek}`. |
 | `POST /v1/duels` | ✓ | `{handle, weekKey}`. Challenge for that week. One duel per pair per week, at most 3 pending/accepted per reader (`409`), public on both sides. |
 | `POST /v1/duels/:id/accept` · `/decline` | ✓ | Only the challenged reader, only while pending and the week is not over. |
@@ -123,6 +124,7 @@ In memory, per process (see `src/rateLimit.js`):
 | New accounts per IP, and per email | 5 / hour |
 | Community writes (follow, unfollow, kudos, duel, accept, decline) per account | 60 / 15 min |
 | Searches per IP | 120 / 5 min |
+| Visitor lists (`GET /v1/visitors`) per account | 30 / 15 min |
 | Password-reset emails per IP / per email address | 10 / hour · 3 / hour |
 | Completed password resets per account | 3 / 365 days (stored on the account; past it the email explains when) |
 | Wrong reset codes per email address | 10 / 15 min, and 5 per code |
@@ -169,7 +171,8 @@ collections that reference it.
 - `weekKey` — ISO week the minutes belong to, e.g. `2026-W39`
 - `weekMinutes` — 0–10080; `streak` — 0–36500; `booksFinished` — 0–100000
 - `shelf` — up to 12 of `{title (≤120), author (≤80) | null, styleSeed (≤64)}`
-- `weekKey`, `weekMinutes`, `streak`, `booksFinished` and `shelf` are held **only while the profile is public**: a private profile's are refused quietly, and going private clears them
+- `readDay` — optional: the reader's own local date on which they last read, e.g. `2026-09-27` (sent by apps that have Pip's visitors; absent on older profiles, which then never visit). Only ever compared with the day a follower asks `GET /v1/visitors` about; no route returns it
+- `weekKey`, `weekMinutes`, `streak`, `booksFinished`, `shelf` and `readDay` are held **only while the profile is public**: a private profile's are refused quietly, and going private clears them
 - `updatedAt` — date
 
 **`states`** — only if the device syncs through this server

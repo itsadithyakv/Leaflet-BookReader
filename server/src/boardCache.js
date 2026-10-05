@@ -58,4 +58,41 @@ export function rememberBoard(weekKey, rows, sharedReaders, stamp = changes) {
 export function forgetBoards() {
   changes += 1;
   boards.clear();
+  visitors.clear();
+}
+
+/**
+ * "Which of the readers you follow read today", kept as briefly as the board
+ * and for the same reason: an app that asks twice in a row is answered from
+ * memory. One entry per reader asking; any profile change clears them all
+ * (a friend who goes private must not go on visiting), and so does the
+ * reader's own follow or unfollow. A few thousand short lists at most.
+ */
+const MAX_VISITOR_LISTS = 2000;
+const visitors = new Map();
+
+/** The list kept for this reader, day and week, or null. */
+export function cachedVisitors(readerId, key) {
+  const entry = visitors.get(readerId);
+  if (!entry || entry.key !== key || Date.now() - entry.at > TTL_MS) {
+    visitors.delete(readerId);
+    return null;
+  }
+  return entry.list;
+}
+
+/** `stamp` as for `rememberBoard`: a list read before a profile changed is not kept. */
+export function rememberVisitors(readerId, key, list, stamp = changes) {
+  if (stamp !== changes) {
+    return;
+  }
+  if (visitors.size >= MAX_VISITOR_LISTS) {
+    visitors.clear();
+  }
+  visitors.set(readerId, { at: Date.now(), key, list });
+}
+
+/** This reader followed or unfollowed someone. */
+export function forgetVisitors(readerId) {
+  visitors.delete(readerId);
 }

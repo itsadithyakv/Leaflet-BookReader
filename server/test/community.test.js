@@ -814,6 +814,7 @@ describe("who may call what", () => {
       ["POST", `/v1/duels/${"a".repeat(24)}/decline`],
       ["GET", "/v1/duels"],
       ["GET", "/v1/inbox"],
+      ["GET", `/v1/visitors?day=${TODAY}`],
       ["PATCH", "/v1/account", { displayName: "x" }],
       ["DELETE", "/v1/account", { password: PASSWORD }],
       ["GET", "/v1/state"]

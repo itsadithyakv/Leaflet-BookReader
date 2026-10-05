@@ -1,6 +1,6 @@
 # Leaflet Privacy Policy
 
-**Effective date:** 3 October 2026
+**Effective date:** 4 October 2026
 
 **Who we are:** Leaflet is made by PaperKite ("we", "us"). Contact: [adithyakrishnan.vinod@gmail.com](mailto:adithyakrishnan.vinod@gmail.com)
 
@@ -76,8 +76,10 @@ one, we store the following on our server:
 - **Profile:** a handle you choose (shown as `@handle`), your display name,
   and whether the profile is public or private. While it is public we also
   store what it shows: this week's reading minutes, your streak, how many
-  books you have finished, and a shelf of up to twelve titles from your recent
-  reading sessions. See "Your profile" below.
+  books you have finished, a shelf of up to twelve titles from your recent
+  reading sessions, and the date of the last day you read on, which is used
+  only to tell a friend (a reader you follow who also follows you) that you
+  have read today; the date itself is never shown to anyone. See "Your profile" below.
 - **Synced reading state** (when leaderboards and cross-device features are on):
   a compressed copy of your progress and reading history, so your devices agree.
   It includes your highlights, notes, bookmarks and collections if you have
@@ -103,14 +105,17 @@ what it makes visible before you create the account.
   (the avatar you picked), this week's reading minutes, your streak, how many
   books you have finished, and your shelf (up to twelve titles from your recent
   reading sessions). You appear on the weekly leaderboard and can be found by
-  your handle.
+  your handle. A reader you follow who also follows you can see that you have
+  read today: on such a day your Pip may visit theirs in the app, shown with your
+  `@handle`, your name, your streak and this week's minutes.
 - **If you turn it off,** the account is created with a private profile:
   nothing about you is shown to anyone, you are on no leaderboard, you cannot
   be looked up, and no reading figures are sent to us.
 - **You can change it at any time** in the app under Social → You ("Make
   private" / "Share my profile"). Making your profile private hides you from
   leaderboards, search, inboxes and duels straight away, and removes the
-  reading figures and shelf we stored for it. Your handle and display name
+  reading figures, the shelf and the date you last read on that we stored for
+  it. Your handle and display name
   are kept, unseen, so you can share again later; deleting your account
   removes them too.
 - **Accounts created before Leaflet 1.2 were not changed.** Their profiles
@@ -190,6 +195,12 @@ contact us and we will delete it.
 If this policy changes, we will update the date above and, for significant
 changes, say so in the app.
 
+- **4 October 2026 (Leaflet 1.2):** visitors. A public profile now also
+  stores the date you last read on, so that a reader you follow who also
+  follows you can be told you read today. Words you look up, Pip's diary and its weekly postcard,
+  and which readers' Pips visited yours today are kept or made on your device
+  (and, for the words, in your backup); a postcard leaves it only if you save
+  or copy it and send it yourself.
 - **3 October 2026 (Leaflet 1.2):** a profile created at sign-up is public by
   default, with the switch shown on the sign-up form; making a profile private
   now also removes its stored reading figures; the shelf titles on a public

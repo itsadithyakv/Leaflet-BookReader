@@ -3,7 +3,7 @@ import { requireAccount } from "../auth.js";
 import { accounts, profiles } from "../db.js";
 import { avatarView } from "../avatars.js";
 import { HttpError, asyncHandler, plainText, smallJson } from "../http.js";
-import { isWeekKey, plausibleWeekKeys } from "../week.js";
+import { isPlausibleDayKey, isWeekKey, plausibleWeekKeys } from "../week.js";
 import { deleteCommunityData, recordDuelMinutes } from "../community.js";
 import { forgetBoards } from "../boardCache.js";
 
@@ -38,8 +38,8 @@ const MAX_STREAK = 36_500;
 const MAX_BOOKS_FINISHED = 100_000;
 
 /** What a reader publishes about their reading, as opposed to who they are. */
-const FIGURES = ["weekKey", "weekMinutes", "streak", "booksFinished", "shelf"];
-const NO_FIGURES = { weekKey: null, weekMinutes: 0, streak: 0, booksFinished: 0, shelf: [] };
+const FIGURES = ["weekKey", "weekMinutes", "streak", "booksFinished", "shelf", "readDay"];
+const NO_FIGURES = { weekKey: null, weekMinutes: 0, streak: 0, booksFinished: 0, shelf: [], readDay: null };
 
 function ownView(profile) {
   return {
@@ -145,6 +145,16 @@ export function socialRoutes(db) {
       }
       if (body.shelf !== undefined) {
         update.shelf = sanitiseShelf(body.shelf);
+      }
+      if (body.readDay !== undefined) {
+        // The reader's own local date on which they last read: what lets a
+        // friend's Pip visit "on a day you both read" (`GET /v1/visitors`).
+        // Named by the client like the week, and checked the same way; never
+        // sent back to anyone as a date.
+        if (body.readDay !== null && !isPlausibleDayKey(body.readDay)) {
+          throw new HttpError(400, "readDay must be today's local date, like 2026-09-27.");
+        }
+        update.readDay = body.readDay;
       }
       // The avatar belongs to the account (it is picked at signup, before any
       // profile exists); the profile keeps a copy for the board to show.

@@ -11,6 +11,7 @@ import {
   minutesFor,
   pairKey,
   personView,
+  pickVisitors,
   publicProfilesById,
   visibleDuels
 } from "../community.js";
@@ -19,7 +20,7 @@ import { HttpError, asyncHandler, smallJson } from "../http.js";
 import { RateLimiter, defaultLimits } from "../rateLimit.js";
 import { isPlausibleDayKey, isWeekKey, isoWeekKey, plausibleWeekKeys, weekIsOver } from "../week.js";
 import { HANDLE_PATTERN } from "./social.js";
-import { boardStamp, cachedBoard, rememberBoard } from "../boardCache.js";
+import { boardStamp, cachedBoard, cachedVisitors, forgetVisitors, rememberBoard, rememberVisitors } from "../boardCache.js";
 
 /**
  * The interactive half of the board: following, kudos, weekly duels, the
@@ -93,6 +94,7 @@ export function communityRoutes(db, limits = defaultLimits()) {
   const fallback = defaultLimits();
   const writes = new RateLimiter(limits.social ?? fallback.social);
   const searches = new RateLimiter(limits.search ?? fallback.search);
+  const visits = new RateLimiter(limits.visitors ?? fallback.visitors);
 
   const limit = (limiter, key) => {
     const wait = limiter.blockedFor(key);
@@ -263,6 +265,9 @@ export function communityRoutes(db, limits = defaultLimits()) {
         { $setOnInsert: { createdAt: now } },
         { upsert: true }
       );
+      // A visit needs both to follow the other, so this changes both lists.
+      forgetVisitors(me._id.toHexString());
+      forgetVisitors(them._id.toHexString());
       if (upsertedCount) {
         await events(db).updateOne(
           { userId: them._id, type: "follow", actorId: me._id },
@@ -284,7 +289,9 @@ export function communityRoutes(db, limits = defaultLimits()) {
       const them = HANDLE_PATTERN.test(handle) ? await profiles(db).findOne({ handle }) : null;
       if (them) {
         await follows(db).deleteOne({ followerId: request.account.id, followeeId: them._id });
+        forgetVisitors(them._id.toHexString());
       }
+      forgetVisitors(request.account.id.toHexString());
       response.json({ following: false });
     })
   );
@@ -304,6 +311,71 @@ export function communityRoutes(db, limits = defaultLimits()) {
         .map(personView)
         .sort((a, b) => a.handle.localeCompare(b.handle));
       response.json({ following, followerCount });
+    })
+  );
+
+  /**
+   * Whose Pip could come by today: the public readers this reader follows, and
+   * who follow this reader back, who read on `?day=` (the reader's own local
+   * date), at most a handful, picked the same way all day (see `pickVisitors`).
+   *
+   * "Read today" is the friend's own word: the `readDay` their app publishes
+   * with their minutes, held only while their profile is public. It is
+   * compared here and never sent on, so all this tells anyone is that a
+   * friend (each follows the other) has read today. A reader whose own profile is not
+   * public has no visitors: an empty list, not an error, since nothing they
+   * asked to do is being refused.
+   */
+  router.get(
+    "/visitors",
+    auth,
+    asyncHandler(async (request, response) => {
+      const meId = request.account.id;
+      limit(visits, `acct:${meId}`);
+      const day = request.query.day;
+      if (!isPlausibleDayKey(day)) {
+        throw new HttpError(400, "day must be today's local date, like 2026-09-27.");
+      }
+      const weekKey = askedWeek(request.query.week);
+      const key = `${day}:${weekKey}`;
+      const reader = meId.toHexString();
+
+      let list = cachedVisitors(reader, key);
+      if (!list) {
+        const stamp = boardStamp();
+        list = [];
+        const me = await profiles(db).findOne({ _id: meId }, { projection: { handle: 1, visibility: 1 } });
+        if (isPublic(me)) {
+          const followed = await follows(db)
+            .find({ followerId: meId }, { projection: { followeeId: 1 }, limit: FOLLOW_LIMIT })
+            .toArray();
+          const followedIds = followed.map((row) => row.followeeId).filter((id) => !id.equals(meId));
+          // A friend is a reader who follows back. Following is one-way, and
+          // "read today" is told to nobody a reader has not chosen: a visit
+          // needs both to have followed the other.
+          const back = followedIds.length
+            ? await follows(db)
+                .find({ followerId: { $in: followedIds }, followeeId: meId }, { projection: { followerId: 1 } })
+                .toArray()
+            : [];
+          const ids = back.map((row) => row.followerId);
+          const rows = ids.length
+            ? await profiles(db)
+                .find(
+                  { _id: { $in: ids }, visibility: "public", readDay: day },
+                  { projection: { handle: 1, displayName: 1, avatar: 1, visibility: 1, weekKey: 1, weekMinutes: 1, streak: 1 } }
+                )
+                .toArray()
+            : [];
+          list = pickVisitors(rows.filter(isPublic), day, meId).map((row) => ({
+            ...personView(row),
+            weekMinutes: minutesFor(row, weekKey),
+            streak: row.streak ?? 0
+          }));
+        }
+        rememberVisitors(reader, key, list, stamp);
+      }
+      response.json({ day, visitors: list });
     })
   );
 
