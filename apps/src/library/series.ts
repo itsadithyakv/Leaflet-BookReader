@@ -165,10 +165,18 @@ type Guess = { name: string; index: number | null; strength: SeriesStrength };
 
 const sane = (index: number) => Number.isFinite(index) && index >= 0 && index < 1000;
 
+/**
+ * Words that number a book without naming its series. "The Final Empire
+ * (Book 1)" used to be book 1 of a series called "Book", and every title
+ * ending "(Book 2)" or "(Volume 2)" joined it.
+ */
+const NOT_A_SERIES = new Set(["book", "bk", "vol", "volume", "part", "pt", "no", "number", "issue", "edition", "ed", "version", "chapter", "season", "episode"]);
+const named = (name: string) => !NOT_A_SERIES.has(name.trim().toLowerCase().replace(/[.#]+$/, ""));
+
 /** What the title says about its series, if anything. */
 export const seriesFromTitle = (title: string): Guess | null => {
   let match = BRACKETED.exec(title);
-  if (match && sane(toNumber(match[2]))) {
+  if (match && sane(toNumber(match[2])) && named(match[1])) {
     return { name: match[1].trim(), index: toNumber(match[2]), strength: "strong" };
   }
   match = BOOK_OF.exec(title);

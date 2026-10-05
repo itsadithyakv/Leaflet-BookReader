@@ -58,7 +58,7 @@ const BookCardComponent = ({ book, onRefresh, onOpen, menuActions }: Props) => {
         )}
         {needsDownload && (
           <div
-            className="absolute right-2 top-2 rounded-full bg-surface-container-highest/90 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.12em] text-on-surface-variant"
+            className="absolute right-2 top-2 rounded-full bg-surface-container-highest/90 px-2 py-1 text-[11px] font-bold uppercase tracking-[0.12em] text-on-surface-variant"
             title="On your other device. Opening this will download it."
           >
             Cloud
@@ -100,7 +100,7 @@ const BookCardComponent = ({ book, onRefresh, onOpen, menuActions }: Props) => {
             style={{ width: `${progressPercent}%` }}
           />
         </div>
-        <p className={`mt-2 text-right text-[10px] font-bold uppercase tracking-tighter ${finished ? "text-tertiary" : "text-on-surface-variant"}`}>
+        <p className={`mt-2 text-right text-[11px] font-bold uppercase tracking-tighter ${finished ? "text-tertiary" : "text-on-surface-variant"}`}>
           {finished ? "Finished" : `${progressPercent}%`}
         </p>
       </div>

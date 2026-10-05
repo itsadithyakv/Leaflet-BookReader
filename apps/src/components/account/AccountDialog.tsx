@@ -69,12 +69,12 @@ export const AccountDialog = ({ showToast }: { showToast: (message: string) => v
   }
 
   return (
-    <div className="fixed inset-0 z-[88] flex items-center justify-center overflow-y-auto bg-black/60 px-4 py-6">
+    <div className="fixed inset-0 z-[88] flex overflow-y-auto overscroll-contain bg-black/60 px-4 py-6">
       <div
         role="dialog"
         aria-modal="true"
         aria-label={firstRun ? "Create your Leaflet account" : "Leaflet account"}
-        className="modal-surface confirm-pop relative w-full max-w-md rounded-2xl p-6"
+        className="modal-surface confirm-pop relative m-auto w-full max-w-md rounded-2xl p-6"
       >
         <button
           type="button"

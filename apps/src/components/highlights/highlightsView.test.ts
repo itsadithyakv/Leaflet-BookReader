@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Book } from "@shared/models/book";
 import type { Annotation } from "../../services/annotationService";
-import { booksWithHighlights, groupByChapter, orderHighlights } from "./highlightsView";
+import { booksWithHighlights, groupByChapter, orderHighlights, sectionOfCfi } from "./highlightsView";
 
 const highlight = (id: string, chapter: string | null, cfi = id, createdAt = "2026-09-28T10:00:00Z"): Annotation => ({
   id,
@@ -116,6 +116,66 @@ describe("groupByChapter", () => {
 
   it("has no groups for no highlights", () => {
     expect(groupByChapter([])).toEqual([]);
+  });
+
+  // A place in section `n` of the book (its `n`th file), as epub.js writes one.
+  const at = (section: number, step = 2) => `epubcfi(/6/${(section + 1) * 2}!/4/${step},/1:0,/1:9)`;
+
+  it("keeps two chapters of the same name apart: a chapter is a place", () => {
+    // A novel told by its people: "Mara" is the name of chapters 3 and 9, and nothing between is highlighted.
+    const groups = groupByChapter([highlight("a", "Mara", at(3)), highlight("b", "Mara", at(3, 8)), highlight("c", "Mara", at(9)), highlight("d", "Mara", at(9, 4))]);
+    expect(groups.map((group) => [group.chapter, group.items.map((item) => item.id)])).toEqual([
+      ["Mara", ["a", "b"]],
+      ["Mara", ["c", "d"]]
+    ]);
+  });
+
+  it("takes a chapter that runs over two files as one", () => {
+    const groups = groupByChapter([highlight("a", "Chapter 4", at(5)), highlight("b", "Chapter 4", at(6)), highlight("c", "Chapter 4", at(7))]);
+    expect(groups.map((group) => group.items.length)).toEqual([3]);
+  });
+
+  it("goes by the name alone when a place cannot be read", () => {
+    expect(groupByChapter([highlight("a", "Mara", at(3)), highlight("b", "Mara", "not a cfi"), highlight("c", "Mara", at(4))]).map((group) => group.items.length)).toEqual([3]);
+    expect(groupByChapter([highlight("a", "Mara", "x"), highlight("b", "Mara", "y")]).map((group) => group.items.length)).toEqual([2]);
+    // The one whose place is known still parts two chapters either side of it.
+    expect(groupByChapter([highlight("a", "Mara", at(3)), highlight("b", "Mara", "not a cfi"), highlight("c", "Mara", at(9))]).map((group) => group.items.length)).toEqual([2, 1]);
+    expect(sectionOfCfi(at(0))).toBe(0);
+    expect(sectionOfCfi(at(41))).toBe(41);
+    expect(sectionOfCfi("epubcfi(/6/14[c07]!/4/2/1:3)")).toBe(6);
+    expect(sectionOfCfi("x")).toBeNull();
+    expect(sectionOfCfi(null)).toBeNull();
+  });
+
+  it("names a set's book once, above its chapters", () => {
+    const groups = groupByChapter([
+      highlight("a", "The First Book · Mara", at(3)),
+      highlight("b", "The First Book · Tomas", at(4)),
+      highlight("c", "The First Book · Mara", at(9)),
+      highlight("d", "The Second Book", at(40)),
+      highlight("e", "The Second Book · Mara", at(44)),
+      highlight("f", "The Second Book · Ilse", at(47)),
+      // A third book with one chapter highlighted: a book all the same, in a set.
+      highlight("g", "The Third Book · Mara", at(80))
+    ]);
+    expect(groups.map((group) => [group.book ?? null, group.opensBook ?? false, group.chapter])).toEqual([
+      ["The First Book", true, "Mara"],
+      ["The First Book", false, "Tomas"],
+      ["The First Book", false, "Mara"],
+      [null, false, "The Second Book"],
+      ["The Second Book", true, "Mara"],
+      ["The Second Book", false, "Ilse"],
+      ["The Third Book", true, "Mara"]
+    ]);
+  });
+
+  it("does not take a chapter's own title for a book", () => {
+    // A made chapter list joins a number and its title the same way.
+    const groups = groupByChapter([highlight("a", "Chapter 1 · The Orchard", at(1)), highlight("b", "Chapter 2 · The Ferry", at(1, 90)), highlight("c", "Chapter 2 · The Ferry", at(2))]);
+    expect(groups.map((group) => [group.book ?? null, group.chapter, group.items.length])).toEqual([
+      [null, "Chapter 1 · The Orchard", 1],
+      [null, "Chapter 2 · The Ferry", 2]
+    ]);
   });
 });
 

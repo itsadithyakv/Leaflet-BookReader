@@ -94,7 +94,7 @@ const resolveErrorMessage = (error: unknown, fallback: string) => {
 };
 
 export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPageProps) => {
-  const { books, filters, loading, importing, stats, importBooks, importPaths, refreshMetadata, fetchCover, deleteBook, setFilter } =
+  const { books, filters, loading, importing, stats, importBooks, importFiles, refreshMetadata, fetchCover, deleteBook, setFilter } =
     useLibraryStore(
       useShallow((state) => ({
         books: state.books,
@@ -103,7 +103,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
         importing: state.importing,
         stats: state.stats,
         importBooks: state.importBooks,
-        importPaths: state.importPaths,
+        importFiles: state.importFiles,
         refreshMetadata: state.refreshMetadata,
         deleteBook: state.deleteBook,
         fetchCover: state.fetchCover,
@@ -192,9 +192,20 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
   const streakTitle = snapshot.streak > 0 ? `${snapshot.streak} Day Streak!` : "Start Your Streak";
 
   const handleImport = () => {
-    importBooks().catch((error) => {
-      showToast(resolveErrorMessage(error, "Import failed. Try again."));
-    });
+    // What the library held before, so a book it already had is not called added.
+    const known = new Set(useLibraryStore.getState().books.map((book) => book.id));
+    importBooks()
+      // The dialog used to say nothing: not what came in, and not that a file
+      // among them had failed. It says what a drop says. Closed with nothing
+      // chosen, there is nothing to say.
+      .then((outcome) => {
+        if (outcome) {
+          showToast(describeImport(outcome.asked, outcome.books, known, outcome.failed));
+        }
+      })
+      .catch((error) => {
+        showToast(resolveErrorMessage(error, "Import failed. Try again."));
+      });
   };
 
   /**
@@ -237,13 +248,15 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
       }
       // What the library held before, so a book it already had is not called added.
       const known = new Set(useLibraryStore.getState().books.map((book) => book.id));
-      importPaths(supported)
-        .then((imported) => showToast(describeImport(supported.length, imported, known)))
+      // All of them, not only the ones Leaflet opens: a picture or a zip dropped
+      // among the books is then named as not added, where it used to vanish.
+      importFiles(paths)
+        .then((outcome) => showToast(describeImport(outcome.asked, outcome.books, known, outcome.failed)))
         .catch((error) => {
           showToast(resolveErrorMessage(error, "Import failed. Try again."));
         });
     },
-    [importPaths, importing, showToast]
+    [importFiles, importing, showToast]
   );
 
   useEffect(() => {
@@ -364,7 +377,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
   }, [activeSession, sessionTick]);
 
   return (
-    <div className="flex min-h-full flex-col gap-10">
+    <div className="library-page dock-clear mx-auto flex min-h-full w-full max-w-[2240px] flex-col gap-10">
       <div className="md:hidden">
         <div className="relative">
           <UiIcon
@@ -385,12 +398,14 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
       {/* News about the phone app can wait until there is a library to carry over. */}
       {!libraryEmpty && <MobileComingSoonBanner />}
 
-      <section className="grid min-w-0 gap-6 xl:grid-cols-12">
+      {/* Side by side wherever the rail is: stacked, the pair is 456 px tall and
+          pushes the first row of covers off a laptop's first screen. */}
+      <section className="grid min-w-0 gap-6 md:grid-cols-12">
         {/* clip, not hidden: the resting and running layers are stacked, and an
             overflow-hidden box is still scrollable, so focusing Pip's button
             scrolled the card to reveal the taller hidden layer. */}
         <div
-          className={`paper-surface relative min-w-0 overflow-clip rounded-xl p-6 ${libraryEmpty ? "order-2 xl:col-span-4" : "xl:col-span-8"}`}
+          className={`paper-surface relative min-w-0 overflow-clip rounded-xl p-6 ${libraryEmpty ? "order-2 md:col-span-5 xl:col-span-4" : "md:col-span-7 xl:col-span-8"}`}
         >
           <div className="relative z-10">
             <div className="relative">
@@ -403,7 +418,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
               >
                 <div className="min-w-0">
                   <div>
-                    <h1 className="page-title text-4xl md:text-5xl">{streakTitle}</h1>
+                    <h1 className="page-title library-hero-title text-4xl md:text-5xl">{streakTitle}</h1>
                   </div>
                 </div>
                 <div className="mt-3 grid gap-3">
@@ -451,14 +466,15 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
                     : "opacity-0 translate-y-3 pointer-events-none absolute inset-0"
                 }`}
               >
-                {/* An empty library gives this panel a third of the row: too narrow for
-                    two columns, so the ring goes under the words. */}
+                {/* The ring keeps its own width beside the words from 960 px, where the
+                    panel has room for both. An empty library gives this panel a third
+                    of the row: too narrow, so the ring goes under the words. */}
                 <div
-                  className={`grid min-w-0 gap-6 lg:items-center ${libraryEmpty ? "" : "lg:grid-cols-[1.2fr_0.8fr]"}`}
+                  className={`grid min-w-0 gap-6 [@media(min-width:960px)]:items-center ${libraryEmpty ? "" : "[@media(min-width:960px)]:grid-cols-[minmax(0,1fr)_auto]"}`}
                 >
                   <div>
                     <p className="text-xs uppercase tracking-[0.25em] text-on-surface-variant">Focus Mode</p>
-                    <h1 className="page-title mt-2 text-4xl md:text-5xl">Session Running</h1>
+                    <h1 className="page-title library-hero-title mt-2 text-4xl md:text-5xl">Session Running</h1>
                     <p className="mt-3 text-sm text-on-surface-variant">
                       {sessionReading
                         ? "Stay in the flow. Your focus session is active."
@@ -474,7 +490,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
                       </button>
                     </div>
                   </div>
-                  <div className="flex items-center justify-start lg:justify-end">
+                  <div className="flex items-center justify-start [@media(min-width:960px)]:justify-end">
                     <div className="paper-surface-raised flex flex-col items-center gap-4 border-primary/40 bg-primary/10 px-6 py-6 text-center">
                       <div className="relative flex h-32 w-32 items-center justify-center">
                         <svg className="h-32 w-32 -rotate-90" viewBox="0 0 120 120">
@@ -538,7 +554,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
           ref={importDropRef}
           data-tour="import"
           type="button"
-          className={`import-drop-zone paper-surface relative flex min-w-0 flex-col items-center justify-center p-8 ${libraryEmpty ? "order-1 xl:col-span-8" : "xl:col-span-4"} ${
+          className={`import-drop-zone paper-surface relative flex min-w-0 flex-col items-center justify-center p-8 ${libraryEmpty ? "order-1 md:col-span-7 xl:col-span-8" : "md:col-span-5 xl:col-span-4"} ${
             importing
               ? "cursor-wait opacity-90"
               : dropActive
@@ -564,7 +580,8 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
           <p className="mt-2 max-w-xs text-center text-sm text-on-surface-variant">
             Drop a book here, or click to browse
           </p>
-          <p className="mt-3 max-w-xs text-center text-xs leading-5 text-on-surface-variant/75">
+          {/* With books to show, a window short of height drops this line (index.css). */}
+          <p className={`mt-3 max-w-xs text-center text-xs leading-5 text-on-surface-variant/75 ${libraryEmpty ? "" : "import-formats"}`}>
             {dependencyFreeSummary()} open straight away.
             <br />
             {externalConverterCount()} more formats need the optional converter.
@@ -623,8 +640,11 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
                 <UiIcon name="list" size={18} />
               </button>
             </div>
+            {/* A select is as wide as its longest option: one author with a long
+                name used to push the page sideways. */}
             <select
-              className="inset-field px-3 py-2 text-xs text-on-surface-variant"
+              className="inset-field max-w-[9rem] truncate px-3 py-2 text-xs text-on-surface-variant"
+              aria-label="Author"
               value={filters.author}
               onChange={(event) => setFilter({ author: event.target.value })}
             >
@@ -636,7 +656,8 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
               ))}
             </select>
             <select
-              className="inset-field px-3 py-2 text-xs text-on-surface-variant"
+              className="inset-field max-w-[9rem] truncate px-3 py-2 text-xs text-on-surface-variant"
+              aria-label="Genre"
               value={filters.genre}
               onChange={(event) => setFilter({ genre: event.target.value })}
             >
@@ -649,6 +670,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
             </select>
             <select
               className="inset-field px-3 py-2 text-xs text-on-surface-variant"
+              aria-label="Sort by"
               value={filters.sort}
               onChange={(event) => setFilter({ sort: event.target.value as BookFilter["sort"] })}
             >

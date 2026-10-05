@@ -15,7 +15,7 @@ import { PipWorld, type PipAction } from "./components/PipWorld";
 import { usePipStore } from "./store/pipStore";
 import { usePipWardrobeStore } from "./store/pipWardrobeStore";
 import { pickBeat } from "./pip/moments";
-import { nodFor, nodOdds } from "./pip/bookNods";
+import { loadNods } from "./pip/nods";
 import { loadBookScenes } from "./pip/core";
 
 /** A book untouched this long gets dusted off when it is opened again. */
@@ -36,6 +36,7 @@ import { useReminders } from "./hooks/useReminders";
 import { useAppearanceStore, watchSystemTheme } from "./store/appearanceStore";
 import { bookService } from "./services/bookService";
 import { converterOffer, converterService, type ConverterOffer } from "./services/converterService";
+import { toastMs } from "./library/importSummary";
 import { getPlatform, pickSyncFolder } from "./platform";
 import type { Book } from "@shared/models/book";
 import { requestSettingsSection } from "./pages/settingsSection";
@@ -268,9 +269,10 @@ const App = () => {
     if (toastTimerRef.current) {
       window.clearTimeout(toastTimerRef.current);
     }
+    // Long enough to read: a file's name and why it was not added is a paragraph.
     toastTimerRef.current = window.setTimeout(() => {
       setToast(null);
-    }, 2600);
+    }, toastMs(message));
   }, []);
 
   const resolveErrorMessage = (error: unknown, fallback: string) => {
@@ -298,6 +300,14 @@ const App = () => {
    * she knows only by its genre gets that genre's scene, less often (NOD_ODDS).
    */
   const showBookNod = (book: Book) => {
+    // The table of who gets which scene is fetched now, the first time (pip/nods.ts): it does not load with the app.
+    const opened = performance.now();
+    void loadNods().then(
+      (nods) => playBookNod(book, nods, opened),
+      () => undefined
+    );
+  };
+  const playBookNod = (book: Book, { nodFor, nodOdds }: Awaited<ReturnType<typeof loadNods>>, opened: number) => {
     const nod = nodFor(book);
     if (!nod) {
       return;
@@ -321,9 +331,10 @@ const App = () => {
     if (!show) {
       return;
     }
-    // After the page has had a moment to appear.
+    // After the page has had a moment to appear: 2.2 s from the book's opening, whatever of that the table took to come.
     const ready = loadBookScenes();
-    window.setTimeout(() => void ready.then(() => usePipStore.getState().showPeek(nod.move, nod.line, 1)), 2200);
+    const wait = Math.max(0, 2200 - (performance.now() - opened));
+    window.setTimeout(() => void ready.then(() => usePipStore.getState().showPeek(nod.move, nod.line, 1)), wait);
   };
 
   const openPreparedBook = (book: Book, at: string | null = null) => {
@@ -790,10 +801,12 @@ const App = () => {
     return () => window.clearTimeout(timer);
   }, []);
 
-  // Pip's idle time sometimes plays the current book's scene.
+  // Pip's idle time sometimes plays the current book's scene. She is told the
+  // book, not whether she knows it: she looks it up herself when the moment
+  // comes (PipWorld), which is when the table of nods is first fetched.
   useEffect(() => {
     usePipStore.getState().setBookNod(
-      nowReading && nodFor(nowReading) ? { title: nowReading.title, author: nowReading.author ?? null, genres: nowReading.genres ?? null } : null
+      nowReading ? { title: nowReading.title, author: nowReading.author ?? null, genres: nowReading.genres ?? null } : null
     );
   }, [nowReading?.id, nowReading?.title, nowReading?.author, nowReading?.genres?.join("|")]);
   const [nowReadingFallback, setNowReadingFallback] = useState<string | null>(null);
@@ -1069,7 +1082,7 @@ const App = () => {
       )}
 
       {toast && (
-        <div className="paper-surface fixed bottom-8 right-8 z-50 rounded-lg px-4 py-3 text-sm text-on-surface">
+        <div className="app-toast paper-surface rounded-lg px-4 py-3 text-sm text-on-surface" role="status">
           {toast}
         </div>
       )}
@@ -1091,7 +1104,7 @@ const App = () => {
       {converterPromptBook && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/55 px-6">
           <div
-            className="modal-surface w-full max-w-md p-6"
+            className="modal-surface dialog-fit w-full max-w-md p-6"
             role="dialog"
             aria-modal="true"
             aria-labelledby="converter-dialog-title"

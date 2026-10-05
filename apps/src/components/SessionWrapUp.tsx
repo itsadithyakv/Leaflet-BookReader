@@ -294,7 +294,9 @@ export const SessionWrapUp = () => {
                 />
               </div>
             )}
-            <div className="min-w-0">
+            {/* max-w-full: stacked (a narrow window), a centred item is as wide as
+                its longest line, and the book's title is one unbroken line. */}
+            <div className="min-w-0 max-w-full">
               <p className="text-xs uppercase tracking-widest text-on-surface-variant">
                 {wrapUp.reason === "completed" ? "Session complete" : "Session ended"}
               </p>

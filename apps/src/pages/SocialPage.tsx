@@ -76,7 +76,7 @@ export const SocialPage = ({ showToast, nowReading, onReadNow, onNavigate }: Soc
   ];
 
   return (
-    <div className="flex min-h-full flex-col gap-8">
+    <div className="dock-clear mx-auto flex min-h-full w-full max-w-[1480px] flex-col gap-8">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="page-title text-4xl text-on-surface">Social</h1>

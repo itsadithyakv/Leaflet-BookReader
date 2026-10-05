@@ -11,8 +11,10 @@ const StackedCover = ({ book, offset, total }: { book: Book; offset: number; tot
       {src ? (
         <img src={src} alt="" className="h-full w-full object-cover" onError={onError} />
       ) : (
+        // The title stands in for the cover: a few lines of it, broken anywhere,
+        // so a long word stays inside the little cover.
         <div className="flex h-full items-center justify-center p-1 text-center text-[9px] leading-tight text-on-surface-variant">
-          {book.title}
+          <span className="line-clamp-4 min-w-0 [overflow-wrap:anywhere]">{book.title}</span>
         </div>
       )}
     </div>

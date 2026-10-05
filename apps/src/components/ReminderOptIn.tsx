@@ -92,7 +92,7 @@ export const ReminderOptIn = () => {
         role="dialog"
         aria-modal="true"
         aria-labelledby="reminder-optin-title"
-        className="modal-surface confirm-pop w-full max-w-sm rounded-2xl p-6 text-center"
+        className="modal-surface confirm-pop dialog-fit w-full max-w-sm rounded-2xl p-6 text-center"
       >
         {!pipOff && (
           <div className="mb-2 flex justify-center">

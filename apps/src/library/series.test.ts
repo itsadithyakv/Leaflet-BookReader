@@ -141,6 +141,55 @@ describe("buildSeries", () => {
   });
 });
 
+describe("a series as a real library holds it", () => {
+  // Books 1, 2, 5 and 6 of six, the first two each in two formats, and the
+  // series named three ways: stated by one file under one name and by another
+  // under a second, and worked out from the title for the rest.
+  const library = () => [
+    book("Light Bringer", "Pierce Brown"),
+    book("Golden Son", "Pierce Brown", { series: "Red Rising", seriesIndex: 2 }),
+    book("Red Rising", "Pierce Brown", { series: "The Red Rising Trilogy", seriesIndex: 1 }),
+    book("Dark Age", "Pierce Brown"),
+    book("Golden Son", "Pierce Brown"),
+    book("Red Rising", "Pierce Brown", { series: "Red Rising Trilogy", seriesIndex: 1 })
+  ];
+
+  it("is one series in order, and two copies of a book are one book", () => {
+    const { groups } = buildSeries(library());
+    expect(groups).toHaveLength(1);
+    expect(groups[0].name).toBe("Red Rising");
+    expect(groups[0].members.map((member) => `${member.index} ${member.book.title}`)).toEqual([
+      "1 Red Rising",
+      "1 Red Rising",
+      "2 Golden Son",
+      "2 Golden Son",
+      "5 Dark Age",
+      "6 Light Bringer"
+    ]);
+    expect([groups[0].ownedCount, groups[0].total]).toEqual([4, 6]);
+    expect(groups[0].missing).toEqual([
+      { index: 3, title: "Morning Star" },
+      { index: 4, title: "Iron Gold" }
+    ]);
+    expect(findDuplicates(library()).map((copies) => copies.map((copy) => copy.title))).toEqual([
+      ["Golden Son", "Golden Son"],
+      ["Red Rising", "Red Rising"]
+    ]);
+  });
+
+  it("finishing one copy finishes the book", () => {
+    const books = library();
+    books[2] = { ...books[2], progress: 1 };
+    let group = buildSeries(books).groups[0];
+    expect([group.finishedCount, group.next?.title, group.upNext]).toEqual([1, "Golden Son", true]);
+    // Then the other format of book 2: what is next is a book the library lacks.
+    books[4] = { ...books[4], progress: 1 };
+    group = buildSeries(books).groups[0];
+    expect([group.finishedCount, group.next?.title, group.upNext]).toEqual([2, "Dark Age", false]);
+    expect(group.missingNext).toEqual({ index: 3, title: "Morning Star" });
+  });
+});
+
 describe("seriesFromTitle", () => {
   it.each([
     ["Leviathan Wakes (The Expanse, #1)", "The Expanse", 1, "strong"],
@@ -155,7 +204,20 @@ describe("seriesFromTitle", () => {
     expect(seriesFromTitle(title)).toEqual({ name, index, strength });
   });
 
-  it.each(["The Hobbit (Illustrated Edition)", "1984", "Fahrenheit 451", "The Da Vinci Code: A Novel", "Penguin Classics (1984)"])(
+  it.each([
+    "The Hobbit (Illustrated Edition)",
+    "1984",
+    "Fahrenheit 451",
+    "The Da Vinci Code: A Novel",
+    "Penguin Classics (1984)",
+    // A number with no series named: these were all books of a series called "Book" (or "Volume").
+    "The Glass Road Saltmarsh Triology (Book 1)",
+    "Night Ferry (Book Two)",
+    "Night Ferry (Volume 2)",
+    "Night Ferry [Vol. 3]",
+    "Night Ferry (Part 2)",
+    "Night Ferry (Edition 2)"
+  ])(
     "finds nothing in %s",
     (title) => {
       expect(seriesFromTitle(title)).toBeNull();

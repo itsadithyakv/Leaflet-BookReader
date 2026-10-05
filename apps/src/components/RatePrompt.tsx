@@ -121,7 +121,7 @@ export const RatePrompt = () => {
         }
       }}
     >
-      <div role="dialog" aria-modal="true" aria-labelledby="rate-title" className="modal-surface confirm-pop w-full max-w-sm rounded-2xl p-6 text-center">
+      <div role="dialog" aria-modal="true" aria-labelledby="rate-title" className="modal-surface confirm-pop dialog-fit w-full max-w-sm rounded-2xl p-6 text-center">
         <div className="mb-2 flex justify-center">
           <PipSprite move="smitten" size={80} />
         </div>

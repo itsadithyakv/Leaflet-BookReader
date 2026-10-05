@@ -79,7 +79,7 @@ export const Inbox = ({ showToast }: { showToast: (message: string) => void }) =
   }, [inbox, markSeen]);
 
   return (
-    <section className="paper-surface rounded-xl p-6" aria-labelledby="inbox-title">
+    <section className="paper-surface rounded-xl p-4 sm:p-6" aria-labelledby="inbox-title">
       <SectionHeader eyebrow="News" title="Inbox" id="inbox-title" />
       {inbox.length === 0 ? (
         <div className="mt-2 flex items-center gap-4 py-3">
@@ -89,7 +89,9 @@ export const Inbox = ({ showToast }: { showToast: (message: string) => void }) =
       ) : (
         <ul className="mt-4 flex max-h-96 flex-col gap-1 overflow-y-auto pr-1">
           {inbox.map((item) => (
-            <li key={item.id} className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-surface-container-high/50">
+            // Wraps: in a narrow window the two answers to an invitation go under
+            // its words, which otherwise had six pixels to themselves.
+            <li key={item.id} className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2 rounded-lg px-2 py-2 hover:bg-surface-container-high/50">
               <span className="relative">
                 <button type="button" onClick={() => openReader(item.actor.handle)} aria-label={`Open ${at(item.actor.handle)}`}>
                   <PipAvatar seed={item.actor.pipSeed} avatar={item.actor.avatar} size={34} />
@@ -98,8 +100,8 @@ export const Inbox = ({ showToast }: { showToast: (message: string) => void }) =
                   <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-surface" aria-label="New" />
                 )}
               </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-sm text-on-surface">{describe(item)}</span>
+              <span className="min-w-0 flex-1 basis-32">
+                <span className="block text-sm text-on-surface [overflow-wrap:anywhere]">{describe(item)}</span>
                 <span className="block text-[11px] text-on-surface-variant">{relativeTime(item.createdAt)}</span>
               </span>
               <InviteActions item={item} showToast={showToast} />

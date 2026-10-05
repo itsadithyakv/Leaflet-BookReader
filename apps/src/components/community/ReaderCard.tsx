@@ -157,9 +157,10 @@ export const ReaderCard = ({ signedIn, canJoin, showToast, onChanged }: ReaderCa
               <PipAvatar seed={reader.pipSeed} avatar={reader.avatar} size={80} play label={`${nameOf(reader)}'s Pip`} />
               <div className="min-w-0">
                 <p className="truncate font-headline text-2xl font-bold text-on-surface">{nameOf(reader)}</p>
-                <p className="truncate text-sm text-on-surface-variant">
-                  {at(reader.handle)}
-                  {relation && <span className="ml-2 rounded-full bg-surface-container-high px-2 py-0.5 text-[10px]">{relation}</span>}
+                {/* The note wraps under a long handle rather than being cut off with it. */}
+                <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-on-surface-variant">
+                  <span className="min-w-0 truncate">{at(reader.handle)}</span>
+                  {relation && <span className="shrink-0 rounded-full bg-surface-container-high px-2 py-0.5 text-[11px]">{relation}</span>}
                 </p>
               </div>
             </div>

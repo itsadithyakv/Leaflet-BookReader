@@ -107,14 +107,14 @@ export const SeriesEditorDialog = () => {
         role="dialog"
         aria-modal="true"
         aria-labelledby="series-editor-title"
-        className="modal-surface confirm-pop w-full max-w-md rounded-2xl p-6"
+        className="modal-surface confirm-pop dialog-fit w-full max-w-md rounded-2xl p-6"
         onSubmit={(event) => {
           event.preventDefault();
           save();
         }}
       >
         <p className="text-[10px] uppercase tracking-[0.2em] text-on-surface-variant">Series</p>
-        <h2 id="series-editor-title" className="page-title mt-1 text-xl text-on-surface">
+        <h2 id="series-editor-title" className="page-title mt-1 line-clamp-3 break-words text-xl text-on-surface" title={book.title}>
           {book.title}
         </h2>
         <p className="mt-1 text-xs text-on-surface-variant">

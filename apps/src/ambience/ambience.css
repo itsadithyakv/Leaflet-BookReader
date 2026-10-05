@@ -259,3 +259,8 @@
     transition: none;
   }
 }
+
+/* A switch row is pressed anywhere along it: 24 px high (it was 20). */
+.ambience-switch {
+  min-height: 24px;
+}

@@ -30,9 +30,11 @@ const BookRowComponent = ({ book, onRefresh, onOpen, onRemove }: Props) => {
           onOpen(book);
         }
       }}
-      className="ledger-row flex cursor-pointer items-center gap-4 p-3 transition"
+      // Wraps when the row is narrow: the title keeps a readable width and the
+      // buttons go under it, rather than squeezing it to one word a line.
+      className="ledger-row flex cursor-pointer flex-wrap items-center gap-x-4 gap-y-2 p-3 transition"
     >
-      <div className="book-cover-frame h-16 w-12 overflow-hidden bg-surface-container-high">
+      <div className="book-cover-frame h-16 w-12 shrink-0 overflow-hidden bg-surface-container-high">
         {resolvedCover ? (
           <img src={resolvedCover} alt={book.title} className="h-full w-full object-cover" onError={handleCoverError} />
         ) : (
@@ -41,9 +43,11 @@ const BookRowComponent = ({ book, onRefresh, onOpen, onRemove }: Props) => {
           </div>
         )}
       </div>
-      <div className="flex-1">
-        <p className="book-title text-base text-on-surface">{book.title}</p>
-        <p className="text-xs text-on-surface-variant">
+      <div className="min-w-0 flex-1 basis-40">
+        <p className="book-title line-clamp-2 break-words text-base text-on-surface" title={book.title}>
+          {book.title}
+        </p>
+        <p className="line-clamp-2 break-words text-xs text-on-surface-variant">
           {book.author ?? "Unknown author"}
           {series && (
             <span className="font-semibold text-primary">
@@ -56,20 +60,20 @@ const BookRowComponent = ({ book, onRefresh, onOpen, onRemove }: Props) => {
           {book.available === false && " · downloads when opened"}
         </p>
       </div>
-      <div className="w-32">
+      <div className="hidden w-32 shrink-0 sm:block">
         <div className="h-1.5 w-full rounded-full bg-surface-container-highest">
           <div
             className="h-1.5 rounded-full bg-primary"
             style={{ width: `${progressPercent}%` }}
           />
         </div>
-        <p className="mt-1 text-right text-[10px] font-bold uppercase tracking-tighter text-on-surface-variant">
+        <p className="mt-1 text-right text-[11px] font-bold uppercase tracking-tighter text-on-surface-variant">
           {progressPercent}%
         </p>
       </div>
-      <BookMenu book={book} />
+      <BookMenu book={book} className="ml-auto shrink-0" />
       <button
-        className="tactile-button px-3 py-2 text-xs"
+        className="tactile-button shrink-0 px-3 py-2 text-xs"
         type="button"
         onClick={(e) => {
           e.stopPropagation();
@@ -79,7 +83,7 @@ const BookRowComponent = ({ book, onRefresh, onOpen, onRemove }: Props) => {
         Refresh
       </button>
       <button
-        className="tactile-button px-3 py-2 text-xs"
+        className="tactile-button shrink-0 px-3 py-2 text-xs"
         type="button"
         title={
           confirmRemove

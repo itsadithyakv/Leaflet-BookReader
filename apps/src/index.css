@@ -432,6 +432,7 @@ body::before {
 
 .reader-measure-option {
   display: inline-flex;
+  min-height: 24px;
   align-items: center;
   justify-content: center;
   padding: 3px 5px;
@@ -1994,10 +1995,81 @@ body::before {
   transform: translateY(1px);
 }
 
+/* ---- The toolbar's popovers, in both readers ----
+ * The "···" menu, notes, text settings; the page reader's page size, bookmarks
+ * and settings. Each hangs from its button's right edge, which is fine in a
+ * wide window. In a short one the tall ones scroll inside themselves (the
+ * "···" menu is about 600 px; its last rows were below a 540 px window). In a
+ * narrow one they are pinned to the window instead, because a 300 px box
+ * hung from the third button from the right starts off the left edge. */
+.reader-menu {
+  max-height: calc(100dvh - var(--reader-toolbar-height, 76px) - 1rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 639px) {
+  .reader-toolbar .reader-menu {
+    position: fixed;
+    top: calc(var(--reader-toolbar-height, 56px) + 6px);
+    right: 8px;
+    left: 8px;
+    width: auto;
+    max-width: none;
+    margin-top: 0;
+  }
+}
+
+/* The reader's toast ("Bookmarked.", Dotty's pace). At the foot on the right
+   it is clear of the dock only in a window wide enough to hold both: under
+   1,400 px its longest line lay over the dock (and from x = 0 at 380 px). There
+   it sits above the dock, and above the pace control while one is showing. */
+.reader-toast {
+  max-width: calc(100vw - 2rem);
+}
+
+@media (max-width: 1399px) {
+  .reader-toast {
+    bottom: 4.5rem;
+  }
+
+  .reader-scope:has(.reader-autoscroll-pill) .reader-toast {
+    bottom: 8.25rem;
+  }
+}
+
+@media (max-width: 639px) {
+  .reader-toast {
+    right: 1rem;
+  }
+
+  /* Two lines of it are a rounded box, not a pill. */
+  .reader-toast > div {
+    border-radius: 1rem;
+  }
+}
+
+/* A toolbar button is at least 24 px a side whatever its icon measures (the
+   search glyph is 22). */
+.reader-toolbar button.reader-icon {
+  min-width: 24px;
+  min-height: 24px;
+}
+
+/* On a touch screen they stay finger-sized: the rule above is more specific
+   than the 44 px one for `.reader-icon`, and had quietly undone it. */
+@media (hover: none) and (pointer: coarse) {
+  .reader-toolbar button.reader-icon {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
 /* ---- Notes (bookmarks, highlights), the selection bar and search ----
  * readers/AnnotationsPanel, SelectionBar and SearchPanel. Built from the
  * reader's own variables, so every page finish (paper, dark, true black) fits. */
 .reader-notes-tab {
+  min-height: 24px;
   border-radius: 999px;
   padding: 4px 10px;
   font-size: 10px;
@@ -2013,6 +2085,7 @@ body::before {
   color: var(--reader-text);
 }
 .reader-notes-action {
+  min-height: 24px;
   border: 1px solid var(--reader-border);
   border-radius: 6px;
   padding: 3px 8px;
@@ -2033,9 +2106,21 @@ body::before {
   color: var(--reader-accent);
 }
 .reader-notes-remove {
+  position: relative;
   flex: none;
   color: var(--reader-muted);
   opacity: 0.55;
+}
+/* The cross is 14 px and the colour dots 18: each takes a press from 24. */
+.reader-notes-remove::after,
+.reader-selection-swatch::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 24px;
+  height: 24px;
+  transform: translate(-50%, -50%);
+  content: "";
 }
 .reader-notes-remove:hover,
 .reader-notes-remove:focus-visible {
@@ -2093,6 +2178,7 @@ body::before {
   font-style: italic;
 }
 .reader-selection-swatch {
+  position: relative;
   width: 18px;
   height: 18px;
   border-radius: 999px;
@@ -2298,6 +2384,8 @@ body::before {
    dims to a hairline. Pausing, reaching for the controls or changing the
    pace (which remounts the row) brings them back, and the fade starts over. */
 .reader-rsvp-meta-label {
+  /* The pace and the minutes left are read, not glanced at: 11 px. */
+  font-size: 11px;
   opacity: 0.7;
   animation: rsvp-meta-fade 2.4s ease 3s forwards;
 }
@@ -2477,6 +2565,15 @@ body::before {
 .reader-autoscroll-pill.is-awake {
   opacity: 1;
   animation: none;
+}
+
+/* Held back: a book opened in Smart Read on its cover or its contents page
+   has nothing to set off yet, so "Paused" does not come up there (not even
+   for the two seconds of the fade). It is still there with the toolbar. */
+.reader-autoscroll-pill.is-held:not(.is-awake):not(:hover):not(:focus-within) {
+  opacity: 0;
+  animation: none;
+  pointer-events: none;
 }
 
 /* In view for the first two seconds, then gone. Two names for one animation:
@@ -3335,6 +3432,8 @@ body::before {
 }
 
 .pip-say-button {
+  /* 24 px tall with its 12 px line: at 4px on top it was 23. */
+  min-height: 24px;
   padding: 4px 10px 5px;
   background: #efe7d2;
   color: #1c261f;
@@ -3496,6 +3595,15 @@ body::before {
 /* The app's own confirm dialog pops rather than fades. */
 .confirm-pop {
   animation: confirm-pop-in 220ms cubic-bezier(0.3, 1.3, 0.5, 1) both;
+}
+
+/* A dialog taller than the window scrolls inside itself. Centred and left to
+   overflow, its first lines and its buttons were both outside a small window
+   (the smallest is 380 x 480), with nothing to scroll them back by. */
+.dialog-fit {
+  max-height: calc(100dvh - 1.5rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 @keyframes confirm-pop-in {
@@ -3806,6 +3914,37 @@ body::before {
   }
 }
 
+/* A window with the rail but not much height (a 1366 x 768 laptop at 125% is
+   1093 x 614; 1080p at 200% is 960 x 540): the Library's hero gives up its
+   air, so the first row of covers is on the first screen. A taller window
+   keeps the hero as it was drawn. */
+@media (min-width: 768px) and (max-height: 820px) {
+  .library-page {
+    gap: 1.5rem;
+  }
+
+  .library-page .import-drop-zone {
+    padding: 1rem 1.25rem;
+  }
+
+  .library-page .import-drop-zone .import-book-icon {
+    width: 48px;
+    height: 48px;
+    margin-bottom: 0.625rem;
+    border-radius: 14px;
+  }
+
+  /* Which formats open is said again in Settings; here it is three lines. */
+  .library-page .import-formats {
+    display: none;
+  }
+
+  .library-page .library-hero-title {
+    font-size: 2.25rem;
+    line-height: 2.5rem;
+  }
+}
+
 .now-reading-bar {
   position: relative;
   display: grid;
@@ -3854,7 +3993,7 @@ body::before {
 
 .now-reading-percent {
   color: rgb(var(--color-on-surface-variant));
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
@@ -4066,9 +4205,9 @@ textarea:focus-visible,
 }
 
 .mobile-nav-label {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
   line-height: 1;
 }
 
@@ -4138,6 +4277,50 @@ textarea:focus-visible,
 @media (max-width: 767px) and (min-height: 521px) {
   .now-reading-dock {
     bottom: calc(var(--mobile-nav-height) + 10px);
+  }
+}
+
+/* The bar floats over the foot of the page, so a page that scrolls leaves
+   room under its last row: the bottom book's title and the last setting used
+   to end up beneath it. (The Pip tab fills the window and has nothing there.) */
+.app-shell:has(.now-reading-dock) .dock-clear {
+  /* The bar's 108 px, less the page's own 32 px foot, and 8 px of air. */
+  padding-bottom: 84px;
+}
+
+/* --- toast -------------------------------------------------------------- */
+
+/* Never wider than the window (a 200-character title in "Removed ...") and
+   clear of the bottom bar. In a window too narrow to have room beside the
+   "now reading" bar, it sits above that as well. */
+.app-toast {
+  position: fixed;
+  right: 2rem;
+  bottom: 2rem;
+  z-index: 50;
+  max-width: min(28rem, calc(100vw - 2rem));
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1535px) {
+  .app-shell:has(.now-reading-dock) .app-toast {
+    bottom: 7.5rem;
+  }
+}
+
+@media (max-width: 767px) {
+  .app-toast {
+    right: 1rem;
+  }
+}
+
+@media (max-width: 767px) and (min-height: 521px) {
+  .app-toast {
+    bottom: calc(var(--mobile-nav-height) + 0.75rem);
+  }
+
+  .app-shell:has(.now-reading-dock) .app-toast {
+    bottom: calc(var(--mobile-nav-height) + 104px);
   }
 }
 
@@ -4569,13 +4752,31 @@ button.pip-shop-tile:hover,
   }
 }
 
+/* A short, narrow window keeps the sidebar (the app's window at its smallest,
+   380 x 480): the page takes back its side margins there too, or a floor at
+   one pixel a pixel (240 px) does not fit beside the lift. */
+@media (max-width: 767px) and (max-height: 520px) {
+  .pip-house-page {
+    margin-inline: -12px;
+  }
+}
+
 /* The top of the HUD and the rail line up with the room and its lift
-   (--frame-left and --frame-width, measured from the room). */
+   (--frame-left and --frame-width, measured from the room). Never narrower
+   than holds them on one row, though (or than the page, where that is
+   narrower still), centred on the room: a bar that followed a small room
+   wrapped, its extra rows took height from the room, and the room shrank
+   again (960 x 540 ended with a 360 px room in 784 px of page). */
+.pip-house {
+  --bar-width: max(var(--frame-width, 100%), min(100%, 800px));
+  --bar-left: clamp(0px, calc(var(--frame-left, 0px) - (var(--bar-width) - var(--frame-width, 100%)) / 2), calc(100% - var(--bar-width)));
+}
+
 .pip-hud-top,
 .pip-rail {
-  width: var(--frame-width, 100%);
+  width: var(--bar-width);
   max-width: 100%;
-  margin-left: var(--frame-left, 0);
+  margin-left: var(--bar-left);
 }
 
 .pip-hud-top {
@@ -4650,7 +4851,7 @@ button.pip-shop-tile:hover,
 
 .pip-resource-label {
   color: var(--hud-ink-soft);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -4743,7 +4944,7 @@ button.pip-shop-tile:hover,
 .pip-goal-count {
   flex: none;
   color: var(--hud-ink-soft);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
 }
 
@@ -5056,6 +5257,23 @@ button.pip-shop-tile:hover,
   color: #3b0f1d;
 }
 
+/* A narrow rail (a drawer open beside the house on a small window) shares
+   one row, as a phone's does: wrapped to two it took 58 px from the room. */
+@container (max-width: 560px) {
+  .pip-rail-belt {
+    width: 100%;
+    gap: 8px;
+    padding-inline: 9px;
+  }
+
+  .pip-rail-key,
+  .pip-rail-shop {
+    min-width: 44px;
+    flex: 1 1 auto;
+    padding-inline: 2px;
+  }
+}
+
 /* The ripe dot on the garden key. */
 .pip-rail-key .pip-hud-dot {
   top: -5px;
@@ -5104,6 +5322,49 @@ button.pip-shop-tile:hover,
   --hud-lip: #2e5a1c;
   background: linear-gradient(#8cc85c, #5f9a38);
   color: #0f2410;
+}
+
+/* Playing has eight keys on its one row: at their full 88 px they want 1,000
+   px of rail, and on anything less the last ran off the end of the belt
+   (by 156 px at 800 x 600) while the hint beside them, squeezed to a few
+   letters a line, made the belt 278 px tall. The keys give way instead, down
+   to the width of their names, and the hint goes when the row is tight. */
+.pip-rail-playing .pip-rail-key {
+  min-width: 52px;
+  flex: 0 1 88px;
+  padding-inline: 6px;
+}
+
+@container (max-width: 1040px) {
+  .pip-rail-playing .pip-rail-mode-hint {
+    display: none;
+  }
+}
+
+/* A narrow rail (a phone, or a drawer open beside the house): the keys go
+   under the title, as many to a row as fit. */
+@container (max-width: 640px) {
+  .pip-rail-belt.pip-rail-playing {
+    flex-wrap: wrap;
+  }
+
+  .pip-rail-playing .pip-rail-mode {
+    flex-basis: 100%;
+  }
+
+  .pip-rail-playing .pip-rail-key {
+    min-width: 44px;
+    flex: 1 1 46px;
+    padding-inline: 2px;
+  }
+}
+
+/* The smallest window (380 x 480): the keys say what the rail is for, and
+   the title's row is the 36 px that kept the last of them in the window. */
+@media (max-width: 560px) and (max-height: 560px) {
+  .pip-rail-playing .pip-rail-mode {
+    display: none;
+  }
 }
 
 .pip-hud-dot {
@@ -5738,6 +5999,23 @@ button.pip-shop-tile:hover,
   align-items: center;
 }
 
+/* Under a finger each key of the lift is a thumb's size: the arrows 44 px
+   tall, and a stop's round button pressed in the 44 px about it (the lift
+   is 44 px wide, and shows a stop a floor only where each has 44 px of
+   shaft, and its arrows only where three such keys fit: layout.ts,
+   `liftShowsAll` and `liftShowsArrows`). */
+@media (hover: none) and (pointer: coarse) {
+  .pip-lift-arrow {
+    height: 44px;
+  }
+
+  .pip-lift-stop::after {
+    position: absolute;
+    inset: -8px;
+    content: "";
+  }
+}
+
 .pip-lift-menu {
   position: absolute;
   top: 50%;
@@ -5773,6 +6051,17 @@ button.pip-shop-tile:hover,
   font-size: 12px;
   text-align: left;
   white-space: nowrap;
+}
+
+/* In the list a floor is a whole row: 44 px of it under a finger, and no more about it. */
+@media (hover: none) and (pointer: coarse) {
+  .pip-lift-menu .pip-lift-stop {
+    min-height: 44px;
+  }
+
+  .pip-lift-menu .pip-lift-stop::after {
+    content: none;
+  }
 }
 
 .pip-lift-menu .pip-lift-stop:hover {
@@ -5821,9 +6110,9 @@ button.pip-shop-tile:hover,
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
-  width: var(--frame-width, 100%);
+  width: var(--bar-width);
   max-width: 100%;
-  margin-left: var(--frame-left, 0);
+  margin-left: var(--bar-left);
   padding: 8px 12px;
   background: var(--hud-face);
   color: var(--hud-ink);
@@ -5893,6 +6182,21 @@ button.pip-shop-tile:hover,
   color: var(--hud-ink);
 }
 
+/* Under a finger: the cross here, the HUD's help key and the buttons in
+   Pip's bubble (the tour, her menu) are a thumb's size. */
+@media (hover: none) and (pointer: coarse) {
+  .pip-picker-close,
+  .pip-hud-help {
+    width: 44px;
+    height: 44px;
+  }
+
+  .pip-say-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
 .pip-picker-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -5954,7 +6258,7 @@ button.pip-shop-tile:hover,
   align-items: center;
   gap: 2px;
   color: var(--hud-ink-soft);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
@@ -6000,7 +6304,7 @@ button.pip-shop-tile:hover,
   border-radius: 999px;
   background: rgb(var(--color-outline-variant) / 0.28);
   color: rgb(var(--color-on-surface-variant));
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0;
   text-transform: none;
@@ -6128,8 +6432,8 @@ button.pip-shop-tile:hover,
 /* A drawer beside the house, so the whole room stays in view while Pip tries
    things on. It stands beside the whole house, top bar to rail, and the
    house steps aside for it (the room shrinks), so it never pushes the rail
-   down. Below 1100 px side by side leaves the room too small: it is a sheet
-   at the bottom instead, and the room shrinks to sit above it. */
+   down. On a narrow window side by side leaves the room too small: it is a
+   sheet at the bottom instead, and the room shrinks to sit above it. */
 .pip-drawer {
   position: absolute;
   top: 0;
@@ -6146,7 +6450,13 @@ button.pip-shop-tile:hover,
   padding-right: calc(clamp(340px, 26vw, 440px) + 18px);
 }
 
-@media (max-width: 1099px) {
+/* Where the sheet is used: a phone, and a window under 900 px wide with the
+   height for it. From 900 px the drawer beside the house leaves a bigger room
+   than the sheet does (1024 x 768: 480 x 240 beside it, 360 x 180 over it),
+   and on a short window (520 px or less) the sheet has nowhere to go but over
+   the room and the rail (844 x 390 lost 113 px of a 180 px room to it), so
+   there the drawer stands beside the house from 768 px. */
+@media (max-width: 767px), (max-width: 899px) and (min-height: 521px) {
   .pip-house[data-sheet] {
     padding-right: 0;
   }
@@ -6158,7 +6468,8 @@ button.pip-shop-tile:hover,
     bottom: 8px;
     left: max(86px, calc(50% - 380px));
     width: auto;
-    max-height: 46dvh;
+    /* 44, not 46: at 800 x 600 and 480 x 800 the last 2% was over the room's foot. */
+    max-height: 44dvh;
   }
 
   /* Decorating: a low sheet, so the room and its pins stay in view above it. */
@@ -6179,6 +6490,13 @@ button.pip-shop-tile:hover,
 @media (max-width: 767px) and (min-height: 521px) {
   .pip-drawer {
     bottom: calc(var(--mobile-nav-height) + 8px);
+  }
+}
+
+/* A short, narrow window has the sidebar, not the bottom bar: beside it. */
+@media (max-width: 767px) and (max-height: 520px) {
+  .pip-drawer {
+    left: 86px;
   }
 }
 
@@ -6358,7 +6676,7 @@ button.pip-shop-tile:hover,
 
 .pip-shop-card-note {
   color: rgb(var(--color-on-surface-variant));
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.3;
 }
 
@@ -6370,7 +6688,7 @@ button.pip-shop-tile:hover,
   border-radius: 0 6px 6px 0;
   background: #c8453b;
   color: #fffbf0;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -6425,7 +6743,7 @@ button.pip-shop-tile:hover,
 .pip-shop-group-title {
   margin-bottom: 8px;
   color: rgb(var(--color-on-surface-variant));
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.2em;
   text-transform: uppercase;
@@ -6743,17 +7061,79 @@ button.pip-shop-tile:hover,
   pointer-events: none;
 }
 
-/* Narrow windows: the shop full width, its detail under the grid. */
-@media (max-width: 900px) {
+/* Narrow windows: the shop full width, its detail under the grid. (Only under
+   700 px: from there the detail still fits beside two cards to a row, and
+   under the grid on a short window it left 33 px of list at 844 x 390.) Two
+   cards to a row down to the narrowest window, where 9.5rem gave one. */
+@media (max-width: 699px) {
   .pip-shop-body {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) auto;
   }
 
   .pip-shop-detail {
-    max-height: 40vh;
+    max-height: 36vh;
     border-top: 1px solid rgb(var(--color-outline-variant) / 0.35);
     border-left: 0;
+  }
+
+  .pip-shop-grid {
+    grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
+  }
+}
+
+/* A small window: the shop's tabs are one row that scrolls sideways (the
+   chosen one is focused, so it is in view). Wrapped they were five rows,
+   199 px of a 405 px dialog, at 380 px wide. */
+@media (max-width: 899px), (max-height: 620px) {
+  .pip-shop-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  .pip-shop-tabs .pip-tab {
+    flex: none;
+  }
+}
+
+/* The arcade scrolls as one piece when it is taller than the window (its
+   tiles at 380 x 480, a quiz question with long answers on a phone): there
+   its title and its way out stay at the top of it. */
+@media (max-height: 620px), (max-width: 560px) {
+  .pip-arcade > :first-child {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    margin: -20px -20px 0;
+    padding: 20px 20px 8px;
+    border-radius: 20px 20px 0 0;
+    background: rgb(var(--color-surface-high));
+  }
+}
+
+/* A short window: the shop (and the album, which shares its backdrop) nearly
+   as tall as the window, and the heading without its second line. */
+@media (max-height: 620px) {
+  .pip-shop-backdrop,
+  .pip-arcade-backdrop {
+    padding: 8px;
+  }
+
+  .pip-shop {
+    height: calc(100dvh - 16px);
+  }
+
+  .pip-arcade {
+    max-height: calc(100dvh - 16px);
+  }
+
+  .pip-shop-head {
+    padding-top: 12px;
+  }
+
+  .pip-shop-head p {
+    display: none;
   }
 }
 
@@ -6784,19 +7164,17 @@ button.pip-shop-tile:hover,
     padding: 9px 9px 14px;
   }
 
+  /* Each as wide as its name needs, the rest shared out: in five equal keys
+     "Pip's things" was a pixel wider than its key at 380 px, even at 10 px. */
   .pip-rail-key,
   .pip-rail-shop {
-    min-width: 0;
-    flex: 1 1 0;
+    min-width: 44px;
+    flex: 1 1 auto;
     padding: 7px 2px 6px;
   }
 
   .pip-rail-belt.pip-rail-decorate {
     flex-wrap: wrap;
-  }
-
-  .pip-rail-label {
-    font-size: 10px;
   }
 
   .pip-rail-mode {
@@ -6841,8 +7219,8 @@ button.pip-shop-tile:hover,
   animation: pip-drawer-in 260ms cubic-bezier(0.2, 0.9, 0.3, 1) backwards;
 }
 
-/* Where it is a sheet (below 1100 px), it rises from the bottom instead. */
-@media (max-width: 1099px) {
+/* Where it is a sheet (the same windows as above), it rises from the bottom instead. */
+@media (max-width: 767px), (max-width: 899px) and (min-height: 521px) {
   .pip-drawer {
     animation-name: pip-sheet-in;
   }
@@ -6930,7 +7308,7 @@ button.pip-shop-tile:active,
   gap: 5px;
   margin-bottom: 10px;
   color: rgb(var(--pip-accent));
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.2em;
   text-transform: uppercase;
@@ -7293,6 +7671,31 @@ button.pip-shop-tile:active,
   white-space: nowrap;
 }
 
+/* A small window: the count alone (the list still opens from it). With the
+   next step beside it the top bar needs 720 px to stay on one row, and each
+   row it wraps to is 46 px the room does not get. */
+@media (max-width: 899px), (max-height: 620px) {
+  .pip-resources .pip-goals-next {
+    display: none;
+  }
+}
+
+/* The same with a drawer open beside the house, which takes 358 px of the bar. */
+@media (max-width: 1279px) {
+  .pip-house[data-sheet] .pip-resources .pip-goals-next {
+    display: none;
+  }
+}
+
+/* A short window with a drawer open beside the house: the top bar has 400 px
+   left, and with the first steps in it took three rows (136 px of a 390 px
+   window, and the rail ended 30 px under it). They wait for the drawer. */
+@media (min-width: 768px) and (max-height: 520px) {
+  .pip-house[data-sheet] .pip-resources .pip-goals {
+    display: none;
+  }
+}
+
 .pip-resources .pip-goals-list {
   position: absolute;
   top: calc(100% + 10px);
@@ -7330,7 +7733,7 @@ button.pip-shop-tile:active,
 }
 
 .pip-wish.is-compact .pip-wish-label {
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .pip-wish.is-compact .pip-wish-line {
@@ -7601,7 +8004,7 @@ button.pip-shop-tile:active,
 
 .pip-wish-label {
   color: #2e6136;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.18em;
   text-transform: uppercase;

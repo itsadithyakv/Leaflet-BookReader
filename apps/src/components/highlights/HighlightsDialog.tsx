@@ -55,10 +55,12 @@ const Header = ({
     )}
     <div className="min-w-0 flex-1">
       <p className={EYEBROW}>{eyebrow}</p>
-      <h2 id="highlights-dialog-title" className="page-title mt-1 break-words text-xl text-on-surface">
+      {/* Two lines at most: a very long title used to take the whole dialog
+          in a small window and leave the list no height at all. */}
+      <h2 id="highlights-dialog-title" className="page-title mt-1 line-clamp-2 break-words text-xl text-on-surface" title={title}>
         {title}
       </h2>
-      {detail && <p className="mt-1 text-xs text-on-surface-variant">{detail}</p>}
+      {detail && <p className="mt-1 truncate text-xs text-on-surface-variant">{detail}</p>}
     </div>
     <button
       type="button"
@@ -336,8 +338,14 @@ const BookView = ({
           ) : (
             <div className="space-y-5">
               {groups.map((group, index) => (
-                <section key={`${index}-${group.chapter ?? ""}`} aria-label={group.chapter ?? "Before the first chapter"}>
-                  {group.chapter && <h3 className={`${EYEBROW} mb-2`}>{group.chapter}</h3>}
+                <section
+                  key={`${index}-${group.chapter ?? ""}`}
+                  aria-label={group.chapter ? (group.book ? `${group.book}: ${group.chapter}` : group.chapter) : "Before the first chapter"}
+                >
+                  {/* In a set of books, the book is named once, above its chapters. */}
+                  {group.book && group.opensBook && <h3 className="mb-3 text-sm font-semibold text-on-surface">{group.book}</h3>}
+                  {group.chapter &&
+                    (group.book ? <h4 className={`${EYEBROW} mb-2`}>{group.chapter}</h4> : <h3 className={`${EYEBROW} mb-2`}>{group.chapter}</h3>)}
                   <ul className="space-y-2">
                     {group.items.map((item) => {
                       const color = HIGHLIGHT_COLORS[item.color ?? "yellow"] ?? HIGHLIGHT_COLORS.yellow;

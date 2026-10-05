@@ -83,7 +83,7 @@ export const WelcomeModal = ({
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 px-4">
-      <div className="modal-surface w-full max-w-lg rounded-2xl p-6">
+      <div className="modal-surface dialog-fit w-full max-w-lg rounded-2xl p-6">
         <div className="text-center">
           <h2 className="page-title text-2xl text-on-surface">Welcome to Leaflet</h2>
           <p className="mt-2 text-sm text-on-surface-variant">

@@ -7,7 +7,11 @@
  * "Delete All Data" cleared the database and left these, so importing the same
  * file again opened it at the old place with the old bookmarks.
  */
-const PER_BOOK_PREFIXES = ["leaflet.reader.", "leaflet.bookmarks."];
+// `leaflet.pdfChapters.<book id>`: the chapters found for a PDF that has no
+// contents of its own (readers/pdfChapters.ts).
+// `leaflet.contents.<book id>`: the chapter list made for an EPUB that came
+// without one, or with next to none (readers/autoContents.ts).
+const PER_BOOK_PREFIXES = ["leaflet.reader.", "leaflet.bookmarks.", "leaflet.pdfChapters.", "leaflet.contents."];
 /**
  * `leaflet.people.preview` is the browser preview's character sheets (the app
  * keeps them in the database, which the delete clears).
@@ -24,6 +28,9 @@ const READER_SETTINGS = [
   "leaflet.reader.autoScrollSpeed",
   "leaflet.reader.startMode",
   "leaflet.reader.tourSeen",
+  // The chapter list: that it has shown itself once, and whether it was left open (readers/contentsPanel.ts).
+  "leaflet.reader.contentsSeen",
+  "leaflet.reader.contentsOpen",
   "leaflet.reader.characters",
   // Whether words looked up are kept (readers/words/wordPrefs.ts).
   "leaflet.reader.keepWords",

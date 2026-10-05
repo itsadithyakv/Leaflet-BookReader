@@ -11,6 +11,14 @@ const requireDesktop = () => {
 
 export type EpubSection = { href: string; bytes: number; linear: boolean };
 
+/**
+ * What became of the files handed to an import: how many there were, the
+ * books that came back for them (one a file, so one book can be there twice)
+ * and the files that were not added, each with why in the backend's words
+ * (`import_books_report`).
+ */
+export type ImportOutcome = { asked: number; books: Book[]; failed: Array<{ name: string; reason: string }> };
+
 export const bookService = {
   async list(): Promise<Book[]> {
     if (!isTauri()) {
@@ -18,7 +26,8 @@ export const bookService = {
     }
     return invoke<Book[]>("list_books");
   },
-  async importFromDialog(): Promise<Book[]> {
+  /** Through the file dialog. `null` when it was closed with nothing chosen. */
+  async importFromDialog(): Promise<ImportOutcome | null> {
     requireDesktop();
     const ok = await ensureBookPermissions();
     if (!ok) {
@@ -27,21 +36,35 @@ export const bookService = {
 
     const paths = await pickBookFiles();
     if (!paths || paths.length === 0) {
-      return [];
+      return null;
     }
 
-    return invoke<Book[]>("import_books", { paths });
+    const report = await invoke<Omit<ImportOutcome, "asked">>("import_books_report", { paths });
+    return { asked: paths.length, ...report };
   },
-  async importPaths(paths: string[]): Promise<Book[]> {
+  async importPaths(paths: string[]): Promise<ImportOutcome> {
     requireDesktop();
     if (paths.length === 0) {
-      return [];
+      return { asked: 0, books: [], failed: [] };
     }
     const ok = await ensureBookPermissions();
     if (!ok) {
       throw new Error("Storage permission denied");
     }
-    return invoke<Book[]>("import_books", { paths });
+    const report = await invoke<Omit<ImportOutcome, "asked">>("import_books_report", { paths });
+    return { asked: paths.length, ...report };
+  },
+  /**
+   * A PDF's first page, drawn by the page reader (a JPEG `data:` URL), as the
+   * cover of a book that has none. The book with its cover, or `null` when
+   * nothing changed: it already has one, or it is not a PDF. The backend
+   * checks the picture is one and never replaces a cover.
+   */
+  async savePageCover(bookId: string, image: string): Promise<Book | null> {
+    if (!isTauri()) {
+      return null;
+    }
+    return invoke<Book | null>("save_page_cover", { bookId, image });
   },
   /**
    * The reader's word on a book's series: a name and number, `""` for "not in

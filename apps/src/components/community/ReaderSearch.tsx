@@ -42,7 +42,7 @@ export const ReaderSearch = () => {
   }, [query]);
 
   return (
-    <section className="paper-surface rounded-xl p-6" aria-labelledby="find-title">
+    <section className="paper-surface rounded-xl p-4 sm:p-6" aria-labelledby="find-title">
       <SectionHeader eyebrow="Visit a shelf" title="Find readers" id="find-title" />
       <div className="relative mt-4">
         <UiIcon name="search" size={17} className="absolute left-3 top-1/2 z-10 -translate-y-1/2 text-on-surface-variant" />

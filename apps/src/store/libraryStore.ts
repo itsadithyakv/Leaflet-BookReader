@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { Book, BookFilter } from "@shared/models/book";
 import { EMPTY_SYNC_STATUS, type DriveSyncStatus, type SyncStatus } from "@shared/sync/types";
-import { bookService } from "../services/bookService";
+import { bookService, type ImportOutcome } from "../services/bookService";
 import { syncService } from "../services/syncService";
 import { socialService } from "../services/socialService";
 import { statsService, type ReadingStats } from "../services/statsService";
@@ -32,10 +32,16 @@ type LibraryState = {
   loadBooks: () => Promise<void>;
   loadStats: () => Promise<void>;
   loadSyncStatus: () => Promise<void>;
-  importBooks: () => Promise<void>;
+  /** Through the file dialog. What happened, for the library to say; `null` when nothing was chosen. */
+  importBooks: () => Promise<ImportOutcome | null>;
+  /** The books that came in ("Open with"). Rejects with the last file's reason when none did. */
   importPaths: (paths: string[]) => Promise<Book[]>;
+  /** `importPaths`, with the files that were not added and why (a drop on the window). */
+  importFiles: (paths: string[]) => Promise<ImportOutcome>;
   refreshMetadata: (id: string) => Promise<void>;
   fetchCover: (id: string) => Promise<void>;
+  /** A PDF's first page as the cover of a book that has none (`bookService.savePageCover`). */
+  savePageCover: (id: string, image: string) => Promise<void>;
   openBook: (book: Book) => Promise<void>;
   setFilter: (partial: Partial<BookFilter>) => void;
   startDriveAuth: () => Promise<void>;
@@ -160,32 +166,33 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     importsRunning += 1;
     set({ importing: true });
     try {
-      const imported = await bookService.importFromDialog();
-      if (imported.length === 0) {
-        return;
+      const outcome = await bookService.importFromDialog();
+      if (outcome && outcome.books.length > 0) {
+        takeIn(outcome.books, set, get);
       }
-      const books = mergeBooks(get().books, imported);
-      set({ books });
-      scheduleSync(set, get);
-      void get().refreshMissingMetadata(imported);
+      return outcome;
     } finally {
       importsRunning -= 1;
       set({ importing: importsRunning > 0 });
     }
   },
   async importPaths(paths) {
+    const outcome = await get().importFiles(paths);
+    // As the backend's own `import_books` answers: an error only when nothing came in.
+    if (outcome.books.length === 0 && outcome.failed.length > 0) {
+      throw outcome.failed[outcome.failed.length - 1].reason;
+    }
+    return outcome.books;
+  },
+  async importFiles(paths) {
     importsRunning += 1;
     set({ importing: true });
     try {
-      const imported = await bookService.importPaths(paths);
-      if (imported.length === 0) {
-        return [];
+      const outcome = await bookService.importPaths(paths);
+      if (outcome.books.length > 0) {
+        takeIn(outcome.books, set, get);
       }
-      const books = mergeBooks(get().books, imported);
-      set({ books });
-      scheduleSync(set, get);
-      void get().refreshMissingMetadata(imported);
-      return imported;
+      return outcome;
     } finally {
       importsRunning -= 1;
       set({ importing: importsRunning > 0 });
@@ -202,6 +209,14 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       return;
     }
     set({ books: replaceBook(get().books, updated) });
+  },
+  async savePageCover(id, image) {
+    const updated = await bookService.savePageCover(id, image);
+    const current = get().books.find((book) => book.id === id);
+    // Only the cover is taken: the book has been read on while it was saved.
+    if (updated?.coverUrl && current && !current.coverUrl) {
+      set({ books: replaceBook(get().books, { ...current, coverUrl: updated.coverUrl }) });
+    }
   },
   /**
    * Fetches a book's bytes if this device only has the entry.
@@ -394,6 +409,13 @@ function replaceBook(books: Book[], updated: Book) {
   const next = books.slice();
   next[index] = updated;
   return next;
+}
+
+/** Books an import brought back, into the library: shown, backed up, and looked up. */
+function takeIn(imported: Book[], set: (state: Partial<LibraryState>) => void, get: () => LibraryState) {
+  set({ books: mergeBooks(get().books, imported) });
+  scheduleSync(set, get);
+  void get().refreshMissingMetadata(imported);
 }
 
 function mergeBooks(existing: Book[], imported: Book[]) {

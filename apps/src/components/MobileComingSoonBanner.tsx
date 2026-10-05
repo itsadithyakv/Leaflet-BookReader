@@ -52,7 +52,7 @@ export const MobileComingSoonBanner = () => {
       </div>
       <button
         type="button"
-        className="tactile-button shrink-0 px-3 py-1.5 text-[10px] uppercase tracking-[0.16em]"
+        className="tactile-button shrink-0 px-3 py-1.5 text-[11px] uppercase tracking-[0.16em]"
         onClick={dismiss}
         aria-label="Dismiss mobile app announcement"
       >

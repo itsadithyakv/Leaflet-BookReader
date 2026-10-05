@@ -93,17 +93,17 @@ export const ConfirmDialog = () => {
         role="alertdialog"
         aria-modal="true"
         aria-labelledby={`confirm-title-${pending.id}`}
-        className="modal-surface confirm-pop w-full max-w-sm rounded-2xl p-6 text-center"
+        className="modal-surface confirm-pop dialog-fit w-full max-w-sm rounded-2xl p-6 text-center"
       >
         {pending.pip && (
           <div className="mb-2 flex justify-center">
             <PipSprite move={pending.pip} size={72} playKey={pending.id} />
           </div>
         )}
-        <h2 id={`confirm-title-${pending.id}`} className="page-title text-xl text-on-surface">
+        <h2 id={`confirm-title-${pending.id}`} className="page-title break-words text-xl text-on-surface">
           {pending.title}
         </h2>
-        {pending.body && <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">{pending.body}</p>}
+        {pending.body && <p className="mt-2 break-words text-sm leading-relaxed text-on-surface-variant">{pending.body}</p>}
         <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-center">
           <button
             ref={cancelRef}

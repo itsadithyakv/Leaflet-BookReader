@@ -6,10 +6,10 @@
  * section does not load it.
  */
 
-export type SettingsSection = "general" | "reading" | "library" | "account" | "about";
+export type SettingsSection = "general" | "reading" | "habit" | "library" | "account" | "about";
 
 const SECTION_KEY = "leaflet.settings.section";
-const SECTIONS: SettingsSection[] = ["general", "reading", "library", "account", "about"];
+const SECTIONS: SettingsSection[] = ["general", "reading", "habit", "library", "account", "about"];
 
 /** The section to open on, falling back to the first when it is unknown or not offered in this build. */
 export const readSettingsSection = (offered: SettingsSection[]): SettingsSection => {

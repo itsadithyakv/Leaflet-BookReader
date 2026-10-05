@@ -119,12 +119,12 @@ const RankBadge = ({ rank }: { rank: number }) =>
 
 const Movement = ({ delta }: { delta: number | null }) => {
   if (!delta) {
-    return <span className="w-8 shrink-0" aria-hidden />;
+    return <span className="hidden w-8 shrink-0 [@media(min-width:480px)]:block" aria-hidden />;
   }
   const up = delta > 0;
   return (
     <span
-      className={`w-8 shrink-0 text-right text-[11px] font-semibold tabular-nums ${up ? "text-primary" : "text-on-surface-variant"}`}
+      className={`hidden w-8 shrink-0 text-right text-[11px] font-semibold tabular-nums [@media(min-width:480px)]:block ${up ? "text-primary" : "text-on-surface-variant"}`}
       title={up ? `Up ${delta} since you last looked` : `Down ${-delta} since you last looked`}
     >
       {up ? "▲" : "▼"}
@@ -157,7 +157,9 @@ const Row = ({ entry, leader, delta, onOpen, rowRef, pinned }: RowProps) => {
         onMouseLeave={() => setHot(false)}
         onFocus={() => setHot(true)}
         onBlur={() => setHot(false)}
-        className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-surface-container-high/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${
+        // Under 480 px the streak and the arrow give way, so the name keeps
+        // some width: with all six columns it had none at all.
+        className={`flex w-full items-center gap-2 rounded-lg px-2 py-2.5 text-left transition-colors hover:bg-surface-container-high/60 sm:gap-3 sm:px-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${
           entry.isYou ? "bg-primary/10 ring-1 ring-primary/40" : podium ? "bg-surface-container-high/35" : ""
         } ${pinned ? "paper-surface shadow-lg" : ""}`}
         aria-label={`${nameOf(entry)}, rank ${entry.rank}, ${minutesText(entry.weekMinutes)} this week`}
@@ -182,7 +184,7 @@ const Row = ({ entry, leader, delta, onOpen, rowRef, pinned }: RowProps) => {
             />
           </span>
         </span>
-        <span className="flex w-10 shrink-0 items-center justify-end gap-0.5 text-xs tabular-nums text-on-surface-variant" title={`Streak: ${streakText(entry.streak)}`}>
+        <span className="hidden w-10 shrink-0 items-center justify-end gap-0.5 text-xs tabular-nums text-on-surface-variant [@media(min-width:480px)]:flex" title={`Streak: ${streakText(entry.streak)}`}>
           {entry.streak > 0 && (
             <>
               <Flame size={13} className="text-[#d9886e]" aria-hidden />
@@ -394,7 +396,7 @@ export const Leaderboard = ({
       : "Your library, to pick something to read";
 
   return (
-    <section className="paper-surface rounded-xl p-6" aria-labelledby="board-title">
+    <section className="paper-surface rounded-xl p-4 sm:p-6" aria-labelledby="board-title">
       <SectionHeader
         eyebrow="This week"
         title="Leaderboard"
@@ -540,7 +542,7 @@ export const Leaderboard = ({
       )}
 
       {entries.length > SHOWN_AT_FIRST && (
-        <button type="button" className="mt-2 text-xs font-semibold text-primary hover:underline" onClick={() => setExpanded((value) => !value)}>
+        <button type="button" className="mt-2 py-1 text-xs font-semibold text-primary hover:underline" onClick={() => setExpanded((value) => !value)}>
           {expanded ? "Show the top 10" : `Show all ${entries.length}`}
         </button>
       )}

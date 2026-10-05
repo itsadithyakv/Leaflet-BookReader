@@ -156,8 +156,10 @@ export const ReadingPaceCard = ({ showToast, renderToggle }: ReadingPaceCardProp
       </p>
 
       {limits && (
-        <div className="section-rule mt-4 space-y-4 pt-4">
-          <p className="text-xs text-on-surface-variant">Dotty's range in Smart Read</p>
+        // The two ends of the range sit side by side: one under the other they
+        // made this the tallest card in Settings.
+        <div className="section-rule mt-3 grid gap-x-6 gap-y-3 pt-3 sm:grid-cols-2">
+          <p className="text-xs text-on-surface-variant sm:col-span-2">Dotty's range in Smart Read</p>
           <label className="block">
             <span className="flex items-center justify-between gap-3 text-xs text-on-surface-variant">
               <span>Slowest</span>
@@ -191,7 +193,7 @@ export const ReadingPaceCard = ({ showToast, renderToggle }: ReadingPaceCardProp
         </div>
       )}
 
-      <div className="mt-4 space-y-3">
+      <div className="mt-3 space-y-3">
         <button
           type="button"
           className="inset-field flex w-full items-center justify-between px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
@@ -204,7 +206,7 @@ export const ReadingPaceCard = ({ showToast, renderToggle }: ReadingPaceCardProp
           {renderToggle(startMode === "smart")}
         </button>
       </div>
-      <div className="mt-4 flex flex-wrap gap-3">
+      <div className="mt-3 flex flex-wrap gap-3">
         <button
           type="button"
           className="tactile-button px-4 py-2 text-xs"

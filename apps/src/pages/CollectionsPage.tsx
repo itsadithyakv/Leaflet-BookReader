@@ -25,6 +25,13 @@ type View = { kind: "series"; key: string } | { kind: "shelf"; id: ShelfId } | {
 /** How many authors and genres show before "Show all". */
 const BROWSE_PREVIEW = 12;
 
+/**
+ * The cards of a section. Four to a row in a desktop window; more past it, so
+ * a card on a 4K or ultrawide screen is no wider than one at 1,600 px.
+ */
+const CARD_GRID =
+  "grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 [@media(min-width:1900px)]:grid-cols-5 [@media(min-width:2300px)]:grid-cols-6";
+
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
 const Tile = ({
@@ -143,7 +150,7 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
     // Gone (a shelf emptied, a series split, a collection deleted elsewhere): back to the overview.
     if (!group && !shelf && !collection) {
       return (
-        <div className="flex min-h-full flex-col items-start gap-4">
+        <div className="mx-auto flex min-h-full w-full max-w-[2240px] flex-col items-start gap-4">
           <BackButton onClick={() => setView(null)} />
           <p className="text-sm text-on-surface-variant">This is no longer in your library.</p>
         </div>
@@ -153,7 +160,7 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
     const collectionBooks = collection ? booksOf(collection.bookIds) : [];
 
     return (
-      <div className="flex min-h-full flex-col gap-6">
+      <div className="dock-clear mx-auto flex min-h-full w-full max-w-[2240px] flex-col gap-6">
         <div className="flex flex-col gap-3">
           <BackButton onClick={() => setView(null)} />
           <div className="flex flex-wrap items-end justify-between gap-4">
@@ -294,7 +301,7 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
   );
 
   return (
-    <div className="flex min-h-full flex-col gap-10">
+    <div className="dock-clear mx-auto flex min-h-full w-full max-w-[2240px] flex-col gap-10">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h2 className="page-title text-4xl">Collections</h2>
@@ -344,7 +351,7 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
             in order by themselves.
           </p>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className={CARD_GRID}>
             {series.groups.map((group) => (
               <Tile
                 key={group.key}
@@ -364,7 +371,7 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
         {shelves.length === 0 ? (
           <p className="paper-surface rounded-xl p-5 text-sm text-on-surface-variant">Import a few books to fill these.</p>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className={CARD_GRID}>
             {shelves.map((shelf: Shelf) => (
               <Tile
                 key={shelf.id}
@@ -385,7 +392,7 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
             None yet. Make one with <strong className="text-on-surface">New collection</strong>, or from any book's ⋯ menu.
           </p>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className={CARD_GRID}>
             {collections.map((collection) => {
               const inIt = booksOf(collection.bookIds);
               return (
@@ -423,7 +430,7 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
 };
 
 const BackButton = ({ onClick }: { onClick: () => void }) => (
-  <button type="button" className="flex items-center gap-1.5 text-xs font-semibold text-on-surface-variant hover:text-on-surface" onClick={onClick}>
+  <button type="button" className="flex items-center gap-1.5 self-start py-1 text-xs font-semibold text-on-surface-variant hover:text-on-surface" onClick={onClick}>
     <UiIcon name="back" size={14} /> Collections
   </button>
 );

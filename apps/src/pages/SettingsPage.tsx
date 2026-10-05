@@ -266,6 +266,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
   const sections: SegmentedTab<SettingsSection>[] = [
     { id: "general", label: "General" },
     { id: "reading", label: "Reading" },
+    { id: "habit", label: "Habit" },
     { id: "library", label: "Library" },
     ...(showAccount ? [{ id: "account" as const, label: "Account" }] : []),
     { id: "about", label: "About" }
@@ -307,7 +308,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
   const column = "flex flex-col gap-4 [&>*]:min-w-0";
 
   return (
-    <div className="flex min-h-full flex-col gap-5">
+    <div className="dock-clear mx-auto flex min-h-full w-full max-w-[1480px] flex-col gap-5">
       {/* A few short sections behind tabs. It used to be one page several
           screens long, most of it explanation, with what you came for
           somewhere down it. */}
@@ -395,12 +396,22 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
       )}
 
       {section === "reading" && (
+        // How the text is read. The daily goal and the reminders were here too:
+        // five cards, which no arrangement fitted into a 1366x768 window (the
+        // pace card alone is 453 px), so they have a section of their own.
         <div {...panel("reading")}>
           <div className={column}>
             <ReadingPaceCard key={wiped} showToast={showToast} renderToggle={renderToggle} />
+          </div>
+          <div className={column}>
             <CharactersSetting key={`characters-${wiped}`} renderToggle={renderToggle} />
             <WordsSetting key={`words-${wiped}`} renderToggle={renderToggle} />
           </div>
+        </div>
+      )}
+
+      {section === "habit" && (
+        <div {...panel("habit")}>
           <div className={column}>
               <div className="paper-surface rounded-xl p-5">
                 <p className="text-xs uppercase tracking-widest text-on-surface-variant">Daily goal and focus</p>
@@ -408,7 +419,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                   Read this much in a day to keep your streak alive. Time counts whenever a book is
                   open, whether or not a focus session is running.
                 </p>
-                <div className="mt-4 space-y-3">
+                <div className="mt-3 space-y-2">
                   <div className="inset-field flex w-full items-center justify-between gap-4 px-4 py-3">
                     <span className="text-xs text-on-surface-variant">Daily reading goal</span>
                     <div className="flex items-center gap-2">
@@ -473,7 +484,8 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                   </button>
                 </div>
               </div>
-
+          </div>
+          <div className={column}>
             <RemindersCard key={wiped} showToast={showToast} />
           </div>
         </div>

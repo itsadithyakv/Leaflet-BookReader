@@ -210,7 +210,7 @@ export const SocialPanel = ({ configured, showToast, nowReading, onReadNow, onNa
 
       {signedIn && <DuelCards showToast={showToast} />}
 
-      <div className={`grid gap-6 ${signedIn ? "lg:grid-cols-2" : ""}`}>
+      <div className={`grid gap-6 [&>*]:min-w-0 ${signedIn ? "lg:grid-cols-2" : ""}`}>
         {signedIn && <Inbox showToast={showToast} />}
         <ReaderSearch />
       </div>

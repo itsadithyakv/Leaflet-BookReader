@@ -158,7 +158,7 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
         disabled={busy}
         className="text-xs"
       />
-      <p id={handleNoteId} className="mt-1 text-[10px] text-on-surface-variant">
+      <p id={handleNoteId} className="mt-1 text-[11px] text-on-surface-variant">
         {handleFault ?? (handle ? `Other readers find you as ${at(handle)}.` : COPY.handleHint)}
       </p>
     </>
@@ -212,7 +212,7 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
             </button>
             <button
               type="button"
-              className="text-xs text-on-surface-variant underline"
+              className="py-1 text-xs text-on-surface-variant underline"
               disabled={busy}
               onClick={() => finish(created, null, `Account created. You are signed in. Your profile is private. ${COPY.shareLater}`)}
             >
@@ -278,7 +278,7 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
               >
                 {busy ? "One moment…" : "Email me a code"}
               </button>
-              <button type="button" className="text-xs text-on-surface-variant underline" onClick={leave}>
+              <button type="button" className="py-1 text-xs text-on-surface-variant underline" onClick={leave}>
                 Back to sign in
               </button>
             </div>
@@ -316,7 +316,7 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
               onChange={(event) => setPassword(event.target.value)}
               className={fieldClass}
             />
-            <p className="mt-1 text-[10px] text-on-surface-variant">
+            <p className="mt-1 text-[11px] text-on-surface-variant">
               At least 8 characters. Every device signed in to this account is signed out.
             </p>
             {errorBox}
@@ -328,10 +328,10 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
               >
                 {busy ? "One moment…" : "Set password and sign in"}
               </button>
-              <button type="button" className="text-xs text-on-surface-variant underline" disabled={busy} onClick={sendCode}>
+              <button type="button" className="py-1 text-xs text-on-surface-variant underline" disabled={busy} onClick={sendCode}>
                 Send a new code
               </button>
-              <button type="button" className="text-xs text-on-surface-variant underline" onClick={leave}>
+              <button type="button" className="py-1 text-xs text-on-surface-variant underline" onClick={leave}>
                 Back to sign in
               </button>
             </div>
@@ -403,7 +403,7 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
         />
         {signingUp ? (
           <>
-            <p className="mt-1 text-[10px] text-on-surface-variant">At least 8 characters.</p>
+            <p className="mt-1 text-[11px] text-on-surface-variant">At least 8 characters.</p>
             {FEATURES.community && (
             <>
             <button
@@ -425,7 +425,7 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
                 />
               </span>
             </button>
-            <p id={shareNoteId} className="mt-1.5 text-[10px] leading-relaxed text-on-surface-variant">
+            <p id={shareNoteId} className="mt-1.5 text-[11px] leading-relaxed text-on-surface-variant">
               {share ? COPY.shareAtSignUp : COPY.privateAtSignUp}
             </p>
             </>
@@ -433,7 +433,7 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
           </>
         ) : (
           <div className="mt-1 flex justify-end">
-            <button type="button" className="text-[11px] font-semibold text-primary hover:underline" onClick={forgotPassword}>
+            <button type="button" className="py-1 text-[11px] font-semibold text-primary hover:underline" onClick={forgotPassword}>
               Forgot password?
             </button>
           </div>
@@ -461,7 +461,7 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
           </button>
           <button
             type="button"
-            className="text-xs text-on-surface-variant underline"
+            className="py-1 text-xs text-on-surface-variant underline"
             onClick={() => {
               setMode(signingUp ? "signin" : "signup");
               setError(null);
@@ -472,7 +472,7 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
         </div>
       </form>
       {signingUp && (PRIVACY_URL || TERMS_URL) && (
-        <p className="mt-3 text-[10px] leading-relaxed text-on-surface-variant">
+        <p className="mt-3 text-[11px] leading-relaxed text-on-surface-variant">
           By creating an account you agree to the{" "}
           {TERMS_URL && (
             <button type="button" className="underline" onClick={() => void accountService.openLink(TERMS_URL)}>

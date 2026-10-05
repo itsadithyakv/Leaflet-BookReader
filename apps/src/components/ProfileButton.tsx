@@ -273,7 +273,7 @@ export const ProfileButton = ({
 
           {/* Where to next */}
           <div className={`${section} flex items-center justify-between`}>
-            <button type="button" className="flex items-center gap-1.5 text-[11px] font-semibold text-on-surface-variant hover:text-on-surface" onClick={onOpenSettings}>
+            <button type="button" className="flex items-center gap-1.5 py-1 text-[11px] font-semibold text-on-surface-variant hover:text-on-surface" onClick={onOpenSettings}>
               <UiIcon name="settings" size={14} /> Settings
             </button>
             {account && (

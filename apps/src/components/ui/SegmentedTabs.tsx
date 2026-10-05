@@ -52,7 +52,15 @@ export const SegmentedTabs = <T extends string>({ label, idPrefix, tabs, value, 
 
   const pad = size === "md" ? "px-4 py-2 text-sm" : "px-3.5 py-1.5 text-xs";
   return (
-    <div role="tablist" aria-label={label} className="flex gap-1 rounded-full bg-surface-container p-1" onKeyDown={onKeyDown}>
+    // Wraps rather than runs out of its box: in a narrow window (Settings has
+    // five tabs) the last ones used to be off the edge with nothing to say so.
+    // The radius is a pill's at one row and a rounded box's at two.
+    <div
+      role="tablist"
+      aria-label={label}
+      className="flex max-w-full flex-wrap gap-1 rounded-[1.4rem] bg-surface-container p-1"
+      onKeyDown={onKeyDown}
+    >
       {tabs.map((tab, index) => {
         const selected = tab.id === value;
         return (

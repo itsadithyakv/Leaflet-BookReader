@@ -47,9 +47,10 @@ const DuelCard = ({ duel, showToast }: { duel: Duel; showToast: (message: string
   };
 
   return (
-    <li className="list-none rounded-xl bg-surface-container/60 p-4 ring-1 ring-outline-variant/30">
+    // min-w-0: a grid item is otherwise as wide as its longest name.
+    <li className="min-w-0 list-none rounded-xl bg-surface-container/60 p-4 ring-1 ring-outline-variant/30">
       <div className="flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <PipAvatar seed={duel.you.pipSeed} avatar={duel.you.avatar} size={36} />
           <div className="min-w-0">
             <p className="truncate text-xs text-on-surface-variant">You</p>
@@ -68,7 +69,7 @@ const DuelCard = ({ duel, showToast }: { duel: Duel; showToast: (message: string
 
       <TugOfWar mine={duel.you.minutes} theirs={them.minutes} />
 
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-on-surface-variant">
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-on-surface-variant [overflow-wrap:anywhere]">
         {duel.status === "finished" ? (
           <span className="flex items-center gap-1.5 font-semibold text-on-surface">
             {duel.result === "won" && <Trophy size={14} className="text-[#d4a73a]" aria-hidden />}
@@ -103,7 +104,7 @@ export const DuelCards = ({ showToast }: { showToast: (message: string) => void 
     return null;
   }
   return (
-    <section className="paper-surface rounded-xl p-6" aria-labelledby="duels-title">
+    <section className="paper-surface rounded-xl p-4 sm:p-6" aria-labelledby="duels-title">
       <SectionHeader eyebrow="This week" title="Duels" id="duels-title" />
       <ul className="mt-4 grid gap-3 md:grid-cols-2">
         {duels.map((duel) => (
