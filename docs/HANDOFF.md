@@ -11,9 +11,10 @@ is in [deploy.md](deploy.md) (the checklist) and
 `release/1.2` at `8553264`). Work is now on the branch `release/1.3`, version
 1.3.1, made off that commit (1.3.0 was never built: the owner asked for nine
 more features and for the whole to go out as 1.3.1). It is committed and
-pushed (`origin/release/1.3`) up to `cb430c0`; what was built after that (the
-last bullet but four below, "Four gaps closed") is in the working tree, not
-committed, and is in no package yet. A release build of it compiles and packages
+pushed (`origin/release/1.3`), with what was built after `cb430c0` ("Four
+gaps closed", below) in seven commits to `31384c2`; that later work is in no
+package yet. The mail script and the server were deployed by the owner on
+2026-10-07. A release build of it compiles and packages
 (2026-10-07, 4 m 58 s), but that package was made without the two Google
 values, so Drive backup is off in it: it is kept as
 `target\msix\Leaflet_1.3.1.0_x64.NO-DRIVE-test-only.msix`, for trying the
@@ -105,7 +106,7 @@ holds:**
   was made by hand to see the catalogue's answer (the owner named the book);
   no other title left this PC.
 - **Four gaps closed, and Kindle books read without Calibre** (2026-10-07,
-  after `cb430c0`; **not committed**, the owner has not yet asked). The owner
+  after `cb430c0`; committed and pushed the same day). The owner
   named three gaps and said "fix these however you can, take decisions";
   then asked for `.mobi` without Calibre.
   - *A finished book that is removed still counts* (features.md, "Finished,
@@ -140,11 +141,11 @@ holds:**
     after a removal on a real library and across two devices; the search
     dialog reading real PDFs through its commands; a `.mobi` imported and
     opened in the installed app; a real `My Clippings.txt`.
-  - **The owner's, in this order:** (1) paste the new
-    `server/deploy/password-reset-mailer.gs` into the Apps Script and deploy
-    a new version; (2) deploy the server (a new collection, `confirmations`,
-    with its own TTL index, made at start; no new secret or env value);
-    (3) publish the privacy policy (email confirmation; "account emails");
+  - **The owner's, in this order:** (1) the new mail script and (2) the
+    server: both done 2026-10-07; (3) publish the privacy policy (email
+    confirmation; "account emails"): fast-forward `main` to `release/1.3`
+    and push it, which runs the Website workflow. `origin/main` is still at
+    `399f6c4`, from before 1.1, so the published policy predates 1.2 too;
     (4) build the package. Accounts from before are "not confirmed" and see
     one row in Settings; nothing is mailed to them unasked.
 - 2,453 app tests (342 new in 1.3), 625 Rust tests (76 new), 108 server
