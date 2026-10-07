@@ -40,6 +40,10 @@ pub fn needs_converter(
   if storage::mobi::info(&source).is_ok_and(|info| info.encrypted) {
     return Ok(false);
   }
+  // A Kindle book of the older kind is read by Leaflet itself.
+  if storage::reads_kindle_itself(&source) {
+    return Ok(false);
+  }
 
   Ok(!storage::converter_installed(&app))
 }

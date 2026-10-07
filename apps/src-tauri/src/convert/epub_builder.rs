@@ -11,6 +11,9 @@ use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
 pub struct Chapter {
+  /// What the contents list calls it. A chapter with no title is in the book
+  /// and not in the list: the next piece of a long chapter, a page between
+  /// two named ones.
   pub title: String,
   /// Body markup only; the builder wraps it in an XHTML document.
   pub body: String
@@ -174,6 +177,9 @@ impl EpubBuilder {
   fn nav_document(&self) -> String {
     let mut items = String::new();
     for (index, chapter) in self.chapters.iter().enumerate() {
+      if chapter.title.is_empty() {
+        continue;
+      }
       items.push_str(&format!(
         "      <li><a href=\"text/chapter{}.xhtml\">{}</a></li>\n",
         index + 1,
@@ -200,10 +206,15 @@ impl EpubBuilder {
 
   fn ncx_document(&self) -> String {
     let mut points = String::new();
+    let mut order = 0;
     for (index, chapter) in self.chapters.iter().enumerate() {
+      if chapter.title.is_empty() {
+        continue;
+      }
       let id = index + 1;
+      order += 1;
       points.push_str(&format!(
-        r#"    <navPoint id="navpoint{id}" playOrder="{id}">
+        r#"    <navPoint id="navpoint{id}" playOrder="{order}">
       <navLabel><text>{}</text></navLabel>
       <content src="text/chapter{id}.xhtml"/>
     </navPoint>

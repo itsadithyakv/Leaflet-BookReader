@@ -1,13 +1,17 @@
 //! In-process converters for formats that are cheap to turn into EPUB.
 //!
 //! These exist so the common long tail — plain text, saved web pages, FB2 —
-//! opens with no external dependency. Anything genuinely hard (Kindle
-//! containers, OOXML, CHM) stays with Calibre; see `storage::ensure_epub_version`.
+//! opens with no external dependency. Anything genuinely hard (OOXML, CHM, the
+//! newer Kindle format) stays with Calibre; see `storage::ensure_epub_version`.
+//! A Kindle book of the older kind is read here too (`mobi`), though not by
+//! its file's ending: whether it can be is in its header.
 
 pub mod epub_builder;
 mod fb2;
 mod html;
+pub mod mobi;
 mod text;
+pub mod xhtml;
 
 use anyhow::Result;
 use std::path::Path;
