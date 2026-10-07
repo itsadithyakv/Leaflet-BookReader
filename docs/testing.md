@@ -159,6 +159,17 @@ hidden, the document timeline is frozen, so a CSS transition sits pinned at its
 start value and a transform will look like it is not applying at all. Bypass the
 transition (`el.style.transition = "none"`) before measuring geometry.
 
+**The name card and the notes, in the preview.** Two more harnesses in
+`.leaflet-test/`: `peek-harness.txt` (`__hoverWord("Vin")` rests the pointer
+on a word, `__peek()` reads the card, `__bootAny({...})` opens any book of
+the test library) and `notes-harness.txt` (`__selectFrom`, `__noteCard()`,
+`__notesPanel()`). A pointer's move needs a new place on the screen each time
+(`screenX`/`screenY`), or it is taken for the page moving under a still
+pointer. After editing a module that is not a component, load the page
+afresh: a book left open went on running the old code, and a rule that was
+already fixed looked broken. Asking a wiki from the preview goes straight to
+fandom.com (the app goes through Rust); it sends the test book's series name.
+
 **Checking a move of the text reader's code.** The reader has no component
 tests, so a change that should change nothing (the split of `ReaderView.tsx`
 into `readers/text/`, 2026-10-05) is checked by walking the same book the same

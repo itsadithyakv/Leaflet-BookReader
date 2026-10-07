@@ -101,7 +101,7 @@ Every path derives from one function, `storage::app_data_dir()`:
 
 ```
 <app data>/
-  library.db          SQLite
+  library.db          SQLite (and its write-ahead log, library.db-wal and -shm, while the app runs)
   books/<sha256>.<ext>  the book files
   covers/<sha256>-cover.jpg
   converters/         desktop only: a portable Calibre, if downloaded

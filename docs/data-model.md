@@ -5,6 +5,25 @@
 One file, `<app data>/library.db`, opened through `rusqlite` with a bundled
 SQLite so there is no system dependency on any platform.
 
+**How it writes (1.3).** The database keeps a write-ahead log
+(`journal_mode = WAL`, `synchronous = NORMAL`; `write_ahead` in `db/mod.rs`),
+so `library.db-wal` and `library.db-shm` sit beside it while the app runs.
+SQLite's default waited for the disk twice a commit: 17 ms a saved place on
+the development PC and 28 ms (328 at worst) on its second drive, on the
+window's own thread, because most commands are not `async`. With the log a
+commit is 0.03 ms. What is given up is the last moments before a power cut,
+never the database. The mode is kept in the file, so an older Leaflet opens it
+the same way; a folder that cannot hold a log keeps the default and says so
+in the log file. "Delete All Data" empties the log as well as rebuilding the
+file (`clear_all`; a test reads both for what was deleted), and a database set
+aside as broken takes its log with it.
+
+A sync writes every row of the merged document, so `sync::store::apply` is one
+transaction (`Database::in_transaction`): 18 s row by row for a reader with
+300 books, a year of days and 900 marks, 0.08 s as one, and a run that fails
+part way leaves the library as it was. The measurement is kept:
+`cargo test --lib sync::store::tests::what_applying -- --ignored --nocapture`.
+
 ### `books`
 
 | Column | Notes |

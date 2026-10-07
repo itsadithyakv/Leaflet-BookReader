@@ -7,6 +7,65 @@ is in [deploy.md](deploy.md) (the checklist) and
 
 ## Read this first
 
+**2026-10-07: 1.2 is released (the owner built and shipped it from
+`release/1.2` at `8553264`). Work is now on the branch `release/1.3`, version
+1.3.0, made off that commit. Nothing on it is committed yet: it waits for the
+owner's word. What it holds:**
+
+- **Dotty comes back** (features.md, "Smart Read"). With Dotty below the
+  page, Space reads from what is on screen; a drag held at the window's top
+  or bottom scrolls the page.
+- **A name's card on resting the pointer** (features.md, "Characters"). Any
+  name the book uses, written down or not; the book's own line that best says
+  what it is; no spoilers; on this device. "Characters" is now on unless
+  switched off.
+- **A fan wiki's summary** in that card, when asked: fandom.com, through a
+  narrow Rust command (`wiki_ask`). It can spoil and says so. **The privacy
+  policy draft has a new paragraph for it; publishing the legal pages is the
+  owner's, and should go out with 1.3.**
+- **The notes, redesigned**: a highlight opens in a card beside the page, and
+  the list of notes is a panel of its own.
+- **Highlights in PDFs** (features.md, "Highlights in a PDF"): select, colour,
+  note, the same card and list as a book's; a place is a page and rectangles.
+- **"Where was I?"** (features.md): a card on coming back to a book after
+  three days, and in the ··· menu.
+- **Pictures to share** (`components/share/`): a highlight as a quote card,
+  and a year in review on Social, Stats.
+- **Fewer words on screen**: the owner asked for standing explanations to go
+  (features.md, "Fewer words on the page").
+- **A pass over how it is built** (2026-10-07, the owner asked whether it is
+  well built and optimised). Measured first: the bundle (lazy pages; 600 kB
+  of script at startup, about 200 kB gzipped), the library with 2,000 books (about
+  800 elements on the page, a keystroke in search 4 to 12 ms in a
+  development build), the reader (0.2 ms a scroll event, no task over 50 ms
+  in 240 steps; a name card three novels into the largest test book in
+  0.85 s with no long task). Those were left alone. What was wrong was the
+  database: see data-model.md, "How it writes". It now keeps a write-ahead
+  log, and a sync is one transaction (18 s to 0.08 s for a year's reading).
+  Also: `cargo clippy --all-targets` is clean (it gave 20 style notes), and
+  Settings no longer redraws for every book a sync touches. Not done, on
+  purpose: 54 commands still run on the window's thread (their writes are
+  now cheap; making them `async` is a wide change for little); Pip's art is
+  in the startup script (about 150 kB before minifying).
+  `apps/node_modules/.leaflet-test/chunks.mjs` prints what each chunk is
+  made of.
+- 2,231 app tests (120 new), 556 Rust tests (7 new), `tsc` clean, `vite
+  build` succeeds. The version is 1.3.0 in the five places deploy.md names.
+- **Asked for and not built: read aloud.** The voices Windows gives an app
+  are the old flat ones (this PC has David, Zira and Mark only); a natural
+  voice means a paid cloud service or a speech model shipped in the app
+  (about 100 MB, and its licence needs checking: the usual pronunciation
+  part is GPL). The owner said "later". Start with a listening trial, not
+  the feature. Also offered and not asked for: translating a selection, a
+  dyslexia-friendly face, importing Kindle clippings, a shelf of free books.
+- **Not seen on a screen**, any of it: measured in the preview. The look of
+  the notes and the card, and how the drag's scrolling feels, are for eyes
+  and a hand.
+- Phone stage 0 is still uncommitted in its own checkout
+  (`.claude/worktrees/stage-0`, branch `phone/stage-0`, off `release/1.2`).
+
+What follows was written for 1.2 and is kept as it was.
+
 **The version is 1.2.0. Everything is committed on `release/1.2` and
 pushed to GitHub (2026-10-05; `main` is untouched): the first two days' work, "Pip round two", the reader bug pass and
 "The third round", each described below. No 1.2.0 package has been built.
@@ -134,8 +193,8 @@ owner". The 1.2 release does not wait on anything in the list below.
 | | |
 | --- | --- |
 | `npx tsc --noEmit -p .` in `apps/` | clean |
-| App tests (`npx vitest run` in `apps/`) | 135 files, 2111 passing |
-| Rust tests (`cargo test --lib`) | 549 passing, 3 ignored (one reads `D:\Books` and skips where it is absent) |
+| App tests (`npx vitest run` in `apps/`) | 135 files, 2111 passing (on `release/1.3`, 2026-10-07: 141 files, 2231) |
+| Rust tests (`cargo test --lib`) | 549 passing, 3 ignored (one reads `D:\Books` and skips where it is absent); on `release/1.3`, 556 and 4 ignored (the fourth prints what a sync costs) |
 | `LEAFLET_STORE_BUILD=1 cargo check` | clean |
 | Server tests (`npm test` in `server/`) | 88 passing |
 | `npm run build` | succeeds; it now emits two pages, `index.html` and `desktop-pip.html` |

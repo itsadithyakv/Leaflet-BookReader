@@ -638,7 +638,7 @@ after (`readers/lineAt.ts`, `glide.ts`, `toc.ts`, `smartScroll.ts`,
   line.
 - **A picture in Smart Read.** At a picture, or any stretch with no words
   taller than half the window, Dotty rests beside it and the control says "A
-  picture · Space to go on"; Space, the play button or scrolling past it
+  picture"; Space, the play button or scrolling past it
   carries on. It used to go past in one step. Auto-scroll glides over a
   picture at its set pace, as before.
 - Leaving SpeedRead or Smart Read leaves Dotty on the last word read for a
@@ -663,10 +663,54 @@ when they are showing: it used to sit in exactly their place, underneath them,
 so in Smart Read (which most books open in) a selection could not be
 highlighted. A selection let go by clicking elsewhere in the text takes the bar
 with it (`selectionchange` in the book's documents).
-Highlights are drawn by epub.js's annotation layer and open their note when
-tapped. The notes panel (the bookmark icon) lists bookmarks and highlights in
-reading order, opens or removes each, and copies every highlight and note as
-Markdown; a toast says where a new highlight went.
+Highlights are drawn by epub.js's annotation layer.
+
+A highlight opens where it is (`readers/HighlightCard.tsx`, 1.3): tapping one
+in the page, or pressing "Highlight and add a note", opens a card in the
+selection bar's place above the chapter dock, as the look-up card and the
+character card do. It has the highlighted words (in a book face, the
+highlight's colour down their side), the four colours to change it to, the
+note to write, and copy, remove and "All notes". What is typed is kept
+however the card goes (Done, Ctrl+Enter, Escape, a click elsewhere, another
+highlight tapped); emptying the note removes it. Hands-free reading waits
+while it is open ("Notes are open"). A note used to be written in the list of
+all notes, a 320 px popover hung from the toolbar's bookmark icon, far from
+the words it was about.
+
+The notes panel (`readers/AnnotationsPanel.tsx`, `readers/notes.css`; the
+bookmark icon) is a panel of its own beside the page, like search and the
+characters: highlights under their chapters (the chapter's name stays in
+sight while its highlights scroll), each with the book's words set as a book
+sets them and the reader's note under them on a tint of the highlight's
+colour. Pointing at one shows what can be done with it: the other colours, a
+note, copy, remove. Above the list, when there is anything to choose between:
+only one colour, only those with a note, and "Copy all" (Markdown). Bookmarks
+are the second tab, with "Bookmark this page". The two voices, the book's and
+the reader's, are told apart the same way in the card and the panel. The look
+was designed from the code and measured; it has not been seen on a screen.
+
+**A highlight as a picture** (1.3; `components/share/`). "Share as a
+picture" on a highlight's card and in the list of notes, in either reader,
+draws the passage, the book and its author on a card (1080 by 1350, four
+looks) to save as a PNG or copy. The passage is set as large as fits
+(`fitText`); past 560 characters it is cut at a word. Drawn on a canvas on
+this device; nothing is sent. Saving and copying are the diary postcard's
+(`components/pip/diary/picture.ts`). Its layout was checked by where the ink
+falls on the canvas (inside the margins, the passage clear of the foot, a
+long one and a one-word one); how it looks is for eyes.
+
+**"Where was I?"** (1.3; `readers/recap/`). A book opened again after three
+days or more (and more than 1% read, and not opened at a highlight) shows a
+card in the selection bar's place a second and a half after it is on the
+page: how long it has been, the chapter and how far through, the last lines
+read (the book's words up to the top of the screen, from the start of a
+sentence, 420 characters at most), the names the last thirty thousand
+characters used most (`recentNames`; each opens its name card when Characters
+is on), and the last passage the reader marked. The ··· menu has it at any
+time ("Where was I?"). Everything in it is from before the reader's place, on
+this device. It is not a summary: there is no language model in the app.
+Escape, Space, Enter, a click elsewhere or "Carry on" closes it; hands-free
+reading waits while it is up.
 
 **Look up** (the book-with-a-letter button on the selection bar). A selected
 word or short phrase (six words, 80 characters; a longer selection is refused
@@ -691,10 +735,41 @@ selection bar, in the bar's own dock (beside it, **Search in this book** opens
 search on the selected words), a fixed height so nothing jumps when the answer arrives, kept
 off the selected words where there is room; Escape or a click elsewhere closes
 it. Answers are cached in memory for the session. What is sent is the selected
-words and nothing else; the card says so the first time it is used on a
-device, and behind its "i" after that. Every call Leaflet makes to Wikipedia,
+words and nothing else; the card says so in a small note that opens from the
+"i" at its foot (until 1.3 the note was open the first time the card was
+used). Every call Leaflet makes to Wikipedia,
 Wiktionary and Open Library names the app (`src-tauri/src/http.rs`), as their
 API policy asks; the cover look-ups used to send no name.
+
+**Highlights in a PDF** (1.3; `readers/pdfHighlights.ts`,
+`readers/usePdfNotes.tsx`). Selecting words on a PDF's page offers what
+selecting them in a book does (four colours, a highlight with a note, copy,
+look up), a highlight is drawn over the page in both layouts, pressing one
+opens its card, and the list of notes (the same panel as a book's) has them
+under their chapters with the PDF's page bookmarks beside them. A PDF could
+not be highlighted at all before.
+
+- A PDF has no CFI, so a highlight's place is its page and the rectangles
+  its words cover, as fractions of the page (as the search's marks are), kept
+  in the same field of the same row: `pdf:12:1234,2000,5000,180;...` in
+  ten-thousandths. So it is right at any zoom, travels in the backup like any
+  highlight, and an older Leaflet that meets one lists it and cannot place it.
+- A selection's rectangles (one for every run of text) are joined into one
+  bar a line (`lineRects`); two columns on a line keep a bar each. A
+  highlight is on one page: a selection run on into the next is kept as far
+  as the first.
+- The text layer lies over the highlights so their words can still be
+  selected, so a press on one is found by where it landed on the page.
+- A PDF's bookmarks stay where they were (pages, on this device, under
+  `leaflet.bookmarks.<book id>`): that is the key a book's old bookmarks are
+  moved to the database from, and the PDF reader does not run that move.
+- The Library's Highlights lists PDFs too, in page order, and "Open in book"
+  goes to the highlight's page as a jump (Back returns). A comic has no words
+  and keeps its bookmarks popover.
+- Not done: a highlight across a page break; "search for the selection";
+  the highlight is not kept out of the saved place when a PDF is opened at
+  one (a book opened at a highlight is "a look" for two minutes; a PDF is
+  simply taken there).
 
 **Highlights outside the reader** (`components/highlights/`). The Library's
 **Highlights** button lists every book that has highlights, with a count
@@ -704,7 +779,7 @@ chapters, each with its colour, full text, note and date, and a second tab
 lists its bookmarks. **Open in book** opens the book at that place (the
 reader's `openAt`; the next ordinary open resumes where the reading stopped),
 **Copy** copies one, **Copy all as Markdown** the lot, and **Remove** deletes
-one at once, with Undo. PDFs and comics cannot be highlighted and have no item.
+one at once, with Undo. Comics cannot be highlighted and have no item.
 A highlight whose place cannot be read (one damaged CFI used to scramble the
 order of all the rest) is listed last, oldest first; chapter labels are
 compared with their whitespace collapsed, here and in the Markdown export,
@@ -742,8 +817,9 @@ measured, not heard, in tests (`measure.ts`: level, peak, spectrum,
 steadiness); how the cafe's voices sound is for ears, and the five `talker`
 levels in `scenes.ts` are the one knob.
 
-**Characters** (`readers/people/`, off until switched on in Settings,
-Reading; `leaflet.reader.characters`). Keeps track of who is who without
+**Characters** (`readers/people/`; on unless switched off in Settings,
+Reading; `leaflet.reader.characters`. It was off by default until 1.3, where
+the owner could not find it). Keeps track of who is who without
 spoiling: everything the reader writes about a person (a name, a note, a
 group, a tie to someone else) is stamped with the place in the book it was
 written at, and a card only ever shows what is stamped at or before the place
@@ -754,6 +830,70 @@ edition are compared by CFI, which is exact; an entry without one (imported,
 or from an earlier book) by its fraction of the book. "Here" is the foot of
 the screen; what is written is stamped at the name asked about, or the top of
 the screen.
+
+**Resting the pointer on a name** (1.3; `terms.ts`, `termHover.ts`,
+`TermPeek.tsx`) shows a small card beside it: what the book has said of it so
+far. It works for any name of the book's own, written down or not: a person,
+a place, an order ("Order of the Phoenix", "Night's Watch", "Lord Ruler",
+"the Wall"). Nothing is marked in the text and the book's DOM is not touched.
+
+- *What counts as a name.* There is no dictionary to ask, so a name is told
+  from a word by how the book writes it: capitalised in the middle of a
+  sentence, and not also written small (unless it is given its capital there
+  eight times or more: "the Wall", "the Hand"). The word under the pointer is
+  read with the capitalised words around it, through the small words inside
+  a name ("of the") and through a possessive; of the names that offers, the
+  longest the book has written three times is the one meant ("Night's Watch",
+  not "Watch"), and a title has to hold its own ("Lord Ruler", but "Kelsier"
+  for "Master Kelsier"). Lower-case words of a book's own ("skaa") are not
+  found this way; selecting one and asking still works.
+- *What the card says.* The sentence, among every one so far that uses the
+  name, that reads most like an introduction ("X was a...", "X, the...", "a
+  ... called X", "her brother, X"), labelled "The book says" with its
+  chapter; failing one, where the name first came up ("First appears"). Then
+  how often it has come up, and for someone on the sheet the reader's last
+  note. The rules are strict on purpose: a line that only uses the name,
+  shown as if it said who they were, is worse than the first mention. They
+  were tuned on three novels and are English only. It is the book's own
+  words, not a summary: there is no language model in the app.
+- *No spoilers,* in the same way as the mentions: only text up to the foot of
+  the screen is ever read (`bookText.ts` `about`).
+- *How it behaves.* The pointer rests 380 ms; the card goes when the pointer
+  leaves the name and the card, when the page scrolls, or at a key. A move
+  the page made under a still pointer (Smart Read turning the page) is not a
+  rest: the place on the screen has not changed. It takes no focus and holds
+  nothing up. "More" opens the full card. Mouse only; a phone will need
+  press-and-hold. Settings, Reading has its switch.
+- *Speed.* Chapters are read once and kept: the first card a whole novel into
+  a four-novel set took 0.6 s from the pointer coming to rest, later ones
+  0.8 s (of which 0.38 s is the rest itself).
+
+**A fan wiki's summary** (1.3; `wiki.ts`, `services/wikiService.ts`,
+`src-tauri/src/wiki.rs`). The card's "Wiki" button fetches the opening of the
+name's page on the book's wiki on fandom.com and shows it under the book's
+own line, marked "From the wiki · may spoil". This is the one part of
+Characters that goes online and the one part that can spoil (a wiki's first
+paragraph often tells a character's fate; the test book's did), so it waits
+to be asked unless Settings says "Straight away", and "Never" removes it.
+
+- The wiki is found from the book's series or title (a table of well-known
+  series whose wiki is named otherwise, then the name itself, joined and
+  hyphenated), asked whether it exists, and checked to be about the book (it
+  has a page for the author, the series or the title: `alchemist.fandom.com`
+  is a game's). The answer is kept per book (`leaflet.wiki.<book id>`); the
+  Characters panel's foot shows it and takes another address, or "None".
+- Fandom has no summary API (Wikipedia's is not installed there; its own
+  sits behind a browser check), so the page's opening section is asked for
+  as HTML and read down to its first paragraphs as plain text. The page of
+  that very name is asked for first, so the wiki's own redirects are
+  followed.
+- The Rust side (`wiki_ask`) is a narrow door: `<name>.fandom.com` only,
+  `api.php` only, three read-only actions, JSON only, redirects followed no
+  further than Fandom. Fandom wikis only, for now: the larger wikis some
+  series have elsewhere are not asked.
+- What is sent: the name, and to find the wiki the series or title and the
+  author. [The privacy policy](legal/privacy-policy.md) says so (it is a
+  draft: publishing it is the owner's).
 
 Select a name and press **Who is this?** on the selection bar. For a name not
 on the sheet the card shows the book's own answer, spoiler-free by
@@ -1384,8 +1524,10 @@ reading into samples), `readers/smartScroll.ts` (page steps),
 
 A dot, **Dotty**, paces the reader through the text at their own pace; an RSVP
 overlay (SpeedRead) can present one word at a time. With no pin Dotty follows
-the reading; drag it, or move it with the arrow keys, to pin a start line. In
-Smart Read it walks through the text word by word.
+the reading; drag it, or move it with the arrow keys, to pin a start line. A
+drag held against the top or bottom of the window scrolls the page under
+Dotty, so it can be carried to a line that is not on screen. In Smart Read it
+walks through the text word by word.
 
 **The pace is learned from all reading**, not only Smart Read:
 
@@ -1418,7 +1560,17 @@ Smart Read it walks through the text word by word.
   back further is rereading and says nothing about the pace.
 - **Dotty waits.** Holding a finger or the mouse on the text, a selection, a
   panel over the page, or scrolling back above Dotty to reread all make it wait
-  without counting the time; scrolling back to Dotty (or Space) carries on.
+  without counting the time; scrolling back down to Dotty carries on from it.
+- **Dotty comes back.** With Dotty below the page (the reader went back above
+  it, or it ran on without them), Space or the play button reads from what is
+  on screen: Dotty comes up to the first line of the reading area, the page
+  stays where it is, and Dotty sets off after a beat (`readFromHere` in
+  `useSmartRead.ts`). Paused or not, the control then says "Space reads from
+  here". Space used to carry on from Dotty, and the
+  next page step took the page down to it, so a Dotty that had got ahead could
+  not be brought back at all: it was out of sight to drag, and a drag stopped
+  at the window's first line. Space now never moves the page from under the
+  reader. Going back says nothing about the pace.
 - **Dotty's range** (Settings, default 90–700 WPM) bounds Smart Read. The old
   default ceiling of 320 was why Dotty could never catch a fast reader.
 
@@ -1440,6 +1592,17 @@ Dotty, starting Smart Read, making it your pace, and pausing. The ··· menu
 Read by default (in the scrolling layout), paused at the reader's line so
 nothing moves until Space; its last step and Settings turn that off.
 
+**Fewer words on the page (1.3).** The owner asked for the standing
+explanations to go. A control's own words now say what state it is in and no
+more; how to work it is in its buttons' tooltips. Gone from view: the hint
+beside the Smart Read and auto-scroll controls while they run or are paused
+(it shows only what they are waiting on), the paragraphs under the pace
+controls in the ··· menu, the sentence above the three choices of where to
+start reading, "Your highlights are under the bookmark icon" after every
+highlight, and the second halves of several empty states. The look-up card's
+note on what is sent opens only from its "i". Settings keeps a line under
+each switch, since that is where a reader goes to find out.
+
 Behaviours worth knowing (from the pre-release review):
 
 - Punctuation and paragraph pauses scale with speed, and each section averages
@@ -1459,6 +1622,15 @@ Behaviours worth knowing (from the pre-release review):
   line, and jumps without a streak when it has far to go. The ring, the bounce
   and the sparks are for when a hand reaches for it; what a pointer can catch
   is larger than the dot.
+- A drag puts Dotty no nearer the window's top or bottom than a line's
+  height, so it is never left on a line half off the page (where, pinned, it
+  counted as out of sight and was let go after five seconds). Held within
+  64 px of either edge, or past it, the page scrolls: a few lines a second
+  as the pointer comes into the strip, about a screen a second at the edge,
+  2,000 px a second at most (`dragEdgeSpeed` in `readers/readerDot.ts`),
+  into the chapters before and after. What the drag says about the pace is
+  judged from the word it began on, found again by what it is and not by its
+  number: such a drag brings chapters in above, which renumbers every word.
 - Hands-free reading (auto-scroll, Smart Read, RSVP) earns time for 5 minutes
   after the last real input (`HANDS_FREE_GRACE_MS`). Past that, playback pauses
   with "Still reading? Press Space to carry on." so playback and credited time
