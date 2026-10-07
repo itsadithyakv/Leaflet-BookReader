@@ -114,18 +114,29 @@ fn write(db: &Database, doc: &SyncDoc, gone: &mut Vec<String>) -> Result<Applied
     let local = existing.get(&entry.id);
 
     if entry.is_deleted() {
-      // Nothing to do if this device already knows it is gone.
-      if local.map(|book| book.deleted_at.is_some()).unwrap_or(true) {
-        continue;
-      }
-      if let Some(book) = local {
+      // Removed here by this run, if this device still had it.
+      let was_here = local.is_some_and(|book| book.deleted_at.is_none());
+      if let (true, Some(book)) = (was_here, local) {
         gone.push(book.local_path.clone());
+        result.removed.push(entry.id.clone());
       }
-      db.delete_book(
-        &entry.id,
-        entry.deleted_at.as_deref().unwrap_or(&doc.updated_at)
-      )?;
-      result.removed.push(entry.id.clone());
+      // A removed book that was finished is still a book finished: its row is
+      // kept with the date (and made, on a device that never had the book),
+      // so the count of books finished is the same everywhere.
+      let finished = entry.finished_at.as_deref().is_some_and(|at| !at.is_empty());
+      let recorded = local.is_some_and(|book| book.deleted_at.is_some() && book.finished_at == entry.finished_at);
+      if finished && !recorded {
+        let path = match local {
+          Some(book) => book.local_path.clone(),
+          None => local_path_for(entry)?.to_string_lossy().to_string()
+        };
+        db.upsert_book(&entry.to_record(path, None))?;
+      } else if was_here {
+        db.delete_book(
+          &entry.id,
+          entry.deleted_at.as_deref().unwrap_or(&doc.updated_at)
+        )?;
+      }
       continue;
     }
 
@@ -400,6 +411,58 @@ mod tests {
       stored.metadata_checked_at.as_deref(),
       Some("2026-02-01T00:00:00+00:00")
     );
+  }
+
+  /// A book finished and removed on another device is removed here too, and
+  /// is still a book finished: on a device that had it, and on one that never
+  /// did. Applying the same document again changes nothing.
+  #[test]
+  fn a_book_finished_and_removed_elsewhere_still_counts_as_finished_here() {
+    let mut gone = merge::BookEntry::from_record(&record("aaa", 1.0));
+    gone.deleted_at = Some("2026-08-20T00:00:00+00:00".to_string());
+    gone.finished_at = Some("2026-08-01T00:00:00+00:00".to_string());
+    // Removed without ever being finished: gone, and nothing to count.
+    let mut dropped = merge::BookEntry::from_record(&record("ccc", 0.2));
+    dropped.deleted_at = Some("2026-08-20T00:00:00+00:00".to_string());
+    let doc = merge::SyncDoc {
+      version: merge::DOC_VERSION,
+      updated_at: NOW.to_string(),
+      books: vec![gone, dropped],
+      days: Vec::new(),
+      sessions: Vec::new(),
+      purchases: Vec::new(),
+      plantings: Vec::new(),
+      harvests: Vec::new(),
+      pip: None,
+      annotations: Vec::new(),
+      collections: Vec::new(),
+      reading_profile: None
+    };
+    let counted = |db: &Database| db.finished_and_removed().expect("counted").into_iter().map(|book| (book.id, book.finished_at)).collect::<Vec<_>>();
+    let dated = vec![("aaa".to_string(), Some("2026-08-01T00:00:00+00:00".to_string()))];
+
+    // This device was part way through both.
+    let had = memory_db();
+    had.upsert_book(&record("aaa", 0.3)).expect("seed");
+    had.upsert_book(&record("ccc", 0.2)).expect("seed");
+    let mut applied = apply(&had, &doc).expect("apply");
+    applied.removed.sort();
+    assert_eq!(applied.removed, vec!["aaa".to_string(), "ccc".to_string()]);
+    assert!(had.list_books().expect("list").is_empty());
+    assert_eq!(counted(&had), dated);
+
+    // This one never had either.
+    let never = memory_db();
+    let applied = apply(&never, &doc).expect("apply");
+    assert!(applied.removed.is_empty() && applied.missing.is_empty());
+    assert!(never.list_books().expect("list").is_empty());
+    assert_eq!(counted(&never), dated);
+
+    for db in [&had, &never] {
+      let again = apply(db, &doc).expect("again");
+      assert!(again.removed.is_empty());
+      assert_eq!(counted(db), dated);
+    }
   }
 
   /// A book deleted elsewhere leaves the visible library here.

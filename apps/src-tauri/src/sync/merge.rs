@@ -535,7 +535,10 @@ pub fn merge(local: &SyncDoc, remote: &SyncDoc, now: &str) -> SyncDoc {
     .into_values()
     .filter(|book| match instant_opt(&book.deleted_at) {
       // Drop tombstones old enough that every device has certainly seen them.
-      Some(deleted) => deleted >= cutoff,
+      // Not one of a book that was finished: that entry is also the record
+      // that it was, and what the count of books finished goes by once the
+      // book is out of the library. It is a few hundred bytes, kept for good.
+      Some(deleted) => deleted >= cutoff || book.finished_at.as_deref().is_some_and(|at| !at.is_empty()),
       None => true
     })
     .collect();
@@ -1262,6 +1265,23 @@ mod tests {
     ancient.deleted_at = Some("2025-01-01T00:00:00+00:00".to_string());
     let merged = merge(&doc(vec![ancient]), &doc(vec![]), NOW);
     assert!(merged.books.is_empty());
+  }
+
+  /// A book finished and then removed stays in the document for good: its
+  /// entry is what says it was finished, on this device and the others.
+  #[test]
+  fn a_removed_book_that_was_finished_is_never_collected() {
+    let mut finished = entry("aaa");
+    finished.deleted_at = Some("2025-01-01T00:00:00+00:00".to_string());
+    finished.finished_at = Some("2024-12-20T10:00:00+00:00".to_string());
+    // Marked "not started" before it was removed: nothing to remember.
+    let mut taken_back = entry("bbb");
+    taken_back.deleted_at = Some("2025-01-01T00:00:00+00:00".to_string());
+    taken_back.finished_at = Some(String::new());
+    let merged = merge(&doc(vec![finished, taken_back]), &doc(vec![]), NOW);
+    assert_eq!(merged.books.iter().map(|book| book.id.as_str()).collect::<Vec<_>>(), vec!["aaa"]);
+    assert!(merged.books[0].is_deleted());
+    assert_eq!(merged.books[0].finished_at.as_deref(), Some("2024-12-20T10:00:00+00:00"));
   }
 
   #[test]

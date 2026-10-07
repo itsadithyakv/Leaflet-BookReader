@@ -52,7 +52,9 @@ pub(crate) fn build_profile_update(db: &db::Database, today_key: &str) -> Result
     .map_err(|e| e.to_string())?
     .iter()
     .filter(|book| has_finished(book))
-    .count() as i64;
+    .count() as i64
+    // And those finished and since removed from the library.
+    + db.finished_and_removed().map_err(|e| e.to_string())?.len() as i64;
 
   // The most recent books still on the shelf -- a burned one is not something
   // to show off.
@@ -337,6 +339,19 @@ mod tests {
     add("marked-not-started", 0.0, Some(""));
     add("half-way", 0.5, None);
     assert_eq!(build_profile_update(&db, "2026-10-03").expect("update").books_finished, Some(2));
+
+    // Taking a finished book out of the library does not take it out of the count.
+    // (One at its end with no date yet is dated as it goes.)
+    db.delete_book("at-its-end", "2026-10-02T10:00:00+00:00").expect("remove");
+    db.delete_book("being-read-again", "2026-10-02T10:00:00+00:00").expect("remove");
+    assert_eq!(build_profile_update(&db, "2026-10-03").expect("update").books_finished, Some(2));
+    // One never finished, or marked "not started", leaves nothing behind.
+    db.delete_book("half-way", "2026-10-02T10:00:00+00:00").expect("remove");
+    db.delete_book("marked-not-started", "2026-10-02T10:00:00+00:00").expect("remove");
+    assert_eq!(build_profile_update(&db, "2026-10-03").expect("update").books_finished, Some(2));
+    let kept: Vec<String> = db.finished_and_removed().expect("kept").into_iter().map(|book| book.id).collect();
+    assert_eq!(kept.len(), 2);
+    assert!(kept.contains(&"at-its-end".to_string()) && kept.contains(&"being-read-again".to_string()));
   }
 
   /// The board is fed by the day ledger, which holds every minute the reading

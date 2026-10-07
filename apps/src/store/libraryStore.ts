@@ -1,11 +1,11 @@
 import { create } from "zustand";
 import type { Book, BookFilter } from "@shared/models/book";
 import { EMPTY_SYNC_STATUS, type DriveSyncStatus, type SyncStatus } from "@shared/sync/types";
-import { bookService, type ImportOutcome } from "../services/bookService";
+import { bookService, type FinishedGone, type ImportOutcome } from "../services/bookService";
 import { syncService } from "../services/syncService";
 import { socialService } from "../services/socialService";
 import { statsService, type ReadingStats } from "../services/statsService";
-import { isFinished } from "../constants/books";
+import { finishedOn, hasFinished, isFinished } from "../constants/books";
 import { isStandInCover } from "../readers/pageCover";
 
 const defaultFilters: BookFilter = {
@@ -18,6 +18,11 @@ const defaultFilters: BookFilter = {
 
 type LibraryState = {
   books: Book[];
+  /**
+   * Books finished and since removed from the library (`finishedBooks.ts`
+   * puts them with the library's for a count of books finished).
+   */
+  finishedGone: FinishedGone[];
   filters: BookFilter;
   loading: boolean;
   metadataRefreshing: boolean;
@@ -105,6 +110,7 @@ export const isMetadataRetryDue = (book: Book, now = Date.now()) => {
 
 export const useLibraryStore = create<LibraryState>((set, get) => ({
   books: [],
+  finishedGone: [],
   filters: defaultFilters,
   loading: false,
   metadataRefreshing: false,
@@ -124,8 +130,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   downloading: [],
   async loadBooks() {
     set({ loading: true });
-    const books = await bookService.list();
-    set({ books, loading: false });
+    const [books, finishedGone] = await Promise.all([bookService.list(), bookService.finishedRemoved().catch(() => [])]);
+    set({ books, finishedGone, loading: false });
     void get().refreshMissingMetadata(books);
     if (!seriesScanned) {
       // Books imported before series were read have theirs read once, here.
@@ -268,8 +274,15 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   },
 
   async deleteBook(id: string) {
+    const removed = get().books.find((book) => book.id === id);
     await syncService.deleteBook(id);
-    set({ books: get().books.filter((book) => book.id !== id) });
+    // A finished book goes on counting as one. As the database keeps it, for
+    // now; what the database says replaces this the next time it is asked.
+    const on = removed && hasFinished(removed) ? finishedOn(removed) : null;
+    set({
+      books: get().books.filter((book) => book.id !== id),
+      finishedGone: removed && on ? [...get().finishedGone.filter((book) => book.id !== id), { id, title: removed.title, author: removed.author ?? null, finishedAt: on }] : get().finishedGone
+    });
     scheduleSync(set, get);
   },
 
@@ -332,8 +345,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       // Sync can add, remove and re-position books, so the library is re-read
       // rather than patched: guessing which rows changed is how the two views
       // drift apart.
-      const [books, status] = await Promise.all([bookService.list(), syncService.status()]);
-      set({ books, sync: status, syncStatus: "success" });
+      const [books, status, finishedGone] = await Promise.all([bookService.list(), syncService.status(), bookService.finishedRemoved().catch(() => get().finishedGone)]);
+      set({ books, finishedGone, sync: status, syncStatus: "success" });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       set({ syncStatus: "error", syncError: message });
@@ -423,6 +436,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   resetAll() {
     set({
       books: [],
+      finishedGone: [],
       filters: defaultFilters,
       loading: false,
       metadataRefreshing: false,
@@ -456,7 +470,10 @@ function replaceBook(books: Book[], updated: Book) {
 
 /** Books an import brought back, into the library: shown, backed up, and looked up. */
 function takeIn(imported: Book[], set: (state: Partial<LibraryState>) => void, get: () => LibraryState) {
-  set({ books: mergeBooks(get().books, imported) });
+  // A book finished, removed and now added again is back in the library, and
+  // is counted there.
+  const back = new Set(imported.map((book) => book.id));
+  set({ books: mergeBooks(get().books, imported), finishedGone: get().finishedGone.filter((book) => !back.has(book.id)) });
   scheduleSync(set, get);
   void get().refreshMissingMetadata(imported);
 }

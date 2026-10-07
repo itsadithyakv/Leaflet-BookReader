@@ -370,6 +370,22 @@ impl Database {
     Ok(())
   }
 
+  /// Books the reader finished and has since removed from the library. Their
+  /// rows are kept, and travel in the backup, so that taking a book out of
+  /// the library does not take it out of the count of books finished.
+  pub fn finished_and_removed(&self) -> Result<Vec<BookRecord>> {
+    let mut stmt = self.conn.prepare(&format!(
+      "SELECT {} FROM books WHERE deleted_at IS NOT NULL AND finished_at IS NOT NULL AND finished_at <> ''",
+      Self::BOOK_COLUMNS
+    ))?;
+    let rows = stmt.query_map([], Self::row_to_book)?;
+    let mut books = Vec::new();
+    for row in rows {
+      books.push(row?);
+    }
+    Ok(books)
+  }
+
   /// Every book row including tombstones. Only sync wants these: a deletion
   /// has to travel to the other devices before its row can be forgotten.
   pub fn list_books_for_sync(&self) -> Result<Vec<BookRecord>> {
@@ -386,9 +402,15 @@ impl Database {
   /// long enough to reach every other device. The file on disk is the caller's
   /// to remove.
   pub fn delete_book(&self, book_id: &str, deleted_at: &str) -> Result<()> {
+    // A book at its end with no finished date (its place came from a device
+    // that did not keep one) is dated as it goes, from when its progress last
+    // moved: the row is what will say it was finished (`finished_and_removed`).
     self.conn.execute(
-      "UPDATE books SET deleted_at = ?1 WHERE id = ?2",
-      params![deleted_at, book_id]
+      "UPDATE books SET deleted_at = ?1,
+         finished_at = CASE WHEN finished_at IS NULL AND progress >= ?3
+           THEN COALESCE(progress_updated_at, last_opened, ?1) ELSE finished_at END
+       WHERE id = ?2",
+      params![deleted_at, book_id, FINISHED_AT]
     )?;
     Ok(())
   }

@@ -113,10 +113,14 @@ pub(crate) async fn import_one(path: &str, state: &State<'_, AppState>) -> Resul
     // gone. Returning it would make re-importing a no-op for the 90 days the
     // tombstone lives, so it falls through and is imported afresh; the upsert
     // below clears `deleted_at`.
+    // A book removed and now added again was finished when it was: the date
+    // is carried over, or adding it back would un-finish it.
+    let mut finished_before: Option<String> = None;
     if let Some(existing) = {
       let db = state.db.guard();
       db.find_by_hash(&hash).map_err(|e| e.to_string())?
     } {
+      finished_before = existing.finished_at.clone();
       if existing.deleted_at.is_none() {
         let mut existing = existing;
         // Listed, but its file is not on this computer (it came from a backup
@@ -178,7 +182,7 @@ pub(crate) async fn import_one(path: &str, state: &State<'_, AppState>) -> Resul
     let cover_url = embedded_cover.map(|path| path.to_string_lossy().to_string());
 
     let book = BookRecord {
-      finished_at: None,
+      finished_at: finished_before,
       id: hash.clone(),
       title: identity.title,
       author: identity.author,
@@ -575,6 +579,31 @@ pub fn update_progress(
     .map_err(|e| e.to_string())
 }
 
+/// A book finished and since removed, as the page counts it.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FinishedGone {
+  pub id: String,
+  pub title: String,
+  pub author: Option<String>,
+  pub finished_at: String
+}
+
+/// The books finished and since removed from the library
+/// (`Database::finished_and_removed`): they are not in the library's list,
+/// and still count as finished in the stats, the goal and the year in review.
+#[tauri::command]
+pub fn finished_removed(state: State<'_, AppState>) -> Result<Vec<FinishedGone>, String> {
+  let db = state.db.guard();
+  Ok(
+    db.finished_and_removed()
+      .map_err(|e| e.to_string())?
+      .into_iter()
+      .map(|book| FinishedGone { id: book.id, title: book.title, author: book.author, finished_at: book.finished_at.unwrap_or_default() })
+      .collect()
+  )
+}
+
 /// "Mark as finished" and "Mark as not started" (`Database::set_finished`).
 /// Answers with the book as it now is.
 #[tauri::command]
@@ -657,6 +686,8 @@ pub fn clear_all_data(app: AppHandle, state: State<'_, AppState>) -> Result<(), 
   }
   // The reader's own fonts, which are files of theirs too.
   crate::fonts::remove_all();
+  // And the text kept of each PDF for the library's search.
+  crate::pdf_text::remove_all();
 
   Ok(())
 }

@@ -3,6 +3,7 @@ import type { Book } from "@shared/models/book";
 import { useLibraryStore } from "../store/libraryStore";
 import { useHabitStore } from "../store/habitStore";
 import { hasFinished } from "../constants/books";
+import { useBooksRead } from "../library/finishedBooks";
 import { SocialPanel, type SocialNavTarget } from "../components/SocialPanel";
 import { SessionShelf } from "../components/SessionShelf";
 import { ReadingCalendar } from "../components/ReadingCalendar";
@@ -67,7 +68,9 @@ export const SocialPage = ({ showToast, nowReading, onReadNow, onNavigate }: Soc
     const daysRead = snapshot.days.filter((day) => day.minutes > 0).length;
     return { weekMinutes, totalMinutes, daysRead };
   }, [snapshot.days]);
-  const finishedBooks = useMemo(() => books.filter(hasFinished).length, [books]);
+  // With the ones finished and since removed (library/finishedBooks.ts).
+  const booksRead = useBooksRead();
+  const finishedBooks = useMemo(() => booksRead.filter(hasFinished).length, [booksRead]);
   // The latest year there is any reading in; none on a new library.
   const reviewYear = useMemo(() => yearsRead(snapshot.days)[0] ?? null, [snapshot.days]);
 

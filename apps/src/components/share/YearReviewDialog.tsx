@@ -5,6 +5,7 @@ import { annotationService } from "../../services/annotationService";
 import { wordService } from "../../services/wordService";
 import { useHabitStore } from "../../store/habitStore";
 import { useLibraryStore } from "../../store/libraryStore";
+import { useBooksRead } from "../../library/finishedBooks";
 import { CARD_HEIGHT, CARD_STYLES, CARD_WIDTH } from "./quoteCard";
 import { closeYearReview, openYearReview, useShareStore } from "./shareStore";
 import { drawYearCard, yearFigures, yearFileName, yearLines } from "./yearCard";
@@ -37,6 +38,8 @@ export const YearReviewDialog = () => {
   const days = useHabitStore((state) => state.snapshot.days);
   const sessions = useHabitStore((state) => state.snapshot.sessions);
   const books = useLibraryStore((state) => state.books);
+  // With the books finished and since removed: they were read in their year all the same.
+  const booksRead = useBooksRead();
   const [styleId, setStyleId] = useState(keptStyle);
   const [counts, setCounts] = useState<{ year: number; highlights: number; words: number } | null>(null);
   const [said, setSaid] = useState<string | null>(null);
@@ -53,11 +56,11 @@ export const YearReviewDialog = () => {
         : yearReview(year, {
             days,
             sessions,
-            books,
+            books: booksRead,
             highlights: counts?.year === year ? counts.highlights : 0,
             words: counts?.year === year ? counts.words : 0
           }),
-    [year, days, sessions, books, counts]
+    [year, days, sessions, booksRead, counts]
   );
 
   // The year's highlights and looked-up words: counted from the reader's own marks.

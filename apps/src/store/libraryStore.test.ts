@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Book } from "@shared/models/book";
 import { bookService, type ImportOutcome } from "../services/bookService";
+import { syncService } from "../services/syncService";
 import { useLibraryStore } from "./libraryStore";
 
 const book = (id: string) => ({ id, title: id, author: "Someone", genres: ["x"], coverUrl: "c", progress: 0 }) as unknown as Book;
@@ -164,5 +165,45 @@ describe("looking a book's cover up", () => {
     // The one that got no answer has no stamp, so it is asked for again next time.
     const stamps = Object.fromEntries(useLibraryStore.getState().books.map((item) => [item.id, item.metadataCheckedAt ?? null]));
     expect(stamps).toEqual({ offline: null, answered: "2026-10-07T10:00:00Z" });
+  });
+});
+
+describe("removing a finished book", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    useLibraryStore.getState().resetAll();
+  });
+
+  it("takes it out of the library and keeps it among the books finished", async () => {
+    vi.spyOn(syncService, "deleteBook").mockResolvedValue(undefined);
+    useLibraryStore.setState({
+      books: [
+        { ...book("dated"), progress: 0.2, finishedAt: "2026-03-01T10:00:00Z" },
+        { ...book("at-its-end"), progress: 1, progressUpdatedAt: "2026-05-01T10:00:00Z" },
+        { ...book("half"), progress: 0.5 },
+        { ...book("taken-back"), progress: 0, finishedAt: "" }
+      ]
+    });
+    for (const id of ["dated", "at-its-end", "half", "taken-back"]) {
+      await useLibraryStore.getState().deleteBook(id);
+    }
+    expect(useLibraryStore.getState().books).toEqual([]);
+    expect(useLibraryStore.getState().finishedGone).toEqual([
+      { id: "dated", title: "dated", author: "Someone", finishedAt: "2026-03-01T10:00:00Z" },
+      { id: "at-its-end", title: "at-its-end", author: "Someone", finishedAt: "2026-05-01T10:00:00Z" }
+    ]);
+  });
+
+  it("counts it in the library again when it is added back", async () => {
+    vi.spyOn(syncService, "deleteBook").mockResolvedValue(undefined);
+    vi.spyOn(bookService, "refreshMetadata").mockResolvedValue(null as unknown as Book);
+    useLibraryStore.setState({ books: [{ ...book("a"), progress: 1, finishedAt: "2026-03-01T10:00:00Z" }] });
+    await useLibraryStore.getState().deleteBook("a");
+    expect(useLibraryStore.getState().finishedGone.map((gone) => gone.id)).toEqual(["a"]);
+
+    vi.spyOn(bookService, "importPaths").mockResolvedValue(came({ ...book("a"), finishedAt: "2026-03-01T10:00:00Z" }));
+    await useLibraryStore.getState().importPaths(["C:\Books\a.epub"]);
+    expect(useLibraryStore.getState().finishedGone).toEqual([]);
+    expect(useLibraryStore.getState().books.map((entry) => [entry.id, entry.finishedAt])).toEqual([["a", "2026-03-01T10:00:00Z"]]);
   });
 });

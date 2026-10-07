@@ -11,6 +11,9 @@ const requireDesktop = () => {
 
 export type EpubSection = { href: string; bytes: number; linear: boolean };
 
+/** A book finished and since removed from the library: what is still known of it. */
+export type FinishedGone = { id: string; title: string; author: string | null; finishedAt: string };
+
 /**
  * What became of the files handed to an import: how many there were, the
  * books that came back for them (one a file, so one book can be there twice)
@@ -25,6 +28,17 @@ export const bookService = {
       return [];
     }
     return invoke<Book[]>("list_books");
+  },
+  /**
+   * The books finished and since removed. They are not in the library, and
+   * still count as finished (stats, the goal, the year in review). None in the
+   * preview, which has no database.
+   */
+  async finishedRemoved(): Promise<FinishedGone[]> {
+    if (!isTauri()) {
+      return [];
+    }
+    return invoke<FinishedGone[]>("finished_removed");
   },
   /** Through the file dialog. `null` when it was closed with nothing chosen. */
   async importFromDialog(): Promise<ImportOutcome | null> {

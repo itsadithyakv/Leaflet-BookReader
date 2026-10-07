@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useLibraryStore } from "../../store/libraryStore";
+import { useBooksRead } from "../../library/finishedBooks";
 import { EYEBROW } from "../ui/SectionHeader";
 import { UiIcon } from "../UiIcon";
 import { MAX_YEAR_GOAL, cleanGoal, finishedInYear, goalStanding, setYearGoal, yearGoal } from "./yearGoal";
@@ -10,7 +10,7 @@ import { MAX_YEAR_GOAL, cleanGoal, finishedInYear, goalStanding, setYearGoal, ye
  * place. With no goal it is one quiet line offering to set one.
  */
 export const YearGoalCard = () => {
-  const books = useLibraryStore((state) => state.books);
+  const books = useBooksRead();
   const year = new Date().getFullYear();
   const [goal, setGoal] = useState(() => yearGoal(year));
   const [editing, setEditing] = useState(false);

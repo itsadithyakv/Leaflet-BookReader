@@ -19,6 +19,7 @@ mod http;
 mod lookup;
 mod wiki;
 mod metadata;
+mod pdf_text;
 mod pip;
 mod reminders;
 mod search;
@@ -247,6 +248,7 @@ pub fn run() {
       commands::read_book_bytes,
       commands::update_progress,
       commands::set_book_finished,
+      commands::finished_removed,
       commands::keep_awake,
       commands::set_account_backup,
       commands::reading_stats,
@@ -308,6 +310,9 @@ pub fn run() {
       commands::account_reset_request,
       commands::account_reset_confirm,
       commands::account_set_avatar,
+      commands::account_email_code,
+      commands::account_email_confirm,
+      commands::account_change_email,
       commands::account_logout,
       commands::account_change_password,
       commands::account_delete,
@@ -322,6 +327,8 @@ pub fn run() {
       commands::library_copy_run,
       commands::library_search,
       commands::library_search_cancel,
+      commands::pdf_text_has,
+      commands::pdf_text_save,
       commands::cloud_reachable,
       commands::take_pending_open_paths,
       commands::clear_all_data,
