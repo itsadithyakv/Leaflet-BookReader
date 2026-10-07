@@ -32,6 +32,7 @@ export const ReaderDialogs = ({ reader }: { reader: ReaderScope }) => {
       )}
 
       {people.panel}
+      {people.peek}
 
       {searchOpen && bookRef.current && (
         <SearchPanel
@@ -69,9 +70,6 @@ export const ReaderDialogs = ({ reader }: { reader: ReaderScope }) => {
             <h2 className="mt-2 font-headline text-xl font-bold reader-text-color">
               Where should reading begin?
             </h2>
-            <p className="mt-2 text-sm leading-relaxed reader-muted">
-              Drag Dotty beside any line, then start from that exact position.
-            </p>
             <div className="mt-5 grid gap-2">
               <button
                 type="button"

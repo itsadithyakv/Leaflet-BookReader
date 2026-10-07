@@ -17,31 +17,31 @@ import type { NameEntry } from "./names";
 export type NameSuggestion = { name: string; count: number };
 
 /** Words before a name that go with it: "Lord Renoux" is offered whole. */
-const TITLES = new Set(
+export const TITLES = new Set(
   "lord lady ser sir dame king queen prince princess duke duchess count countess baron baroness master mistress maester captain commander general colonel major sergeant lieutenant admiral doctor dr mr mrs ms miss father mother brother sister uncle aunt saint".split(
     " "
   )
 );
 
 /** Capitalised mid-sentence, and not people. */
-const NOT_NAMES = new Set(
+export const NOT_NAMES = new Set(
   "monday tuesday wednesday thursday friday saturday sunday january february march april may june july august september october november december god gods lord lady sir madam majesty highness grace english french german spanish latin greek roman christmas easter chapter book part prologue epilogue north south east west mr mrs ms miss dr".split(
     " "
   )
 );
 
 /** Words that put what follows somewhere: a name mostly after these is a place. */
-const PLACING = new Set("in at from into near through across toward towards outside inside beyond leaving entering".split(" "));
+export const PLACING = new Set("in at from into near through across toward towards outside inside beyond leaving entering".split(" "));
 
 /** "The Ministry", "a Mistborn": a thing or a kind, not someone (unless a title goes with it: "the Lord Ruler"). */
-const ARTICLES = new Set(["the", "a", "an"]);
+export const ARTICLES = new Set(["the", "a", "an"]);
 
 /**
  * What people do in a book, right after their name: "Sazed said", "Vin
  * nodded". A place or an idea is not written of this way. English only;
  * a book with none of it at all (another language) is not held to it.
  */
-const ACTS = new Set(
+export const ACTS = new Set(
   "said says asked replied answered whispered muttered murmured shouted called cried added continued snapped growled sighed laughed nodded smiled grinned frowned shrugged thought wondered looked glanced turned paused stood sat walked stepped shook raised knew felt saw heard wanted".split(
     " "
   )

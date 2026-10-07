@@ -497,7 +497,7 @@ export const CharacterCard = ({
         {!person && asked && (
           <>
             <p className="reader-lookup-text">
-              Not in your characters yet. Write a line below to keep track of them.
+              Not in your characters yet.
             </p>
             <div className="reader-people-spacer" />
             {inTheBook}

@@ -13,6 +13,7 @@ import type { Place } from "./model";
 import { isCommonWord } from "../../services/smartReadService";
 import { nameMatcher, type NameEntry } from "./names";
 import { nameCounter, type NameCounter, type NameSuggestion } from "./suggest";
+import { statOf, termSummary, type SectionStat, type TermSummary } from "./terms";
 
 /** A document's text nodes in reading order, as one string. */
 export type TextIndex = { text: string; nodes: Text[]; starts: number[] };
@@ -186,6 +187,28 @@ export type MentionSearch = {
    * at the same place costs nothing. Null when the place cannot be told.
    */
   namesSoFar: (place: Place, known: NameEntry[], options: { signal: AbortSignal; limit?: number }) => Promise<NameSuggestion[] | null>;
+  /**
+   * What the book has said of a name up to `place` (`terms.ts`): how often,
+   * where first, and the line that best says what it is. `small` is the name
+   * as one lower-case word, when it is one and nobody has vouched for it: a
+   * word the book also writes small is no name. Null when the place cannot
+   * be told.
+   */
+  about: (
+    names: NameEntry[],
+    person: string | null,
+    place: Place,
+    options: { signal: AbortSignal; small?: string | null }
+  ) => Promise<TermSummary | null>;
+  /**
+   * The book's words just before `place`, at least `chars` of them where the
+   * book has that many: the end of the chapter being read up to the place,
+   * with the end of the chapters before it when that is short. For "where
+   * was I?" (readers/recap). Null when the place cannot be told.
+   */
+  before: (place: Place, options: { signal: AbortSignal; chars: number }) => Promise<string | null>;
+  /** The names the book has used most in the stretch just before `place` (as `namesSoFar`, over `before`). */
+  recentNames: (place: Place, options: { signal: AbortSignal; chars: number; limit?: number }) => Promise<NameSuggestion[] | null>;
   /** The exact place of a mention found, for jumping to it. */
   cfiOf: (mention: { section: number; start: number; end: number }) => Promise<string | null>;
   clear: () => void;
@@ -205,6 +228,8 @@ const pause = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 export const mentionSearch = (book: any, passOver: (section: number) => boolean = () => false): MentionSearch => {
   const texts = new Map<number, string>();
   const found = new Map<string, Map<number, RawMention[]>>();
+  /** What whole chapters say of a name, by the name asked about (see `about`). */
+  const told = new Map<string, Map<number, SectionStat>>();
   let counted: { key: string; counter: NameCounter } | null = null;
 
   const load = async (section: number): Promise<{ index: TextIndex; item: any } | null> => {
@@ -249,7 +274,38 @@ export const mentionSearch = (book: any, passOver: (section: number) => boolean 
     return { section, offset };
   };
 
+  const before = async (place: Place, { signal, chars }: { signal: AbortSignal; chars: number }): Promise<string | null> => {
+    const here = await hereOf(place);
+    if (!here || here.offset === null || signal.aborted) {
+      return null;
+    }
+    let text = (await textOf(here.section)).slice(0, here.offset);
+    // The place is near the top of its chapter: the chapter before ends just above it.
+    for (let section = here.section - 1; section >= 0 && text.length < chars; section -= 1) {
+      if (signal.aborted) {
+        return null;
+      }
+      const earlier = await textOf(section);
+      if (earlier.trim()) {
+        text = `${earlier}\n${text}`;
+      }
+    }
+    return signal.aborted ? null : text.slice(-chars);
+  };
+
   return {
+    before,
+
+    recentNames: async (place, { signal, chars, limit = 8 }) => {
+      const text = await before(place, { signal, chars });
+      if (text === null) {
+        return null;
+      }
+      const counter = nameCounter(isCommonWord);
+      counter.add(text);
+      return counter.result([], limit);
+    },
+
     find: async (names, person, place, { signal, keep = 3, onProgress }) => {
       const here = await hereOf(place);
       if (!here || signal.aborted) {
@@ -321,6 +377,47 @@ export const mentionSearch = (book: any, passOver: (section: number) => boolean 
       return signal.aborted ? null : counted.counter.result(known, limit);
     },
 
+    about: async (names, person, place, { signal, small = null }) => {
+      const here = await hereOf(place);
+      if (!here || signal.aborted) {
+        return null;
+      }
+      const key = `${person ?? ""}|${small ?? ""}|${names.map((name) => `${name.exact ? "=" : "~"}${name.text}>${name.person}`).sort().join("|")}`;
+      let kept = told.get(key);
+      if (!kept) {
+        kept = new Map();
+        told.set(key, kept);
+        if (told.size > KEPT_QUERIES * 2) {
+          told.delete(told.keys().next().value as string);
+        }
+      }
+      const matcher = nameMatcher(names);
+      const stats: SectionStat[] = [];
+      let sliceStart = performance.now();
+      for (let section = 0; section <= here.section; section += 1) {
+        if (signal.aborted) {
+          return null;
+        }
+        const loaded = !texts.has(section);
+        if (section < here.section) {
+          let stat = kept.get(section);
+          if (!stat) {
+            stat = statOf(section, await textOf(section), matcher, person, small);
+            kept.set(section, stat);
+          }
+          stats.push(stat);
+        } else if (here.offset !== null) {
+          // The chapter being read: only as far as the place, and not kept (the place moves).
+          stats.push(statOf(section, (await textOf(section)).slice(0, here.offset), matcher, person, small));
+        }
+        if (loaded || performance.now() - sliceStart > SLICE_MS) {
+          await pause();
+          sliceStart = performance.now();
+        }
+      }
+      return signal.aborted ? null : termSummary(stats);
+    },
+
     cfiOf: async ({ section, start, end }) => {
       const loaded = await load(section);
       const range = loaded ? rangeOf(loaded.index, start, end) : null;
@@ -337,6 +434,7 @@ export const mentionSearch = (book: any, passOver: (section: number) => boolean 
     clear: () => {
       texts.clear();
       found.clear();
+      told.clear();
       counted = null;
     }
   };

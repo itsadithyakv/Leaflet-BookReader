@@ -16,6 +16,7 @@ mod formats;
 mod habit;
 mod http;
 mod lookup;
+mod wiki;
 mod metadata;
 mod pip;
 mod reminders;
@@ -268,6 +269,7 @@ pub fn run() {
       commands::people_delete,
       commands::people_export,
       commands::lookup_term,
+      commands::wiki_ask,
       commands::diary_sources,
       commands::diary_save_picture,
       commands::words_list,

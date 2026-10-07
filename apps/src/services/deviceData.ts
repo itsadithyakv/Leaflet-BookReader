@@ -11,7 +11,8 @@
 // contents of its own (readers/pdfChapters.ts).
 // `leaflet.contents.<book id>`: the chapter list made for an EPUB that came
 // without one, or with next to none (readers/autoContents.ts).
-const PER_BOOK_PREFIXES = ["leaflet.reader.", "leaflet.bookmarks.", "leaflet.pdfChapters.", "leaflet.contents."];
+// `leaflet.wiki.<book id>`: the fan wiki found or chosen for a book (services/wikiService.ts).
+const PER_BOOK_PREFIXES = ["leaflet.reader.", "leaflet.bookmarks.", "leaflet.pdfChapters.", "leaflet.contents.", "leaflet.wiki."];
 /**
  * `leaflet.people.preview` is the browser preview's character sheets (the app
  * keeps them in the database, which the delete clears).
@@ -32,6 +33,12 @@ const READER_SETTINGS = [
   "leaflet.reader.contentsSeen",
   "leaflet.reader.contentsOpen",
   "leaflet.reader.characters",
+  // Resting the pointer on a name, and whether a wiki may be asked (readers/people/peoplePrefs.ts).
+  "leaflet.reader.charactersHover",
+  "leaflet.reader.charactersWiki",
+  // The look last chosen for a picture to share (components/share).
+  "leaflet.share.quoteStyle",
+  "leaflet.share.yearStyle",
   // Whether words looked up are kept (readers/words/wordPrefs.ts).
   "leaflet.reader.keepWords",
   "leaflet.lookup.noteSeen",

@@ -6,8 +6,12 @@ import { isContentsPage } from "./mentions";
 import { CharacterCard, type CardTarget } from "./CharacterCard";
 import { peopleMarks } from "./marks";
 import { PeoplePanel } from "./PeoplePanel";
-import { usePeopleSwitch } from "./peoplePrefs";
+import { usePeopleHover, usePeopleSwitch, useWikiMode } from "./peoplePrefs";
+import { termHover, type HoverAsk } from "./termHover";
+import { TermPeek } from "./TermPeek";
+import { isCommonWord } from "../../services/smartReadService";
 import { SheetActions } from "./SheetActions";
+import { WikiChoice } from "./WikiChoice";
 import { castAt, placeOrder, type Place } from "./model";
 import { cleanName, namesOf, whoIs } from "./names";
 import { usePeople } from "./usePeople";
@@ -19,6 +23,8 @@ export type PeopleReaderOptions = {
   /** False where the feature has no place (the book is not open yet). The reader's own switch is read here. */
   ready?: boolean;
   bookId: string;
+  /** What the book is called, for finding its fan wiki when the reader asks for one. */
+  about?: { title: string; author?: string | null; series?: string | null };
   /** The epub.js book and rendition, once the book is open. */
   book: any | null;
   rendition: any | null;
@@ -46,6 +52,7 @@ export type PeopleReaderOptions = {
 export const usePeopleReader = ({
   ready = true,
   bookId,
+  about,
   book,
   rendition,
   place,
@@ -60,6 +67,10 @@ export const usePeopleReader = ({
   const { entries, commit } = usePeople(bookId, enabled);
   const [open, setOpen] = useState<{ target: CardTarget; here: Place; at: Place } | null>(null);
   const [panelAt, setPanelAt] = useState<{ here: Place; at: Place } | null>(null);
+  // The pointer resting on a name: what the book has said of it (`TermPeek`).
+  const [hoverOn] = usePeopleHover();
+  const [wiki] = useWikiMode();
+  const [peek, setPeek] = useState<{ ask: HoverAsk; here: Place } | null>(null);
 
   // Places in this edition are told apart exactly, by their CFIs.
   const order = useMemo(() => {
@@ -135,6 +146,7 @@ export const usePeopleReader = ({
   useEffect(() => {
     setOpen(null);
     setPanelAt(null);
+    setPeek(null);
   }, [enabled, bookId]);
 
   const entriesRef = useRef(entries);
@@ -241,6 +253,66 @@ export const usePeopleReader = ({
     };
   }, [enabled, rendition, marks, markNames]);
 
+  // ---- The pointer resting on a name -------------------------------------
+  const placesNowRef = useRef(placesNow);
+  placesNowRef.current = placesNow;
+  const busyRef = useRef(false);
+  // A card or the panel is up: the peek would only be in the way.
+  busyRef.current = Boolean(open) || Boolean(panelAt);
+  const hover = useMemo(
+    () =>
+      termHover({
+        onAsk: (ask) => setPeek({ ask, here: placesNowRef.current(ask.cfi).here }),
+        onLeave: () => setPeek(null),
+        blocked: () => {
+          const over = coveredRef.current;
+          return busyRef.current || (typeof over === "function" ? over() : over);
+        },
+        isCommon: isCommonWord
+      }),
+    []
+  );
+
+  useEffect(() => {
+    if (!enabled || !hoverOn || !rendition) {
+      return;
+    }
+    const sync = () => {
+      let all: unknown[] | null = null;
+      try {
+        const views = rendition.views?.()?.all?.();
+        all = Array.isArray(views) ? views.map((view: any) => view?.contents).filter(Boolean) : null;
+      } catch {
+        all = null;
+      }
+      hover.sync(all ?? rendition.getContents?.() ?? []);
+    };
+    sync();
+    rendition.on?.("rendered", sync);
+    rendition.on?.("removed", sync);
+    // The page moving, or a key, takes the peek away: it was about what was under the pointer.
+    const container = rendition.manager?.container as HTMLElement | undefined;
+    const dismiss = () => hover.dismiss();
+    container?.addEventListener("scroll", dismiss, { passive: true });
+    window.addEventListener("keydown", dismiss, true);
+    window.addEventListener("resize", dismiss);
+    return () => {
+      rendition.off?.("rendered", sync);
+      rendition.off?.("removed", sync);
+      container?.removeEventListener("scroll", dismiss);
+      window.removeEventListener("keydown", dismiss, true);
+      window.removeEventListener("resize", dismiss);
+      hover.clear();
+    };
+  }, [enabled, hoverOn, rendition, hover]);
+
+  // A card or the panel opening takes the peek's place.
+  useEffect(() => {
+    if (open || panelAt) {
+      hover.dismiss();
+    }
+  }, [open, panelAt, hover]);
+
   // The sheet changed (a name added, something brought in).
   useEffect(() => {
     if (enabled) {
@@ -271,6 +343,36 @@ export const usePeopleReader = ({
       />
     ) : null;
 
+  const peekCard: ReactNode =
+    enabled && hoverOn && peek && !open && !panelAt ? (
+      <TermPeek
+        key={peek.ask.key}
+        ask={peek.ask}
+        here={peek.here}
+        book={{ id: bookId, title: about?.title ?? "", author: about?.author, series: about?.series }}
+        entries={entries}
+        order={order}
+        search={search}
+        chapterOf={chapterOf}
+        wiki={about?.title ? wiki : "off"}
+        onKeep={(on) => hover.keep(on)}
+        onMore={(name, person) => {
+          const cfi = peek.ask.cfi;
+          hover.dismiss();
+          if (person) {
+            openPerson(person, cfi);
+          } else {
+            askWhoIs(name, cfi);
+          }
+        }}
+        onJump={(cfi) => {
+          hover.dismiss();
+          goTo(cfi);
+        }}
+        onClose={() => hover.dismiss()}
+      />
+    ) : null;
+
   const panel: ReactNode =
     enabled && panelAt ? (
       <PeoplePanel
@@ -284,7 +386,12 @@ export const usePeopleReader = ({
         onOpenPerson={(id) => openPerson(id)}
         onClose={closePanel}
         onToast={toast}
-        actions={<SheetActions bookId={bookId} entries={entries} commit={commit} onToast={toast} />}
+        actions={
+          <>
+            <SheetActions bookId={bookId} entries={entries} commit={commit} onToast={toast} />
+            {about?.title && wiki !== "off" && <WikiChoice book={{ id: bookId, title: about.title, author: about.author, series: about.series }} onToast={toast} />}
+          </>
+        }
       />
     ) : null;
 
@@ -297,6 +404,8 @@ export const usePeopleReader = ({
     /** "Characters", to put beside the reader's other panels; null when it is shut. */
     panel,
     panelOpen: Boolean(panel),
+    /** What the book has said of the name the pointer rests on; null when it rests on none. */
+    peek: peekCard,
     openPanel,
     closePanel,
     askWhoIs,

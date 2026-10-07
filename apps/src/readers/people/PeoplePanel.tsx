@@ -221,7 +221,7 @@ export const PeoplePanel = ({
           <div className="reader-people-list" aria-live="polite">
             {cast.people.length === 0 && (
               <p className="reader-lookup-text reader-muted">
-                No one yet. Select a name in the book and press “Who is this?”, or add one here.
+                No one yet.
               </p>
             )}
             {cast.people.length > 0 && shown.length === 0 && <p className="reader-lookup-text reader-muted">No one by that name so far.</p>}
