@@ -54,7 +54,23 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
     syncNow,
     loadSyncStatus,
     resetAll: resetLibrary
-  } = useLibraryStore();
+  } = useLibraryStore(
+    // Only what this page shows: taking the whole store drew the page again
+    // for every book a sync or an import touched.
+    useShallow((state) => ({
+      sync: state.sync,
+      syncStatus: state.syncStatus,
+      syncError: state.syncError,
+      startDriveAuth: state.startDriveAuth,
+      disconnectDrive: state.disconnectDrive,
+      setSyncFolder: state.setSyncFolder,
+      setDriveCredentials: state.setDriveCredentials,
+      clearDriveCredentials: state.clearDriveCredentials,
+      syncNow: state.syncNow,
+      loadSyncStatus: state.loadSyncStatus,
+      resetAll: state.resetAll
+    }))
+  );
   const {
     focusSettings,
     setFocusSettings,
