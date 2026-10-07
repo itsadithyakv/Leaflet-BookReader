@@ -294,6 +294,8 @@ export const useReaderKeys = (reader: WithSession & Later<"people">) => {
         setFontPanelOpen(false);
         break;
       case "notesPanel":
+        // (And not back to the card of the highlight it was opened on.)
+        reader.setNotesFocus(null);
         setBookmarkPanelOpen(false);
         break;
       case "moreMenu":

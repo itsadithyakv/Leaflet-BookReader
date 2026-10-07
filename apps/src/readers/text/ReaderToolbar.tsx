@@ -1,6 +1,7 @@
 import { UiIcon } from "../../components/UiIcon";
 import { PipExitGuard } from "../../hooks/useFocusLockExit";
 import { AnnotationsPanel } from "../AnnotationsPanel";
+import { openQuoteCard } from "../../components/share/shareStore";
 import { TypePanel } from "../TypePanel";
 import { toolbarTitleClass } from "../titleFit";
 import { ReaderAmbience } from "../../ambience";
@@ -11,7 +12,7 @@ import type { ReaderScope } from "./scope";
 export const ReaderToolbar = ({ reader }: { reader: ReaderScope }) => {
   const {
     addBookmark, align, annotations, book, bookmarkPanelOpen, bookmarks, chapterInBook, chooseAlign, chooseMeasure,
-    chooseSpacing, chooseTypeface, closeSearch, exitGuard, exportHighlights, fontPanelOpen, fontPanelRef, fontSize,
+    chooseSpacing, chooseTypeface, closeSearch, copyText, exitGuard, exportHighlights, fontPanelOpen, fontPanelRef, fontSize,
     hoverChrome, measure, notesFocus, openBookmark, orderedHighlights, people, revealChrome, searchOpen,
     setBookmarkPanelOpen, setFontPanelOpen, setFontSize, setNotesFocus, setSearchOpen, sidebarOpen, sidebarPinned,
     spacing, toggleContents, toolbarRef, typeface
@@ -130,8 +131,10 @@ export const ReaderToolbar = ({ reader }: { reader: ReaderScope }) => {
               setNotesFocus(null);
               setBookmarkPanelOpen((prev) => !prev);
             }}
-            title="Bookmarks and highlights"
-            aria-label="Bookmarks and highlights"
+            title="Notes: highlights and bookmarks"
+            aria-label="Notes: highlights and bookmarks"
+            aria-haspopup="dialog"
+            aria-expanded={bookmarkPanelOpen}
           >
             <span className="material-symbols-outlined">bookmark</span>
           </button>
@@ -145,7 +148,14 @@ export const ReaderToolbar = ({ reader }: { reader: ReaderScope }) => {
               onOpen={openBookmark}
               onRemove={(id) => void annotations.remove(id)}
               onSaveNote={(id, note) => void annotations.update(id, { note: note || null })}
+              onRecolor={(id, color) => void annotations.update(id, { color })}
+              onCopy={copyText}
+              onShare={(item) => openQuoteCard({ text: item.text ?? "", title: book.title, author: book.author })}
               onExport={exportHighlights}
+              onClose={() => {
+                setNotesFocus(null);
+                setBookmarkPanelOpen(false);
+              }}
             />
           )}
         </div>

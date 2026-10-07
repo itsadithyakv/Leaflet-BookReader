@@ -4,6 +4,9 @@ import { ChapterDock } from "../ChapterDock";
 import { NotePopover } from "../NotePopover";
 import { ProgressBar } from "../ProgressBar";
 import { LookupCard } from "../LookupCard";
+import { HighlightCard } from "../HighlightCard";
+import { RecapCard } from "../recap/RecapCard";
+import { openQuoteCard } from "../../components/share/shareStore";
 import { selectedTextBox } from "../lookupPlacement";
 import { SpeedReadStage } from "./SpeedReadStage";
 import type { ReaderScope } from "./scope";
@@ -11,13 +14,18 @@ import type { ReaderScope } from "./scope";
 /** The page: the book itself, and what sits over its foot (the selection bar, a note, the dock). */
 export const ReaderPage = ({ reader }: { reader: ReaderScope }) => {
   const {
-    book, bookAtFraction, bookMarks, bookRef, canSeek, chapterAtFraction, chapterDockRef, chapterInBook,
-    clearSelection, closeNoteRef, copySelection, dockAbovePace, dockAwake, dockNear, fontSize, formatChapterDisplay,
-    goBack, goForward, goNextSection, goPrevSection, goToNote, highlightSelection, jumps, lastCfiProgressRef,
-    loadError, loading, lookUpShowing, measure, note, onClose, outlook, paged, pageOf, people, renditionRef,
-    searchBookFor, seekHoldRef, seekTo, selection, selectionChapter, selectionDockBottom, selectionDockRef,
-    setDockNear, setLookUpCfi, setReloadKey, sidebarOpen, toggleContents, turnPage, viewerRef
+    annotations, book, bookAtFraction, bookMarks, bookRef, bookmarkPanelOpen, canSeek, chapterAtFraction,
+    chapterDockRef, chapterInBook, clearSelection, closeNoteRef, copySelection, copyText, dockAbovePace, dockAwake,
+    dockNear, fontSize, formatChapterDisplay, goBack, goForward, goNextSection, goPrevSection, goToNote,
+    highlightBox, highlightSelection, highlights, jumps, lastCfiProgressRef, loadError, loading, lookUpShowing, measure,
+    note, notesFocus, notesWrite, onClose, outlook, paged, pageOf, people, renditionRef, searchBookFor, seekHoldRef,
+    seekTo, selection, selectionChapter, selectionDockBottom, selectionDockRef, setBookmarkPanelOpen, setDockNear,
+    setLookUpCfi, setNotesFocus, setReloadKey, sidebarOpen, toggleContents, turnPage, viewerRef
   } = reader;
+  // "Where was I?", when nothing else has the foot of the page.
+  const recapShown = reader.recap !== null && !selection && !people.card && !note && !(notesFocus && !bookmarkPanelOpen) && bookRef.current;
+  // A highlight opened beside the page (tapped, or just made to write a note on).
+  const opened = notesFocus && !bookmarkPanelOpen && !selection && !people.card ? (highlights.find((item) => item.id === notesFocus) ?? null) : null;
   return (
     <main className="reader-main overflow-hidden">
       {loadError && (
@@ -101,8 +109,60 @@ export const ReaderPage = ({ reader }: { reader: ReaderScope }) => {
               )}
             </div>
           )}
+          {recapShown && reader.recap && (
+            <div className={`reader-selection-dock ${dockAbovePace ? "is-above-pace" : ""}`}>
+              <RecapCard
+                book={bookRef.current}
+                place={{
+                  progress: lastCfiProgressRef.current ?? book.progress ?? 0,
+                  cfi: reader.readingPlaceCfi() ?? reader.lastCfiRef.current,
+                  chapter: reader.chapterLabel
+                }}
+                days={reader.recap.days}
+                chapter={reader.chapterLabel || null}
+                progress={lastCfiProgressRef.current ?? book.progress ?? 0}
+                highlights={highlights}
+                chapterOf={reader.chapterOfSection}
+                onName={
+                  people.enabled
+                    ? (name) => {
+                        reader.setRecap(null);
+                        people.askWhoIs(name, null);
+                      }
+                    : undefined
+                }
+                onOpenHighlight={(cfi) => {
+                  reader.setRecap(null);
+                  reader.noteJumpFromHere();
+                  reader.goToPlace(cfi);
+                }}
+                onClose={() => reader.setRecap(null)}
+              />
+            </div>
+          )}
+          {/* A highlight and its note, in the same place. */}
+          {opened && (
+            <div className={`reader-selection-dock ${dockAbovePace ? "is-above-pace" : ""}`}>
+              <HighlightCard
+                key={opened.id}
+                highlight={opened}
+                writing={notesWrite}
+                avoid={() => highlightBox(opened.cfi)}
+                onSaveNote={(text) => void annotations.update(opened.id, { note: text || null })}
+                onRecolor={(color) => void annotations.update(opened.id, { color })}
+                onRemove={() => {
+                  setNotesFocus(null);
+                  void annotations.remove(opened.id);
+                }}
+                onCopy={() => copyText(opened.text ?? "")}
+                onShare={() => openQuoteCard({ text: opened.text ?? "", title: book.title, author: book.author })}
+                onShowAll={() => setBookmarkPanelOpen(true)}
+                onClose={() => setNotesFocus(null)}
+              />
+            </div>
+          )}
           {/* A footnote, in the selection bar's place: the two are never up together. */}
-          {note && !selection && !people.card && (
+          {note && !selection && !people.card && !opened && (
             <div className={`reader-selection-dock ${dockAbovePace ? "is-above-pace" : ""}`}>
               <NotePopover
                 marker={note.marker}

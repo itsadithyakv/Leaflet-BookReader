@@ -118,8 +118,8 @@ export const useReadingModes = (reader: WithPanels) => {
 /** What hands-free reading is waiting on while something lies over the text. */
 export const useReadingHold = (reader: WithChrome) => {
   const {
-    bookmarkPanelOpen, contentsOver, fontPanelOpen, interruptedRef, note, pendingReadingMode, people, picture,
-    searchOpen, selection, shortcutsOpen, tourOpen
+    bookmarkPanelOpen, contentsOver, fontPanelOpen, interruptedRef, note, notesFocus, pendingReadingMode, people,
+    picture, recap, searchOpen, selection, shortcutsOpen, tourOpen
   } = reader;
   // What hands-free reading is waiting on, in words for its controls: they
   // must never show a pace while nothing is moving.
@@ -128,7 +128,7 @@ export const useReadingHold = (reader: WithChrome) => {
       ? "Text is selected · Esc lets it go"
       : searchOpen
         ? "Search is open"
-        : bookmarkPanelOpen
+        : bookmarkPanelOpen || notesFocus !== null
           ? "Notes are open"
           : contentsOver
             ? "Chapters are open"
@@ -144,7 +144,9 @@ export const useReadingHold = (reader: WithChrome) => {
                       ? "Keyboard shortcuts are open"
                       : people.cardOpen || people.panelOpen
                         ? "Characters are open"
-                        : null;
+                        : recap !== null
+                          ? "Where you are is open"
+                          : null;
   // Anything over the text (a selection, search, notes, the chapter list, a
   // dialog) makes auto-scroll and Smart Read wait; they carry on by themselves
   // once it is gone.
@@ -152,6 +154,7 @@ export const useReadingHold = (reader: WithChrome) => {
     selection !== null ||
     searchOpen ||
     bookmarkPanelOpen ||
+    notesFocus !== null ||
     contentsOver ||
     tourOpen ||
     fontPanelOpen ||
@@ -160,6 +163,7 @@ export const useReadingHold = (reader: WithChrome) => {
     shortcutsOpen ||
     people.cardOpen ||
     people.panelOpen ||
+    recap !== null ||
     pendingReadingMode !== null;
 
   return { holdReason };

@@ -6,6 +6,7 @@ import { Sidebar } from "./components/Sidebar";
 import { ProfileButton, type SyncMode } from "./components/ProfileButton";
 import { AccountDialog, accountOffered, markAccountOffered, useAccountDialog } from "./components/account/AccountDialog";
 import { WelcomeModal } from "./components/WelcomeModal";
+import { useShareStore } from "./components/share/shareStore";
 import { SessionWrapUp } from "./components/SessionWrapUp";
 import { usePipReactions } from "./hooks/usePipReactions";
 import { useCommunityPulse } from "./hooks/useCommunityPulse";
@@ -69,6 +70,13 @@ const SettingsPage = lazy(() =>
 );
 // Highlights outside the reader. It sorts them with epub.js, so it loads the
 // first time it is opened rather than putting epub.js into startup.
+// Pictures to share (a passage, the year): drawn only when asked for.
+const QuoteCardDialog = lazy(() =>
+  import("./components/share/QuoteCardDialog").then((module) => ({ default: module.QuoteCardDialog }))
+);
+const YearReviewDialog = lazy(() =>
+  import("./components/share/YearReviewDialog").then((module) => ({ default: module.YearReviewDialog }))
+);
 const HighlightsDialog = lazy(() =>
   import("./components/highlights/HighlightsDialog").then((module) => ({ default: module.HighlightsDialog }))
 );
@@ -206,6 +214,8 @@ const App = () => {
   const fullscreenLockRef = useRef(false);
   const theme = useAppearanceStore((state) => state.theme);
   const highlightsOpen = useHighlightsStore((state) => state.view !== null);
+  const quoteOpen = useShareStore((state) => state.quote !== null);
+  const yearOpen = useShareStore((state) => state.year !== null);
   const toggleTheme = useAppearanceStore((state) => state.toggleTheme);
 
   useEffect(() => {
@@ -1204,6 +1214,7 @@ const App = () => {
               book={selected}
               kind={selectedDelivery === "comic" ? "comic" : "pdf"}
               onClose={closeReader}
+              openAt={openAt}
             />
           ) : (
             <ReaderView key={selected.id} book={selected} onClose={closeReader} openAt={openAt} />
@@ -1223,6 +1234,16 @@ const App = () => {
       {highlightsOpen && (
         <Suspense fallback={null}>
           <HighlightsDialog onOpenInBook={openBookAt} />
+        </Suspense>
+      )}
+      {quoteOpen && (
+        <Suspense fallback={null}>
+          <QuoteCardDialog />
+        </Suspense>
+      )}
+      {yearOpen && (
+        <Suspense fallback={null}>
+          <YearReviewDialog />
         </Suspense>
       )}
       <RatePrompt />

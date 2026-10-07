@@ -1,7 +1,15 @@
 import { useRef } from "react";
 import { useAutoHideChrome } from "../../hooks/useAutoHideChrome";
+import { guessSeries } from "../../library/series";
 import { usePeopleReader } from "../people/usePeopleReader";
+import type { Book } from "@shared/models/book";
 import type { WithKeys } from "./scope";
+
+/** The series a book is in, as the library reckons it, or null. */
+const seriesName = (book: Book): string | null => {
+  const guess = guessSeries(book);
+  return guess && guess !== "none" ? guess.name : null;
+};
 
 /**
  * The toolbar stepping out of the way while reading, and the characters
@@ -10,7 +18,7 @@ import type { WithKeys } from "./scope";
 export const useReaderChrome = (reader: WithKeys) => {
   const {
     book, bookmarkPanelOpen, bookRef, chapterLabel, chapterOfSection, contentsOver, fontPanelOpen, goToPlace,
-    lastCfiProgressRef, lastCfiRef, loadError, loading, morePanelOpen, note, noteJumpFromHere, pendingReadingMode,
+    lastCfiProgressRef, lastCfiRef, loadError, loading, morePanelOpen, note, noteJumpFromHere, notesFocus, pendingReadingMode,
     picture, renditionRef, searchOpen, selection, shortcutsOpen, showFocusToastRef, soundPanelOpen, tourOpen
   } = reader;
   // Characters (readers/people): who is who, as far as the reader has got.
@@ -18,6 +26,7 @@ export const useReaderChrome = (reader: WithKeys) => {
   const people = usePeopleReader({
     ready: !loading && loadError === null,
     bookId: book.id,
+    about: { title: book.title, author: book.author, series: seriesName(book) },
     book: bookRef.current,
     rendition: renditionRef.current,
     place: () => ({
@@ -35,6 +44,7 @@ export const useReaderChrome = (reader: WithKeys) => {
     covered: () =>
       searchOpen ||
       bookmarkPanelOpen ||
+      notesFocus !== null ||
       contentsOver ||
       tourOpen ||
       fontPanelOpen ||
@@ -56,6 +66,7 @@ export const useReaderChrome = (reader: WithKeys) => {
   } = useAutoHideChrome(
     fontPanelOpen ||
       bookmarkPanelOpen ||
+      notesFocus !== null ||
       morePanelOpen ||
       soundPanelOpen ||
       searchOpen ||
