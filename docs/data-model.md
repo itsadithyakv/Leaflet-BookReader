@@ -303,6 +303,8 @@ Book files live beside it as `books/<sha256>.<ext>` and are fetched on demand.
 - **`createdAt`** — the minimum; the earliest import is the truth.
 - **Deletion** — holds unless the other device edited the book *after* it, which
   is how re-importing a removed book brings it back instead of being undone.
+  A tombstone leaves the document after ninety days, except one with a
+  finished date: that entry is the record that the book was read, and stays.
 - **Ledger minutes** — the maximum, not the sum. Neither device knows how much of
   the other's time overlapped its own, and a sum would let repeated syncing
   inflate a streak.

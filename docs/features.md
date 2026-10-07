@@ -187,8 +187,38 @@ reading stopped. `src-tauri/src/search.rs`, `readers/findPlace.ts`,
 and have to change together. Checked: opening at a match in the preview (the
 41st of 107 in a chapter came to the top of the window, the find panel open on
 the words, the saved place untouched). Not checked: the dialog itself and the
-command over IPC, which need the app. Accents beyond Latin European letters
+command over IPC, which need the app. PDFs are covered too (next paragraph).
+Accents beyond Latin European letters
 must be typed in the library search (the in-book search folds everything).
+
+**Search inside books covers PDFs** (1.3.1; `src-tauri/src/pdf_text.rs`,
+`readers/pdfTextCache.ts`, `readers/pdfFindPlace.ts`,
+`components/search/readPdfBook.ts`). Rust cannot read a PDF's text well and
+pdf.js can, so a PDF's text is read once by the page and kept on this device
+(`<app data>/text/<sha256>.json.gz`, a string a page); after that the search
+reads what was kept, as fast as it reads an EPUB. It is kept when a PDF with
+no table of contents of its own is opened in the reader, which reads every
+page anyway to find its chapters, and otherwise the first time a search meets
+the PDF: the dialog says "Reading 3 PDFs…" while it reads them, one at a
+time, and closing it or typing something else stops the reading where it is.
+A match in a PDF is shown with its page ("p. 12", counted from the file's
+first page), and picking it opens the book on that page with the reader's own
+search open on the same words (`pagefind:<page>:<nth>` and the words on a
+second line). The words are matched as in an EPUB, and a word broken over the
+end of a line is found whole; the reader's PDF search now also takes a typed
+apostrophe for a curly one, so the two agree. A phrase that runs from the
+foot of one page onto the next is not found here, though the reader's own
+search finds it. A scanned PDF has no text: it is counted as "not searched",
+and the count says why when the pointer rests on it. Comics are not searched.
+No more than 20,000 pages and ten million characters are kept of one PDF.
+The text is removed with the book, and all of it by "Delete All Data"; it is
+not synced. Reading 600 pages of text took 0.4 s in Node, and searching what
+was kept of them about 0.1 s in a debug build. Trying this in the preview
+found a fault older than the search: in the Scroll layout a PDF opened at a
+place (a search match, and a highlight before that) showed the page it was
+last read at, because a go-to made before the pages were first laid out was
+overwritten by the saved place. `PdfScrollPages.tsx` now keeps what was asked
+and goes there once the pages are laid out.
 
 ### Series, shelves and collections — `pages/CollectionsPage.tsx`
 
@@ -244,13 +274,61 @@ Every format falls into one of four *delivery* kinds:
 | --- | --- | --- |
 | **Native** | EPUB, PDF, CBZ | Rendered directly. |
 | **Built-in** | TXT, TXTZ, HTML, HTM, HTMLZ, XHTML, FB2, FBZ | Converted to EPUB **in-process** by `convert/`. No external tool. |
-| **Convert** | MOBI, AZW/AZW3/AZW4, PRC, PDB, LIT, LRF, RB, SNB, TCR, PML/PMLZ, RTF, DOCX, ODT, CHM, CBR, CBC | Needs Calibre. |
+| **Convert** | MOBI, AZW/AZW3/AZW4, PRC, PDB, LIT, LRF, RB, SNB, TCR, PML/PMLZ, RTF, DOCX, ODT, CHM, CBR, CBC | Needs Calibre, except a Kindle book of the older kind, which Leaflet reads itself (below). |
 | — | anything else | Rejected at the picker, not silently dropped after import. |
 
 The built-in converters (`convert/text.rs`, `convert/html.rs`, `convert/fb2.rs`,
-assembled by `convert/epub_builder.rs`) exist so the common formats need no
-200 MB download. The EPUB they write stores the `mimetype` entry uncompressed and
+and `convert/mobi.rs` for a Kindle book of the older kind, assembled by
+`convert/epub_builder.rs`) exist so the common formats need no 200 MB
+download. The EPUB they write stores the `mimetype` entry uncompressed and
 first, as the spec requires.
+
+### Kindle books without Calibre
+
+(1.3.1; `convert/mobi.rs`, `convert/xhtml.rs`.) A `.mobi`, `.prc` or old
+`.azw` is a Palm database: record 0 is a header, the records after it are the
+text in 4 KB pieces each compressed by itself (PalmDOC, a small LZ77), and
+after the text come the pictures. The text is one page of HTML from the year
+2000 in which a link says where it goes by a byte count
+(`<a filepos=0001234>`), a picture by its number (`<img recindex="00003">`)
+and a new page by `<mbp:pagebreak/>`. Leaflet now makes that into an EPUB
+itself, in the conversion cache where Calibre's would go, so the reader opens
+it as any book:
+
+- A chapter is a run between page breaks. Its name is what the book's own
+  contents page calls the place (the words of the link that leads there);
+  with no contents page, its first heading. A chapter with no name is in the
+  book and not in the contents list (`Chapter.title` empty), and the first is
+  always listed. A book with no page breaks is cut every 200 KB at the next
+  paragraph: one page of a megabyte was slow to open and to turn.
+- Every place a link leads to gets an anchor, and the link the chapter that
+  anchor ended up in. Pictures are the ones the text uses, by their own type.
+- The reader opens a chapter as XML, which forgives nothing, and this HTML
+  leaves `<br>` open, writes `&nbsp;` and does not quote attributes. So it is
+  taken apart into tags and text and written again with every tag closed in
+  order and every entity a character (`xhtml.rs`). Of how a page was set,
+  centred and right-aligned are kept; sizes, indents and fonts are the
+  reader's to decide. Scripts, styles and the head are not text and are left
+  out.
+- Windows-1252 books (most older ones) are read as such.
+
+Whether a file is one of these is in its header, not its ending
+(`mobi::can_read`), and `needs_converter` asks: a readable one no longer
+prompts for Calibre. Still Calibre's: the newer format (KF8: most `.azw3`,
+where the book is in fragments put together by tables) and the old Huffman
+compression. A file that carries both formats (most made after 2011) is read
+from its older half. A book locked to an account says so and asks for
+nothing, as before. If reading one here fails for any other reason, it goes
+to Calibre as it always did.
+
+Checked on the one real `.mobi` in the owner's library (numbers only: 8.6 MB,
+59 chapters of which 56 named by its contents page, 65 pictures, 15,414 links
+all placed, every chapter well formed, 0.35 s in a debug build), and that
+book opened in the reader in the preview: its chapters, its contents list, a
+chapter's three pictures, and a link followed to its place in another
+chapter. `cargo test --lib convert::mobi::probe -- --ignored --nocapture`
+prints those numbers again. Not checked: more than one real file; a
+Windows-1252 one from the wild; how it looks.
 
 ### The Calibre converter
 
@@ -838,13 +916,39 @@ found (their titles when that is pointed at). A Kindle location is not a
 place in the book's file, so these highlights are kept at
 `kindle:<location>`, as a PDF's are at `pdf:…`: listed after the book's own,
 in the Kindle's order, under its page or location, with a small "Kindle" tag,
-and never drawn or gone to. Each keeps the Kindle's date (`annotation_save`
+and neither drawn nor gone to until the book has been opened once (next
+paragraph). Each keeps the Kindle's date (`annotation_save`
 takes an optional creation time, used only for a new row). Its id comes from
 the book, the place and the words, so the same file imported again adds
 nothing and changes nothing. Known: one removed in Leaflet comes back if the
 file is imported again, and one edited on the Kindle since arrives as a
 second row. Checked in the preview with an invented file (a highlight, its
 note, a book not in the library); not with a real Kindle's.
+
+**Kindle highlights, placed in the book** (1.3.1;
+`readers/kindlePlacing.ts`, `readers/text/useKindlePlacing.ts`). A clipping
+has no place in the file, but it has its words, and the words are in the
+book. Four seconds after an EPUB with such highlights is up, their words are
+looked for in its text, in the page's idle moments (no more than 6 ms at a
+time, so reading and Smart Read come first), and each one found is saved again
+at a CFI of its own, under its chapter's name, with its note, colour and the
+Kindle's date as they were. From then on it is drawn on the page, opens from
+the list and syncs like any other; the "Kindle" tag goes with the
+`kindle:` place. Only letters and digits are compared (lower case, no
+accents, a ligature as its letters), because the two files never agree on
+quotes, dashes, ellipses, spaces or soft hyphens. A passage that is not there
+whole (a footnote's number in the middle, a word set right in another
+edition) is found by its first and last eight words, in order and about as
+far apart as it is long. A wrong place is worse than none: one or two words,
+or fewer than twelve letters, are placed only where the book says them once
+as whole words; a longer passage said more than once goes to the one nearest
+where its Kindle location points, and one said more than 24 times goes
+nowhere. One not found stays listed as before and is not looked for again on
+this device (`leaflet.kindleTried.<book>` in the page's storage, cleared by
+"Delete All Data"). Not placed: clippings of a PDF or a comic; a note written
+where nothing was highlighted. Checked in the preview on a test copy of a
+real novel: two real passages were placed in the right chapter and drawn, an
+invented one stayed where it was. Not checked with a real Kindle's file.
 
 **A highlight from the past, once a day** (1.3;
 `components/highlights/DailyHighlight.tsx`, `highlightOfTheDay.ts`). The
@@ -2791,8 +2895,18 @@ has ever been finished, which is what a count goes by (books finished here
 and on the public card, the year in review, the goal). A book's menu has
 **Mark as finished** (it goes to its end, dated now) and **Mark as not
 started** (back to the start, no place kept, the date cleared on every
-device). Still true: removing a finished book from the library takes it out
-of the count.
+device).
+
+Removing a finished book does not take it out of the count (1.3.1). Its row
+was already kept for ninety days so the removal could reach the other
+devices; a row with a finished date is now kept for good, as the record that
+the book was read (`finished_and_removed`, and the merge never collects it).
+A book at its end with no date is given one as it is removed. The row reaches
+a device that never had the book, so the count is the same everywhere. The
+stats, the public card, the goal and the year in review count the library's
+books and these together (`library/finishedBooks.ts`, `finished_removed`);
+shelves, series and the library's own "N Finished" are of the books that are
+there. A book added back takes its date with it and is counted once.
 
 **A goal of books for the year** (1.3; `components/goal/`). A card on Stats:
 "7 of 20 books", a bar, and the pace in a word or two ("On pace", "3 ahead",
@@ -3026,7 +3140,28 @@ leaderboards now and for one identity across devices when the mobile app ships.
   email explains the limit and the date instead of carrying a code. The email is sent by a Google Apps Script web app from the owner's
   Gmail (`server/deploy/password-reset-mailer.gs`, about 100 a day, free); the
   server holds only a shared secret for it (`server/src/mail.js`).
-- Not yet: email verification.
+- **Confirming the address** (1.3.1; `components/account/AccountForm.tsx`,
+  `AccountEmail.tsx`, `emailHint.ts`). A typo at sign-up used to lose the
+  account for good: no reset email could ever arrive. Signing up now emails an
+  eight-character code (30 minutes, five wrong tries, stored hashed together
+  with the address it went to) and the form ends on one step, "Enter the code
+  we emailed to …", with Confirm, Resend and Later. Nothing waits on it: the
+  account works at once. Unconfirmed, the only reminder is one row in
+  Settings → Account ("Email not confirmed": Confirm, Resend, Change); accounts
+  from before this are unconfirmed and see only that row. The address can be
+  changed there with the password (`POST /v1/account/email`): every device
+  stays signed in, the new address starts unconfirmed and is sent a code, and
+  codes sent to the old one stop working. Under the email field at sign-up, a
+  domain one slip from a common one (gmial.com, gmail.con) gets a quiet "Did
+  you mean …?" that fills the field and never blocks. The server says
+  `emailConfirmed` on every account answer; one with no mailer leaves it out,
+  and the app then shows none of this, as it does with a server from before
+  1.3.1. At most five confirmation emails an hour per account and three per
+  address, through the same Apps Script as resets, as a third fixed message.
+  **It needs the mail script and the server deployed** (deploy.md, 4b and
+  "Releasing an update"): the script first. Nothing tells the old address
+  when an email is changed, and a completed password reset does not count as
+  confirming. Not seen on a screen; the server's part is tested (108 tests).
 
 An earlier version had a sign-in modal that accepted any email, verified
 nothing, and stored the result in `localStorage`, plus a "premium" flag anyone

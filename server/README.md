@@ -60,6 +60,9 @@ Authenticated routes take `Authorization: Bearer <token>`. Errors are
 | `POST /v1/auth/reset/request` | | `{email}` → `{ok, minutes}`, the same whether or not the address has an account; emails a code if it does (or, after 3 resets in 365 days, an email saying when it can be reset again). `429` past 3 per address or 10 per IP an hour; `503` if no mailer is configured. |
 | `POST /v1/auth/reset/confirm` | | `{email, code, password}` → `{token, account}`. Sets the password, ends every session, signs in. `400` "That code is wrong or has expired." |
 | `PATCH /v1/account` | ✓ | `{displayName?, avatar?}`. Only the fields sent change; `avatar: null` clears it. The avatar is copied onto the profile too. |
+| `POST /v1/account/email/code` | ✓ | Emails a new confirmation code → `{sent, minutes, account}` (`sent: false` when already confirmed). `429` past 5 an hour per account or 3 per address; `503` if no mailer is configured. |
+| `POST /v1/account/email/confirm` | ✓ | `{code}` → `{account}` with `emailConfirmed: true`. `400` for a wrong or expired code; five wrong tries delete it. |
+| `POST /v1/account/email` | ✓ | `{password, email}` → `{sent, minutes, account}`. Changes the address, keeps every session, starts it unconfirmed and mails it a code. `403` wrong password, `409` address taken. |
 | `DELETE /v1/account` | ✓ | `{password}`. Deletes community data, account, profile, state and all sessions. |
 | `GET /v1/state` | ✓ | `{version, state}` (base64 gzipped blob, or `null`). |
 | `PUT /v1/state` | ✓ | `{version, state}`. `version` is the one last read (0 = none). `409` with the current document if another device wrote first. Up to 2 MB. |

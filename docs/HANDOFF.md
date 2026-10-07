@@ -11,7 +11,9 @@ is in [deploy.md](deploy.md) (the checklist) and
 `release/1.2` at `8553264`). Work is now on the branch `release/1.3`, version
 1.3.1, made off that commit (1.3.0 was never built: the owner asked for nine
 more features and for the whole to go out as 1.3.1). It is committed and
-pushed (`origin/release/1.3`). A release build of it compiles and packages
+pushed (`origin/release/1.3`) up to `cb430c0`; what was built after that (the
+last bullet but four below, "Four gaps closed") is in the working tree, not
+committed, and is in no package yet. A release build of it compiles and packages
 (2026-10-07, 4 m 58 s), but that package was made without the two Google
 values, so Drive backup is off in it: it is kept as
 `target\msix\Leaflet_1.3.1.0_x64.NO-DRIVE-test-only.msix`, for trying the
@@ -91,9 +93,8 @@ holds:**
     on made-up ones; **copy `library.db` before 1.3 first opens it**).
   - Phone stage 0 will now also meet `finished_at` in `merge.rs` and
     `db/mod.rs` when it is brought onto 1.3.
-  - Found and not fixed: an email is not verified at sign-up (a typo there
-    means a reset can never arrive); removing a finished book lowers the
-    count of books finished.
+  - Found then, and fixed since: removing a finished book lowered the count
+    of books finished (features.md, "Finished, with a date").
 - **Covers that went missing** (the owner: a famous novel, a PDF, at "No
   cover yet"; features.md, "Metadata enrichment" and "A PDF with no cover
   takes its first page"). The catalogue had the cover and the first page
@@ -103,8 +104,52 @@ holds:**
   books another lookup, once. One lookup of that one title
   was made by hand to see the catalogue's answer (the owner named the book);
   no other title left this PC.
-- 2,368 app tests (257 new in 1.3), 595 Rust tests (46 new), `tsc` clean,
-  `cargo clippy --all-targets` clean, `vite build` succeeds. The version is 1.3.1 in the five places deploy.md names.
+- **Four gaps closed, and Kindle books read without Calibre** (2026-10-07,
+  after `cb430c0`; **not committed**, the owner has not yet asked). The owner
+  named three gaps and said "fix these however you can, take decisions";
+  then asked for `.mobi` without Calibre.
+  - *A finished book that is removed still counts* (features.md, "Finished,
+    with a date"; data-model.md, the tombstone exception). Removing dates a
+    book at its end if it had no date; a removed book with a date is never
+    collected from the sync document and is recorded on a device that never
+    had it; importing the file again carries the date over. The count, the
+    year's goal and the year in review read `useBooksRead()`
+    (`library/finishedBooks.ts`).
+  - *The email is confirmed* (features.md, "Confirming the address"). A code
+    by email at sign-up, never required; a row in Settings, Account until it
+    is done; the address can be changed with the password; a "Did you mean
+    gmail.com?" under a slip. **It does nothing until the mail script and
+    then the server are deployed, in that order** (deploy.md, 4b).
+  - *Kindle highlights get their places* (features.md, "Kindle highlights,
+    placed in the book"): found by their words when the book is opened.
+  - *Search inside books covers PDFs* (features.md, same name): the text is
+    read once by pdf.js and kept on the device.
+  - *Kindle books without Calibre* (features.md, same name): `.mobi`, `.prc`
+    and old `.azw`. `.azw3` (KF8) and Huffman files still need Calibre.
+  - Found on the way: in the Scroll layout a PDF opened at a place landed on
+    the saved page (`PdfScrollPages.tsx`); fixed.
+  - Three of these were built by engineers working beside this one (email,
+    Kindle placing, PDF search); their code was read, their tests run, and
+    the last two tried in the preview.
+  - Checked in the preview: the owner's one real `.mobi` as an EPUB (59
+    chapters, contents, pictures, a link followed); a PDF opened at a match
+    in both layouts (page 300 of 600, the find open on the words); two real
+    passages placed and drawn in a test book, an invented one left alone.
+  - Not checked, because they need the app, the server or a second device:
+    the whole email flow on a screen and a real email arriving; the count
+    after a removal on a real library and across two devices; the search
+    dialog reading real PDFs through its commands; a `.mobi` imported and
+    opened in the installed app; a real `My Clippings.txt`.
+  - **The owner's, in this order:** (1) paste the new
+    `server/deploy/password-reset-mailer.gs` into the Apps Script and deploy
+    a new version; (2) deploy the server (a new collection, `confirmations`,
+    with its own TTL index, made at start; no new secret or env value);
+    (3) publish the privacy policy (email confirmation; "account emails");
+    (4) build the package. Accounts from before are "not confirmed" and see
+    one row in Settings; nothing is mailed to them unasked.
+- 2,453 app tests (342 new in 1.3), 625 Rust tests (76 new), 108 server
+  tests, `tsc` clean, `cargo clippy --all-targets` clean, `vite build`
+  succeeds (all run together 2026-10-07, after the work above). The version is 1.3.1 in the five places deploy.md names.
 - **Asked for and not built: read aloud.** The voices Windows gives an app
   are the old flat ones (this PC has David, Zira and Mark only); a natural
   voice means a paid cloud service or a speech model shipped in the app
@@ -648,7 +693,9 @@ still stands for the other shared files, `lib.rs` and `index.css`.)
 `apps/node_modules/.leaflet-test/` (inside `node_modules`, so git-ignored)
 holds the harnesses and fixtures the measurements used, described in
 [testing.md](testing.md). It includes copies of the owner's own files
-(`mistborn.epub`, `test.pdf`, and 16 books under `library/`), and
+(`mistborn.epub`, `test.pdf`, and 16 books under `library/`, with
+`library/from-mobi.epub`, the owner's Kindle book as Leaflet's own reader
+made it), and
 `shell-sweep.html`, which runs the app in frames of thirteen window sizes. Delete the folder whenever; nothing builds
 from it. Development builds publish `window.__leafletRendition` and
 `window.__leafletReader`, both behind `import.meta.env.DEV`.

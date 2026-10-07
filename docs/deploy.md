@@ -134,6 +134,15 @@ The two `RESET_MAIL_*` lines come from step 4b; leave them out until then
 
 ### 4b. Password-reset emails — *script.google.com*
 
+(Since 1.3.1 the same script also sends the code that confirms an address at
+sign-up, as a third fixed message. A script from before then must be updated
+**before** the server is: paste the new `server/deploy/password-reset-mailer.gs`
+over `Code.gs`, check `SUPPORT_EMAIL`, then Deploy → Manage deployments →
+pencil → Version: New version → Deploy. The address and the secret stay the
+same. The new script sends the two reset emails exactly as before, so it is
+safe under the old server; the other way round every sign-up's code is
+refused until the script catches up.)
+
 Free: Google Apps Script sends from a Gmail account, about 100 emails a day.
 The emails come **from** whichever Gmail owns the script, so use the one you
 want readers to see (a dedicated one, e.g. `leaflet.app.mail@gmail.com`, keeps

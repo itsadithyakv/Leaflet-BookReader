@@ -73,6 +73,12 @@ one, we store the following on our server:
   once used, after five wrong tries, or when it expires. We also keep the dates
   of your resets from the last year, because an account can be reset three
   times a year.
+- **Email confirmation:** when you create an account or change its email
+  address, we email that address a one-time code. Until it is used we store a
+  hash of the code, when it expires (30 minutes later) and how many wrong tries
+  it has had; it is deleted once used, after five wrong tries, when it
+  expires, or when you ask for a new one. We also store whether, and when,
+  your address was confirmed. Your account works whether or not you confirm.
 - **Profile:** a handle you choose (shown as `@handle`), your display name,
   and whether the profile is public or private. While it is public we also
   store what it shows: this week's reading minutes, your streak, how many
@@ -158,9 +164,10 @@ challenged.
   reads at startup to find our server, are hosted on GitHub Pages. Loading them
   sends GitHub the usual web request information, such as your IP address, under
   GitHub's privacy statement. No account or reading information is sent.
-- **Gmail (password reset emails).** If you ask to reset your password, your
-  email address and the one-time code are passed to Google's Apps Script and
-  sent from our Gmail account, so Google handles that email under its own
+- **Gmail (account emails).** When you create an account, change its email
+  address, ask for a new confirmation code or ask to reset your password,
+  your email address and the one-time code are passed to Google's Apps Script
+  and sent from our Gmail account, so Google handles that email under its own
   privacy terms. Nothing else about you or your reading is included.
 - **DuckDNS.** Our server's address, `leafletapp.duckdns.org`, is provided by
   DuckDNS, which only translates the name into the server's IP address.
@@ -177,7 +184,7 @@ to the minimum the features need.
 ## How long we keep it
 
 We keep your account information until you delete your account. Sign-in
-sessions expire after 90 days without use, and a password reset code after 15
+sessions expire after 90 days without use, an email confirmation code after 30 minutes, and a password reset code after 15
 minutes. Community data is kept only as long
 as it is useful: kudos for 21 days, your inbox of notifications for 60 days,
 weekly duels for 90 days, and a follow until either reader removes it. Making
