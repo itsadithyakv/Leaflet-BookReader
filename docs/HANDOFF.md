@@ -9,8 +9,8 @@ is in [deploy.md](deploy.md) (the checklist) and
 
 **2026-10-07: 1.2 is released (the owner built and shipped it from
 `release/1.2` at `8553264`). Work is now on the branch `release/1.3`, version
-1.3.0, made off that commit. Nothing on it is committed yet: it waits for the
-owner's word. What it holds:**
+1.3.0, made off that commit. It is committed there (13 commits, to
+`e79cad2`) and not pushed. What it holds:**
 
 - **Dotty comes back** (features.md, "Smart Read"). With Dotty below the
   page, Space reads from what is on screen; a drag held at the window's top
