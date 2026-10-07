@@ -258,6 +258,7 @@
 }
 
 .reader-lookup-foot {
+  position: relative;
   display: flex;
   flex: none;
   align-items: flex-start;
@@ -276,9 +277,23 @@
   min-width: 0;
 }
 
-.reader-lookup-kept,
-.reader-lookup-note {
+.reader-lookup-kept {
   margin: 3px 0;
+}
+
+/* What looking up sends: a small note that opens from the "i", above it. */
+.reader-lookup-note {
+  position: absolute;
+  right: 6px;
+  bottom: calc(100% + 6px);
+  z-index: 1;
+  width: min(17rem, calc(100% - 12px));
+  margin: 0;
+  border-width: 1px;
+  border-radius: 10px;
+  padding: 8px 10px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);
+  color: var(--reader-muted);
 }
 
 .reader-lookup-note[hidden] {

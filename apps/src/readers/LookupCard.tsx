@@ -48,20 +48,6 @@ type State =
   | { status: "failed"; failure: LookupFailure }
   | { status: "done"; result: LookupResult };
 
-/**
- * Set once the card has been used on this device: the note on what is sent
- * has been shown. "Delete All Data" forgets it (services/deviceData.ts).
- */
-const NOTE_SEEN_KEY = "leaflet.lookup.noteSeen";
-
-const noteSeen = () => {
-  try {
-    return localStorage.getItem(NOTE_SEEN_KEY) === "1";
-  } catch {
-    return false;
-  }
-};
-
 const SOURCE_NAMES = { wiktionary: "Wiktionary", wikipedia: "Wikipedia" } as const;
 
 const Entries = ({ entries }: { entries: LookupEntry[] }) => (
@@ -85,7 +71,9 @@ const Entries = ({ entries }: { entries: LookupEntry[] }) => (
  * selection bar and sits above it, in the bar's own dock.
  *
  * Only the selected words are sent, and only because the reader pressed Look
- * up; the note at the foot says so the first time.
+ * up; the "i" at the foot says so when it is pressed. (The note used to be
+ * open the first time the card was used, which read as small print stuck to
+ * the answer.)
  *
  * A word that gets an answer is kept, with the meaning shown and the place
  * (readers/words/): the card says so, and can take it back.
@@ -98,8 +86,8 @@ export const LookupCard = ({ term, language, onClose, avoid, place: wordPlace }:
   const [state, setState] = useState<State>({ status: shown ? "loading" : "refused" });
   const [attempt, setAttempt] = useState(0);
   const [place, setPlace] = useState<CardPlace>({ height: CARD_HEIGHT, lift: CARD_GAP, shift: 0 });
-  // The first time on this device the note is open; after that it is behind the "i".
-  const [noteOpen, setNoteOpen] = useState(() => !noteSeen());
+  // What looking up sends: behind the "i", until it is pressed.
+  const [noteOpen, setNoteOpen] = useState(false);
   const [linkFailed, setLinkFailed] = useState(false);
   // The word as it was kept, and whether the reader then took it back.
   const [kept, setKept] = useState<SavedWord | null>(null);
@@ -115,14 +103,6 @@ export const LookupCard = ({ term, language, onClose, avoid, place: wordPlace }:
   avoidRef.current = avoid;
   const titleId = useId();
   const noteId = useId();
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(NOTE_SEEN_KEY, "1");
-    } catch {
-      // Storage that cannot be written: the note simply shows again next time.
-    }
-  }, []);
 
   useEffect(() => {
     if (!shown) {
@@ -441,11 +421,12 @@ export const LookupCard = ({ term, language, onClose, avoid, place: wordPlace }:
               )}
             </p>
           )}
-          <p id={noteId} className="reader-lookup-note" hidden={!noteOpen}>
-            Only the words you selected are sent to Wiktionary and Wikipedia, and only when you press Look up. Nothing
-            about you or your book goes with them.
-          </p>
         </div>
+        {/* Over the answer's last lines, not under them: the card keeps its size. */}
+        <p id={noteId} className="reader-lookup-note reader-panel reader-border" role="note" hidden={!noteOpen}>
+          Only the words you selected are sent to Wiktionary and Wikipedia, and only when you press Look up. Nothing
+          about you or your book goes with them.
+        </p>
         <button
           type="button"
           className="reader-lookup-info"
