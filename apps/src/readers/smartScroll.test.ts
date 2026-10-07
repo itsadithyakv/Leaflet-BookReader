@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planScrollStep, readingBand, stepDuration, type ReadingArea, screenStep, chapterEndTop, isPictureGap, pastPictureGap, isScrollCorrection } from "./smartScroll";
+import { planScrollStep, readingBand, stepDuration, type ReadingArea, screenStep, chapterEndTop, isPictureGap, pastPictureGap, isScrollCorrection, lineInArea } from "./smartScroll";
 
 // 18px type at 1.8 line height.
 const LINE = 32.4;
@@ -125,5 +125,34 @@ describe("epub.js keeping the text in place", () => {
     expect(isScrollCorrection(3, 0)).toBe(false);
     expect(isScrollCorrection(0, 0)).toBe(false);
     expect(isScrollCorrection(-1315, null)).toBe(false);
+  });
+});
+
+describe("where Dotty's line is against the reading area", () => {
+  const area: ReadingArea = { height: 640, lineHeight: LINE, topInset: 12, bottomInset: 112 };
+
+  it("is in it between the toolbar's strip and Smart Read's controls", () => {
+    expect(lineInArea(12, area)).toBe("in");
+    expect(lineInArea(300, area)).toBe("in");
+    expect(lineInArea(528, area)).toBe("in");
+  });
+
+  it("is above it when the reader has read on past Dotty", () => {
+    expect(lineInArea(11, area)).toBe("above");
+    expect(lineInArea(-4000, area)).toBe("above");
+  });
+
+  it("is below it when the reader went back, or Dotty ran on", () => {
+    expect(lineInArea(529, area)).toBe("below");
+    // Behind the controls counts: the line cannot be read there.
+    expect(lineInArea(600, area)).toBe("below");
+    expect(lineInArea(9000, area)).toBe("below");
+  });
+
+  it.each(Object.entries(screens))("agrees with the page steps on a %s", (_name, screen) => {
+    // A line the steps would leave where it is, is in the area.
+    const band = readingBand(screen);
+    expect(lineInArea(band.top, screen)).toBe("in");
+    expect(lineInArea(band.turn - screen.lineHeight, screen)).toBe("in");
   });
 });

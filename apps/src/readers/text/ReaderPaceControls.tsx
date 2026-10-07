@@ -35,7 +35,7 @@ export const ReaderPaceControls = ({ reader }: { reader: ReaderScope }) => {
             type="button"
             className="reader-autoscroll-main reader-accent"
             onClick={() => setAutoScrollActive(false)}
-            title="Pause (Space)"
+            title="Pause (Space). Hold the page to make it wait."
           >
             <UiIcon name={autoScrollHeld || holdReason ? "hand" : "pause"} size={16} />
             <span className="tabular-nums">
@@ -51,9 +51,8 @@ export const ReaderPaceControls = ({ reader }: { reader: ReaderScope }) => {
           >
             <UiIcon name="plus" size={16} />
           </button>
-          <span className="reader-autoscroll-hint reader-muted">
-            {holdReason ?? "Space pauses · hold the page to wait"}
-          </span>
+          {/* Only why it is waiting: how to work it is in the buttons' own titles. */}
+          {holdReason && <span className="reader-autoscroll-hint reader-muted">{holdReason}</span>}
         </div>
       )}
 
@@ -81,7 +80,13 @@ export const ReaderPaceControls = ({ reader }: { reader: ReaderScope }) => {
             type="button"
             className="reader-autoscroll-main reader-accent"
             onClick={toggleSmartPlay}
-            title={readingPaused || smartWaiting || smartAtPicture ? "Carry on (Space)" : "Pause (Space)"}
+            title={
+              smartWaiting
+                ? "Read from here (Space), or scroll down to Dotty"
+                : readingPaused || smartAtPicture
+                  ? "Carry on (Space)"
+                  : "Pause (Space). Read ahead and Dotty catches up."
+            }
           >
             <UiIcon
               name={readingPaused || smartWaiting || smartAtPicture ? "play" : autoScrollHeld || holdReason ? "hand" : "pause"}
@@ -110,15 +115,13 @@ export const ReaderPaceControls = ({ reader }: { reader: ReaderScope }) => {
           >
             <UiIcon name="plus" size={16} />
           </button>
-          <span className="reader-autoscroll-hint reader-muted">
-            {readingPaused
-              ? "Space to carry on"
-              : smartWaiting
-                ? "Scroll back to Dotty, or Space to go on"
-                : smartAtPicture
-                  ? "A picture · Space to go on"
-                  : holdReason ?? "Space pauses · read ahead and Dotty catches up"}
-          </span>
+          {/* Only what it is waiting on, and the one key that is not what it
+              looks like. How to work it is in the buttons' own titles. */}
+          {(smartWaiting || smartAtPicture || (!readingPaused && holdReason)) && (
+            <span className="reader-autoscroll-hint reader-muted">
+              {smartWaiting ? "Space reads from here" : smartAtPicture ? "A picture" : holdReason}
+            </span>
+          )}
         </div>
       )}
     </>

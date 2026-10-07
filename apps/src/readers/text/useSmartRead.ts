@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { type ReaderWord, type SmartSession } from "../readerTypes";
 import { paceLimits, plainFromWpm, setBookPace, wpmFromPlain } from "../paceModel";
 import { judgeCatchUp } from "../paceTracker";
-import { easeInOutCubic, pastPictureGap, planScrollStep, readingBand, stepDuration, type ReadingArea } from "../smartScroll";
+import { easeInOutCubic, lineInArea, pastPictureGap, planScrollStep, readingBand, stepDuration, type ReadingArea } from "../smartScroll";
 import { glideFrame, glideSet, startGlide } from "../glide";
 import type { Later, WithAuto, WithKeys } from "./scope";
 
@@ -322,8 +322,68 @@ export const useSmartRead = (reader: WithAuto & SmartLater) => {
     return last.getBoundingClientRect().bottom - room - container.getBoundingClientRect().top;
   };
 
-  /** Space, or the play button: go on after a reread, otherwise pause or carry on. */
+  /**
+   * Dotty is below the page: the reader went back above it, or it ran on
+   * without them. Space (or the play button) then reads from what they are
+   * looking at: Dotty comes up to the first line of the reading area, where
+   * it can be seen and dragged to the very line. False when Dotty is not
+   * below the page.
+   *
+   * Space used to carry on from Dotty, and the next page step took the page
+   * down to it: with Dotty out of sight there was no way to say "I am here".
+   * Going on from Dotty is still there: scroll down to it and it carries on.
+   */
+  const readFromHere = () => {
+    if (readerWordsStale() || wordIndexMissesView()) {
+      prepareReaderWords(false);
+    }
+    const container = ensureScrollContainer();
+    const words = readerWordsRef.current;
+    if (!container || words.length === 0 || !smartSessionRef.current) {
+      return false;
+    }
+    // Where Dotty is: the last line read when it rests at a picture (the word
+    // to read next is then below the picture), otherwise the word it is on.
+    const resting = smartPictureRef.current;
+    const place = resting?.before ?? words[Math.min(activeWordIndexRef.current, words.length - 1)];
+    const rect = place ? getReaderWordRect(place) : null;
+    if (!rect) {
+      return false;
+    }
+    const area = readingArea(container);
+    if (lineInArea(rect.top - container.getBoundingClientRect().top, area) !== "below") {
+      return false;
+    }
+    // The same line a catch-up takes the reader to be on: near the top.
+    const line = readingBand(area).top + area.lineHeight / 2;
+    const index = findNearestWordIndex(line / Math.max(1, container.clientHeight));
+    if (index >= activeWordIndexRef.current) {
+      return false;
+    }
+    cancelSmartCatchUp();
+    cancelSmartPageTurn();
+    stopWaitingForReread();
+    if (resting) {
+      smartPictureRef.current = null;
+      setSmartAtPicture(false);
+    }
+    // Going back says nothing about the pace: it is measured afresh from here.
+    moveSmartDotty(index);
+    smartManualOverrideUntilRef.current = 0;
+    // A beat for the eye to find Dotty before it sets off.
+    smartStepHoldUntilRef.current = Date.now() + 1200;
+    lastHandsOnAtRef.current = Date.now();
+    showFocusToast("Dotty came back to you.");
+    return true;
+  };
+
+  /** Space, or the play button: read from here when Dotty is below the page, otherwise pause or carry on. */
   const toggleSmartPlay = () => {
+    if (readFromHere()) {
+      readingPausedRef.current = false;
+      setReadingPaused(false);
+      return;
+    }
     if (goOnFromPicture()) {
       smartManualOverrideUntilRef.current = 0;
       readingPausedRef.current = false;
@@ -409,10 +469,10 @@ export const useSmartRead = (reader: WithAuto & SmartLater) => {
       return;
     }
     const area = readingArea(container);
-    const lineTop = rect.top - container.getBoundingClientRect().top;
+    const where = lineInArea(rect.top - container.getBoundingClientRect().top, area);
     // Dotty's line not wholly in view at the top is behind the reader: the same
     // test the page steps use, so the two never pull the page opposite ways.
-    if (lineTop < area.topInset) {
+    if (where === "above") {
       stopWaitingForReread();
       smartReaderAheadRef.current = true;
       if (smartCatchUpTimerRef.current) {
@@ -422,7 +482,7 @@ export const useSmartRead = (reader: WithAuto & SmartLater) => {
       return;
     }
     cancelSmartCatchUp();
-    if (lineTop > area.height - area.bottomInset) {
+    if (where === "below") {
       if (!smartRereadRef.current) {
         smartRereadRef.current = true;
         setSmartWaiting(true);

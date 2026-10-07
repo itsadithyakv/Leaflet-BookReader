@@ -126,3 +126,12 @@ export const pastPictureGap = (nextTop: number, area: ReadingArea) =>
  */
 export const isScrollCorrection = (scrollDelta: number, movedOnScreen: number | null) =>
   movedOnScreen !== null && Math.abs(scrollDelta) > 4 && Math.abs(movedOnScreen) <= 2;
+
+/**
+ * Where a line is against the reading area (its top, from the top of the
+ * window): above it, in it, or below it. Dotty's line above is the reader
+ * having read on past Dotty; below is the reader having gone back above it,
+ * or Dotty having run on without them.
+ */
+export const lineInArea = (lineTop: number, area: ReadingArea): "above" | "in" | "below" =>
+  lineTop < area.topInset ? "above" : lineTop > area.height - area.bottomInset ? "below" : "in";

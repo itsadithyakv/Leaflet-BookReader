@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { dotIsStranded } from "../readerDot";
+import { dotIsStranded, dragEdgeSpeed } from "../readerDot";
+import { type ReaderWord } from "../readerTypes";
 import type { WithCover, WithSmart } from "./scope";
 
 /** Dotty's width, in pixels (its look is in index.css). */
@@ -11,10 +12,10 @@ const DOT_SIZE = 7;
  */
 export const useReaderDot = (reader: WithSmart) => {
   const {
-    activeWordIndexRef, buildReadingWordState, contentsForCfi, ensureScrollContainer, findNearestWordIndex,
-    getReaderWordRect, initialPrefs, keptWordPlaceRef, layout, noteSmartDrag, programmaticScrollUntilRef,
-    readerWordsRef, readingModeRef, renditionRef, scrollContainerRef, setReadingWord, smartManualOverrideUntilRef,
-    wordSectionIdsRef
+    activeWordIndexRef, buildReadingWordState, cancelSmartPageTurn, contentsForCfi, ensureScrollContainer,
+    findNearestWordIndex, getReaderWordRect, initialPrefs, keptWordPlaceRef, layout, linePx, loadFurther,
+    noteSmartDrag, programmaticScrollUntilRef, readerWordsRef, readingModeRef, renditionRef, scrollContainerRef,
+    setReadingWord, smartManualOverrideUntilRef, wordSectionIdsRef
   } = reader;
   const lastMarkerRef = useRef<string | null>(null);
   const readerDotTimerRef = useRef<number | null>(null);
@@ -81,23 +82,94 @@ export const useReaderDot = (reader: WithSmart) => {
     element.setAttribute("aria-label", "Dotty reading position");
     element.setAttribute("aria-orientation", "vertical");
     element.setAttribute("aria-valuemin", "1");
-    element.title = "Drag Dotty to choose your reading start line";
+    element.title = "Drag Dotty to your line. Hold it at the top or bottom of the page to go further.";
     element.style.pointerEvents = "auto";
 
     let dragging = false;
     let pendingClientY = 0;
-    let gestureStartIndex = 0;
+    // The word the drag began on, not its number: a drag that scrolls the
+    // page brings chapters in above, which renumbers every word on it.
+    let gestureStart: ReaderWord | undefined;
+    // Held against the top or bottom of the window, the page scrolls under
+    // Dotty (readers/readerDot.ts), so it can be carried to a line that is
+    // not on screen. It used to stop at the window's first or last line.
+    let edgeFrame: number | null = null;
+    let edgeAt = 0;
+    let edgeCarry = 0;
+    let edgeAskedAt = 0;
+    let edgeScrolled = false;
     const moveToClientY = (clientY: number, commit = false) => {
       const rect = container.getBoundingClientRect();
-      const ratio = Math.min(0.98, Math.max(0.02, (clientY - rect.top) / Math.max(1, rect.height)));
-      applyUserReadingAnchor(
-        findNearestWordIndex(ratio),
-        commit ? { commitPaceFrom: gestureStartIndex } : undefined
-      );
+      // A line's height in from the top and the bottom: the line nearest the
+      // very edge is half off the page, and Dotty put there was out of sight.
+      const edge = Math.min(rect.height / 2, Math.max(rect.height * 0.02, linePx()));
+      const within = Math.min(rect.height - edge, Math.max(edge, clientY - rect.top));
+      const index = findNearestWordIndex(within / Math.max(1, rect.height));
+      if (commit) {
+        const began = gestureStart;
+        const from = began
+          ? readerWordsRef.current.findIndex((word) => word.node === began.node && word.start === began.start)
+          : -1;
+        // (Its chapter gone from the page: a long way, which says nothing about the pace.)
+        applyUserReadingAnchor(index, { commitPaceFrom: from >= 0 ? from : index });
+      } else {
+        applyUserReadingAnchor(index);
+      }
+      // Scrolling the drag did is the drag's, not the reader reading on or
+      // going back, while word of it is still arriving. (Placing Dotty
+      // clears this, so it is said again after each placing.)
+      if (edgeScrolled) {
+        programmaticScrollUntilRef.current = Date.now() + 250;
+      }
     };
+    const stopEdgeScroll = () => {
+      if (edgeFrame !== null) {
+        window.cancelAnimationFrame(edgeFrame);
+        edgeFrame = null;
+      }
+      edgeAt = 0;
+      edgeCarry = 0;
+    };
+    const edgeStep = (time: number) => {
+      edgeFrame = null;
+      const rect = container.getBoundingClientRect();
+      const speed = dragging ? dragEdgeSpeed(pendingClientY, rect.top, rect.bottom) : 0;
+      if (speed === 0) {
+        stopEdgeScroll();
+        return;
+      }
+      const elapsed = edgeAt ? Math.min(64, Math.max(0, time - edgeAt)) : 16;
+      edgeAt = time;
+      // Whole pixels, the rest carried over: a slow scroll is under one a frame.
+      const wanted = (speed * elapsed) / 1000 + edgeCarry;
+      const step = Math.trunc(wanted);
+      edgeCarry = wanted - step;
+      if (step !== 0) {
+        const before = container.scrollTop;
+        container.scrollTop = before + step;
+        if (container.scrollTop !== before) {
+          edgeScrolled = true;
+          moveToClientY(pendingClientY);
+        } else if (Date.now() - edgeAskedAt > 400) {
+          // At the end of what is on the page: the chapter beyond is asked for.
+          edgeAskedAt = Date.now();
+          loadFurther();
+        }
+      }
+      edgeFrame = window.requestAnimationFrame(edgeStep);
+    };
+    const startEdgeScroll = () => {
+      if (edgeFrame !== null) return;
+      const rect = container.getBoundingClientRect();
+      if (dragEdgeSpeed(pendingClientY, rect.top, rect.bottom) === 0) return;
+      cancelSmartPageTurn();
+      edgeFrame = window.requestAnimationFrame(edgeStep);
+    };
+
     element.onpointerdown = (event) => {
       dragging = true;
-      gestureStartIndex = readerDotAnchorIndexRef.current ?? activeWordIndexRef.current;
+      edgeScrolled = false;
+      gestureStart = readerWordsRef.current[readerDotAnchorIndexRef.current ?? activeWordIndexRef.current];
       pendingClientY = event.clientY;
       element.classList.add("reader-dot-dragging");
       element.dataset.dragging = "true";
@@ -107,6 +179,7 @@ export const useReaderDot = (reader: WithSmart) => {
     element.onpointermove = (event) => {
       if (!dragging) return;
       pendingClientY = event.clientY;
+      startEdgeScroll();
       if (readerDotDragFrameRef.current) return;
       readerDotDragFrameRef.current = window.requestAnimationFrame(() => {
         readerDotDragFrameRef.current = null;
@@ -116,6 +189,7 @@ export const useReaderDot = (reader: WithSmart) => {
     element.onpointerup = (event) => {
       if (!dragging) return;
       dragging = false;
+      stopEdgeScroll();
       element.classList.remove("reader-dot-dragging");
       delete element.dataset.dragging;
       if (element.hasPointerCapture(event.pointerId)) {
@@ -125,6 +199,7 @@ export const useReaderDot = (reader: WithSmart) => {
     };
     element.onpointercancel = () => {
       dragging = false;
+      stopEdgeScroll();
       element.classList.remove("reader-dot-dragging");
       delete element.dataset.dragging;
     };
