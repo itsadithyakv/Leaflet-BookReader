@@ -94,7 +94,16 @@ holds:**
   - Found and not fixed: an email is not verified at sign-up (a typo there
     means a reset can never arrive); removing a finished book lowers the
     count of books finished.
-- 2,365 app tests (254 new in 1.3), 591 Rust tests (42 new), `tsc` clean,
+- **Covers that went missing** (the owner: a famous novel, a PDF, at "No
+  cover yet"; features.md, "Metadata enrichment" and "A PDF with no cover
+  takes its first page"). The catalogue had the cover and the first page
+  made a good stand-in, so a lookup had failed once and stuck. Fixed: a
+  lookup with no answer is not stamped; a first page is a stand-in a real
+  cover replaces; the reader goes by the live book; schema 6 gives coverless
+  books another lookup, once. One lookup of that one title
+  was made by hand to see the catalogue's answer (the owner named the book);
+  no other title left this PC.
+- 2,368 app tests (257 new in 1.3), 595 Rust tests (46 new), `tsc` clean,
   `cargo clippy --all-targets` clean, `vite build` succeeds. The version is 1.3.1 in the five places deploy.md names.
 - **Asked for and not built: read aloud.** The voices Windows gives an app
   are the old flat ones (this PC has David, Zira and Mark only); a natural

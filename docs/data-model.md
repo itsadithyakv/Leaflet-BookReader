@@ -30,13 +30,13 @@ part way leaves the library as it was. The measurement is kept:
 | --- | --- |
 | `id` TEXT PK | SHA-256 of the file contents |
 | `title`, `author`, `genres` | `genres` is a JSON array |
-| `cover_url` | **Local** path to the cached cover. Never synced. |
+| `cover_url` | **Local** path to the cached cover. Never synced. A path ending `-page.jpg` is a PDF's first page standing in for one |
 | `local_path` | **Local** absolute path. Never synced. |
 | `file_hash` | Same as `id`; kept for the index |
 | `progress` REAL | 0–1 |
 | `position` TEXT | Exact place (EPUB CFI); `NULL` for page-based books. Written with `progress` |
 | `last_opened`, `created_at` | RFC 3339 |
-| `metadata_checked_at` | Drives the 14-day enrichment cooldown |
+| `metadata_checked_at` | Drives the 14-day enrichment cooldown. Stamped only when the catalogue answered (1.3.1) |
 | `metadata_updated_at` | When title/author/genres last changed |
 | `progress_updated_at` | When `progress` last changed — *not* when opened |
 | `finished_at` | When the reader finished the book (1.3, schema 5): stamped when `progress` reaches `FINISHED_AT` (0.99) from short of it, and by "Mark as finished". It stays through a second reading. `''` is the reader saying "not started"; `NULL` is never finished |
@@ -207,7 +207,7 @@ table as the fallback where no keychain exists.
 ## Migrations
 
 The schema is versioned with SQLite's `PRAGMA user_version`
-(`SCHEMA_VERSION` in `db/mod.rs`, currently **5**). `apply_schema()` runs
+(`SCHEMA_VERSION` in `db/mod.rs`, currently **6**). `apply_schema()` runs
 `CREATE TABLE IF NOT EXISTS` for everything at the latest shape, then
 `upgrade()` brings an older file forward one step at a time, in one
 transaction:
@@ -219,6 +219,7 @@ transaction:
 | 3 | `books.series`, `series_index`; `collections.book_ids`, `created_at`, `updated_at`, `deleted_at` |
 | 4 | `focus_sessions.flower`, `flower_bloomed` |
 | 5 | `books.finished_at`, filled for books already at their end from the day their progress last moved (which is what the app had been showing as the day they were finished) |
+| 6 | Nothing added: `metadata_checked_at` is cleared for books with no cover, once, because a lookup that got no answer used to be stamped as made |
 
 Columns are added only if missing (`add_column`), and only that case is
 forgiven: a full disk or a locked file is an error. Before any upgrade the file

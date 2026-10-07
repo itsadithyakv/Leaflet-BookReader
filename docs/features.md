@@ -65,6 +65,17 @@ site names. Results are cached with a `metadata_checked_at` stamp and a **14-day
 cooldown** — some books simply have no match upstream, and without the cooldown
 the app re-queried them on every launch forever.
 
+The stamp is for a lookup that was really made (1.3.1; `lookup_was_made`).
+A lookup that got no answer (offline, the catalogue slow or down) or was
+offered a cover that would not download used to be stamped all the same, so
+a famous book added at a bad moment went a fortnight with no cover: the
+owner's copy of a novel everyone knows sat at "No cover yet" while the
+catalogue had its cover all along. Unstamped, it is asked for again the next
+time the library loads. Schema 6 clears the stamp of every book still without
+a cover, once, so those get their turn again. Among a search's results the
+book is the closest title, then one with a cover, then the catalogue's first
+(`best_match`): it was the last of the equals, cover or none.
+
 **What a book is called** (`metadata/normalize.rs`, `identify`). The title,
 author, series and genres come from what the file says about itself (an EPUB's
 package, a Kindle book's header: `storage/epub.rs`, `storage/mobi.rs`) and,
@@ -110,11 +121,18 @@ the PDF's fills a gap unless it is an account's or a program's name
 stored one written properly, as when a site's file name lost a colon.
 
 **A PDF with no cover takes its first page** (`readers/pageCover.ts`,
-`save_page_cover`): drawn once, 600 px wide, 2.5 s after the book is first
-opened once a lookup has had its turn, saved as every cover is (a real image,
-the thumbnail made) and never in place of one. A blank first page is not
-used. A cover that exists is always kept, so a lookup that succeeds later
-does not replace a first page.
+`save_page_cover`): drawn 600 px wide, 2.5 s after the book is open and a
+lookup has had its turn (answered or not, in this run of the app or before),
+and never in place of a cover. A blank first page is not used. Since 1.3.1
+the page is a stand-in, kept as `<hash>-page.jpg` beside where a real cover
+goes: the book still counts as one to look up, and a lookup that finds its
+real cover replaces the page (`storage::is_page_cover`, `isStandInCover`).
+Before, a title page saved after a failed lookup was the cover for good. The
+reader also goes by the library as it is now and not by the book as it was
+when it opened: a PDF opened straight after being added, with its lookup
+still out, never got its page until it was opened a second time. And a
+lookup that ends after a page was saved keeps the page in the database (it
+used to write back the "no cover" it had read at its start).
 
 **The import dialog says what happened**, as a drop does
 (`import_books_report`, `library/importSummary.ts`): how many books were
