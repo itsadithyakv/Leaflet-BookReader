@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Book } from "@shared/models/book";
 import { useCollectionStore } from "../store/collectionStore";
-import { getBookExtension, isPageImageFormat } from "../constants/bookFormats";
+import { getBookExtension, isHighlightableFormat } from "../constants/bookFormats";
 import { openHighlights, useHighlightsStore } from "./highlights/highlightsStore";
 import { openSeriesEditor } from "./SeriesEditor";
 import { UiIcon } from "./UiIcon";
@@ -38,8 +38,8 @@ export const BookMenu = ({ book, actions = [], className = "" }: Props) => {
   const load = useCollectionStore((state) => state.load);
   const toggleBook = useCollectionStore((state) => state.toggleBook);
   const create = useCollectionStore((state) => state.create);
-  // Only books read as text can be highlighted; a PDF or a comic has none to show.
-  const highlightable = !isPageImageFormat(getBookExtension(book.localPath));
+  // A book of words can be highlighted (a PDF too, since 1.3); a comic has none to show.
+  const highlightable = isHighlightableFormat(getBookExtension(book.localPath));
   const highlightCount = useHighlightsStore((state) => state.counts[book.id] ?? 0);
 
   useLayoutEffect(() => {

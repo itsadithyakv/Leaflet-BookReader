@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { EpubCFI } from "epubjs";
+import { comparePlaces, isPdfPlace } from "../../readers/pdfHighlights";
 import type { Book } from "@shared/models/book";
 import { annotationService, type Annotation } from "../../services/annotationService";
 import { HIGHLIGHT_COLORS } from "../../readers/highlightColors";
@@ -210,9 +211,10 @@ const BookView = ({
   // The same order as the reader's own list: by place in the book.
   const highlights = useMemo(() => {
     const cfi = new EpubCFI();
+    // A PDF's places are pages and lines, not CFIs (readers/pdfHighlights.ts).
     return orderHighlights(
       (items ?? []).filter((item) => item.kind === "highlight"),
-      (a, b) => cfi.compare(a, b)
+      (a, b) => (isPdfPlace(a) || isPdfPlace(b) ? comparePlaces(a, b) : cfi.compare(a, b))
     );
   }, [items]);
   const groups = useMemo(() => groupByChapter(highlights), [highlights]);

@@ -38,6 +38,7 @@ import { currentMark, pageMarks, type MeasureText, type PageRect } from "./pdfTe
 import { PdfLinkAreas, bindLinkPointer } from "./PdfLinkAreas";
 import type { PageLink } from "./pdfLinks";
 import { bindTextSelection } from "./pdfTextLayer";
+import { PdfHighlightMarks, type PageHighlight } from "./usePdfNotes";
 
 export { placeToOpen, type StoredPlace } from "./pageScroll";
 
@@ -79,6 +80,8 @@ type PdfScrollPagesProps = {
   initialPlace: OpenPlace;
   /** The phrase a search is marking, and the result chosen. */
   searchQuery: string;
+  /** The reader's highlights, by page (from 1). */
+  highlights?: Map<number, PageHighlight[]>;
   activeHit: PdfSearchHit | null;
   onPage: (page: number) => void;
   /** The scale the pages are at, and the size (at scale 1) it was worked out for. */
@@ -137,6 +140,8 @@ type ScrollPageProps = {
   marks: PageRect[][] | undefined;
   currentMark: number | null;
   links: PageLink[] | undefined;
+  /** The reader's highlights on this page (readers/usePdfNotes.tsx). */
+  highlights: PageHighlight[] | undefined;
   onLink: (link: PageLink) => void;
   register: (index: number, canvas: HTMLCanvasElement | null, layer: HTMLDivElement | null) => void;
 };
@@ -208,6 +213,7 @@ const ScrollPage = memo((props: ScrollPageProps) => {
           ))
         )}
       </div>
+      <PdfHighlightMarks highlights={props.highlights} />
       {links.length > 0 && <PdfLinkAreas links={links} onFollow={props.onLink} />}
       <div ref={layer} className="textLayer" />
     </div>
@@ -989,6 +995,7 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
         marks={marks.query === searchQuery ? marks.pages.get(index)?.rects : undefined}
         currentMark={marks.query === searchQuery ? currentMark(activeHit, index + 1, marks.pages.get(index)) : null}
         links={links.get(index)}
+        highlights={props.highlights?.get(index + 1)}
         onLink={followLink}
         register={register}
       />

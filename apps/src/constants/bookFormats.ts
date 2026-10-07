@@ -82,6 +82,9 @@ export const isPageImageFormat = (extension: string) => {
   return delivery === "pdf" || delivery === "comic";
 };
 
+/** A book with words to highlight: read as text, or a PDF. A comic is pictures. */
+export const isHighlightableFormat = (extension: string) => findBookFormat(extension)?.delivery !== "comic";
+
 export const getBookExtension = (path: string) => path.split(".").pop()?.toLowerCase() ?? "";
 
 export const findBookFormat = (extension: string) =>

@@ -12,11 +12,22 @@ const newId = () =>
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
+type Options = {
+  /**
+   * False in the page reader, which keeps a PDF's bookmarks (pages, not
+   * CFIs) under the very key a book's old bookmarks are moved from: moved,
+   * they would be thrown away.
+   */
+  moveOldBookmarks?: boolean;
+  /** False where there is nothing to keep (a comic): nothing is read. */
+  enabled?: boolean;
+};
+
 /**
  * A book's bookmarks and highlights, kept in the database (and so in the
  * backup). Changes schedule a backup, like closing a book does.
  */
-export const useAnnotations = (bookId: string) => {
+export const useAnnotations = (bookId: string, { moveOldBookmarks = true, enabled = true }: Options = {}) => {
   const [items, setItems] = useState<Annotation[]>([]);
   const requestBackup = useLibraryStore((state) => state.requestBackup);
 
@@ -25,6 +36,9 @@ export const useAnnotations = (bookId: string) => {
     const load = async () => {
       // Bookmarks from before the database move over once.
       try {
+        if (!moveOldBookmarks) {
+          throw new Error("not this reader's to move");
+        }
         const raw = localStorage.getItem(legacyKey(bookId));
         const legacy = raw ? (JSON.parse(raw) as LegacyBookmark[]) : [];
         if (Array.isArray(legacy) && legacy.length > 0) {
@@ -50,11 +64,13 @@ export const useAnnotations = (bookId: string) => {
       }
     };
     setItems([]);
-    void load();
+    if (enabled) {
+      void load();
+    }
     return () => {
       live = false;
     };
-  }, [bookId]);
+  }, [bookId, enabled, moveOldBookmarks]);
 
   const save = useCallback(
     async (input: AnnotationInput) => {

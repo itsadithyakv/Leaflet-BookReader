@@ -66,6 +66,12 @@ import { PdfSearchPanel } from "../readers/PdfSearchPanel";
 import type { PdfSearchHit } from "../readers/pdfSearch";
 import { currentMark, pageMarks, type MeasureText, type PageRect } from "../readers/pdfText";
 import { bindTextSelection } from "../readers/pdfTextLayer";
+import { AnnotationsPanel } from "../readers/AnnotationsPanel";
+import { decodePlace, pagePlace } from "../readers/pdfHighlights";
+import { highlightsMarkdown } from "../readers/useAnnotations";
+import { PdfHighlightMarks, usePdfNotes } from "../readers/usePdfNotes";
+import type { Annotation } from "../services/annotationService";
+import { openQuoteCard } from "../components/share/shareStore";
 import { ShortcutsSheet } from "../readers/ShortcutsSheet";
 import { ReaderAmbience, ReaderAmbienceRow, ambiencePopoverOpen, closeAmbiencePopover, useAmbiencePopoverOpen } from "../ambience";
 import { Redo2, Undo2 } from "lucide-react";
@@ -85,6 +91,8 @@ type PageReaderViewProps = {
   book: Book;
   kind: PageReaderKind;
   onClose: () => void;
+  /** A highlight to open the PDF at ("Open in book" from the Library's highlights): readers/pdfHighlights.ts. */
+  openAt?: string | null;
 };
 
 type ReaderDisplayMode = "paper" | "dark-paper" | "true-white" | "true-black" | "app";
@@ -241,7 +249,7 @@ const FIT_CHOICES: Array<{ fit: PageFit; label: string; hint: string }> = [
   { fit: "actual", label: "100%", hint: "Actual size (Ctrl+0)" }
 ];
 
-export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => {
+export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReaderViewProps) => {
   // Focus lock: leaving the book mid-session takes intent (see the hook).
   const exitGuard = useFocusLockExit(onClose);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -323,6 +331,29 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
   const [searchQuery, setSearchQuery] = useState("");
   const [activeHit, setActiveHit] = useState<PdfSearchHit | null>(null);
   const [marks, setMarks] = useState<PageMarks>(NO_MARKS);
+  /** The highlight the list of notes opens on ("All notes" from its card). */
+  const [notesFocus, setNotesFocus] = useState<string | null>(null);
+  /** A word or two about what was just done ("Highlighted."), for a moment. */
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+  const showToast = useCallback((message: string) => {
+    setToast(message);
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = window.setTimeout(() => {
+      toastTimerRef.current = null;
+      setToast(null);
+    }, 2200);
+  }, []);
+  useEffect(
+    () => () => {
+      if (toastTimerRef.current !== null) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+    },
+    []
+  );
   const [links, setLinks] = useState<PageLinks>(NO_PAGE_LINKS);
   const pageBoxRef = useRef<HTMLDivElement>(null);
   const [goToOpen, setGoToOpen] = useState(false);
@@ -555,6 +586,17 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
     },
     [goToPage, noteJumpFromHere]
   );
+
+  // Opened at a highlight: its page is gone to as a jump, so Back returns to where the reading stopped.
+  const openedAtRef = useRef<string | null>(null);
+  useEffect(() => {
+    const page = decodePlace(openAt)?.page;
+    if (!page || !pdf || loading || pageCount <= 0 || openedAtRef.current === openAt) {
+      return;
+    }
+    openedAtRef.current = openAt;
+    jumpToPage(Math.min(pageCount, page));
+  }, [jumpToPage, loading, openAt, pageCount, pdf]);
 
   const goBack = useCallback(() => {
     const step = stepBack(jumpsRef.current, lineNow());
@@ -1708,6 +1750,34 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
   const shownLinks = links.page === drawnPage ? links.items : NO_PAGE_LINKS.items;
   linksRef.current = shownLinks;
 
+  // Highlights and notes on a PDF's pages (readers/usePdfNotes.tsx). A comic has no words to mark.
+  const notes = usePdfNotes({
+    bookId: book.id,
+    enabled: kind === "pdf" && Boolean(pdf) && !loading,
+    stageRef: scrollRef,
+    labelOf: (page) => chapterOf(page) ?? `Page ${page}`,
+    progress: () => percent / 100,
+    onShowAll: (id) => {
+      setNotesFocus(id);
+      setBookmarkPanelOpen(true);
+    },
+    onShare: (text) => openQuoteCard({ text, title: book.title, author: book.author }),
+    toast: showToast
+  });
+  // A PDF's bookmarks are pages, kept on this device; in the list of notes they sit beside the highlights.
+  const bookmarkNotes: Annotation[] = orderedBookmarks.map((bookmark) => {
+    const chapter = chapterOf(bookmark.page);
+    return {
+      id: bookmark.id,
+      bookId: book.id,
+      kind: "bookmark",
+      cfi: pagePlace(bookmark.page),
+      chapter: chapter ? `${bookmark.label} · ${chapter}` : bookmark.label,
+      createdAt: bookmark.createdAt,
+      updatedAt: bookmark.createdAt
+    };
+  });
+
   return (
     <div
       className={`reader-scope pdf-reader page-reader fixed inset-0 z-50 h-full w-full overflow-hidden reader-bg ${
@@ -1850,14 +1920,51 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
             <button
               className={`reader-icon transition-colors reader-hover-accent ${pageBookmarked ? "page-reader-toolbar-on" : ""}`}
               type="button"
-              onClick={() => setBookmarkPanelOpen((open) => !open)}
-              title="Bookmarks (B bookmarks this page)"
-              aria-label={pageBookmarked ? "Bookmarks: this page is bookmarked" : "Bookmarks"}
+              onClick={() => {
+                setNotesFocus(null);
+                setBookmarkPanelOpen((open) => !open);
+              }}
+              title={kind === "pdf" ? "Notes: highlights and bookmarks (B bookmarks this page)" : "Bookmarks (B bookmarks this page)"}
+              aria-label={pageBookmarked ? "Bookmarks: this page is bookmarked" : kind === "pdf" ? "Notes: highlights and bookmarks" : "Bookmarks"}
               aria-expanded={bookmarkPanelOpen}
             >
               <span className="material-symbols-outlined">bookmark</span>
             </button>
-            {bookmarkPanelOpen && (
+            {bookmarkPanelOpen && kind === "pdf" && (
+              <AnnotationsPanel
+                key={notesFocus ?? "notes"}
+                bookmarks={bookmarkNotes}
+                highlights={notes.highlights}
+                focusId={notesFocus}
+                addBookmarkLabel={pageBookmarked ? "Remove this page's bookmark" : "Bookmark this page"}
+                onAddBookmark={toggleCurrentBookmark}
+                onOpen={(place) => {
+                  const page = decodePlace(place)?.page;
+                  if (page) {
+                    jumpToPage(page);
+                    setNotesFocus(null);
+                    setBookmarkPanelOpen(false);
+                  }
+                }}
+                onRemove={(id) => {
+                  if (bookmarks.some((bookmark) => bookmark.id === id)) {
+                    saveBookmarks(removeBookmark(bookmarks, id));
+                  } else {
+                    void notes.remove(id);
+                  }
+                }}
+                onSaveNote={(id, note) => void notes.update(id, { note: note || null })}
+                onRecolor={(id, color) => void notes.update(id, { color })}
+                onCopy={notes.copy}
+                onShare={(item) => openQuoteCard({ text: item.text ?? "", title: book.title, author: book.author })}
+                onExport={() => notes.copy(highlightsMarkdown(book.title, book.author, notes.highlights))}
+                onClose={() => {
+                  setNotesFocus(null);
+                  setBookmarkPanelOpen(false);
+                }}
+              />
+            )}
+            {bookmarkPanelOpen && kind !== "pdf" && (
               <div className="reader-menu absolute right-0 mt-3 w-72 rounded-xl border p-4 text-xs shadow-2xl reader-panel reader-border">
                 <div className="flex items-center justify-between">
                   <span className="text-xs uppercase tracking-widest reader-muted">Bookmarks</span>
@@ -2233,6 +2340,7 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
                     onPlace={savePlace}
                     onActivity={markReadingActivity}
                     onLink={followLink}
+                    highlights={notes.onPage}
                   />
                 )}
                 {!loading && source && !scrolling && (
@@ -2243,6 +2351,7 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
                     }`}
                     style={tone ? { background: toneCss(tone.paper) } : undefined}
                     data-dark={tone?.dark ? "true" : undefined}
+                    data-page={pdf && drawnPage > 0 ? drawnPage : undefined}
                     onClick={
                       kind === "comic"
                         ? (event) => {
@@ -2276,6 +2385,7 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
                             ))
                           )}
                         </div>
+                        <PdfHighlightMarks highlights={notes.onPage.get(drawnPage)} />
                         {shownLinks.length > 0 && <PdfLinkAreas links={shownLinks} onFollow={followLink} />}
                         <div ref={textLayerRef} className="textLayer" />
                       </>
@@ -2396,6 +2506,16 @@ export const PageReaderView = ({ book, kind, onClose }: PageReaderViewProps) => 
           )}
         </main>
       </div>
+
+      {notes.dock}
+
+      {toast && (
+        <div className="reader-toast fixed bottom-6 right-6 z-[60]" role="status">
+          <div className="rounded-full border px-4 py-2 text-[10px] uppercase tracking-widest shadow-xl reader-panel reader-border reader-muted">
+            {toast}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

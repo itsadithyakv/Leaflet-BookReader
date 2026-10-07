@@ -18,6 +18,39 @@
   pointer-events: none;
 }
 
+/* The reader's highlights (readers/usePdfNotes.tsx): the same, in the
+   highlight's own colour. Laid over the picture of the page and blended into
+   it, so the words stay as dark as they were, the way a highlighter leaves
+   them; on a dark finish the colour is laid thinly on top instead, where
+   blending would leave nothing to see. */
+.pdf-reader-highlights {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.pdf-reader-highlight {
+  position: absolute;
+  border-radius: 2px;
+  opacity: 0.5;
+  mix-blend-mode: multiply;
+}
+
+.pdf-reader-page[data-dark="true"] .pdf-reader-highlight {
+  opacity: 0.3;
+  mix-blend-mode: normal;
+}
+
+/* The selection bar, and an open highlight in its card, over the foot of the page. */
+.pdf-notes-dock {
+  position: fixed;
+  bottom: 76px;
+  left: 50%;
+  z-index: 46;
+  transform: translateX(-50%);
+}
+
 /* The mark's place is worked out from the run's width, not its letters, so
    it is given a little to spare each side. */
 .pdf-reader-mark {
