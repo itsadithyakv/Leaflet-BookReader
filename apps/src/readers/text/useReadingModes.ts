@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { watchForeground } from "../../services/windowService";
+import { keepAwake } from "../../services/keepAwake";
 import { type ReadingMode, type ReaderWord } from "../readerTypes";
 import { PAGE_TOP_PAD } from "../finish";
 import { rsvpStageVars, rsvpRamp, HANDS_FREE_GRACE_MS, getPaceFactor } from "../pacing";
@@ -113,6 +114,22 @@ export const useReadingModes = (reader: WithPanels) => {
     startPausedRef, speedReadWpm, setSpeedReadWpm, requestReadingMode, beginReadingMode, rsvpPivot, rsvpWordStyle,
     rsvpMinutesLeft, rsvpProgress, dockAbovePace
   };
+};
+
+/**
+ * Keeps the screen on while the page is reading itself: auto-scroll running,
+ * or Dotty or word by word not paused. Those pause by themselves when the
+ * reader has gone quiet for long enough ("Still reading?") or the window is
+ * left, and the screen is let go with them.
+ */
+export const useAwakeWhileReading = (reader: WithCover) => {
+  const { autoScrollActive, readingMode, readingPaused } = reader;
+  const reading = autoScrollActive || (readingMode !== "standard" && !readingPaused);
+  useEffect(() => {
+    keepAwake(reading);
+  }, [reading]);
+  // Closing the book lets go whatever was playing.
+  useEffect(() => () => keepAwake(false), []);
 };
 
 /** What hands-free reading is waiting on while something lies over the text. */
