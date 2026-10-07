@@ -80,11 +80,13 @@ one, we store the following on our server:
   reading sessions, and the date of the last day you read on, which is used
   only to tell a friend (a reader you follow who also follows you) that you
   have read today; the date itself is never shown to anyone. See "Your profile" below.
-- **Synced reading state** (when leaderboards and cross-device features are on):
-  a compressed copy of your progress and reading history, so your devices agree.
-  It includes your highlights, notes, bookmarks and collections if you have
-  any, and never your book files. We cannot read it: it is stored as you send
-  it and used only to give it back to your devices.
+- **Synced reading state** (only while you are signed in and either a Google
+  Drive backup is connected, or you have turned on "Back up reading to my
+  Leaflet account" in Settings): a compressed copy of your progress and
+  reading history, so your devices agree. It includes your highlights, notes,
+  bookmarks and collections if you have any, and never your book files. We do
+  not read it: it is stored as you send it and used only to give it back to
+  your devices. It is compressed, not encrypted.
 
 We use this information only to run your account and the features you turn on.
 We do not sell it, rent it, or use it for advertising.

@@ -39,6 +39,7 @@ part way leaves the library as it was. The measurement is kept:
 | `metadata_checked_at` | Drives the 14-day enrichment cooldown |
 | `metadata_updated_at` | When title/author/genres last changed |
 | `progress_updated_at` | When `progress` last changed — *not* when opened |
+| `finished_at` | When the reader finished the book (1.3, schema 5): stamped when `progress` reaches `FINISHED_AT` (0.99) from short of it, and by "Mark as finished". It stays through a second reading. `''` is the reader saying "not started"; `NULL` is never finished |
 | `deleted_at` | Tombstone; the row survives so the deletion can travel |
 | `series`, `series_index` | From the book's own metadata or set by the reader; `""` means "not in a series". Part of the metadata group. Most books leave these `NULL` and the app works the series out (`src/library/series.ts`) |
 
@@ -206,7 +207,7 @@ table as the fallback where no keychain exists.
 ## Migrations
 
 The schema is versioned with SQLite's `PRAGMA user_version`
-(`SCHEMA_VERSION` in `db/mod.rs`, currently **4**). `apply_schema()` runs
+(`SCHEMA_VERSION` in `db/mod.rs`, currently **5**). `apply_schema()` runs
 `CREATE TABLE IF NOT EXISTS` for everything at the latest shape, then
 `upgrade()` brings an older file forward one step at a time, in one
 transaction:
@@ -217,6 +218,7 @@ transaction:
 | 2 | `annotations` |
 | 3 | `books.series`, `series_index`; `collections.book_ids`, `created_at`, `updated_at`, `deleted_at` |
 | 4 | `focus_sessions.flower`, `flower_bloomed` |
+| 5 | `books.finished_at`, filled for books already at their end from the day their progress last moved (which is what the app had been showing as the day they were finished) |
 
 Columns are added only if missing (`add_column`), and only that case is
 forgiven: a full disk or a locked file is an error. Before any upgrade the file
@@ -249,6 +251,7 @@ Defined in `sync/merge.rs`. This is what crosses between devices — as
       "progress": 0.42,
       "position": "epubcfi(…)",   // optional; travels with progress
       "progressUpdatedAt": "…",   // distinct from lastOpened, on purpose
+      "finishedAt": "…",          // optional: when it was finished; "" = "not started"
       "lastOpened": "…",
       "createdAt": "…",
       "deletedAt": null           // tombstone
@@ -288,6 +291,13 @@ Book files live beside it as `books/<sha256>.<ext>` and are fetched on demand.
   position; never lose a reader's place. `position` (the CFI) is taken from the
   same winner, even when it has none, so a percentage is never paired with
   another device's place. Documents without the field parse as `null`.
+- **Finished date** — the later of the two stands (a book read twice was last
+  finished the second time). A side that says nothing never takes the other's
+  away, which is what a device on a version before 1.3 does: it drops the field
+  and its newer progress still wins without losing the date. A side that says
+  "not started" (`""`) does take it away, unless the other finished the book
+  after that side's progress last moved (the nearest thing there is to when it
+  was said).
 - **`lastOpened`** — the maximum; it is not a contested value.
 - **`createdAt`** — the minimum; the earliest import is the truth.
 - **Deletion** — holds unless the other device edited the book *after* it, which

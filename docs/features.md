@@ -142,6 +142,36 @@ thumbnail (`<sha256>-thumb.jpg`, 360 px, made once) rather than the full cover,
 through one cached hook (`hooks/useCoverSrc.ts`). Metadata lookups run three at
 a time with a 15-second timeout, and write to the library in batches.
 
+**Search inside books** (1.3; the row under the library's search box, in the
+app only): the words typed are looked for in the text of every EPUB in the
+library, and of the EPUB kept beside a Kindle book or a text file that has
+been opened once. A book is never converted for the sake of a search, and
+PDFs and comics have no text to read, so they are counted as "not searched".
+Each book is read a section at a time in reading order: the markup is taken
+off by hand (a parser stops at the first unclosed `<br>`), scripts, styles and
+the head are left out, and a paragraph's end parts two words where an `<em>`
+does not. Matching is the in-book search's: whatever the case, without the
+accents typed, and a typed apostrophe finds a curly one (the in-book search
+gained that too, so the two agree). Every match is counted and the first five
+of a book are shown with about sixty characters each side, cut between words;
+books arrive as they are finished, the most recently read first, and end
+sorted by count. A newer search stops the one before it. Fourteen books
+(17 MB of text) take about a third of a second in an optimised build.
+Picking a match opens the book there: the place is the section, which of its
+matches, and the words (`find:<spine>:<nth>:<href>` and the words on a second
+line), found again once the book is open and marked like a result of the
+in-book search, with that search open on the same words. It is a look, as a
+highlight opened from the library is: the saved place stays where the reading
+stopped until the reader stays two minutes. When the words are no longer in
+the section the book opens at its start; when the section is gone, where the
+reading stopped. `src-tauri/src/search.rs`, `readers/findPlace.ts`,
+`components/search/`. The two sides read a section's text by the same rules
+and have to change together. Checked: opening at a match in the preview (the
+41st of 107 in a chapter came to the top of the window, the find panel open on
+the words, the saved place untouched). Not checked: the dialog itself and the
+command over IPC, which need the app. Accents beyond Latin European letters
+must be typed in the library search (the in-book search folds everything).
+
 ### Series, shelves and collections — `pages/CollectionsPage.tsx`
 
 **Series gather by themselves** (`library/series.ts`). A book's series comes
@@ -770,6 +800,43 @@ not be highlighted at all before.
   the highlight is not kept out of the saved place when a PDF is opened at
   one (a book opened at a highlight is "a look" for two minutes; a PDF is
   simply taken there).
+
+**Highlights from a Kindle** (1.3; `library/kindleClippings.ts`,
+`library/kindleImport.ts`, `components/highlights/KindleImport.tsx`). "Import
+from Kindle…" at the foot of the Library's Highlights view takes the `My
+Clippings.txt` a Kindle keeps and adds its highlights and notes to the books
+the library already has. The file is read by the page itself and goes
+nowhere. A highlight the Kindle wrote again after an edit is kept once, as it
+was last; a note goes with the highlight it was written on (a note with no
+highlight is kept by itself); bookmarks, empty entries and those the Kindle
+would not copy (the publisher's clipping limit) are left out. Only the
+English wording is understood: an entry in another language is kept, with no
+place and no date. A book is found by its title, and its author when both
+sides name one ("Voss, Maren" is "Maren Voss"; a series in brackets or a
+subtitle on one side only does not matter); a title that fits two books is
+not guessed at. Before anything is added, one line says how many highlights
+for how many books, how many are here already, and how many books were not
+found (their titles when that is pointed at). A Kindle location is not a
+place in the book's file, so these highlights are kept at
+`kindle:<location>`, as a PDF's are at `pdf:…`: listed after the book's own,
+in the Kindle's order, under its page or location, with a small "Kindle" tag,
+and never drawn or gone to. Each keeps the Kindle's date (`annotation_save`
+takes an optional creation time, used only for a new row). Its id comes from
+the book, the place and the words, so the same file imported again adds
+nothing and changes nothing. Known: one removed in Leaflet comes back if the
+file is imported again, and one edited on the Kindle since arrives as a
+second row. Checked in the preview with an invented file (a highlight, its
+note, a book not in the library); not with a real Kindle's.
+
+**A highlight from the past, once a day** (1.3;
+`components/highlights/DailyHighlight.tsx`, `highlightOfTheDay.ts`). The
+library page shows one of the reader's own highlights between the top of the
+page and the books: the passage (two lines of it), its book, and a cross that
+puts it away until tomorrow. Pressing it opens the book there, as "Open in
+book" does. Which one is settled by the date, so it is the same all day: a
+book is chosen as likely as it has highlights, then one of its highlights,
+from a week or more ago when there is one. Nothing shows with no highlights.
+One list call a day; nothing leaves the device.
 
 **Highlights outside the reader** (`components/highlights/`). The Library's
 **Highlights** button lists every book that has highlights, with a count
@@ -1483,6 +1550,30 @@ gutters, the scrollbar) uses them. These used to follow the app theme, so a
 dark page under a light app showed pale strips and a white scrollbar track down
 the sides.
 
+### Your own font
+
+(1.3.) The type panel lists the reader's own fonts after the faces that come
+with the system, and an "Add a font…" tile picks a file: TrueType, OpenType,
+WOFF or WOFF2, up to 10 MB, twelve at most. Leaflet goes by the file's first
+bytes, not its name, and says so plainly when it is something else (a `.ttc`
+collection is several fonts in one file and is refused). The file is copied
+into `fonts/` in the app's data folder under a name made from its contents,
+with what it was called kept in `index.json` beside it
+(`src-tauri/src/fonts.rs`); nothing goes into the database, the backup or
+sync, and "Delete All Data" removes the folder. The typeface chosen is then
+`custom:<id>` (`readers/customFonts.ts`). The book opens without waiting for
+the font: its bytes are asked for separately and reach the page as a data
+URL, each chapter gets an `@font-face` for it, and the text shows in the book
+serif until it is drawn, and stays in it if the font is no longer there, with
+nothing said. Each font has a small cross to remove it; removing the one in
+use goes back to the book serif. Bold and italic are the browser's own from
+the one file. The PDF and comic readers have no typeface and are unchanged.
+Not in the browser preview, which has no files to add one from, so none of
+it has been seen running: the panel's layout, a real font in a chapter, and
+whether the saved line holds when a wide font replaces the serif a moment
+after the book opens (if it drifts: wait on `doc.fonts.load()` before the
+cover lifts in `useBookOpening`).
+
 ### Line length
 
 Lines no longer run the whole window: the text sits in a centred column,
@@ -1701,6 +1792,18 @@ a dark stage and the paper finish stays paper.
 
 Controls: Space pauses, `+`/`-` change the pace by 20 WPM, and the − / play / +
 buttons under the passage do the same.
+
+### The screen stays on
+
+While the page reads itself (auto-scroll running, or Dotty or word by word
+not paused) the app asks Windows to keep the display on (`keep_awake`,
+`commands/power.rs`: `SetThreadExecutionState`; `services/keepAwake.ts`,
+`useAwakeWhileReading`). There is no key and no mouse in those modes, so
+Windows took the reader for away and dimmed the page under them. It is let go
+the moment they pause, which they do by themselves when the reader has gone
+quiet ("Still reading?") or leaves the window, and when the book is closed.
+In a browser it is the screen wake lock where there is one. Not checked on a
+real screen: it needs a build and the patience to wait out a display timeout.
 
 ### Auto-scroll
 
@@ -2658,6 +2761,31 @@ minutes from the day ledger, the week from Monday in your own time zone, and
 in Rust. The library count, the book card label, Pip's celebration and the
 published profile all read it.
 
+**Finished, with a date** (1.3). Finishing used to be read off progress and
+nothing else, so reading a book again un-finished it (on the reader's stats,
+their public card and the year in review) and nothing knew when it had been
+finished. A book now keeps the day (`books.finished_at`, data-model.md):
+stamped when its progress reaches the end, and filled for books already there
+when 1.3 first opens the library. Two rules follow, both in
+`constants/books.ts`: `isFinished(progress)` is where the book is now, which
+is what a shelf and a card's label go by; `hasFinished(book)` is whether it
+has ever been finished, which is what a count goes by (books finished here
+and on the public card, the year in review, the goal). A book's menu has
+**Mark as finished** (it goes to its end, dated now) and **Mark as not
+started** (back to the start, no place kept, the date cleared on every
+device). Still true: removing a finished book from the library takes it out
+of the count.
+
+**A goal of books for the year** (1.3; `components/goal/`). A card on Stats:
+"7 of 20 books", a bar, and the pace in a word or two ("On pace", "3 ahead",
+"2 behind", in whole books; within a book of the pace is on it). The pace runs
+from the day the goal was set, with what had been read by then: what was
+left to read, spread evenly over what was left of the year. From January it
+made a goal of twenty set in October "8 behind" on its first day. The pencil
+changes it (and starts the pace again from today); with none set the card is
+one line offering to. Counted from finished dates in the year. Kept on this
+device, a goal a year (`leaflet.goal.booksPerYear`).
+
 ### The session bookshelf
 
 Every finished focus session becomes a spine, and every visual property means
@@ -2760,6 +2888,22 @@ ships (see [product.md](product.md)). `sync_now` runs one at a time (a lock in
 `AppState`), because two simultaneous first syncs used to create two
 `state.json` files in Drive.
 
+**Backing up to the Leaflet account alone** (1.3). The account's copy of the
+reading state used to ride along with a Drive or folder backup and never went
+by itself, so a reader with an account and no Drive had nothing kept but
+their numbers on the board. Settings, Backup has a switch for signed-in
+readers, "Back up reading to my Leaflet account", off until chosen
+(`cloud::backs_up_alone`, the setting `cloud_backup_alone`,
+`set_account_backup`). On, a backup runs with the account as its only
+transport, at launch and after changes like any other. It carries the
+reading (progress, highlights, days, Pip) and never book files, so on a
+second computer the books are listed and each needs its file added again;
+the message says so. Signing out, or deleting the account, turns it off.
+Turning it off sends nothing more and leaves what the account holds. It is a
+choice and not a default because it sends the reading to Leaflet's server,
+which a Drive backup does not: making it the default is the owner's to
+decide, with the privacy policy.
+
 The transports below share one set of rules.
 
 ### The document
@@ -2838,6 +2982,12 @@ leaderboards now and for one identity across devices when the mobile app ships.
 - Sessions: a random token returned once; the server stores only its SHA-256,
   expiring 90 days after last use. On the device the token lives in Windows
   Credential Manager, never in SQLite or `localStorage`.
+- The name: an account has one and so does the profile (the profile's is
+  the one other readers see; the account's is what the app shows by the
+  reader's avatar). They were set together only at sign-up, so a name changed
+  on Social left the old one in the sidebar for good. Saving the profile now
+  sends the name to both (`cloud::set_display_name`, `PATCH /v1/account`),
+  and the sidebar follows without a restart. No server change.
 - Avatars: signing up means picking a Pip (a skin plus a signature move, stored
   as `skin.move`, e.g. `wizard.magic`) from the catalogue in `pip/avatars.ts`,
   preselected at random; the You card on Social → Community swaps it later, and

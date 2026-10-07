@@ -9,8 +9,9 @@ is in [deploy.md](deploy.md) (the checklist) and
 
 **2026-10-07: 1.2 is released (the owner built and shipped it from
 `release/1.2` at `8553264`). Work is now on the branch `release/1.3`, version
-1.3.0, made off that commit. It is committed and pushed (`origin/release/1.3`),
-and not yet built: the package needs the owner's two Google values, in the
+1.3.1, made off that commit (1.3.0 was never built: the owner asked for nine
+more features and for the whole to go out as 1.3.1). It is committed and
+pushed (`origin/release/1.3`), and not yet built: the package needs the owner's two Google values, in the
 owner's own PowerShell window (deploy.md, "Releasing an update"). What it
 holds:**
 
@@ -59,8 +60,38 @@ holds:**
   Looked at as pictures at every size on a dark and a light bar, not on a
   real taskbar: that needs a build. Uploading the new Store logos to Partner
   Center is the owner's. macOS, iOS and Android icons are untouched.
-- 2,231 app tests (120 new), 556 Rust tests (7 new), `tsc` clean, `vite
-  build` succeeds. The version is 1.3.0 in the five places deploy.md names.
+- **Nine more, built 2026-10-07, which made it 1.3.1** (the owner: "build
+  all of them", after a read through accounts and sync). Each is in
+  features.md under the name given here.
+  - *Finished, with a date*: `books.finished_at`, schema 5, a merge rule of
+    its own (data-model.md); "Mark as finished" and "Mark as not started" in
+    a book's menu. Counts go by `hasFinished`, shelves by `isFinished`.
+  - *A goal of books for the year*: a card on Social, Stats.
+  - *The name*: saving the profile sends the name to the account too.
+  - *The screen stays on* while the page reads itself (`keep_awake`).
+  - *Backing up to the Leaflet account alone*: a switch in Settings, Backup,
+    off until chosen. **The owner's to decide: whether it should be on by
+    default.** The privacy policy's paragraph on synced state was corrected
+    in the repo (it said "we cannot read it"; it is compressed, not
+    encrypted): publishing that is the owner's.
+  - *A highlight from the past, once a day*: on the library page.
+  - *Your own font*, *Highlights from a Kindle*, *Search inside books*:
+    built by three engineers working beside this one; their code was read
+    and their tests run, and two of the three were tried in the preview.
+  - Checked in the preview: the book menu's two items, the goal card, the
+    daily highlight, a Kindle import of an invented file, opening a book at
+    a search match. Not checked, because they need the app itself: the
+    screen staying on, the account backup switch and a backup with it on,
+    the name reaching the sidebar, adding a font, the search dialog and its
+    command, and the migration to schema 5 on a real library (it is tested
+    on made-up ones; **copy `library.db` before 1.3 first opens it**).
+  - Phone stage 0 will now also meet `finished_at` in `merge.rs` and
+    `db/mod.rs` when it is brought onto 1.3.
+  - Found and not fixed: an email is not verified at sign-up (a typo there
+    means a reset can never arrive); removing a finished book lowers the
+    count of books finished.
+- 2,365 app tests (254 new in 1.3), 591 Rust tests (42 new), `tsc` clean,
+  `cargo clippy --all-targets` clean, `vite build` succeeds. The version is 1.3.1 in the five places deploy.md names.
 - **Asked for and not built: read aloud.** The voices Windows gives an app
   are the old flat ones (this PC has David, Zira and Mark only); a natural
   voice means a paid cloud service or a speech model shipped in the app
@@ -203,8 +234,8 @@ owner". The 1.2 release does not wait on anything in the list below.
 | | |
 | --- | --- |
 | `npx tsc --noEmit -p .` in `apps/` | clean |
-| App tests (`npx vitest run` in `apps/`) | 135 files, 2111 passing (on `release/1.3`, 2026-10-07: 141 files, 2231) |
-| Rust tests (`cargo test --lib`) | 549 passing, 3 ignored (one reads `D:\Books` and skips where it is absent); on `release/1.3`, 556 and 4 ignored (the fourth prints what a sync costs) |
+| App tests (`npx vitest run` in `apps/`) | 135 files, 2111 passing (on `release/1.3`, 2026-10-07: 151 files, 2365) |
+| Rust tests (`cargo test --lib`) | 549 passing, 3 ignored (one reads `D:\Books` and skips where it is absent); on `release/1.3`, 591 and 5 ignored (two of them print what a sync and a library search cost) |
 | `LEAFLET_STORE_BUILD=1 cargo check` | clean |
 | Server tests (`npm test` in `server/`) | 88 passing |
 | `npm run build` | succeeds; it now emits two pages, `index.html` and `desktop-pip.html` |
