@@ -6,6 +6,8 @@ import { isFinished } from "../constants/books";
 import { SocialPanel, type SocialNavTarget } from "../components/SocialPanel";
 import { SessionShelf } from "../components/SessionShelf";
 import { ReadingCalendar } from "../components/ReadingCalendar";
+import { openYearReview } from "../components/share/shareStore";
+import { yearsRead } from "../components/share/yearReview";
 import { CountUp } from "../components/community/CountUp";
 import { minutesText } from "../components/community/format";
 import { weekMinutesOf } from "../components/community/ownRow";
@@ -65,6 +67,8 @@ export const SocialPage = ({ showToast, nowReading, onReadNow, onNavigate }: Soc
     return { weekMinutes, totalMinutes, daysRead };
   }, [snapshot.days]);
   const finishedBooks = useMemo(() => books.filter((book) => isFinished(book.progress)).length, [books]);
+  // The latest year there is any reading in; none on a new library.
+  const reviewYear = useMemo(() => yearsRead(snapshot.days)[0] ?? null, [snapshot.days]);
 
   const tiles = [
     { label: "This week", value: stats.weekMinutes, format: minutesText },
@@ -119,6 +123,23 @@ export const SocialPage = ({ showToast, nowReading, onReadNow, onNavigate }: Soc
               </div>
             ))}
           </section>
+
+          {/* The year as one picture to keep or share (components/share). */}
+          {reviewYear !== null && (
+            <button
+              type="button"
+              className="paper-surface flex items-center justify-between gap-4 rounded-xl p-5 text-left transition hover:text-primary"
+              onClick={() => openYearReview(reviewYear)}
+            >
+              <span>
+                <span className={EYEBROW}>Year in review</span>
+                <span className="mt-2 block text-xl font-semibold text-on-surface">Your {reviewYear} in books</span>
+              </span>
+              <span className="material-symbols-outlined text-on-surface-variant" aria-hidden="true">
+                chevron_right
+              </span>
+            </button>
+          )}
 
           <ReadingCalendar days={snapshot.days} goalMinutes={snapshot.goalMinutes} freeReads={snapshot.freeReads} />
 
