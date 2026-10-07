@@ -6,6 +6,7 @@ import { HIGHLIGHT_COLORS } from "../highlightColors";
 import { BAR_GAP, placeBar, selectedTextBox } from "../lookupPlacement";
 import { planHighlightDraws } from "../highlightDraws";
 import { orderHighlights } from "../../components/highlights/highlightsView";
+import { isKindlePlace } from "../../library/kindleClippings";
 import type { Later, WithAnnotations, WithCover, WithHold, WithOutlook } from "./scope";
 
 /** Bookmarks, highlights, the selection, and search. */
@@ -170,6 +171,40 @@ export const useReaderMarks = (reader: WithOutlook & Later<"annotations" | "orde
   };
 
   const searchMarkRef = useRef<{ cfi: string; timer: number } | null>(null);
+  /**
+   * Marks the words at a place for a few seconds: a search result just gone
+   * to, or the match a book was opened at from the library's search
+   * (useBookOpening), which is marked the same.
+   */
+  const markSearchHit = (cfi: string) => {
+    const rendition = renditionRef.current;
+    if (!rendition) {
+      return;
+    }
+    const previous = searchMarkRef.current;
+    if (previous) {
+      window.clearTimeout(previous.timer);
+      try {
+        rendition.annotations.remove(previous.cfi, "highlight");
+      } catch {
+        // Gone with its section.
+      }
+    }
+    try {
+      rendition.annotations.highlight(cfi, {}, undefined, "leaflet-search-hit", { fill: "#f5b800", "fill-opacity": "0.55" });
+    } catch {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      try {
+        rendition.annotations.remove(cfi, "highlight");
+      } catch {
+        // Gone with its section.
+      }
+      searchMarkRef.current = null;
+    }, 4000);
+    searchMarkRef.current = { cfi, timer };
+  };
   /** Jumps to a search result and marks the words there for a few seconds. */
   const openSearchHit = (hit: SearchHit) => {
     const rendition = renditionRef.current;
@@ -184,34 +219,13 @@ export const useReaderMarks = (reader: WithOutlook & Later<"annotations" | "orde
         return;
       }
       clearToolbar(hit.cfi);
-      const previous = searchMarkRef.current;
-      if (previous) {
-        window.clearTimeout(previous.timer);
-        try {
-          rendition.annotations.remove(previous.cfi, "highlight");
-        } catch {
-          // Gone with its section.
-        }
-      }
-      try {
-        rendition.annotations.highlight(hit.cfi, {}, undefined, "leaflet-search-hit", { fill: "#f5b800", "fill-opacity": "0.55" });
-      } catch {
-        return;
-      }
-      const timer = window.setTimeout(() => {
-        try {
-          rendition.annotations.remove(hit.cfi, "highlight");
-        } catch {
-          // Gone with its section.
-        }
-        searchMarkRef.current = null;
-      }, 4000);
-      searchMarkRef.current = { cfi: hit.cfi, timer };
+      markSearchHit(hit.cfi);
     });
   };
 
   const openBookmark = (cfi: string) => {
-    if (!renditionRef.current) {
+    // A Kindle's place is nowhere the book can be turned to.
+    if (!renditionRef.current || isKindlePlace(cfi)) {
       return;
     }
     setBookmarkPanelOpen(false);
@@ -224,7 +238,7 @@ export const useReaderMarks = (reader: WithOutlook & Later<"annotations" | "orde
     setNotesWrite, copyText, highlightBox, searchOpen,
     setSearchOpen, searchSeed, closeSearch, setLookUpCfi, addBookmarkRef, selectionRef, clearSelectionRef,
     selectionChangedRef, addBookmark, appliedHighlightsRef, clearSelection, selectionChapter, highlightSelection,
-    copySelection, lookUpShowing, searchBookFor, exportHighlights, searchMarkRef, openSearchHit, openBookmark
+    copySelection, lookUpShowing, searchBookFor, exportHighlights, searchMarkRef, markSearchHit, openSearchHit, openBookmark
   };
 };
 
@@ -255,7 +269,11 @@ export const useHighlightDrawing = (reader: WithAnnotations) => {
       return;
     }
     const applied = appliedHighlightsRef.current;
-    const wanted = new Map(highlights.map((item) => [`${item.id}|${item.color ?? "yellow"}`, item]));
+    // A highlight brought from a Kindle has no place in this file
+    // (library/kindleClippings.ts): listed, never handed to epub.js as a CFI.
+    const wanted = new Map(
+      highlights.filter((item) => !isKindlePlace(item.cfi)).map((item) => [`${item.id}|${item.color ?? "yellow"}`, item])
+    );
     // One mark per place: two highlights of the same words share it (see
     // readers/highlightDraws.ts).
     const plan = planHighlightDraws(

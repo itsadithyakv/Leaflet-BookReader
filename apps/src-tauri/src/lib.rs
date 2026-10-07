@@ -12,6 +12,7 @@ mod convert;
 mod db;
 mod desktop_pip;
 mod diag;
+mod fonts;
 mod formats;
 mod habit;
 mod http;
@@ -20,6 +21,7 @@ mod wiki;
 mod metadata;
 mod pip;
 mod reminders;
+mod search;
 mod storage;
 mod sync;
 
@@ -244,6 +246,9 @@ pub fn run() {
       commands::cover_data,
       commands::read_book_bytes,
       commands::update_progress,
+      commands::set_book_finished,
+      commands::keep_awake,
+      commands::set_account_backup,
       commands::reading_stats,
       commands::drive_auth_start,
       commands::drive_auth_wait,
@@ -276,6 +281,10 @@ pub fn run() {
       commands::word_record,
       commands::words_review,
       commands::words_delete,
+      commands::fonts_list,
+      commands::font_add,
+      commands::font_data,
+      commands::font_remove,
       commands::collections_list,
       commands::collection_save,
       commands::collection_delete,
@@ -311,6 +320,8 @@ pub fn run() {
       commands::library_copy_status,
       commands::library_copy_set,
       commands::library_copy_run,
+      commands::library_search,
+      commands::library_search_cancel,
       commands::cloud_reachable,
       commands::take_pending_open_paths,
       commands::clear_all_data,

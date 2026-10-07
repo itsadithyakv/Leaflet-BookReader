@@ -25,12 +25,14 @@ import { MobileNav } from "./components/MobileNav";
 import { UiIcon } from "./components/UiIcon";
 import { LibraryPage } from "./pages/LibraryPage";
 import { useLibraryStore } from "./store/libraryStore";
+import { useAccountStore } from "./store/accountStore";
 import { FEATURES } from "./constants/features";
 import { ALIVE_EVERY_MS, AWAY_FREE_MS, flowerGrowing, useHabitStore } from "./store/habitStore";
 import { setAppFullscreen, watchForeground } from "./services/windowService";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { SeriesEditorDialog } from "./components/SeriesEditor";
 import { useHighlightsStore } from "./components/highlights/highlightsStore";
+import { useLibrarySearchStore } from "./components/search/librarySearchStore";
 import { RatePrompt, openStoreReview } from "./components/RatePrompt";
 import { ReminderOptIn } from "./components/ReminderOptIn";
 import { useReminders } from "./hooks/useReminders";
@@ -79,6 +81,10 @@ const YearReviewDialog = lazy(() =>
 );
 const HighlightsDialog = lazy(() =>
   import("./components/highlights/HighlightsDialog").then((module) => ({ default: module.HighlightsDialog }))
+);
+// "Search inside books", from the library's search box.
+const LibrarySearchDialog = lazy(() =>
+  import("./components/search/LibrarySearchDialog").then((module) => ({ default: module.LibrarySearchDialog }))
 );
 
 /** Books whose scene Pip has already shown once (see showBookNod). */
@@ -197,7 +203,7 @@ const App = () => {
 
   // Which transport is carrying sync, if any. There is no account tier: sync
   // runs against the reader's own storage, so there is nothing to sign up for.
-  const syncMode: SyncMode = sync.driveConnected ? "drive" : sync.folderPath ? "folder" : "off";
+  const syncMode: SyncMode = sync.driveConnected ? "drive" : sync.folderPath ? "folder" : sync.accountBackup ? "account" : "off";
 
   const { activeSession, focusSettings, goalMinutes, startSession, stopSession, loadHabit } =
     useHabitStore(
@@ -214,6 +220,7 @@ const App = () => {
   const fullscreenLockRef = useRef(false);
   const theme = useAppearanceStore((state) => state.theme);
   const highlightsOpen = useHighlightsStore((state) => state.view !== null);
+  const librarySearchOpen = useLibrarySearchStore((state) => state.query !== null);
   const quoteOpen = useShareStore((state) => state.quote !== null);
   const yearOpen = useShareStore((state) => state.year !== null);
   const toggleTheme = useAppearanceStore((state) => state.toggleTheme);
@@ -249,12 +256,19 @@ const App = () => {
   // Back up on launch. The app may have been closed mid-session, and on a new
   // computer this same pass is what restores the library from Drive.
   useEffect(() => {
-    if (sync.driveConnected) {
+    if (sync.driveConnected || sync.accountBackup) {
       syncNow().catch(() => {
         // startup backup failure is fine; it is recorded and retried later
       });
     }
-  }, [sync.driveConnected, syncNow]);
+  }, [sync.driveConnected, sync.accountBackup, syncNow]);
+
+  // Backing up to the Leaflet account ends with the session (signing out, or
+  // the account deleted), and what the backup's state says has to follow.
+  const signedIn = useAccountStore((state) => state.status.signedIn);
+  useEffect(() => {
+    void useLibraryStore.getState().loadSyncStatus();
+  }, [signedIn]);
 
   // Closing a book is the moment progress and the habit ledger have changed, so
   // it is when a backup is worth taking. Imports and deletes schedule their own.
@@ -1234,6 +1248,11 @@ const App = () => {
       {highlightsOpen && (
         <Suspense fallback={null}>
           <HighlightsDialog onOpenInBook={openBookAt} />
+        </Suspense>
+      )}
+      {librarySearchOpen && (
+        <Suspense fallback={null}>
+          <LibrarySearchDialog onOpenInBook={openBookAt} />
         </Suspense>
       )}
       {quoteOpen && (

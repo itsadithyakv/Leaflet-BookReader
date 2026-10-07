@@ -20,8 +20,11 @@ import { UiIcon } from "../components/UiIcon";
 import { FocusFlower, flowerCaption, flowerLook } from "../components/FocusFlower";
 import { askConfirm } from "../components/ConfirmDialog";
 import { MobileComingSoonBanner } from "../components/MobileComingSoonBanner";
+import { DailyHighlight } from "../components/highlights/DailyHighlight";
 import { UpNextStrip } from "../components/UpNextStrip";
 import { openHighlightsList, useHighlightsStore } from "../components/highlights/highlightsStore";
+import { openLibrarySearch } from "../components/search/librarySearchStore";
+import { searchable } from "../components/search/librarySearch";
 import { librarySeries, type LibrarySeries } from "../library/series";
 import { describeImport } from "../library/importSummary";
 
@@ -185,7 +188,9 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
   const finishedBooks = books.filter((book) => isFinished(book.progress)).length;
   /** No books at all (not merely none matching): the page leads with importing. */
   const libraryEmpty = !loading && totalBooks === 0;
-  const filtersNarrowed = filters.author !== "all" || filters.genre !== "all";
+  /** The words in the search box, when there are enough of them to look for inside the books (the app only). */
+  const insideQuery = isTauri() && totalBooks > 0 ? searchable(filters.query) : null;
+  const filtersNarrowed =filters.author !== "all" || filters.genre !== "all";
   // The streak everything else shows (goal days in a row, by the reader's own
   // day). This used to count days a book was opened, by UTC day, and read
   // "Start Your Streak" until a book was opened today.
@@ -591,6 +596,9 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
 
       <UpNextStrip onOpen={onOpenBook} onSeeAll={() => onNavigate("collections")} />
 
+      {/* One of the reader's own highlights, once a day; nothing when there are none. */}
+      {!libraryEmpty && <DailyHighlight />}
+
       <section className="flex flex-1 flex-col gap-6">
         <div className="flex flex-wrap items-end justify-between gap-6">
           <div>
@@ -682,6 +690,21 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
             </select>
           </div>
         </div>
+
+        {/* The search box finds books by title and author; this looks for the
+            same words inside them. In the app only: the browser preview has no
+            files to read. */}
+        {insideQuery && (
+          <button
+            type="button"
+            className="-my-2 flex max-w-full items-center gap-2 self-start rounded-lg px-2 py-1.5 text-sm text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+            onClick={() => openLibrarySearch(insideQuery)}
+            title="Looks for these words in the text of every book"
+          >
+            <UiIcon name="search" size={15} className="shrink-0" />
+            <span className="min-w-0 truncate">Search inside books for “{insideQuery}”</span>
+          </button>
+        )}
 
         <div className="flex-1 min-h-[480px]">
           {loading ? (

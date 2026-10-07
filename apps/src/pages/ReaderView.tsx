@@ -15,7 +15,7 @@ import { useNotesAndPictures } from "../readers/text/useNotesAndPictures";
 import { useContentsList, useContentsListShowing } from "../readers/text/useContentsList";
 import { usePageTurning, usePageInput } from "../readers/text/usePageTurning";
 import { useReaderPanels, usePanelDismissal, useFirstOpen, useRecapOnReturn } from "../readers/text/useReaderPanels";
-import { useReadingModes, useReadingHold, useReadingEngine } from "../readers/text/useReadingModes";
+import { useReadingModes, useReadingHold, useReadingEngine, useAwakeWhileReading } from "../readers/text/useReadingModes";
 import { useReaderPrefs, usePrefsSaving } from "../readers/text/useReaderPrefs";
 import { useReaderSession } from "../readers/text/useReaderSession";
 import { useReaderKeys } from "../readers/text/useReaderKeys";
@@ -30,6 +30,7 @@ import { ReaderDialogs } from "../readers/text/ReaderDialogs";
 import { ReaderSessionMarks } from "../readers/text/ReaderSessionMarks";
 import { ReaderPaceControls } from "../readers/text/ReaderPaceControls";
 import type { ReaderScope } from "../readers/text/scope";
+import { isKindlePlace } from "../library/kindleClippings";
 
 type ReaderViewProps = {
   book: Book;
@@ -46,7 +47,8 @@ type ReaderViewProps = {
  */
 export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) => {
   // One scope a render. Each hook adds what it owns and reads the rest from it.
-  const reader = { book, onClose, openAt } as ReaderScope;
+  // (A highlight brought from a Kindle has no place to open at: the book opens where the reading stopped.)
+  const reader = { book, onClose, openAt: isKindlePlace(openAt) ? null : openAt } as ReaderScope;
   // What the reader keeps and can do. These run no effects, so their order is free.
   Object.assign(reader, useReaderCore(reader));
   Object.assign(reader, useReadingPace(reader));
@@ -93,6 +95,7 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
   useDotSwitch(reader);
   useFirstOpen(reader);
   useRecapOnReturn(reader);
+  useAwakeWhileReading(reader);
   Object.assign(reader, useSelectionDock(reader));
 
   const { chromeVisible, displayMode, focusToast, hoverChrome, isLight, pageStyle, readingMode } = reader;

@@ -36,6 +36,10 @@ const READER_SETTINGS = [
   // Resting the pointer on a name, and whether a wiki may be asked (readers/people/peoplePrefs.ts).
   "leaflet.reader.charactersHover",
   "leaflet.reader.charactersWiki",
+  // The day today's highlight was put away on (components/highlights/highlightOfTheDay).
+  "leaflet.dailyHighlight.dismissed",
+  // The reader's goal of books for each year (components/goal).
+  "leaflet.goal.booksPerYear",
   // The look last chosen for a picture to share (components/share).
   "leaflet.share.quoteStyle",
   "leaflet.share.yearStyle",

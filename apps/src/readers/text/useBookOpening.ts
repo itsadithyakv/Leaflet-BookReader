@@ -8,6 +8,7 @@ import { formatSummary, getBookExtension, isReadableExtension } from "../../cons
 import { buildSectionWeights, isChapterLike, onLastPage, outsideStory, progressToSave, spineIndexForProgress } from "../progress";
 import { isFinished } from "../../constants/books";
 import { FALLBACK_FACE, MEASURE_PADDING, applyTypeChoice, type TocItem } from "../readerTypes";
+import { applyCustomFont } from "../customFonts";
 import { getReaderFinish, getReaderFinishBackground, PAGE_TOP_PAD } from "../finish";
 import { flattenToc, tocPlace } from "../toc";
 import { markInkImages } from "../inkImages";
@@ -26,6 +27,8 @@ import { scanBook } from "../contentsScan";
 import { listedAgain } from "../chapterSpan";
 import { findInnerBooks, storyGaps, tocDepths, type ContentsRow } from "../innerBooks";
 import { placeToSave } from "../readingPlace";
+import { findInBook } from "../findPlace";
+import { isLook } from "../openAt";
 import type { WithCover } from "./scope";
 
 /**
@@ -37,7 +40,7 @@ export const useBookOpening = (reader: WithCover) => {
   const {
     activeWordIndexRef, appliedHighlightsRef, applyContentsRef, applyEndRoom, applyReaderInsets, applyReaderTypography,
     book, bookMeasureCss, bookRef, chapterPositionsRef, chapterSpineIndicesRef, chapterTurnUntilRef, clearToolbar,
-    closeNoteRef, contentsRowsRef, contentWheelHandlerRef, displayModeRef, ensureScrollContainer,
+    closeNoteRef, contentsRowsRef, contentWheelHandlerRef, customFontRef, displayModeRef, ensureScrollContainer,
     ensureSingleScrollContainer, followBookLinkRef, fontSizeRef, goToListedLineRef, holdAutoScrollRef, innerBooksRef,
     lastCfiBelowRef, lastCfiProgressRef, lastCfiRef, lastComputedProgressRef, lastHandsOnAtRef, lastProgressRef,
     layoutRef, lookingBetweenStories, markNavigating, markReadingActivity, navigatingUntilRef, notePagePlace,
@@ -51,7 +54,9 @@ export const useBookOpening = (reader: WithCover) => {
     storyEndInView, storyEndWasBelowRef, storyGapsRef, tocLabelsRef, tocPlacesRef, tocSpineStartsRef, tocWithinRef,
     typeChoiceRef, updateBookProgress, updateOutlookRef, viewerRef
   } = reader;
-  const relocateHandlerRef = useRef<((location: { start?: { percentage?: number } }) => void) | null>(null);
+  // For a book opened at a match of the library's search (below, where the saved place is restored).
+  const { markSearchHit, openAt, openedAtPlaceRef, searchBookFor, soughtRef } = reader;
+  const relocateHandlerRef =useRef<((location: { start?: { percentage?: number } }) => void) | null>(null);
   const lastProgressAtRef = useRef(0);
 
   const localPath =
@@ -210,6 +215,9 @@ export const useBookOpening = (reader: WithCover) => {
           doc.documentElement.style.setProperty("--reader-content-pad", `${pad}px`);
           doc.documentElement.style.setProperty("--reader-measure", bookMeasureCss());
           applyTypeChoice(doc.documentElement, typeChoiceRef.current);
+          // The reader's own font, if its file has been read by now; if not,
+          // it is put in when it has (useTypeChange).
+          applyCustomFont(doc, customFontRef.current);
           doc.documentElement.setAttribute("data-leaflet-layout", layoutRef.current);
           if (!doc.getElementById("reader-font-scale")) {
             // The book's drop caps and opening small capitals are found
@@ -1251,6 +1259,25 @@ export const useBookOpening = (reader: WithCover) => {
         });
 
         applyReaderInsets();
+        // Opened at a match of the library's search: the words are found in
+        // their section now that the book is open (readers/findPlace.ts), and
+        // the reader goes there as it would to a saved place. Once: a book
+        // laid out again reopens where the reader is by then.
+        const sought = soughtRef.current;
+        const match = sought ? await findInBook(epub, sought) : null;
+        if (cancelled) {
+          return;
+        }
+        if (sought) {
+          soughtRef.current = null;
+          if (match) {
+            lastCfiRef.current = match.cfi;
+            lastCfiBelowRef.current = 0;
+          }
+          // A book without that section opens where the reading stopped, and
+          // that is no look (readers/openAt.ts).
+          openedAtPlaceRef.current = isLook(openAt, match !== null);
+        }
         // The saved place, if it still resolves. A stale or broken position
         // used to reject here and the book never opened again.
         markNavigating(2500);
@@ -1296,6 +1323,13 @@ export const useBookOpening = (reader: WithCover) => {
         }
         scheduleReaderWordIndex(true);
         setLoading(false);
+        // The match the book was opened at is marked as a result of the
+        // in-book search is, with that search open on the same words: the
+        // book's other matches are a click away.
+        if (restored && sought && match?.found) {
+          markSearchHit(match.cfi);
+          searchBookFor(sought.query);
+        }
         // Indexing the whole book (for progress in books without usable
         // chapters) waits until the first page is up, and runs when idle.
         // With section sizes known, progress needs no index at all; this is

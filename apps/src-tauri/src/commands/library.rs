@@ -178,6 +178,7 @@ pub(crate) async fn import_one(path: &str, state: &State<'_, AppState>) -> Resul
     let cover_url = embedded_cover.map(|path| path.to_string_lossy().to_string());
 
     let book = BookRecord {
+      finished_at: None,
       id: hash.clone(),
       title: identity.title,
       author: identity.author,
@@ -531,6 +532,17 @@ pub fn update_progress(
     .map_err(|e| e.to_string())
 }
 
+/// "Mark as finished" and "Mark as not started" (`Database::set_finished`).
+/// Answers with the book as it now is.
+#[tauri::command]
+pub fn set_book_finished(book_id: String, finished: bool, state: State<'_, AppState>) -> Result<BookRecord, String> {
+  let db = state.db.guard();
+  db.set_finished(&book_id, finished, &db::now_iso()).map_err(|e| e.to_string())?;
+  db.find_by_id(&book_id)
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| "Book not found".to_string())
+}
+
 /// Removes a book from the library on every device.
 ///
 /// The row is tombstoned rather than dropped, so the removal can reach the other
@@ -600,6 +612,8 @@ pub fn clear_all_data(app: AppHandle, state: State<'_, AppState>) -> Result<(), 
     let _ = fs::remove_dir_all(&dir);
     let _ = fs::create_dir_all(&dir);
   }
+  // The reader's own fonts, which are files of theirs too.
+  crate::fonts::remove_all();
 
   Ok(())
 }

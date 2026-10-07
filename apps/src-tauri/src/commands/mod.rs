@@ -38,6 +38,9 @@ mod lookup;
 mod wiki;
 mod diary;
 mod words;
+mod power;
+mod search;
+mod fonts;
 
 pub use library::*;
 pub use backup::*;
@@ -58,3 +61,6 @@ pub use lookup::*;
 pub use wiki::*;
 pub use diary::*;
 pub use words::*;
+pub use power::*;
+pub use search::*;
+pub use fonts::*;
