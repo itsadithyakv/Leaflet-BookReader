@@ -40,6 +40,18 @@ export type SignUpOutcome =
   /** The account exists and is signed in; the profile was not shared, and `reason` says why. */
   | { kind: "created"; status: AccountStatus; reason: string };
 
+/**
+ * Whether the form asks for the emailed code once the account is made.
+ *
+ * Only when the server said "not confirmed" about it. A server from before
+ * confirmation says nothing either way, and then nothing is asked: there is
+ * no code on its way and nowhere to send one.
+ */
+export const asksForEmailCode = (status: AccountStatus) => status.account?.emailConfirmed === false;
+
+/** A code is eight letters and digits, however it was spaced or dashed. */
+export const emailCodeReady = (code: string) => code.replace(/[^a-z0-9]/gi, "").length === 8;
+
 const reasonOf = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
 export const signUpWithProfile = async (steps: SignUpSteps, input: SignUpInput): Promise<SignUpOutcome> => {

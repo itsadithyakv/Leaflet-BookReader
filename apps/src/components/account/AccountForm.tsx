@@ -12,7 +12,8 @@ import { COPY } from "../community/copy";
 import { at } from "../community/format";
 import { handleProblem, suggestHandle } from "../community/handle";
 import { HandleField } from "../community/HandleField";
-import { signUpWithProfile } from "./signUpFlow";
+import { emailHint } from "./emailHint";
+import { asksForEmailCode, emailCodeReady, signUpWithProfile } from "./signUpFlow";
 
 export type AccountFormMode = "signin" | "signup" | "reset";
 
@@ -37,6 +38,10 @@ const labelClass = "mt-3 block text-[10px] uppercase tracking-[0.2em] text-on-su
  * A new account's profile is shared with other readers unless the switch on
  * the form is turned off: the form asks for a handle, says what becomes
  * visible, and saves the profile straight after the account (`signUpFlow.ts`).
+ *
+ * Where the server confirms addresses, one step follows a sign-up: the code
+ * it emailed, or "Later" (Settings → Account keeps a row for it). The account
+ * works either way. Signing in never asks.
  */
 export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming = false }: Props) => {
   const createAccount = useAccountStore((state) => state.createAccount);
@@ -65,6 +70,15 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
   // shared yet (the handle was taken, the connection dropped): one step left.
   const [created, setCreated] = useState<AccountStatus | null>(null);
   const createdRef = useRef<AccountStatus | null>(null);
+  // The account and its profile are settled, and the address is not yet
+  // confirmed: the emailed code is asked for once, here, before the form
+  // closes. Holds what the form will say when it does.
+  const [confirming, setConfirming] = useState<{ status: AccountStatus; profile: SocialProfile | null; message: string } | null>(null);
+  const sharedRef = useRef<SocialProfile | null>(null);
+  const [resent, setResent] = useState(false);
+  // "Did you mean …?" under the email, worked out when the field is left so
+  // it does not come and go with every letter.
+  const [hint, setHint] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const handleId = useId();
@@ -76,10 +90,13 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
   useEffect(
     () => () => {
       if (createdRef.current) {
+        if (sharedRef.current) {
+          setMe(sharedRef.current);
+        }
         adopt(createdRef.current);
       }
     },
-    [adopt]
+    [adopt, setMe]
   );
 
   const handle = typedHandle ?? (share ? suggestHandle(displayName, email) : "");
@@ -90,14 +107,37 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
   /** The sign-up is over: say who is signed in, and close. */
   const finish = (status: AccountStatus, profile: SocialProfile | null, message: string) => {
     createdRef.current = null;
+    sharedRef.current = null;
     setCreated(null);
+    setConfirming(null);
     if (profile) {
       setMe(profile);
     }
     adopt(status);
     setPassword("");
+    setCode("");
     setMode("signin");
     onDone(message);
+  };
+
+  /**
+   * The account and its profile are settled. Where the server says the
+   * address is not confirmed, one compact step is left: the emailed code, or
+   * "Later". Closed instead, the account is handed over as it is.
+   */
+  const conclude = (status: AccountStatus, profile: SocialProfile | null, message: string) => {
+    if (!asksForEmailCode(status)) {
+      finish(status, profile, message);
+      return;
+    }
+    createdRef.current = status;
+    sharedRef.current = profile;
+    setCreated(null);
+    setPassword("");
+    setCode("");
+    setResent(false);
+    setError(null);
+    setConfirming({ status, profile, message });
   };
 
   const sharedMessage = (shared: string | null) => `Account created. You're signed in, and your profile is shared as ${at(shared)}.`;
@@ -118,7 +158,7 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
           setError(outcome.reason);
           return;
         }
-        finish(
+        conclude(
           outcome.status,
           outcome.profile,
           outcome.shared
@@ -139,7 +179,7 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
     setError(null);
     socialService
       .saveProfile({ handle, displayName: displayName.trim(), visibility: "public" })
-      .then((profile) => finish(created, profile, sharedMessage(profile.handle ?? handle)))
+      .then((profile) => conclude(created, profile, sharedMessage(profile.handle ?? handle)))
       .catch((cause) => setError(errorMessage(cause)))
       .finally(() => setBusy(false));
   };
@@ -185,6 +225,96 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
     </p>
   );
 
+  if (confirming) {
+    const confirmCode = () => {
+      setBusy(true);
+      setError(null);
+      accountService
+        .confirmEmail(code)
+        .then((status) => finish(status, confirming.profile, `${confirming.message} Email confirmed.`))
+        .catch((cause) => setError(errorMessage(cause)))
+        .finally(() => setBusy(false));
+    };
+    const resend = () => {
+      setBusy(true);
+      setError(null);
+      setResent(false);
+      accountService
+        .requestEmailCode()
+        .then((status) => {
+          // Confirmed meanwhile (on another device): nothing is left to ask.
+          if (!asksForEmailCode(status)) {
+            finish(status, confirming.profile, confirming.message);
+            return;
+          }
+          createdRef.current = status;
+          setCode("");
+          setResent(true);
+        })
+        .catch((cause) => setError(errorMessage(cause)))
+        .finally(() => setBusy(false));
+    };
+    return (
+      <div>
+        <p className="font-headline text-2xl font-bold text-on-surface">Confirm your email</p>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (emailCodeReady(code) && !busy) {
+              confirmCode();
+            }
+          }}
+        >
+          <p
+            className="mt-2 text-xs leading-relaxed text-on-surface-variant"
+            title="A password reset can only reach an address that works. Not there after a minute? Check spam."
+          >
+            Enter the code we emailed to{" "}
+            <span className="break-all font-semibold text-on-surface">{confirming.status.account?.email}</span>
+          </p>
+          <input
+            aria-label="Code from the email"
+            autoComplete="one-time-code"
+            autoCapitalize="characters"
+            spellCheck={false}
+            placeholder="ABCD-EFGH"
+            maxLength={12}
+            value={code}
+            onChange={(event) => setCode(event.target.value.toUpperCase())}
+            className={`${fieldClass} font-mono tracking-[0.2em]`}
+          />
+          {errorBox}
+          {resent && !error && (
+            <p className="mt-2 text-[11px] text-on-surface-variant" role="status">
+              New code sent.
+            </p>
+          )}
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              type="submit"
+              className="tactile-button tactile-button-primary px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={busy || !emailCodeReady(code)}
+            >
+              {busy ? "One moment…" : "Confirm"}
+            </button>
+            <button type="button" className="py-1 text-xs text-on-surface-variant underline" disabled={busy} onClick={resend}>
+              Resend
+            </button>
+            <button
+              type="button"
+              className="py-1 text-xs text-on-surface-variant underline"
+              disabled={busy}
+              title="Confirm it any time under Settings → Account."
+              onClick={() => finish(confirming.status, confirming.profile, confirming.message)}
+            >
+              Later
+            </button>
+          </div>
+        </form>
+      </div>
+    );
+  }
+
   if (created) {
     return (
       <div>
@@ -214,7 +344,7 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
               type="button"
               className="py-1 text-xs text-on-surface-variant underline"
               disabled={busy}
-              onClick={() => finish(created, null, `Account created. You are signed in. Your profile is private. ${COPY.shareLater}`)}
+              onClick={() => conclude(created, null, `Account created. You are signed in. Your profile is private. ${COPY.shareLater}`)}
             >
               Keep it private for now
             </button>
@@ -375,9 +505,25 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
           autoCapitalize="none"
           spellCheck={false}
           value={email}
-          onChange={(event) => setEmail(event.target.value)}
+          onChange={(event) => {
+            setEmail(event.target.value);
+            setHint(null);
+          }}
+          onBlur={() => setHint(emailHint(email))}
           className={fieldClass}
         />
+        {signingUp && hint && (
+          <button
+            type="button"
+            className="mt-1 block text-left text-[11px] text-on-surface-variant hover:text-on-surface"
+            onClick={() => {
+              setEmail(hint);
+              setHint(null);
+            }}
+          >
+            Did you mean <span className="break-all font-semibold underline">{hint}</span>?
+          </button>
+        )}
         {signingUp && (
           <>
             <label className={labelClass}>Name (optional)</label>

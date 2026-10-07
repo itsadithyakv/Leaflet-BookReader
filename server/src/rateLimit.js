@@ -82,6 +82,10 @@ export function defaultLimits() {
     // Password-reset emails: per address asking, and per email address asked
     // about. Each one is a real email from a Gmail with a daily quota.
     resetIp: { limit: 10, windowMs: 60 * MINUTE },
-    resetEmail: { limit: 3, windowMs: 60 * MINUTE }
+    resetEmail: { limit: 3, windowMs: 60 * MINUTE },
+    // Confirmation emails: per account asking (a new code, or a change of
+    // address), and per address written to. The one sent at sign-up counts.
+    confirmAccount: { limit: 5, windowMs: 60 * MINUTE },
+    confirmEmail: { limit: 3, windowMs: 60 * MINUTE }
   };
 }

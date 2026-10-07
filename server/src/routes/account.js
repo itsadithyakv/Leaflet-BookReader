@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { createHash, randomInt, timingSafeEqual } from "node:crypto";
-import { accounts, profiles, resets, sessions, states } from "../db.js";
+import { accounts, confirmations, profiles, resets, sessions, states } from "../db.js";
 import { HttpError, asyncHandler, plainText, smallJson } from "../http.js";
 import { accountView, createSession, loadAccount, requireAccount } from "../auth.js";
 import { burnPasswordCheck, hashPassword, passwordProblem, verifyPassword } from "../passwords.js";
@@ -69,6 +69,28 @@ function resetDigest(code) {
   return createHash("sha256").update(cleaned).digest();
 }
 
+// ---- email confirmation -----------------------------------------------------
+//
+// A typo in the address at sign-up used to lose the account for good: the
+// reset email could never arrive. So a code goes to the address when the
+// account is made, and the app asks for it. Nothing waits on it: the account
+// works at once, confirmed or not.
+//
+// The same kind of code as a reset, kept the same way. It lasts longer, since
+// the reader has to go and find the email first.
+export const CONFIRM_MINUTES = 30;
+const CONFIRM_TRIES = 5;
+const CONFIRM_FAILED = "That code is wrong or has expired. Ask for a new one.";
+
+/**
+ * A confirmation code as stored: hashed together with the address it was sent
+ * to, so it can never confirm another one (the address can change while a
+ * code is out).
+ */
+function confirmDigest(email, code) {
+  return createHash("sha256").update(email).update("\n").update(resetDigest(code)).digest();
+}
+
 export function normaliseEmail(value) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
@@ -108,6 +130,8 @@ export function accountRoutes(db, limits, mailer = null) {
   const signups = new RateLimiter(limits.signup);
   const resetsByIp = new RateLimiter(limits.resetIp);
   const resetsByEmail = new RateLimiter(limits.resetEmail);
+  const confirmsByAccount = new RateLimiter(limits.confirmAccount);
+  const confirmsByEmail = new RateLimiter(limits.confirmEmail);
   const auth = requireAccount(db);
 
   const tooMany = (seconds) =>
@@ -138,6 +162,62 @@ export function accountRoutes(db, limits, mailer = null) {
     return ok;
   };
 
+  /**
+   * The account for the client. Without a mailer no code can be sent, so the
+   * account is described as it was before confirmation existed, and the app
+   * shows nothing about it.
+   */
+  const view = (account) => {
+    const seen = accountView(account);
+    if (!mailer) {
+      delete seen.emailConfirmed;
+    }
+    return seen;
+  };
+
+  /** A new code for the account's address, replacing the last one and its wrong tries. */
+  const newConfirmation = async (accountId, email) => {
+    const code = newResetCode();
+    const now = new Date();
+    await confirmations(db).replaceOne(
+      { _id: accountId },
+      {
+        codeHash: confirmDigest(email, code).toString("hex"),
+        attempts: 0,
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + CONFIRM_MINUTES * 60_000)
+      },
+      { upsert: true }
+    );
+    return code;
+  };
+
+  /**
+   * Emails the code, after the answer has gone. A failure is only logged:
+   * "refused: bad request" means the Apps Script is older than this message
+   * and needs its new version deployed.
+   */
+  const mailConfirmation = (email, code) => {
+    confirmsByEmail.hit(email);
+    Promise.resolve()
+      // `confirmation`, not `code`: a script from before this message existed
+      // takes any `code` for a password reset and would send that email.
+      .then(() => mailer({ kind: "confirm", to: email, confirmation: code, minutes: CONFIRM_MINUTES }))
+      .catch((error) => console.error("[leaflet] confirmation email not sent:", error?.message ?? error));
+  };
+
+  /** Refuses another confirmation email for now, or counts this one. */
+  const limitConfirmation = (accountId, email) => {
+    const key = `id:${accountId}`;
+    const wait = Math.max(confirmsByAccount.blockedFor(key), confirmsByEmail.blockedFor(email));
+    if (wait) {
+      throw tooMany(wait);
+    }
+    confirmsByAccount.hit(key);
+  };
+
+  const noMailer = () => new HttpError(503, "Email confirmation isn't set up on this server yet.");
+
   router.post(
     "/auth/signup",
     smallJson,
@@ -167,7 +247,8 @@ export function accountRoutes(db, limits, mailer = null) {
         displayName,
         avatar,
         createdAt: now,
-        passwordChangedAt: now
+        passwordChangedAt: now,
+        emailConfirmedAt: null
       };
       try {
         const { insertedId } = await accounts(db).insertOne(doc);
@@ -180,7 +261,18 @@ export function accountRoutes(db, limits, mailer = null) {
       }
 
       const token = await createSession(db, doc._id);
-      response.status(201).json({ token, account: accountView(doc) });
+      // The account is made whatever happens to its code: it can be asked for
+      // again from Settings.
+      const code = mailer
+        ? await newConfirmation(doc._id, email).catch((error) => {
+            console.error("[leaflet] confirmation code not kept:", error?.message ?? error);
+            return null;
+          })
+        : null;
+      response.status(201).json({ token, account: view(doc) });
+      if (code) {
+        mailConfirmation(email, code);
+      }
     })
   );
 
@@ -202,7 +294,7 @@ export function accountRoutes(db, limits, mailer = null) {
         throw new HttpError(401, LOGIN_FAILED);
       }
       const token = await createSession(db, account._id);
-      response.json({ token, account: accountView(account) });
+      response.json({ token, account: view(account) });
     })
   );
 
@@ -322,7 +414,7 @@ export function accountRoutes(db, limits, mailer = null) {
       );
       await sessions(db).deleteMany({ userId: account._id });
       const token = await createSession(db, account._id);
-      response.json({ token, account: accountView(account) });
+      response.json({ token, account: view(account) });
     })
   );
 
@@ -340,7 +432,7 @@ export function accountRoutes(db, limits, mailer = null) {
     auth,
     asyncHandler(async (request, response) => {
       const account = await loadAccount(db, request.account.id);
-      response.json({ account: accountView(account) });
+      response.json({ account: view(account) });
     })
   );
 
@@ -400,7 +492,131 @@ export function accountRoutes(db, limits, mailer = null) {
         await profiles(db).updateOne({ _id: request.account.id }, { $set: { avatar: update.avatar } });
         forgetBoards();
       }
-      response.json({ account: accountView(await loadAccount(db, request.account.id)) });
+      response.json({ account: view(await loadAccount(db, request.account.id)) });
+    })
+  );
+
+  /**
+   * Emails a new confirmation code to the account's address. The last code
+   * stops working. An address already confirmed is sent nothing.
+   */
+  router.post(
+    "/account/email/code",
+    auth,
+    smallJson,
+    asyncHandler(async (request, response) => {
+      if (!mailer) {
+        throw noMailer();
+      }
+      const account = await loadAccount(db, request.account.id);
+      if (account.emailConfirmedAt instanceof Date) {
+        response.json({ sent: false, minutes: CONFIRM_MINUTES, account: view(account) });
+        return;
+      }
+      limitConfirmation(account._id, account.email);
+      const code = await newConfirmation(account._id, account.email);
+      response.json({ sent: true, minutes: CONFIRM_MINUTES, account: view(account) });
+      mailConfirmation(account.email, code);
+    })
+  );
+
+  /** Confirms the account's address with the emailed code. */
+  router.post(
+    "/account/email/confirm",
+    auth,
+    smallJson,
+    asyncHandler(async (request, response) => {
+      if (!mailer) {
+        throw noMailer();
+      }
+      const account = await loadAccount(db, request.account.id);
+      // Confirmed already (on another device, say): nothing left to do.
+      if (account.emailConfirmedAt instanceof Date) {
+        response.json({ account: view(account) });
+        return;
+      }
+      const key = `confirm:${account._id}`;
+      const wait = byEmail.blockedFor(key);
+      if (wait) {
+        throw tooMany(wait);
+      }
+      const pending = await confirmations(db).findOne({ _id: account._id });
+      const fresh = pending && pending.expiresAt > new Date() && pending.attempts < CONFIRM_TRIES;
+      const matches =
+        fresh &&
+        timingSafeEqual(Buffer.from(pending.codeHash, "hex"), confirmDigest(account.email, request.body?.code));
+      if (!matches) {
+        byEmail.hit(key);
+        if (pending) {
+          // Wrong tries use the code up; the last one takes it away.
+          if (pending.attempts + 1 >= CONFIRM_TRIES) {
+            await confirmations(db).deleteOne({ _id: pending._id });
+          } else {
+            await confirmations(db).updateOne({ _id: pending._id }, { $inc: { attempts: 1 } });
+          }
+        }
+        throw new HttpError(400, CONFIRM_FAILED);
+      }
+      byEmail.reset(key);
+      // Spent first, so it works once. And only while the address is still
+      // the one it was checked against: a change of address made meanwhile
+      // leaves the new one unconfirmed.
+      const { deletedCount } = await confirmations(db).deleteOne({ _id: account._id, codeHash: pending.codeHash });
+      const confirmedAt = new Date();
+      const { matchedCount } = deletedCount
+        ? await accounts(db).updateOne(
+            { _id: account._id, email: account.email },
+            { $set: { emailConfirmedAt: confirmedAt } }
+          )
+        : { matchedCount: 0 };
+      if (matchedCount !== 1) {
+        throw new HttpError(400, CONFIRM_FAILED);
+      }
+      response.json({ account: view({ ...account, emailConfirmedAt: confirmedAt }) });
+    })
+  );
+
+  /**
+   * Changes the account's address, with the password. Every device stays
+   * signed in. The new address starts unconfirmed and is sent a code; codes
+   * sent to the old one (to confirm it, or to reset the password) stop
+   * working.
+   */
+  router.post(
+    "/account/email",
+    auth,
+    smallJson,
+    asyncHandler(async (request, response) => {
+      if (!mailer) {
+        throw noMailer();
+      }
+      const body = request.body ?? {};
+      const account = await loadAccount(db, request.account.id);
+      // 403 rather than 401, as for a change of password.
+      if (!(await checkPassword(`id:${account._id}`, body.password, account.passwordHash))) {
+        throw new HttpError(403, "Password is incorrect.");
+      }
+      const email = normaliseEmail(body.email);
+      const problem = emailProblem(email);
+      if (problem) {
+        throw new HttpError(400, problem);
+      }
+      if (email === account.email) {
+        throw new HttpError(400, "That is already this account's email.");
+      }
+      limitConfirmation(account._id, email);
+      try {
+        await accounts(db).updateOne({ _id: account._id }, { $set: { email, emailConfirmedAt: null } });
+      } catch (error) {
+        if (error?.code === 11000) {
+          throw new HttpError(409, "An account with that email already exists.");
+        }
+        throw error;
+      }
+      await resets(db).deleteOne({ _id: account._id });
+      const code = await newConfirmation(account._id, email);
+      response.json({ sent: true, minutes: CONFIRM_MINUTES, account: view({ ...account, email, emailConfirmedAt: null }) });
+      mailConfirmation(email, code);
     })
   );
 
@@ -424,6 +640,7 @@ export function accountRoutes(db, limits, mailer = null) {
       await states(db).deleteOne({ _id: account._id });
       await sessions(db).deleteMany({ userId: account._id });
       await resets(db).deleteOne({ _id: account._id });
+      await confirmations(db).deleteOne({ _id: account._id });
       await accounts(db).deleteOne({ _id: account._id });
       response.json({ deleted: true });
     })

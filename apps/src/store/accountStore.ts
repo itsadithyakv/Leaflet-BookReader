@@ -19,6 +19,12 @@ type AccountState = {
   /** Takes the answer from `createAccount` as who is signed in. */
   adopt: (status: AccountStatus) => void;
   setAvatar: (avatar: string | null) => Promise<void>;
+  /** Emails a new confirmation code to the account's address. */
+  requestEmailCode: () => Promise<void>;
+  /** Confirms the address with the emailed code. */
+  confirmEmail: (code: string) => Promise<void>;
+  /** A new address, with the password; it starts unconfirmed. */
+  changeEmail: (password: string, email: string) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   /** Emails a reset code; resolves to how many minutes it lasts. */
   requestReset: (email: string) => Promise<number>;
@@ -86,6 +92,12 @@ export const useAccountStore = create<AccountState>((set) => {
         }
       }
     },
+
+    requestEmailCode: () => run(() => accountService.requestEmailCode()),
+
+    confirmEmail: (code) => run(() => accountService.confirmEmail(code)),
+
+    changeEmail: (password, email) => run(() => accountService.changeEmail(password, email)),
 
     signIn: (email, password) => run(() => accountService.signIn(email, password)),
 

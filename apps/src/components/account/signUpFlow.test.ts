@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SocialProfile } from "@shared/sync/types";
 import type { AccountStatus } from "../../services/accountService";
-import { signUpWithProfile, type SignUpInput } from "./signUpFlow";
+import { asksForEmailCode, emailCodeReady, signUpWithProfile, type SignUpInput } from "./signUpFlow";
 
 const STATUS: AccountStatus = {
   available: true,
@@ -88,5 +88,51 @@ describe("signing up", () => {
     const taken = await signUpWithProfile({ create, saveProfile }, input({ share: false }));
     expect(taken).toMatchObject({ kind: "done", shared: false, profile: null });
     expect(taken.kind === "done" && taken.note).toContain("That handle is taken.");
+  });
+});
+
+describe("the emailed code after signing up", () => {
+  const said = (emailConfirmed?: boolean | null): AccountStatus => ({
+    ...STATUS,
+    account: { ...STATUS.account!, ...(emailConfirmed === undefined ? {} : { emailConfirmed }) }
+  });
+
+  it("is asked for when the server says the address is not confirmed", async () => {
+    const create = vi.fn().mockResolvedValue(said(false));
+    const saveProfile = vi.fn().mockResolvedValue(profileOf("public"));
+    const outcome = await signUpWithProfile({ create, saveProfile }, input());
+    expect(asksForEmailCode(outcome.status)).toBe(true);
+  });
+
+  it("is still asked for when the profile was left for another step", async () => {
+    const create = vi.fn().mockResolvedValue(said(false));
+    const saveProfile = vi.fn().mockRejectedValue(new Error("That handle is taken."));
+    const outcome = await signUpWithProfile({ create, saveProfile }, input());
+    expect(outcome.kind).toBe("created");
+    expect(asksForEmailCode(outcome.status)).toBe(true);
+  });
+
+  it("is not asked for by a server that says nothing about confirmation", async () => {
+    // An older server: the account comes back without the field at all.
+    const create = vi.fn().mockResolvedValue(said());
+    const saveProfile = vi.fn().mockResolvedValue(profileOf("public"));
+    const outcome = await signUpWithProfile({ create, saveProfile }, input());
+    expect(asksForEmailCode(outcome.status)).toBe(false);
+    // Rust sends an unknown answer on as null.
+    expect(asksForEmailCode(said(null))).toBe(false);
+  });
+
+  it("is not asked for once confirmed, or of nobody", () => {
+    expect(asksForEmailCode(said(true))).toBe(false);
+    expect(asksForEmailCode({ ...STATUS, signedIn: false, account: null })).toBe(false);
+  });
+
+  it("is ready at eight letters and digits, however typed", () => {
+    expect(emailCodeReady("ABCD-EFGH")).toBe(true);
+    expect(emailCodeReady(" abcd efgh ")).toBe(true);
+    expect(emailCodeReady("ABCD2345")).toBe(true);
+    expect(emailCodeReady("ABCD-EFG")).toBe(false);
+    expect(emailCodeReady("ABCD-EFGH-J")).toBe(false);
+    expect(emailCodeReady("")).toBe(false);
   });
 });

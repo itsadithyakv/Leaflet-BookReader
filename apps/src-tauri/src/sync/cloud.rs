@@ -281,6 +281,12 @@ pub struct Account {
   /// Absent on accounts cached before avatars existed, hence the default.
   #[serde(default)]
   pub avatar: Option<String>,
+  /// Whether the address was confirmed with an emailed code. `None` when the
+  /// server did not say: one from before confirmation existed (or with no
+  /// mailer), or an account cached before then. The app then shows nothing
+  /// about it, rather than nag for a code no server would take.
+  #[serde(default)]
+  pub email_confirmed: Option<bool>,
   #[serde(default)]
   pub created_at: Option<String>
 }
@@ -573,9 +579,49 @@ fn account_name_body(name: &str) -> serde_json::Value {
 /// Changes what the reader controls about the account itself. Only the fields
 /// in `body` change; the answer is the account as the server now has it.
 async fn patch_account(db_mutex: &std::sync::Mutex<Database>, body: serde_json::Value) -> Result<AccountStatus> {
+  account_call(db_mutex, reqwest::Method::PATCH, "/v1/account", body).await
+}
+
+/// Asks the server to email a new code to the account's address. An address
+/// already confirmed is sent nothing, and the answer says it is confirmed.
+pub async fn request_email_code(db_mutex: &std::sync::Mutex<Database>) -> Result<AccountStatus> {
+  account_call(db_mutex, reqwest::Method::POST, "/v1/account/email/code", serde_json::json!({})).await
+}
+
+/// Confirms the account's address with the emailed code.
+pub async fn confirm_email(db_mutex: &std::sync::Mutex<Database>, code: &str) -> Result<AccountStatus> {
+  account_call(db_mutex, reqwest::Method::POST, "/v1/account/email/confirm", email_code_body(code)).await
+}
+
+/// Changes the account's address, with the password. Every device stays
+/// signed in; the new address starts unconfirmed and is sent a code.
+pub async fn change_email(db_mutex: &std::sync::Mutex<Database>, password: &str, email: &str) -> Result<AccountStatus> {
+  account_call(db_mutex, reqwest::Method::POST, "/v1/account/email", email_change_body(password, email)).await
+}
+
+/// What confirming sends: the code as typed, less the space around it. The
+/// server reads past its case, dash and inner spaces.
+fn email_code_body(code: &str) -> serde_json::Value {
+  serde_json::json!({ "code": code.trim() })
+}
+
+/// What changing the address sends. The password goes exactly as typed (a
+/// space can be part of one); the address trimmed.
+fn email_change_body(password: &str, email: &str) -> serde_json::Value {
+  serde_json::json!({ "password": password, "email": email.trim() })
+}
+
+/// A signed-in call that answers with the account as the server now has it,
+/// which is kept here so the change shows offline too.
+async fn account_call(
+  db_mutex: &std::sync::Mutex<Database>,
+  method: reqwest::Method,
+  path: &str,
+  body: serde_json::Value
+) -> Result<AccountStatus> {
   let (base, token) = session_token(db_mutex)?;
   let response = client()?
-    .patch(format!("{base}/v1/account"))
+    .request(method, format!("{base}{path}"))
     .bearer_auth(&token)
     .json(&body)
     .send()
@@ -953,6 +999,49 @@ mod tests {
       serde_json::from_str(r#"{"id":"a1","email":"ada@example.com","avatar":"wizard.magic"}"#).unwrap();
     assert_eq!(new.avatar.as_deref(), Some("wizard.magic"));
     assert!(serde_json::to_string(&new).unwrap().contains(r#""avatar":"wizard.magic""#));
+  }
+
+  /// "Not confirmed" and "the server did not say" are different answers: the
+  /// second is an older server, and the app must not ask it for a code.
+  #[test]
+  fn an_account_without_the_confirmed_flag_is_unknown_not_unconfirmed() {
+    let older: Account = serde_json::from_str(r#"{"id":"a1","email":"ada@example.com"}"#).unwrap();
+    assert_eq!(older.email_confirmed, None);
+    let unconfirmed: Account =
+      serde_json::from_str(r#"{"id":"a1","email":"ada@example.com","emailConfirmed":false}"#).unwrap();
+    assert_eq!(unconfirmed.email_confirmed, Some(false));
+    let confirmed: Account =
+      serde_json::from_str(r#"{"id":"a1","email":"ada@example.com","emailConfirmed":true,"createdAt":null}"#).unwrap();
+    assert_eq!(confirmed.email_confirmed, Some(true));
+
+    // The cache and the page get it under the server's own name, and an
+    // unknown one survives being cached and read back as unknown.
+    assert!(serde_json::to_string(&unconfirmed).unwrap().contains(r#""emailConfirmed":false"#));
+    let cached: Account = serde_json::from_str(&serde_json::to_string(&older).unwrap()).unwrap();
+    assert_eq!(cached.email_confirmed, None);
+  }
+
+  /// The answers to asking for a code and to changing the address carry more
+  /// than the account (`sent`, `minutes`); only the account is read.
+  #[test]
+  fn the_confirmation_answers_are_read_for_their_account() {
+    let asked: MeResponse = serde_json::from_str(
+      r#"{"sent":true,"minutes":30,"account":{"id":"a1","email":"ada@example.com","emailConfirmed":false,"displayName":null,"avatar":null,"createdAt":"2026-10-07T09:00:00.000Z"}}"#
+    )
+    .unwrap();
+    assert_eq!(asked.account.email_confirmed, Some(false));
+    let confirmed: MeResponse =
+      serde_json::from_str(r#"{"account":{"id":"a1","email":"ada@example.com","emailConfirmed":true}}"#).unwrap();
+    assert_eq!(confirmed.account.email_confirmed, Some(true));
+  }
+
+  #[test]
+  fn a_code_and_a_new_address_are_sent_trimmed_and_the_password_as_typed() {
+    assert_eq!(email_code_body("  abcd-efgh ").to_string(), r#"{"code":"abcd-efgh"}"#);
+    assert_eq!(
+      email_change_body(" pass word ", "  Ada@Example.com ").to_string(),
+      r#"{"email":"Ada@Example.com","password":" pass word "}"#
+    );
   }
 
   #[test]

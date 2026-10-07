@@ -27,6 +27,11 @@ import { MongoClient } from "mongodb";
  * `resets`    at most one pending password reset per account: the SHA-256 of
  *             the emailed code, how many wrong tries it has had, and when it
  *             expires (15 minutes; the TTL index removes it).
+ * `confirmations` at most one pending email confirmation per account, kept
+ *             the same way: the code's SHA-256, its wrong tries, its expiry
+ *             (30 minutes). (`accounts.emailConfirmedAt` is when the address
+ *             was confirmed: null until then, and absent on accounts made
+ *             before confirmation existed.)
  */
 
 const DAY_SECONDS = 24 * 60 * 60;
@@ -93,6 +98,7 @@ export async function ensureIndexes(db) {
   );
 
   await resets(db).createIndex({ expiresAt: 1 }, { name: "expiry", expireAfterSeconds: 0 });
+  await confirmations(db).createIndex({ expiresAt: 1 }, { name: "expiry", expireAfterSeconds: 0 });
 
   await ensureCommunityIndexes(db);
 }
@@ -130,6 +136,7 @@ export const kudos = (db) => db.collection("kudos");
 export const duels = (db) => db.collection("duels");
 export const events = (db) => db.collection("events");
 export const resets = (db) => db.collection("resets");
+export const confirmations = (db) => db.collection("confirmations");
 
 export async function close() {
   if (client) {

@@ -1,17 +1,22 @@
 /**
  * Leaflet password-reset mailer — a Google Apps Script web app.
  *
- * The Leaflet API posts here and this script sends one of two fixed emails
+ * The Leaflet API posts here and this script sends one of three fixed emails
  * from the Gmail account that owns it (MailApp: free, about 100 recipients a
  * day on a personal account):
  *
  *   {secret, kind: "code",  to, code, minutes}  the reset code
  *   {secret, kind: "limit", to, availableOn}    this year's 3 resets are used up
+ *   {secret, kind: "confirm", to, confirmation, minutes}
+ *                                                the code that confirms an address
+ *                                                (not called `code`: an older copy of
+ *                                                this script then refuses the message
+ *                                                instead of sending it as a reset)
  *   {secret, kind: "ping"}                       checks the secret, sends nothing
  *                                                (the API does this when it starts)
  *
- * It sends nothing else, so the worst a leaked secret can do is send Leaflet
- * reset emails. Step-by-step setup: docs/deploy.md, "Password-reset emails".
+ * It sends nothing else, so the worst a leaked secret can do is send Leaflet's
+ * own emails. Step-by-step setup: docs/deploy.md, "Password-reset emails".
  *
  * After editing this script: Deploy -> Manage deployments -> edit (pencil) ->
  * Version: New version -> Deploy. The URL stays the same.
@@ -45,7 +50,8 @@ function doPost(e) {
   if (to.length > 254 || !EMAIL.test(to)) {
     return reply({ ok: false, error: "bad request" });
   }
-  var message = body.kind === "limit" ? limitMessage(body) : codeMessage(body);
+  var message =
+    body.kind === "limit" ? limitMessage(body) : body.kind === "confirm" ? confirmMessage(body) : codeMessage(body);
   if (!message) {
     return reply({ ok: false, error: "bad request" });
   }
@@ -86,6 +92,32 @@ function codeMessage(body) {
       "<p>Type it in Leaflet (Settings &rarr; Account). It works once, for " + minutes + " minutes.</p>" +
       '<p style="color:#5b6b5e;font-size:13px">If you didn\'t ask for this, ignore this email; ' +
       "your password stays as it is.</p>"
+  };
+}
+
+/** The code that confirms an email address, sent at sign-up and when the address changes. */
+function confirmMessage(body) {
+  var code = String(body.confirmation || "");
+  if (!CODE.test(code)) {
+    return null;
+  }
+  var minutes = Math.min(60, Math.max(5, Math.round(Number(body.minutes) || 30)));
+  return {
+    subject: "Confirm your email for Leaflet: " + code,
+    text:
+      "Here is the code to confirm this email address for your Leaflet account:\n\n" +
+      "    " + code + "\n\n" +
+      "Type it in Leaflet (Settings -> Account). It works once, for " + minutes + " minutes.\n\n" +
+      "If you didn't create a Leaflet account, ignore this email; the address stays unconfirmed.\n\n" +
+      "- Leaflet",
+    html:
+      "<p>Here is the code to confirm this email address for your Leaflet account:</p>" +
+      '<p style="font-size:28px;font-weight:700;letter-spacing:4px;font-family:Consolas,Menlo,monospace;' +
+      'background:#eef3e8;border-radius:8px;padding:12px 16px;display:inline-block;margin:8px 0">' +
+      code + "</p>" +
+      "<p>Type it in Leaflet (Settings &rarr; Account). It works once, for " + minutes + " minutes.</p>" +
+      '<p style="color:#5b6b5e;font-size:13px">If you didn\'t create a Leaflet account, ignore this email; ' +
+      "the address stays unconfirmed.</p>"
   };
 }
 

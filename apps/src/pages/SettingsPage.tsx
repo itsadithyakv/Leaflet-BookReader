@@ -22,6 +22,7 @@ import { useAccountStore } from "../store/accountStore";
 import { accountService, errorMessage } from "../services/accountService";
 import { diagnosticsService } from "../services/diagnosticsService";
 import { forgetBooksOnThisDevice } from "../services/deviceData";
+import { AccountEmail } from "../components/account/AccountEmail";
 import { AccountForm } from "../components/account/AccountForm";
 import { PipAvatar } from "../components/community/PipAvatar";
 import { usePipStore, type PipMode } from "../store/pipStore";
@@ -869,6 +870,7 @@ const AccountCard = ({ showToast }: { showToast: (message: string) => void }) =>
         {status.offline && (
           <p className="mt-2 text-[11px] text-on-surface-variant">Offline. Showing saved details.</p>
         )}
+        {panel === "none" && <AccountEmail account={account} showToast={showToast} />}
 
         {panel === "password" && (
           <div className="mt-1">

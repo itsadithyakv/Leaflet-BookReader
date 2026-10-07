@@ -91,11 +91,17 @@ export function optionalAccount(db) {
   });
 }
 
-/** The account as the client sees it. Never includes the password hash. */
+/**
+ * The account as the client sees it. Never includes the password hash.
+ *
+ * `emailConfirmed` is false for an account made before confirmation existed
+ * (it has no `emailConfirmedAt` at all): nobody has shown the address works.
+ */
 export function accountView(account) {
   return {
     id: account._id.toHexString(),
     email: account.email,
+    emailConfirmed: account.emailConfirmedAt instanceof Date,
     displayName: account.displayName ?? null,
     avatar: avatarView(account.avatar),
     createdAt: account.createdAt instanceof Date ? account.createdAt.toISOString() : null

@@ -7,6 +7,12 @@ export type Account = {
   displayName: string | null;
   /** The avatar picked at signup or since (`skin.move`, see `pip/avatars.ts`), or null. */
   avatar: string | null;
+  /**
+   * Whether the address was confirmed with an emailed code. Missing or null
+   * when the server did not say (one from before confirmation existed): the
+   * app then shows nothing about it.
+   */
+  emailConfirmed?: boolean | null;
   createdAt: string | null;
 };
 
@@ -59,6 +65,21 @@ export const accountService = {
   /** Picks a new avatar, or clears it with null. */
   async setAvatar(avatar: string | null): Promise<AccountStatus> {
     return invoke<AccountStatus>("account_set_avatar", { avatar });
+  },
+
+  /** Emails a new confirmation code to the account's address. */
+  async requestEmailCode(): Promise<AccountStatus> {
+    return invoke<AccountStatus>("account_email_code");
+  },
+
+  /** Confirms the account's address with the emailed code. */
+  async confirmEmail(code: string): Promise<AccountStatus> {
+    return invoke<AccountStatus>("account_email_confirm", { code });
+  },
+
+  /** A new address, with the password. It starts unconfirmed and is sent a code. */
+  async changeEmail(password: string, email: string): Promise<AccountStatus> {
+    return invoke<AccountStatus>("account_change_email", { password, email });
   },
 
   async signIn(email: string, password: string): Promise<AccountStatus> {

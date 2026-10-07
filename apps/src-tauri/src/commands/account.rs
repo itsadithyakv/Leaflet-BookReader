@@ -45,6 +45,38 @@ pub async fn account_set_avatar(
     .map_err(|e| e.to_string())
 }
 
+/// Emails a new confirmation code to the account's address.
+#[tauri::command]
+pub async fn account_email_code(state: State<'_, AppState>) -> Result<cloud::AccountStatus, String> {
+  cloud::request_email_code(&state.db)
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Confirms the account's address with the emailed code.
+#[tauri::command]
+pub async fn account_email_confirm(
+  code: String,
+  state: State<'_, AppState>
+) -> Result<cloud::AccountStatus, String> {
+  cloud::confirm_email(&state.db, &code)
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Changes the account's address, with the password. The new one starts
+/// unconfirmed and is sent a code.
+#[tauri::command]
+pub async fn account_change_email(
+  password: String,
+  email: String,
+  state: State<'_, AppState>
+) -> Result<cloud::AccountStatus, String> {
+  cloud::change_email(&state.db, &password, &email)
+    .await
+    .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn account_login(
   email: String,
