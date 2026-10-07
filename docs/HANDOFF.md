@@ -11,7 +11,11 @@ is in [deploy.md](deploy.md) (the checklist) and
 `release/1.2` at `8553264`). Work is now on the branch `release/1.3`, version
 1.3.1, made off that commit (1.3.0 was never built: the owner asked for nine
 more features and for the whole to go out as 1.3.1). It is committed and
-pushed (`origin/release/1.3`), and not yet built: the package needs the owner's two Google values, in the
+pushed (`origin/release/1.3`). A release build of it compiles and packages
+(2026-10-07, 4 m 58 s), but that package was made without the two Google
+values, so Drive backup is off in it: it is kept as
+`target\msix\Leaflet_1.3.1.0_x64.NO-DRIVE-test-only.msix`, for trying the
+features on this PC and never for upload. The one to upload is not yet built: the package needs the owner's two Google values, in the
 owner's own PowerShell window (deploy.md, "Releasing an update"). What it
 holds:**
 
