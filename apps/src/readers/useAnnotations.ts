@@ -82,6 +82,39 @@ export const useAnnotations = (bookId: string, { moveOldBookmarks = true, enable
     [requestBackup]
   );
 
+  /**
+   * Several saved as one change to the list: one redraw of the notes and the
+   * page, one backup. For highlights brought from a Kindle as they are given
+   * their places (text/useKindlePlacing.ts), which can be hundreds at once.
+   * One that will not save is left as it was. Stopped (`signal`), nothing
+   * more is saved and the list, which may be another book's by then, is left
+   * alone.
+   */
+  const saveAll = useCallback(
+    async (inputs: AnnotationInput[], signal?: AbortSignal) => {
+      const saved: Annotation[] = [];
+      for (const input of inputs) {
+        if (signal?.aborted) {
+          break;
+        }
+        try {
+          saved.push(await annotationService.save(input));
+        } catch {
+          // Left as it was.
+        }
+      }
+      if (saved.length > 0) {
+        if (!signal?.aborted) {
+          const ids = new Set(saved.map((item) => item.id));
+          setItems((current) => [...current.filter((item) => !ids.has(item.id)), ...saved]);
+        }
+        requestBackup();
+      }
+      return saved;
+    },
+    [requestBackup]
+  );
+
   const addBookmark = useCallback(
     (cfi: string, chapter: string | null) => save({ id: newId(), bookId, kind: "bookmark", cfi, chapter }),
     [bookId, save]
@@ -120,7 +153,7 @@ export const useAnnotations = (bookId: string, { moveOldBookmarks = true, enable
   );
   const highlights = useMemo(() => items.filter((item) => item.kind === "highlight"), [items]);
 
-  return { bookmarks, highlights, addBookmark, addHighlight, update, remove };
+  return { bookmarks, highlights, addBookmark, addHighlight, update, remove, saveAll };
 };
 
 /**

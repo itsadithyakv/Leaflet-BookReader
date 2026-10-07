@@ -23,6 +23,7 @@ import { useCloseBook, useBookChange } from "../readers/text/useReaderLifecycle"
 import { useReaderChrome } from "../readers/text/useReaderChrome";
 import { useReaderCover } from "../readers/text/useReaderCover";
 import { useBookOpening } from "../readers/text/useBookOpening";
+import { useKindlePlacing } from "../readers/text/useKindlePlacing";
 import { ReaderToolbar } from "../readers/text/ReaderToolbar";
 import { ReaderContentsPanel } from "../readers/text/ReaderContentsPanel";
 import { ReaderPage } from "../readers/text/ReaderPage";
@@ -97,6 +98,8 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
   useRecapOnReturn(reader);
   useAwakeWhileReading(reader);
   Object.assign(reader, useSelectionDock(reader));
+  // Last: it waits for the book to be up, and nothing waits on it.
+  useKindlePlacing(reader);
 
   const { chromeVisible, displayMode, focusToast, hoverChrome, isLight, pageStyle, readingMode } = reader;
 

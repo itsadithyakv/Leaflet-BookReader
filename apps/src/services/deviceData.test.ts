@@ -61,6 +61,12 @@ describe("what Delete All Data removes from the webview", () => {
     expect(storage.getItem(`leaflet.contents.${BOOK}`)).toBeNull();
   });
 
+  it("removes the note of which Kindle highlights were not found in a book", () => {
+    storage.setItem(`leaflet.kindleTried.${BOOK}`, '{"v":1,"ids":["kindle-0a1b2c3d4e5f6071"],"top":640}');
+    forgetBooksOnThisDevice();
+    expect(storage.getItem(`leaflet.kindleTried.${BOOK}`)).toBeNull();
+  });
+
   it("forgets that the lookup card's note has been shown", () => {
     forgetBooksOnThisDevice();
     expect(storage.getItem("leaflet.lookup.noteSeen")).toBeNull();

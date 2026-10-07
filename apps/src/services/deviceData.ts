@@ -12,7 +12,8 @@
 // `leaflet.contents.<book id>`: the chapter list made for an EPUB that came
 // without one, or with next to none (readers/autoContents.ts).
 // `leaflet.wiki.<book id>`: the fan wiki found or chosen for a book (services/wikiService.ts).
-const PER_BOOK_PREFIXES = ["leaflet.reader.", "leaflet.bookmarks.", "leaflet.pdfChapters.", "leaflet.contents.", "leaflet.wiki."];
+// `leaflet.kindleTried.<book id>`: the Kindle highlights looked for in a book and not found (readers/kindlePlacing.ts).
+const PER_BOOK_PREFIXES = ["leaflet.reader.", "leaflet.bookmarks.", "leaflet.pdfChapters.", "leaflet.contents.", "leaflet.wiki.", "leaflet.kindleTried."];
 /**
  * `leaflet.people.preview` is the browser preview's character sheets (the app
  * keeps them in the database, which the delete clears).
