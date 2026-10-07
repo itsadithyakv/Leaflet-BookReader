@@ -53,6 +53,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
     clearDriveCredentials,
     syncNow,
     loadSyncStatus,
+    setAccountBackup,
     resetAll: resetLibrary
   } = useLibraryStore(
     // Only what this page shows: taking the whole store drew the page again
@@ -68,6 +69,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
       clearDriveCredentials: state.clearDriveCredentials,
       syncNow: state.syncNow,
       loadSyncStatus: state.loadSyncStatus,
+      setAccountBackup: state.setAccountBackup,
       resetAll: state.resetAll
     }))
   );
@@ -137,7 +139,8 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
           : "Nothing backed up yet.";
 
   const syncing = syncStatus === "syncing";
-  const syncConfigured = sync.driveConnected || Boolean(sync.folderPath);
+  const syncConfigured = sync.driveConnected || Boolean(sync.folderPath) || Boolean(sync.accountBackup);
+  const accountSignedIn = useAccountStore((state) => state.status.signedIn);
   // A folder someone already set up keeps its controls, so turning the feature
   // off can never strand a transport that is still running.
   const showFolderSync = FEATURES.multiDeviceSync || Boolean(sync.folderPath);
@@ -217,7 +220,10 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
       })
       .catch((error) =>
         showToast(
-          reason(error, sync.driveConnected ? "Backup failed. Check your Drive connection." : "Backup failed. Check the sync folder.")
+          reason(
+            error,
+            sync.driveConnected ? "Backup failed. Check your Drive connection." : sync.folderPath ? "Backup failed. Check the sync folder." : "Backup failed. Check your connection."
+          )
         )
       );
   };
@@ -517,7 +523,9 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                   ? sync.accountEmail ?? "Google Drive"
                   : sync.folderPath
                     ? "Sync folder"
-                    : "Not backed up"}
+                    : sync.accountBackup
+                      ? "Leaflet account"
+                      : "Not backed up"}
               </p>
               <p className="mt-2 text-xs text-on-surface-variant">{syncHelper}</p>
               {sync.booksPending > 0 && (
@@ -653,6 +661,22 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                   </div>
                 )}
               </div>
+
+              {FEATURES.accounts && accountSignedIn && (
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={Boolean(sync.accountBackup)}
+                  className="mt-5 flex w-full items-center justify-between gap-3 border-t border-outline-variant/40 pt-4 text-left"
+                  title="Keeps your progress, highlights and reading days with your Leaflet account. Never your book files."
+                  onClick={() =>
+                    setAccountBackup(!sync.accountBackup).catch((error) => showToast(reason(error, "Backup failed. Check your connection.")))
+                  }
+                >
+                  <span className="text-xs font-semibold text-on-surface">Back up reading to my Leaflet account</span>
+                  {renderToggle(Boolean(sync.accountBackup))}
+                </button>
+              )}
 
               <button
                 type="button"

@@ -23,11 +23,13 @@ pub(crate) fn current_week_days(today_key: &str) -> Vec<String> {
     .collect()
 }
 
-/// When a book counts as finished. The last page often reports 0.99x rather
-/// than 1, so "finished" is anything from here on. The same number is
-/// `FINISHED_AT` in `apps/src/constants/books.ts`; keep the two equal, or a
-/// reader's own stats and their public card disagree.
-pub(crate) const FINISHED_AT: f32 = 0.99;
+/// Whether a book has been finished: it has a finished date (`finished_at`,
+/// which stays through a second reading), or it is at its end now. The page
+/// counts the same way (`hasFinished` in `apps/src/constants/books.ts`), so a
+/// reader's own stats and their public card agree.
+pub(crate) fn has_finished(book: &BookRecord) -> bool {
+  book.finished_at.as_deref().is_some_and(|at| !at.is_empty()) || book.progress >= db::FINISHED_AT
+}
 
 /// Builds what this reader publishes: the numbers the board ranks on, and the
 /// shelf worth showing.
@@ -49,7 +51,7 @@ pub(crate) fn build_profile_update(db: &db::Database, today_key: &str) -> Result
     .list_books()
     .map_err(|e| e.to_string())?
     .iter()
-    .filter(|book| book.progress >= FINISHED_AT)
+    .filter(|book| has_finished(book))
     .count() as i64;
 
   // The most recent books still on the shelf -- a burned one is not something
@@ -230,6 +232,7 @@ pub async fn save_social_profile(
   let going_public = visibility.as_deref() == Some("public");
   // Handles are shown with an "@" and stored without one.
   let handle = handle.map(|value| bare_handle(&value));
+  let renamed = display_name.clone();
 
   let mut update = cloud::ProfileUpdate {
     handle,
@@ -250,6 +253,14 @@ pub async fn save_social_profile(
   }
 
   cloud::put_profile(&state.db, &update).await.map_err(|e| e.to_string())?;
+
+  // The account's own copy of the name follows (`cloud::set_display_name`).
+  // The save is not failed for it: the profile's is the one readers see.
+  if let Some(name) = renamed {
+    if let Err(error) = cloud::set_display_name(&state.db, &name).await {
+      crate::diag::warn(&format!("the account's name did not follow the profile's: {error}"));
+    }
+  }
 
   if let Some(value) = visibility {
     let db = state.db.guard();
@@ -290,6 +301,42 @@ mod tests {
     // Every day of it has the same week key, which is the board it is ranked on.
     assert!(week.iter().all(|day| iso_week_key(day) == "2026-W40"));
     assert_eq!(iso_week_key("2026-10-05"), "2026-W41");
+  }
+
+  /// A book finished once still counts while it is being read again; one
+  /// marked "not started" does not, whatever it was before.
+  #[test]
+  fn books_finished_counts_dates_as_well_as_books_at_their_end() {
+    let db = crate::db::tests::memory_db();
+    let add = |id: &str, progress: f32, finished: Option<&str>| {
+      let entry = crate::sync::merge::BookEntry::from_record(&BookRecord {
+        id: id.to_string(),
+        title: id.to_string(),
+        author: None,
+        genres: Vec::new(),
+        cover_url: None,
+        local_path: format!("/{id}.epub"),
+        file_hash: id.to_string(),
+        progress,
+        position: None,
+        series: None,
+        series_index: None,
+        last_opened: None,
+        created_at: "2026-01-01T00:00:00+00:00".to_string(),
+        metadata_checked_at: None,
+        metadata_updated_at: None,
+        progress_updated_at: None,
+        finished_at: finished.map(str::to_string),
+        deleted_at: None,
+        available: true
+      });
+      db.upsert_book(&entry.to_record(format!("/{id}.epub"), None)).expect("book");
+    };
+    add("at-its-end", 1.0, None);
+    add("being-read-again", 0.2, Some("2026-03-01T10:00:00+00:00"));
+    add("marked-not-started", 0.0, Some(""));
+    add("half-way", 0.5, None);
+    assert_eq!(build_profile_update(&db, "2026-10-03").expect("update").books_finished, Some(2));
   }
 
   /// The board is fed by the day ledger, which holds every minute the reading

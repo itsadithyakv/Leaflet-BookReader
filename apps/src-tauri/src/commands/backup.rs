@@ -27,7 +27,10 @@ pub struct SyncStatus {
   pub api_base_custom: bool,
   pub last_synced_at: Option<String>,
   /// Books in the library whose file is not on this device yet.
-  pub books_pending: usize
+  pub books_pending: usize,
+  /// The reader chose to back up to their Leaflet account by itself, and is
+  /// signed in (`cloud::backs_up_alone`).
+  pub account_backup: bool
 }
 
 pub const FOLDER_SETTING: &str = "sync_folder_path";
@@ -63,8 +66,23 @@ pub(crate) fn read_sync_status(db: &db::Database) -> Result<SyncStatus, String> 
       .get_setting(LAST_SYNCED_SETTING)
       .map_err(|e| e.to_string())?
       .filter(|value| !value.is_empty()),
-    books_pending: pending
+    books_pending: pending,
+    account_backup: crate::sync::cloud::backs_up_alone(db)
   })
+}
+
+/// Turns backing up to the Leaflet account by itself on or off
+/// (`cloud::backs_up_alone`). Turning it off sends nothing more and leaves
+/// what the account holds; deleting the account is what removes that.
+#[tauri::command]
+pub fn set_account_backup(on: bool, state: State<'_, AppState>) -> Result<SyncStatus, String> {
+  let db = state.db.guard();
+  if on && !crate::sync::cloud::signed_in(&db) {
+    return Err("Sign in to your Leaflet account first.".to_string());
+  }
+  db.set_setting(crate::sync::cloud::BACKUP_ALONE_SETTING, if on { "1" } else { "" })
+    .map_err(|e| e.to_string())?;
+  read_sync_status(&db)
 }
 
 #[tauri::command]
@@ -202,7 +220,7 @@ pub(crate) async fn run_sync(state: &State<'_, AppState>) -> Result<crate::sync:
   // that arrives mid-run waits and then converges against what the first wrote.
   let _running = state.sync_lock.lock().await;
   let now = db::now_iso();
-  let (folder_path, drive_connected, cloud_signed_in) = {
+  let (folder_path, drive_connected, cloud_signed_in, cloud_alone) = {
     let db = state.db.guard();
     (
       db.get_setting(FOLDER_SETTING)
@@ -211,11 +229,14 @@ pub(crate) async fn run_sync(state: &State<'_, AppState>) -> Result<crate::sync:
       drive::load_refresh_token(&db)
         .map_err(|e| e.to_string())?
         .is_some(),
-      crate::sync::cloud::signed_in(&db)
+      crate::sync::cloud::signed_in(&db),
+      crate::sync::cloud::backs_up_alone(&db)
     )
   };
 
-  if folder_path.is_none() && !drive_connected {
+  // The account alone is a backup when the reader chose it; otherwise it only
+  // rides along with a folder or Drive, as it always has.
+  if folder_path.is_none() && !drive_connected && !cloud_alone {
     return Err("Sync is not set up yet. Connect Drive or choose a sync folder.".to_string());
   }
 
@@ -250,6 +271,42 @@ pub(crate) async fn run_sync(state: &State<'_, AppState>) -> Result<crate::sync:
     db.set_setting(LAST_SYNCED_SETTING, &now).map_err(|e| e.to_string())?;
   }
   Ok(report)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::sync::cloud;
+
+  /// Backing up to the account alone is a choice: off until made, and gone
+  /// with the session it was made in.
+  #[test]
+  fn backing_up_to_the_account_alone_is_off_until_chosen() {
+    let db = crate::db::tests::memory_db();
+    assert!(!cloud::backs_up_alone(&db));
+    // Chosen, but nobody is signed in: still nothing is sent.
+    db.set_setting(cloud::BACKUP_ALONE_SETTING, "1").expect("setting");
+    assert!(!cloud::backs_up_alone(&db));
+    assert!(!read_sync_status(&db).expect("status").account_backup);
+  }
+
+  /// With only the account, a missing file is the reader's to add again; the
+  /// account never had it.
+  #[test]
+  fn a_book_with_no_file_says_what_to_do_about_it() {
+    assert!(no_file_message(true).contains("Add the same file again"));
+    assert!(no_file_message(false).contains("sync is not set up"));
+  }
+}
+
+/// Why a book with no file here cannot be fetched. An account's backup holds
+/// the reading, never the files, so there the way on is the file itself.
+pub(crate) fn no_file_message(account_backup: bool) -> &'static str {
+  if account_backup {
+    "That book's file is not on this computer. Add the same file again and your place will be waiting."
+  } else {
+    "That book is not on this device, and sync is not set up."
+  }
 }
 
 /// Fetches a book this device has an entry for but no file.
@@ -311,5 +368,9 @@ pub async fn download_book(
     }
     return Ok(local);
   }
-  Err("That book is not on this device, and sync is not set up.".to_string())
+  let alone = {
+    let db = state.db.guard();
+    crate::sync::cloud::backs_up_alone(&db)
+  };
+  Err(no_file_message(alone).to_string())
 }

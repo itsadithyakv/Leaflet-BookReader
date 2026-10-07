@@ -80,6 +80,17 @@ export const syncService = {
     return invoke<SyncStatus>("set_sync_folder", { path });
   },
 
+  /**
+   * Whether the reading is backed up to the Leaflet account by itself, with
+   * no Drive and no folder. The reader's choice; needs them signed in.
+   */
+  async setAccountBackup(on: boolean): Promise<SyncStatus> {
+    if (!isTauri()) {
+      return EMPTY_SYNC_STATUS;
+    }
+    return invoke<SyncStatus>("set_account_backup", { on });
+  },
+
   async syncNow(): Promise<SyncReport> {
     if (!isTauri()) {
       return EMPTY_REPORT;

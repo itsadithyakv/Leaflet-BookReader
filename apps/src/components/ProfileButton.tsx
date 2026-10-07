@@ -13,7 +13,7 @@ import { useAccountDialog } from "./account/AccountDialog";
  * How backup is set up. There is no paid tier: backup runs against the
  * reader's own storage.
  */
-export type SyncMode = "off" | "folder" | "drive";
+export type SyncMode = "off" | "folder" | "drive" | "account";
 
 type Props = {
   open: boolean;

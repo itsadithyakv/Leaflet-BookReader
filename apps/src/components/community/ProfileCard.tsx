@@ -123,6 +123,9 @@ export const ProfileCard = ({ profile, loadError = null, onRetry, handleNudge = 
       })
       .then((saved) => {
         onSaved(saved);
+        // The name by the avatar in the sidebar is the account's, which the
+        // save has just brought into line: show it without a restart.
+        void useAccountStore.getState().load();
         if (!visibility) {
           setPanel("none");
         }

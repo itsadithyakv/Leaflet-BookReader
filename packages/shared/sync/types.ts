@@ -33,6 +33,8 @@ export type SyncStatus = {
   lastSyncedAt: string | null;
   /** Books in the library whose file is not on this device yet. */
   booksPending: number;
+  /** The reader chose to back up to their Leaflet account by itself, and is signed in. */
+  accountBackup?: boolean;
 };
 
 /** What one sync run did. */
@@ -54,7 +56,8 @@ export const EMPTY_SYNC_STATUS: SyncStatus = {
   apiBase: null,
   apiBaseCustom: false,
   lastSyncedAt: null,
-  booksPending: 0
+  booksPending: 0,
+  accountBackup: false
 };
 
 /** One book on a shared shelf. The spine's look derives from the seed. */

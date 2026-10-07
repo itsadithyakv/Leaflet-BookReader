@@ -29,6 +29,9 @@ use crate::LockExt;
 
 pub const API_BASE_SETTING: &str = "cloud_api_base";
 pub const PROFILE_VISIBILITY_SETTING: &str = "cloud_profile_visibility";
+/// "1" when the reader chose to back their reading up to their Leaflet account
+/// by itself, with no Drive and no folder (`backs_up_alone`).
+pub const BACKUP_ALONE_SETTING: &str = "cloud_backup_alone";
 
 /// Retries after losing a race for the document. Each one is a fresh merge, so
 /// nothing the other device wrote is lost.
@@ -226,6 +229,20 @@ pub fn clear_session(db: &Database) {
   // Kept, it made the next account on this computer publish (or not) by the
   // last one's choice.
   forget_visibility(db);
+  // So does the choice to keep a copy of the reading with the account: the
+  // next reader to sign in here has not made it.
+  let _ = db.set_setting(BACKUP_ALONE_SETTING, "");
+}
+
+/// Whether this device backs its reading up to the Leaflet account by itself.
+///
+/// The account's copy of the reading state used to ride along with a Drive or
+/// folder backup and never went alone, so a reader with an account and no
+/// Drive had nothing kept but their numbers on the board. It is a choice, off
+/// until made (Settings, Backup): it sends the reader's progress, highlights
+/// and reading days to Leaflet's server, which a Drive backup does not.
+pub fn backs_up_alone(db: &Database) -> bool {
+  signed_in(db) && db.get_setting(BACKUP_ALONE_SETTING).ok().flatten().as_deref() == Some("1")
 }
 
 /// Whether the signed-in reader shares their profile, as this device last
@@ -534,11 +551,33 @@ pub async fn logout(db_mutex: &std::sync::Mutex<Database>) -> Result<AccountStat
 /// Sets (or, with `None`, clears) the reader's avatar, and refreshes the cached
 /// account so the change shows offline too. The server checks the id.
 pub async fn set_avatar(db_mutex: &std::sync::Mutex<Database>, avatar: Option<&str>) -> Result<AccountStatus> {
+  patch_account(db_mutex, serde_json::json!({ "avatar": avatar })).await
+}
+
+/// The account's own name, which is what this app shows beside the reader's
+/// avatar. An empty one removes it.
+///
+/// The profile has a copy (the one other readers see), and the two were set
+/// together only at sign-up: a name changed on the profile left the old one
+/// here for good. `save_social_profile` now sends both.
+pub async fn set_display_name(db_mutex: &std::sync::Mutex<Database>, name: &str) -> Result<AccountStatus> {
+  patch_account(db_mutex, account_name_body(name)).await
+}
+
+/// What changing the name sends: the name trimmed, or `null` for none.
+fn account_name_body(name: &str) -> serde_json::Value {
+  let name = name.trim();
+  serde_json::json!({ "displayName": if name.is_empty() { None } else { Some(name) } })
+}
+
+/// Changes what the reader controls about the account itself. Only the fields
+/// in `body` change; the answer is the account as the server now has it.
+async fn patch_account(db_mutex: &std::sync::Mutex<Database>, body: serde_json::Value) -> Result<AccountStatus> {
   let (base, token) = session_token(db_mutex)?;
   let response = client()?
     .patch(format!("{base}/v1/account"))
     .bearer_auth(&token)
-    .json(&serde_json::json!({ "avatar": avatar }))
+    .json(&body)
     .send()
     .await
     .map_err(unreachable)?;
@@ -892,6 +931,15 @@ pub fn handle_segment(handle: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+  /// A name is sent trimmed, and an emptied one as `null`, which the server
+  /// takes as "remove it" (a missing field would leave the old name).
+  #[test]
+  fn a_changed_name_is_sent_trimmed_and_an_emptied_one_as_null() {
+    assert_eq!(super::account_name_body("  Ada Lovelace ").to_string(), r#"{"displayName":"Ada Lovelace"}"#);
+    assert_eq!(super::account_name_body("   ").to_string(), r#"{"displayName":null}"#);
+    assert_eq!(super::account_name_body("").to_string(), r#"{"displayName":null}"#);
+  }
+
   use super::*;
   use crate::db::tests::memory_db;
 
