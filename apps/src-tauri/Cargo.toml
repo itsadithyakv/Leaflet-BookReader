@@ -1,6 +1,6 @@
 [package]
 name = "leaflet"
-version = "1.3.0"
+version = "1.3.1"
 edition = "2021"
 build = "build.rs"
 
@@ -88,6 +88,8 @@ windows = { version = "0.61", features = [
   "Win32_Storage_Packaging_Appx",
   # Desktop Pip (src/desktop_pip/win.rs): whether the mouse button is still
   # down, and Windows' own "a full-screen app or a presentation is running".
+  # Keeping the display on while the page reads itself (commands/power.rs).
+  "Win32_System_Power",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging"
