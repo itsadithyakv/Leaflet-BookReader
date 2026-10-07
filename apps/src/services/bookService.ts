@@ -76,6 +76,16 @@ export const bookService = {
     }
     return invoke<Book>("book_set_series", { bookId, series, seriesIndex });
   },
+  /**
+   * "Mark as finished" and "Mark as not started". The book as it now is, or
+   * null in the preview, which has no database.
+   */
+  async setFinished(bookId: string, finished: boolean): Promise<Book | null> {
+    if (!isTauri()) {
+      return null;
+    }
+    return invoke<Book>("set_book_finished", { bookId, finished });
+  },
   /** Reads the series inside the books already in the library, once ever. How many gained one. */
   async scanSeries(): Promise<number> {
     if (!isTauri()) {

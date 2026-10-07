@@ -171,6 +171,7 @@ mod tests {
 
   fn book(id: &str, title: &str, progress: f32, deleted: bool) -> BookRecord {
     BookRecord {
+      finished_at: None,
       id: id.to_string(),
       title: title.to_string(),
       author: Some("Someone".to_string()),

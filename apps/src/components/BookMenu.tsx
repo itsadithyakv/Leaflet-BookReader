@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Book } from "@shared/models/book";
 import { useCollectionStore } from "../store/collectionStore";
+import { useLibraryStore } from "../store/libraryStore";
+import { isFinished } from "../constants/books";
 import { getBookExtension, isHighlightableFormat } from "../constants/bookFormats";
 import { openHighlights, useHighlightsStore } from "./highlights/highlightsStore";
 import { openSeriesEditor } from "./SeriesEditor";
@@ -38,6 +40,10 @@ export const BookMenu = ({ book, actions = [], className = "" }: Props) => {
   const load = useCollectionStore((state) => state.load);
   const toggleBook = useCollectionStore((state) => state.toggleBook);
   const create = useCollectionStore((state) => state.create);
+  const setBookFinished = useLibraryStore((state) => state.setBookFinished);
+  const atItsEnd = isFinished(book.progress);
+  // Something to take back: a place in the book, or a finished date.
+  const begun = (book.progress ?? 0) > 0 || Boolean(book.finishedAt);
   // A book of words can be highlighted (a PDF too, since 1.3); a comic has none to show.
   const highlightable = isHighlightableFormat(getBookExtension(book.localPath));
   const highlightCount = useHighlightsStore((state) => state.counts[book.id] ?? 0);
@@ -225,6 +231,35 @@ export const BookMenu = ({ book, actions = [], className = "" }: Props) => {
                 {highlightCount > 0 && (
                   <span className="ml-auto text-xs tabular-nums text-on-surface-variant">{highlightCount}</span>
                 )}
+              </button>
+            )}
+            {!atItsEnd && (
+              <button
+                type="button"
+                role="menuitem"
+                className={item}
+                onClick={() => {
+                  close();
+                  void setBookFinished(book.id, true);
+                }}
+              >
+                <UiIcon name="check" size={16} className="text-on-surface-variant" />
+                Mark as finished
+              </button>
+            )}
+            {begun && (
+              <button
+                type="button"
+                role="menuitem"
+                className={item}
+                title="Back to the start, with no finished date"
+                onClick={() => {
+                  close();
+                  void setBookFinished(book.id, false);
+                }}
+              >
+                <UiIcon name="undo" size={16} className="text-on-surface-variant" />
+                Mark as not started
               </button>
             )}
             {actions.map((action) => (

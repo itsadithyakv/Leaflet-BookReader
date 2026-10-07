@@ -100,6 +100,13 @@ pub struct BookRecord {
   /// opening a book is not the same as moving through it.
   #[serde(default)]
   pub progress_updated_at: Option<String>,
+  /// When the reader finished the book: stamped the moment its progress
+  /// reaches the end (`FINISHED_AT`), and by "Mark as finished". It stays when
+  /// the book is read again, so a book finished once is not unfinished by a
+  /// second reading. `Some("")` is the reader saying "not started", which
+  /// takes the date away on every device; `None` is a book never finished.
+  #[serde(default)]
+  pub finished_at: Option<String>,
   /// Tombstone. A removed book keeps its row so the removal can reach other
   /// devices instead of being undone by them on the next sync.
   #[serde(default)]
@@ -193,7 +200,7 @@ impl Database {
   }
 
   /// The columns `row_to_book` reads, in its order.
-  const BOOK_COLUMNS: &'static str = "id, title, author, genres, cover_url, local_path, file_hash, progress, last_opened, created_at, metadata_checked_at, metadata_updated_at, progress_updated_at, deleted_at, position, series, series_index";
+  const BOOK_COLUMNS: &'static str = "id, title, author, genres, cover_url, local_path, file_hash, progress, last_opened, created_at, metadata_checked_at, metadata_updated_at, progress_updated_at, deleted_at, position, series, series_index, finished_at";
 
   fn row_to_book(row: &rusqlite::Row<'_>) -> rusqlite::Result<BookRecord> {
     let genres_json: Option<String> = row.get(3)?;
@@ -217,6 +224,7 @@ impl Database {
       metadata_checked_at: row.get(10)?,
       metadata_updated_at: row.get(11)?,
       progress_updated_at: row.get(12)?,
+      finished_at: row.get(17)?,
       deleted_at: row.get(13)?,
       available: {
         let path: String = row.get(5)?;
@@ -265,8 +273,8 @@ impl Database {
   pub fn upsert_book(&self, book: &BookRecord) -> Result<()> {
     let genres_json = serde_json::to_string(&book.genres).ok();
     self.conn.execute(
-      "INSERT INTO books (id, title, author, genres, cover_url, local_path, file_hash, progress, last_opened, created_at, metadata_checked_at, metadata_updated_at, progress_updated_at, deleted_at, position, series, series_index)
-      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+      "INSERT INTO books (id, title, author, genres, cover_url, local_path, file_hash, progress, last_opened, created_at, metadata_checked_at, metadata_updated_at, progress_updated_at, deleted_at, position, series, series_index, finished_at)
+      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
         author = excluded.author,
@@ -283,7 +291,8 @@ impl Database {
         deleted_at = excluded.deleted_at,
         position = excluded.position,
         series = excluded.series,
-        series_index = excluded.series_index",
+        series_index = excluded.series_index,
+        finished_at = excluded.finished_at",
       params![
         book.id,
         book.title,
@@ -301,7 +310,8 @@ impl Database {
         book.deleted_at,
         book.position,
         book.series,
-        book.series_index
+        book.series_index,
+        book.finished_at
       ]
     )?;
     Ok(())
@@ -429,6 +439,10 @@ impl Database {
         |row| Ok((row.get(0)?, row.get(1)?))
       )
       .optional()?;
+    // Reaching the end from short of it is finishing the book: the date is
+    // kept from then on (`BookRecord::finished_at`). A book that is new here,
+    // or was already at its end, is not finished again by being opened.
+    let finishes = progress >= FINISHED_AT && previous.as_ref().is_some_and(|(value, _)| *value < FINISHED_AT);
     let moved = previous
       .map(|(value, previous_position)| {
         (value - progress).abs() > f32::EPSILON
@@ -446,8 +460,32 @@ impl Database {
         params![last_opened, book_id]
       )?;
     }
+    if finishes {
+      self.conn.execute("UPDATE books SET finished_at = ?1 WHERE id = ?2", params![now_iso(), book_id])?;
+    }
     if let Some(opened_at) = last_opened {
       self.log_reading_session(book_id, &opened_at)?;
+    }
+    Ok(())
+  }
+
+  /// "Mark as finished" and "Mark as not started", from a book's menu.
+  ///
+  /// Finished: the book is at its end as of `now`. Not started: it is at its
+  /// beginning with no place kept, and its finished date is cleared for every
+  /// device (`Some("")`, which the merge reads as said on purpose). Both are a
+  /// change of progress and carry its stamp, so the other devices follow.
+  pub fn set_finished(&self, book_id: &str, finished: bool, now: &str) -> Result<()> {
+    if finished {
+      self.conn.execute(
+        "UPDATE books SET progress = 1.0, position = NULL, finished_at = ?1, progress_updated_at = ?1 WHERE id = ?2",
+        params![now, book_id]
+      )?;
+    } else {
+      self.conn.execute(
+        "UPDATE books SET progress = 0.0, position = NULL, finished_at = '', progress_updated_at = ?1 WHERE id = ?2",
+        params![now, book_id]
+      )?;
     }
     Ok(())
   }
@@ -1132,7 +1170,8 @@ fn apply_schema(conn: &Connection) -> Result<()> {
         deleted_at TEXT,
         position TEXT,
         series TEXT,
-        series_index REAL
+        series_index REAL,
+        finished_at TEXT
       );
       /* The reader's own collections (see Collection). book_ids is a JSON list.
          book_collections below is unused: it predates collections being carried
@@ -1258,7 +1297,12 @@ fn apply_schema(conn: &Connection) -> Result<()> {
 /// version, and put the new shape in the `CREATE TABLE`s above too (a new
 /// library is created at the latest version directly). Never edit a step that
 /// has shipped.
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 5;
+
+/// From this much of a book on, it is finished: the last page often reports
+/// 0.99x rather than 1. The same number is `FINISHED_AT` in
+/// `apps/src/constants/books.ts`; keep the two equal.
+pub const FINISHED_AT: f32 = 0.99;
 
 /// Brings an older database up to `SCHEMA_VERSION`, one version at a time,
 /// all in one transaction: a step that fails leaves the database as it was.
@@ -1294,6 +1338,20 @@ fn upgrade(conn: &Connection) -> Result<()> {
     // The focus flower a full-screen session grew, and whether it bloomed.
     add_column(&tx, "focus_sessions", "flower TEXT")?;
     add_column(&tx, "focus_sessions", "flower_bloomed INTEGER NOT NULL DEFAULT 0")?;
+  }
+  if from < 5 {
+    // When a book was finished. Until now that was read off its progress, so
+    // the books already at their end get the day their progress last moved
+    // (which is what the app showed as the day they were finished).
+    add_column(&tx, "books", "finished_at TEXT")?;
+    // The stamp the date is read from is as old as version 1; a library
+    // without it for any reason gets it here rather than failing the upgrade.
+    add_column(&tx, "books", "progress_updated_at TEXT")?;
+    tx.execute(
+      "UPDATE books SET finished_at = COALESCE(progress_updated_at, last_opened, created_at)
+       WHERE finished_at IS NULL AND progress >= ?1",
+      params![FINISHED_AT]
+    )?;
   }
   tx.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))?;
   tx.commit()?;
@@ -1547,6 +1605,80 @@ pub(crate) mod tests {
     let s2 = back.iter().find(|s| s.id == "s2").expect("s2");
     assert_eq!(s2.flower.as_deref(), Some("tulip"));
     assert!(s2.flower_bloomed);
+  }
+
+  /// Reaching the end stamps the day; reading the book again keeps it; and
+  /// being opened while already at the end is not finishing it again.
+  #[test]
+  fn reaching_the_end_is_finishing_and_the_date_stays() {
+    let db = memory_db();
+    seeded_book(&db);
+    db.update_progress("b1", 0.6, None, None).expect("reading");
+    assert_eq!(db.find_by_id("b1").expect("query").expect("present").finished_at, None);
+
+    db.update_progress("b1", 0.995, None, None).expect("the last page");
+    let finished = db.find_by_id("b1").expect("query").expect("present").finished_at.expect("finished");
+    assert!(!finished.is_empty());
+
+    // Opened again at the end, then read again from the start.
+    db.conn.execute("UPDATE books SET finished_at = '2026-03-01T10:00:00Z' WHERE id = 'b1'", []).expect("backdate");
+    db.update_progress("b1", 1.0, None, None).expect("still at the end");
+    db.update_progress("b1", 0.02, None, None).expect("a second reading");
+    let book = db.find_by_id("b1").expect("query").expect("present");
+    assert_eq!(book.finished_at.as_deref(), Some("2026-03-01T10:00:00Z"));
+    assert_eq!(book.progress, 0.02);
+
+    // Finished the second time: that is the day now.
+    db.update_progress("b1", 0.99, None, None).expect("finished again");
+    let again = db.find_by_id("b1").expect("query").expect("present").finished_at.expect("finished");
+    assert_ne!(again, "2026-03-01T10:00:00Z");
+  }
+
+  #[test]
+  fn a_book_is_marked_finished_or_not_started() {
+    let db = memory_db();
+    seeded_book(&db);
+    db.update_progress("b1", 0.4, None, Some("epubcfi(/6/8!/4/2/1:0)".to_string())).expect("reading");
+
+    db.set_finished("b1", true, "2026-10-07T09:00:00Z").expect("finished");
+    let book = db.find_by_id("b1").expect("query").expect("present");
+    assert_eq!((book.progress, book.position.as_deref()), (1.0, None));
+    assert_eq!(book.finished_at.as_deref(), Some("2026-10-07T09:00:00Z"));
+    assert_eq!(book.progress_updated_at.as_deref(), Some("2026-10-07T09:00:00Z"), "stamped, so it syncs");
+
+    db.set_finished("b1", false, "2026-10-08T09:00:00Z").expect("not started");
+    let book = db.find_by_id("b1").expect("query").expect("present");
+    assert_eq!((book.progress, book.position.as_deref()), (0.0, None));
+    // Said on purpose, which is not the same as never finished.
+    assert_eq!(book.finished_at.as_deref(), Some(""));
+    assert_eq!(book.progress_updated_at.as_deref(), Some("2026-10-08T09:00:00Z"));
+  }
+
+  /// A library from before finished dates: the books at their end get the day
+  /// their progress last moved, and the others get none.
+  #[test]
+  fn version_5_dates_the_books_already_finished() {
+    let conn = Connection::open_in_memory().expect("open");
+    conn
+      .execute_batch(
+        "CREATE TABLE books (id TEXT PRIMARY KEY, title TEXT NOT NULL, author TEXT, genres TEXT, cover_url TEXT,
+           local_path TEXT NOT NULL, file_hash TEXT NOT NULL, progress REAL DEFAULT 0, last_opened TEXT,
+           created_at TEXT NOT NULL, metadata_checked_at TEXT, metadata_updated_at TEXT, progress_updated_at TEXT,
+           deleted_at TEXT, position TEXT, series TEXT, series_index REAL);
+         INSERT INTO books (id, title, local_path, file_hash, progress, created_at, progress_updated_at, last_opened) VALUES
+           ('done', 'Done', '/done.epub', 'done', 0.995, '2026-01-01T00:00:00Z', '2026-05-02T20:00:00Z', '2026-06-01T08:00:00Z'),
+           ('old', 'Old', '/old.epub', 'old', 1.0, '2025-01-01T00:00:00Z', NULL, '2025-02-03T08:00:00Z'),
+           ('half', 'Half', '/half.epub', 'half', 0.5, '2026-01-01T00:00:00Z', '2026-05-02T20:00:00Z', NULL);
+         PRAGMA user_version = 4;"
+      )
+      .expect("old library");
+    apply_schema(&conn).expect("upgrade");
+    let db = Database { conn, path: PathBuf::from(":memory:") };
+    let finished = |id: &str| db.find_by_id(id).expect("query").expect("present").finished_at;
+    assert_eq!(finished("done").as_deref(), Some("2026-05-02T20:00:00Z"));
+    assert_eq!(finished("old").as_deref(), Some("2025-02-03T08:00:00Z"), "no progress stamp: the day it was last opened");
+    assert_eq!(finished("half"), None);
+    assert_eq!(db.schema_version(), SCHEMA_VERSION);
   }
 
   #[test]

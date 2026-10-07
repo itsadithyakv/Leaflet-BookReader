@@ -2,10 +2,11 @@ import { useMemo, useState } from "react";
 import type { Book } from "@shared/models/book";
 import { useLibraryStore } from "../store/libraryStore";
 import { useHabitStore } from "../store/habitStore";
-import { isFinished } from "../constants/books";
+import { hasFinished } from "../constants/books";
 import { SocialPanel, type SocialNavTarget } from "../components/SocialPanel";
 import { SessionShelf } from "../components/SessionShelf";
 import { ReadingCalendar } from "../components/ReadingCalendar";
+import { YearGoalCard } from "../components/goal/YearGoalCard";
 import { openYearReview } from "../components/share/shareStore";
 import { yearsRead } from "../components/share/yearReview";
 import { CountUp } from "../components/community/CountUp";
@@ -66,7 +67,7 @@ export const SocialPage = ({ showToast, nowReading, onReadNow, onNavigate }: Soc
     const daysRead = snapshot.days.filter((day) => day.minutes > 0).length;
     return { weekMinutes, totalMinutes, daysRead };
   }, [snapshot.days]);
-  const finishedBooks = useMemo(() => books.filter((book) => isFinished(book.progress)).length, [books]);
+  const finishedBooks = useMemo(() => books.filter(hasFinished).length, [books]);
   // The latest year there is any reading in; none on a new library.
   const reviewYear = useMemo(() => yearsRead(snapshot.days)[0] ?? null, [snapshot.days]);
 
@@ -123,6 +124,8 @@ export const SocialPage = ({ showToast, nowReading, onReadNow, onNavigate }: Soc
               </div>
             ))}
           </section>
+
+          <YearGoalCard />
 
           {/* The year as one picture to keep or share (components/share). */}
           {reviewYear !== null && (

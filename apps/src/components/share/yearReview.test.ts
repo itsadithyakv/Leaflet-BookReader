@@ -2,13 +2,14 @@ import { describe, expect, it } from "vitest";
 import { dayWords, timeWords, yearReview, yearsRead } from "./yearReview";
 
 const day = (dateKey: string, minutes: number) => ({ dateKey, minutes });
-const book = (id: string, fields: Partial<{ title: string; author: string | null; genres: string[]; progress: number; progressUpdatedAt: string | null; lastOpened: string | null }>) => ({
+const book = (id: string, fields: Partial<{ title: string; author: string | null; genres: string[]; progress: number; progressUpdatedAt: string | null; lastOpened: string | null; finishedAt: string | null }>) => ({
   id,
   title: fields.title ?? id,
   author: fields.author ?? null,
   genres: fields.genres ?? [],
   progress: fields.progress ?? 0,
   progressUpdatedAt: fields.progressUpdatedAt ?? null,
+  finishedAt: fields.finishedAt ?? null,
   lastOpened: fields.lastOpened ?? null
 });
 // Local times, as the reader's clock had them.
@@ -61,6 +62,18 @@ describe("a year of reading", () => {
     const review = yearReview(2026, { days, sessions: [], books });
     expect(review.finished.map((item) => item.title)).toEqual(["Late", "Early"]);
     expect(review.booksRead).toBe(4);
+  });
+
+  it("keeps a book in the year it was finished when it is read again later", () => {
+    const books = [
+      // Finished in 2025, half way through a second reading in 2026.
+      book("a", { title: "Read twice", progress: 0.5, progressUpdatedAt: at(4, 1, 9), finishedAt: at(8, 1, 9, 2025) }),
+      // Marked "not started": no longer finished in any year.
+      book("b", { title: "Taken back", progress: 0, progressUpdatedAt: at(4, 2, 9), finishedAt: "" }),
+      book("c", { title: "This year", progress: 0.1, progressUpdatedAt: at(9, 1, 9), finishedAt: at(5, 1, 9) })
+    ];
+    expect(yearReview(2026, { days, sessions: [], books }).finished.map((item) => item.title)).toEqual(["This year"]);
+    expect(yearReview(2025, { days, sessions: [], books }).finished.map((item) => item.title)).toEqual(["Read twice"]);
   });
 
   it("names the author and the kind most read, when it is more than one book", () => {

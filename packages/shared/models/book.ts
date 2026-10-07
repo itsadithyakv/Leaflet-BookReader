@@ -27,6 +27,12 @@ export type Book = {
    * opened. Missing on a book that has never moved, or one made by hand.
    */
   progressUpdatedAt?: string | null;
+  /**
+   * When the reader finished the book: stamped when it reaches its end, and
+   * by "Mark as finished". It stays through a second reading. `""` is the
+   * reader saying "not started"; missing on a book never finished.
+   */
+  finishedAt?: string | null;
   createdAt: string;
   // Last time metadata enrichment ran for this book, successful or not.
   metadataCheckedAt?: string | null;

@@ -6,7 +6,7 @@
  *
  * Pure: records in, figures out.
  */
-import { isFinished } from "../../constants/books";
+import { finishedOn, hasFinished } from "../../constants/books";
 
 type Day = { dateKey: string; minutes: number };
 type Session = { startedAt: string; minutes: number };
@@ -17,6 +17,7 @@ type BookRead = {
   genres?: string[];
   progress: number;
   progressUpdatedAt?: string | null;
+  finishedAt?: string | null;
   lastOpened: string | null;
 };
 
@@ -121,9 +122,12 @@ export const yearReview = (
 
   // A book counts for the year its reading last moved in; one only opened, the year it was opened.
   const touched = records.books.filter((book) => book.progress > 0 && inYear(book.progressUpdatedAt ?? book.lastOpened, year));
-  const finished = touched
-    .filter((book) => isFinished(book.progress))
-    .sort((a, b) => (b.progressUpdatedAt ?? b.lastOpened ?? "").localeCompare(a.progressUpdatedAt ?? a.lastOpened ?? ""))
+  // Finished in the year by its finished date, which a second reading in a
+  // later year does not move (and which is the progress stamp for a book
+  // finished before the date was kept).
+  const finished = records.books
+    .filter((book) => hasFinished(book) && inYear(finishedOn(book), year))
+    .sort((a, b) => (finishedOn(b) ?? "").localeCompare(finishedOn(a) ?? ""))
     .map((book) => ({ title: book.title, author: book.author }));
 
   const sessions = records.sessions.filter((session) => inYear(session.startedAt, year) && session.minutes > 0);

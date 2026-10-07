@@ -227,6 +227,7 @@ mod tests {
 
   fn stored(title: &str, author: Option<&str>) -> BookRecord {
     BookRecord {
+      finished_at: None,
       id: "abc".into(),
       title: title.into(),
       author: author.map(str::to_string),

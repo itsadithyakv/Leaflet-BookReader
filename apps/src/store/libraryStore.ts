@@ -5,6 +5,7 @@ import { bookService, type ImportOutcome } from "../services/bookService";
 import { syncService } from "../services/syncService";
 import { socialService } from "../services/socialService";
 import { statsService, type ReadingStats } from "../services/statsService";
+import { isFinished } from "../constants/books";
 
 const defaultFilters: BookFilter = {
   query: "",
@@ -58,6 +59,10 @@ type LibraryState = {
   refreshMissingMetadata: (books?: Book[]) => Promise<void>;
   /** See `bookService.setSeries`. */
   setSeries: (id: string, series: string | null, seriesIndex: number | null) => Promise<void>;
+  /** See `syncService.setAccountBackup`. Turning it on backs up at once. */
+  setAccountBackup: (on: boolean) => Promise<void>;
+  /** "Mark as finished" (true) or "Mark as not started" (false). */
+  setBookFinished: (id: string, finished: boolean) => Promise<void>;
   /** `position` left undefined keeps the book's current CFI. */
   updateBookProgress: (id: string, progress: number, position?: string | null) => void;
   resetAll: () => void;
@@ -135,6 +140,19 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // The preview has no database: the change lives in memory.
     const current = get().books.find((book) => book.id === id);
     const next = updated ?? (current ? { ...current, series, seriesIndex } : null);
+    if (next) {
+      set({ books: replaceBook(get().books, next) });
+      scheduleSync(set, get);
+    }
+  },
+  async setBookFinished(id, finished) {
+    const updated = await bookService.setFinished(id, finished);
+    // The preview has no database: the change lives in memory, as the database makes it.
+    const current = get().books.find((book) => book.id === id);
+    const now = new Date().toISOString();
+    const next =
+      updated ??
+      (current ? { ...current, progress: finished ? 1 : 0, position: null, finishedAt: finished ? now : "", progressUpdatedAt: now } : null);
     if (next) {
       set({ books: replaceBook(get().books, next) });
       scheduleSync(set, get);
@@ -289,6 +307,12 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       await get().syncNow();
     }
   },
+  async setAccountBackup(on) {
+    set({ sync: await syncService.setAccountBackup(on) });
+    if (on) {
+      await get().syncNow();
+    }
+  },
   requestBackup() {
     scheduleSync(set, get);
   },
@@ -365,6 +389,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // Stamped as the database stamps it (db `update_progress`): only when the
     // place really moved, so this copy says the same as the next one loaded.
     const moved = (book: Book) => Math.abs((book.progress ?? 0) - progress) > 1e-6 || (position != null && position !== book.position);
+    // Reaching the end from short of it is finishing the book, and is dated.
+    const finishes = (book: Book) => isFinished(progress) && !isFinished(book.progress);
     set({
       books: get().books.map((book) =>
         book.id === id
@@ -372,7 +398,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
               ...book,
               progress,
               position: position === undefined ? book.position : position,
-              progressUpdatedAt: moved(book) ? new Date().toISOString() : book.progressUpdatedAt
+              progressUpdatedAt: moved(book) ? new Date().toISOString() : book.progressUpdatedAt,
+              finishedAt: finishes(book) ? new Date().toISOString() : book.finishedAt
             }
           : book
       )
@@ -436,8 +463,8 @@ function scheduleSync(
   set: (state: Partial<LibraryState>) => void,
   get: () => LibraryState
 ) {
-  const { driveConnected, folderPath } = get().sync;
-  if (!driveConnected && !folderPath) {
+  const { driveConnected, folderPath, accountBackup } = get().sync;
+  if (!driveConnected && !folderPath && !accountBackup) {
     return;
   }
   if (syncTimer) {

@@ -69,6 +69,11 @@ pub struct BookEntry {
   /// Conflating the two is what let a device that merely opened a book roll
   /// another device's reading position backwards.
   pub progress_updated_at: String,
+  /// When the book was finished (`BookRecord::finished_at`: `Some("")` is
+  /// "not started", said on purpose). Left out of the document for a book
+  /// never finished, and by versions that do not keep it.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub finished_at: Option<String>,
   pub last_opened: Option<String>,
   pub created_at: String,
   /// Set when the book was removed. The entry survives so the removal can reach
@@ -222,6 +227,29 @@ fn later(a: &Option<String>, b: &Option<String>) -> Option<String> {
 /// Whole-record last-writer-wins was the original bug: it let one field's
 /// timestamp decide the fate of every other field. Here a title correction on
 /// one device and a position change on another both survive.
+/// When a book was finished, from two devices' answers.
+///
+/// The later date stands: a book read twice was last finished the second
+/// time. A side that says nothing (a version that does not keep the date, or
+/// a book never finished there) never takes the other's away. A side that
+/// says "not started" does, unless the other finished the book after that
+/// side's progress last moved, which is the nearest thing there is to when it
+/// was said.
+fn merge_finished(a: &BookEntry, b: &BookEntry) -> Option<String> {
+  let unless_finished_since = |date: &str, cleared: &BookEntry| {
+    Some(if instant(date) > instant(&cleared.progress_updated_at) { date.to_string() } else { String::new() })
+  };
+  match (a.finished_at.as_deref(), b.finished_at.as_deref()) {
+    (None, _) => b.finished_at.clone(),
+    (_, None) => a.finished_at.clone(),
+    (Some(""), Some("")) => Some(String::new()),
+    (Some(""), Some(date)) => unless_finished_since(date, a),
+    (Some(date), Some("")) => unless_finished_since(date, b),
+    // The same moment written two ways is still decided the same way round.
+    (Some(x), Some(y)) => Some(if (instant(x), x) >= (instant(y), y) { x } else { y }.to_string())
+  }
+}
+
 fn merge_book(a: &BookEntry, b: &BookEntry) -> BookEntry {
   // Metadata moves as a group, newest write wins. Exact ties fall back to
   // comparing the values themselves so the result cannot depend on argument
@@ -310,6 +338,7 @@ fn merge_book(a: &BookEntry, b: &BookEntry) -> BookEntry {
     // loser would pair one device's percentage with another device's place.
     position: progress_from.position.clone(),
     progress_updated_at: progress_from.progress_updated_at.clone(),
+    finished_at: merge_finished(a, b),
     // "Last opened" is inherently a maximum rather than a contested value.
     last_opened: later(&a.last_opened, &b.last_opened),
     // The earliest import is the truth about when the book entered the library.
@@ -597,6 +626,7 @@ impl BookEntry {
         .progress_updated_at
         .clone()
         .unwrap_or_else(|| book.created_at.clone()),
+      finished_at: book.finished_at.clone(),
       last_opened: book.last_opened.clone(),
       created_at: book.created_at.clone(),
       deleted_at: book.deleted_at.clone()
@@ -623,6 +653,7 @@ impl BookEntry {
       metadata_checked_at: None,
       metadata_updated_at: Some(self.metadata_updated_at.clone()),
       progress_updated_at: Some(self.progress_updated_at.clone()),
+      finished_at: self.finished_at.clone(),
       deleted_at: self.deleted_at.clone(),
       // A document entry says nothing about whether the bytes are here; the
       // caller re-reads the row, which checks the filesystem.
@@ -737,6 +768,7 @@ mod tests {
 
   fn entry(id: &str) -> BookEntry {
     BookEntry {
+      finished_at: None,
       id: id.to_string(),
       ext: "epub".to_string(),
       title: format!("Book {id}"),
@@ -955,6 +987,61 @@ mod tests {
     let ab = merge(&a, &b, now);
     assert_eq!(ab.collections, merge(&b, &a, now).collections, "commutative");
     assert_eq!(ab.collections[0].book_ids, vec!["b1".to_string(), "b2".to_string()]);
+  }
+
+  /// A finished date, between two devices: the later one stands, silence
+  /// takes nothing away, and "not started" takes it away unless the book was
+  /// finished after that was said.
+  #[test]
+  fn a_finished_date_merges_without_being_lost() {
+    let with = |finished: Option<&str>, progress_at: &str| {
+      let mut book = entry("a");
+      book.finished_at = finished.map(str::to_string);
+      book.progress_updated_at = progress_at.to_string();
+      book
+    };
+    let both_ways = |x: &BookEntry, y: &BookEntry| {
+      let one = merge_book(x, y).finished_at;
+      assert_eq!(one, merge_book(y, x).finished_at, "the same whichever side is which");
+      one
+    };
+    let march = "2026-03-01T10:00:00+00:00";
+    let june = "2026-06-01T10:00:00+00:00";
+    let may = "2026-05-01T10:00:00+00:00";
+    let july = "2026-07-01T10:00:00+00:00";
+
+    // Read twice: the second time is when it was last finished.
+    assert_eq!(both_ways(&with(Some(march), march), &with(Some(june), june)).as_deref(), Some(june));
+    // A device on a version that does not keep the date read on after it:
+    // its newer progress wins, and the date is still there.
+    let merged = merge_book(&with(Some(march), march), &with(None, june));
+    assert_eq!(merged.finished_at.as_deref(), Some(march));
+    assert_eq!(merged.progress_updated_at, june);
+    assert_eq!(both_ways(&with(None, march), &with(None, june)), None);
+
+    // "Not started", said in May, takes March's date away...
+    assert_eq!(both_ways(&with(Some(march), march), &with(Some(""), may)).as_deref(), Some(""));
+    // ...even when the other device read a little more since without knowing.
+    assert_eq!(both_ways(&with(Some(march), june), &with(Some(""), may)).as_deref(), Some(""));
+    // Finished again in July, after it was said: that stands.
+    assert_eq!(both_ways(&with(Some(july), july), &with(Some(""), may)).as_deref(), Some(july));
+    assert_eq!(both_ways(&with(Some(""), march), &with(Some(""), may)).as_deref(), Some(""));
+    // And against silence, "not started" is kept as said.
+    assert_eq!(both_ways(&with(Some(""), may), &with(None, june)).as_deref(), Some(""));
+  }
+
+  /// A book never finished adds nothing to the document, so a version that
+  /// does not know the field reads and writes it as before.
+  #[test]
+  fn a_finished_date_is_left_out_of_the_document_until_there_is_one() {
+    let plain = serde_json::to_string(&entry("a")).expect("json");
+    assert!(!plain.contains("finishedAt"));
+    let mut finished = entry("a");
+    finished.finished_at = Some("2026-03-01T10:00:00+00:00".to_string());
+    let json = serde_json::to_string(&finished).expect("json");
+    assert!(json.contains(r#""finishedAt":"2026-03-01T10:00:00+00:00""#));
+    assert_eq!(serde_json::from_str::<BookEntry>(&json).expect("back"), finished);
+    assert_eq!(serde_json::from_str::<BookEntry>(&plain).expect("old document").finished_at, None);
   }
 
   #[test]
@@ -1191,6 +1278,7 @@ mod tests {
   #[test]
   fn an_unstamped_legacy_record_loses_to_a_real_edit() {
     let legacy = BookRecord {
+      finished_at: None,
       id: "aaa".to_string(),
       title: "Old".to_string(),
       author: None,

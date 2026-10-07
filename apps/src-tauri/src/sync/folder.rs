@@ -213,6 +213,7 @@ mod tests {
 
   fn book(id: &str, progress: f32, now: &str) -> BookRecord {
     BookRecord {
+      finished_at: None,
       id: id.to_string(),
       title: format!("Book {id}"),
       author: Some("Someone".to_string()),

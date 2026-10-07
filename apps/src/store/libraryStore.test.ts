@@ -80,3 +80,50 @@ describe("importing", () => {
     expect(useLibraryStore.getState().importing).toBe(false);
   });
 });
+
+describe("finishing a book", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    useLibraryStore.getState().resetAll();
+  });
+
+  it("dates the book when its progress reaches the end, and keeps the date through a second reading", () => {
+    useLibraryStore.setState({ books: [{ ...book("a"), progress: 0.6 }] });
+    const { updateBookProgress } = useLibraryStore.getState();
+    const now = () => useLibraryStore.getState().books[0];
+
+    updateBookProgress("a", 0.8);
+    expect(now().finishedAt).toBeUndefined();
+    updateBookProgress("a", 0.995);
+    const finished = now().finishedAt;
+    expect(finished).toBeTruthy();
+
+    // Opened again at the end: not finished a second time. Read again: still finished then.
+    updateBookProgress("a", 1);
+    updateBookProgress("a", 0.05);
+    expect(now().finishedAt).toBe(finished);
+    expect(now().progress).toBe(0.05);
+  });
+
+  it("marks a book finished or not started as the database does, where there is no database", async () => {
+    vi.spyOn(bookService, "setFinished").mockResolvedValue(null);
+    useLibraryStore.setState({ books: [{ ...book("a"), progress: 0.4, position: "epubcfi(/6/8!/4/2/1:0)" }] });
+    const now = () => useLibraryStore.getState().books[0];
+
+    await useLibraryStore.getState().setBookFinished("a", true);
+    expect([now().progress, now().position]).toEqual([1, null]);
+    expect(now().finishedAt).toBeTruthy();
+    expect(now().progressUpdatedAt).toBe(now().finishedAt);
+
+    await useLibraryStore.getState().setBookFinished("a", false);
+    expect([now().progress, now().position, now().finishedAt]).toEqual([0, null, ""]);
+  });
+
+  it("takes the book as the database sends it back", async () => {
+    const sent = { ...book("a"), progress: 1, finishedAt: "2026-10-07T09:00:00Z" };
+    vi.spyOn(bookService, "setFinished").mockResolvedValue(sent);
+    useLibraryStore.setState({ books: [{ ...book("a"), progress: 0.4 }, book("b")] });
+    await useLibraryStore.getState().setBookFinished("a", true);
+    expect(useLibraryStore.getState().books.map((entry) => [entry.id, entry.finishedAt ?? null])).toEqual([["a", "2026-10-07T09:00:00Z"], ["b", null]]);
+  });
+});

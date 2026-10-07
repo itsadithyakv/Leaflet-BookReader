@@ -440,6 +440,7 @@ mod tests {
 
   fn record(id: &str, title: &str, local_path: &str) -> BookRecord {
     BookRecord {
+      finished_at: None,
       id: id.to_string(),
       title: title.to_string(),
       author: Some("Someone".to_string()),
