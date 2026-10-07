@@ -80,7 +80,24 @@ pub struct Applied {
 ///
 /// Local-only facts are preserved rather than overwritten: `cover_url` points at
 /// this machine's cache, and `local_path` is derived here. Neither travels.
+///
+/// As one transaction. Every row of the document is written on every run, and
+/// a row a commit held the database (and so every command waiting on it) for
+/// twenty seconds with a year's reading in it; and a run that fails part way
+/// now leaves the library as it was rather than half merged.
 pub fn apply(db: &Database, doc: &SyncDoc) -> Result<Applied> {
+  let mut gone: Vec<String> = Vec::new();
+  let result = db.in_transaction(|| write(db, doc, &mut gone))?;
+  // Only once their rows say so: a file cannot be put back by a rollback.
+  for path in gone {
+    let _ = std::fs::remove_file(path);
+  }
+  Ok(result)
+}
+
+/// `apply`'s rows. The files of books removed elsewhere are named in `gone`
+/// for the caller to delete once the rows are kept.
+fn write(db: &Database, doc: &SyncDoc, gone: &mut Vec<String>) -> Result<Applied> {
   let mut result = Applied::default();
   let existing: std::collections::HashMap<String, crate::db::BookRecord> = db
     .list_books_for_sync()?
@@ -102,7 +119,7 @@ pub fn apply(db: &Database, doc: &SyncDoc) -> Result<Applied> {
         continue;
       }
       if let Some(book) = local {
-        let _ = std::fs::remove_file(&book.local_path);
+        gone.push(book.local_path.clone());
       }
       db.delete_book(
         &entry.id,
@@ -214,6 +231,70 @@ mod tests {
       progress_updated_at: Some("2026-01-01T00:00:00+00:00".to_string()),
       deleted_at: None,
       available: true
+    }
+  }
+
+  /// Prints what writing a sync into the database costs, with SQLite's
+  /// default journal and with the write-ahead log the app asks for:
+  /// `cargo test --lib sync::store::tests::what_applying -- --ignored --nocapture`
+  #[test]
+  #[ignore = "a measurement: writes two databases to the temp folder"]
+  fn what_applying_a_sync_costs_on_this_machine() {
+    use crate::db::tests::disk_db;
+    // A reader of a year or so: 300 books, a year of days, 900 marks.
+    let from = memory_db();
+    for index in 0..300 {
+      from.upsert_book(&record(&format!("book{index}"), 0.3)).expect("book");
+    }
+    for day in 0..365 {
+      let date = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).expect("date") + chrono::Duration::days(day);
+      from.credit_minutes(&date.to_string(), 25.0, 20).expect("day");
+    }
+    for index in 0..900 {
+      from
+        .put_annotation(&crate::db::Annotation {
+          id: format!("mark{index}"),
+          book_id: format!("book{}", index % 300),
+          kind: "highlight".to_string(),
+          cfi: format!("epubcfi(/6/{index}!/4/2,/1:0,/1:40)"),
+          text: Some("A passage of about the length a reader marks, give or take a line.".to_string()),
+          note: None,
+          color: Some("yellow".to_string()),
+          chapter: Some("Chapter One".to_string()),
+          created_at: NOW.to_string(),
+          updated_at: NOW.to_string(),
+          deleted_at: None
+        })
+        .expect("mark");
+    }
+    let doc = snapshot(&from, NOW).expect("snapshot");
+    println!("{} books, {} days, {} marks", doc.books.len(), doc.days.len(), doc.annotations.len());
+    // Row by row, as it was before `apply` became one transaction.
+    for logged in [false, true] {
+      let path = std::env::temp_dir().join(format!("leaflet-rows-cost-{}-{logged}.db", std::process::id()));
+      let to = disk_db(&path, logged);
+      let rows = std::time::Instant::now();
+      write(&to, &doc, &mut Vec::new()).expect("write");
+      println!("{}, a commit a row: {:?}", if logged { "write-ahead log" } else { "default journal" }, rows.elapsed());
+      drop(to);
+      for suffix in ["", "-wal", "-shm", "-journal"] {
+        let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+      }
+    }
+    for logged in [false, true] {
+      let path = std::env::temp_dir().join(format!("leaflet-apply-cost-{}-{logged}.db", std::process::id()));
+      let to = disk_db(&path, logged);
+      let first = std::time::Instant::now();
+      apply(&to, &doc).expect("apply");
+      let first = first.elapsed();
+      // The second is what every later sync costs: the same rows again.
+      let again = std::time::Instant::now();
+      apply(&to, &doc).expect("apply");
+      println!("{}, one transaction: first {:?}, again {:?}", if logged { "write-ahead log" } else { "default journal" }, first, again.elapsed());
+      drop(to);
+      for suffix in ["", "-wal", "-shm", "-journal"] {
+        let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+      }
     }
   }
 

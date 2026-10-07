@@ -158,6 +158,7 @@ impl Database {
     }
     let existed = path.exists();
     let conn = Connection::open(&path)?;
+    write_ahead(&conn);
     if existed {
       backup_before_upgrade(&conn, &path);
     }
@@ -173,6 +174,18 @@ impl Database {
 
   pub fn path(&self) -> &Path {
     &self.path
+  }
+
+  /// Runs `work` as one transaction: everything it writes is kept, or, when
+  /// it fails, none of it. It is one commit as well, where each statement
+  /// outside a transaction is its own: what a sync's thousand rows need.
+  /// `work` must not start a transaction of its own.
+  pub fn in_transaction<T>(&self, work: impl FnOnce() -> Result<T>) -> Result<T> {
+    // Dropped without a commit (an error, a panic), it rolls back.
+    let transaction = self.conn.unchecked_transaction()?;
+    let value = work()?;
+    transaction.commit()?;
+    Ok(value)
   }
 
   fn init_schema(&self) -> Result<()> {
@@ -1071,7 +1084,32 @@ impl Database {
     // `DELETE` only marks the pages free: the titles, notes and paths stay in
     // the file until it is rebuilt. Best effort; the rows are gone either way.
     let _ = self.conn.execute_batch("VACUUM;");
+    // The rebuilt file is written through the log (`write_ahead`), and the log
+    // still holds the pages it replaced until it is emptied.
+    let _ = self.conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
     Ok(())
+  }
+}
+
+/// Has the database keep a write-ahead log, and wait for the disk at a
+/// checkpoint rather than at every commit.
+///
+/// SQLite's default writes a rollback journal and waits for the disk twice
+/// for each commit: 17 ms a saved place on this project's development PC, and
+/// 28 ms (328 at worst) on its second drive, on the window's own thread, since
+/// most commands are not `async`. With the log a commit is an append: 0.03 ms.
+///
+/// What is given up is the last moments before a power cut (the commits since
+/// the last sync to disk), never the database: a log is replayed or discarded
+/// whole. The mode is kept in the file, so this is asked once and found set
+/// after. A folder that cannot hold a log (a network share) keeps the default,
+/// and its full waits with it.
+fn write_ahead(conn: &Connection) {
+  let mode: String = conn.query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0)).unwrap_or_default();
+  if mode.eq_ignore_ascii_case("wal") {
+    let _ = conn.execute_batch("PRAGMA synchronous = NORMAL;");
+  } else {
+    crate::diag::warn(&format!("the library database keeps its \"{mode}\" journal: write-ahead logging was refused"));
   }
 }
 
@@ -1312,7 +1350,7 @@ fn db_path() -> Result<PathBuf> {
 }
 
 pub fn now_iso() -> String {
-  DateTime::<Utc>::from(Utc::now()).to_rfc3339()
+  Utc::now().to_rfc3339()
 }
 
 #[cfg(test)]
@@ -1605,6 +1643,20 @@ pub(crate) mod tests {
     Database { conn, path: PathBuf::from(":memory:") }
   }
 
+  /// A new database in a file, as the app opens one or as SQLite would by
+  /// default (`logged` false): for measuring what the disk costs.
+  pub(crate) fn disk_db(path: &Path, logged: bool) -> Database {
+    for suffix in ["", "-wal", "-shm", "-journal"] {
+      let _ = fs::remove_file(format!("{}{suffix}", path.display()));
+    }
+    let conn = Connection::open(path).expect("open");
+    if logged {
+      write_ahead(&conn);
+    }
+    apply_schema(&conn).expect("schema");
+    Database { conn, path: path.to_path_buf() }
+  }
+
   fn session(id: &str, ended_at: &str) -> FocusSessionRecord {
     FocusSessionRecord {
       id: id.to_string(),
@@ -1824,21 +1876,92 @@ pub(crate) mod tests {
   fn clearing_everything_leaves_nothing_readable_in_the_file() {
     let path = std::env::temp_dir().join(format!("leaflet-clear-test-{}.db", std::process::id()));
     let _ = fs::remove_file(&path);
+    let log = PathBuf::from(format!("{}-wal", path.display()));
+    let _ = fs::remove_file(&log);
     let conn = Connection::open(&path).expect("open");
+    write_ahead(&conn);
     apply_schema(&conn).expect("schema");
     let db = Database { conn, path: path.clone() };
     seeded_book(&db);
     for index in 0..200 {
       db.set_setting(&format!("key-{index}"), &format!("ZZ-PRIVATE-{index}-ZZ D:\\Books\\A Title I Read.epub")).expect("setting");
     }
+    assert!(fs::read(&log).expect("log").windows(11).any(|window| window == b"ZZ-PRIVATE-"), "the test writes through the log");
 
     db.clear_all().expect("clear");
-    drop(db);
 
-    let bytes = fs::read(&path).expect("read");
-    let holds = |needle: &str| bytes.windows(needle.len()).any(|window| window == needle.as_bytes());
-    assert!(!holds("ZZ-PRIVATE-"), "a deleted setting is still in the file");
-    assert!(!holds("A Title I Read"), "a deleted path is still in the file");
+    // With the app still running, which is when it matters: the log as well
+    // as the file, since what was written last is in the log.
+    for file in [&path, &log] {
+      let bytes = fs::read(file).unwrap_or_default();
+      let holds = |needle: &str| bytes.windows(needle.len()).any(|window| window == needle.as_bytes());
+      assert!(!holds("ZZ-PRIVATE-"), "a deleted setting is still in {}", file.display());
+      assert!(!holds("A Title I Read"), "a deleted path is still in {}", file.display());
+    }
+    drop(db);
     let _ = fs::remove_file(&path);
+  }
+
+  /// A database on disk keeps a write-ahead log and does not wait for the
+  /// disk at every commit; what was written is there when it is opened again.
+  #[test]
+  fn a_database_on_disk_writes_ahead() {
+    let path = std::env::temp_dir().join(format!("leaflet-wal-test-{}.db", std::process::id()));
+    let _ = fs::remove_file(&path);
+    {
+      let conn = Connection::open(&path).expect("open");
+      write_ahead(&conn);
+      apply_schema(&conn).expect("schema");
+      let mode: String = conn.query_row("PRAGMA journal_mode", [], |row| row.get(0)).expect("mode");
+      assert_eq!(mode, "wal");
+      // 1 is NORMAL: the disk is waited for at a checkpoint.
+      let synchronous: i64 = conn.query_row("PRAGMA synchronous", [], |row| row.get(0)).expect("synchronous");
+      assert_eq!(synchronous, 1);
+      let db = Database { conn, path: path.clone() };
+      db.set_setting("kept", "yes").expect("setting");
+    }
+    // The mode is the file's: a connection that asks for nothing has it.
+    let conn = Connection::open(&path).expect("open again");
+    let mode: String = conn.query_row("PRAGMA journal_mode", [], |row| row.get(0)).expect("mode");
+    assert_eq!(mode, "wal");
+    let db = Database { conn, path: path.clone() };
+    assert_eq!(db.get_setting("kept").expect("read").as_deref(), Some("yes"));
+    drop(db);
+    let _ = fs::remove_file(&path);
+  }
+
+  /// What a transaction wrote is kept whole, and what a failed one wrote is
+  /// not kept at all.
+  #[test]
+  fn a_transaction_keeps_all_of_its_writes_or_none() {
+    let db = memory_db();
+    let kept = db.in_transaction(|| {
+      db.set_setting("one", "1")?;
+      db.set_setting("two", "2")?;
+      Ok(2)
+    });
+    assert_eq!(kept.expect("commit"), 2);
+    assert_eq!(db.get_setting("two").expect("read").as_deref(), Some("2"));
+
+    let failed: Result<()> = db.in_transaction(|| {
+      db.set_setting("one", "changed")?;
+      db.set_setting("three", "3")?;
+      anyhow::bail!("the fourth row would not write")
+    });
+    assert!(failed.is_err());
+    assert_eq!(db.get_setting("one").expect("read").as_deref(), Some("1"));
+    assert_eq!(db.get_setting("three").expect("read"), None);
+    // And the database takes writes again after it.
+    db.set_setting("four", "4").expect("write");
+    assert_eq!(db.get_setting("four").expect("read").as_deref(), Some("4"));
+  }
+
+  /// A database that cannot keep a log (one in memory) is left as it was.
+  #[test]
+  fn a_database_that_cannot_log_keeps_its_journal() {
+    let conn = Connection::open_in_memory().expect("open");
+    write_ahead(&conn);
+    let synchronous: i64 = conn.query_row("PRAGMA synchronous", [], |row| row.get(0)).expect("synchronous");
+    assert_eq!(synchronous, 2);
   }
 }
