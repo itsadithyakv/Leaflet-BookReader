@@ -167,8 +167,8 @@ export const ReaderMoreMenu = ({ reader }: { reader: ReaderScope }) => {
                     type="button"
                     className="reader-mini-control"
                     onClick={toggleSmartPlay}
-                    title={readingPaused || smartWaiting || smartAtPicture ? "Carry on (Space)" : "Pause (Space)"}
-                    aria-label={readingPaused || smartWaiting || smartAtPicture ? "Carry on" : "Pause"}
+                    title={smartWaiting ? "Read from here (Space)" : readingPaused || smartAtPicture ? "Carry on (Space)" : "Pause (Space)"}
+                    aria-label={smartWaiting ? "Read from here" : readingPaused || smartAtPicture ? "Carry on" : "Pause"}
                   >
                     <span className="material-symbols-outlined text-base">
                       {readingPaused || smartWaiting || smartAtPicture ? "play_arrow" : "pause"}
@@ -185,10 +185,6 @@ export const ReaderMoreMenu = ({ reader }: { reader: ReaderScope }) => {
                   </button>
                 </div>
               </div>
-              <p className="mt-2 text-[10px] leading-relaxed reader-muted">
-                Your pace for this book, learned from all your reading on every device: how hard the text is,
-                the time of day, and each correction you make. Stops to think are left out.
-              </p>
             </div>
           )}
           {readingMode === "speed" && (
@@ -216,9 +212,6 @@ export const ReaderMoreMenu = ({ reader }: { reader: ReaderScope }) => {
                 title={`SpeedRead ${speedReadWpm} words per minute`}
               />
               <div className="mt-2 text-right text-[10px] tabular-nums reader-muted">{speedReadWpm} WPM</div>
-              <p className="mt-2 text-[10px] leading-relaxed reader-muted">
-                Timing automatically eases for uncommon, technical and unfamiliar words.
-              </p>
             </div>
           )}
           <button
@@ -232,6 +225,16 @@ export const ReaderMoreMenu = ({ reader }: { reader: ReaderScope }) => {
           <button
             type="button"
             className="mt-2 w-full py-1.5 text-center text-[10px] uppercase tracking-widest transition reader-muted reader-hover-accent"
+            onClick={() => {
+              setMorePanelOpen(false);
+              reader.setRecap({ days: null });
+            }}
+          >
+            Where was I?
+          </button>
+          <button
+            type="button"
+            className="w-full py-1.5 text-center text-[10px] uppercase tracking-widest transition reader-muted reader-hover-accent"
             onClick={() => {
               setMorePanelOpen(false);
               setTourOpen(true);

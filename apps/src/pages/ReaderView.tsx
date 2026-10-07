@@ -14,7 +14,7 @@ import { useReaderMarks, useBookAnnotations, useHighlightDrawing, useSelectionDo
 import { useNotesAndPictures } from "../readers/text/useNotesAndPictures";
 import { useContentsList, useContentsListShowing } from "../readers/text/useContentsList";
 import { usePageTurning, usePageInput } from "../readers/text/usePageTurning";
-import { useReaderPanels, usePanelDismissal, useFirstOpen } from "../readers/text/useReaderPanels";
+import { useReaderPanels, usePanelDismissal, useFirstOpen, useRecapOnReturn } from "../readers/text/useReaderPanels";
 import { useReadingModes, useReadingHold, useReadingEngine } from "../readers/text/useReadingModes";
 import { useReaderPrefs, usePrefsSaving } from "../readers/text/useReaderPrefs";
 import { useReaderSession } from "../readers/text/useReaderSession";
@@ -92,6 +92,7 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
   useTypeChange(reader);
   useDotSwitch(reader);
   useFirstOpen(reader);
+  useRecapOnReturn(reader);
   Object.assign(reader, useSelectionDock(reader));
 
   const { chromeVisible, displayMode, focusToast, hoverChrome, isLight, pageStyle, readingMode } = reader;

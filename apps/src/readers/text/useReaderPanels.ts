@@ -2,7 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { TOUR_CONTENTS_STEP, readerTourSeen, readStartMode } from "../ReaderTour";
 import { PEEK_MIN_WIDTH, setContentsSeen } from "../contentsPanel";
 import { useAmbiencePopoverOpen } from "../../ambience";
+import { daysAway, worthRecap } from "../recap/recap";
 import type { WithAnnotations, WithCover, WithPages } from "./scope";
+
+/** A book come back to is reminded of this long after it is on the page: after Smart Read has taken its place. */
+const RECAP_AFTER_MS = 1500;
 
 /**
  * What opens over the toolbar (the type panel, the ··· menu, the shortcuts
@@ -28,6 +32,12 @@ export const useReaderPanels = (reader: WithPages) => {
 
   /** The walkthrough of Dotty, Smart Read and pausing (first open, or from the ··· menu). */
   const [tourOpen, setTourOpen] = useState(false);
+
+  /**
+   * "Where was I?" (readers/recap): showing, and how many days the book had
+   * been left when it opened by itself (null when it was asked for).
+   */
+  const [recap, setRecap] = useState<{ days: number | null } | null>(null);
 
   /** Which step of the walkthrough is showing (the chapter list's handle is lit on its own step). */
   const [tourStep, setTourStep] = useState(-1);
@@ -67,7 +77,7 @@ export const useReaderPanels = (reader: WithPages) => {
   return {
     fontPanelOpen, setFontPanelOpen, fontPanelRef, morePanelOpen, setMorePanelOpen, soundPanelOpen, morePanelRef,
     morePanelCloseRef, shortcutsOpen, setShortcutsOpen, shortcutsOpenRef, tourOpen, setTourOpen, tourStep,
-    spotlightDotty
+    spotlightDotty, recap, setRecap
   };
 };
 
@@ -137,6 +147,30 @@ export const useFirstOpen = (reader: WithCover) => {
         beginReadingMode("smart", "top", { paused: true });
       }
     }, 900);
+    return () => window.clearTimeout(timer);
+  }, [loading, loadError]);
+};
+
+/**
+ * A book come back to after some days opens with "Where was I?" (readers/recap).
+ * Not one opened at a highlight (that is a look, not a return), nor on a
+ * device still being shown round.
+ */
+export const useRecapOnReturn = (reader: WithCover) => {
+  const { book, loadError, loading, openAt, setRecap } = reader;
+  const offeredRef = useRef(false);
+  useEffect(() => {
+    if (loading || loadError || offeredRef.current) {
+      return;
+    }
+    const days = daysAway(book.lastOpened, Date.now());
+    if (openAt || !readerTourSeen() || days === null || !worthRecap(book.lastOpened, book.progress ?? 0, Date.now())) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      offeredRef.current = true;
+      setRecap({ days });
+    }, RECAP_AFTER_MS);
     return () => window.clearTimeout(timer);
   }, [loading, loadError]);
 };

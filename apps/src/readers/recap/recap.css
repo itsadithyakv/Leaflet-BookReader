@@ -1,0 +1,86 @@
+/* "Where was I?" (RecapCard.tsx), on the note card's own look (notes.css):
+   the book's words in a book face, what is the reader's or the app's in the
+   interface's. */
+.reader-recap {
+  --note-colour: var(--reader-accent);
+  max-height: min(30rem, calc(100vh - 9rem));
+}
+
+.reader-recap p {
+  margin: 0;
+}
+
+.reader-recap-where {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+/* A paragraph's end is a break, so speech reads as speech. */
+.reader-recap-lines {
+  max-height: 11em;
+}
+
+.reader-recap-lines p + p {
+  margin-top: 0.45em;
+}
+
+.reader-recap-label {
+  display: block;
+  flex: none;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.reader-recap-row {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.reader-recap-names {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* (A name is a chip from the character card's styles; with Characters off it is not a button.) */
+.reader-recap-names .reader-people-link {
+  min-height: 24px;
+  border: 1px solid var(--reader-border);
+  border-radius: 999px;
+  background: var(--reader-pill);
+  padding: 2px 9px;
+  font-size: 12px;
+}
+
+.reader-recap-mark {
+  display: block;
+  flex: none;
+  border-radius: 8px;
+  margin: 0 -6px;
+  padding: 4px 6px;
+  text-align: left;
+  transition: background 0.15s ease;
+}
+
+.reader-recap-mark:hover,
+.reader-recap-mark:focus-visible {
+  background: var(--reader-hover-bg);
+  outline: none;
+}
+
+.reader-recap-marked {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 12.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
