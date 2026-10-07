@@ -127,3 +127,42 @@ describe("finishing a book", () => {
     expect(useLibraryStore.getState().books.map((entry) => [entry.id, entry.finishedAt ?? null])).toEqual([["a", "2026-10-07T09:00:00Z"], ["b", null]]);
   });
 });
+
+describe("looking a book's cover up", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    useLibraryStore.getState().resetAll();
+  });
+
+  const full = (id: string, fields: Partial<Book>) => ({ ...book(id), genres: ["x"], ...fields }) as Book;
+
+  it("asks again for a book whose cover is only its own first page, and not for one with a real cover", async () => {
+    const asked: string[] = [];
+    vi.spyOn(bookService, "refreshMetadata").mockImplementation(async (id: string) => {
+      asked.push(id);
+      return null as unknown as Book;
+    });
+    await useLibraryStore.getState().refreshMissingMetadata([
+      full("page", { coverUrl: "C:\covers\page-page.jpg" }),
+      full("real", { coverUrl: "C:\covers\real-cover.jpg" }),
+      full("none", { coverUrl: null })
+    ]);
+    expect(asked.sort()).toEqual(["none", "page"]);
+  });
+
+  it("notes that a lookup has had its turn, answered or not", async () => {
+    vi.spyOn(bookService, "refreshMetadata").mockImplementation(async (id: string) => {
+      if (id === "offline") {
+        throw new Error("no connection");
+      }
+      return full(id, { coverUrl: null, metadataCheckedAt: "2026-10-07T10:00:00Z" });
+    });
+    useLibraryStore.setState({ books: [full("offline", { coverUrl: null }), full("answered", { coverUrl: null })] });
+    expect(useLibraryStore.getState().lookupTried).toEqual({});
+    await useLibraryStore.getState().refreshMissingMetadata(useLibraryStore.getState().books);
+    expect(Object.keys(useLibraryStore.getState().lookupTried).sort()).toEqual(["answered", "offline"]);
+    // The one that got no answer has no stamp, so it is asked for again next time.
+    const stamps = Object.fromEntries(useLibraryStore.getState().books.map((item) => [item.id, item.metadataCheckedAt ?? null]));
+    expect(stamps).toEqual({ offline: null, answered: "2026-10-07T10:00:00Z" });
+  });
+});

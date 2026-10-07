@@ -964,6 +964,48 @@ pub fn store_cover_bytes(bytes: &[u8], hash: &str) -> Result<PathBuf> {
   Ok(dest)
 }
 
+/// How a PDF's first page is named when it stands in for a cover.
+const PAGE_COVER_SUFFIX: &str = "-page.jpg";
+
+/// Whether a stored cover is a PDF's own first page standing in for one
+/// (`store_page_cover_bytes`), and not a cover from the book or a catalogue.
+/// A stand-in gives way to a real cover the next time a lookup finds one.
+pub fn is_page_cover(cover: &str) -> bool {
+  cover.ends_with(PAGE_COVER_SUFFIX)
+}
+
+/// Saves a PDF's first page as its stand-in cover. Under a name of its own:
+/// kept as `<hash>-cover.jpg` it could not be told from a real cover, and
+/// `store_cover` never replaces one of those, so a title page saved after a
+/// lookup that failed stayed the book's cover for good.
+pub fn store_page_cover_bytes(bytes: &[u8], hash: &str) -> Result<PathBuf> {
+  if sniff_image_mime(bytes).is_none() {
+    return Err(anyhow::anyhow!("cover was not an image"));
+  }
+  page_cover_into(&covers_dir()?, bytes, hash)
+}
+
+fn page_cover_into(dir: &Path, bytes: &[u8], hash: &str) -> Result<PathBuf> {
+  fs::create_dir_all(dir)?;
+  let dest = dir.join(format!("{hash}{PAGE_COVER_SUFFIX}"));
+  let staging = dir.join(format!("{hash}-page.part"));
+  fs::write(&staging, bytes)?;
+  if let Err(error) = fs::rename(&staging, &dest) {
+    let _ = fs::remove_file(&staging);
+    return Err(error.into());
+  }
+  Ok(dest)
+}
+
+/// Takes a stand-in away once the book has a real cover, and the thumbnail
+/// made from it, so the next one asked for is made from the real one.
+pub fn drop_page_cover(hash: &str) {
+  if let Ok(dir) = covers_dir() {
+    let _ = fs::remove_file(dir.join(format!("{hash}{PAGE_COVER_SUFFIX}")));
+    let _ = fs::remove_file(dir.join(format!("{hash}-thumb.jpg")));
+  }
+}
+
 /// Widest a library thumbnail is drawn: a grid card is about 180 px wide, so
 /// this covers a 2x display with room to spare.
 const THUMB_WIDTH: u32 = 360;
@@ -1003,6 +1045,7 @@ fn thumbnail_into(dir: &Path, cover: &Path, hash: &str) -> Result<PathBuf> {
 pub fn remove_book_extras(hash: &str, book_path: &Path) {
   if let Ok(dir) = covers_dir() {
     let _ = fs::remove_file(dir.join(format!("{}-cover.jpg", hash)));
+    let _ = fs::remove_file(dir.join(format!("{hash}{PAGE_COVER_SUFFIX}")));
     let _ = fs::remove_file(dir.join(format!("{}-thumb.jpg", hash)));
   }
   if let Ok(converted) = converted_epub_path(hash) {
@@ -1073,6 +1116,25 @@ fn extract_epub_metadata(path: &Path) -> Result<BasicMetadata> {
 mod tests {
   use crate::LockExt;
   use super::*;
+
+  /// A PDF's first page is kept under a name of its own, so it can be told
+  /// from a real cover and replaced by one; and it is written again each time.
+  #[test]
+  fn a_page_standing_in_for_a_cover_is_kept_apart_from_a_real_one() {
+    let dir = std::env::temp_dir().join(format!("leaflet-page-cover-test-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let mut png = Vec::new();
+    image::RgbImage::from_pixel(8, 12, image::Rgb([200, 200, 190]))
+      .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+      .expect("png");
+    let page = page_cover_into(&dir, &png, "h").expect("page");
+    assert!(is_page_cover(&page.to_string_lossy()));
+    assert!(!is_page_cover(&dir.join("h-cover.jpg").to_string_lossy()));
+    assert!(!dir.join("h-cover.jpg").exists(), "the real cover's name is left free");
+    // Saved again (the book opened again before a lookup): no error, same file.
+    assert_eq!(page_cover_into(&dir, &png, "h").expect("again"), page);
+    let _ = fs::remove_dir_all(&dir);
+  }
 
   #[test]
   fn a_cover_thumbnail_is_a_small_jpeg_made_once() {

@@ -1297,7 +1297,7 @@ fn apply_schema(conn: &Connection) -> Result<()> {
 /// version, and put the new shape in the `CREATE TABLE`s above too (a new
 /// library is created at the latest version directly). Never edit a step that
 /// has shipped.
-pub const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 6;
 
 /// From this much of a book on, it is finished: the last page often reports
 /// 0.99x rather than 1. The same number is `FINISHED_AT` in
@@ -1352,6 +1352,14 @@ fn upgrade(conn: &Connection) -> Result<()> {
        WHERE finished_at IS NULL AND progress >= ?1",
       params![FINISHED_AT]
     )?;
+  }
+  if from < 6 {
+    // A lookup that got no answer (offline, the catalogue down) used to be
+    // stamped as made, and the stamp holds the next one off for fourteen
+    // days. Books still without a cover get another turn now: it is one
+    // lookup each, once, and most of them will find the cover they missed.
+    add_column(&tx, "books", "metadata_checked_at TEXT")?;
+    tx.execute("UPDATE books SET metadata_checked_at = NULL WHERE cover_url IS NULL", [])?;
   }
   tx.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))?;
   tx.commit()?;
@@ -1678,6 +1686,28 @@ pub(crate) mod tests {
     assert_eq!(finished("done").as_deref(), Some("2026-05-02T20:00:00Z"));
     assert_eq!(finished("old").as_deref(), Some("2025-02-03T08:00:00Z"), "no progress stamp: the day it was last opened");
     assert_eq!(finished("half"), None);
+    assert_eq!(db.schema_version(), SCHEMA_VERSION);
+  }
+
+  /// Books with no cover get another lookup: the old stamp may be from one
+  /// that never got an answer. A book with a cover keeps its stamp.
+  #[test]
+  fn version_6_gives_books_without_a_cover_another_lookup() {
+    let conn = Connection::open_in_memory().expect("open");
+    apply_schema(&conn).expect("schema");
+    conn
+      .execute_batch(
+        "INSERT INTO books (id, title, local_path, file_hash, progress, created_at, metadata_checked_at, cover_url) VALUES
+           ('bare', 'Bare', '/bare.pdf', 'bare', 0.0, '2026-01-01T00:00:00Z', '2026-10-05T10:00:00Z', NULL),
+           ('covered', 'Covered', '/covered.epub', 'covered', 0.0, '2026-01-01T00:00:00Z', '2026-10-05T10:00:00Z', '/covers/covered-cover.jpg');
+         PRAGMA user_version = 5;"
+      )
+      .expect("a library at version 5");
+    apply_schema(&conn).expect("upgrade");
+    let db = Database { conn, path: PathBuf::from(":memory:") };
+    let checked = |id: &str| db.find_by_id(id).expect("query").expect("present").metadata_checked_at;
+    assert_eq!(checked("bare"), None);
+    assert_eq!(checked("covered").as_deref(), Some("2026-10-05T10:00:00Z"));
     assert_eq!(db.schema_version(), SCHEMA_VERSION);
   }
 

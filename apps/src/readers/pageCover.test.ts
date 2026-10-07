@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { COVER_WIDTH, coverScale, looksBlank } from "./pageCover";
+import { COVER_WIDTH, coverScale, looksBlank, isStandInCover } from "./pageCover";
 
 /** A page of one colour, `width` by `height`, with rectangles of others drawn on it. */
 const drawn = (width: number, height: number, paper: number, marks: Array<[x: number, y: number, w: number, h: number, shade: number]> = [], noise = 0) => {
@@ -69,5 +69,16 @@ describe("whether a first page has anything on it", () => {
     expect(looksBlank(longer, 120, 160)).toBe(true);
     // Fewer: what there is.
     expect(looksBlank(drawn(120, 80, 255), 120, 160)).toBe(true);
+  });
+});
+
+describe("a first page standing in for a cover", () => {
+  it("is told by the name the backend keeps it under", () => {
+    expect(isStandInCover("C:\Users\me\AppData\covers\abc123-page.jpg")).toBe(true);
+    expect(isStandInCover("/home/me/.local/share/covers/abc123-page.jpg")).toBe(true);
+    expect(isStandInCover("C:\Users\me\AppData\covers\abc123-cover.jpg")).toBe(false);
+    expect(isStandInCover(null)).toBe(false);
+    expect(isStandInCover(undefined)).toBe(false);
+    expect(isStandInCover("")).toBe(false);
   });
 });

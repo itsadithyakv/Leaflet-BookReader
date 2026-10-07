@@ -63,15 +63,7 @@ pub async fn fetch_metadata(title: &str, author: Option<&str>, isbn: Option<&str
   let doc = if isbn.is_some() {
     response.docs.first()
   } else {
-    response
-      .docs
-      .iter()
-      .take(5)
-      .filter(|doc| is_match(title, author, doc.title.as_deref(), doc.author_name.as_ref().and_then(|a| a.first()).map(String::as_str)))
-      .max_by(|a, b| {
-        let score = |doc: &SearchDoc| title_similarity(title, doc.title.as_deref().unwrap_or(""));
-        score(a).partial_cmp(&score(b)).unwrap_or(std::cmp::Ordering::Equal)
-      })
+    best_match(title, author, &response.docs)
   };
   let doc = match doc {
     Some(doc) => doc,
@@ -94,6 +86,31 @@ pub async fn fetch_metadata(title: &str, author: Option<&str>, isbn: Option<&str
     subjects,
     cover_url
   }))
+}
+
+/// The result that is the book, among a search's first five: the closest
+/// title; between equals, one with a cover; and between those, the one the
+/// catalogue ranked first.
+///
+/// It was `max_by` on the title alone, which between equals keeps the last:
+/// of several works all called by the book's exact title, the one the
+/// catalogue thought least likely, cover or none.
+fn best_match<'a>(title: &str, author: Option<&str>, docs: &'a [SearchDoc]) -> Option<&'a SearchDoc> {
+  let mut best: Option<(&SearchDoc, f64)> = None;
+  for doc in docs.iter().take(5) {
+    if !is_match(title, author, doc.title.as_deref(), doc.author_name.as_ref().and_then(|a| a.first()).map(String::as_str)) {
+      continue;
+    }
+    let score = title_similarity(title, doc.title.as_deref().unwrap_or(""));
+    let better = match best {
+      None => true,
+      Some((held, held_score)) => score > held_score || (score == held_score && doc.cover_i.is_some() && held.cover_i.is_none())
+    };
+    if better {
+      best = Some((doc, score));
+    }
+  }
+  best.map(|(doc, _)| doc)
 }
 
 /// Lower-case words, punctuation and a few filler words dropped.
@@ -141,6 +158,33 @@ fn is_match(title: &str, author: Option<&str>, found_title: Option<&str>, found_
 
 #[cfg(test)]
 mod tests {
+  fn found(title: &str, author: &str, cover: Option<i64>) -> super::SearchDoc {
+    super::SearchDoc { title: Some(title.to_string()), author_name: Some(vec![author.to_string()]), subject: None, cover_i: cover, key: None }
+  }
+
+  /// Several works can carry a book's exact title. The first the catalogue
+  /// ranked is the book, unless it has no cover and an equal one has.
+  #[test]
+  fn between_equal_titles_the_first_ranked_is_taken_and_one_with_a_cover_before_one_without() {
+    let docs = vec![
+      found("The Long Field", "Mara Ellison", Some(11)),
+      found("The Long Field / Other Stories", "Mara Ellison", Some(22)),
+      found("The Long Field", "Mara Ellison", Some(33))
+    ];
+    // Was the last of the equals (33): `max_by` keeps the last.
+    assert_eq!(super::best_match("The Long Field", Some("Mara Ellison"), &docs).and_then(|doc| doc.cover_i), Some(11));
+
+    let coverless_first = vec![found("The Long Field", "Mara Ellison", None), found("The Long Field", "Mara Ellison", Some(33))];
+    assert_eq!(super::best_match("The Long Field", Some("Mara Ellison"), &coverless_first).and_then(|doc| doc.cover_i), Some(33));
+
+    // A closer title still wins over a cover, and another author's book is no match.
+    let closer = vec![found("The Long Field Companion", "Mara Ellison", Some(5)), found("The Long Field", "Mara Ellison", None)];
+    assert_eq!(super::best_match("The Long Field", Some("Mara Ellison"), &closer).and_then(|doc| doc.title.clone()).as_deref(), Some("The Long Field"));
+    let other = vec![found("The Long Field", "Someone Else", Some(9))];
+    assert!(super::best_match("The Long Field", Some("Mara Ellison"), &other).is_none());
+    assert!(super::best_match("The Long Field", None, &[]).is_none());
+  }
+
   use super::*;
 
   #[test]

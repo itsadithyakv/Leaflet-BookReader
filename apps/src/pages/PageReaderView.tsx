@@ -1031,9 +1031,18 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
   // once a lookup has had its turn at finding the book's own, and a while
   // after the book is open, so the page being read is drawn first. Saved
   // through the backend's checks, and never in place of a cover.
+  //
+  // Both are read from the library as it is now, not from the book as it was
+  // when the reader opened: a book opened while its lookup was still out
+  // (straight after adding it) never got its page, and kept "No cover yet"
+  // until it was opened a second time.
   const savePageCover = useLibraryStore((state) => state.savePageCover);
+  const hasCover = useLibraryStore((state) => Boolean(state.books.find((item) => item.id === book.id)?.coverUrl));
+  const lookedUp = useLibraryStore(
+    (state) => Boolean(state.lookupTried[book.id]) || Boolean(state.books.find((item) => item.id === book.id)?.metadataCheckedAt)
+  );
   useEffect(() => {
-    if (!pdf || book.coverUrl || !book.metadataCheckedAt) {
+    if (!pdf || hasCover || !lookedUp) {
       return;
     }
     let wanted = true;
@@ -1049,7 +1058,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
       wanted = false;
       window.clearTimeout(timer);
     };
-  }, [pdf, book.id, book.coverUrl, book.metadataCheckedAt, savePageCover]);
+  }, [pdf, book.id, hasCover, lookedUp, savePageCover]);
 
   useEffect(() => {
     if (!book.coverUrl) {

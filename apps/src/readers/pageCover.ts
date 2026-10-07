@@ -12,6 +12,14 @@
  * here, pure; the drawing is `coverImage` in readers/pageSources.ts.
  */
 
+/**
+ * Whether a book's cover is its own first page standing in for one. The
+ * backend keeps those under a name of their own (`storage::is_page_cover`),
+ * so a lookup that later finds the real cover can replace it, and so the
+ * library still counts the book as one to look up.
+ */
+export const isStandInCover = (coverUrl: string | null | undefined) => typeof coverUrl === "string" && /-page\.jpg$/i.test(coverUrl);
+
 /** How wide the picture is drawn: the library's thumbnail is 360, and a 2x screen shows that at 180. */
 export const COVER_WIDTH = 600;
 /** JPEG quality: a page of text at 600 wide is 40 to 90 KB. */

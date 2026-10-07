@@ -6,6 +6,7 @@ import { syncService } from "../services/syncService";
 import { socialService } from "../services/socialService";
 import { statsService, type ReadingStats } from "../services/statsService";
 import { isFinished } from "../constants/books";
+import { isStandInCover } from "../readers/pageCover";
 
 const defaultFilters: BookFilter = {
   query: "",
@@ -20,6 +21,12 @@ type LibraryState = {
   filters: BookFilter;
   loading: boolean;
   metadataRefreshing: boolean;
+  /**
+   * Books a lookup has had its turn at since the app started, answered or
+   * not. A PDF takes its first page for a cover only after that
+   * (PageReaderView), and a lookup that got no answer leaves no stamp.
+   */
+  lookupTried: Record<string, true>;
   metadataTotal: number;
   metadataDone: number;
   syncStatus: DriveSyncStatus;
@@ -101,6 +108,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   filters: defaultFilters,
   loading: false,
   metadataRefreshing: false,
+  lookupTried: {},
   metadataTotal: 0,
   metadataDone: 0,
   syncStatus: "idle",
@@ -233,6 +241,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const current = get().books.find((book) => book.id === id);
     // Only the cover is taken: the book has been read on while it was saved.
     if (updated?.coverUrl && current && !current.coverUrl) {
+      // (A real cover found meanwhile is kept: the backend answers with nothing then.)
       set({ books: replaceBook(get().books, { ...current, coverUrl: updated.coverUrl }) });
     }
   },
@@ -339,7 +348,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         return false;
       }
       const missingAuthor = !book.author || book.author.trim().length === 0;
-      const missingCover = !book.coverUrl;
+      // A first page standing in for a cover is still a cover to look for.
+      const missingCover = !book.coverUrl || isStandInCover(book.coverUrl);
       const missingGenres = !book.genres || book.genres.length === 0;
       const noisyTitle = /--|anna.?s archive|isbn/i.test(book.title);
       return missingAuthor || missingCover || missingGenres || noisyTitle;
@@ -353,14 +363,18 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // of times, and one slow lookup held up every book behind it.
     let done = 0;
     let waiting: Book[] = [];
+    let tried: string[] = [];
     let flushTimer: ReturnType<typeof setTimeout> | null = null;
     const flush = () => {
       flushTimer = null;
       const batch = waiting;
       waiting = [];
+      const turns = tried;
+      tried = [];
       set({
         metadataDone: done,
-        books: batch.reduce((books, updated) => replaceBook(books, updated), get().books)
+        books: batch.reduce((books, updated) => replaceBook(books, updated), get().books),
+        lookupTried: turns.length > 0 ? { ...get().lookupTried, ...Object.fromEntries(turns.map((id) => [id, true as const])) } : get().lookupTried
       });
     };
     const queue = [...needsRefresh];
@@ -374,6 +388,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         } catch {
           // A book without a match keeps what it has; it is retried after the cooldown.
         }
+        tried.push(book.id);
         done += 1;
         flushTimer ??= setTimeout(flush, METADATA_FLUSH_MS);
       }
@@ -411,6 +426,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       filters: defaultFilters,
       loading: false,
       metadataRefreshing: false,
+      lookupTried: {},
       metadataTotal: 0,
       metadataDone: 0,
       syncStatus: "idle",

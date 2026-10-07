@@ -250,7 +250,15 @@ pub async fn refresh_metadata(book_id: String, state: State<'_, AppState>) -> Re
   book.title = tidy.title;
   book.author = tidy.author;
 
-  if let Ok(Some(meta)) = open_library::fetch_metadata(&normalized.title, normalized.author.as_deref(), normalized.isbn.as_deref()).await {
+  // A PDF's first page standing in for a cover gives way to a real one.
+  let stand_in = book.cover_url.as_deref().is_some_and(storage::is_page_cover);
+  let had_cover = book.cover_url.clone();
+  // Whether the catalogue answered, and whether a cover it offered failed to
+  // arrive: a lookup that got no answer has not been made (see below).
+  let lookup = open_library::fetch_metadata(&normalized.title, normalized.author.as_deref(), normalized.isbn.as_deref()).await;
+  let answered = lookup.is_ok();
+  let mut cover_lost = false;
+  if let Ok(Some(meta)) = lookup {
     // The catalogue's title only when it is this title written properly: a
     // search for "Dune" that finds only "Dune Messiah" is a match by its
     // first word, and used to rename the book.
@@ -263,28 +271,56 @@ pub async fn refresh_metadata(book_id: String, state: State<'_, AppState>) -> Re
     // Added after the book's own subjects, never in place of them.
     book.genres = normalize::merge_genres(&book.genres, &meta.subjects);
     if let Some(url) = meta.cover_url {
-      if let Ok(path) = storage::store_cover(&url, &book.file_hash).await {
-        book.cover_url = Some(path.to_string_lossy().to_string());
+      match storage::store_cover(&url, &book.file_hash).await {
+        Ok(path) => book.cover_url = Some(path.to_string_lossy().to_string()),
+        Err(_) => cover_lost = book.cover_url.is_none() || stand_in
       }
     }
   }
 
-  if book.cover_url.is_none() {
+  if book.cover_url.is_none() || book.cover_url.as_deref().is_some_and(storage::is_page_cover) {
     if let Ok(Some(url)) = wikipedia::fetch_cover(&normalized.title, normalized.author.as_deref()).await {
       if let Ok(path) = storage::store_cover(&url, &book.file_hash).await {
         book.cover_url = Some(path.to_string_lossy().to_string());
       }
     }
   }
+  let found_cover = book.cover_url != had_cover;
+  if found_cover && stand_in {
+    storage::drop_page_cover(&book.file_hash);
+  }
 
-  book.metadata_checked_at = Some(db::now_iso());
+  // Stamped only when the lookup was really made. The stamp starts a wait of
+  // fourteen days before the next one, which is right for a book no catalogue
+  // knows and was wrong for a lookup that never got an answer (offline, the
+  // catalogue slow or down, the cover's download cut off): a famous book
+  // imported at a bad moment went a fortnight with no cover. Unstamped, it is
+  // asked for again the next time the library loads.
+  if lookup_was_made(answered, cover_lost, found_cover) {
+    book.metadata_checked_at = Some(db::now_iso());
+  }
 
   {
     let db = state.db.guard();
+    // The lookup can take most of a minute on a bad connection, and the book
+    // may have been given its first page for a cover meanwhile: what is in
+    // the database now is kept unless this lookup found a cover itself.
+    if !found_cover {
+      if let Ok(Some(now)) = db.find_by_id(&book.id) {
+        book.cover_url = now.cover_url;
+      }
+    }
     db.update_metadata(&book).map_err(|e| e.to_string())?;
   }
 
   Ok(book)
+}
+
+/// Whether a lookup counts as made, for the fourteen-day wait: the catalogue
+/// answered and any cover it offered arrived, or a cover was found some other
+/// way. No answer, or a cover that would not download, is to be tried again.
+pub(crate) fn lookup_was_made(answered: bool, cover_lost: bool, found_cover: bool) -> bool {
+  found_cover || (answered && !cover_lost)
 }
 
 #[tauri::command]
@@ -386,7 +422,9 @@ pub async fn save_page_cover(book_id: String, image: String, state: State<'_, Ap
   let bytes = page_cover_bytes(&image)?;
   let hash = book.file_hash.clone();
   let saved = tauri::async_runtime::spawn_blocking(move || -> anyhow::Result<std::path::PathBuf> {
-    let cover = storage::store_cover_bytes(&bytes, &hash)?;
+    // As a stand-in (`storage::is_page_cover`): a lookup that finds the
+    // book's real cover later replaces it.
+    let cover = storage::store_page_cover_bytes(&bytes, &hash)?;
     // Made now, so the library's card has it the moment the reader goes back.
     let _ = storage::cover_thumbnail(&cover, &hash);
     Ok(cover)
@@ -394,8 +432,13 @@ pub async fn save_page_cover(book_id: String, image: String, state: State<'_, Ap
   .await
   .map_err(|e| format!("Cover task failed: {e}"))?
   .map_err(|e| e.to_string())?;
-  book.cover_url = Some(saved.to_string_lossy().to_string());
   let db = state.db.guard();
+  // A lookup may have found the real cover while the page was being saved.
+  if db.find_by_id(&book.id).ok().flatten().is_some_and(|now| now.cover_url.is_some()) {
+    storage::drop_page_cover(&book.file_hash);
+    return Ok(None);
+  }
+  book.cover_url = Some(saved.to_string_lossy().to_string());
   db.update_cover(&book.id, book.cover_url.clone()).map_err(|e| e.to_string())?;
   Ok(Some(book))
 }
@@ -629,6 +672,22 @@ mod tests {
     assert_eq!(failure, ImportFailure { name: "Don't Wake (Mara Ellison).epub".into(), reason: "That file is empty (0 bytes).".into() });
     assert_eq!(import_failure("/home/mara/notes.xyz", None).reason, "Leaflet does not open .xyz files.");
     assert_eq!(import_failure("/home/mara/README", None), ImportFailure { name: "README".into(), reason: "It has no extension (.epub, .pdf), so Leaflet cannot tell what kind of book it is.".into() });
+  }
+
+  /// A lookup that got no answer, or lost the cover it was offered, is not
+  /// stamped as made: the stamp holds the next one off for fourteen days.
+  #[test]
+  fn a_lookup_counts_as_made_only_when_it_was_answered() {
+    // The catalogue answered: no match, or a match with nothing to download.
+    assert!(lookup_was_made(true, false, false));
+    // It answered and the cover arrived.
+    assert!(lookup_was_made(true, false, true));
+    // Offline, or the catalogue down: to be tried again.
+    assert!(!lookup_was_made(false, false, false));
+    // It answered with a cover that would not download: tried again too.
+    assert!(!lookup_was_made(true, true, false));
+    // The catalogue was down and the other source had the cover: done.
+    assert!(lookup_was_made(false, false, true));
   }
 
   /// Only a real JPEG or PNG is kept as a cover, whatever the label says.
