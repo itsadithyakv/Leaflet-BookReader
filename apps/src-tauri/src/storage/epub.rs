@@ -465,6 +465,63 @@ pub fn sections(path: &Path) -> Result<Vec<Section>> {
   Ok(out)
 }
 
+/// One section of a book opened to be read through (`reading`).
+pub struct ReadingSection {
+  /// Its place in the spine, counted as epub.js counts it: every `itemref`,
+  /// whether or not the manifest has its item.
+  pub index: usize,
+  /// As written in the manifest, relative to the package (as epub.js has it).
+  pub href: String,
+  /// Its path inside the archive.
+  inside: String
+}
+
+/// A book opened to be read through, a section at a time in reading order
+/// (the library's search, `crate::search`). The package is read once and the
+/// archive stays open, so a section costs one read and only one is ever held.
+pub struct Reading {
+  archive: Archive,
+  pub sections: Vec<ReadingSection>
+}
+
+/// Opens the EPUB at `path` for reading through. Only sections of text are
+/// listed: a spine may name a picture.
+pub fn reading(path: &Path) -> Result<Reading> {
+  let mut archive = open_archive(path)?;
+  let package = read_package(&mut archive)?;
+  let sections = package
+    .spine
+    .iter()
+    .enumerate()
+    .filter_map(|(index, itemref)| {
+      let item = package.manifest.get(&itemref.idref)?;
+      let kind = item.media_type.to_ascii_lowercase();
+      (kind.is_empty() || kind.contains("html") || kind.contains("xml")).then(|| ReadingSection {
+        index,
+        href: item.href.clone(),
+        inside: archive_path(&package.opf_path, &item.href)
+      })
+    })
+    .collect();
+  Ok(Reading { archive, sections })
+}
+
+impl Reading {
+  /// The bytes of the section at `at` in `sections`, or `None` where the
+  /// archive has no such file, it will not unpack, or it is over `limit`
+  /// bytes (a damaged or hostile archive can claim any size).
+  pub fn read(&mut self, at: usize, limit: u64) -> Option<Vec<u8>> {
+    let inside = &self.sections.get(at)?.inside;
+    let file = self.archive.by_name(inside).ok()?;
+    if file.size() > limit {
+      return None;
+    }
+    let mut bytes = Vec::with_capacity(file.size() as usize);
+    file.take(limit + 1).read_to_end(&mut bytes).ok()?;
+    (bytes.len() as u64 <= limit).then_some(bytes)
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;

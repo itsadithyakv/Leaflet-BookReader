@@ -25,7 +25,10 @@ export const foldText = (text: string, keepMarks = false): { text: string; from:
   for (let index = 0; index < text.length; ) {
     const code = text.codePointAt(index) ?? 0;
     const size = code > 0xffff ? 2 : 1;
-    let piece = text.slice(index, index + size).toLowerCase();
+    // A typed apostrophe finds a curly one, as in the library's search
+    // (src-tauri/src/search.rs), which sends the reader here to find a match
+    // again. One character for one, so the places hold.
+    let piece = text.slice(index, index + size).toLowerCase().replace(/[‘’‚‛ʼ]/g, "'").replace(/[“”„‟]/g, '"');
     if (!keepMarks) {
       piece = piece.normalize("NFD").replace(/\p{M}/gu, "");
     }

@@ -6,7 +6,8 @@ import { PAGE_TOP_PAD } from "../finish";
 import { pageAt, pageHolding } from "../pageTurn";
 import { readingLineIn } from "../readingPlace";
 import { lineAt } from "../lineAt";
-import { placeFollows } from "../openAt";
+import { isLook, placeAtOpen, placeFollows } from "../openAt";
+import { decodeFindPlace } from "../findPlace";
 import type { WithCover, WithDot } from "./scope";
 
 /**
@@ -35,8 +36,10 @@ export const useReaderPlace = (reader: WithDot) => {
   // (read on another device) is further on, or this device has none.
   const lastCfiRef = useRef<string | null>(
     (() => {
-      if (openAt) {
-        return openAt;
+      // (A match of the library's search is not a place yet: `soughtRef` below.)
+      const picked = placeAtOpen(openAt);
+      if (picked) {
+        return picked;
       }
       const local = initialPrefs?.cfi ?? null;
       const synced = book.position ?? null;
@@ -66,7 +69,12 @@ export const useReaderPlace = (reader: WithDot) => {
   // reader stays (readers/openAt.ts). Meanwhile the saved place and the
   // book's progress stay where the reading stopped, so the next ordinary open
   // resumes there; this is what this device had saved, written back as it was.
-  const openedAtPlaceRef = useRef(openAt !== null);
+  // Opened at a match of the library's search ("Search inside books"): the
+  // section and the words, found in the book once it is open (useBookOpening,
+  // readers/findPlace.ts) and then cleared, so a book laid out again reopens
+  // where the reader is by then. A look like a highlight's.
+  const soughtRef = useRef(decodeFindPlace(openAt));
+  const openedAtPlaceRef = useRef(isLook(openAt, soughtRef.current !== null));
   const storedPlaceRef = useRef({
     cfi: initialPrefs?.cfi,
     cfiProgress: initialPrefs?.cfiProgress,
@@ -533,7 +541,7 @@ export const useReaderPlace = (reader: WithDot) => {
 
   return {
     lastProgressRef, lastComputedProgressRef, progressArmedRef, openedAtRef, lastCfiRef, lastCfiProgressRef,
-    shownLineRef, lastCfiBelowRef, chapterPositionsRef, openedAtPlaceRef, storedPlaceRef, placeFollowsNow,
+    shownLineRef, lastCfiBelowRef, chapterPositionsRef, openedAtPlaceRef, soughtRef, storedPlaceRef, placeFollowsNow,
     updateBookProgress, sectionWeightsRef, readingPlace, readingPlaceCfi, sectionPlace, storyEndBottom,
     storyEndWasBelowRef, storyEndInView, goToPlace, settleOnPage, pageFrame, pagePlaceRef, pageRelayoutsRef,
     notePagePlace, relayPages, measurePagesAgain, clearToolbar, displayChapter
