@@ -18,8 +18,13 @@ export const useReaderMarks = (reader: WithOutlook & Later<"annotations" | "orde
 
   /** Text selected in the page, offered for highlighting. */
   const [selection, setSelection] = useState<{ cfi: string; text: string } | null>(null);
-  /** A highlight whose note the notes panel opens on (tapped in the page). */
+  /**
+   * A highlight that is open: in its own card beside the page (tapped in the
+   * page, or just made with a note to write), or, with the notes panel up,
+   * the one the panel opens on. `notesWrite` says its note has the keyboard.
+   */
   const [notesFocus, setNotesFocus] = useState<string | null>(null);
+  const [notesWrite, setNotesWrite] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   /** Words the search panel opens with ("Search in this book" from the selection bar); empty for Ctrl+F. */
   const [searchSeed, setSearchSeed] = useState("");
@@ -83,11 +88,12 @@ export const useReaderMarks = (reader: WithOutlook & Later<"annotations" | "orde
       .addHighlight(picked.cfi, picked.text, selectionChapter(), color)
       .then((saved) => {
         if (withNote) {
+          // Its card opens where it is, ready to be written in.
+          setBookmarkPanelOpen(false);
+          setNotesWrite(true);
           setNotesFocus(saved.id);
-          setBookmarkPanelOpen(true);
         } else {
-          // Where it went, for a reader who has not yet found the list.
-          showFocusToast("Highlighted. Your highlights are under the bookmark icon.", 3200);
+          showFocusToast("Highlighted.");
         }
       })
       .catch(() => showFocusToast("Couldn't save the highlight."));
@@ -101,6 +107,29 @@ export const useReaderMarks = (reader: WithOutlook & Later<"annotations" | "orde
       );
     }
     clearSelection();
+  };
+
+  /** Copies some words, and says so. */
+  const copyText = (text: string) => {
+    void navigator.clipboard.writeText(text).then(
+      () => showFocusToast("Copied."),
+      () => showFocusToast("Couldn't copy.")
+    );
+  };
+
+  /** Where a highlight's words are in the window, for its card to keep off them; null when they are not on the page. */
+  const highlightBox = (cfi: string) => {
+    try {
+      const range = renditionRef.current?.getRange?.(cfi) as Range | null | undefined;
+      const frame = (range?.startContainer.ownerDocument?.defaultView?.frameElement as HTMLElement | null | undefined)?.getBoundingClientRect();
+      const text = range?.getBoundingClientRect();
+      if (!frame || !text || (text.width === 0 && text.height === 0)) {
+        return null;
+      }
+      return { top: frame.top + text.top, bottom: frame.top + text.bottom, left: frame.left + text.left, right: frame.left + text.right };
+    } catch {
+      return null;
+    }
   };
 
   selectionRef.current = selection;
@@ -191,7 +220,8 @@ export const useReaderMarks = (reader: WithOutlook & Later<"annotations" | "orde
   };
 
   return {
-    bookmarkPanelOpen, setBookmarkPanelOpen, selection, setSelection, notesFocus, setNotesFocus, searchOpen,
+    bookmarkPanelOpen, setBookmarkPanelOpen, selection, setSelection, notesFocus, setNotesFocus, notesWrite,
+    setNotesWrite, copyText, highlightBox, searchOpen,
     setSearchOpen, searchSeed, closeSearch, setLookUpCfi, addBookmarkRef, selectionRef, clearSelectionRef,
     selectionChangedRef, addBookmark, appliedHighlightsRef, clearSelection, selectionChapter, highlightSelection,
     copySelection, lookUpShowing, searchBookFor, exportHighlights, searchMarkRef, openSearchHit, openBookmark
@@ -218,7 +248,7 @@ export const useBookAnnotations = (reader: WithHold) => {
 
 /** Draws the highlights into the chapters on the page. */
 export const useHighlightDrawing = (reader: WithAnnotations) => {
-  const { appliedHighlightsRef, highlights, loading, renditionRef, setBookmarkPanelOpen, setNotesFocus } = reader;
+  const { appliedHighlightsRef, highlights, loading, renditionRef, setBookmarkPanelOpen, setNotesFocus, setNotesWrite } = reader;
   useEffect(() => {
     const rendition = renditionRef.current;
     if (!rendition?.annotations || loading) {
@@ -254,8 +284,10 @@ export const useHighlightDrawing = (reader: WithAnnotations) => {
           item.cfi,
           { id: item.id },
           () => {
+            // Its card, beside the page: not the whole list.
+            setBookmarkPanelOpen(false);
+            setNotesWrite(false);
             setNotesFocus(item.id);
-            setBookmarkPanelOpen(true);
           },
           "leaflet-highlight",
           { fill: colour.fill, "fill-opacity": "0.32" }

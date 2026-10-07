@@ -1,0 +1,483 @@
+/* The reader's notes: the panel that lists every highlight and bookmark
+   (AnnotationsPanel.tsx) and the card a highlight opens in beside the page
+   (HighlightCard.tsx). Built from the reader's own variables, so it fits every
+   page finish and both themes.
+
+   Two voices, kept apart everywhere: the book's words are set in a book face
+   with the highlight's colour down their side; the reader's own are in the
+   interface's face on a tint of that colour. */
+
+/* ---- The panel ---- */
+.reader-notes-panel {
+  position: fixed;
+  top: 5rem;
+  right: 1rem;
+  z-index: 60;
+  display: flex;
+  width: 25rem;
+  max-width: calc(100vw - 2rem);
+  max-height: min(42rem, calc(100vh - 7rem));
+  flex-direction: column;
+  overflow: hidden;
+  border-width: 1px;
+  border-radius: 14px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
+  font-size: 12px;
+  line-height: 1.5;
+  letter-spacing: normal;
+  text-align: left;
+  text-transform: none;
+}
+
+.reader-notes-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--reader-border) 60%, transparent);
+  padding: 10px 10px 10px 12px;
+}
+
+.reader-notes-filters {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px 2px;
+}
+
+.reader-notes-chip {
+  min-height: 24px;
+  border: 1px solid var(--reader-border);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 11px;
+  color: var(--reader-muted);
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.reader-notes-chip:hover {
+  color: var(--reader-text);
+}
+
+.reader-notes-chip.is-on {
+  border-color: var(--reader-accent);
+  background: color-mix(in srgb, var(--reader-accent) 12%, transparent);
+  color: var(--reader-text);
+}
+
+/* A colour, as a dot: to show only that colour, or to change a highlight to it. */
+.reader-notes-dot {
+  position: relative;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--note-colour);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--reader-text) 22%, transparent);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.reader-notes-dot.is-small {
+  width: 11px;
+  height: 11px;
+}
+
+/* Small to look at, 24 px to press. */
+.reader-notes-dot::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 24px;
+  height: 24px;
+  transform: translate(-50%, -50%);
+  content: "";
+}
+
+.reader-notes-dot.is-small::after {
+  width: 20px;
+}
+
+.reader-notes-dot:hover,
+.reader-notes-dot:focus-visible {
+  transform: scale(1.18);
+}
+
+.reader-notes-dot.is-on {
+  box-shadow:
+    0 0 0 2px var(--reader-panel),
+    0 0 0 4px var(--reader-accent);
+}
+
+.reader-notes-list {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 14px 14px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--reader-border) transparent;
+}
+
+/* In a set of books, the book's name once above its chapters. */
+.reader-notes-book {
+  margin: 14px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* A chapter's name stays in sight while its highlights are scrolled through. */
+.reader-notes-chapter-head {
+  position: sticky;
+  top: -4px;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0;
+  background: var(--reader-panel);
+  padding: 12px 0 5px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.reader-notes-chapter-head > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* One highlight: its colour down the side, the book's words, the reader's under them. */
+.reader-notes-item {
+  position: relative;
+  border-radius: 10px;
+  padding: 8px 8px 6px 16px;
+  transition: background 0.15s ease;
+}
+
+.reader-notes-item + .reader-notes-item {
+  margin-top: 4px;
+}
+
+.reader-notes-item::before {
+  position: absolute;
+  top: 11px;
+  bottom: 11px;
+  left: 4px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--note-colour);
+  content: "";
+}
+
+.reader-notes-item:hover,
+.reader-notes-item:focus-within {
+  background: color-mix(in srgb, var(--reader-pill) 70%, transparent);
+}
+
+/* The one the panel was opened on. */
+.reader-notes-item.is-focus {
+  background: color-mix(in srgb, var(--note-colour) 12%, var(--reader-pill));
+}
+
+.reader-notes-quote,
+.reader-note-quote {
+  font-family: Georgia, "Iowan Old Style", "Palatino Linotype", "Times New Roman", serif;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--reader-text);
+  overflow-wrap: anywhere;
+}
+
+.reader-notes-quote {
+  display: -webkit-box;
+  width: 100%;
+  overflow: hidden;
+  text-align: left;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+  transition: color 0.15s ease;
+}
+
+.reader-notes-quote:hover {
+  color: var(--reader-accent);
+}
+
+/* The reader's own words. */
+.reader-notes-note {
+  display: block;
+  width: 100%;
+  margin-top: 7px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--note-colour) 13%, var(--reader-pill));
+  padding: 7px 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-align: left;
+  color: var(--reader-text);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  transition: background 0.15s ease;
+}
+
+.reader-notes-note:hover {
+  background: color-mix(in srgb, var(--note-colour) 20%, var(--reader-pill));
+}
+
+.reader-notes-edit {
+  margin-top: 7px;
+}
+
+.reader-notes-edit-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 5px;
+  font-size: 10.5px;
+}
+
+.reader-notes-item-foot {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 3px;
+  font-size: 10.5px;
+}
+
+/* What can be done with it: there when the highlight is pointed at or has the keyboard. */
+.reader-notes-item-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.reader-notes-item:hover .reader-notes-item-tools,
+.reader-notes-item:focus-within .reader-notes-item-tools {
+  opacity: 1;
+}
+
+/* Nothing to point with: always there. */
+@media (hover: none) {
+  .reader-notes-item-tools {
+    opacity: 1;
+  }
+}
+
+.reader-notes-recolour {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-right: 8px;
+}
+
+.reader-notes-tool {
+  display: inline-flex;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--reader-muted);
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.reader-notes-tool:hover,
+.reader-notes-tool:focus-visible {
+  background: var(--reader-hover-bg);
+  color: var(--reader-accent);
+}
+
+.reader-notes-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 30px 18px 22px;
+  text-align: center;
+  color: var(--reader-muted);
+}
+
+.reader-notes-empty p {
+  margin: 0;
+  max-width: 18rem;
+}
+
+.reader-notes-empty p:first-of-type {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.reader-notes-empty p + p,
+.reader-notes-empty p:only-child {
+  font-size: 12px;
+  font-weight: 400;
+}
+
+/* Bookmarks: a place to come back to, and no more than that. */
+.reader-notes-add {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin-top: 12px;
+  border: 1px dashed var(--reader-border);
+  border-radius: 10px;
+  padding: 9px 10px;
+  font-size: 12px;
+  color: var(--reader-text);
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.reader-notes-add:hover {
+  border-color: var(--reader-accent);
+  color: var(--reader-accent);
+}
+
+.reader-notes-bookmark {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  border-radius: 10px;
+  padding: 2px 6px 2px 0;
+  transition: background 0.15s ease;
+}
+
+.reader-notes-bookmark:hover,
+.reader-notes-bookmark:focus-within {
+  background: color-mix(in srgb, var(--reader-pill) 70%, transparent);
+}
+
+.reader-notes-bookmark-go {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  text-align: left;
+  color: var(--reader-accent);
+}
+
+.reader-notes-bookmark-go > span {
+  display: flex;
+  flex-direction: column;
+  font-size: 10.5px;
+}
+
+.reader-notes-bookmark-name {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reader-notes-panel :is(.reader-notes-quote, .reader-notes-note, .reader-notes-tool, .reader-notes-dot, .reader-notes-chip, .reader-notes-add, .reader-notes-bookmark-go, .reader-notes-action, .reader-notes-tab):focus-visible,
+.reader-note-card :is(.reader-notes-dot, .reader-notes-action, .reader-mini-control, .reader-note-swatch, .reader-note-quote):focus-visible {
+  outline: 2px solid var(--reader-accent);
+  outline-offset: 1px;
+}
+
+/* ---- The card: one highlight, opened beside the page ---- */
+.reader-note-card {
+  width: min(26rem, calc(100vw - 16px));
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+.reader-note-card-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.reader-note-card-head h2 {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reader-note-card-tools {
+  display: inline-flex;
+  flex: none;
+  gap: 6px;
+}
+
+/* The words highlighted, with their colour down the side; a long passage scrolls here. */
+.reader-note-quote {
+  min-height: 1.55em;
+  flex: 0 1 auto;
+  margin: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-left: 3px solid var(--note-colour);
+  padding-left: 11px;
+  max-height: 8.6em;
+  scrollbar-width: thin;
+  scrollbar-color: var(--reader-border) transparent;
+}
+
+.reader-note-card-row,
+.reader-note-card-foot {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.reader-note-date {
+  font-size: 10.5px;
+}
+
+.reader-note-swatch.is-current {
+  box-shadow:
+    0 0 0 1px var(--reader-panel),
+    0 0 0 3px var(--reader-accent);
+}
+
+/* Where the reader writes: a tint of the highlight's colour, in both the card and the panel. */
+.reader-note-field {
+  display: block;
+  width: 100%;
+  flex: none;
+  resize: none;
+  border: 1px solid var(--reader-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--note-colour, var(--reader-accent)) 9%, var(--reader-pill));
+  padding: 9px 11px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--reader-text);
+  outline: none;
+  scrollbar-width: thin;
+  scrollbar-color: var(--reader-border) transparent;
+  transition: border-color 0.15s ease;
+}
+
+.reader-note-field::placeholder {
+  color: var(--reader-muted);
+}
+
+.reader-note-field:focus {
+  border-color: var(--reader-accent);
+}
