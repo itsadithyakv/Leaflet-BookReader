@@ -1,8 +1,10 @@
 import type { KeyboardEvent } from "react";
+import { CustomFaces } from "./CustomFaces";
 import { MeasureControl } from "./MeasureControl";
 import {
   FALLBACK_FACE,
   TYPEFACE_STACK,
+  type BuiltInTypeface,
   type ReaderAlign,
   type ReaderMeasure,
   type ReaderSpacing,
@@ -26,7 +28,7 @@ type TypePanelProps = {
 export const MIN_FONT_SIZE = 14;
 export const MAX_FONT_SIZE = 32;
 
-const FACES: Array<{ id: ReaderTypeface; name: string; hint: string }> = [
+const FACES: Array<{ id: BuiltInTypeface; name: string; hint: string }> = [
   { id: "book", name: "Book's own", hint: "The face the publisher chose" },
   { id: "serif", name: "Book serif", hint: "Georgia" },
   { id: "modern", name: "Modern serif", hint: "Cambria" },
@@ -129,7 +131,8 @@ export const TypePanel = ({
         onKeyDown={(event) =>
           arrowTo(
             event,
-            FACES.map((face) => face.id),
+            // Read off the panel: the reader's own fonts (CustomFaces) are among them.
+            Array.from(event.currentTarget.querySelectorAll<HTMLElement>("[data-face]"), (option) => option.dataset.face as ReaderTypeface),
             typeface,
             onTypeface
           )
@@ -144,6 +147,7 @@ export const TypePanel = ({
               role="radio"
               aria-checked={on}
               tabIndex={on ? 0 : -1}
+              data-face={face.id}
               title={face.hint}
               className={`reader-type-option reader-border ${on ? "is-on" : ""}`}
               onClick={() => onTypeface(face.id)}
@@ -155,6 +159,7 @@ export const TypePanel = ({
             </button>
           );
         })}
+        <CustomFaces typeface={typeface} onTypeface={onTypeface} />
       </div>
     </div>
 

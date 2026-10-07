@@ -1,5 +1,7 @@
 /** Types shared by the reader and its helpers. */
 
+import { customFamily, customFontId, isCustomTypeface, type CustomTypeface } from "./customFonts";
+
 export type TocItem = {
   id?: string;
   label: string;
@@ -131,7 +133,9 @@ export const pagesViewerMaxWidth = (measure: ReaderMeasure, fontSize: number) =>
  * the reader preferred. Preferences of the device, like the line length: they
  * suit an eye and a screen, not a book.
  */
-export type ReaderTypeface = "book" | "serif" | "modern" | "sans" | "wide";
+export type BuiltInTypeface = "book" | "serif" | "modern" | "sans" | "wide";
+/** One of those, or a font the reader added (readers/customFonts.ts). */
+export type ReaderTypeface = BuiltInTypeface | CustomTypeface;
 
 export const TYPEFACE_KEY = "leaflet.reader.typeface";
 
@@ -140,7 +144,7 @@ export const TYPEFACE_KEY = "leaflet.reader.typeface";
  * Windows face first, then what stands in for it on a Mac or Linux. "book" is
  * the publisher's own choice, and has no stack: nothing is imposed.
  */
-export const TYPEFACE_STACK: Record<ReaderTypeface, string | null> = {
+export const TYPEFACE_STACK: Record<BuiltInTypeface, string | null> = {
   book: null,
   serif: 'Georgia, "Iowan Old Style", "Noto Serif", "DejaVu Serif", "Times New Roman", serif',
   modern: 'Cambria, Charter, "Bitstream Charter", "Sitka Text", "Noto Serif", Georgia, serif',
@@ -151,9 +155,26 @@ export const TYPEFACE_STACK: Record<ReaderTypeface, string | null> = {
 /** What a book with no face of its own is set in (and the face of "serif"). */
 export const FALLBACK_FACE = TYPEFACE_STACK.serif as string;
 
+/**
+ * The stack a face is set in. A font of the reader's own goes in front of
+ * the book serif, which shows until the font has been read, and for good
+ * when the font is no longer there: nothing has to notice that it went.
+ */
+export const typefaceStack = (typeface: ReaderTypeface): string | null => {
+  const custom = customFontId(typeface);
+  if (custom) {
+    return `${customFamily(custom)}, ${FALLBACK_FACE}`;
+  }
+  // A typeface that names neither is set in the book serif as well.
+  return Object.prototype.hasOwnProperty.call(TYPEFACE_STACK, typeface) ? TYPEFACE_STACK[typeface as BuiltInTypeface] : FALLBACK_FACE;
+};
+
 export const readTypeface = (): ReaderTypeface => {
   try {
     const value = localStorage.getItem(TYPEFACE_KEY);
+    if (value && isCustomTypeface(value)) {
+      return value;
+    }
     return value === "book" || value === "modern" || value === "sans" || value === "wide" ? value : "serif";
   } catch {
     return "serif";
@@ -205,7 +226,7 @@ export type TypeChoice = { typeface: ReaderTypeface; spacing: ReaderSpacing; ali
  * read right to left keeps its ragged edge on the other side.
  */
 export const typeVariables = (choice: TypeChoice) => {
-  const stack = TYPEFACE_STACK[choice.typeface];
+  const stack = typefaceStack(choice.typeface);
   return {
     variables: {
       "--reader-font-family": stack ?? FALLBACK_FACE,

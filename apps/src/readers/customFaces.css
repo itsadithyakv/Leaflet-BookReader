@@ -1,0 +1,56 @@
+/* The reader's own fonts in the type panel (readers/CustomFaces.tsx). Each
+   sits in the grid of faces like the ones that come with the system, with a
+   small cross in its corner to remove it. */
+.reader-type-own {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
+
+.reader-type-own .reader-type-option {
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
+
+/* A file's name can be long: it is cut here, and whole in the tooltip. */
+.reader-type-own-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reader-type-own-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--reader-muted);
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.reader-type-own-remove:hover {
+  color: var(--reader-accent);
+  background: var(--reader-hover-bg);
+}
+
+/* Why a font was not added, across the whole grid. */
+.reader-type-problem {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reader-type-own-remove {
+    transition: none;
+  }
+}

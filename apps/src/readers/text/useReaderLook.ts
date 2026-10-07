@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { EpubCFI } from "epubjs";
 import { useAppearanceStore } from "../../store/appearanceStore";
 import { ALIGN_KEY, LAYOUT_KEY, LINE_HEIGHT, MEASURE_KEY, MEASURE_PADDING, SPACING_KEY, TYPEFACE_KEY, applyTypeChoice, lineHeightPx, measureCss, readAlign, readLayout, readMeasure, readSpacing, readTypeface, type ReaderAlign, type ReaderLayout, type ReaderMeasure, type ReaderSpacing, type ReaderTypeface, type ReaderDisplayMode } from "../readerTypes";
+import { applyCustomFont, customFontFaceCss, customFontId, type CustomFontFace } from "../customFonts";
+import { fontService } from "../../services/fontService";
 import { getReaderFinish, getReaderFinishBackground, PAGE_TOP_PAD } from "../finish";
 import type { Later, WithCover, WithPace } from "./scope";
 
@@ -60,6 +62,14 @@ export const useReaderLook = (reader: WithPace & Later<"setAutoScrollActive">) =
   const [align, setAlign] = useState<ReaderAlign>(readAlign);
   const typeChoiceRef = useRef({ typeface, spacing, align });
   typeChoiceRef.current = { typeface, spacing, align };
+  // A font of the reader's own (readers/customFonts.ts), once its file has
+  // been read (useTypeChange asks for it): what the chapters' stylesheet hook
+  // gives each chapter. Null while the font is on its way, when it is no
+  // longer there, and for every other face.
+  const [customFont, setCustomFont] = useState<CustomFontFace | null>(null);
+  const customFontNow = customFont && customFont.id === customFontId(typeface) ? customFont : null;
+  const customFontRef = useRef<CustomFontFace | null>(customFontNow);
+  customFontRef.current = customFontNow;
   const keepChoice = (key: string, value: string) => {
     try {
       localStorage.setItem(key, value);
@@ -185,6 +195,7 @@ export const useReaderLook = (reader: WithPace & Later<"setAutoScrollActive">) =
       doc.documentElement.style.setProperty("--reader-font-size", `${fontSizeRef.current}px`);
       doc.documentElement.style.setProperty("--reader-measure", bookMeasureCss());
       applyTypeChoice(doc.documentElement, typeChoiceRef.current);
+      applyCustomFont(doc, customFontRef.current);
     });
   };
 
@@ -233,6 +244,7 @@ export const useReaderLook = (reader: WithPace & Later<"setAutoScrollActive">) =
   return {
     fontSize, setFontSize, fontSizeRef, displayMode, setDisplayMode, readerTheme, displayModeRef, readerThemeRef,
     toggleTheme, layout, layoutRef, paged, measure, chooseMeasure, typeface, spacing, align, typeChoiceRef,
+    customFontRef, setCustomFont, customFontOn: customFontNow?.id ?? "",
     chooseTypeface, chooseSpacing, chooseAlign, linePx, bookMeasureCss, chooseLayout, applyReaderInsets,
     ensureSingleScrollContainer, applyEndRoom, applyReaderTypography, isLight, rsvpDark, pageStyle, rsvpStyle
   };
@@ -283,10 +295,32 @@ export const useThemeChange = (reader: WithCover) => {
 /** A change of type lays the page out again round the line being read. */
 export const useTypeChange = (reader: WithCover) => {
   const {
-    align, applyReaderInsets, applyReaderTypography, autoScrollRunRef, clearToolbar, displayedViews, fontSize,
-    fontSizeRef, layoutRef, markNavigating, measure, measurePagesAgain, pagePlaceRef, persistReaderState, readingPlace,
-    readingPlaceCfi, refreshReaderDot, renditionRef, scheduleReaderWordIndex, settleOnPage, spacing, typeface
+    align, applyReaderInsets, applyReaderTypography, autoScrollRunRef, clearToolbar, customFontOn, displayedViews,
+    fontSize, fontSizeRef, layoutRef, loading, markNavigating, measure, measurePagesAgain, pagePlaceRef,
+    persistReaderState, readingPlace, readingPlaceCfi, refreshReaderDot, renditionRef, scheduleReaderWordIndex,
+    setCustomFont, settleOnPage, spacing, typeface
   } = reader;
+  // The reader's own font is asked for here, apart from the book: the book
+  // opens in the face behind it (readers/readerTypes.ts) and takes the font
+  // when its file has been read. A font that is no longer there is never
+  // read, the book stays in that face, and nothing is said.
+  const wantedFont = customFontId(typeface);
+  useEffect(() => {
+    if (!wantedFont) {
+      setCustomFont(null);
+      return;
+    }
+    let wanted = true;
+    void fontService.data(wantedFont).then((data) => {
+      const css = customFontFaceCss(wantedFont, data);
+      if (wanted) {
+        setCustomFont(css ? { id: wantedFont, css } : null);
+      }
+    });
+    return () => {
+      wanted = false;
+    };
+  }, [wantedFont]);
   /** The line the last change of type was anchored on (scrolling), and how far below the reading line it was put. */
   const typeAnchorRef = useRef<{ cfi: string; below: number } | null>(null);
   /** That anchor, if it is still where it was put: within two pixels. Null once the reader has moved. */
@@ -312,6 +346,7 @@ export const useTypeChange = (reader: WithCover) => {
   const appliedFontSizeRef = useRef(fontSize);
   const appliedMeasureRef = useRef(measure);
   const appliedTypeRef = useRef(`${typeface}|${spacing}|${align}`);
+  const appliedFontRef = useRef(customFontOn);
   useEffect(() => {
     if (!renditionRef.current?.themes?.fontSize) {
       applyReaderTypography();
@@ -324,8 +359,13 @@ export const useTypeChange = (reader: WithCover) => {
     // reflowed.
     const rendition = renditionRef.current;
     const typeNow = `${typeface}|${spacing}|${align}`;
+    // The reader's own font arriving changes the face as well. Not while the
+    // book is opening: the place is still being gone to then, and the line in
+    // view would be the wrong one to return to.
+    const fontArrived = appliedFontRef.current !== customFontOn && !loading;
+    appliedFontRef.current = customFontOn;
     const changed =
-      appliedFontSizeRef.current !== fontSize || appliedMeasureRef.current !== measure || appliedTypeRef.current !== typeNow;
+      appliedFontSizeRef.current !== fontSize || appliedMeasureRef.current !== measure || appliedTypeRef.current !== typeNow || fontArrived;
     appliedFontSizeRef.current = fontSize;
     appliedMeasureRef.current = measure;
     appliedTypeRef.current = typeNow;
@@ -401,5 +441,5 @@ export const useTypeChange = (reader: WithCover) => {
         window.clearTimeout(resettle);
       }
     };
-  }, [fontSize, measure, typeface, spacing, align]);
+  }, [fontSize, measure, typeface, spacing, align, customFontOn]);
 };
