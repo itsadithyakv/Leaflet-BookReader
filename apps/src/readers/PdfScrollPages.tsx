@@ -323,6 +323,19 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
     return column.getBoundingClientRect().top - stage.getBoundingClientRect().top + stage.scrollTop;
   }, [stageRef]);
 
+  /** A page asked for (`goTo`) before the first layout, for that layout to open at. */
+  const askedBeforeOpenRef = useRef<{ page: number; fraction: number } | null>(null);
+  /** Where the window is put for a page gone to: its top, or a place down it a third of the way down the window. */
+  const anchorFor = (page: number, fraction: number): Anchor => {
+    const index = Math.min(pageCount, Math.max(1, Math.round(page))) - 1;
+    const atStart = index === 0 && fraction <= 0;
+    return {
+      place: { page: index, fraction, extra: 0 },
+      // The very start of the book is the scroller's own start, the room above the first page in view.
+      offset: atStart ? columnTop() : fraction > 0 ? (stageRef.current?.clientHeight ?? 0) / 3 : TOP_INSET
+    };
+  };
+
   /** The top of the window, down the column. */
   const viewTop = useCallback(() => (stageRef.current?.scrollTop ?? 0) - columnTop(), [columnTop, stageRef]);
 
@@ -656,6 +669,15 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
               ? columnTop()
               : TOP_INSET
       };
+      // A page asked for before this first layout (the book opened at a
+      // highlight, or at a match of the library's search) is where it opens.
+      // The stored place above used to be put over it: the reader found
+      // itself where it had stopped reading, not where it had asked to go.
+      const asked = askedBeforeOpenRef.current;
+      askedBeforeOpenRef.current = null;
+      if (asked) {
+        anchorRef.current = anchorFor(asked.page, asked.fraction);
+      }
     }
     // Text laid for a page's old size would sit off the stretched page until it is redrawn.
     drawnRef.current.forEach((record, index) => {
@@ -870,13 +892,12 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
         if (!stage) {
           return;
         }
-        const index = Math.min(pageCount, Math.max(1, Math.round(page))) - 1;
-        const atStart = index === 0 && fraction <= 0;
-        anchorRef.current = {
-          place: { page: index, fraction, extra: 0 },
-          // The very start of the book is the scroller's own start, the room above the first page in view.
-          offset: atStart ? columnTop() : fraction > 0 ? stage.clientHeight / 3 : TOP_INSET
-        };
+        if (!openedRef.current) {
+          // Not laid out yet: kept for the first layout, which would undo it.
+          askedBeforeOpenRef.current = { page, fraction };
+          return;
+        }
+        anchorRef.current = anchorFor(page, fraction);
         acrossRef.current = null;
         shownHitRef.current = null;
         applyAnchor();
