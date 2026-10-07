@@ -9,7 +9,9 @@ is in [deploy.md](deploy.md) (the checklist) and
 
 **2026-10-07: 1.2 is released (the owner built and shipped it from
 `release/1.2` at `8553264`). Work is now on the branch `release/1.3`, version
-1.3.0, made off that commit. It is committed there and not pushed. What it
+1.3.0, made off that commit. It is committed and pushed (`origin/release/1.3`),
+and not yet built: the package needs the owner's two Google values, in the
+owner's own PowerShell window (deploy.md, "Releasing an update"). What it
 holds:**
 
 - **Dotty comes back** (features.md, "Smart Read"). With Dotty below the
