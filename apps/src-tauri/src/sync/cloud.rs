@@ -79,7 +79,7 @@ pub fn normalise_api_base(value: &str) -> Result<String> {
     "http" => return Err(anyhow!("Use https:// — plain http:// is only allowed for localhost.")),
     _ => return Err(anyhow!("That should start with https://"))
   }
-  if url.host_str().map_or(true, str::is_empty) || !url.username().is_empty() || url.password().is_some() {
+  if url.host_str().is_none_or(str::is_empty) || !url.username().is_empty() || url.password().is_some() {
     return Err(anyhow!("That does not look like a web address."));
   }
   // Every request is this address with a path put on the end. After a `?` or

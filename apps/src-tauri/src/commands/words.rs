@@ -453,7 +453,7 @@ mod tests {
     let gone = db.find_annotation(&row.id).expect("find").expect("kept");
     assert_eq!(gone.deleted_at.as_deref(), Some(LATER));
     // Removing it twice keeps the first date; it cannot be reviewed while it is gone.
-    delete(&db, &[row.id.clone()], "2026-10-06T10:00:00Z").expect("delete");
+    delete(&db, std::slice::from_ref(&row.id), "2026-10-06T10:00:00Z").expect("delete");
     assert_eq!(db.find_annotation(&row.id).expect("find"), Some(gone));
     assert!(review(&db, &[WordReview { id: row.id.clone(), to_box: 1, due: 20_400 }], LATER).is_err());
 
@@ -475,7 +475,7 @@ mod tests {
 
     // One device plays the quiz, the other removes the word later: the removal wins everywhere.
     review(&to, &[WordReview { id: row.id.clone(), to_box: 2, due: 20_400 }], LATER).expect("review");
-    delete(&from, &[row.id.clone()], "2026-10-06T10:00:00Z").expect("delete");
+    delete(&from, std::slice::from_ref(&row.id), "2026-10-06T10:00:00Z").expect("delete");
     let (a, b) = (snapshot(&to, LATER).expect("snapshot"), snapshot(&from, LATER).expect("snapshot"));
     let merged = merge(&a, &b, LATER);
     assert_eq!(merged.annotations, merge(&b, &a, LATER).annotations, "either way round");

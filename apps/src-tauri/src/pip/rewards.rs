@@ -668,11 +668,11 @@ mod tests {
     let wish = wish_for(&catalogue, &day, &owned(&catalogue, &[])).expect("a wish");
     let at = |time: &str| format!("{day}T{time}+05:30");
     let granted = bought_at("room", &wish.id, 70, &at("20:15:00"));
-    assert_eq!(granted_days(&catalogue, &[granted.clone()]), BTreeSet::from([day.clone()]));
+    assert_eq!(granted_days(&catalogue, std::slice::from_ref(&granted)), BTreeSet::from([day.clone()]));
 
     // Bought, and the wish for that day stays what it was: what was owned
     // before the day began is what it was chosen from.
-    let view = wish_today(&catalogue, &[granted.clone()], &day).expect("today's wish");
+    let view = wish_today(&catalogue, std::slice::from_ref(&granted), &day).expect("today's wish");
     assert!(view.granted);
     assert_eq!(view.id, wish.id);
 

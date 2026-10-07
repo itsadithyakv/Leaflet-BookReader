@@ -9,8 +9,12 @@
 //! runs, under an AppUserModelID it names itself, but Windows will not keep a
 //! schedule for it, so there the reminders are in-app only.
 
+/// A reminder, when to show it, and when Windows should take it down unseen.
+type Timed = (crate::reminders::Reminder, chrono::DateTime<chrono::Utc>, Option<chrono::DateTime<chrono::Utc>>);
+
 #[cfg(windows)]
 mod imp {
+  use super::Timed;
   use crate::reminders::Reminder;
   use std::sync::OnceLock;
   use windows::core::{Interface, HSTRING};
@@ -166,7 +170,7 @@ mod imp {
   /// Windows accepted. Packaged builds only.
   pub fn schedule(
     identifier: &str,
-    toasts: &[(Reminder, chrono::DateTime<chrono::Utc>, Option<chrono::DateTime<chrono::Utc>>)]
+    toasts: &[Timed]
   ) -> windows::core::Result<usize> {
     if !packaged() {
       return Ok(0);
@@ -221,7 +225,7 @@ mod imp {
 
   pub fn schedule(
     _identifier: &str,
-    _toasts: &[(Reminder, chrono::DateTime<chrono::Utc>, Option<chrono::DateTime<chrono::Utc>>)]
+    _toasts: &[super::Timed]
   ) -> Result<usize, String> {
     Ok(0)
   }

@@ -594,6 +594,8 @@ impl ReadingMood {
 
 /// A stored amount, kept to what a day can hold (a row edited by hand, or
 /// one that will not read as a number, is not a bigger allowance).
+// Not `clamp`: that hands a not-a-number back, and this makes it nothing.
+#[allow(clippy::manual_clamp)]
 fn spent_of_the_day(given: f64) -> f64 {
   given.max(0.0).min(READING_MOOD_PER_DAY)
 }

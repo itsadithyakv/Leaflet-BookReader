@@ -242,7 +242,7 @@ pub(crate) async fn run_sync(state: &State<'_, AppState>) -> Result<crate::sync:
       .await
       .map_err(|e| e.to_string())?;
     report.merge_in(cloud_report);
-    let _ = publish_profile(&state).await;
+    let _ = publish_profile(state).await;
   }
 
   {

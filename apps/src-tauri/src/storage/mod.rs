@@ -494,8 +494,8 @@ pub async fn install_converter(app: &AppHandle) -> Result<PathBuf> {
     let result = run_portable_installer(installer_path.clone(), install_root.clone()).await;
     let _ = fs::remove_file(&installer_path);
     result?;
-    return resolve_converter_path(Some(app))
-      .ok_or_else(|| anyhow::anyhow!("calibre installed, but ebook-convert.exe was not found"));
+    resolve_converter_path(Some(app))
+      .ok_or_else(|| anyhow::anyhow!("calibre installed, but ebook-convert.exe was not found"))
   }
 
   #[cfg(not(target_os = "windows"))]
@@ -716,8 +716,7 @@ fn describe_converter_failure(stderr: &[u8], stdout: &[u8]) -> String {
     .lines()
     .map(str::trim)
     .filter(|line| !line.is_empty())
-    .filter(|line| !line.starts_with("Traceback") && !line.starts_with("File \""))
-    .last()
+    .rfind(|line| !line.starts_with("Traceback") && !line.starts_with("File \""))
     .unwrap_or("")
     .to_string();
 

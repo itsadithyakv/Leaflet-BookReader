@@ -137,7 +137,7 @@ fn truncate(value: &str, max_chars: usize, max_bytes: usize) -> String {
     }
     out.push(character);
   }
-  out.trim_end_matches(|c: char| c == '.' || c == ' ' || c == '-').to_string()
+  out.trim_end_matches(['.', ' ', '-']).to_string()
 }
 
 /// `Title - Author`, safe to use as a file name on Windows, macOS and Linux:

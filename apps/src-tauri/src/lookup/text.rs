@@ -110,7 +110,7 @@ pub fn attribute<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
   while let Some(found) = tag[from..].find(&needle) {
     let at = from + found;
     // "title=" must not be found inside "data-title=".
-    let starts_a_name = tag[..at].chars().next_back().map_or(true, |c| c.is_whitespace());
+    let starts_a_name = tag[..at].chars().next_back().is_none_or(|c| c.is_whitespace());
     let value = &tag[at + needle.len()..];
     if starts_a_name {
       return value.find('"').map(|end| &value[..end]);
@@ -235,7 +235,7 @@ pub fn clip(text: &str, max: usize) -> String {
     .char_indices()
     .filter(|(index, c)| matches!(c, '.' | '!' | '?') && head[index + c.len_utf8()..].starts_with(' '))
     .map(|(index, c)| index + c.len_utf8())
-    .last();
+    .next_back();
   match sentence {
     // A sentence that ends in the second half: stop there, whole.
     Some(end) if head[..end].chars().count() >= max / 2 => head[..end].to_string(),

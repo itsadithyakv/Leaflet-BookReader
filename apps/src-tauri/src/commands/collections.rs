@@ -171,7 +171,7 @@ fn reread(book: &BookRecord, basic: Option<&storage::BasicMetadata>) -> Option<R
   // keeps the one it has, whoever its maker's computer says wrote it.
   let author = if pdf.is_some() { stored.author.or(identity.author) } else { identity.author.or(stored.author) };
   let genres = if book.genres.is_empty() { identity.genres } else { book.genres.clone() };
-  let named = (identity.title != book.title || author != book.author || genres != book.genres).then(|| (identity.title, author, genres));
+  let named = (identity.title != book.title || author != book.author || genres != book.genres).then_some((identity.title, author, genres));
   let series = if book.series.is_none() {
     identity.series.filter(|name| !name.is_empty()).map(|name| (name, identity.series_index))
   } else {

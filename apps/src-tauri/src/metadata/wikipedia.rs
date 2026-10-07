@@ -30,7 +30,7 @@ pub async fn fetch_cover(title: &str, author: Option<&str>) -> Result<Option<Str
   let mut query = title.to_string();
   if let Some(author) = author {
     if !author.trim().is_empty() {
-      query.push_str(" ");
+      query.push(' ');
       query.push_str(author);
     }
   }

@@ -473,7 +473,7 @@ fn split_catalogue_name(title: &str, known: &[String]) -> Option<Parsed> {
     halves.len() == 2
       && halves.iter().all(|half| (1..=3).contains(&word_count(half)) && half.chars().next().is_some_and(char::is_uppercase) && !half.chars().any(|ch| ch.is_ascii_digit()))
   };
-  if !own && !(sorted_name && parts.len() == 3 && numbered(parts[1]).is_some()) {
+  if !(own || sorted_name && parts.len() == 3 && numbered(parts[1]).is_some()) {
     return None;
   }
   let rest = &parts[1..];

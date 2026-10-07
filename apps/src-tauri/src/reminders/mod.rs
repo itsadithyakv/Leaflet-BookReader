@@ -304,7 +304,8 @@ fn minute_of_day(time: NaiveDateTime) -> u32 {
 
 pub fn in_quiet_hours(time: NaiveDateTime) -> bool {
   let minute = minute_of_day(time);
-  minute >= QUIET_START || minute < QUIET_END
+  // Quiet runs over midnight: every minute outside the waking span.
+  !(QUIET_END..QUIET_START).contains(&minute)
 }
 
 fn at_minute(date: chrono::NaiveDate, minute: u32) -> NaiveDateTime {

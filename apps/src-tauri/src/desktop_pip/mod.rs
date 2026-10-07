@@ -414,7 +414,7 @@ pub fn sign_up(nudge: &Nudge, now: NaiveDateTime) -> bool {
   if now >= nudge.fired_at + Duration::minutes(reminders::CATCH_UP_MINUTES) {
     return false;
   }
-  nudge.shown_at.map_or(true, |shown| now < shown + Duration::minutes(SIGN_HOLD_MINUTES))
+  nudge.shown_at.is_none_or(|shown| now < shown + Duration::minutes(SIGN_HOLD_MINUTES))
 }
 
 #[cfg(test)]

@@ -295,7 +295,7 @@ impl<'a> Scan<'a> {
         let after = self.at;
         let generation = self.integer();
         self.skip_space();
-        let referred = generation.is_some() && self.peek() == Some(b'R') && self.bytes.get(self.at + 1).map_or(true, |next| is_space(*next) || is_delimiter(*next));
+        let referred = generation.is_some() && self.peek() == Some(b'R') && self.bytes.get(self.at + 1).is_none_or(|next| is_space(*next) || is_delimiter(*next));
         if referred {
           self.at += 1;
           return u32::try_from(number).ok().map(Value::Ref);
