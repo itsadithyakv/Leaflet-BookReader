@@ -3,6 +3,7 @@ import { Image as ImageIcon } from "lucide-react";
 import { UiIcon } from "../components/UiIcon";
 import type { Annotation } from "../services/annotationService";
 import { groupByChapter } from "../components/highlights/highlightsView";
+import { KINDLE_TAG_ABOUT, isKindlePlace } from "../library/kindleClippings";
 import { noteDate } from "./HighlightCard";
 import { HIGHLIGHT_COLORS, HIGHLIGHT_COLOR_IDS } from "./highlightColors";
 import "./notes.css";
@@ -189,9 +190,19 @@ export const AnnotationsPanel = ({
                     className={`reader-notes-item ${focusId === item.id ? "is-focus" : ""}`}
                     style={{ ["--note-colour" as string]: swatch }}
                   >
-                    <button type="button" className="reader-notes-quote" onClick={() => onOpen(item.cfi)} title="Go to this place in the book">
-                      {item.text}
-                    </button>
+                    {isKindlePlace(item.cfi) ? (
+                      // Brought from a Kindle: no place in this book to go to, so words and not a button
+                      // (and nothing at all for a note written where nothing was highlighted).
+                      item.text && (
+                        <p className="reader-notes-quote" style={{ color: "var(--reader-text)" }}>
+                          {item.text}
+                        </p>
+                      )
+                    ) : (
+                      <button type="button" className="reader-notes-quote" onClick={() => onOpen(item.cfi)} title="Go to this place in the book">
+                        {item.text}
+                      </button>
+                    )}
 
                     {editing === item.id ? (
                       <div className="reader-notes-edit">
@@ -235,7 +246,14 @@ export const AnnotationsPanel = ({
 
                     {editing !== item.id && (
                       <div className="reader-notes-item-foot">
-                        <span className="reader-muted">{noteDate(item.createdAt)}</span>
+                        <span className="reader-muted">
+                          {noteDate(item.createdAt)}
+                          {isKindlePlace(item.cfi) && (
+                            <span className="ml-1.5 rounded border border-current px-1 text-[9.5px] uppercase tracking-wide" title={KINDLE_TAG_ABOUT}>
+                              Kindle
+                            </span>
+                          )}
+                        </span>
                         <span className="reader-notes-item-tools">
                           <span className="reader-notes-recolour" role="group" aria-label="Colour">
                             {HIGHLIGHT_COLOR_IDS.filter((id) => id !== (item.color ?? "yellow")).map((id) => (

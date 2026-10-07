@@ -16,7 +16,14 @@ export type Annotation = {
   deletedAt?: string | null;
 };
 
-export type AnnotationInput = Omit<Annotation, "createdAt" | "updatedAt" | "deletedAt">;
+export type AnnotationInput = Omit<Annotation, "createdAt" | "updatedAt" | "deletedAt"> & {
+  /**
+   * When it was made, for one made somewhere else (a highlight brought from a
+   * Kindle keeps the Kindle's date). Used only when the row is new; left out,
+   * it is made now.
+   */
+  createdAt?: string;
+};
 
 /** How many highlights a book has. */
 export type HighlightCount = { bookId: string; count: number };
@@ -84,7 +91,7 @@ export const annotationService = {
       const all = previewAll();
       const now = new Date().toISOString();
       const existing = all.find((item) => item.id === input.id);
-      const saved: Annotation = { ...input, createdAt: existing?.createdAt ?? now, updatedAt: now, deletedAt: null };
+      const saved: Annotation = { ...input, createdAt: existing?.createdAt ?? input.createdAt ?? now, updatedAt: now, deletedAt: null };
       previewWrite([...all.filter((item) => item.id !== input.id), saved]);
       return saved;
     }

@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::db::{Annotation, HighlightCount};
+use chrono::{DateTime, Utc};
 
 /// What the reader sends: everything but the timestamps, which are set here.
 #[derive(Deserialize)]
@@ -15,7 +16,11 @@ pub struct AnnotationInput {
   pub text: Option<String>,
   pub note: Option<String>,
   pub color: Option<String>,
-  pub chapter: Option<String>
+  pub chapter: Option<String>,
+  /// When it was made, for one made somewhere else (a highlight brought from a
+  /// Kindle keeps the Kindle's date). Used only when the row is new.
+  #[serde(default)]
+  pub created_at: Option<String>
 }
 
 const KINDS: [&str; 2] = ["bookmark", "highlight"];
@@ -24,6 +29,15 @@ const MAX_TEXT: usize = 4000;
 
 fn clipped(value: Option<String>) -> Option<String> {
   value.map(|text| text.chars().take(MAX_TEXT).collect::<String>()).filter(|text| !text.trim().is_empty())
+}
+
+/// The time a new row says it was made, written as the database writes times.
+/// None when it gives none, or one that cannot be right (not a time, or later
+/// than now): the row is then made now.
+fn made_at(given: Option<&str>, now: &str) -> Option<String> {
+  let made = DateTime::parse_from_rfc3339(given?.trim()).ok()?.with_timezone(&Utc);
+  let latest = DateTime::parse_from_rfc3339(now).ok()?.with_timezone(&Utc);
+  (made <= latest).then(|| made.to_rfc3339())
 }
 
 /// A book's bookmarks and highlights, oldest first.
@@ -67,7 +81,11 @@ fn save(db: &db::Database, input: AnnotationInput, now: &str) -> Result<Annotati
     note: clipped(input.note),
     color: input.color,
     chapter: input.chapter,
-    created_at: existing.map(|row| row.created_at).unwrap_or_else(|| now.to_string()),
+    // A row that is there keeps its own date, whatever is sent.
+    created_at: existing
+      .map(|row| row.created_at)
+      .or_else(|| made_at(input.created_at.as_deref(), now))
+      .unwrap_or_else(|| now.to_string()),
     updated_at: now.to_string(),
     deleted_at: None
   };
@@ -120,7 +138,8 @@ mod tests {
       text: Some("words".into()),
       note: None,
       color: Some("yellow".into()),
-      chapter: None
+      chapter: None,
+      created_at: None
     }
   }
 
@@ -193,5 +212,52 @@ mod tests {
       assert!(delete(&db, id, LATER).is_err(), "{kind}");
       assert_eq!(db.find_annotation(id).expect("find"), Some(row), "{kind} is as it was");
     }
+  }
+
+  #[test]
+  fn a_new_row_keeps_the_date_it_was_made_elsewhere() {
+    let db = memory_db();
+    // A highlight brought from a Kindle: made then, changed (here) now.
+    let mut brought = input("k1", "highlight");
+    brought.created_at = Some("2024-03-04T22:15:32.000+05:30".into());
+    let saved = save(&db, brought, NOW).expect("save");
+    assert_eq!((saved.created_at.as_str(), saved.updated_at.as_str()), ("2024-03-04T16:45:32+00:00", NOW));
+    assert_eq!(db.find_annotation("k1").expect("find").map(|row| row.created_at).as_deref(), Some("2024-03-04T16:45:32+00:00"));
+
+    // Saved again, with another date or none, it keeps the one it has.
+    let mut again = input("k1", "highlight");
+    again.created_at = Some("2020-01-01T00:00:00Z".into());
+    assert_eq!(save(&db, again, LATER).expect("save").created_at, "2024-03-04T16:45:32+00:00");
+    assert_eq!(save(&db, input("k1", "highlight"), LATER).expect("save").created_at, "2024-03-04T16:45:32+00:00");
+    // So does one made here: a date sent later does not move it.
+    save(&db, input("h1", "highlight"), NOW).expect("save");
+    let mut dated = input("h1", "highlight");
+    dated.created_at = Some("2020-01-01T00:00:00Z".into());
+    assert_eq!(save(&db, dated, LATER).expect("save").created_at, NOW);
+    // Removed and brought again, it is back with its first date.
+    delete(&db, "k1", LATER).expect("delete");
+    let mut back = input("k1", "highlight");
+    back.created_at = Some("2021-06-01T00:00:00Z".into());
+    assert_eq!(save(&db, back, LATER).expect("save").created_at, "2024-03-04T16:45:32+00:00");
+
+    // A date that cannot be right is not kept: the row is made now.
+    for (id, given) in [("x1", "next Tuesday"), ("x2", ""), ("x3", "2031-01-01T00:00:00Z"), ("x4", "2024-03-04 22:15:32")] {
+      let mut odd = input(id, "highlight");
+      odd.created_at = Some(given.into());
+      assert_eq!(save(&db, odd, NOW).expect("save").created_at, NOW, "{given}");
+    }
+  }
+
+  #[test]
+  fn the_date_is_optional_in_what_the_reader_sends() {
+    let plain = r#"{"id":"h1","bookId":"b1","kind":"highlight","cfi":"kindle:123","text":"words","note":null,"color":"yellow","chapter":"Page 12"}"#;
+    let without: AnnotationInput = serde_json::from_str(plain).expect("the reader's own highlights send no date");
+    assert_eq!(without.created_at, None);
+    let dated = plain.replace(r#""id":"h1""#, r#""id":"h1","createdAt":"2024-03-04T16:45:32.000Z""#);
+    let with: AnnotationInput = serde_json::from_str(&dated).expect("a date");
+    assert_eq!(with.created_at.as_deref(), Some("2024-03-04T16:45:32.000Z"));
+    // A place that is not a CFI is kept as it is sent, like a PDF's.
+    let saved = save(&memory_db(), with, NOW).expect("save");
+    assert_eq!((saved.cfi.as_str(), saved.created_at.as_str()), ("kindle:123", "2024-03-04T16:45:32+00:00"));
   }
 }

@@ -12,6 +12,8 @@ import { EYEBROW } from "../ui/SectionHeader";
 import { SegmentedTabs, panelId, tabId } from "../ui/SegmentedTabs";
 import { showHighlightsView, useHighlightsStore } from "./highlightsStore";
 import { booksWithHighlights, countLabel, groupByChapter, orderHighlights } from "./highlightsView";
+import { KINDLE_TAG_ABOUT, isKindlePlace } from "../../library/kindleClippings";
+import { KindleImport } from "./KindleImport";
 
 type Tab = "highlights" | "bookmarks";
 const TABS_ID = "book-notes";
@@ -145,6 +147,7 @@ const BooksView = () => {
           </ul>
         )}
       </div>
+      <KindleImport />
     </>
   );
 };
@@ -351,7 +354,8 @@ const BookView = ({
                   <ul className="space-y-2">
                     {group.items.map((item) => {
                       const color = HIGHLIGHT_COLORS[item.color ?? "yellow"] ?? HIGHLIGHT_COLORS.yellow;
-                      const about = snippet(item.text);
+                      const about = snippet(item.text || item.note);
+                      const fromKindle = isKindlePlace(item.cfi);
                       return (
                         <li key={item.id} className="flex gap-3 rounded-xl border border-outline-variant/30 bg-surface-container-low/70 p-4">
                           <span className="w-1 shrink-0 rounded-full" style={{ background: color.swatch }} aria-hidden="true" />
@@ -368,11 +372,20 @@ const BookView = ({
                               </p>
                             )}
                             <div className="mt-3 flex flex-wrap items-center gap-x-1 gap-y-1">
+                              {fromKindle && (
+                                <span
+                                  className="mr-1 rounded border border-outline-variant px-1.5 text-[10px] font-semibold uppercase tracking-wide text-on-surface-variant"
+                                  title={KINDLE_TAG_ABOUT}
+                                >
+                                  Kindle
+                                </span>
+                              )}
                               <time dateTime={item.createdAt} className="mr-auto pr-2 text-[11px] text-on-surface-variant">
                                 {dateLabel(item.createdAt)}
                               </time>
-                              <RowAction icon="book-open" label="Open in book" about={about} onClick={() => open(item)} />
-                              <RowAction icon="copy" label="Copy" about={about} onClick={() => copy(item.text ?? "", "Copied.")} />
+                              {/* One brought from a Kindle has no place in the book to open it at. */}
+                              {!fromKindle && <RowAction icon="book-open" label="Open in book" about={about} onClick={() => open(item)} />}
+                              <RowAction icon="copy" label="Copy" about={about} onClick={() => copy(item.text || item.note || "", "Copied.")} />
                               <RowAction icon="trash" label="Remove" about={about} danger onClick={() => void remove(item)} />
                             </div>
                           </div>

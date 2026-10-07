@@ -1,5 +1,6 @@
 import type { Book } from "@shared/models/book";
 import type { Annotation } from "../../services/annotationService";
+import { compareKindlePlaces, isKindlePlace } from "../../library/kindleClippings";
 
 /** Compares two places in a book (epub.js's `EpubCFI.compare`); may throw on a CFI it cannot read. */
 export type CfiCompare = (a: string, b: string) => number;
@@ -15,7 +16,14 @@ const byMade = (a: Annotation, b: Annotation) => a.createdAt.localeCompare(b.cre
 export const orderHighlights = (highlights: Annotation[], compare: CfiCompare) => {
   const placed: Annotation[] = [];
   const unplaced: Annotation[] = [];
+  // Brought from a Kindle (library/kindleClippings.ts): no place in this
+  // book's file, so after those that have one, in the Kindle's own order.
+  const kindle: Annotation[] = [];
   for (const item of highlights) {
+    if (isKindlePlace(item.cfi)) {
+      kindle.push(item);
+      continue;
+    }
     try {
       compare(item.cfi, item.cfi);
       placed.push(item);
@@ -30,7 +38,8 @@ export const orderHighlights = (highlights: Annotation[], compare: CfiCompare) =
       return byMade(a, b);
     }
   });
-  return [...placed, ...unplaced.sort(byMade)];
+  kindle.sort((a, b) => compareKindlePlaces(a.cfi, b.cfi) || byMade(a, b));
+  return [...placed, ...kindle, ...unplaced.sort(byMade)];
 };
 
 export type ChapterGroup = {

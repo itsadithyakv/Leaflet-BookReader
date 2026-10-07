@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { UiIcon } from "../../components/UiIcon";
 import type { Annotation } from "../../services/annotationService";
+import { isKindlePlace } from "../../library/kindleClippings";
 import { mentionSearch } from "../people/bookText";
 import { isContentsPage } from "../people/mentions";
 import type { Place } from "../people/model";
@@ -84,9 +85,10 @@ export const RecapCard = ({ book, place, days, chapter, progress, highlights, ch
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [book]);
 
-  // The last thing marked: the reader's own way back in.
+  // The last thing marked: the reader's own way back in. (Not one brought
+  // from a Kindle: it has no place to go back to, and may be from further on.)
   const latest = useMemo(
-    () => [...highlights].filter((item) => item.kind === "highlight").sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null,
+    () => [...highlights].filter((item) => item.kind === "highlight" && !isKindlePlace(item.cfi)).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null,
     [highlights]
   );
 
