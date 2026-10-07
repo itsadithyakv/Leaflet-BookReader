@@ -12,7 +12,13 @@
 //! having to be typed, and with a typed apostrophe finding a curly one. The
 //! reader finds a match again by the same rules (`apps/src/readers/findPlace.ts`:
 //! what is skipped, what parts two words), so the two have to change together.
+//!
+//! A PDF is searched through the text kept of it (`crate::pdf_text`), which
+//! the page reads once: a page there is what a section is to an EPUB, and a
+//! match is told of by its page. A PDF whose text has not been read yet is
+//! named in the answer, so the page can read it and ask again for that book.
 
+use crate::pdf_text;
 use crate::storage::epub;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -449,6 +455,10 @@ pub struct Hit {
   /// Which of the section's matches it is, from 0: the reader finds the
   /// section's matches again and goes to this one.
   pub nth: usize,
+  /// In a PDF, the page it is on, from 1, and `nth` is which of that page's
+  /// matches; `href` is then empty. Absent for an EPUB.
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub page: Option<usize>,
   pub before: String,
   /// The words found, as the book writes them.
   pub text: String,
@@ -485,7 +495,7 @@ pub fn search_book(path: &Path, needle: &Needle, stop: &dyn Fn() -> bool) -> any
     for (nth, &(start, end)) in places.iter().enumerate().take(room) {
       let (before, words, after) = snippet(&text, start, end);
       let section = &book.sections[at];
-      found.hits.push(Hit { href: section.href.clone(), spine: section.index, nth, before, text: words, after });
+      found.hits.push(Hit { href: section.href.clone(), spine: section.index, nth, page: None, before, text: words, after });
     }
     found.count += places.len();
   }
@@ -495,12 +505,64 @@ pub fn search_book(path: &Path, needle: &Needle, stop: &dyn Fn() -> bool) -> any
   Ok(found)
 }
 
-/// A book of the library, and the EPUB its text is in: its own file, or the
-/// conversion kept beside it. `None` for a book with neither (a PDF, a comic,
+/// A PDF page's text in one line, as a section's is: any run of white space,
+/// and every end of a line, one space. A word broken over the end of a line
+/// with a hyphen ("light-" / "house") is joined again, as the reader's own
+/// search finds it and as its results show it (`apps/src/readers/pdfText.ts`).
+/// A hyphen that was the word's own and happened to end the line goes with
+/// it: "well-" / "known" is found as "wellknown" only.
+fn page_line(page: &str) -> String {
+  let mut line = Line { text: String::with_capacity(page.len()), gap: false };
+  let mut chars = page.chars();
+  while let Some(c) = chars.next() {
+    if c == '-' && !line.gap && line.text.chars().next_back().is_some_and(char::is_alphabetic) {
+      let mut ahead = chars.clone();
+      if ahead.next() == Some('\n') && ahead.next().is_some_and(char::is_lowercase) {
+        // The hyphen and the line's end are both passed over.
+        chars.next();
+        continue;
+      }
+    }
+    line.push(c);
+  }
+  line.text
+}
+
+/// Goes through the text kept of a PDF, a string a page. `stop` is asked
+/// between pages. A phrase that runs from the foot of one page onto the next
+/// is not found: a page is searched by itself.
+pub fn search_pages(pages: &[String], needle: &Needle, stop: &dyn Fn() -> bool) -> Found {
+  let mut found = Found::default();
+  for (at, page) in pages.iter().enumerate() {
+    if stop() {
+      break;
+    }
+    let text = page_line(page);
+    let places = find_all(&text, needle);
+    let room = KEPT.saturating_sub(found.hits.len());
+    for (nth, &(start, end)) in places.iter().enumerate().take(room) {
+      let (before, words, after) = snippet(&text, start, end);
+      found.hits.push(Hit { href: String::new(), spine: 0, nth, page: Some(at + 1), before, text: words, after });
+    }
+    found.count += places.len();
+  }
+  found
+}
+
+/// A book of the library, and where its text is: the EPUB it is in (its own
+/// file, or the conversion kept beside it) or, for a PDF that is on this
+/// device, the file its text is kept in once it has been read
+/// (`pdf_text::path_of`). Neither for a book with no text to search (a comic,
 /// a Kindle book never opened, a book whose file is not on this device).
 pub struct Shelved {
   pub id: String,
-  pub epub: Option<PathBuf>
+  pub epub: Option<PathBuf>,
+  pub pdf: Option<PathBuf>
+}
+
+/// Whether a book is a PDF, by its file's name.
+pub fn is_pdf(book: &Path) -> bool {
+  book.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))
 }
 
 /// The EPUB to search for a book: the book itself when it is one, or else the
@@ -543,11 +605,42 @@ pub struct Summary {
   pub books: Vec<BookMatches>,
   /// Books whose text was gone through.
   pub searched: usize,
-  /// Books that could not be: no text to read (a PDF, a comic, a book not
-  /// converted or not on this device) or a file too damaged to open.
+  /// Books that could not be: no text to read (a comic, a PDF that is only
+  /// pictures of its pages, a book not converted or not on this device) or a
+  /// file too damaged to open.
   pub skipped: usize,
+  /// How many of those are PDFs with no text in them (scans).
+  pub no_text: usize,
+  /// PDFs whose text has not been read yet, by id, in the order they came:
+  /// counted neither as searched nor as skipped. The page reads each and asks
+  /// again for it alone.
+  pub unread: Vec<String>,
   /// A newer search began, and this one stopped where it was.
   pub stopped: bool
+}
+
+/// What became of one book.
+enum Outcome {
+  Found(Found),
+  /// A PDF whose kept text has nothing in it to search.
+  NoText,
+  /// A PDF whose text is not kept yet.
+  Unread,
+  Unreadable
+}
+
+fn go_through(book: &Shelved, needle: &Needle, stop: &dyn Fn() -> bool) -> Outcome {
+  if let Some(path) = &book.epub {
+    return search_book(path, needle, stop).map_or(Outcome::Unreadable, Outcome::Found);
+  }
+  let Some(kept) = &book.pdf else {
+    return Outcome::Unreadable;
+  };
+  match pdf_text::load_from(kept) {
+    None => Outcome::Unread,
+    Some(pages) if !pdf_text::has_text(&pages) => Outcome::NoText,
+    Some(pages) => Outcome::Found(search_pages(&pages, needle, stop))
+  }
 }
 
 /// Goes through the books in the order given, telling of each as it is done.
@@ -561,19 +654,26 @@ pub fn search_library(shelf: &[Shelved], needle: &Needle, stop: &dyn Fn() -> boo
     }
     // A damaged file must not end the search, whatever it does to the code
     // that reads it: a panic there is one more book that could not be read.
-    let found = book.epub.as_deref().and_then(|path| {
-      std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| search_book(path, needle, stop).ok())).ok().flatten()
-    });
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| go_through(book, needle, stop))).unwrap_or(Outcome::Unreadable);
     if stop() {
       summary.stopped = true;
       break;
     }
-    let matches = match found {
-      Some(found) => {
+    let matches = match outcome {
+      Outcome::Found(found) => {
         summary.searched += 1;
         (found.count > 0).then(|| BookMatches { book_id: book.id.clone(), count: found.count, matches: found.hits })
       }
-      None => {
+      Outcome::NoText => {
+        summary.skipped += 1;
+        summary.no_text += 1;
+        None
+      }
+      Outcome::Unread => {
+        summary.unread.push(book.id.clone());
+        None
+      }
+      Outcome::Unreadable => {
         summary.skipped += 1;
         None
       }
@@ -807,7 +907,7 @@ mod tests {
 
     let shelf: Vec<Shelved> = [("noise", Some(&noise)), ("cut", Some(&cut)), ("pdf", None), ("good", Some(&good)), ("gone", Some(&dir.join("gone.epub")))]
       .into_iter()
-      .map(|(id, path)| Shelved { id: id.to_string(), epub: path.cloned() })
+      .map(|(id, path)| Shelved { id: id.to_string(), epub: path.cloned(), pdf: None })
       .collect();
     let mut told = Vec::new();
     let summary = search_library(&shelf, &needle("lighthouse"), &|| false, |progress| told.push((progress.done, progress.total, progress.book.map(|book| book.book_id))));
@@ -825,7 +925,7 @@ mod tests {
       .map(|(id, times)| {
         let path = dir.join(format!("{id}.epub"));
         write_epub(&path, &[("one.xhtml", page(&format!("<p>Fog.</p>{}", "<p>A lighthouse.</p>".repeat(times))))], &["one.xhtml"]);
-        Shelved { id: id.to_string(), epub: Some(path) }
+        Shelved { id: id.to_string(), epub: Some(path), pdf: None }
       })
       .collect();
     let summary = search_library(&shelf, &needle("lighthouse"), &|| false, |_| {});
@@ -841,7 +941,7 @@ mod tests {
       .map(|at| {
         let path = dir.join(format!("{at}.epub"));
         write_epub(&path, &[("one.xhtml", page("<p>A lighthouse.</p>"))], &["one.xhtml"]);
-        Shelved { id: at.to_string(), epub: Some(path) }
+        Shelved { id: at.to_string(), epub: Some(path), pdf: None }
       })
       .collect();
     // Called off while the third book is being told of.
@@ -902,6 +1002,201 @@ mod tests {
     let _ = std::fs::remove_dir_all(&dir);
   }
 
+  /// A hash for a made-up PDF, one for each letter.
+  fn hash_of(letter: char) -> String {
+    letter.to_string().repeat(64)
+  }
+
+  /// Keeps a made-up PDF's text under `dir`, as the page would, and gives the file it is in.
+  fn keep_text(dir: &Path, letter: char, pages: &[&str]) -> PathBuf {
+    let pages: Vec<String> = pages.iter().map(|page| page.to_string()).collect();
+    pdf_text::save_in(dir, &hash_of(letter), &pages).expect("save");
+    pdf_text::file_in(dir, &hash_of(letter)).expect("a hash")
+  }
+
+  #[test]
+  fn a_pdf_is_searched_a_page_at_a_time_and_a_match_told_of_by_its_page() {
+    let pages: Vec<String> = [
+      "Nothing on the first page.",
+      "The keeper climbed\nthe Lighthouse stairs,   and the\nlighthouse shook.",
+      "",
+      "“Don’t,” said the naïve keeper of the LIGHTHOUSE."
+    ]
+    .iter()
+    .map(|page| page.to_string())
+    .collect();
+    let found = search_pages(&pages, &needle("lighthouse"), &|| false);
+    assert_eq!(found.count, 3);
+    assert_eq!(found.hits.iter().map(|hit| (hit.page, hit.nth, hit.href.as_str())).collect::<Vec<_>>(), [(Some(2), 0, ""), (Some(2), 1, ""), (Some(4), 0, "")]);
+    // The lines of a page are one line, and the snippet is cut as an EPUB's is.
+    assert_eq!(
+      (found.hits[0].before.as_str(), found.hits[0].text.as_str(), found.hits[0].after.as_str()),
+      ("The keeper climbed the ", "Lighthouse", " stairs, and the lighthouse shook.")
+    );
+    // The same rules as an EPUB's text: case, accents, quotes, and words either side of a line's end.
+    assert_eq!(search_pages(&pages, &needle("climbed the lighthouse"), &|| false).count, 1);
+    assert_eq!(search_pages(&pages, &needle("don't"), &|| false).hits[0].text, "Don’t");
+    assert_eq!(search_pages(&pages, &needle("naive keeper"), &|| false).hits[0].page, Some(4));
+    assert_eq!(search_pages(&pages, &needle("naïve"), &|| false).count, 1);
+    assert_eq!(search_pages(&pages, &needle("windmill"), &|| false).count, 0);
+    // No more are kept to show than of an EPUB, and all are counted.
+    let many: Vec<String> = (0..40).map(|_| "A lighthouse. A lighthouse.".to_string()).collect();
+    let found = search_pages(&many, &needle("lighthouse"), &|| false);
+    assert_eq!((found.count, found.hits.len()), (80, KEPT));
+    assert_eq!(found.hits.iter().map(|hit| (hit.page, hit.nth)).collect::<Vec<_>>(), [(Some(1), 0), (Some(1), 1), (Some(2), 0), (Some(2), 1), (Some(3), 0)]);
+    // A match's page is not written for an EPUB, and is for a PDF.
+    let json = serde_json::to_value(&found.hits[4]).expect("json");
+    assert_eq!(json["page"], 3);
+    let epub = Hit { href: "a.xhtml".into(), spine: 0, nth: 0, page: None, before: String::new(), text: String::new(), after: String::new() };
+    assert!(serde_json::to_value(&epub).expect("json").get("page").is_none());
+  }
+
+  #[test]
+  fn a_word_broken_over_the_end_of_a_line_is_found_whole() {
+    assert_eq!(page_line("the light-\nhouse on the rock"), "the lighthouse on the rock");
+    assert_eq!(page_line("  one\n\ntwo \t three\n"), "one two three");
+    // Only a word's own break: a dash, a hyphen before a capital or a number,
+    // and a hyphen in the middle of a line are left as they are.
+    assert_eq!(page_line("wait -\nthen go"), "wait - then go");
+    assert_eq!(page_line("the Anglo-\nSaxon and pre-\n1900 well-known"), "the Anglo- Saxon and pre- 1900 well-known");
+    assert_eq!(page_line("-\nlist"), "- list");
+    assert_eq!(page_line("ends with a hyphen-"), "ends with a hyphen-");
+    assert_eq!(page_line("caf\u{e9}-\n\u{e9}t\u{e9}"), "caf\u{e9}\u{e9}t\u{e9}");
+
+    let pages = vec!["The keeper of the light-\nhouse slept.".to_string()];
+    let found = search_pages(&pages, &needle("lighthouse"), &|| false);
+    assert_eq!((found.count, found.hits[0].before.as_str(), found.hits[0].text.as_str()), (1, "The keeper of the ", "lighthouse"));
+  }
+
+  #[test]
+  fn a_pdf_not_read_yet_is_named_and_a_scan_is_counted_as_having_no_text() {
+    let dir = scratch("pdfs");
+    let texts = dir.join("text");
+    let epub = dir.join("book.epub");
+    write_epub(&epub, &[("one.xhtml", page("<p>A lighthouse.</p>"))], &["one.xhtml"]);
+    let read = keep_text(&texts, 'a', &["Fog.", "A lighthouse, and a lighthouse.", "The Lighthouse."]);
+    let without = keep_text(&texts, 'b', &["Only fog here."]);
+    let scan = keep_text(&texts, 'c', &["", " \n ", ""]);
+    // Never read; and read, but the file was damaged since.
+    let never = pdf_text::file_in(&texts, &hash_of('d')).expect("a hash");
+    let damaged = keep_text(&texts, 'e', &["A lighthouse that cannot be read back."]);
+    std::fs::write(&damaged, b"not what was written").expect("write");
+
+    let shelf: Vec<Shelved> = [("epub", Some(&epub), None), ("read", None, Some(&read)), ("never", None, Some(&never)), ("comic", None, None), ("scan", None, Some(&scan)), ("without", None, Some(&without)), ("damaged", None, Some(&damaged))]
+      .into_iter()
+      .map(|(id, epub, pdf)| Shelved { id: id.to_string(), epub: epub.cloned(), pdf: pdf.cloned() })
+      .collect();
+    let mut told = Vec::new();
+    let summary = search_library(&shelf, &needle("lighthouse"), &|| false, |progress| told.push((progress.done, progress.total, progress.book.map(|book| book.book_id))));
+    assert_eq!((summary.searched, summary.skipped, summary.no_text, summary.stopped), (3, 2, 1, false));
+    assert_eq!(summary.unread, ["never", "damaged"]);
+    assert_eq!(summary.books.iter().map(|book| (book.book_id.as_str(), book.count)).collect::<Vec<_>>(), [("read", 3), ("epub", 1)]);
+    assert_eq!(summary.books[0].matches.iter().map(|hit| (hit.page, hit.nth)).collect::<Vec<_>>(), [(Some(2), 0), (Some(2), 1), (Some(3), 0)]);
+    // Every book is told of as it is passed, searched or not.
+    assert_eq!(told.len(), 7);
+    assert_eq!(told[1], (2, 7, Some("read".to_string())));
+    assert_eq!(told[2], (3, 7, None));
+
+    // Once its text is kept, the book is asked for alone, and is no longer named.
+    keep_text(&texts, 'd', &["A lighthouse at last."]);
+    let alone: Vec<Shelved> = shelf.into_iter().filter(|book| book.id == "never").collect();
+    let summary = search_library(&alone, &needle("lighthouse"), &|| false, |_| {});
+    assert_eq!((summary.searched, summary.skipped, summary.no_text, summary.unread.len()), (1, 0, 0, 0));
+    assert_eq!(summary.books.iter().map(|book| (book.book_id.as_str(), book.count)).collect::<Vec<_>>(), [("never", 1)]);
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn a_search_that_is_called_off_stops_among_pdfs_too() {
+    let dir = scratch("pdfs-stopped");
+    let texts = dir.join("text");
+    let shelf: Vec<Shelved> = "abcdef"
+      .chars()
+      .map(|letter| Shelved { id: letter.to_string(), epub: None, pdf: Some(keep_text(&texts, letter, &["A lighthouse.", "A lighthouse.", "A lighthouse."])) })
+      .collect();
+    // Called off while the second book is being told of.
+    let stopped = std::cell::Cell::new(false);
+    let summary = search_library(&shelf, &needle("lighthouse"), &|| stopped.get(), |progress| stopped.set(progress.done == 2));
+    assert_eq!((summary.searched, summary.books.len(), summary.stopped), (2, 2, true));
+    assert!(summary.unread.is_empty());
+
+    // Called off between the pages of a book: what it had found is not reported.
+    let asked = std::cell::Cell::new(0);
+    let summary = search_library(
+      &shelf,
+      &needle("lighthouse"),
+      &|| {
+        asked.set(asked.get() + 1);
+        asked.get() > 2
+      },
+      |_| panic!("nothing was finished")
+    );
+    assert_eq!((summary.searched, summary.books.len(), summary.stopped), (0, 0, true));
+    // And a page's own search stops where it is asked to.
+    let pages: Vec<String> = (0..10).map(|_| "A lighthouse.".to_string()).collect();
+    let asked = std::cell::Cell::new(0);
+    let found = search_pages(&pages, &needle("lighthouse"), &|| {
+      asked.set(asked.get() + 1);
+      asked.get() > 4
+    });
+    assert_eq!(found.count, 4);
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn a_pdf_is_known_by_its_files_name() {
+    assert!(is_pdf(Path::new("/books/abc.pdf")));
+    assert!(is_pdf(Path::new("C:\\Books\\ABC.PDF")));
+    for other in ["/books/abc.epub", "/books/abc.cbz", "/books/pdf", "/books/abc.pdf.part", ""] {
+      assert!(!is_pdf(Path::new(other)), "{other}");
+    }
+  }
+
+  /// What searching the text kept of PDFs costs, for a person to read: text
+  /// made up here, in the sizes of real books. Prints numbers only.
+  ///
+  /// ```text
+  /// cargo test --lib pdf_search_cost -- --ignored --nocapture
+  /// ```
+  #[test]
+  #[ignore = "times a search of made-up text; run by hand with --ignored --nocapture"]
+  fn pdf_search_cost_over_kept_text() {
+    use std::time::Instant;
+    let dir = scratch("pdf-cost");
+    let texts = dir.join("text");
+    let line = |page: usize, at: usize| format!("Page {page} line {at} of the long book, where the windmill stood.\n");
+    // (pages, lines a page): the test PDF `long.pdf`, a long novel, a reference book.
+    for (letter, pages, lines) in [('a', 600, 29), ('b', 1500, 45), ('c', 5000, 45)] {
+      let book: Vec<String> = (1..=pages).map(|page| (1..=lines).map(|at| line(page, at)).collect()).collect();
+      let chars: usize = book.iter().map(|page| page.chars().count()).sum();
+      let started = Instant::now();
+      pdf_text::save_in(&texts, &hash_of(letter), &book).expect("save");
+      let saving = started.elapsed().as_secs_f64() * 1000.0;
+      let path = pdf_text::file_in(&texts, &hash_of(letter)).expect("a hash");
+      let on_disk = std::fs::metadata(&path).expect("there").len();
+      let started = Instant::now();
+      let kept = pdf_text::load_from(&path).expect("kept");
+      let loading = started.elapsed().as_secs_f64() * 1000.0;
+      println!("{pages} pages, {chars} characters, {} KB on disk: saving {saving:.1} ms, reading back {loading:.1} ms", on_disk / 1024);
+      let shelf = [Shelved { id: letter.to_string(), epub: None, pdf: Some(path) }];
+      for query in ["windmill", "the long", "zzqqzz", "page 77 line"] {
+        let started = Instant::now();
+        let found = search_pages(&kept, &needle(query), &|| false);
+        let looking = started.elapsed().as_secs_f64() * 1000.0;
+        let started = Instant::now();
+        let summary = search_library(&shelf, &needle(query), &|| false, |_| {});
+        println!(
+          "  {:>14}: {} matches; looking {looking:.1} ms, the whole search of the book (read back and look) {:.1} ms",
+          format!("{query:?}"),
+          found.count,
+          started.elapsed().as_secs_f64() * 1000.0
+        );
+        assert_eq!(summary.searched, 1);
+      }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
   /// What a search of a real library costs, for a person to read: the test
   /// copies under `apps/node_modules/.leaflet-test/library`. Prints numbers
   /// only, never a title or a word of a book. Silent where the folder is absent.
@@ -923,7 +1218,7 @@ mod tests {
     let shelf: Vec<Shelved> = files
       .iter()
       .enumerate()
-      .map(|(at, path)| Shelved { id: at.to_string(), epub: epub_of(path, None) })
+      .map(|(at, path)| Shelved { id: at.to_string(), epub: epub_of(path, None), pdf: None })
       .collect();
     let bytes: u64 = shelf.iter().filter_map(|book| book.epub.as_ref()).filter_map(|path| std::fs::metadata(path).ok()).map(|meta| meta.len()).sum();
     println!("{} files, {} of them EPUBs, {:.1} MB of EPUB", shelf.len(), shelf.iter().filter(|book| book.epub.is_some()).count(), bytes as f64 / 1_048_576.0);

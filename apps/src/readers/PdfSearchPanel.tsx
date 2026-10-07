@@ -13,6 +13,8 @@ type PdfSearchPanelProps = {
   active: PdfSearchHit | null;
   /** Bumped when Ctrl+F is pressed with the panel already open: back to the field. */
   focusToken: number;
+  /** The words the panel opens on: the PDF was opened at a match of the library's search (readers/pdfFindPlace.ts). */
+  initialQuery?: string;
   /** The phrase now being searched for ("" when there is none), so the page can mark it. */
   onQuery: (query: string) => void;
   onOpen: (hit: PdfSearchHit) => void;
@@ -41,11 +43,12 @@ export const PdfSearchPanel = ({
   textOf,
   active,
   focusToken,
+  initialQuery = "",
   onQuery,
   onOpen,
   onClose
 }: PdfSearchPanelProps) => {
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const [found, setFound] = useState<PdfSearchState | null>(null);
   // The page the search on show began at.
   const [began, setBegan] = useState(1);

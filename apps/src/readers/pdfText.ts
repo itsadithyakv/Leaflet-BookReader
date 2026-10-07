@@ -139,6 +139,15 @@ export const hasSearchableText = (text: string) => /[\p{L}\p{N}]/u.test(text);
 const escapeForPattern = (char: string) => char.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
+ * One character of the phrase, as the pattern looks for it. A typed
+ * apostrophe or quotation mark finds a curly one, and the other way round, as
+ * the library's search does (src-tauri/src/search.rs): it opens a PDF here on
+ * the words it found (readers/pdfFindPlace.ts), and they have to be found again.
+ */
+const charPattern = (char: string) =>
+  /['‘’‚‛ʼ]/.test(char) ? "['‘’‚‛ʼ]" : /["“”„‟]/.test(char) ? '["“”„‟]' : escapeForPattern(char);
+
+/**
  * Letters without their accents, for comparing: "café" as "cafe", "Zürich"
  * as "Zurich". One character for one, so a place in the folded text is the
  * same place in the text itself; a letter that does not come apart into a
@@ -167,9 +176,9 @@ export const searchPattern = (query: string): RegExp | null => {
       Array.from(word)
         .map((char, index, chars) =>
           index === chars.length - 1
-            ? escapeForPattern(char)
+            ? charPattern(char)
             : // A hyphen typed may itself be where the line ended ("harness-" / "room").
-              escapeForPattern(char) + (char === "-" ? "\\n?" : "(?:-\\n)?")
+              charPattern(char) + (char === "-" ? "\\n?" : "(?:-\\n)?")
         )
         .join("")
     )

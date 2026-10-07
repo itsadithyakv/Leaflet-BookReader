@@ -94,6 +94,14 @@ describe("finding a phrase", () => {
     expect(findMatches(text, "resume")).toEqual([{ start: 4, end: 10 }]);
   });
 
+  it("finds an apostrophe or a quotation mark straight or curly, whichever was typed", () => {
+    const said = "“Don’t,” she said. \"Don't.\" DON‘T";
+    const found = (query: string) => findMatches(said, query).map((match) => said.slice(match.start, match.end));
+    expect(found("don't")).toEqual(["Don’t", "Don't", "DON‘T"]);
+    expect(found("don’t")).toEqual(["Don’t", "Don't", "DON‘T"]);
+    expect(found('"don\'t')).toEqual(["“Don’t", "\"Don't"]);
+  });
+
   it("treats what is typed as words, not as a pattern", () => {
     expect(findMatches("cost (a+b)* is $5.00", "(a+b)*")).toEqual([{ start: 5, end: 11 }]);
     expect(findMatches("a.c abc", "a.c")).toEqual([{ start: 0, end: 3 }]);

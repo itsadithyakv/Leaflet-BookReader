@@ -92,8 +92,16 @@ export type PdfExtras = {
    * its sizes of type, its first and last lines and, near the front, its
    * links. The page's text is read for it and let go, not kept, so reading a
    * whole book this way does not push the pages being read out of the cache.
+   * `textTo` is handed the page's text on the way (as `plainText` gives it),
+   * so the same reading can keep it for the library's search
+   * (readers/pdfTextCache.ts).
    */
-  chapterFacts(page: number): Promise<PageFacts>;
+  chapterFacts(page: number, textTo?: (text: string) => void): Promise<PageFacts>;
+  /**
+   * A page's text as the search goes through it (`pageText`'s `joined.text`),
+   * read and let go, not kept: for reading a whole document's text once.
+   */
+  plainText(page: number): Promise<string>;
   /**
    * A page's links (readers/pdfLinks.ts), each with where it is on the page
    * and where it goes; empty for a page with none, or whose annotations
@@ -557,23 +565,39 @@ export const createPdfPageSource = async (bookId: string): Promise<PageSource> =
       }
     },
     pageText: readText,
-    async chapterFacts(pageNumber) {
+    async chapterFacts(pageNumber, textTo) {
       // A printed contents page is at the front: links are read only there.
       const linked = pageNumber <= CONTENTS_WITHIN ? await readLinks(pageNumber) : [];
       const kept = texts.get(pageNumber);
       if (kept) {
         const text = await kept;
+        textTo?.(text.joined.text);
         return digestPage(pageNumber, { items: text.joined.items, transform: text.transform, width: text.width, height: text.height }, linked);
       }
       const page = await document.getPage(pageNumber);
       try {
         const read = await page.getTextContent();
         const viewport = page.getViewport({ scale: 1 });
+        // The text as the reader's search has it, drop caps mended: only when it is asked for.
+        textTo?.(joinTextItems(mendDropCaps(read.items as Array<Partial<TextItem>>)).text);
         return digestPage(
           pageNumber,
           { items: read.items as Array<Partial<TextItem>>, transform: viewport.transform, width: viewport.width, height: viewport.height },
           linked
         );
+      } finally {
+        page.cleanup();
+      }
+    },
+    async plainText(pageNumber) {
+      const kept = texts.get(pageNumber);
+      if (kept) {
+        return (await kept).joined.text;
+      }
+      const page = await document.getPage(pageNumber);
+      try {
+        const read = await page.getTextContent();
+        return joinTextItems(mendDropCaps(read.items as Array<Partial<TextItem>>)).text;
       } finally {
         page.cleanup();
       }

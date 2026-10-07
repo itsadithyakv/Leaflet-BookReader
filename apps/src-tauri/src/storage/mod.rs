@@ -43,6 +43,12 @@ fn is_kindle(ext: &str) -> bool {
   matches!(ext, "mobi" | "azw" | "azw3" | "azw4" | "prc")
 }
 
+/// Whether this is a Kindle book Leaflet reads without Calibre
+/// (`convert/mobi.rs`): the older kind, not locked. Its header says.
+pub fn reads_kindle_itself(source: &Path) -> bool {
+  is_kindle(&normalized_ext(source)) && crate::convert::mobi::can_read(source).is_ok()
+}
+
 /// Where the library lives, set once at startup from Tauri's path resolver.
 static APP_DATA_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
@@ -795,8 +801,39 @@ pub fn ensure_epub_version(
     if format.delivery == Delivery::Builtin {
       return convert_builtin_to(source, &target);
     }
+    // A Kindle book is tried here first. What this does not read (the newer
+    // format, an old compression) is Calibre's as before; one locked to an
+    // account is nobody's, and says so without asking for Calibre.
+    if is_kindle(&ext) && !target.exists() {
+      match convert_kindle_to(source, &target) {
+        Ok(path) => return Ok(path),
+        Err(crate::convert::mobi::NotRead::Locked) => return Err(ConversionError::Failed(DRM_MESSAGE.to_string())),
+        Err(_) => {}
+      }
+    }
     convert_to(source, &target, app)
   })
+}
+
+/// A Kindle book made into an EPUB in the conversion cache by Leaflet itself,
+/// written to one side and renamed, like every conversion.
+fn convert_kindle_to(source: &Path, target: &Path) -> std::result::Result<PathBuf, crate::convert::mobi::NotRead> {
+  use crate::convert::mobi::NotRead;
+  if let Some(parent) = target.parent() {
+    let _ = fs::create_dir_all(parent);
+  }
+  let fallback_title = source.file_stem().and_then(|value| value.to_str()).unwrap_or("Untitled");
+  let staging = target.with_extension("epub.part");
+  let _ = fs::remove_file(&staging);
+  if let Err(error) = crate::convert::mobi::to_epub(source, &staging, fallback_title) {
+    let _ = fs::remove_file(&staging);
+    return Err(error);
+  }
+  if let Err(error) = fs::rename(&staging, target) {
+    let _ = fs::remove_file(&staging);
+    return Err(NotRead::Damaged(format!("Could not save the converted book: {error}")));
+  }
+  Ok(target.to_path_buf())
 }
 
 /// In-process conversion. Same caching and same write-then-rename discipline as
@@ -1053,6 +1090,8 @@ pub fn remove_book_extras(hash: &str, book_path: &Path) {
       let _ = fs::remove_file(converted);
     }
   }
+  // The text kept of a PDF for the library's search.
+  crate::pdf_text::remove(hash);
 }
 
 /// The cover inside the book, saved as its cover: an EPUB's, a Kindle

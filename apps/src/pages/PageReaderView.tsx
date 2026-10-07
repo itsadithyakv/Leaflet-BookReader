@@ -64,7 +64,10 @@ import { PdfLinkAreas, bindLinkPointer } from "../readers/PdfLinkAreas";
 import type { PageLink } from "../readers/pdfLinks";
 import { PdfSearchPanel } from "../readers/PdfSearchPanel";
 import type { PdfSearchHit } from "../readers/pdfSearch";
-import { currentMark, pageMarks, type MeasureText, type PageRect } from "../readers/pdfText";
+import { currentMark, findMatches, pageMarks, snippetAt, type MeasureText, type PageRect } from "../readers/pdfText";
+import { decodePdfFindPlace, matchToShow } from "../readers/pdfFindPlace";
+import { collectPdfText, fitToKeep } from "../readers/pdfTextCache";
+import { librarySearchService } from "../services/librarySearchService";
 import { bindTextSelection } from "../readers/pdfTextLayer";
 import { AnnotationsPanel } from "../readers/AnnotationsPanel";
 import { decodePlace, pagePlace } from "../readers/pdfHighlights";
@@ -329,6 +332,8 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchFocusToken, setSearchFocusToken] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
+  /** The words the search panel opens on, when the book was opened at a match of the library's search. */
+  const [searchSeed, setSearchSeed] = useState("");
   const [activeHit, setActiveHit] = useState<PdfSearchHit | null>(null);
   const [marks, setMarks] = useState<PageMarks>(NO_MARKS);
   /** The highlight the list of notes opens on ("All notes" from its card). */
@@ -587,15 +592,39 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
     [goToPage, noteJumpFromHere]
   );
 
-  // Opened at a highlight: its page is gone to as a jump, so Back returns to where the reading stopped.
+  // Opened at a highlight, or at a match of the library's search: its page is
+  // gone to as a jump, so Back returns to where the reading stopped.
   const openedAtRef = useRef<string | null>(null);
   useEffect(() => {
-    const page = decodePlace(openAt)?.page;
+    const sought = decodePdfFindPlace(openAt);
+    const page = sought?.page ?? decodePlace(openAt)?.page;
     if (!page || !pdf || loading || pageCount <= 0 || openedAtRef.current === openAt) {
       return;
     }
     openedAtRef.current = openAt;
-    jumpToPage(Math.min(pageCount, page));
+    const target = Math.min(pageCount, page);
+    jumpToPage(target);
+    if (!sought) {
+      return;
+    }
+    // A match of the library's search (readers/pdfFindPlace.ts): the reader's
+    // own search opens on the same words, which marks them on the page, and
+    // the match picked is the one on show. Where the words are not on the
+    // page any more, the reader is on the page and that is all.
+    setSearchSeed(sought.query);
+    setSearchQuery(sought.query);
+    setSearchOpen(true);
+    void pdf.pageText(target).then(
+      (text) => {
+        const matches = findMatches(text.joined.text, sought.query);
+        const nth = matchToShow(matches.length, sought.nth);
+        if (nth !== null && openedAtRef.current === openAt) {
+          shownHitRef.current = null;
+          setActiveHit({ page: target, nth, snippet: snippetAt(text.joined.text, matches[nth]) });
+        }
+      },
+      () => undefined
+    );
   }, [jumpToPage, loading, openAt, pageCount, pdf]);
 
   const goBack = useCallback(() => {
@@ -827,6 +856,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
   const closeSearch = useCallback(() => {
     setSearchOpen(false);
     setSearchQuery("");
+    setSearchSeed("");
     setActiveHit(null);
   }, []);
 
@@ -961,14 +991,22 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
       if (!found) {
         setChapters("looking");
         await new Promise((resolve) => window.setTimeout(resolve, CHAPTERS_AFTER_MS));
+        // This reads every page's text, which the library's search wants kept
+        // (readers/pdfTextCache.ts): it is gathered on the way, unless it is
+        // kept already, and kept only if the reading reaches the last page.
+        const texts = (await librarySearchService.hasPdfText(book.id).catch(() => true)) ? null : collectPdfText(pageCount);
         found = await readChapters({
           pageCount,
-          factsOf: (page) => pdf.chapterFacts(page),
+          factsOf: (page) => pdf.chapterFacts(page, texts ? (text) => texts.put(page, text) : undefined),
           stillWanted: () => wanted,
           breathe: () => new Promise((resolve) => window.setTimeout(resolve, 0))
         });
         if (!found || !wanted) {
           return;
+        }
+        const whole = texts?.whole();
+        if (whole) {
+          void librarySearchService.savePdfText(book.id, fitToKeep(whole)).catch(() => undefined);
         }
         try {
           localStorage.setItem(key, packChapters(found, pageCount));
@@ -2173,6 +2211,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
           textOf={(page) => pdf.pageText(page).then((text) => text.joined.text)}
           active={activeHit}
           focusToken={searchFocusToken}
+          initialQuery={searchSeed}
           onQuery={setSearchQuery}
           onOpen={openHit}
           onClose={closeSearch}

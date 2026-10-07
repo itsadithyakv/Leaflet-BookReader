@@ -5,13 +5,19 @@ import { librarySearchService, type BookMatches, type LibraryMatch } from "../..
 import { useLibraryStore } from "../../store/libraryStore";
 import { UiIcon } from "../UiIcon";
 import { EYEBROW } from "../ui/SectionHeader";
-import { MAX_QUERY, listResults, matchCount, matchPlace, searchable, statusLine, withBook, type BookResult, type SearchState } from "./librarySearch";
+import {
+  MAX_QUERY, listResults, matchCount, matchPlace, notSearchedTitle, pageLabel, readUnread, searchable, statusLine, withBook,
+  type BookResult, type SearchState
+} from "./librarySearch";
 import { closeLibrarySearch, useLibrarySearchStore } from "./librarySearchStore";
+import { readPdfBook } from "./readPdfBook";
 
 /** Typing waits this long before a search starts; the search before it is stopped. */
 const DEBOUNCE_MS = 300;
 /** The list is drawn again this often while books arrive, not once a book: a large library has hundreds. */
 const REDRAW_MS = 120;
+/** PDFs that could not be read since the app started (locked, damaged): not tried again at every search. */
+const unreadablePdfs = new Set<string>();
 
 const iconButton =
   "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary";
@@ -38,13 +44,18 @@ const BookMatchesEntry = ({ result, onOpen }: { result: BookResult; onOpen: (boo
       </div>
       <ul className="mt-1 space-y-0.5">
         {matches.map((match, at) => (
-          <li key={`${match.href}-${match.nth}-${at}`}>
+          <li key={`${match.href}-${match.page ?? ""}-${match.nth}-${at}`}>
             <button
               type="button"
               className="w-full rounded-lg px-3 py-2 text-left text-sm leading-relaxed text-on-surface-variant transition-colors hover:bg-surface-container-high focus-visible:bg-surface-container-high focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
               onClick={() => onOpen(book, match)}
-              aria-label={`Open ${book.title} at: ${match.before}${match.text}${match.after}`}
+              aria-label={`Open ${book.title} at${pageLabel(match) ? ` ${pageLabel(match)}` : ""}: ${match.before}${match.text}${match.after}`}
             >
+              {pageLabel(match) && (
+                <span className="mr-2 text-xs font-semibold tabular-nums text-on-surface-variant" title="The page of the PDF, counted from its first">
+                  {pageLabel(match)}
+                </span>
+              )}
               {match.before}
               <mark className="rounded-sm bg-primary/25 px-0.5 font-semibold text-on-surface">{match.text}</mark>
               {match.after}
@@ -112,6 +123,8 @@ export const LibrarySearchDialog = ({ onOpenInBook }: LibrarySearchDialogProps) 
     setState({ kind: "searching", done: 0, total: 0 });
     let stale = false;
     let started = false;
+    // The library has answered; and, once the PDFs it had no text for have been read too, the search is finished.
+    let answered = false;
     let finished = false;
     // What has arrived since the list was last drawn.
     let arrived: BookMatches[] = [];
@@ -132,7 +145,7 @@ export const LibrarySearchDialog = ({ onOpenInBook }: LibrarySearchDialogProps) 
       librarySearchService
         .search(words, (told) => {
           // (A book told of after the answer itself has nothing to add to it.)
-          if (stale || finished) {
+          if (stale || answered) {
             return;
           }
           progress = { done: told.done, total: told.total };
@@ -141,26 +154,60 @@ export const LibrarySearchDialog = ({ onOpenInBook }: LibrarySearchDialogProps) 
           }
           redraw ??= window.setTimeout(draw, REDRAW_MS);
         })
-        .then((summary) => {
+        .then(async (summary) => {
           if (stale) {
             return;
           }
-          finished = true;
+          answered = true;
           if (redraw !== null) {
             window.clearTimeout(redraw);
           }
           // Stopped by something other than this dialog's next search: only part of an answer.
           if (summary.stopped) {
+            finished = true;
             setState({ kind: "failed" });
             return;
           }
           setFound(summary.books);
-          setState({ kind: "done", skipped: summary.skipped });
+          let { skipped, noText } = summary;
+          if (summary.unread.length > 0) {
+            // PDFs never read before: each is read here, kept, and searched. The line is
+            // written again only when what it says, or the bar under it, has changed.
+            let shown = "";
+            const rest = await readUnread(summary.unread, {
+              read: (bookId, onPage) => readPdfBook(bookId, () => !stale, onPage),
+              save: (bookId, pages) => librarySearchService.savePdfText(bookId, pages),
+              search: (bookId) => librarySearchService.search(words, () => undefined, [bookId]),
+              stillWanted: () => !stale,
+              unreadable: unreadablePdfs,
+              onProgress: (left, fraction) => {
+                const now = `${left}:${Math.round(fraction * 100)}`;
+                if (now !== shown) {
+                  shown = now;
+                  setState({ kind: "reading", left, fraction });
+                }
+              },
+              onBook: (book) => setFound((was) => withBook(was, book))
+            });
+            if (stale || !rest) {
+              return;
+            }
+            if (rest.stopped) {
+              finished = true;
+              setState({ kind: "failed" });
+              return;
+            }
+            skipped += rest.skipped;
+            noText += rest.noText;
+          }
+          finished = true;
+          setState({ kind: "done", skipped, noText });
         })
         .catch(() => {
           if (stale) {
             return;
           }
+          answered = true;
           finished = true;
           if (redraw !== null) {
             window.clearTimeout(redraw);
@@ -194,8 +241,11 @@ export const LibrarySearchDialog = ({ onOpenInBook }: LibrarySearchDialogProps) 
     closeLibrarySearch();
     onOpenInBook(book, matchPlace(match, words));
   };
-  const searching = state.kind === "searching";
+  // How far along the bar under the line is: through the books, then through the PDFs being read. Null when nothing is going on.
+  const along =
+    state.kind === "searching" ? (state.total > 0 ? state.done / state.total : 0) : state.kind === "reading" ? state.fraction : null;
   const skipped = state.kind === "done" ? state.skipped : 0;
+  const noText = state.kind === "done" ? state.noText : 0;
 
   return (
     <div
@@ -241,24 +291,22 @@ export const LibrarySearchDialog = ({ onOpenInBook }: LibrarySearchDialogProps) 
         </div>
 
         <div className="mt-3 flex items-center justify-between gap-3 text-xs text-on-surface-variant">
-          <span role="status" aria-live="polite">
+          <span
+            role="status"
+            aria-live="polite"
+            title={state.kind === "reading" ? "A PDF's text is read once and kept. The next search does not wait for it." : undefined}
+          >
             {statusLine(state, results)}
           </span>
           {skipped > 0 && (
-            <span
-              className="shrink-0 tabular-nums"
-              title="PDFs and comics have no text to search. A Kindle book or a text file is searched once it has been opened, and a book not on this device once it is downloaded."
-            >
+            <span className="shrink-0 tabular-nums" title={notSearchedTitle(noText)}>
               {skipped.toLocaleString()} not searched
             </span>
           )}
         </div>
         <div className="mt-2 h-0.5 overflow-hidden rounded-full bg-surface-container-high" aria-hidden="true">
-          {searching && (
-            <div
-              className="h-full bg-primary/70 transition-[width] duration-200"
-              style={{ width: `${state.total > 0 ? Math.round((state.done / state.total) * 100) : 0}%` }}
-            />
+          {along !== null && (
+            <div className="h-full bg-primary/70 transition-[width] duration-200" style={{ width: `${Math.round(along * 100)}%` }} />
           )}
         </div>
 
