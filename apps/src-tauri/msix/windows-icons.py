@@ -1,7 +1,7 @@
-"""Renders Leaflet's Windows icons: Pip with a book, on nothing, drawn afresh
-at every size Windows asks for.
+"""Renders Leaflet's Windows icons: Pip's face, on nothing, drawn afresh at
+every size Windows asks for.
 
-    node apps/scripts/pip-logo.mjs                  (draws the logo itself)
+    node apps/scripts/pip-logo.mjs                  (draws the two faces)
     python apps/src-tauri/msix/windows-icons.py
 
 Needs Pillow. Writes into src-tauri/icons:
@@ -15,17 +15,20 @@ Needs Pillow. Writes into src-tauri/icons:
 - 32x32.png, 128x128.png, 128x128@2x.png, icon.png: the rest of Tauri's set.
 and into brand/store-logos: the 300, 150 and 71 px logos the Store listing asks for.
 
-There is no tile behind Pip. The icon used to be Pip standing on a cream
-rounded square, which on the taskbar read as a small figure in a box and gave
-a fifth of the icon to the box. The logo has a thin light edge of its own, so
-it sits on a dark taskbar and a light one alike, and it fills the icon.
+The icon is Pip's face and nothing else. It was Pip standing on a cream tile
+(a small figure in a box), then Pip sitting with a book on nothing (a figure
+24 by 31 in a square: narrow, a third of it leaf, the book a few pixels of
+noise on a taskbar). A face is as wide and as tall as the square, and two
+eyes and a leaf are what is left of any icon at 24 pixels.
 
-Why not scale one image: Pip is 32-pixel art. Stretched 1.5x to the 48 px icon
-Start uses at 150% scaling, some of its pixels became one screen pixel and some
-two, so the eyes and outline went ragged. Here each size puts Pip at a
-whole-number scale where one nearly fills the icon, so every pixel of Pip stays
-square. Where none does, Pip is scaled by exact area averaging: soft at the
-seams, never lopsided.
+Why not scale one image: Pip is pixel art. Stretched by anything but a whole
+number, some of her pixels become one screen pixel and some two, and the eyes
+and outline go ragged. So there are two drawings of the face, 16 and 18
+pixels square (pip-logo.mjs says why those), and each size uses whichever
+fills more of it at a whole-number scale: 16 px is the smaller as it is, 32
+and 48 the smaller doubled and tripled, 36 the larger doubled. Where neither
+comes to four fifths of the icon (24 and 30 px), the smaller is scaled to the
+whole icon by exact area averaging: soft at the seams, never lopsided.
 """
 
 from pathlib import Path
@@ -35,28 +38,25 @@ from PIL import Image
 apps = Path(__file__).resolve().parents[2]
 icons = apps / "src-tauri" / "icons"
 store = apps.parent / "brand" / "store-logos"
-sprite = Image.open(apps / "src" / "assets" / "pip" / "pip-32.png").convert("RGBA")
-pip = sprite.crop(sprite.getbbox())  # 24 x 31, with its light edge
+# The two drawings of the face, each a square with no margin, smaller first.
+faces = [Image.open(apps / "src" / "assets" / "pip" / f"pip-face-{side}.png").convert("RGBA") for side in (16, 18)]
 
-# How much of the icon's height Pip takes when no whole-number scale suits.
-FILL = 0.94
-# A whole-number scale is used when it puts Pip within this share of the
-# icon's height: a crisp Pip a little smaller reads better than a softened one
-# that fills it.
-CRISP_SHARE = (0.75, 1.0)
+# A whole-number scale is used when it fills at least this share of the icon:
+# a crisp face a little smaller reads better than a softened one that fills it.
+CRISP_FROM = 0.8
 SUPERSAMPLE = 8
 
 
 def pip_at(size: int) -> Image.Image:
-    """Pip sized for an icon `size` pixels tall: crisp when it can be."""
-    crisp = [k for k in range(1, 64) if CRISP_SHARE[0] <= k * pip.height / size <= CRISP_SHARE[1]]
-    if crisp:
-        k = max(crisp)
-        return pip.resize((pip.width * k, pip.height * k), Image.NEAREST)
-    height = FILL * size
-    width = height * pip.width / pip.height
-    big = pip.resize((pip.width * SUPERSAMPLE, pip.height * SUPERSAMPLE), Image.NEAREST)
-    return big.resize((max(1, round(width)), max(1, round(height))), Image.BOX)
+    """The face sized for an icon `size` pixels square: crisp when it can be."""
+    # Whichever comes out larger; the larger drawing when they come out the same.
+    across, face = max((((size // face.width) * face.width, face) for face in faces), key=lambda pair: (pair[0], pair[1].width))
+    if across >= CRISP_FROM * size:
+        return face.resize((across, across), Image.NEAREST)
+    # The smaller drawing: the same eyes on a smaller head, so more face.
+    face = faces[0]
+    big = face.resize((face.width * SUPERSAMPLE, face.height * SUPERSAMPLE), Image.NEAREST)
+    return big.resize((size, size), Image.BOX)
 
 
 def icon(width: int, height: int | None = None) -> Image.Image:
@@ -74,8 +74,8 @@ def save(image: Image.Image, name: str, folder: Path = icons) -> None:
 # Every target size Windows picks from, at every display scale.
 for size in (16, 20, 24, 30, 32, 36, 40, 44, 48, 60, 64, 72, 80, 96, 256):
     image = icon(size)
-    # The logo carries its own light edge, so plated and unplated (dark or
-    # light taskbar) are the same picture.
+    # The face is bright enough for a dark taskbar and outlined for a light
+    # one, so plated and unplated are the same picture.
     for suffix in ("", "_altform-unplated", "_altform-lightunplated"):
         save(image, f"Square44x44Logo.targetsize-{size}{suffix}.png")
 

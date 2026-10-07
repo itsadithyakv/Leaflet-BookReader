@@ -9,8 +9,8 @@ is in [deploy.md](deploy.md) (the checklist) and
 
 **2026-10-07: 1.2 is released (the owner built and shipped it from
 `release/1.2` at `8553264`). Work is now on the branch `release/1.3`, version
-1.3.0, made off that commit. It is committed there (13 commits, to
-`e79cad2`) and not pushed. What it holds:**
+1.3.0, made off that commit. It is committed there and not pushed. What it
+holds:**
 
 - **Dotty comes back** (features.md, "Smart Read"). With Dotty below the
   page, Space reads from what is on screen; a drag held at the window's top
@@ -49,6 +49,14 @@ is in [deploy.md](deploy.md) (the checklist) and
   in the startup script (about 150 kB before minifying).
   `apps/node_modules/.leaflet-test/chunks.mjs` prints what each chunk is
   made of.
+- **The app icon is Pip's face** (the owner: "really small and
+  indistinguishable" on the taskbar). The logo (Pip with a book) is kept for
+  everything else; the Windows icons, the `.ico`, the Store logos in
+  `brand/store-logos` and the favicon are the face, from two drawings
+  (`pip-face-16.png`, `pip-face-18.png`; `apps/src/assets/pip/README.md`).
+  Looked at as pictures at every size on a dark and a light bar, not on a
+  real taskbar: that needs a build. Uploading the new Store logos to Partner
+  Center is the owner's. macOS, iOS and Android icons are untouched.
 - 2,231 app tests (120 new), 556 Rust tests (7 new), `tsc` clean, `vite
   build` succeeds. The version is 1.3.0 in the five places deploy.md names.
 - **Asked for and not built: read aloud.** The voices Windows gives an app

@@ -8,14 +8,22 @@
 //   pip.svg                       the same as vectors
 //   pip-tile-40.png ... -1280.png the logo on the cream tile, for places that
 //   pip-tile.svg                  need a square badge with a background
-// and apps/public/favicon.png. The Windows icons are made from pip-32.png by
-// src-tauri/msix/windows-icons.py: run that afterwards.
+//   pip-face-16.png, -18.png      the app icon: Pip's face alone, drawn twice
+//   pip-face-512.png, pip-face.svg  the same, large and as vectors
+// and apps/public/favicon.png (the face). The Windows icons are made from the
+// two faces by src-tauri/msix/windows-icons.py: run that afterwards.
 //
 // The logo used to be Pip standing, the same sprite the app shows idle, on a
 // cream tile. On the taskbar that read as a small figure in a box. This one is
 // a pose of its own that says what the app is for (the book), fills the frame,
 // and has no background: the light edge lets it sit on a dark taskbar and a
 // light one alike. No dependencies: the PNGs are encoded here.
+//
+// The app icon is not the logo. On the taskbar the logo was a 24 by 31 figure
+// in a square: narrow, a third of it leaf, and its book, hands and feet a few
+// pixels of noise. The icon is Pip's face and nothing else, as wide and as
+// tall as the square, the leaf growing from behind it into the corner the
+// head leaves empty.
 import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
@@ -32,7 +40,7 @@ globalThis.ImageData = class {
 const here = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(here, "..");
 const pipRoot = pathToFileURL(path.join(appRoot, "src", "pip") + path.sep).href;
-const { renderFrame, drawPip } = await import(pipRoot + "engine.js");
+const { renderFrame, drawPip, drawLeafOnly } = await import(pipRoot + "engine.js");
 const { prop } = await import(pipRoot + "anims.js");
 const { SKINS, resolve } = await import(pipRoot + "skins.js");
 
@@ -63,6 +71,57 @@ const logo = {
 
 const sprout = SKINS.find((skin) => skin.id === "sprout") ?? SKINS[0];
 const frame = renderFrame(logo, 0, resolve(sprout, 0), { rim: EDGE });
+
+// ---- the app icon -----------------------------------------------------------------
+
+// A lighter leaf than Pip wears in the app: with no light edge round the icon,
+// her own dark green was lost on a dark taskbar.
+const FACE_LEAF = { leafColor: "#5FCB6B", leafShade: "#2F9E57" };
+
+/**
+ * Pip's face: her head `w` by `h` (half sizes, as the engine takes them), no
+ * hands, feet or belly, and a leaf whose stem starts `dx`, `dy` from the top of
+ * her head, behind it, at `angle` degrees and `length` times its usual size.
+ */
+const face = ({ w, h, leaf: [dx, dy, angle, length] }) => ({
+  loop: 1,
+  draw: (g) => {
+    drawPip(g, {
+      x: 16,
+      y: 26,
+      w,
+      h,
+      feet: false,
+      hands: false,
+      leaf: "none",
+      colors: { belly: null },
+      mouth: "smile",
+      behind: (g, A) => drawLeafOnly(g, { x: A.cx + dx, y: A.top.y + dy + 0.8, w: 1, h: 1, la: angle, ll: length, ...FACE_LEAF })
+    });
+  }
+});
+
+// Two drawings, 18 and 16 pixels square, because Pip is pixel art and only a
+// whole-number scale keeps her pixels square: 18 is exact at 36 px (a taskbar
+// at 150%) and 72, 16 at 16, 32, 48 and 64. The smaller has a smaller head,
+// not a shrunk one: her eyes, cheeks and mouth are the same pixels in both.
+const FACES = {
+  18: face({ w: 8, h: 6.5, leaf: [2, 2.2, 62, 0.85] }),
+  16: face({ w: 7, h: 5.5, leaf: [1.5, 2.2, 60, 0.8] })
+};
+
+/** A face cut to its square. Fails if the engine no longer draws it that size. */
+const faceArt = (side) => {
+  const drawn = renderFrame(FACES[side], 0, resolve(sprout, 0)).data;
+  let left = N, top = N, right = -1, bottom = -1;
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (drawn[(y * N + x) * 4 + 3]) { left = Math.min(left, x); right = Math.max(right, x); top = Math.min(top, y); bottom = Math.max(bottom, y); }
+  if (right - left + 1 !== side || bottom - top + 1 !== side) {
+    throw new Error(`the ${side}-pixel face came out ${right - left + 1} by ${bottom - top + 1}: adjust FACES`);
+  }
+  const out = new Uint8Array(side * side * 4);
+  for (let y = 0; y < side; y++) out.set(drawn.subarray(((y + top) * N + left) * 4, ((y + top) * N + left + side) * 4), y * side * 4);
+  return out;
+};
 
 // ---- PNG ----------------------------------------------------------------------
 
@@ -205,5 +264,10 @@ for (const scale of [1, 2, 4, 8, 16, 32]) {
   writePng(path.join(assets, `pip-tile-${TILE * scale}.png`), scaled(tile, TILE, scale), TILE * scale, TILE * scale);
 }
 fs.writeFileSync(path.join(assets, "pip-tile.svg"), toSvg(tile, TILE, "Leaflet: Pip with a book, on a tile", 320));
-writePng(path.join(appRoot, "public", "favicon.png"), scaled(sprite, N, 2), N * 2, N * 2);
+for (const side of [16, 18]) {
+  writePng(path.join(assets, `pip-face-${side}.png`), faceArt(side), side, side);
+}
+writePng(path.join(assets, "pip-face-512.png"), scaled(faceArt(16), 16, 32), 512, 512);
+fs.writeFileSync(path.join(assets, "pip-face.svg"), toSvg(faceArt(16), 16, "Leaflet: Pip's face", 512));
+writePng(path.join(appRoot, "public", "favicon.png"), scaled(faceArt(16), 16, 4), 64, 64);
 console.log(`Wrote the logo to ${assets} (art rows ${bounds.top} to ${bounds.bottom} of ${N}).`);
