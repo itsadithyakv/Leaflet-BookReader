@@ -305,6 +305,43 @@ fn only_a_part_of_speech_that_is_all_forms_is_followed() {
   assert_eq!(parse_definitions(&circular, "set", &en()).unwrap().unwrap().form_of, None);
 }
 
+fn link(word: &str) -> String {
+  format!("<a rel=\"mw:WikiLink\" href=\"/wiki/{word}\" title=\"{word}\">{word}</a>")
+}
+
+#[test]
+fn a_definition_that_only_points_at_another_word_names_it() {
+  // As Wiktionary writes them.
+  let state = format!("The state of being {}; an {} of {} or {}.", link("sagacious"), link("acute"), link("perception"), link("discernment"));
+  let leaning = |word: &str, part: Option<&str>| Some(Leaning { word: word.to_string(), part: part.map(str::to_string) });
+  assert_eq!(leans_on(&state, "sagaciousness"), leaning("sagacious", None));
+  let manner = format!("In a {} or {} manner; with {}.", link("happy"), link("cheerful"), link("happiness"));
+  assert_eq!(leans_on(&manner, "happily"), leaning("happy", None));
+  // The link says which "fathom" is meant.
+  let not = format!("{} to <a rel=\"mw:WikiLink\" href=\"/wiki/fathom#Verb\" title=\"fathom\">fathom</a>.", link("impossible"));
+  assert_eq!(leans_on(&not, "unfathomable"), leaning("fathom", Some("Verb")));
+
+  // A definition that says what the word means is left to say it.
+  let realm = format!("A {} having a {} or {} as its actual or nominal {}.", link("realm"), link("king"), link("queen"), link("sovereign"));
+  assert_eq!(leans_on(&realm, "kingdom"), None);
+  // Words it is not made from, a glossary page, a phrase, itself.
+  let insight = format!("{} {} or {}; {}.", link("acute"), link("discernment"), link("understanding"), link("insight"));
+  assert_eq!(leans_on(&insight, "perspicacity"), None);
+  assert_eq!(leans_on("<a href=\"/wiki/Appendix:Glossary\" title=\"Appendix:Glossary\">uncountable</a> Luck.", "luckiness"), None);
+  assert_eq!(leans_on("The <a title=\"lucky break\">lucky break</a>.", "luckiness"), None);
+  assert_eq!(leans_on(&format!("See {}.", link("luck")), "luck"), None);
+  assert_eq!(leans_on("The state of being wise.", "wisdom"), None);
+
+  // In the parsed entries: the first definition decides, and a form is followed to its word instead.
+  let found = parse_definitions(&body(&[("English", "Noun", &[state.as_str(), "Wisdom."])]), "sagaciousness", &en()).unwrap().unwrap();
+  assert_eq!((found.form_of, found.leans_on), (None, leaning("sagacious", None)));
+  let second = parse_definitions(&body(&[("English", "Noun", &["Good sense.", state.as_str()])]), "sagaciousness", &en()).unwrap().unwrap();
+  assert_eq!(second.leans_on, None);
+  let ran = form("run");
+  let form_first = parse_definitions(&body(&[("English", "Verb", &[ran.as_str()])]), "running", &en()).unwrap().unwrap();
+  assert_eq!((form_first.form_of.as_deref(), form_first.leans_on), (Some("run"), None));
+}
+
 #[test]
 fn what_marks_a_form() {
   assert_eq!(form_of(&form("run")).as_deref(), Some("run"));
@@ -403,7 +440,7 @@ fn a_summary_links_to_its_own_wiki_and_is_clipped() {
 // ---- Which side leads ----
 
 fn meaning() -> Meaning {
-  Meaning { word: "w".to_string(), language: "English".to_string(), entries: Vec::new(), url: String::new(), root: None }
+  Meaning { word: "w".to_string(), language: "English".to_string(), entries: Vec::new(), url: String::new(), root: None, base: None }
 }
 
 fn summary(ambiguous: bool) -> Summary {
@@ -477,7 +514,8 @@ fn results_and_errors_are_sent_in_the_shape_the_service_reads() {
       language: "English".to_string(),
       entries: vec![Entry { part_of_speech: "Noun".to_string(), definitions: vec!["plural of house".to_string()] }],
       url: wiktionary_page("houses", "English"),
-      root: Some(Root { word: "house".to_string(), entries: Vec::new(), url: wiktionary_page("house", "English") })
+      root: Some(Root { word: "house".to_string(), entries: Vec::new(), url: wiktionary_page("house", "English") }),
+      base: None
     }),
     summary: None,
     lead: Lead::Meaning,
@@ -493,7 +531,8 @@ fn results_and_errors_are_sent_in_the_shape_the_service_reads() {
         "language": "English",
         "entries": [{ "partOfSpeech": "Noun", "definitions": ["plural of house"] }],
         "url": "https://en.wiktionary.org/wiki/houses#English",
-        "root": { "word": "house", "entries": [], "url": "https://en.wiktionary.org/wiki/house#English" }
+        "root": { "word": "house", "entries": [], "url": "https://en.wiktionary.org/wiki/house#English" },
+        "base": null
       },
       "summary": null,
       "lead": "meaning",

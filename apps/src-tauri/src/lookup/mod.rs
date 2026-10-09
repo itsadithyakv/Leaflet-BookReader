@@ -60,7 +60,11 @@ pub struct Meaning {
   pub language: String,
   pub entries: Vec<Entry>,
   pub url: String,
-  pub root: Option<Root>
+  pub root: Option<Root>,
+  /// The word this one is made from, with its meaning, when this word's own
+  /// definition only points at it: "sagaciousness" is "the state of being
+  /// sagacious", which tells a reader who does not know "sagacious" nothing.
+  pub base: Option<Root>
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -352,7 +356,18 @@ struct RawDefinition {
 struct Definitions {
   language: String,
   entries: Vec<Entry>,
-  form_of: Option<String>
+  form_of: Option<String>,
+  /// The word the first definition leans on (`leans_on`).
+  leans_on: Option<Leaning>
+}
+
+/// A word a definition leans on, and which of its parts of speech is meant
+/// when the link says: "impossible to fathom" links the verb, and "fathom"
+/// is a measure of depth first.
+#[derive(Debug, Clone, PartialEq)]
+struct Leaning {
+  word: String,
+  part: Option<String>
 }
 
 /// The word a definition is a form of, when that is all it says ("plural of
@@ -371,6 +386,65 @@ fn form_of(definition: &str) -> Option<String> {
   (!word.is_empty() && !word.contains(':')).then(|| word.to_string())
 }
 
+/// A definition that leans on another word is a short one: "the state of
+/// being sagacious", "in a happy or cheerful manner", "impossible to fathom".
+/// A longer one ("a realm having a king or queen as its sovereign") says what
+/// the word means by itself.
+const LEANING_WORDS: usize = 7;
+/// How much of the word it is made from a word has to start with: "happily"
+/// has four of the five letters of "happy".
+const SHARED_START: usize = 4;
+/// What may stand before that start: "unfathomable" is made from "fathom".
+const PREFIXES: [&str; 13] = ["un", "in", "im", "il", "ir", "non", "dis", "mis", "re", "over", "under", "out", "pre"];
+
+fn starts_like(word: &str, base: &str) -> bool {
+  let shared = word.chars().zip(base.chars()).take_while(|(a, b)| a == b).count();
+  // Most of the base, since its ending changes ("happy", "happi-").
+  shared >= SHARED_START && shared * 5 >= base.chars().count() * 3
+}
+
+/// The word a definition leans on, when it says little else: the first word
+/// it links to that the word looked up is made from. That word's own meaning
+/// is then shown under it. Wiktionary links the words of a definition, which
+/// is all this goes by: no list of endings, and nothing for a definition that
+/// stands by itself.
+fn leans_on(definition: &str, word: &str) -> Option<Leaning> {
+  let opening = text::plain(definition);
+  let opening = opening.split([';', '.']).next().unwrap_or("");
+  if opening.split_whitespace().count() > LEANING_WORDS {
+    return None;
+  }
+  let word = word.to_lowercase();
+  let mut rest = definition;
+  while let Some(at) = rest.find("<a ") {
+    let anchor = &rest[at..];
+    let end = anchor.find('>')?;
+    rest = &anchor[end..];
+    let tag = &anchor[..end];
+    let Some(title) = text::attribute(tag, "title") else {
+      continue;
+    };
+    let linked = text::decode_entities(title);
+    let linked = linked.trim();
+    let base = linked.to_lowercase();
+    // One word, and a word: not a phrase, a glossary page or the word itself.
+    if base.is_empty() || base == word || base.contains([' ', ':', '#']) {
+      continue;
+    }
+    let made_from = starts_like(&word, &base)
+      || PREFIXES.iter().any(|prefix| word.strip_prefix(prefix).is_some_and(|after| starts_like(after, &base)));
+    if made_from {
+      // "/wiki/fathom#Verb": the part of speech, where the link names one.
+      let part = text::attribute(tag, "href")
+        .and_then(|href| href.split_once('#'))
+        .map(|(_, part)| text::decode_entities(part).replace('_', " "))
+        .filter(|part| !part.is_empty());
+      return Some(Leaning { word: linked.to_string(), part });
+    }
+  }
+  None
+}
+
 /// The entries for the book's language, or failing that for English. A word
 /// that exists only in some third language is not what the reader selected.
 fn parse_definitions(body: &str, word: &str, lang: &Lang) -> Result<Option<Definitions>, serde_json::Error> {
@@ -384,6 +458,8 @@ fn parse_definitions(body: &str, word: &str, lang: &Lang) -> Result<Option<Defin
     let has_words = raw.iter().any(|entry| entry.language != "Translingual");
     let mut entries = Vec::new();
     let mut target = None;
+    // The first definition there is, as it came: what the word is said to be.
+    let mut first = None;
     for entry in raw.iter().filter(|entry| !has_words || entry.language != "Translingual") {
       let mut definitions = Vec::new();
       let mut forms = Vec::new();
@@ -393,6 +469,7 @@ fn parse_definitions(body: &str, word: &str, lang: &Lang) -> Result<Option<Defin
         if plain.is_empty() || definitions.contains(&plain) {
           continue;
         }
+        first.get_or_insert(item.definition.as_str());
         forms.push(form_of(&item.definition));
         definitions.push(plain);
       }
@@ -416,7 +493,9 @@ fn parse_definitions(body: &str, word: &str, lang: &Lang) -> Result<Option<Defin
       .map(|entry| entry.language.as_str())
       .find(|name| !name.is_empty() && (!has_words || *name != "Translingual"))
       .unwrap_or("English");
-    return Ok(Some(Definitions { language: text::squeeze(language), entries, form_of: target }));
+    // A form is followed to its word; only a word of its own leans on another.
+    let leans_on = if target.is_none() { first.and_then(|definition| leans_on(definition, word)) } else { None };
+    return Ok(Some(Definitions { language: text::squeeze(language), entries, form_of: target, leans_on }));
   }
   Ok(None)
 }
@@ -552,19 +631,31 @@ async fn find_meaning(client: &Client, term: &str, lang: &Lang) -> Side<Meaning>
       Side::Found(found) => {
         // "houses" says only "plural of house": one hop, so the reader gets
         // what a house is as well. One hop and no further.
-        let root = match &found.form_of {
-          Some(target) => match definitions_of(client, target, lang).await {
-            Side::Found(of) => Some(Root { word: target.clone(), url: wiktionary_page(target, &of.language), entries: of.entries }),
-            _ => None
-          },
-          None => None
-        };
+        let mut root = None;
+        let mut base = None;
+        if let Some(target) = found.form_of.as_ref().or(found.leans_on.as_ref().map(|leaning| &leaning.word)) {
+          if let Side::Found(of) = definitions_of(client, target, lang).await {
+            let mut other = Root { word: target.clone(), url: wiktionary_page(target, &of.language), entries: of.entries };
+            // "sagaciousness" is "the state of being sagacious": the same one
+            // hop, kept apart, because the word looked up is still the word.
+            if found.form_of.is_some() {
+              root = Some(other);
+            } else {
+              // The part of speech the definition meant comes first.
+              if let Some(part) = found.leans_on.as_ref().and_then(|leaning| leaning.part.as_deref()) {
+                other.entries.sort_by_key(|entry| !entry.part_of_speech.eq_ignore_ascii_case(part));
+              }
+              base = Some(other);
+            }
+          }
+        }
         return Side::Found(Meaning {
           url: wiktionary_page(&word, &found.language),
           word,
           language: found.language,
           entries: found.entries,
-          root
+          root,
+          base
         });
       }
       Side::Missing => continue,

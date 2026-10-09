@@ -14,6 +14,12 @@ export type LookupMeaning = {
   entries: LookupEntry[];
   url: string;
   root: LookupRoot | null;
+  /**
+   * The word this one is made from, with its meaning, when this word's own
+   * definition only points at it ("sagaciousness": "the state of being
+   * sagacious"). Not there in an answer from before this was added.
+   */
+  base?: LookupRoot | null;
 };
 
 export type LookupSummary = {

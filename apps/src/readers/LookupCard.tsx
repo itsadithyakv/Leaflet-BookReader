@@ -270,6 +270,13 @@ export const LookupCard = ({ term, language, onClose, avoid, place: wordPlace }:
           <Entries entries={meaning.root.entries} />
         </>
       )}
+      {/* "The state of being sagacious" says nothing without "sagacious": that word, under it. */}
+      {meaning.base && (
+        <>
+          <div className="reader-lookup-word">{meaning.base.word}</div>
+          <Entries entries={meaning.base.entries} />
+        </>
+      )}
       {more("More on Wiktionary", meaning.root?.url ?? meaning.url)}
     </section>
   );
