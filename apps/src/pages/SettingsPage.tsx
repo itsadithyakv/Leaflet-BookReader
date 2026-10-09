@@ -14,6 +14,7 @@ import { RemindersCard } from "../components/RemindersCard";
 import { ConverterCard } from "../components/ConverterCard";
 import { LeaderboardsCard } from "../components/LeaderboardsCard";
 import { LibraryCopyCard } from "../components/LibraryCopyCard";
+import { TidyFolderCard } from "../components/TidyFolderCard";
 import { pickSyncFolder } from "../platform";
 import { FEATURES } from "../constants/features";
 import { PRIVACY_URL, SUPPORT_EMAIL, TERMS_URL } from "../constants/links";
@@ -697,6 +698,8 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
           </div>
           <div className={column}>
             <LibraryCopyCard key={wiped} showToast={showToast} renderToggle={renderToggle} />
+
+            <TidyFolderCard key={`tidy-${wiped}`} showToast={showToast} />
 
             <ConverterCard showToast={showToast} />
           </div>

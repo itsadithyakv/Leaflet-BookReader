@@ -90,7 +90,7 @@ impl Outcome {
 
 /// Names Windows keeps for devices. `CON.epub` is as reserved as `CON`: only
 /// the part before the first dot counts.
-fn is_reserved_name(stem: &str) -> bool {
+pub(super) fn is_reserved_name(stem: &str) -> bool {
   let base = stem.split('.').next().unwrap_or("").trim().to_ascii_uppercase();
   match base.as_str() {
     "CON" | "PRN" | "AUX" | "NUL" => true,
@@ -234,18 +234,37 @@ fn stem_room(folder: &Path, ext: &str) -> usize {
   MAX_PATH_CHARS.saturating_sub(taken).clamp(MIN_STEM_CHARS, MAX_STEM_CHARS)
 }
 
+/// How far below the folder a copy is still looked for. "Tidy a folder"
+/// (`storage/tidy.rs`) sorts books into `Author\Series\`, two folders down:
+/// a copies folder tidied that way must not be filled a second time.
+const SAME_BOOK_DEPTH: usize = 3;
+
 /// The file in `folder` that already holds exactly this book, whatever it is
-/// called. The names Leaflet would give it are tried first; this is for the
-/// rest: a copy the reader renamed, the original they keep in this same folder
+/// called and whichever of its folders it has been sorted into. The names
+/// Leaflet would give it are tried first; this is for the rest: a copy the
+/// reader renamed or tidied away, the original they keep in this same folder
 /// under its own name, a `(2)` whose plain name has since been freed.
 fn find_same_book(folder: &Path, ext: &str, source_len: u64, hash: &str) -> Option<PathBuf> {
-  fs::read_dir(folder)
-    .ok()?
-    .flatten()
-    .map(|entry| entry.path())
-    // The same kind of file only, which also leaves out staging files.
-    .filter(|path| path.extension().is_some() && extension_of(path) == ext)
-    .find(|path| is_same_book(path, source_len, hash))
+  fn look(folder: &Path, ext: &str, source_len: u64, hash: &str, deeper: usize) -> Option<PathBuf> {
+    let mut below = Vec::new();
+    for entry in fs::read_dir(folder).ok()?.flatten() {
+      let path = entry.path();
+      // What the entry is itself: a link out of the folder is not followed.
+      let Ok(kind) = entry.file_type() else { continue };
+      if kind.is_dir() {
+        below.push(path);
+      // The same kind of file only, which also leaves out staging files.
+      } else if kind.is_file() && path.extension().is_some() && extension_of(&path) == ext && is_same_book(&path, source_len, hash) {
+        return Some(path);
+      }
+    }
+    // This folder's own files first, then what is sorted below it.
+    if deeper == 0 {
+      return None;
+    }
+    below.iter().find_map(|inner| look(inner, ext, source_len, hash, deeper - 1))
+  }
+  look(folder, ext, source_len, hash, SAME_BOOK_DEPTH)
 }
 
 /// A name from the index is only ever a plain file name. Anything with a path
@@ -569,6 +588,31 @@ mod tests {
 
     assert_eq!(outcome, Outcome::AlreadyThere(folder.join("dune (my scan).EPUB")));
     assert_eq!(scratch.names(), vec![".leaflet-0000.part", "dune (my scan).EPUB", "other.epub"]);
+  }
+
+  /// The copies folder after "Tidy a folder": the book is two folders down
+  /// under another name, and the name it was copied under is free again.
+  #[test]
+  fn a_book_sorted_into_a_folder_of_the_copies_folder_is_not_copied_again() {
+    let scratch = Scratch::new("sorted");
+    let folder = scratch.copies();
+    let (source, hash) = scratch.book("aaa.epub", b"the whole book");
+    let sorted = folder.join("Frank Herbert").join("Dune");
+    fs::create_dir_all(&sorted).expect("folders");
+    fs::write(sorted.join("01 - Dune.epub"), b"the whole book").expect("sorted copy");
+
+    let outcome = copy_book(&folder, &source, &hash, "Dune", Some("Frank Herbert"), Some("Dune - Frank Herbert.epub")).expect("copy");
+
+    assert_eq!(outcome, Outcome::AlreadyThere(sorted.join("01 - Dune.epub")));
+    assert_eq!(scratch.names(), vec!["Frank Herbert"]);
+
+    // Too far down to be one of these: copied, as before.
+    let deep = folder.join("a").join("b").join("c").join("d");
+    fs::create_dir_all(&deep).expect("deep");
+    let (other, other_hash) = scratch.book("bbb.epub", b"a second book");
+    fs::write(deep.join("far.epub"), b"a second book").expect("far copy");
+    let outcome = copy_book(&folder, &other, &other_hash, "Emma", None, None).expect("copy");
+    assert!(matches!(outcome, Outcome::Copied(_)), "{outcome:?}");
   }
 
   /// `Dune (2).epub` is this book and `Dune.epub` (another book) has since

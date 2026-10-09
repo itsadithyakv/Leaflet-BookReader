@@ -45,6 +45,15 @@ export async function pickLibraryCopyFolder(): Promise<string | null> {
   return module.pickLibraryCopyFolder();
 }
 
+/** Picks the folder of book files to tidy. Desktop only, like the copies. */
+export async function pickTidyFolder(): Promise<string | null> {
+  if (getPlatform() === "mobile") {
+    return null;
+  }
+  const module = await import("./desktop/file");
+  return module.pickTidyFolder();
+}
+
 export async function ensureBookPermissions(): Promise<boolean> {
   if (getPlatform() === "mobile") {
     const module = await import("./mobile/permissions");

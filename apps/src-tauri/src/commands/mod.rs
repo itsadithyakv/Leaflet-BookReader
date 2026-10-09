@@ -41,6 +41,7 @@ mod words;
 mod power;
 mod search;
 mod fonts;
+mod tidy;
 
 pub use library::*;
 pub use backup::*;
@@ -64,3 +65,4 @@ pub use words::*;
 pub use power::*;
 pub use search::*;
 pub use fonts::*;
+pub use tidy::*;

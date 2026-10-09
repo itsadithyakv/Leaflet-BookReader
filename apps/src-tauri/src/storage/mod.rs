@@ -15,6 +15,7 @@ pub mod epub;
 pub mod library_copy;
 pub mod mobi;
 pub mod pdf;
+pub mod tidy;
 #[cfg(test)]
 mod library_probe;
 

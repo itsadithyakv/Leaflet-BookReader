@@ -688,6 +688,8 @@ pub fn clear_all_data(app: AppHandle, state: State<'_, AppState>) -> Result<(), 
   crate::fonts::remove_all();
   // And the text kept of each PDF for the library's search.
   crate::pdf_text::remove_all();
+  // And the record of the last "tidy a folder" run, which names their files.
+  super::tidy::forget_last();
 
   Ok(())
 }

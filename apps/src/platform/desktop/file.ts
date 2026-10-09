@@ -48,6 +48,16 @@ export async function pickLibraryCopyFolder(): Promise<string | null> {
   return typeof selected === "string" ? selected : null;
 }
 
+/** Picks the folder whose book files are to be renamed and sorted. */
+export async function pickTidyFolder(): Promise<string | null> {
+  const selected = await open({
+    directory: true,
+    multiple: false,
+    title: "Choose the folder your book files are in"
+  });
+  return typeof selected === "string" ? selected : null;
+}
+
 export async function pickBookFiles(): Promise<string[]> {
   const selected = await open({
     multiple: true,
