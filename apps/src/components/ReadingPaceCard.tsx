@@ -11,6 +11,7 @@ import {
 } from "../readers/paceModel";
 import { readingProfileService } from "../services/readingProfileService";
 import { readStartMode, saveStartMode, setReaderTourSeen, type StartMode } from "../readers/ReaderTour";
+import { pausesWhenStill, setPausesWhenStill } from "../readers/pacing";
 
 const BAND_LABELS: Record<DifficultyBand, string> = {
   easy: "Light reads",
@@ -37,6 +38,7 @@ export const ReadingPaceCard = ({ showToast, renderToggle }: ReadingPaceCardProp
   const requestBackup = useLibraryStore((state) => state.requestBackup);
   const [profile, setProfile] = useState<ReadingProfile | null>(null);
   const [startMode, setStartMode] = useState<StartMode>(readStartMode);
+  const [pauseWhenStill, setPauseWhenStill] = useState(pausesWhenStill);
   const [confirmForget, setConfirmForget] = useState(false);
   const saveTimerRef = useRef<number | null>(null);
   // The range a slider was left at, while its save is still waiting.
@@ -204,6 +206,20 @@ export const ReadingPaceCard = ({ showToast, renderToggle }: ReadingPaceCardProp
             <span className="mt-0.5 block text-[11px] opacity-75">Paused at your line; Space sets Dotty off.</span>
           </span>
           {renderToggle(startMode === "smart")}
+        </button>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={pauseWhenStill}
+          className="inset-field flex w-full items-center justify-between px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
+          title="Smart Read, SpeedRead and auto-scroll stop after five minutes without a key or the pointer, and wait for Space"
+          onClick={() => {
+            setPausesWhenStill(!pauseWhenStill);
+            setPauseWhenStill(!pauseWhenStill);
+          }}
+        >
+          <span className="text-left">Pause when I've been still for five minutes</span>
+          {renderToggle(pauseWhenStill)}
         </button>
       </div>
       <div className="mt-3 flex flex-wrap gap-3">

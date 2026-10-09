@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { PAGE_TOP_PAD } from "../finish";
 import { AUTO_SCROLL_DEFAULT_KEY, AUTO_SCROLL_YIELD_BACK_MS, AUTO_SCROLL_YIELD_AHEAD_MS, AUTO_SCROLL_TUNE_COOLDOWN_MS, autoScrollLinesPerMinute, autoScrollPixelsPerSecond, autoScrollSpeedForLines, readAutoScrollDefault } from "../autoScroll";
-import { HANDS_FREE_GRACE_MS } from "../pacing";
+import { stillTooLong } from "../pacing";
 import { predictWpm, readerPace } from "../paceModel";
 import type { Later, WithCover, WithWords } from "./scope";
 
@@ -225,8 +225,9 @@ export const useAutoScrollEngine = (reader: WithCover) => {
       }
       const now = Date.now();
       // Nobody has touched the page for a while: stop rather than scroll a
-      // chapter past an empty chair (and stop crediting minutes for it).
-      if (now - lastHandsOnAtRef.current >= HANDS_FREE_GRACE_MS) {
+      // chapter past an empty chair (and stop crediting minutes for it). Only
+      // for a reader who asked for that (Settings, "Pause when I've been still").
+      if (stillTooLong(now - lastHandsOnAtRef.current)) {
         // The last stretch was probably an empty chair, not a pace kept up with.
         autoScrollRunRef.current = { ms: 0, px: 0 };
         setAutoScrollActive(false);

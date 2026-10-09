@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { EpubCFI } from "epubjs";
-import { HANDS_FREE_GRACE_MS } from "../pacing";
+import { handsFreeCounts } from "../pacing";
 import { isScrollCorrection } from "../smartScroll";
 import { glideFrame, glideSet, startGlide } from "../glide";
 import { NOT_HELD, STILL_MS, isOnScrollbar, letGo, pageScrolled, pressOn, type ScrollbarHold } from "../scrollbarHold";
@@ -305,7 +305,7 @@ export const useScrollWatch = (reader: WithCover) => {
         return;
       }
       const now = Date.now();
-      if (now - lastHandsOnAtRef.current < HANDS_FREE_GRACE_MS) {
+      if (handsFreeCounts(now - lastHandsOnAtRef.current)) {
         markReadingActivity();
       }
       const last = lastScrollTopRef.current ?? target.scrollTop;

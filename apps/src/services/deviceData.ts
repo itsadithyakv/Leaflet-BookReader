@@ -29,6 +29,8 @@ const READER_SETTINGS = [
   "leaflet.reader.measure",
   "leaflet.reader.autoScrollSpeed",
   "leaflet.reader.startMode",
+  // Whether hands-free reading stops for a reader gone still (readers/pacing.ts).
+  "leaflet.reader.pauseWhenStill",
   "leaflet.reader.tourSeen",
   // The chapter list: that it has shown itself once, and whether it was left open (readers/contentsPanel.ts).
   "leaflet.reader.contentsSeen",

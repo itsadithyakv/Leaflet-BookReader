@@ -16,8 +16,49 @@ export { noveltyHolds, rsvpRamp, MAX_WORD_HOLD } from "./rsvpHold";
  */
 export const READER_WORD_PATTERN = /[\p{L}\p{N}]+(?:[’'\-][\p{L}\p{N}]+|(?<=\p{N})[.,]\p{N}+)*/gu;
 
-/** How long auto-scroll or Smart Read keeps crediting time after the last real input. */
+/** How long auto-scroll or Smart Read keeps crediting time after the last real input, when it pauses for a reader gone still. */
 export const HANDS_FREE_GRACE_MS = 5 * 60_000;
+/**
+ * And when it does not pause: an hour. The page reads on for as long as it is
+ * left to, which is the point of it for a reader who sits back and never
+ * touches anything; but a night left running is not a night of reading, and
+ * the minutes go on a board other readers are on.
+ */
+export const HANDS_FREE_UNPAUSED_MS = 60 * 60_000;
+
+/**
+ * "Pause when I've been still" (Settings, Reading). Smart Read, SpeedRead and
+ * auto-scroll used to stop after five minutes without a key or the pointer,
+ * always: to a reader following Dotty with their hands in their lap that is
+ * a book that keeps stopping. Off unless the reader turns it on.
+ */
+export const PAUSE_WHEN_STILL_KEY = "leaflet.reader.pauseWhenStill";
+
+export const pausesWhenStill = (): boolean => {
+  try {
+    return localStorage.getItem(PAUSE_WHEN_STILL_KEY) === "1";
+  } catch {
+    return false;
+  }
+};
+
+export const setPausesWhenStill = (on: boolean) => {
+  try {
+    if (on) {
+      localStorage.setItem(PAUSE_WHEN_STILL_KEY, "1");
+    } else {
+      localStorage.removeItem(PAUSE_WHEN_STILL_KEY);
+    }
+  } catch {
+    // Storage that cannot be written: the choice stays as it was.
+  }
+};
+
+/** Whether hands-free reading stops now, `quietMs` after the last touch. */
+export const stillTooLong = (quietMs: number, pauses = pausesWhenStill()) => pauses && quietMs >= HANDS_FREE_GRACE_MS;
+
+/** Whether hands-free reading is still credited as reading, `quietMs` after the last touch. */
+export const handsFreeCounts = (quietMs: number, pauses = pausesWhenStill()) => quietMs < (pauses ? HANDS_FREE_GRACE_MS : HANDS_FREE_UNPAUSED_MS);
 
 export const READER_BLOCK_SELECTOR =
   "p, li, blockquote, pre, h1, h2, h3, h4, h5, h6, dd, dt, td, th, figcaption, div, section, article, body";

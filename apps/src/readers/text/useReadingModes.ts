@@ -3,7 +3,7 @@ import { watchForeground } from "../../services/windowService";
 import { keepAwake } from "../../services/keepAwake";
 import { type ReadingMode, type ReaderWord } from "../readerTypes";
 import { PAGE_TOP_PAD } from "../finish";
-import { rsvpStageVars, rsvpRamp, HANDS_FREE_GRACE_MS, getPaceFactor } from "../pacing";
+import { rsvpStageVars, rsvpRamp, getPaceFactor, handsFreeCounts, stillTooLong } from "../pacing";
 import { predictPlainWpm } from "../paceModel";
 import { isPictureGap } from "../smartScroll";
 import type { WithChrome, WithCover, WithPanels } from "./scope";
@@ -119,8 +119,9 @@ export const useReadingModes = (reader: WithPanels) => {
 /**
  * Keeps the screen on while the page is reading itself: auto-scroll running,
  * or Dotty or word by word not paused. Those pause by themselves when the
- * reader has gone quiet for long enough ("Still reading?") or the window is
- * left, and the screen is let go with them.
+ * window is left, and, for a reader who asked for it, when the reader has
+ * gone quiet for long enough ("Still reading?"); the screen is let go with
+ * them.
  */
 export const useAwakeWhileReading = (reader: WithCover) => {
   const { autoScrollActive, readingMode, readingPaused } = reader;
@@ -425,17 +426,21 @@ export const useReadingEngine = (reader: WithCover) => {
           }
         }
         // Playing hands-free counts as reading for the same grace window as
-        // auto-scroll. Past it, pause rather than play on to an empty room:
-        // playback and credited time then always agree, and a reader who
-        // stepped away comes back to the word they left on.
-        if (now - lastHandsOnAtRef.current >= HANDS_FREE_GRACE_MS) {
+        // auto-scroll. Past it, for a reader who asked for that, pause rather
+        // than play on to an empty room: a reader who stepped away comes back
+        // to the word they left on. Otherwise it reads on, and the minutes
+        // stop being counted an hour after the last touch (readers/pacing.ts).
+        const quiet = now - lastHandsOnAtRef.current;
+        if (stillTooLong(quiet)) {
           readingPausedRef.current = true;
           setReadingPaused(true);
           showFocusToast("Still reading? Press Space to carry on.");
           schedule(180);
           return;
         }
-        markReadingActivity();
+        if (handsFreeCounts(quiet)) {
+          markReadingActivity();
+        }
         let wpm = speedReadWpmRef.current;
         if (mode === "smart") {
           wpm = smartWpmNow();
