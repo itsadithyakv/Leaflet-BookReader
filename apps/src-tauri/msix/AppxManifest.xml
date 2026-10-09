@@ -118,6 +118,23 @@
             </uap:SupportedFileTypes>
           </uap:FileTypeAssociation>
         </uap:Extension>
+        <!--
+          Kindle books. Leaflet reads the older kind itself (convert/mobi.rs),
+          so they are offered in "Open with" like an EPUB; an .azw3 is still
+          Calibre's to convert, and opening one says so.
+        -->
+        <uap:Extension Category="windows.fileTypeAssociation">
+          <uap:FileTypeAssociation Name="leaflet.kindle">
+            <uap:DisplayName>Kindle book</uap:DisplayName>
+            <uap:Logo>Assets\Square44x44Logo.png</uap:Logo>
+            <uap:SupportedFileTypes>
+              <uap:FileType ContentType="application/x-mobipocket-ebook">.mobi</uap:FileType>
+              <uap:FileType>.prc</uap:FileType>
+              <uap:FileType>.azw</uap:FileType>
+              <uap:FileType>.azw3</uap:FileType>
+            </uap:SupportedFileTypes>
+          </uap:FileTypeAssociation>
+        </uap:Extension>
         <uap:Extension Category="windows.fileTypeAssociation">
           <uap:FileTypeAssociation Name="leaflet.fb2">
             <uap:DisplayName>FictionBook</uap:DisplayName>
