@@ -58,6 +58,49 @@ changes; a book removed before its copy is made is skipped. The folder is a sett
 under AppData are refused: Windows redirects a packaged app's writes there
 into the package.
 
+**Tidy a folder** (after 1.3.1; Settings, Library; `storage/tidy.rs`,
+`commands/tidy.rs`, `library/tidyPlan.ts`, `library/tidyNames.ts`,
+`components/TidyFolderCard.tsx`). The owner keeps their book files in one
+folder under the names the sites gave them and asked for Leaflet to "rename my
+files locally so they are well sorted". The card renames and sorts the book
+files of a folder the reader chooses: `Author\Series\01 - Title.ext` for a
+book in a series, `Author\Title.ext` otherwise, `Unknown author\` where
+nobody is named. A file whose bytes are a book in the library takes the
+title, author and series the library shows (so a well-known series is sorted
+though no file names it); any other file goes by what it says about itself,
+read as import reads it, and a series only where it is named outright.
+Nothing happens until asked: Preview lists every change (`tidy_scan`, then
+the planner on the page), and only the Rename button moves anything
+(`tidy_apply`, which trusts nothing the page sent: each path is checked to
+be a plain, legal name inside the folder, a book file keeps its kind, links
+and junctions are not followed). Names are made safe for Windows and
+shortened so the whole path opens; two books wanting one name get `(2)`; a
+second copy of the same book stays where it is and is counted. No file is
+deleted or written over, and a folder is removed only when the run emptied
+it. Undo puts the last run back (`tidy_undo`, from `<app data>/tidy-undo.json`,
+which is written every 25 moves so that a run cut short can still be undone),
+after a restart too, for every file still where the run put it. The library
+is untouched: Leaflet reads its own copy of each book. A whole drive, the
+home folder, AppData and the sync folder are refused. It is asked for each
+time; nothing watches a folder. Book copies look two folders down for a book
+that is there already (`find_same_book`), so a copies folder that has been
+tidied is not filled a second time. Tried end to end on a copy of the
+owner's own folder in the temporary directory (the folder itself only read;
+numbers only): 25 files, 11 into `Author\`, 14 into `Author\Series\` with
+their numbers, every book byte for byte the same after, and all 25 put back
+by Undo. That trial found Undo refusing to give a file back a name longer
+than Windows opens, which was the name it had; fixed. The three steps are
+kept (`storage::tidy::probe`, `library/tidyProbe.test.ts`). Not checked: the
+card on a screen, the folder picker, a run through the app.
+
+**Packing books smaller was measured and not built.** The owner asked
+whether copies could be compressed to save space. An EPUB is a zip already
+and its pictures are JPEGs: packing the owner's 23 files again as hard as a
+zip allows took 68.8 MB to 67.8 MB (1.5%; the EPUBs 0.1%, half their bytes
+being pictures). Anything more means making the pictures worse. What takes
+the space is that a book can be on the disk three times (the reader's file,
+Leaflet's own copy, the book copy).
+
 **Metadata enrichment** (`metadata/`) fills in missing title, author, genres and
 cover from **Open Library**, falling back to **Wikipedia**. Titles are normalised
 first (`metadata/normalize.rs`) because filenames from the wild carry ISBNs and
@@ -245,6 +288,31 @@ series). Each group knows how much is read, what is next, and which books are
 missing: the titles, for a well-known series; the gaps in the numbers,
 otherwise. Nothing about groups is stored, so a correction applies at once.
 
+**A series in parts, and the books beside it** (after 1.3.1;
+`library/knownSeries.ts`: `parts`, `extras`; `components/collections/SeriesDetail.tsx`).
+The owner's Mistborn page listed seven books in one run, though they are two
+series of three and four, and gave no sign of which books can be skipped. A
+well-known series may now name its parts (Mistborn's two eras, a trilogy and
+its prequels, the Witcher's stories, saga and standalone: nine series so far)
+and the page puts a small heading where each begins, with its numbers. It may
+also name books beside its main line (a novella between two novels, a
+prequel: seven so far). Those are shown with their kind and "optional", are
+placed where they are best read and not where a shop numbers them (Mistborn:
+Secret History after the sixth book, as its writer asks, not at 3.5), and are
+left out of "n of m read", of what is missing and of what is next until the
+main line is read. A file that names a part as if it were the series ("Wax
+and Wayne, #1") joins the whole series at the right number.
+
+Two files of the owner's did not join their series. One wrote its own title
+where its author goes, so its author was not the series' author: such an
+"author" is now nobody, on the page (`knownSeriesFor`) and in what is stored
+(`metadata::normalize::identify`; `scan_series` version 4 reads the books
+already in the library again, and a book left with no author is owed a
+catalogue lookup at once, not after the fortnight's wait). And a book whose
+title is one of a well-known series that is already in the library joins it
+whatever its file says of its author, when the title is three words or more
+("The Alloy of Law" with The Final Empire on the shelf; never "Eclipse").
+
 The library shows **"Next in your series"** above the grid when the reader has
 finished a book and the next one is waiting, or names the next one to get when
 the library lacks it (`components/UpNextStrip.tsx`). Cards carry their series
@@ -311,6 +379,11 @@ it as any book:
   reader's to decide. Scripts, styles and the head are not text and are left
   out.
 - Windows-1252 books (most older ones) are read as such.
+
+Windows offers Leaflet for these under "Open with" (after 1.3.1;
+`msix/AppxManifest.xml`, `leaflet.kindle`: `.mobi`, `.prc`, `.azw`, `.azw3`):
+the package had never declared them, because every one of them needed
+Calibre. It takes a new package to show.
 
 Whether a file is one of these is in its header, not its ending
 (`mobi::can_read`), and `needs_converter` asks: a readable one no longer
@@ -849,7 +922,19 @@ from the section for the book's language or else English; the summary comes
 from the Wikipedia in the book's language, then the English one. A word is
 tried as selected, lower-cased, without a possessive and without a plural
 ending, and a form ("houses", "ran") is followed one hop so its root's meaning
-shows too. Definitions arrive as HTML and leave Rust as plain text. A name, a
+shows too. So is a word whose definition only points at the word it is made
+from (after 1.3.1; `leans_on` in `lookup/mod.rs`): the owner looked up
+"sagaciousness" and was told "the state of being sagacious", which says
+nothing to a reader who does not know "sagacious". When the first definition
+is short (seven words to its first stop) and links a word this one starts
+like, or starts like after "un-", "in-", "dis-" and the like, that word's
+meaning is shown under it (`Meaning.base`), with the part of speech the link
+named first ("impossible to fathom" means the verb). The word kept in My
+words and the link to Wiktionary stay the word looked up. A definition that
+stands by itself ("a realm having a king or queen as its sovereign") is left
+alone. It is one more request, for a word out of Wiktionary's own answer.
+Checked against Wiktionary itself with seven words (`live`, the ignored
+test); the card showing it was not seen. Definitions arrive as HTML and leave Rust as plain text. A name, a
 capitalised word or a phrase leads with the summary, a plain word with its
 meaning (so a capitalised common word at the start of a sentence gets the
 name's entry: lower-casing first would break "German" and "Polish"). A
@@ -979,6 +1064,36 @@ so the next ordinary open resumes where the reading stopped. Search results,
 bookmarks and highlights open 80 px down, clear of the toolbar, and one mark
 is drawn per place (`readers/highlightDraws.ts`): two highlights of exactly
 the same words used to leave a mark that could not be removed.
+
+**No highlight on a highlight** (after 1.3.1; `readers/highlightOverlap.ts`,
+`readers/text/useReaderMarks.ts`, `readers/pdfHighlights.ts`:
+`highlightsUnderRects`). The owner highlighted two words, then three that
+began with the same two: two highlights, the colour doubled where they met,
+and removing one left the other, so that it looked as if highlights could not
+be removed. A selection inside a highlight is now that highlight: a colour
+pressed changes its colour ("Colour changed.", or "Already highlighted."),
+the note button opens its card, and nothing is added. A selection that runs
+past a highlight's end grows it: the highlights it touches become one, over
+all their words, with their notes joined (the new one is saved before the old
+are removed). In a PDF the first half holds; a selection running past a
+highlight's end still makes a second one there. With words selected over a
+highlight, the selection bar has **Remove highlight** (every highlight under
+the selection). Removing from a highlight's card also removes any other
+highlight of exactly that place that has no note of its own, which is what an
+older version could leave behind. Checked in the preview on a real book, as
+the owner did it: twelve letters highlighted, then thirteen from the same
+start, came to one highlight and one mark; the same words again added
+nothing; another colour changed its colour; a selection past its end grew it;
+"Remove highlight" and the card's bin each left none. The first run of that
+check found the fix not working at all: the rendition's `getRange` knows only
+the chapters it counts as in view, so a highlight's range is now read from
+its chapter's own document.
+
+**A highlight's card is its colour** (after 1.3.1). The colour was a thin bar
+down the side of each highlight, in the library's list, the reader's notes
+panel and the card's quote (the owner: "I don't like that little bar"). Each
+is now tinted all over in the highlight's colour, faint enough to read on,
+with a border of the same.
 
 **Words looked up are kept** (`readers/words/`, `services/wordService.ts`,
 `commands/words.rs`). A look-up that gets an answer keeps the word (in its
@@ -1844,10 +1959,18 @@ Behaviours worth knowing (from the pre-release review):
   into the chapters before and after. What the drag says about the pace is
   judged from the word it began on, found again by what it is and not by its
   number: such a drag brings chapters in above, which renumbers every word.
-- Hands-free reading (auto-scroll, Smart Read, RSVP) earns time for 5 minutes
-  after the last real input (`HANDS_FREE_GRACE_MS`). Past that, playback pauses
-  with "Still reading? Press Space to carry on." so playback and credited time
-  always agree.
+- Hands-free reading (auto-scroll, Smart Read, RSVP) reads on for as long as
+  it is left to. It used to pause five minutes after the last real input,
+  always, with "Still reading? Press Space to carry on."; to a reader
+  following Dotty with their hands in their lap that is a book that keeps
+  stopping (the owner: "kind of annoying"). The pause is now a switch,
+  Settings → Reading → "Pause when I've been still for five minutes", off
+  unless turned on (`readers/pacing.ts`: `pausesWhenStill`, `stillTooLong`).
+  With it on, time is earned for those five minutes (`HANDS_FREE_GRACE_MS`),
+  as before. With it off, time is earned for an hour after the last touch
+  (`HANDS_FREE_UNPAUSED_MS`) and the page then reads on uncounted: a night
+  left running is not a night of reading, and the minutes go on a board
+  other readers are on.
 - Keys keep working after clicking into the book text: the epub iframe forwards
   them to the reader's shortcut handler.
 - Nothing plays on while Leaflet is in the background: switching apps pauses
@@ -1922,8 +2045,9 @@ not paused) the app asks Windows to keep the display on (`keep_awake`,
 `commands/power.rs`: `SetThreadExecutionState`; `services/keepAwake.ts`,
 `useAwakeWhileReading`). There is no key and no mouse in those modes, so
 Windows took the reader for away and dimmed the page under them. It is let go
-the moment they pause, which they do by themselves when the reader has gone
-quiet ("Still reading?") or leaves the window, and when the book is closed.
+the moment they pause, which they do by themselves when the reader leaves
+the window (and, with "Pause when I've been still" on, has gone quiet), and
+when the book is closed.
 In a browser it is the screen wake lock where there is one. Not checked on a
 real screen: it needs a build and the patience to wait out a display timeout.
 

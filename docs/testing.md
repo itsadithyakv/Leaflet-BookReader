@@ -119,6 +119,12 @@ second copy of the store) and `setState({ books: [...] })` with a book whose
 `window.__leafletReader` (`words()`, `active()`, `paceScale()`) for Smart Read
 and SpeedRead's.
 
+**They went on 2026-10-08**, when the release run sheet's `npm ci` cleaned
+`node_modules`: every harness and fixture named below, and the copies of the
+owner's books. Only `mistborn.epub` has been put back (2026-10-09). The next
+session that needs them should keep them somewhere `npm ci` does not reach
+(a git-ignored folder beside `apps`, served to the preview by a Vite alias).
+
 Aids kept out of git in `apps/node_modules/.leaflet-test/` (they go when
 `node_modules` is cleaned; none is needed to build): `boot.txt` loads the
 harnesses; `__bootBook('fixture' | 'mistborn', prefs, bookPrefs)` opens a

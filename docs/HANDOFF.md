@@ -148,9 +148,41 @@ holds:**
     `399f6c4`, from before 1.1, so the published policy predates 1.2 too;
     (4) build the package. Accounts from before are "not confirmed" and see
     one row in Settings; nothing is mailed to them unasked.
-- 2,453 app tests (342 new in 1.3), 625 Rust tests (76 new), 108 server
+- **1.3.2: the owner's first evening with 1.3.1** (2026-10-09; 1.3.1 was
+  built, tagged `v1.3.1` and sent to the Store by the owner; this is
+  committed and pushed on `release/1.3` as 1.3.2, and no package of it has
+  been built). Eight things the owner reported or asked for, each in features.md under the name
+  given here.
+  - *A series in parts, and the books beside it*: Mistborn's two eras headed,
+    a novella marked optional; and two books that had not joined the series
+    (a file that wrote its title where its author goes; `scan_series` is at
+    version 4).
+  - *No highlight on a highlight*, with "Remove highlight" in the selection
+    bar; *A highlight's card is its colour* (no more thin bar).
+  - *Hands-free reading reads on*: the five-minute "Still reading?" pause is
+    a switch in Settings, Reading, off unless turned on. Time is then earned
+    for an hour after the last touch.
+  - *Kindle files under "Open with"*: the package had never declared them.
+  - *Tidy a folder*: renames and sorts the book files of a folder, with a
+    preview and an undo. Built by an engineer working beside this one; its
+    code that moves files was read, and it was tried end to end on a copy of
+    the owner's folder.
+  - *Packing books smaller*: measured (1.5%), not built.
+  - *A look-up that explains itself* (features.md, "Look up"): a word
+    defined only by the word it is made from ("sagaciousness": "the state
+    of being sagacious") now shows that word's meaning under it.
+  - Checked in the preview: the highlight changes on a real book, the series
+    page with a seeded Mistborn (headings, the optional novella, both books
+    joined), the pause switch, that the Tidy card draws. Not checked, because
+    they need the app: a `.mobi` under "Open with"; the Tidy card's folder
+    picker and a run through it; the library's Highlights list in its new
+    colours; the books already in the owner's library being read again
+    (version 4) and the one with no author getting its lookup.
+  - **The test aids are gone** (testing.md): the run sheet's `npm ci`
+    cleaned `node_modules`, which is where they were kept.
+- 2,495 app tests (384 new in 1.3), 648 Rust tests (99 new), 108 server
   tests, `tsc` clean, `cargo clippy --all-targets` clean, `vite build`
-  succeeds (all run together 2026-10-07, after the work above). The version is 1.3.1 in the five places deploy.md names.
+  succeeds (all but the server's run together 2026-10-09, after the work above; the server is unchanged since its 108 passed). The version is 1.3.2 in the five places deploy.md names.
 - **Asked for and not built: read aloud.** The voices Windows gives an app
   are the old flat ones (this PC has David, Zira and Mark only); a natural
   voice means a paid cloud service or a speech model shipped in the app
@@ -696,7 +728,8 @@ holds the harnesses and fixtures the measurements used, described in
 [testing.md](testing.md). It includes copies of the owner's own files
 (`mistborn.epub`, `test.pdf`, and 16 books under `library/`, with
 `library/from-mobi.epub`, the owner's Kindle book as Leaflet's own reader
-made it), and
+made it; **all of it went with `npm ci` on 2026-10-08, and only
+`mistborn.epub` is back**), and
 `shell-sweep.html`, which runs the app in frames of thirteen window sizes. Delete the folder whenever; nothing builds
 from it. Development builds publish `window.__leafletRendition` and
 `window.__leafletReader`, both behind `import.meta.env.DEV`.
