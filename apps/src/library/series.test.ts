@@ -141,6 +141,98 @@ describe("buildSeries", () => {
   });
 });
 
+describe("a series in parts, with books beside it", () => {
+  const SANDERSON = "Brandon Sanderson";
+
+  it("takes in a book whose file wrote its title where the author goes", () => {
+    const { groups } = buildSeries([
+      book("The Final Empire", SANDERSON),
+      book("The Well of Ascension", "The Well of Ascension"),
+      book("The Hero of Ages: Book Three of Mistborn", SANDERSON)
+    ]);
+    expect(groups.map((group) => [group.name, group.author])).toEqual([["Mistborn", SANDERSON]]);
+    expect(groups[0].members.map((member) => member.index)).toEqual([1, 2, 3]);
+  });
+
+  it("takes in a book of a series already here whatever its file says of its author, but not a short title", () => {
+    const { groups } = buildSeries([
+      book("The Final Empire", SANDERSON),
+      book("The Alloy of Law", "Tor Books"),
+      book("Twilight", "Stephenie Meyer"),
+      book("New Moon", "Stephenie Meyer"),
+      book("Eclipse", "Someone Else")
+    ]);
+    expect(groups.map((group) => [group.name, group.members.map((member) => member.index)])).toEqual([
+      ["Mistborn", [1, 4]],
+      ["Twilight", [1, 2]]
+    ]);
+  });
+
+  it("reads the underscore a file's name has for a colon", () => {
+    const { groups } = buildSeries([
+      book("The Final Empire", SANDERSON),
+      book("The Well of Ascension _ book two of Mistborn", SANDERSON),
+      book("Mistborn _ Secret History", SANDERSON)
+    ]);
+    expect(groups.map((group) => [group.name, group.members.map((member) => member.index)])).toEqual([["Mistborn", [1, 2, 6.5]]]);
+  });
+
+  it("counts a part's number from the part's first book", () => {
+    const { groups } = buildSeries([
+      book("The Final Empire", SANDERSON),
+      book("The Alloy of Law", SANDERSON, { series: "Wax and Wayne", seriesIndex: 1 }),
+      // (A title the list does not know: its number is all there is.)
+      book("Shadows of Self: A Novel", SANDERSON, { series: "Mistborn: Wax and Wayne", seriesIndex: 2 })
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].members.map((member) => member.index)).toEqual([1, 4, 5]);
+  });
+
+  it("says where each part begins and ends", () => {
+    const [mistborn] = buildSeries([book("The Final Empire", SANDERSON), book("The Hero of Ages", SANDERSON)]).groups;
+    expect(mistborn.parts).toEqual([
+      { name: "Era One", from: 1, to: 3 },
+      { name: "Era Two: Wax and Wayne", from: 4, to: 7 }
+    ]);
+    const [dune] = buildSeries([book("Dune", "Frank Herbert"), book("Dune Messiah", "Frank Herbert")]).groups;
+    expect(dune.parts).toEqual([]);
+  });
+
+  it("keeps a novella out of the counts, out of what is missing, and out of what is next", () => {
+    const novella = book("Mistborn: Secret History", SANDERSON, { series: "Mistborn", seriesIndex: 3.5 });
+    const [mistborn] = buildSeries([
+      book("The Final Empire", SANDERSON, { progress: 1 }),
+      novella,
+      book("The Bands of Mourning", SANDERSON)
+    ]).groups;
+    // Read where the list says, not where its file numbers it.
+    expect(mistborn.members.map((member) => [member.index, member.extra])).toEqual([
+      [1, undefined],
+      [6, undefined],
+      [6.5, "Novella"]
+    ]);
+    expect([mistborn.total, mistborn.ownedCount, mistborn.finishedCount]).toEqual([7, 2, 1]);
+    expect(mistborn.missing.map((entry) => entry.index)).toEqual([2, 3, 4, 5, 7]);
+    expect(mistborn.missingExtras).toEqual([]);
+    expect(mistborn.next?.title).toBe("The Bands of Mourning");
+
+    const [stormlight] = buildSeries([
+      book("The Way of Kings", SANDERSON, { progress: 1 }),
+      book("Words of Radiance", SANDERSON, { progress: 1 }),
+      book("Edgedancer", SANDERSON),
+      book("Oathbringer", SANDERSON)
+    ]).groups;
+    expect(stormlight.next?.title).toBe("Oathbringer");
+    expect(stormlight.missingExtras).toEqual([{ index: 3.5, title: "Dawnshard", kind: "Novella" }]);
+  });
+
+  it("offers an extra once the main line is read", () => {
+    const [stormlight] = buildSeries([book("The Way of Kings", SANDERSON, { progress: 1 }), book("Edgedancer", SANDERSON)]).groups;
+    expect(stormlight.next?.title).toBe("Edgedancer");
+    expect(stormlight.finishedCount).toBe(1);
+  });
+});
+
 describe("a series as a real library holds it", () => {
   // Books 1, 2, 5 and 6 of six, the first two each in two formats, and the
   // series named three ways: stated by one file under one name and by another

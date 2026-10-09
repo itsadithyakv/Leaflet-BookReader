@@ -807,6 +807,9 @@ pub fn identify(file_stem: &str, basic: &crate::storage::BasicMetadata) -> Ident
     Some(named) => named.author.or(parsed.author).or_else(|| clean_authors(&basic.authors).filter(|author| tool_author_usable(author))),
     None => clean_authors(&basic.authors).or(parsed.author).or_else(|| from_file_name(file_stem).author)
   };
+  // A file whose maker wrote the title where the author goes names no one,
+  // and a catalogue may then say who did write it.
+  let author = author.filter(|author| name_words(author) != name_words(&title));
 
   Identity { title, author, series, series_index, genres: clean_subjects(&basic.subjects) }
 }
@@ -1188,6 +1191,17 @@ mod tests {
     assert_eq!((identity.title.as_str(), identity.author.as_deref()), ("The Night Ferry", Some("Mara Ellison")));
     let identity = identify("Night Ferry (Mara Ellison) (z-lib.org)", &book(None, &["Unknown"]));
     assert_eq!(identity.author.as_deref(), Some("Mara Ellison"));
+  }
+
+  #[test]
+  fn an_author_that_is_the_title_is_no_one() {
+    // The file says so itself, and its name was made from what it says.
+    let identity = identify("The Night Ferry (The Night Ferry) (z-library.sk, 1lib.sk)", &book(Some("The Night Ferry"), &["The Night Ferry"]));
+    assert_eq!((identity.title.as_str(), identity.author), ("The Night Ferry", None));
+    // What an older version stored of it.
+    assert_eq!(identify_stored("The Night Ferry", Some("the night ferry")).author, None);
+    // A book named for its writer keeps her.
+    assert_eq!(identify_stored("Mara Ellison: A Life", Some("Mara Ellison")).author.as_deref(), Some("Mara Ellison"));
   }
 
   #[test]

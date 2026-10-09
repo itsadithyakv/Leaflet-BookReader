@@ -25,9 +25,10 @@ const MAX_BOOKS: usize = 10_000;
 /// author and genres again (`metadata::normalize`), since a reader cannot
 /// edit them and an older version stored "Title (Author) (z-library.sk, ...)"
 /// and "Brown, Pierce" as they came. Version 3 reads a PDF's own title and
-/// author (`storage/pdf.rs`), which nothing read before.
+/// author (`storage/pdf.rs`), which nothing read before. Version 4 takes
+/// the author away from a book whose file wrote its title there.
 const SERIES_SCAN_KEY: &str = "series_scan_version";
-const SERIES_SCAN_VERSION: &str = "3";
+const SERIES_SCAN_VERSION: &str = "4";
 
 fn clip(value: &str, max: usize) -> String {
   value.trim().chars().take(max).collect::<String>().trim().to_string()
@@ -283,6 +284,13 @@ mod tests {
     // Right already, with nothing new to say: untouched.
     assert_eq!(reread(&stored("Night Ferry", Some("Mara Ellison")), Some(&says(Some("Night Ferry"), &["Mara Ellison"], &[]))), None);
     assert_eq!(reread(&stored("Night Ferry", Some("Mara Ellison")), None), None);
+
+    // A file that wrote its title where the author goes: the book names no one.
+    let titled_twice = stored("Night Ferry", Some("Night Ferry"));
+    assert_eq!(
+      reread(&titled_twice, Some(&says(Some("Night Ferry"), &["Night Ferry"], &[]))),
+      Some(Reread { id: "abc".into(), named: Some(("Night Ferry".into(), None, vec![])), series: None })
+    );
 
     // Genres the book already has stay; a series the reader set stays.
     let mut kept = stored("Night Ferry", Some("Mara Ellison"));

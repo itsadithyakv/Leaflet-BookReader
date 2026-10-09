@@ -360,11 +360,14 @@ impl Database {
   /// Writes a title, author and genres worked out again from the book by
   /// today's rules (`commands::scan_series`). Stamped, unlike the series
   /// above: a device still on the old rules holds the old title under the old
-  /// stamp, and on a tie the merge could keep either.
+  /// stamp, and on a tie the merge could keep either. A book left with no
+  /// author is owed a lookup now, not after the fortnight's wait.
   pub fn retitle(&self, id: &str, title: &str, author: Option<&str>, genres: &[String]) -> Result<()> {
     let genres_json = serde_json::to_string(genres).ok();
     self.conn.execute(
-      "UPDATE books SET title = ?1, author = ?2, genres = ?3, metadata_updated_at = ?4 WHERE id = ?5",
+      "UPDATE books SET title = ?1, author = ?2, genres = ?3, metadata_updated_at = ?4,
+         metadata_checked_at = CASE WHEN ?2 IS NULL THEN NULL ELSE metadata_checked_at END
+       WHERE id = ?5",
       params![title, author, genres_json, now_iso(), id]
     )?;
     Ok(())

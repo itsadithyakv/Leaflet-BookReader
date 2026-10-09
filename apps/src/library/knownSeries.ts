@@ -13,7 +13,28 @@
  * is ignored) and its author's surname is one of `authors`. An entry of several
  * titles is one book published under different names (UK and US editions).
  * Order is the order the series is usually numbered in.
+ *
+ * A long series is often several shorter ones (`parts`: Mistborn's two eras,
+ * a trilogy and its prequels), and has books beside its main line that a
+ * reader may skip (`extras`: a novella between two novels). Both are shown
+ * as such, and an extra is never what is "next" nor counted as missing.
  */
+
+/** A named run of a series' books, from book `from` to the next part (or the end). */
+export type KnownPart = {
+  name: string;
+  from: number;
+  /** Names a file may give this part as if it were the series: "Wax and Wayne, #1" is Mistborn's fourth. */
+  aliases?: string[];
+};
+
+/**
+ * A book beside the main line. `index` is where it is best read (2.5: after
+ * the second book), which is not always the number a shop gives it; `kind`
+ * is the one word shown beside it.
+ */
+export type KnownExtra = { index: number; title: string | string[]; kind: string };
+
 export type KnownSeries = {
   name: string;
   /** Surnames, lower case, as `authorKey` makes them. */
@@ -21,6 +42,8 @@ export type KnownSeries = {
   /** Other names the series goes by, so a book that names it differently joins. */
   aliases?: string[];
   books: Array<string | string[]>;
+  parts?: KnownPart[];
+  extras?: KnownExtra[];
 };
 
 export const KNOWN_SERIES: KnownSeries[] = [
@@ -51,6 +74,10 @@ export const KNOWN_SERIES: KnownSeries[] = [
       "Mockingjay",
       "The Ballad of Songbirds and Snakes",
       "Sunrise on the Reaping"
+    ],
+    parts: [
+      { name: "The trilogy", from: 1 },
+      { name: "Prequels", from: 4 }
     ]
   },
   {
@@ -65,6 +92,10 @@ export const KNOWN_SERIES: KnownSeries[] = [
       "The Last Olympian",
       "The Chalice of the Gods",
       "Wrath of the Triple Goddess"
+    ],
+    parts: [
+      { name: "The original five", from: 1 },
+      { name: "The Senior Year Adventures", from: 6 }
     ]
   },
   {
@@ -131,13 +162,28 @@ export const KNOWN_SERIES: KnownSeries[] = [
       "Shadows of Self",
       "The Bands of Mourning",
       "The Lost Metal"
-    ]
+    ],
+    parts: [
+      { name: "Era One", from: 1, aliases: ["Mistborn Era 1", "Mistborn Era One", "Mistborn: The Original Trilogy"] },
+      {
+        name: "Era Two: Wax and Wayne",
+        from: 4,
+        aliases: ["Wax and Wayne", "Mistborn: Wax and Wayne", "The Mistborn Saga: Wax and Wayne", "Mistborn Era 2", "Mistborn Era Two", "The Alloy Era"]
+      }
+    ],
+    // Shops number it 3.5; it gives away the second era up to its sixth book,
+    // and its writer asks that it be read after that one.
+    extras: [{ index: 6.5, title: ["Mistborn: Secret History", "Secret History"], kind: "Novella" }]
   },
   {
     name: "The Stormlight Archive",
     authors: ["sanderson"],
     aliases: ["Stormlight"],
-    books: ["The Way of Kings", "Words of Radiance", "Oathbringer", "Rhythm of War", "Wind and Truth"]
+    books: ["The Way of Kings", "Words of Radiance", "Oathbringer", "Rhythm of War", "Wind and Truth"],
+    extras: [
+      { index: 2.5, title: "Edgedancer", kind: "Novella" },
+      { index: 3.5, title: "Dawnshard", kind: "Novella" }
+    ]
   },
   {
     name: "The Wheel of Time",
@@ -157,7 +203,8 @@ export const KNOWN_SERIES: KnownSeries[] = [
       "The Gathering Storm",
       "Towers of Midnight",
       "A Memory of Light"
-    ]
+    ],
+    extras: [{ index: 0, title: "New Spring", kind: "Prequel" }]
   },
   {
     name: "The Expanse",
@@ -201,6 +248,11 @@ export const KNOWN_SERIES: KnownSeries[] = [
       "Foundation and Earth",
       "Prelude to Foundation",
       "Forward the Foundation"
+    ],
+    parts: [
+      { name: "The trilogy", from: 1 },
+      { name: "Sequels", from: 4 },
+      { name: "Prequels", from: 6 }
     ]
   },
   {
@@ -226,12 +278,18 @@ export const KNOWN_SERIES: KnownSeries[] = [
       ["The Tower of the Swallow", "The Tower of Swallows"],
       "The Lady of the Lake",
       "Season of Storms"
+    ],
+    parts: [
+      { name: "Short stories", from: 1 },
+      { name: "The saga", from: 3 },
+      { name: "Standalone", from: 8 }
     ]
   },
   {
     name: "The Kingkiller Chronicle",
     authors: ["rothfuss"],
-    books: ["The Name of the Wind", "The Wise Man's Fear"]
+    books: ["The Name of the Wind", "The Wise Man's Fear"],
+    extras: [{ index: 2.5, title: "The Slow Regard of Silent Things", kind: "Novella" }]
   },
   {
     name: "Millennium",
@@ -253,7 +311,8 @@ export const KNOWN_SERIES: KnownSeries[] = [
       "Empire of Storms",
       "Tower of Dawn",
       "Kingdom of Ash"
-    ]
+    ],
+    extras: [{ index: 0.5, title: "The Assassin's Blade", kind: "Prequel" }]
   },
   {
     name: "A Court of Thorns and Roses",
@@ -285,7 +344,11 @@ export const KNOWN_SERIES: KnownSeries[] = [
   {
     name: "Red Rising",
     authors: ["brown"],
-    books: ["Red Rising", "Golden Son", "Morning Star", "Iron Gold", "Dark Age", "Light Bringer"]
+    books: ["Red Rising", "Golden Son", "Morning Star", "Iron Gold", "Dark Age", "Light Bringer"],
+    parts: [
+      { name: "The trilogy", from: 1 },
+      { name: "The second series", from: 4 }
+    ]
   },
   {
     name: "The Maze Runner",
@@ -370,7 +433,8 @@ export const KNOWN_SERIES: KnownSeries[] = [
       "Wolves of the Calla",
       "Song of Susannah",
       "The Dark Tower"
-    ]
+    ],
+    extras: [{ index: 4.5, title: "The Wind Through the Keyhole", kind: "Side story" }]
   },
   {
     name: "A Series of Unfortunate Events",
@@ -418,7 +482,11 @@ export const KNOWN_SERIES: KnownSeries[] = [
   {
     name: "Hyperion Cantos",
     authors: ["simmons"],
-    books: ["Hyperion", "The Fall of Hyperion", "Endymion", "The Rise of Endymion"]
+    books: ["Hyperion", "The Fall of Hyperion", "Endymion", "The Rise of Endymion"],
+    parts: [
+      { name: "Hyperion", from: 1 },
+      { name: "Endymion", from: 3 }
+    ]
   },
   {
     name: "The Murderbot Diaries",

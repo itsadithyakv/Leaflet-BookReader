@@ -1,6 +1,6 @@
 import type { Book } from "@shared/models/book";
 import { isFinished } from "../constants/books";
-import { KNOWN_SERIES, type KnownSeries } from "./knownSeries";
+import { KNOWN_SERIES, type KnownExtra, type KnownPart, type KnownSeries } from "./knownSeries";
 
 /**
  * Series, worked out from the library.
@@ -28,7 +28,12 @@ export type SeriesMember = {
   book: Book;
   /** Its number in the series; `null` when nothing says. */
   index: number | null;
+  /** Beside the main line of a well-known series, and what kind: "Novella". A reader may skip it. */
+  extra?: string;
 };
+
+/** A named run of a series: its books are numbered `from` to `to`. */
+export type SeriesPart = { name: string; from: number; to: number };
 
 export type SeriesGroup = {
   key: string;
@@ -40,11 +45,15 @@ export type SeriesGroup = {
   total: number | null;
   /** Books of the series not in the library: known titles, or gaps in the numbers. */
   missing: Array<{ index: number; title: string | null }>;
-  /** Books read to the end, counting two copies of one book once. */
+  /** The parts a well-known series is made of (two eras, a trilogy and its prequels); empty for most. */
+  parts: SeriesPart[];
+  /** Its books beside the main line that are not in the library. Never counted as missing. */
+  missingExtras: Array<{ index: number; title: string; kind: string }>;
+  /** Books read to the end, counting two copies of one book once, and none of the extras. */
   finishedCount: number;
-  /** How many distinct books of the series are in the library. */
+  /** How many distinct books of the series are in the library, extras apart. */
   ownedCount: number;
-  /** The first book, in order, not yet finished. */
+  /** The first book of the main line, in order, not yet finished; an extra only when the main line is read. */
   next: Book | null;
   /** `next` is untouched and the book before it is finished: the reader is between books. */
   upNext: boolean;
@@ -80,10 +89,17 @@ export const normalizeTitle = (text: string) =>
 
 const stripBrackets = (text: string) => text.replace(/\s*[([{][^)\]}]*[)\]}]\s*/g, " ").replace(/\s+/g, " ").trim();
 
+/**
+ * A file's name cannot hold a colon, and the sites that name files write " _ "
+ * for one: "The Well of Ascension _ book two of Mistborn" is a title and its
+ * subtitle.
+ */
+const withColons = (title: string) => title.replace(/\s+_\s+/g, ": ");
+
 /** The ways one book's title might be compared: whole, before and after a
  * subtitle's colon, and before a " - ". */
 export const titleKeys = (title: string): string[] => {
-  const base = stripBrackets(title);
+  const base = stripBrackets(withColons(title));
   const keys = new Set<string>();
   const add = (value: string) => {
     const key = normalizeTitle(value);
@@ -118,6 +134,8 @@ export const authorKey = (author: string | null | undefined): string | null => {
 
 const KNOWN_BY_KEY = new Map<string, KnownSeries>();
 const KNOWN_ALIAS = new Map<string, string>();
+/** A part's own names: a file that says "Wax and Wayne, #1" means the fourth book of Mistborn. */
+const KNOWN_PART = new Map<string, KnownPart>();
 
 const rawSeriesKey = (name: string) =>
   normalizeTitle(stripBrackets(name))
@@ -129,6 +147,12 @@ for (const known of KNOWN_SERIES) {
   KNOWN_BY_KEY.set(key, known);
   for (const alias of known.aliases ?? []) {
     KNOWN_ALIAS.set(rawSeriesKey(alias), key);
+  }
+  for (const part of known.parts ?? []) {
+    for (const alias of part.aliases ?? []) {
+      KNOWN_ALIAS.set(rawSeriesKey(alias), key);
+      KNOWN_PART.set(rawSeriesKey(alias), part);
+    }
   }
 }
 
@@ -174,7 +198,8 @@ const NOT_A_SERIES = new Set(["book", "bk", "vol", "volume", "part", "pt", "no",
 const named = (name: string) => !NOT_A_SERIES.has(name.trim().toLowerCase().replace(/[.#]+$/, ""));
 
 /** What the title says about its series, if anything. */
-export const seriesFromTitle = (title: string): Guess | null => {
+export const seriesFromTitle = (written: string): Guess | null => {
+  const title = withColons(written);
   let match = BRACKETED.exec(title);
   if (match && sane(toNumber(match[2])) && named(match[1])) {
     return { name: match[1].trim(), index: toNumber(match[2]), strength: "strong" };
@@ -201,12 +226,14 @@ export const seriesFromTitle = (title: string): Guess | null => {
 /** A well-known series this book is in, by its title and author. */
 export const knownSeriesFor = (title: string, author: string | null | undefined): Guess | null => {
   const keys = titleKeys(title);
-  const surname = authorKey(author);
+  // A file whose maker wrote the title where the author goes ("The Well of
+  // Ascension" by "The Well of Ascension") names no one.
+  const surname = keys.includes(normalizeTitle(author ?? "")) ? null : authorKey(author);
   for (const known of KNOWN_SERIES) {
     if (surname ? !known.authors.includes(surname) : false) {
       continue;
     }
-    const position = knownPosition(known, keys);
+    const position = knownIndex(known, keys);
     // With no author, only a title long enough to be unmistakable matches:
     // "Eclipse" alone is not Twilight.
     if (position !== null && (surname || keys[0].split(" ").length >= 3)) {
@@ -236,6 +263,15 @@ const knownPosition = (known: KnownSeries, keys: string[]): number | null => {
   }
   return null;
 };
+
+/** The book beside a known series' main line that a title is, or `null`. */
+const knownExtra = (known: KnownSeries, keys: string[]): KnownExtra | null =>
+  known.extras?.find((extra) => (Array.isArray(extra.title) ? extra.title : [extra.title]).some((title) => keys.includes(normalizeTitle(title)))) ??
+  null;
+
+/** A title's place in a known series: its number in the main line, or where its extra is read. */
+const knownIndex = (known: KnownSeries, keys: string[]): number | null =>
+  knownPosition(known, keys) ?? knownExtra(known, keys)?.index ?? null;
 
 /** The shared start of titles by one author: before a colon, or before " and the ". */
 const PREFIX_STOP = new Set(["complete", "collected", "selected", "best", "stories", "short stories", "novel", "book", "volume", "part", "works"]);
@@ -312,7 +348,27 @@ export const buildSeries = (books: Book[]): LibrarySeries => {
       unplaced.push(book);
       continue;
     }
-    add(seriesKey(guess.name), guess.name, { book, index: guess.index }, guess.strength);
+    // "Wax and Wayne, #1" is the fourth book of Mistborn: a part's number is
+    // counted from the part's first book, unless the title says which it is.
+    const part = KNOWN_PART.get(rawSeriesKey(guess.name));
+    const index =
+      part && guess.index !== null
+        ? knownIndex(KNOWN_BY_KEY.get(seriesKey(guess.name)) as KnownSeries, titleKeys(book.title)) ?? part.from + guess.index - 1
+        : guess.index;
+    add(seriesKey(guess.name), guess.name, { book, index }, guess.strength);
+  }
+
+  // A book whose title is one of a well-known series that is already here
+  // joins it whatever its file says of its author: with The Final Empire on
+  // the shelf, "The Alloy of Law" is that one. Three words or more, so that
+  // "Eclipse" and "New Moon" stay other people's books.
+  for (const book of [...unplaced]) {
+    const keys = titleKeys(book.title).filter((key) => key.split(" ").length >= 3);
+    const known = keys.length > 0 ? KNOWN_SERIES.find((one) => drafts.has(rawSeriesKey(one.name)) && knownIndex(one, keys) !== null) : undefined;
+    if (known) {
+      unplaced.splice(unplaced.indexOf(book), 1);
+      add(rawSeriesKey(known.name), known.name, { book, index: knownIndex(known, keys) }, "strong");
+    }
   }
 
   // Two or more books by one author sharing the start of their titles.
@@ -358,11 +414,16 @@ export const buildSeries = (books: Book[]): LibrarySeries => {
     if (alone && draft.members[0].strength === "weak") {
       continue;
     }
-    const members: SeriesMember[] = draft.members.map(({ book, index }) => ({
-      book,
-      // A well-known series numbers the books that did not say.
-      index: index ?? (known ? knownPosition(known, titleKeys(book.title)) : null)
-    }));
+    const members: SeriesMember[] = draft.members.map(({ book, index }) => {
+      const keys = titleKeys(book.title);
+      // A book beside the main line is read where the list says, whatever
+      // number its file gives it; a well-known series numbers the rest that
+      // did not say.
+      const extra = known ? knownExtra(known, keys) : null;
+      return extra
+        ? { book, index: extra.index, extra: extra.kind }
+        : { book, index: index ?? (known ? knownPosition(known, keys) : null) };
+    });
     members.sort(
       (a, b) =>
         (a.index ?? Number.POSITIVE_INFINITY) - (b.index ?? Number.POSITIVE_INFINITY) ||
@@ -384,7 +445,13 @@ export const buildSeries = (books: Book[]): LibrarySeries => {
     if (ownedSlots.size < 2) {
       continue;
     }
-    const nextIndex = members.findIndex((member) => !finishedSlots.has(slot(member)));
+    // The counts are of the main line: a novella read is not a seventh of the series.
+    const extraSlots = new Set(members.filter((member) => member.extra).map(slot));
+    const mainOnly = (slots: Set<string>) => [...slots].filter((one) => !extraSlots.has(one)).length;
+    // What is next is the main line's next book; an extra only once that is read.
+    const unread = (member: SeriesMember) => !finishedSlots.has(slot(member));
+    const nextMain = members.findIndex((member) => unread(member) && !member.extra);
+    const nextIndex = nextMain >= 0 ? nextMain : members.findIndex(unread);
     const next = nextIndex >= 0 ? members[nextIndex].book : null;
 
     const owned = new Set(members.map((member) => member.index).filter((index): index is number => index !== null));
@@ -417,6 +484,15 @@ export const buildSeries = (books: Book[]): LibrarySeries => {
           ) ?? null
         : null;
 
+    const parts: SeriesPart[] = (known?.parts ?? []).map((part, at, all) => ({
+      name: part.name,
+      from: part.from,
+      to: (all[at + 1]?.from ?? known!.books.length + 1) - 1
+    }));
+    const missingExtras = (known?.extras ?? [])
+      .filter((extra) => !owned.has(extra.index))
+      .map((extra) => ({ index: extra.index, title: Array.isArray(extra.title) ? extra.title[0] : extra.title, kind: extra.kind }));
+
     groups.push({
       key,
       name,
@@ -424,8 +500,10 @@ export const buildSeries = (books: Book[]): LibrarySeries => {
       members,
       total: known ? known.books.length : null,
       missing,
-      finishedCount: finishedSlots.size,
-      ownedCount: ownedSlots.size,
+      parts,
+      missingExtras,
+      finishedCount: mainOnly(finishedSlots),
+      ownedCount: mainOnly(ownedSlots),
       next,
       upNext:
         missingNext === null &&
