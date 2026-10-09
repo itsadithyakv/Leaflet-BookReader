@@ -84,6 +84,7 @@ export const ReaderPage = ({ reader }: { reader: ReaderScope }) => {
                   text={selection.text}
                   onHighlight={(color) => highlightSelection(color)}
                   onNote={() => highlightSelection("yellow", true)}
+                  onRemoveHighlight={reader.highlightsUnderSelection(selection.cfi).length > 0 ? reader.removeHighlightsUnder : undefined}
                   onCopy={copySelection}
                   onDismiss={clearSelection}
                   onLookUp={() => {
@@ -152,7 +153,13 @@ export const ReaderPage = ({ reader }: { reader: ReaderScope }) => {
                 onRecolor={(color) => void annotations.update(opened.id, { color })}
                 onRemove={() => {
                   setNotesFocus(null);
-                  void annotations.remove(opened.id);
+                  // And any other highlight of exactly these words that has no
+                  // note of its own: laid on this one by an older version,
+                  // it would take this one's place on the page as if nothing
+                  // had been removed.
+                  highlights
+                    .filter((item) => item.id === opened.id || (item.cfi === opened.cfi && !item.note?.trim()))
+                    .forEach((item) => void annotations.remove(item.id));
                 }}
                 onCopy={() => copyText(opened.text ?? "")}
                 onShare={() => openQuoteCard({ text: opened.text ?? "", title: book.title, author: book.author })}

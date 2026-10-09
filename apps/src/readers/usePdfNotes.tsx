@@ -5,7 +5,7 @@ import { HighlightCard } from "./HighlightCard";
 import { HIGHLIGHT_COLORS } from "./highlightColors";
 import { LookupCard } from "./LookupCard";
 import type { Box } from "./lookupPlacement";
-import { comparePlaces, decodePlace, encodePlace, highlightAt, lineRects, selectedWords, toPageRects } from "./pdfHighlights";
+import { comparePlaces, decodePlace, encodePlace, highlightAt, highlightsUnderRects, lineRects, selectedWords, toPageRects } from "./pdfHighlights";
 import type { PageRect } from "./pdfText";
 import { SelectionBar } from "./SelectionBar";
 import { useAnnotations } from "./useAnnotations";
@@ -212,12 +212,31 @@ export const usePdfNotes = ({ bookId, enabled, stageRef, labelOf, language, prog
     };
   }, [enabled, stageRef]);
 
+  /** The highlights the selected words lie over, and the one that holds them all already. */
+  const underPicked = () => highlightsUnderRects(picked ? byPageRef.current.get(picked.page) ?? NONE : NONE, picked?.rects ?? []);
+
   const highlight = (color: string, withNote = false) => {
     if (!picked) {
       return;
     }
     const made = picked;
+    const { within } = underPicked();
     clearSelection();
+    // Highlighted already: that highlight, in the colour asked for. Nothing is laid on it.
+    if (within) {
+      const had = annotations.highlights.find((item) => item.id === within.id);
+      if (withNote) {
+        setOpened({ id: within.id, writing: true });
+      } else if ((had?.color ?? "yellow") === color) {
+        toast("Already highlighted.");
+      } else {
+        void annotations.update(within.id, { color }).then(
+          () => toast("Colour changed."),
+          () => toast("Couldn't save the highlight.")
+        );
+      }
+      return;
+    }
     void annotations
       .addHighlight(encodePlace({ page: made.page, rects: made.rects }), made.text, labelOf(made.page), color)
       .then((saved) => {
@@ -228,6 +247,19 @@ export const usePdfNotes = ({ bookId, enabled, stageRef, labelOf, language, prog
         }
       })
       .catch(() => toast("Couldn't save the highlight."));
+  };
+
+  /** The selection bar's "Remove highlight": every highlight under the selected words. */
+  const removeUnderPicked = () => {
+    const ids = underPicked().over.map((item) => item.id);
+    clearSelection();
+    if (ids.length === 0) {
+      return;
+    }
+    void Promise.all(ids.map((id) => annotations.remove(id))).then(
+      () => toast(ids.length === 1 ? "Highlight removed." : `${ids.length} highlights removed.`),
+      () => toast("Couldn't remove the highlight.")
+    );
   };
 
   const copy = (text: string) => {
@@ -276,6 +308,7 @@ export const usePdfNotes = ({ bookId, enabled, stageRef, labelOf, language, prog
           text={picked.text}
           onHighlight={(color) => highlight(color)}
           onNote={() => highlight("yellow", true)}
+          onRemoveHighlight={underPicked().over.length > 0 ? removeUnderPicked : undefined}
           onCopy={() => {
             copy(picked.text);
             clearSelection();
@@ -305,7 +338,11 @@ export const usePdfNotes = ({ bookId, enabled, stageRef, labelOf, language, prog
           onRecolor={(color) => void annotations.update(openedItem.id, { color })}
           onRemove={() => {
             setOpened(null);
-            void annotations.remove(openedItem.id);
+            // And any other highlight of exactly this place with no note of
+            // its own, laid on this one by an older version.
+            annotations.highlights
+              .filter((item) => item.id === openedItem.id || (item.cfi === openedItem.cfi && !item.note?.trim()))
+              .forEach((item) => void annotations.remove(item.id));
           }}
           onCopy={() => copy(openedItem.text ?? "")}
           onShare={onShare ? () => onShare(openedItem.text ?? "") : undefined}

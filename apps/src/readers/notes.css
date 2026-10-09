@@ -154,37 +154,29 @@
   white-space: nowrap;
 }
 
-/* One highlight: its colour down the side, the book's words, the reader's under them. */
+/* One highlight, in its own colour all over: the book's words, the reader's under them. */
 .reader-notes-item {
   position: relative;
+  border: 1px solid color-mix(in srgb, var(--note-colour) 36%, transparent);
   border-radius: 10px;
-  padding: 8px 8px 6px 16px;
+  background: color-mix(in srgb, var(--note-colour) 14%, var(--reader-pill));
+  padding: 8px 8px 6px 11px;
   transition: background 0.15s ease;
 }
 
 .reader-notes-item + .reader-notes-item {
-  margin-top: 4px;
-}
-
-.reader-notes-item::before {
-  position: absolute;
-  top: 11px;
-  bottom: 11px;
-  left: 4px;
-  width: 3px;
-  border-radius: 3px;
-  background: var(--note-colour);
-  content: "";
+  margin-top: 6px;
 }
 
 .reader-notes-item:hover,
 .reader-notes-item:focus-within {
-  background: color-mix(in srgb, var(--reader-pill) 70%, transparent);
+  background: color-mix(in srgb, var(--note-colour) 21%, var(--reader-pill));
 }
 
 /* The one the panel was opened on. */
 .reader-notes-item.is-focus {
-  background: color-mix(in srgb, var(--note-colour) 12%, var(--reader-pill));
+  border-color: color-mix(in srgb, var(--note-colour) 75%, transparent);
+  background: color-mix(in srgb, var(--note-colour) 26%, var(--reader-pill));
 }
 
 .reader-notes-quote,
@@ -216,7 +208,7 @@
   width: 100%;
   margin-top: 7px;
   border-radius: 8px;
-  background: color-mix(in srgb, var(--note-colour) 13%, var(--reader-pill));
+  background: color-mix(in srgb, var(--reader-text) 6%, transparent);
   padding: 7px 10px;
   font-size: 12.5px;
   line-height: 1.5;
@@ -228,7 +220,7 @@
 }
 
 .reader-notes-note:hover {
-  background: color-mix(in srgb, var(--note-colour) 20%, var(--reader-pill));
+  background: color-mix(in srgb, var(--reader-text) 11%, transparent);
 }
 
 .reader-notes-edit {
@@ -422,16 +414,17 @@
   gap: 6px;
 }
 
-/* The words highlighted, with their colour down the side; a long passage scrolls here. */
+/* The words highlighted, on their colour; a long passage scrolls here. */
 .reader-note-quote {
   min-height: 1.55em;
   flex: 0 1 auto;
   margin: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  border-left: 3px solid var(--note-colour);
-  padding-left: 11px;
-  max-height: 8.6em;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--note-colour) 24%, transparent);
+  padding: 8px 11px;
+  max-height: 9.4em;
   scrollbar-width: thin;
   scrollbar-color: var(--reader-border) transparent;
 }

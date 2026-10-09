@@ -357,9 +357,16 @@ const BookView = ({
                       const about = snippet(item.text || item.note);
                       const fromKindle = isKindlePlace(item.cfi);
                       return (
-                        <li key={item.id} className="flex gap-3 rounded-xl border border-outline-variant/30 bg-surface-container-low/70 p-4">
-                          <span className="w-1 shrink-0 rounded-full" style={{ background: color.swatch }} aria-hidden="true" />
-                          <div className="min-w-0 flex-1">
+                        <li
+                          key={item.id}
+                          className="rounded-xl border p-4"
+                          // The whole card in the highlight's colour, faint enough to read on.
+                          style={{
+                            background: `color-mix(in srgb, ${color.swatch} 16%, rgb(var(--color-surface-low)))`,
+                            borderColor: `color-mix(in srgb, ${color.swatch} 42%, transparent)`
+                          }}
+                        >
+                          <div className="min-w-0">
                             <span className="sr-only">{color.name} highlight</span>
                             <blockquote className="whitespace-pre-wrap break-words text-sm leading-relaxed text-on-surface">
                               {item.text}

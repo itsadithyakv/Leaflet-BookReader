@@ -5,6 +5,8 @@ type SelectionBarProps = {
   text: string;
   onHighlight: (color: string) => void;
   onNote: () => void;
+  /** Takes off the highlight the selection lies over. The button is there only when this is. */
+  onRemoveHighlight?: () => void;
   onCopy: () => void;
   onDismiss: () => void;
   /** Looks the selection up (its meaning, a summary). The button is there only when this is. */
@@ -29,6 +31,7 @@ export const SelectionBar = ({
   text,
   onHighlight,
   onNote,
+  onRemoveHighlight,
   onCopy,
   onDismiss,
   onLookUp,
@@ -57,6 +60,11 @@ export const SelectionBar = ({
     <button type="button" className="reader-mini-control" onClick={onNote} title="Highlight and add a note">
       <UiIcon name="note" size={16} />
     </button>
+    {onRemoveHighlight && (
+      <button type="button" className="reader-mini-control" onClick={onRemoveHighlight} title="Remove highlight" aria-label="Remove highlight">
+        <UiIcon name="trash" size={16} />
+      </button>
+    )}
     <button type="button" className="reader-mini-control" onClick={onCopy} title="Copy">
       <UiIcon name="copy" size={15} />
     </button>

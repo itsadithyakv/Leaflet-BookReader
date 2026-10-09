@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { orderHighlights } from "../components/highlights/highlightsView";
 import type { Annotation } from "../services/annotationService";
-import { MAX_RECTS, comparePlaces, decodePlace, encodePlace, highlightAt, isPdfPlace, lineRects, pagePlace, selectedWords, toPageRects } from "./pdfHighlights";
+import { MAX_RECTS, comparePlaces, decodePlace, encodePlace, highlightAt, highlightsUnderRects, isPdfPlace, lineRects, pagePlace, selectedWords, toPageRects } from "./pdfHighlights";
 
 describe("a place in a PDF, as it is stored", () => {
   it("is the page and what the highlight covers, and reads back the same", () => {
@@ -147,5 +147,29 @@ describe("a selection's words", () => {
 
   it("keep a hyphen that is the word's own", () => {
     expect(selectedWords("a well-\nKnown name and a self-made one")).toBe("a well- Known name and a self-made one");
+  });
+});
+
+describe("a selection over words highlighted already", () => {
+  const line = (top: number, left = 0.1, width = 0.8) => ({ left, top, width, height: 0.02 });
+  const passage = { id: "passage", rects: [line(0.2), line(0.225), line(0.25, 0.1, 0.4)] };
+  const other = { id: "other", rects: [line(0.6)] };
+
+  it("is the highlight it lies inside", () => {
+    const under = highlightsUnderRects([passage, other], [line(0.225, 0.3, 0.2)]);
+    expect([under.over.map((one) => one.id), under.within?.id]).toEqual([["passage"], "passage"]);
+    // The same words selected again, a hair off.
+    expect(highlightsUnderRects([passage], [line(0.2005), line(0.2255), line(0.2505, 0.1, 0.398)]).within?.id).toBe("passage");
+  });
+
+  it("lies over one it runs past the end of, without being inside it", () => {
+    const under = highlightsUnderRects([passage, other], [line(0.25, 0.3, 0.5), line(0.275)]);
+    expect([under.over.map((one) => one.id), under.within]).toEqual([["passage"], null]);
+  });
+
+  it("is over nothing on the next line, whose edge only touches", () => {
+    expect(highlightsUnderRects([passage], [line(0.268)]).over).toEqual([]);
+    expect(highlightsUnderRects([passage, other], [line(0.4)])).toEqual({ over: [], within: null });
+    expect(highlightsUnderRects([passage], [])).toEqual({ over: [], within: null });
   });
 });

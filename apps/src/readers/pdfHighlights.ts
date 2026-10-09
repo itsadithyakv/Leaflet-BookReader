@@ -183,6 +183,34 @@ export const highlightAt = <T extends { rects: PageRect[] }>(highlights: T[], x:
   return found;
 };
 
+const areaOf = (rect: PageRect) => rect.width * rect.height;
+const shared = (a: PageRect, b: PageRect) =>
+  Math.max(0, Math.min(a.left + a.width, b.left + b.width) - Math.max(a.left, b.left)) *
+  Math.max(0, Math.min(a.top + a.height, b.top + b.height) - Math.max(a.top, b.top));
+/** Two lines of text nearly touch: less than this share of the smaller rectangle is the line above's edge, not words in common. */
+const SHARED_WORDS = 0.3;
+/** A selection made again over the same words is never to the pixel the same: this much of each of its lines is "all of it". */
+const COVERED = 0.8;
+
+/**
+ * The highlights of a page that some selected words lie over, and the one
+ * that covers all of them already. Highlighting those again laid a second
+ * highlight on the first (see readers/highlightOverlap.ts, which is this for
+ * a book of text).
+ */
+export const highlightsUnderRects = <T extends { rects: PageRect[] }>(highlights: readonly T[], rects: readonly PageRect[]): { over: T[]; within: T | null } => {
+  const over = highlights.filter((highlight) =>
+    highlight.rects.some((theirs) => rects.some((mine) => shared(mine, theirs) >= SHARED_WORDS * Math.min(areaOf(mine), areaOf(theirs)) && shared(mine, theirs) > 0))
+  );
+  const within =
+    rects.length > 0
+      ? over.find((highlight) =>
+          rects.every((mine) => highlight.rects.reduce((sum, theirs) => sum + shared(mine, theirs), 0) >= COVERED * areaOf(mine))
+        ) ?? null
+      : null;
+  return { over, within };
+};
+
 /** A selection's words as a highlight keeps them: one line, hyphens at line ends joined. */
 export const selectedWords = (text: string) =>
   text

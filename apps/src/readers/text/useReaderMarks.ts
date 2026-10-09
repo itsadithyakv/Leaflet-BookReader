@@ -5,6 +5,7 @@ import type { SearchHit } from "../searchBook";
 import { HIGHLIGHT_COLORS } from "../highlightColors";
 import { BAR_GAP, placeBar, selectedTextBox } from "../lookupPlacement";
 import { planHighlightDraws } from "../highlightDraws";
+import { highlightsUnder, joinNotes, type Under } from "../highlightOverlap";
 import { orderHighlights } from "../../components/highlights/highlightsView";
 import { isKindlePlace } from "../../library/kindleClippings";
 import type { Later, WithAnnotations, WithCover, WithHold, WithOutlook } from "./scope";
@@ -79,25 +80,125 @@ export const useReaderMarks = (reader: WithOutlook & Later<"annotations" | "orde
     return chapterLabel || null;
   };
 
+  /** A place's words on the page, as a range in their chapter's document; null when they are not on it. */
+  const rangeOf = (cfi: string): Range | null => {
+    try {
+      // From the chapter's own document, wherever it is: the rendition's
+      // `getRange` knows only the chapters it counts as in view, and words
+      // can be selected in one that is drawn just past the window's edge.
+      const section = (new EpubCFI(cfi) as any).spinePos as number;
+      for (const contents of renditionRef.current?.getContents?.() ?? []) {
+        const range = contents?.sectionIndex === section ? (contents.range(cfi) as Range | null | undefined) : null;
+        if (range) {
+          return range;
+        }
+      }
+    } catch {
+      // A place from another edition of the book: not on the page.
+    }
+    return null;
+  };
+
+  /**
+   * The highlights some selected words lie over (readers/highlightOverlap.ts),
+   * with the selection's own range; null when the selection is not on the
+   * page. Only the highlights of the selection's own chapter are looked at.
+   */
+  const underSelection = (cfi: string): (Under & { picked: Range }) | null => {
+    const picked = rangeOf(cfi);
+    if (!picked) {
+      return null;
+    }
+    const chapter = cfi.slice(0, cfi.indexOf("!") + 1);
+    const laid = reader.annotations.highlights
+      .filter((item) => item.cfi.startsWith(chapter) && !isKindlePlace(item.cfi))
+      .flatMap((item) => {
+        const range = rangeOf(item.cfi);
+        return range ? [{ id: item.id, range }] : [];
+      });
+    return { picked, ...highlightsUnder(picked, laid) };
+  };
+
+  /** The highlights under some selected words: the selection bar offers to remove them. */
+  const highlightsUnderSelection = (cfi: string) => underSelection(cfi)?.over.map((one) => one.id) ?? [];
+
+  const openToWrite = (id: string) => {
+    // Its card opens where it is, ready to be written in.
+    setBookmarkPanelOpen(false);
+    setNotesWrite(true);
+    setNotesFocus(id);
+  };
+
   const highlightSelection = (color: string, withNote = false) => {
     if (!selection) {
       return;
     }
     const picked = selection;
+    // Read before the selection is let go: nothing is laid on a highlight that is there.
+    const under = underSelection(picked.cfi);
     clearSelection();
+    const failed = () => showFocusToast("Couldn't save the highlight.");
+
+    // Inside a highlight already: that highlight, in the colour asked for.
+    if (under?.within) {
+      const had = reader.annotations.highlights.find((item) => item.id === under.within?.id);
+      if (withNote) {
+        openToWrite(under.within.id);
+      } else if ((had?.color ?? "yellow") === color) {
+        showFocusToast("Already highlighted.");
+      } else {
+        void reader.annotations.update(under.within.id, { color }).then(() => showFocusToast("Colour changed."), failed);
+      }
+      return;
+    }
+
+    // Running past a highlight's end: the highlights it touches become one,
+    // over all their words, with their notes. The new one is saved first, so
+    // that nothing is lost if it will not save.
+    let place = picked;
+    const joined = under && under.over.length > 0 ? reader.annotations.highlights.filter((item) => under.over.some((one) => one.id === item.id)) : [];
+    if (under && joined.length > 0) {
+      const contents = (renditionRef.current?.getContents?.() ?? []).find((one: any) => one?.document === under.whole.startContainer.ownerDocument);
+      try {
+        const cfi = contents?.cfiFromRange?.(under.whole) as string | undefined;
+        const text = under.whole.toString().replace(/\s+/g, " ").trim();
+        if (cfi && text) {
+          place = { cfi, text };
+        }
+      } catch {
+        // The selection alone, then, beside what is there.
+      }
+    }
+    const grown = place !== picked;
     void reader.annotations
-      .addHighlight(picked.cfi, picked.text, selectionChapter(), color)
-      .then((saved) => {
+      .addHighlight(place.cfi, place.text, selectionChapter(), color, grown ? joinNotes(joined.map((item) => item.note)) : null)
+      .then(async (saved) => {
+        if (grown) {
+          await Promise.all(joined.map((item) => reader.annotations.remove(item.id).catch(() => undefined)));
+        }
         if (withNote) {
-          // Its card opens where it is, ready to be written in.
-          setBookmarkPanelOpen(false);
-          setNotesWrite(true);
-          setNotesFocus(saved.id);
+          openToWrite(saved.id);
         } else {
           showFocusToast("Highlighted.");
         }
       })
-      .catch(() => showFocusToast("Couldn't save the highlight."));
+      .catch(failed);
+  };
+
+  /** Takes the highlights under the selection off: the selection bar's "Remove highlight". */
+  const removeHighlightsUnder = () => {
+    if (!selection) {
+      return;
+    }
+    const ids = highlightsUnderSelection(selection.cfi);
+    clearSelection();
+    if (ids.length === 0) {
+      return;
+    }
+    void Promise.all(ids.map((id) => reader.annotations.remove(id))).then(
+      () => showFocusToast(ids.length === 1 ? "Highlight removed." : `${ids.length} highlights removed.`),
+      () => showFocusToast("Couldn't remove the highlight.")
+    );
   };
 
   const copySelection = () => {
@@ -238,6 +339,7 @@ export const useReaderMarks = (reader: WithOutlook & Later<"annotations" | "orde
     setNotesWrite, copyText, highlightBox, searchOpen,
     setSearchOpen, searchSeed, closeSearch, setLookUpCfi, addBookmarkRef, selectionRef, clearSelectionRef,
     selectionChangedRef, addBookmark, appliedHighlightsRef, clearSelection, selectionChapter, highlightSelection,
+    highlightsUnderSelection, removeHighlightsUnder,
     copySelection, lookUpShowing, searchBookFor, exportHighlights, searchMarkRef, markSearchHit, openSearchHit, openBookmark
   };
 };
