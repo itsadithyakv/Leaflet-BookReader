@@ -5,7 +5,8 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
-  type ReactElement
+  type ReactElement,
+  type ReactNode
 } from "react";
 import { UiIcon } from "../components/UiIcon";
 import { accountService } from "../services/accountService";
@@ -40,6 +41,12 @@ type LookupCardProps = {
    * that off in Settings); without it nothing is kept.
    */
   place?: LookupPlace | null;
+  /**
+   * What the book itself says of the term (readers/people/TermInBook.tsx),
+   * shown when no dictionary knows it: a word the book made up means what
+   * the book says it means.
+   */
+  inBook?: ReactNode;
 };
 
 type State =
@@ -81,7 +88,7 @@ const Entries = ({ entries }: { entries: LookupEntry[] }) => (
  * A dialog: focus moves in and stays in, and Escape or a click anywhere else
  * closes it and puts focus back where it was.
  */
-export const LookupCard = ({ term, language, onClose, avoid, place: wordPlace }: LookupCardProps) => {
+export const LookupCard = ({ term, language, onClose, avoid, place: wordPlace, inBook }: LookupCardProps) => {
   const shown = lookupTerm(term);
   const [state, setState] = useState<State>({ status: shown ? "loading" : "refused" });
   const [attempt, setAttempt] = useState(0);
@@ -380,21 +387,23 @@ export const LookupCard = ({ term, language, onClose, avoid, place: wordPlace }:
           </div>
         )}
 
+        {result?.sample && sections.length > 0 && (
+          <p className="reader-lookup-sample reader-border reader-muted">Sample answer. The browser preview looks nothing up.</p>
+        )}
+        {/* Not a word a dictionary has: what it is in this book, ahead of anything else found. */}
+        {result && !result.meaning && inBook}
+        {sections}
+        {/* After what the book says of it, when it says anything. */}
         {result && sections.length === 0 && (
           <div className="reader-lookup-state">
             <p className="reader-lookup-text">
-              Nothing found for “{result.term}” in Wiktionary or Wikipedia.
+              {inBook ? "Not a word in Wiktionary or Wikipedia." : `Nothing found for “${result.term}” in Wiktionary or Wikipedia.`}
             </p>
             <button type="button" className="reader-notes-action" onClick={() => open(webSearchUrl(result.term))}>
               Search the web
             </button>
           </div>
         )}
-
-        {result?.sample && sections.length > 0 && (
-          <p className="reader-lookup-sample reader-border reader-muted">Sample answer. The browser preview looks nothing up.</p>
-        )}
-        {sections}
 
         {result && result.missed.length > 0 && (
           <p className="reader-lookup-missed reader-muted">
@@ -431,8 +440,8 @@ export const LookupCard = ({ term, language, onClose, avoid, place: wordPlace }:
         </div>
         {/* Over the answer's last lines, not under them: the card keeps its size. */}
         <p id={noteId} className="reader-lookup-note reader-panel reader-border" role="note" hidden={!noteOpen}>
-          Only the words you selected are sent to Wiktionary and Wikipedia, and only when you press Look up. Nothing
-          about you or your book goes with them.
+          Only the words you selected are sent to Wiktionary and Wikipedia, and only when you look them up (Look up,
+          or a double-click on a word). Nothing about you or your book goes with them.
         </p>
         <button
           type="button"

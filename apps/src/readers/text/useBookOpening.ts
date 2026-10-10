@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { isDoubleClickedWord, lookUpOnDoubleClick } from "../words/wordPrefs";
 import { isTauri } from "@tauri-apps/api/core";
 import ePub from "epubjs";
 import { bookService } from "../../services/bookService";
@@ -54,6 +55,8 @@ export const useBookOpening = (reader: WithCover) => {
     storyEndInView, storyEndWasBelowRef, storyGapsRef, tocLabelsRef, tocPlacesRef, tocSpineStartsRef, tocWithinRef,
     typeChoiceRef, updateBookProgress, updateOutlookRef, viewerRef
   } = reader;
+  /** When a word in the book was last double-clicked: the selection that follows is that word, and is looked up. */
+  const doubleClickedAtRef = useRef(0);
   // For a book opened at a match of the library's search (below, where the saved place is restored).
   const { markSearchHit, openAt, openedAtPlaceRef, searchBookFor, soughtRef } = reader;
   const relocateHandlerRef =useRef<((location: { start?: { percentage?: number } }) => void) | null>(null);
@@ -1126,6 +1129,12 @@ export const useBookOpening = (reader: WithCover) => {
             // A note and the selection bar share a place: one at a time.
             closeNoteRef.current();
             setSelection({ cfi: cfiRange, text });
+            // A word double-clicked is looked up without the button being
+            // pressed (Settings, "Look a word up when I double-click it").
+            if (lookUpOnDoubleClick() && isDoubleClickedWord(text, doubleClickedAtRef.current)) {
+              doubleClickedAtRef.current = 0;
+              reader.setLookUpCfi(cfiRange);
+            }
           }
         });
         const bindChromeReveal = () => {
@@ -1139,6 +1148,10 @@ export const useBookOpening = (reader: WithCover) => {
               lastHandsOnAtRef.current = Date.now();
               markReadingActivity();
             };
+            // When a word was last double-clicked: the selection that follows is that word.
+            doc.addEventListener("dblclick", () => {
+              doubleClickedAtRef.current = Date.now();
+            });
             let pressedAt = 0;
             doc.addEventListener(
               "pointerdown",

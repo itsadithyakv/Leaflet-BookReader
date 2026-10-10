@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useWordsSwitch } from "./wordPrefs";
+import { useLookUpOnDoubleClick, useWordsSwitch } from "./wordPrefs";
 
 type WordsSettingProps = {
   /** The settings page's own switch drawing. */
@@ -12,6 +12,7 @@ type WordsSettingProps = {
  */
 export const WordsSetting = ({ renderToggle }: WordsSettingProps) => {
   const [on, setOn] = useWordsSwitch();
+  const [onDouble, setOnDouble] = useLookUpOnDoubleClick();
   return (
     <div className="paper-surface rounded-xl p-5">
       <p className="text-xs uppercase tracking-widest text-on-surface-variant">Looking words up</p>
@@ -31,6 +32,17 @@ export const WordsSetting = ({ renderToggle }: WordsSettingProps) => {
           </span>
         </span>
         {renderToggle(on)}
+      </button>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={onDouble}
+        className="inset-field mt-3 flex w-full items-center justify-between gap-3 px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
+        title="The word is sent to Wiktionary and Wikipedia, as it is when you press Look up. A word no dictionary has is shown as the book uses it."
+        onClick={() => setOnDouble(!onDouble)}
+      >
+        <span className="text-left">Look a word up when I double-click it</span>
+        {renderToggle(onDouble)}
       </button>
     </div>
   );

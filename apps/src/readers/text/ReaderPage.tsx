@@ -75,6 +75,7 @@ export const ReaderPage = ({ reader }: { reader: ReaderScope }) => {
                   language={(bookRef.current as any)?.packaging?.metadata?.language}
                   avoid={() => selectedTextBox(renditionRef.current?.getContents?.() ?? [])}
                   place={{ bookId: book.id, cfi: selection.cfi, chapter: selectionChapter(), progress: lastCfiProgressRef.current ?? book.progress ?? 0 }}
+                  inBook={people.inBook(selection.text, selection.cfi)}
                   onClose={() => setLookUpCfi(null)}
                 />
               )}

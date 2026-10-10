@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { isDoubleClickedWord, lookUpOnDoubleClick } from "./words/wordPrefs";
 import { orderHighlights } from "../components/highlights/highlightsView";
 import type { Annotation } from "../services/annotationService";
 import { HighlightCard } from "./HighlightCard";
@@ -124,6 +125,17 @@ export const usePdfNotes = ({ bookId, enabled, stageRef, labelOf, language, prog
       }
       const around = range.getBoundingClientRect();
       setPicked({ page, rects, text, box: { left: around.left, right: around.right, top: around.top, bottom: around.bottom } });
+      // A word double-clicked is looked up without the button being pressed.
+      if (lookUpOnDoubleClick() && isDoubleClickedWord(text, doubleClickedAt)) {
+        doubleClickedAt = 0;
+        setLookUp(true);
+      }
+    };
+    let doubleClickedAt = 0;
+    const onDouble = () => {
+      doubleClickedAt = Date.now();
+      // The second press's own `pointerup` came before this: read again.
+      soon();
     };
     const soon = () => window.setTimeout(read, 0);
     const onKeyUp = (event: KeyboardEvent) => {
@@ -140,9 +152,11 @@ export const usePdfNotes = ({ bookId, enabled, stageRef, labelOf, language, prog
       }
     };
     document.addEventListener("pointerup", soon);
+    document.addEventListener("dblclick", onDouble);
     document.addEventListener("keyup", onKeyUp);
     document.addEventListener("selectionchange", onChange);
     return () => {
+      document.removeEventListener("dblclick", onDouble);
       document.removeEventListener("pointerup", soon);
       document.removeEventListener("keyup", onKeyUp);
       document.removeEventListener("selectionchange", onChange);

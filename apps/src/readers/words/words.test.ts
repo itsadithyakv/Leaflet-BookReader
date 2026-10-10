@@ -6,6 +6,7 @@ import { pinnedNotes } from "../../pip/furnish";
 import type { LookupResult } from "../../services/lookupService";
 import { entriesOf, isPeopleRow } from "../people/rows";
 import { keepable } from "./keep";
+import { DOUBLE_CLICK_MS, isDoubleClickedWord } from "./wordPrefs";
 import { MAX_MEANING, fromRow, isWordRow, languageKey, recorded, reviewed, wordId, wordsOf, type WordInput, type WordRow } from "./rows";
 
 const NOW = "2026-10-04T10:00:00Z";
@@ -211,5 +212,19 @@ describe("what a list of annotations can carry", () => {
     for (const kind of ["word", "person", "person.note", "person.link", "person.group", "something-newer"]) {
       expect(isAnnotation({ ...base, kind }), kind).toBe(false);
     }
+  });
+});
+
+describe("a word picked by a double-click", () => {
+  it("is one word, selected just after the double-click", () => {
+    const at = 1_000_000;
+    expect(isDoubleClickedWord("shelldry", at, at + 260)).toBe(true);
+    expect(isDoubleClickedWord(" Kelsier ", at, at + 260)).toBe(true);
+    expect(isDoubleClickedWord("mother-in-law", at, at + 260)).toBe(true);
+    // A phrase dragged over, a mark of punctuation, and a selection made long after.
+    expect(isDoubleClickedWord("a game of shelldry", at, at + 260)).toBe(false);
+    expect(isDoubleClickedWord("—", at, at + 260)).toBe(false);
+    expect(isDoubleClickedWord("shelldry", at, at + DOUBLE_CLICK_MS)).toBe(false);
+    expect(isDoubleClickedWord("shelldry", 0, at)).toBe(false);
   });
 });
