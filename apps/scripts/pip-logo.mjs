@@ -8,10 +8,10 @@
 //   pip.svg                       the same as vectors
 //   pip-tile-40.png ... -1280.png the logo on the cream tile, for places that
 //   pip-tile.svg                  need a square badge with a background
-//   pip-face-16.png, -18.png      the app icon: Pip's face alone, drawn twice
+//   pip-face-16.png, -18.png      Pip's face alone, drawn twice
 //   pip-face-512.png, pip-face.svg  the same, large and as vectors
-// and apps/public/favicon.png (the face). The Windows icons are made from the
-// two faces by src-tauri/msix/windows-icons.py: run that afterwards.
+// The face was the app icon until October 2026. The icon is now a green book, drawn
+// in src-tauri/msix/windows-icons.py, which also writes the favicon.
 //
 // The logo used to be Pip standing, the same sprite the app shows idle, on a
 // cream tile. On the taskbar that read as a small figure in a box. This one is
@@ -269,5 +269,4 @@ for (const side of [16, 18]) {
 }
 writePng(path.join(assets, "pip-face-512.png"), scaled(faceArt(16), 16, 32), 512, 512);
 fs.writeFileSync(path.join(assets, "pip-face.svg"), toSvg(faceArt(16), 16, "Leaflet: Pip's face", 512));
-writePng(path.join(appRoot, "public", "favicon.png"), scaled(faceArt(16), 16, 4), 64, 64);
 console.log(`Wrote the logo to ${assets} (art rows ${bounds.top} to ${bounds.bottom} of ${N}).`);
