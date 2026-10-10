@@ -143,21 +143,26 @@ challenged.
   No account or identifier of yours is included. You can see their privacy
   policies on their websites.
 - **Wiktionary and Wikipedia (looking a word up).** When you select a word or
-  a short phrase in a book and press **Look up**, Leaflet sends those selected
-  words, and nothing else (not the book, not the sentence around them, no
-  account or identifier of yours), to Wiktionary and Wikipedia to fetch a
-  meaning and a short summary. Nothing is sent until you press it, and what
-  you looked up is not stored. "Search the web", offered when nothing is
+  a short phrase in a book and press **Look up**, or double-click a word,
+  Leaflet sends those selected words, and nothing else (not the book, not the
+  sentence around them, no account or identifier of yours), to Wiktionary and
+  Wikipedia to fetch a meaning and a short summary. Nothing is sent until you
+  do one or the other, you can turn the double-click off in Settings, and what
+  you looked up is not sent anywhere else. "Search the web", offered when nothing is
   found, opens a DuckDuckGo search for those words in your browser.
-- **Fandom (a fan wiki's summary of a name).** When a name in a book has its
+- **A fan wiki (its summary of a name).** When a name in a book has its
   card open and you press **Wiki** (or have chosen, in Settings, to have wiki
-  summaries fetched straight away), Leaflet asks the book's fan wiki on
-  fandom.com for the opening of that name's page. It sends the name, and, to
-  find which wiki the book has, the book's series or title and its author's
-  name. Nothing else is sent (not the book, not the page you are on, no
+  summaries fetched straight away), Leaflet asks the book's fan wiki for the
+  opening of that name's page. The wiki is one on fandom.com, or, for the
+  books they cover, coppermind.net, awoiaf.westeros.org or wiki.lspace.org. It sends the name, and, to find which wiki
+  the book has, the book's series or title and its author's name. If you
+  have chosen "straight away", Leaflet also fetches the list of the wiki's
+  page names when you open the book, so that it can recognise the book's own
+  invented words; that request says nothing about what you read or where you
+  are in it. Nothing else is sent (not the book, not the page you are on, no
   account or identifier of yours), nothing is sent until you ask, and you can
-  turn wiki summaries off in Settings. Fandom receives the usual web request
-  information, such as your IP address, under its own privacy policy.
+  turn wiki summaries off in Settings. The wiki receives the usual web
+  request information, such as your IP address, under its own privacy policy.
 - **Calibre (optional).** If you choose to install the optional converter,
   Leaflet downloads it from calibre-ebook.com.
 - **GitHub Pages.** Leaflet's website, and a small signed settings file the app

@@ -911,6 +911,34 @@ this device. It is not a summary: there is no language model in the app.
 Escape, Space, Enter, a click elsewhere or "Carry on" closes it; hands-free
 reading waits while it is up.
 
+**A double-click looks a word up, and a word no dictionary has is answered
+by the book** (after 1.3.2; `readers/words/wordPrefs.ts`,
+`readers/people/TermInBook.tsx`, `readers/LookupCard.tsx`). The owner asked
+for one way to ask about any word, in any book, without a wiki having to be
+known beforehand: "let them double tap a word... if it is an English word,
+show meaning, else show what it means in context to the book." A double-click
+selects a word, as it always did, and the look-up card now opens on it by
+itself (in a book of text and in a PDF). If Wiktionary has the word, the
+card is what Look up always showed. If it has not, the card's first section
+is **In this book**: the line the word came into the book on (or the one
+that says what it is), how often the book has used it so far, a way to go
+there; and under it the book's fan wiki on the word, asked for at once where
+the reader chose "Straight away", on a press of "Ask the book's wiki" where
+they chose "When I ask", and not offered where they chose "Never". Nothing
+after the place being read is read. The book's own lines need no wiki and no
+list of anyone's: they are there for every book, which is what a reader of
+many books wanted. Needs "Characters" on (the book's text is read by it);
+without it the card says, as before, that nothing was found. A selection
+made any other way opens nothing by itself. Settings, Reading has the
+switch ("Look a word up when I double-click it"), on unless turned off: it
+is the one thing that sends a word to Wiktionary and Wikipedia without the
+Look up button, and the card's (i) and the privacy policy now say so.
+Checked in the preview on a real book: a double-click on a made-up word
+gave the book's line and, asked, the wiki's summary; on an ordinary word the
+meaning; a plain selection, and a double-click with the switch off, only the
+selection bar. In the preview the dictionary's answer is a stand-in, so the
+real Wiktionary saying "no such word" was not part of the check.
+
 **Look up** (the book-with-a-letter button on the selection bar). A selected
 word or short phrase (six words, 80 characters; a longer selection is refused
 before anything is sent) is looked up in one call, `lookup_term`: its meaning
@@ -1151,6 +1179,22 @@ a place, an order ("Order of the Phoenix", "Night's Watch", "Lord Ruler",
   not "Watch"), and a title has to hold its own ("Lord Ruler", but "Kelsier"
   for "Master Kelsier"). Lower-case words of a book's own ("skaa") are not
   found this way; selecting one and asking still works.
+- *A word the book made up and writes small* (after 1.3.2). The owner rested
+  the pointer on "shelldry", a game a novel names twice and never with a
+  capital, and got nothing: nothing in the book tells it from a word. The
+  book's fan wiki does, by having a page for it. With wiki summaries set to
+  "Straight away", the names of the wiki's pages are read once when the book
+  opens (`wikiService.words`: five hundred to a request, redirects too, up
+  to 20,000; the single words among them are kept on this device for a
+  month under `leaflet.wikiWords.<wiki>`, 4,372 words and 95 KB for the
+  Coppermind, read in under fifteen seconds beside the book opening). A word
+  written small that is one of them, or its plural, and is not an everyday
+  word, gets the card: the book's own line, and the wiki's summary of the
+  page the wiki keeps it under. No word under the pointer is ever sent
+  anywhere to find this out. A word the book has used more than thirty times
+  so far gets no card: by then the reader knows it, and a card at every rest
+  on "mist" would be in the way. Not done where the wiki waits to be asked
+  ("When I ask") or is off: nothing is read from a wiki unasked there.
 - *What the card says.* The sentence, among every one so far that uses the
   name, that reads most like an introduction ("X was a...", "X, the...", "a
   ... called X", "her brother, X"), labelled "The book says" with its
@@ -1191,10 +1235,22 @@ to be asked unless Settings says "Straight away", and "Never" removes it.
   as HTML and read down to its first paragraphs as plain text. The page of
   that very name is asked for first, so the wiki's own redirects are
   followed.
-- The Rust side (`wiki_ask`) is a narrow door: `<name>.fandom.com` only,
-  `api.php` only, three read-only actions, JSON only, redirects followed no
-  further than Fandom. Fandom wikis only, for now: the larger wikis some
-  series have elsewhere are not asked.
+- The Rust side (`wiki_ask`) is a narrow door: `<name>.fandom.com` and the
+  wikis named in `OTHER_WIKIS` only, their `api.php` only, three read-only
+  actions (and of a wiki's lists only the names of its pages), JSON only,
+  redirects followed no further than a wiki's own API.
+- *A series' own wiki* (after 1.3.2). Fandom's Mistborn wiki has two hundred
+  pages and none for "shelldry"; the Coppermind, the wiki of everything that
+  writer has written, has five thousand. `coppermind.net` is now a wiki
+  Leaflet may ask (`OTHER_WIKIS`, in `wiki.ts` and in `wiki.rs`, which is
+  what decides), and is tried first for those books, by series or by title
+  (`HINTS`). A wiki found for a book the older way is looked for again once
+  (`LOOKING` in `wikiService.ts`); one the reader chose is left alone. Other
+  series' own wikis are added to the two lists one by one: A Wiki of Ice and
+  Fire (`awoiaf.westeros.org`) and the Discworld's (`wiki.lspace.org`) are
+  there too, each asked first for its books. Tolkien Gateway did not answer
+  its API from here and is not. For every other book the wiki is still the
+  one on Fandom named for its series or title, found without any list.
 - What is sent: the name, and to find the wiki the series or title and the
   author. [The privacy policy](legal/privacy-policy.md) says so (it is a
   draft: publishing it is the owner's).

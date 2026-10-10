@@ -180,9 +180,27 @@ holds:**
     (version 4) and the one with no author getting its lookup.
   - **The test aids are gone** (testing.md): the run sheet's `npm ci`
     cleaned `node_modules`, which is where they were kept.
-- 2,495 app tests (384 new in 1.3), 648 Rust tests (99 new), 108 server
+- **1.3.3** (2026-10-10; 1.3.2 was built and tagged `v1.3.2` by the owner; this is
+  committed and pushed on `release/1.3`, and no package of it has been built): the owner
+  rested the pointer on "shelldry" in Mistborn and got no card. Two causes,
+  both in features.md ("A word the book made up and writes small", "A
+  series' own wiki"): the hover knew only capitalised names, and Leaflet
+  asked only Fandom, whose Mistborn wiki has no such page. The Coppermind is
+  now asked for those books, and the names of a wiki's pages say which small
+  words are the book's own. Checked in the preview on the real passage: the
+  card came up with the book's line and the Coppermind's summary; ordinary
+  words beside it gave nothing. Only with wiki summaries set to "Straight
+  away". The privacy policy's paragraph on fan wikis was rewritten for it
+  (coppermind.net, and the list of page names): publishing it is the owner's.
+  The owner then asked for a way that needs no wiki known beforehand and
+  works for every book: **a double-click on a word looks it up**, and a word
+  no dictionary has is answered by the book's own lines, with the fan wiki
+  under them (features.md, "A double-click looks a word up"). On by default,
+  with a switch; the policy's look-up paragraph says so. A Wiki of Ice and
+  Fire and the Discworld's wiki were added beside the Coppermind.
+- 2,503 app tests (392 new in 1.3), 649 Rust tests (100 new), 108 server
   tests, `tsc` clean, `cargo clippy --all-targets` clean, `vite build`
-  succeeds (all but the server's run together 2026-10-09, after the work above; the server is unchanged since its 108 passed). The version is 1.3.2 in the five places deploy.md names.
+  succeeds (all but the server's run together 2026-10-10, after the work above; the server is unchanged since its 108 passed). The version is 1.3.3 in the five places deploy.md names.
 - **Asked for and not built: read aloud.** The voices Windows gives an app
   are the old flat ones (this PC has David, Zira and Mark only); a natural
   voice means a paid cloud service or a speech model shipped in the app
