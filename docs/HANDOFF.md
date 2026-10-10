@@ -59,6 +59,18 @@ holds:**
   in the startup script (about 150 kB before minifying).
   `apps/node_modules/.leaflet-test/chunks.mjs` prints what each chunk is
   made of.
+- **1.3.4: the app icon is now a green book** (2026-10-10; committed and
+  pushed, and built with the values in `build.env`): the owner thought the face was not getting clicks in the Store
+  and asked for "a green book in a grid style". Drawn on Pip's pixel grid in
+  the app's own green, with a leaf on the cover (`windows-icons.py`,
+  `BOOKS`); every icon, the favicon and the Store logos were made again.
+  Looked at as pictures at every size on a dark and a light bar; not seen on
+  a real taskbar or in the Store. The Store logos in `brand/store-logos` are
+  the owner's to upload. Also in 1.3.4: Space after a button was clicked
+  pauses the reading and no longer presses that button again (features.md,
+  "Space after a button was clicked"), and a release build reads its five
+  values from `apps/src-tauri/msix/build.env`, which git ignores (deploy.md,
+  step 7). What follows is the face it replaced.
 - **The app icon is Pip's face** (the owner: "really small and
   indistinguishable" on the taskbar). The logo (Pip with a book) is kept for
   everything else; the Windows icons, the `.ico`, the Store logos in
@@ -200,7 +212,7 @@ holds:**
   Fire and the Discworld's wiki were added beside the Coppermind.
 - 2,503 app tests (392 new in 1.3), 649 Rust tests (100 new), 108 server
   tests, `tsc` clean, `cargo clippy --all-targets` clean, `vite build`
-  succeeds (all but the server's run together 2026-10-10, after the work above; the server is unchanged since its 108 passed). The version is 1.3.3 in the five places deploy.md names.
+  succeeds (all but the server's run together 2026-10-10, after the work above; the server is unchanged since its 108 passed). The version is 1.3.4 in the five places deploy.md names.
 - **Asked for and not built: read aloud.** The voices Windows gives an app
   are the old flat ones (this PC has David, Zira and Mark only); a natural
   voice means a paid cloud service or a speech model shipped in the app

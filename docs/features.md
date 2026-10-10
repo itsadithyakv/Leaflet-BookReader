@@ -2029,6 +2029,17 @@ Behaviours worth knowing (from the pre-release review):
   other readers are on.
 - Keys keep working after clicking into the book text: the epub iframe forwards
   them to the reader's shortcut handler.
+- Space after a button was clicked is still the reader's (after 1.3.3). The
+  owner pressed "faster" and then Space to pause, and got "faster" again: a
+  click leaves the keyboard on the button, and the reader let a focused
+  button keep its Space when the browser said the keyboard had reached it
+  (`:focus-visible`), which the browser says of a clicked button as soon as
+  any key is pressed. The reader now notes the button the pointer last
+  pressed itself (`clickedControlRef` in `text/useReaderKeys.ts`, as the page
+  reader already did): Space on that one pauses or carries on, and only a
+  button the Tab key reached keeps its own Space and Enter. Checked in the
+  preview: "Faster" clicked, then Space, started Dotty; Space again paused
+  her; after Tab, Space was left to the button.
 - Nothing plays on while Leaflet is in the background: switching apps pauses
   auto-scroll, Smart Read and RSVP (the OS window's focus, not the page's
   `blur`, which fires when the book's iframe is clicked). Coming back says so,

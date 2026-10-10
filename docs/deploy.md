@@ -294,6 +294,22 @@ cd src-tauri\msix
 .\build-msix.ps1
 ```
 
+**Or keep the five values in a file, once** (since 1.3.3). Copy
+`apps\src-tauri\msix\build.env.example` to `build.env` in the same folder,
+fill in the two Google values, and every build after that is:
+
+```powershell
+cd D:\Leaflet\apps
+npm ci
+cd src-tauri\msix
+.\build-msix.ps1
+```
+
+The script reads only those five names from the file, prints which it took
+(never their values), and lets a value set in the window win. Git ignores
+`build.env`: it holds the Google client secret, so it is never committed, and
+it should be in whatever backup the signing key is in.
+
 Leave `VITE_ENABLE_MULTI_DEVICE` and `VITE_ENABLE_FULL_PIP_HOUSE` unset for 1.0.
 Leave `VITE_ENABLE_DESKTOP_PIP` unset too until Pip on the desktop has been
 tried on a real desktop (the checklist is in HANDOFF.md).

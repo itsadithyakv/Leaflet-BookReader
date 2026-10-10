@@ -217,7 +217,8 @@ The logo is Pip sitting with an open book, on a transparent background
 (`apps/scripts/pip-logo.mjs` draws it with the engine). Its files are in
 `apps/src/assets/pip/` (PNG at every 32-multiple, SVG, a cream tile for places
 that need a square badge, and sticker poses); see the README there. The Windows
-app icons in `src-tauri/icons` are Pip's face alone (1.3: the logo was small
-and hard to tell on a taskbar), made by `src-tauri/msix/windows-icons.py`
-from two drawings of it, `pip-face-16.png` and `pip-face-18.png`, so that it
+app icons in `src-tauri/icons` are a green book (after 1.3.3: Pip's face,
+which they were from 1.3, filled the square and said nothing of what the app
+is for, and the owner thought it was costing clicks in the Store), drawn in
+`src-tauri/msix/windows-icons.py` twice, 16 and 18 pixels square, so that it
 is sharp at the sizes Windows shows most.
