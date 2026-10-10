@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { knowsBook, pageFor, pageParams, pageSummary, searchTitles, siteName, summaryFrom, wikiGuesses, wikiHost } from "./wiki";
+import { knowsBook, ownPage, ownWords, pageFor, pageParams, pageSummary, searchTitles, siteName, summaryFrom, titlesFrom, titlesParams, wikiApi, wikiGuesses, wikiHost } from "./wiki";
 
 describe("a wiki's address", () => {
   it("is taken as typed, pasted or just named", () => {
@@ -8,17 +8,45 @@ describe("a wiki's address", () => {
     expect(wikiHost("red-rising")).toBe("red-rising.fandom.com");
   });
 
-  it("is only ever one of Fandom's", () => {
-    for (const typed of ["", "example.com", "mistborn.fandom.com.evil.example", "evil.example/mistborn.fandom.com", "a.b.fandom.com", "-x.fandom.com", "x-.fandom.com", "coppermind.net", "fandom.com"]) {
+  it("is only ever one of Fandom's, or a wiki named here", () => {
+    for (const typed of ["", "example.com", "mistborn.fandom.com.evil.example", "evil.example/mistborn.fandom.com", "a.b.fandom.com", "-x.fandom.com", "x-.fandom.com", "coppermind.org", "evil.coppermind.net", "coppermind.net.evil.example", "fandom.com"]) {
       expect(wikiHost(typed), typed).toBeNull();
     }
+    for (const typed of ["coppermind.net", "https://coppermind.net/wiki/Shelldry", "www.coppermind.net", "Coppermind"]) {
+      expect(wikiHost(typed), typed).toBe("coppermind.net");
+    }
+    expect([wikiHost("awoiaf"), wikiHost("https://awoiaf.westeros.org/index.php/Jon_Snow"), wikiHost("lspace")]).toEqual([
+      "awoiaf.westeros.org",
+      "awoiaf.westeros.org",
+      "wiki.lspace.org"
+    ]);
+    // A wiki's first label is not its name: "wiki" is a wiki on Fandom, if anything.
+    expect(wikiHost("wiki")).toBe("wiki.fandom.com");
+    expect([wikiApi("coppermind.net"), wikiApi("mistborn.fandom.com")]).toEqual(["/w/api.php", "/api.php"]);
   });
 });
 
 describe("the wikis a book may have", () => {
   it("are named for its series first, then for the book", () => {
-    expect(wikiGuesses({ title: "The Final Empire", series: "Mistborn" })).toEqual(["mistborn.fandom.com", "finalempire.fandom.com", "final-empire.fandom.com"]);
+    expect(wikiGuesses({ title: "The Night Ferry", series: "Saltmarsh" })).toEqual([
+      "saltmarsh.fandom.com",
+      "nightferry.fandom.com",
+      "night-ferry.fandom.com"
+    ]);
     expect(wikiGuesses({ title: "Dune" })).toEqual(["dune.fandom.com"]);
+  });
+
+  it("start with a wiki of the books' own, by the series or by the book alone", () => {
+    expect(wikiGuesses({ title: "The Final Empire", series: "Mistborn" })).toEqual([
+      "coppermind.net",
+      "mistborn.fandom.com",
+      "finalempire.fandom.com",
+      "final-empire.fandom.com"
+    ]);
+    // No series stored: the title says whose it is.
+    expect(wikiGuesses({ title: "The Final Empire" })[0]).toBe("coppermind.net");
+    // Before the series' wiki on Fandom, which is the smaller.
+    expect(wikiGuesses({ title: "Oathbringer", series: "The Stormlight Archive" }).slice(0, 2)).toEqual(["coppermind.net", "stormlightarchive.fandom.com"]);
   });
 
   it("are tried joined and hyphenated", () => {
@@ -37,12 +65,19 @@ describe("the wikis a book may have", () => {
   });
 
   it("start with the wiki a series is known to have, where that is not named as the series is", () => {
-    expect(wikiGuesses({ title: "A Game of Thrones", series: "A Song of Ice and Fire" }).slice(0, 2)).toEqual(["iceandfire.fandom.com", "gameofthrones.fandom.com"]);
+    expect(wikiGuesses({ title: "A Game of Thrones", series: "A Song of Ice and Fire" }).slice(0, 3)).toEqual([
+      "awoiaf.westeros.org",
+      "iceandfire.fandom.com",
+      "gameofthrones.fandom.com"
+    ]);
     expect(wikiGuesses({ title: "Game of Thrones Boxed Set: A Game of Thrones, a Clash of Kings, a Storm of Swords, and a Feast for Crows" })).toEqual([
+      "awoiaf.westeros.org",
       "iceandfire.fandom.com",
       "gameofthrones.fandom.com",
       "game-of-thrones.fandom.com"
     ]);
+    expect(wikiGuesses({ title: "A Storm of Swords" })[0]).toBe("awoiaf.westeros.org");
+    expect(wikiGuesses({ title: "Mort", series: "Discworld" })[0]).toBe("wiki.lspace.org");
     expect(wikiGuesses({ title: "The Eye of the World", series: "The Wheel of Time" })[0]).toBe("wot.fandom.com");
     // A book named for its series, with none stated.
     expect(wikiGuesses({ title: "Harry Potter and the Half-Blood Prince" })[0]).toBe("harrypotter.fandom.com");
@@ -66,6 +101,40 @@ describe("what a wiki answers", () => {
     expect(searchTitles('["Vin",["Vin","Characters","Reen"],["","",""],["u1","u2","u3"]]')).toEqual(["Vin", "Characters", "Reen"]);
     expect(searchTitles('["Nobody",[],[],[]]')).toEqual([]);
     expect(searchTitles("not json")).toEqual([]);
+  });
+});
+
+describe("a wiki's own words", () => {
+  const answer = JSON.stringify({
+    continue: { apcontinue: "Bob_(Skyward)" },
+    query: { allpages: [{ title: "Shelldry" }, { title: "Skaa" }, { title: "Iron (metal)" }, { title: "Iron" }, { title: "Lord Ruler" }, { title: "Obligator" }, { title: "Tin" }, { title: "17th Shard" }, {}] }
+  });
+
+  it("are asked for five hundred page names at a time", () => {
+    expect(Object.fromEntries(titlesParams())).toEqual({ action: "query", list: "allpages", aplimit: "500", apnamespace: "0" });
+    expect(Object.fromEntries(titlesParams("Bob_(Skyward)")).apcontinue).toBe("Bob_(Skyward)");
+    const { titles, next } = titlesFrom(answer);
+    expect([titles.length, next]).toEqual([8, "Bob_(Skyward)"]);
+    expect(titlesFrom(JSON.stringify({ query: { allpages: [{ title: "Zane" }] } }))).toEqual({ titles: ["Zane"], next: null });
+    expect(titlesFrom("<html>not an answer</html>")).toEqual({ titles: [], next: null });
+  });
+
+  it("are its single-word pages, small, each with its page", () => {
+    const words = new Map(ownWords(titlesFrom(answer).titles));
+    // A name of several words, a short one and one with a figure in it are not words of its own.
+    expect([...words.keys()].sort()).toEqual(["iron", "obligator", "shelldry", "skaa"]);
+    // The page named exactly so, not the one told apart in brackets.
+    expect(words.get("iron")).toBe("Iron");
+  });
+
+  it("give the page for a word as the book writes it, or its plural", () => {
+    const words = new Map(ownWords(["Shelldry", "Obligator", "Skaa", "Canton", "Ministry"]));
+    expect(ownPage(words, "shelldry")).toBe("Shelldry");
+    expect(ownPage(words, "obligators")).toBe("Obligator");
+    expect(ownPage(words, "ministries")).toBe("Ministry");
+    expect(ownPage(words, "tomorrow")).toBeNull();
+    // Too short to be told from a word by its ending.
+    expect(ownPage(new Map([["ska", "Ska"]]), "skas")).toBeNull();
   });
 });
 

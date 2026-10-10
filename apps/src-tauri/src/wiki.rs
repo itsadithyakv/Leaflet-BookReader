@@ -3,9 +3,9 @@
 //!
 //! It happens here rather than in the webview because the release build's
 //! Content-Security-Policy does not let the webview reach the internet. This
-//! is a narrow door, not a way out: only Fandom's wikis (`<name>.fandom.com`),
-//! only their `api.php`, only reading, and only the few questions the reader
-//! has a use for. What is asked and what is made of the answer is in
+//! is a narrow door, not a way out: only Fandom's wikis (`<name>.fandom.com`)
+//! and the few named in `OTHER_WIKIS`, only their `api.php`, only reading,
+//! and only the few questions the reader has a use for. What is asked and what is made of the answer is in
 //! `apps/src/readers/people/wiki.ts`, where it is tested.
 //!
 //! What leaves the device is the wiki's name (found from the book's series or
@@ -23,11 +23,21 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_BYTES: usize = 2 * 1024 * 1024;
 const MAX_VALUE_CHARS: usize = 200;
 const SUFFIX: &str = ".fandom.com";
+const FANDOM_API: &str = "/api.php";
+/// Wikis that are not Fandom's, each with where its API is. A series' own
+/// wiki is sometimes the only one worth asking: the Mistborn wiki on Fandom
+/// has two hundred pages and the Coppermind five thousand. Named one by one,
+/// since nothing about an address says it is a wiki.
+const OTHER_WIKIS: [(&str, &str); 3] = [
+  ("coppermind.net", "/w/api.php"),
+  ("awoiaf.westeros.org", "/api.php"),
+  ("wiki.lspace.org", "/api.php")
+];
 
-/// What may be asked: finding a page by name, a page's opening section, and
-/// what the wiki calls itself.
+/// What may be asked: finding a page by name, a page's opening section, what
+/// the wiki calls itself, and the names of its pages.
 const ACTIONS: [&str; 3] = ["opensearch", "parse", "query"];
-const PARAMS: [&str; 12] = [
+const PARAMS: [&str; 16] = [
   "action",
   "search",
   "limit",
@@ -39,7 +49,11 @@ const PARAMS: [&str; 12] = [
   "disableeditsection",
   "disabletoc",
   "meta",
-  "siprop"
+  "siprop",
+  "list",
+  "aplimit",
+  "apnamespace",
+  "apcontinue"
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
@@ -74,17 +88,26 @@ impl WikiError {
   }
 }
 
-/// `mistborn.fandom.com`: one label of lower-case letters, digits and hyphens
-/// (not at either end), then Fandom's domain. Nothing else is ever called.
-pub fn valid_host(host: &str) -> bool {
-  let Some(label) = host.strip_suffix(SUFFIX) else {
-    return false;
-  };
-  !label.is_empty()
+/// Where a wiki's API is, for a host that is one: `mistborn.fandom.com` (one
+/// label of lower-case letters, digits and hyphens, not at either end, then
+/// Fandom's domain), or one of `OTHER_WIKIS` exactly. `None` for anything
+/// else: nothing else is ever called.
+pub fn api_of(host: &str) -> Option<&'static str> {
+  if let Some((_, api)) = OTHER_WIKIS.iter().find(|(known, _)| *known == host) {
+    return Some(api);
+  }
+  let label = host.strip_suffix(SUFFIX)?;
+  let plain = !label.is_empty()
     && label.len() <= 60
     && !label.starts_with('-')
     && !label.ends_with('-')
-    && label.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    && label.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+  plain.then_some(FANDOM_API)
+}
+
+#[cfg(test)]
+fn valid_host(host: &str) -> bool {
+  api_of(host).is_some()
 }
 
 /// The question, checked: a known action, known parameters, short values.
@@ -98,6 +121,10 @@ pub fn checked(params: &[(String, String)]) -> Option<Vec<(String, String)>> {
     }
     if key == "action" {
       action = Some(value.as_str());
+    }
+    // Of a wiki's lists, only the names of its pages.
+    if key == "list" && value != "allpages" {
+      return None;
     }
     out.push((key.clone(), value.clone()));
   }
@@ -118,9 +145,9 @@ fn client() -> Result<&'static Client, WikiError> {
     .timeout(TIMEOUT)
     .connect_timeout(CONNECT_TIMEOUT)
     .https_only(true)
-    // A wiki that has moved (`redrising` to `red-rising`) is followed, and no further than Fandom.
+    // A wiki that has moved (`redrising` to `red-rising`) is followed, and no further than a wiki's own API.
     .redirect(reqwest::redirect::Policy::custom(|attempt| {
-      let stays = attempt.url().host_str().is_some_and(valid_host) && attempt.url().path() == "/api.php";
+      let stays = attempt.url().host_str().and_then(api_of) == Some(attempt.url().path());
       if stays && attempt.previous().len() < 4 {
         attempt.follow()
       } else {
@@ -138,11 +165,11 @@ pub async fn ask(host: &str, params: &[(String, String)]) -> Result<String, Wiki
   let Some(query) = checked(params) else {
     return Err(WikiError::new(WikiErrorKind::Refused));
   };
-  if !valid_host(&host) {
+  let Some(api) = api_of(&host) else {
     return Err(WikiError::new(WikiErrorKind::Refused));
-  }
+  };
   let response = client()?
-    .get(format!("https://{host}/api.php"))
+    .get(format!("https://{host}{api}"))
     .query(&query)
     .send()
     .await
@@ -202,7 +229,25 @@ mod tests {
   }
 
   #[test]
+  fn a_wiki_named_here_is_a_host_and_its_neighbours_are_not() {
+    assert_eq!(api_of("coppermind.net"), Some("/w/api.php"));
+    assert_eq!(api_of("awoiaf.westeros.org"), Some("/api.php"));
+    assert_eq!(api_of("wiki.lspace.org"), Some("/api.php"));
+    assert_eq!(api_of("westeros.org"), None);
+    assert_eq!(api_of("lspace.org"), None);
+    assert_eq!(api_of("mistborn.fandom.com"), Some("/api.php"));
+    for host in ["www.coppermind.net", "coppermind.net.evil.example", "evil.coppermind.net", "coppermind.org", "Coppermind.net", "coppermind.net:8443"] {
+      assert_eq!(api_of(host), None, "{host} was taken for a wiki");
+    }
+  }
+
+  #[test]
   fn only_the_questions_the_reader_asks_get_through() {
+    // The names of a wiki's pages, and no other list of it.
+    let names = [("action", "query"), ("list", "allpages"), ("aplimit", "500"), ("apnamespace", "0"), ("apcontinue", "Bob")];
+    assert!(checked(&pairs(&names)).is_some());
+    assert!(checked(&pairs(&[("action", "query"), ("list", "allusers")])).is_none());
+    assert!(checked(&pairs(&[("action", "query"), ("list", "allpages|allusers")])).is_none());
     let search = checked(&pairs(&[("action", "opensearch"), ("search", "Vin"), ("limit", "5")])).expect("a search is allowed");
     assert_eq!(search.last(), Some(&("format".to_string(), "json".to_string())));
     assert!(checked(&pairs(&[("action", "parse"), ("page", "Vin"), ("prop", "text"), ("section", "0"), ("redirects", "1")])).is_some());

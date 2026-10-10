@@ -4,8 +4,9 @@
  * `services/wikiService.ts` (through Rust in the app: `src-tauri/src/wiki.rs`);
  * here is only what to ask for and what to make of the answers.
  *
- * Fandom's wikis only. They run MediaWiki, whose API has no "summary" to
- * give (Wikipedia's `extracts` is not installed there, and Fandom's own
+ * Fandom's wikis, and the few others named in `OTHER_WIKIS` (a series' own
+ * wiki is sometimes the only one worth asking). They run MediaWiki, whose
+ * API has no "summary" to give (Wikipedia's `extracts` is not installed there, and Fandom's own
  * article API sits behind a browser check), so the opening section is asked
  * for as HTML and read down to its first paragraphs here.
  *
@@ -16,8 +17,25 @@
  * Pure: strings in, strings out.
  */
 
-/** Fandom's domain: the only place asked. */
+/** Fandom's domain: any wiki there may be asked. */
 export const WIKI_SUFFIX = ".fandom.com";
+
+/**
+ * Wikis that are not Fandom's, each with where its API is. The Mistborn wiki
+ * on Fandom has two hundred pages and nothing on the game the nobles play;
+ * the Coppermind, the wiki of everything its writer has written, has five
+ * thousand. The same list is in Rust (`src-tauri/src/wiki.rs`), which is what
+ * decides: an address not on both is never called.
+ */
+export const OTHER_WIKIS: ReadonlyArray<{ host: string; api: string; name: string }> = [
+  { host: "coppermind.net", api: "/w/api.php", name: "coppermind" },
+  // A Wiki of Ice and Fire, and the Discworld's.
+  { host: "awoiaf.westeros.org", api: "/api.php", name: "awoiaf" },
+  { host: "wiki.lspace.org", api: "/api.php", name: "lspace" }
+];
+
+/** Where a wiki's API is. */
+export const wikiApi = (host: string) => OTHER_WIKIS.find((wiki) => wiki.host === host)?.api ?? "/api.php";
 
 /** As much of a page's opening as the peek has room for. */
 export const MAX_SUMMARY = 520;
@@ -39,13 +57,18 @@ export type WikiSummary = {
   url: string;
 };
 
-/** A wiki's address as typed or pasted, down to its host; null when it is not one of Fandom's. */
+/** A wiki's address as typed or pasted, down to its host; null when it is not one of Fandom's or of `OTHER_WIKIS`. */
 export const wikiHost = (typed: string): string | null => {
   const host = typed
     .trim()
     .toLowerCase()
     .replace(/^https?:\/\//, "")
     .replace(/[/?#].*$/, "");
+  // Its address, with or without "www."; or just its name ("coppermind").
+  const other = OTHER_WIKIS.find((wiki) => wiki.host === host || `www.${wiki.host}` === host || wiki.name === host);
+  if (other) {
+    return other.host;
+  }
   const label = host.endsWith(WIKI_SUFFIX) ? host.slice(0, -WIKI_SUFFIX.length) : /^[a-z0-9-]+$/.test(host) ? host : null;
   if (!label || !/^[a-z0-9](?:[a-z0-9-]{0,58}[a-z0-9])?$/.test(label)) {
     return null;
@@ -85,8 +108,12 @@ const slugs = (name: string): string[] => {
  * so one that has moved or was never right costs a request and nothing else.
  */
 const HINTS: Array<[string, string[]]> = [
-  ["song of ice and fire", ["iceandfire", "gameofthrones"]],
-  ["game of thrones", ["iceandfire", "gameofthrones"]],
+  ["song of ice and fire", ["awoiaf.westeros.org", "iceandfire", "gameofthrones"]],
+  ["game of thrones", ["awoiaf.westeros.org", "iceandfire", "gameofthrones"]],
+  ...["clash of kings", "storm of swords", "feast for crows", "dance with dragons", "fire and blood", "knight of the seven kingdoms"].map(
+    (name): [string, string[]] => [name, ["awoiaf.westeros.org", "iceandfire"]]
+  ),
+  ["discworld", ["wiki.lspace.org"]],
   ["lord of the rings", ["lotr"]],
   ["hobbit", ["lotr"]],
   ["silmarillion", ["lotr"]],
@@ -107,7 +134,15 @@ const HINTS: Array<[string, string[]]> = [
   ["series of unfortunate events", ["snicket"]],
   ["mortal instruments", ["shadowhunters"]],
   ["infernal devices", ["shadowhunters"]],
-  ["harry potter", ["harrypotter"]]
+  ["harry potter", ["harrypotter"]],
+  // One writer's books, which share a wiki of their own (a full address, not a name on Fandom).
+  ...[
+    "mistborn", "final empire", "well of ascension", "hero of ages", "alloy of law", "shadows of self", "bands of mourning", "lost metal",
+    "wax and wayne", "stormlight archive", "way of kings", "words of radiance", "oathbringer", "rhythm of war", "wind and truth",
+    "edgedancer", "dawnshard", "elantris", "warbreaker", "emperors soul", "arcanum unbounded", "tress of the emerald sea",
+    "yumi and the nightmare painter", "sunlit man", "skyward", "starsight", "cytonic", "defiant", "steelheart", "firefight", "calamity",
+    "reckoners", "rithmatist"
+  ].map((name): [string, string[]] => [name, ["coppermind.net"]])
 ];
 
 /** A series or a title as the hints name it: small, without articles, punctuation or what follows a colon. */
@@ -129,21 +164,25 @@ const hintKey = (name: string) =>
 export const wikiGuesses = (book: { title: string; series?: string | null }): string[] => {
   const out: string[] = [];
   const add = (slug: string) => {
-    const host = `${slug}${WIKI_SUFFIX}`;
+    // A name on Fandom, or a whole address.
+    const host = slug.includes(".") ? slug : `${slug}${WIKI_SUFFIX}`;
     if (!out.includes(host)) {
       out.push(host);
     }
   };
   const names = [book.series ?? "", book.title];
+  // A wiki of the books' own before one on Fandom, whichever name says so.
+  const hinted: string[] = [];
   for (const name of names) {
     const key = hintKey(name);
     for (const [series, wikis] of HINTS) {
       // The series itself, or a book named for it ("Harry Potter and the...").
       if (key === series || key.startsWith(`${series} `)) {
-        wikis.forEach(add);
+        hinted.push(...wikis);
       }
     }
   }
+  [...hinted.filter((wiki) => wiki.includes(".")), ...hinted.filter((wiki) => !wiki.includes("."))].forEach(add);
   for (const name of names) {
     slugs(name).forEach(add);
   }
@@ -176,6 +215,20 @@ export const pageParams = (title: string): WikiParams => [
   ["redirects", "1"],
   ["disableeditsection", "1"],
   ["disabletoc", "1"]
+];
+
+/**
+ * The names of a wiki's pages, five hundred at a time, from `from` on (what
+ * the answer before said comes next). Redirects too: a thing the book has a
+ * word for is often kept under a longer name ("obligator" under the ministry
+ * it serves), and the word is the redirect.
+ */
+export const titlesParams = (from: string | null = null): WikiParams => [
+  ["action", "query"],
+  ["list", "allpages"],
+  ["aplimit", "500"],
+  ["apnamespace", "0"],
+  ...(from ? ([["apcontinue", from.slice(0, 200)]] as WikiParams) : [])
 ];
 
 // ---- What to make of the answers ---------------------------------------------
@@ -236,6 +289,70 @@ export const knowsBook = (titles: string[], book: { title: string; series?: stri
   const have = titles.map(plain);
   const names = [book.title.replace(/\s*[:([–—].*$/, ""), book.series ?? "", book.author ?? ""].map(plain).filter((name) => name.length >= 3);
   return names.some((name) => have.some((title) => title === name || title.startsWith(`${name} `) || title === `the ${name}`));
+};
+
+/** The page names in an answer to `titlesParams`, and where the next lot starts (null at the end). */
+export const titlesFrom = (json: string): { titles: string[]; next: string | null } => {
+  const answer = parse(json) as { query?: { allpages?: unknown }; continue?: { apcontinue?: unknown } } | null;
+  const pages = Array.isArray(answer?.query?.allpages) ? (answer.query.allpages as Array<{ title?: unknown }>) : [];
+  const next = answer?.continue?.apcontinue;
+  return {
+    titles: pages.map((page) => page?.title).filter((title): title is string => typeof title === "string" && title.length > 0),
+    next: typeof next === "string" && next ? next : null
+  };
+};
+
+/** A word of the wiki's own is at least this long: "skaa", "atium". */
+const OWN_WORD_LETTERS = 4;
+
+/**
+ * The single words among a wiki's page names, small, each with the page it
+ * is: what tells "shelldry" (a game the book made up, which it writes small
+ * and twice) from a word. A name told apart from another's in brackets
+ * ("Iron (metal)") is its word; a name of several words is not one, and is
+ * written with capitals in the book anyway.
+ */
+export const ownWords = (titles: readonly string[]): Array<[string, string]> => {
+  const words = new Map<string, string>();
+  for (const title of titles) {
+    const word = title.replace(/\s*\([^)]*\)\s*$/, "").trim();
+    if (/^\p{L}+$/u.test(word) && word.length >= OWN_WORD_LETTERS) {
+      const key = word.toLocaleLowerCase();
+      // The page named exactly so before one told apart in brackets.
+      if (!words.has(key) || title === word) {
+        words.set(key, title);
+      }
+    }
+  }
+  return [...words];
+};
+
+/**
+ * The wiki's page for a word of the book, small as the book writes it: the
+ * word, or the one it is the plural of ("obligators"). Null for a word the
+ * wiki has no page for, which is nearly every word.
+ */
+export const ownPage = (words: ReadonlyMap<string, string>, key: string): string | null => {
+  if (key.length < OWN_WORD_LETTERS) {
+    return null;
+  }
+  const forms = [key];
+  if (key.endsWith("ies")) {
+    forms.push(`${key.slice(0, -3)}y`);
+  }
+  if (key.endsWith("es")) {
+    forms.push(key.slice(0, -2));
+  }
+  if (key.endsWith("s")) {
+    forms.push(key.slice(0, -1));
+  }
+  for (const form of forms) {
+    const page = form.length >= OWN_WORD_LETTERS ? words.get(form) : undefined;
+    if (page) {
+      return page;
+    }
+  }
+  return null;
 };
 
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", ndash: "–", mdash: "—", hellip: "…", lsquo: "‘", rsquo: "’", ldquo: "“", rdquo: "”" };

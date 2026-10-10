@@ -72,7 +72,7 @@ export const WikiChoice = ({ book, onToast }: WikiChoiceProps) => {
   return (
     <form className="reader-people-wiki" onSubmit={(event) => void save(event)}>
       <label className="reader-lookup-visually-hidden" htmlFor={`wiki-${book.id}`}>
-        This book's wiki on fandom.com
+        This book's wiki: its address on fandom.com, or coppermind.net
       </label>
       <input
         id={`wiki-${book.id}`}

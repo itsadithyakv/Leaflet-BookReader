@@ -54,7 +54,7 @@ export const CharactersSetting = ({ renderToggle }: CharactersSettingProps) => {
             <span className="min-w-[14rem] flex-1 text-left">
               <span className="block">Summaries from a fan wiki</span>
               <span className="mt-0.5 block text-[11px] opacity-75">
-                From fandom.com. They can give away what happens later. Sends the name and the book's title.
+                From the book's fan wiki. They can give away what happens later. Sends the name and the book's title.
               </span>
             </span>
             <span className="flex flex-none gap-1">
