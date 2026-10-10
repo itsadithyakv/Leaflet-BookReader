@@ -32,6 +32,20 @@ export const useReaderKeys = (reader: WithSession & Later<"people">) => {
   const readerKeyHandlerRef = useRef<((event: KeyboardEvent) => void) | null>(null);
   /** When a key last turned a page (layout "pages"), for pacing a held key. */
   const lastKeyTurnAtRef = useRef(0);
+  /**
+   * The button the pointer last pressed, which a click leaves the keyboard
+   * on. Space after pressing "faster" has to pause the reading, not press
+   * "faster" again: only a control the keyboard itself reached (Tab) keeps
+   * its own Space and Enter.
+   */
+  const clickedControlRef = useRef<Element | null>(null);
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      clickedControlRef.current = event.target instanceof Element ? event.target.closest('button, a, summary, [role="button"], [role="switch"], [role="radio"], [role="tab"]') : null;
+    };
+    window.addEventListener("pointerdown", onPointerDown, true);
+    return () => window.removeEventListener("pointerdown", onPointerDown, true);
+  }, []);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -60,14 +74,17 @@ export const useReaderKeys = (reader: WithSession & Later<"people">) => {
       if ((pictureRef.current || shortcutsOpenRef.current) && event.key !== "Escape") {
         return;
       }
-      // A button, a slider or a radio the keyboard is on takes its own keys:
-      // Space used to start auto-scroll instead of pressing the button.
-      let focusVisible = false;
-      try {
-        focusVisible = Boolean(target?.matches?.(":focus-visible"));
-      } catch {
-        // An older engine: treat it as reached by the mouse.
+      if (event.key === "Tab") {
+        // The keyboard is moving the focus: where it lands is the keyboard's.
+        clickedControlRef.current = null;
       }
+      // A button, a slider or a radio the keyboard is on takes its own keys:
+      // Space used to start auto-scroll instead of pressing the button. One
+      // a click left the keyboard on does not. (The browser's own
+      // `:focus-visible` cannot say which: it turns true for a clicked
+      // button on the very key press that asks, so Space after "faster" was
+      // "faster" again and never a pause.)
+      const focusVisible = Boolean(target) && target !== clickedControlRef.current;
       if (keyBelongsToControl(event, target ? { tag: target.tagName ?? "", role: target.getAttribute?.("role") ?? "", focusVisible } : null)) {
         return;
       }
