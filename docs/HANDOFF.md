@@ -59,8 +59,15 @@ holds:**
   in the startup script (about 150 kB before minifying).
   `apps/node_modules/.leaflet-test/chunks.mjs` prints what each chunk is
   made of.
-- **1.3.4: the app icon is now a green book** (2026-10-10; committed and
-  pushed, and built with the values in `build.env`): the owner thought the face was not getting clicks in the Store
+- **The next release is 1.4.0** (2026-10-10). The owner did not ship 1.3.3
+  or 1.3.4, so what the two hold (the next entry, and "1.3.3" further
+  down) goes out together as 1.4.0, the first release after `v1.3.2`.
+  Committed and pushed on `release/1.3`, which keeps its name. No package
+  of 1.4.0 has been built: a 1.3.4 build was stopped part-way when the
+  number changed, and `Leaflet_1.3.3.0_x64.msix` in `target\msix` is not
+  for upload (Pip's face, and Space still presses the last button).
+- **1.3.4, never released: the app icon is now a green book** (2026-10-10;
+  committed and pushed): the owner thought the face was not getting clicks in the Store
   and asked for "a green book in a grid style". Drawn on Pip's pixel grid in
   the app's own green, with a leaf on the cover (`windows-icons.py`,
   `BOOKS`); every icon, the favicon and the Store logos were made again.
@@ -212,7 +219,7 @@ holds:**
   Fire and the Discworld's wiki were added beside the Coppermind.
 - 2,503 app tests (392 new in 1.3), 649 Rust tests (100 new), 108 server
   tests, `tsc` clean, `cargo clippy --all-targets` clean, `vite build`
-  succeeds (all but the server's run together 2026-10-10, after the work above; the server is unchanged since its 108 passed). The version is 1.3.4 in the five places deploy.md names.
+  succeeds (all but the server's run together 2026-10-10, after the work above; the server is unchanged since its 108 passed). The version is 1.4.0 in the five places deploy.md names.
 - **Asked for and not built: read aloud.** The voices Windows gives an app
   are the old flat ones (this PC has David, Zira and Mark only); a natural
   voice means a paid cloud service or a speech model shipped in the app

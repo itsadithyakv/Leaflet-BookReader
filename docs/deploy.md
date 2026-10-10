@@ -294,7 +294,7 @@ cd src-tauri\msix
 .\build-msix.ps1
 ```
 
-**Or keep the five values in a file, once** (since 1.3.3). Copy
+**Or keep the five values in a file, once** (since 1.4). Copy
 `apps\src-tauri\msix\build.env.example` to `build.env` in the same folder,
 fill in the two Google values, and every build after that is:
 

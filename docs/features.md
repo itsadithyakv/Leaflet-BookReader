@@ -2029,7 +2029,7 @@ Behaviours worth knowing (from the pre-release review):
   other readers are on.
 - Keys keep working after clicking into the book text: the epub iframe forwards
   them to the reader's shortcut handler.
-- Space after a button was clicked is still the reader's (after 1.3.3). The
+- Space after a button was clicked is still the reader's (since 1.4). The
   owner pressed "faster" and then Space to pause, and got "faster" again: a
   click leaves the keyboard on the button, and the reader let a focused
   button keep its Space when the browser said the keyboard had reached it
