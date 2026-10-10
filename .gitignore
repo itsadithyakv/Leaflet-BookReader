@@ -2,6 +2,8 @@ node_modules/
 dist/
 .env
 .env.*.local
+# The values a release build compiles in, the Google client secret among them (build.env.example is its pattern).
+apps/src-tauri/msix/build.env
 *.log
 .DS_Store
 Thumbs.db

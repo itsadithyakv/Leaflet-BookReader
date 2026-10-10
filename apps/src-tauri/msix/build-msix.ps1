@@ -30,6 +30,31 @@ $here = $PSScriptRoot
 $tauriDir = Split-Path -Parent $here
 $appsDir = Split-Path -Parent $tauriDir
 
+# The values compiled into the binary can be kept in `build.env`, beside this
+# script, so that a release build is one command and none of them has to be
+# typed into the window each time. Git ignores that file (it holds the Google
+# client secret); `build.env.example` is its pattern. Only the names below are
+# read from it, a value already set in this window wins, and what is printed
+# is the names, never the values.
+$fromFile = @("LEAFLET_GOOGLE_CLIENT_ID", "LEAFLET_GOOGLE_CLIENT_SECRET", "VITE_ENABLE_ACCOUNTS", "VITE_ENABLE_COMMUNITY", "LEAFLET_API_BASE")
+$envFile = Join-Path $here "build.env"
+if (Test-Path $envFile) {
+  $taken = @()
+  foreach ($line in Get-Content $envFile) {
+    if ($line -match '^\s*([A-Z][A-Z0-9_]*)\s*=\s*(.*?)\s*$') {
+      $name = $Matches[1]
+      $value = $Matches[2].Trim('"').Trim("'")
+      if (($fromFile -contains $name) -and $value -and -not [Environment]::GetEnvironmentVariable($name)) {
+        [Environment]::SetEnvironmentVariable($name, $value, "Process")
+        $taken += $name
+      }
+    }
+  }
+  if ($taken.Count -gt 0) {
+    Write-Host "From build.env: $($taken -join ', ')"
+  }
+}
+
 # Values compiled into the binary. Missing ones do not stop the build, but the
 # feature they drive will be off in the package, so say so loudly.
 $compiledIn = @{
