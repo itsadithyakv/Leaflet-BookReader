@@ -13,7 +13,8 @@
 // without one, or with next to none (readers/autoContents.ts).
 // `leaflet.wiki.<book id>`: the fan wiki found or chosen for a book (services/wikiService.ts).
 // `leaflet.kindleTried.<book id>`: the Kindle highlights looked for in a book and not found (readers/kindlePlacing.ts).
-const PER_BOOK_PREFIXES = ["leaflet.reader.", "leaflet.bookmarks.", "leaflet.pdfChapters.", "leaflet.contents.", "leaflet.wiki.", "leaflet.kindleTried."];
+// `leaflet.wikiWords.<wiki>`: the single words a fan wiki has pages for (services/wikiService.ts), by wiki and not by book.
+const PER_BOOK_PREFIXES = ["leaflet.reader.", "leaflet.bookmarks.", "leaflet.pdfChapters.", "leaflet.contents.", "leaflet.wiki.", "leaflet.wikiWords.", "leaflet.kindleTried."];
 /**
  * `leaflet.people.preview` is the browser preview's character sheets (the app
  * keeps them in the database, which the delete clears).
@@ -46,8 +47,9 @@ const READER_SETTINGS = [
   // The look last chosen for a picture to share (components/share).
   "leaflet.share.quoteStyle",
   "leaflet.share.yearStyle",
-  // Whether words looked up are kept (readers/words/wordPrefs.ts).
+  // Whether words looked up are kept, and whether a double-click looks one up (readers/words/wordPrefs.ts).
   "leaflet.reader.keepWords",
+  "leaflet.reader.lookUpOnDoubleClick",
   "leaflet.lookup.noteSeen",
   // The radio: on or off, the scene, the volume (ambience/prefs.ts).
   "leaflet.ambience",

@@ -8,8 +8,10 @@ import { peopleMarks } from "./marks";
 import { PeoplePanel } from "./PeoplePanel";
 import { usePeopleHover, usePeopleSwitch, useWikiMode } from "./peoplePrefs";
 import { termHover, type HoverAsk } from "./termHover";
+import { TermInBook } from "./TermInBook";
 import { TermPeek } from "./TermPeek";
 import { isCommonWord } from "../../services/smartReadService";
+import { wikiService } from "../../services/wikiService";
 import { SheetActions } from "./SheetActions";
 import { WikiChoice } from "./WikiChoice";
 import { castAt, placeOrder, type Place } from "./model";
@@ -257,6 +259,8 @@ export const usePeopleReader = ({
   const placesNowRef = useRef(placesNow);
   placesNowRef.current = placesNow;
   const busyRef = useRef(false);
+  /** The book's fan wiki, once its page names have been read: the address its own words are asked of. */
+  const ownWikiRef = useRef<string | null>(null);
   // A card or the panel is up: the peek would only be in the way.
   busyRef.current = Boolean(open) || Boolean(panelAt);
   const hover = useMemo(
@@ -268,10 +272,47 @@ export const usePeopleReader = ({
           const over = coveredRef.current;
           return busyRef.current || (typeof over === "function" ? over() : over);
         },
-        isCommon: isCommonWord
+        isCommon: isCommonWord,
+        ownPage: (key) => (ownWikiRef.current ? wikiService.ownPage(ownWikiRef.current, key) : null)
       }),
     []
   );
+
+  // With wiki summaries fetched "straight away", the names of the wiki's
+  // pages are read once (services/wikiService.ts: `words`), so that a word
+  // the book made up and writes small ("shelldry") is known for one. Nothing
+  // is read where the reader has to ask for the wiki, or has turned it off.
+  const aboutTitle = about?.title ?? "";
+  const aboutAuthor = about?.author ?? null;
+  const aboutSeries = about?.series ?? null;
+  useEffect(() => {
+    ownWikiRef.current = null;
+    if (!enabled || !hoverOn || wiki !== "auto" || !aboutTitle) {
+      return undefined;
+    }
+    let live = true;
+    const read = () => {
+      void wikiService
+        .siteFor({ id: bookId, title: aboutTitle, author: aboutAuthor, series: aboutSeries })
+        .then(async (site) => {
+          if (site) {
+            await wikiService.words(site.host);
+          }
+          if (live) {
+            ownWikiRef.current = site?.host ?? null;
+          }
+        })
+        // Offline, or the wiki would not say: names still work, and it is tried again with the next book.
+        .catch(() => undefined);
+    };
+    read();
+    // The reader names another wiki for the book.
+    window.addEventListener(wikiService.CHANGED, read);
+    return () => {
+      live = false;
+      window.removeEventListener(wikiService.CHANGED, read);
+    };
+  }, [enabled, hoverOn, wiki, bookId, aboutTitle, aboutAuthor, aboutSeries]);
 
   useEffect(() => {
     if (!enabled || !hoverOn || !rendition) {
@@ -395,9 +436,31 @@ export const usePeopleReader = ({
       />
     ) : null;
 
+  /**
+   * What the book says of a word looked up, for the look-up card to show
+   * when no dictionary knows the word (`TermInBook`); null with "Characters"
+   * off, when the book's own text is not read.
+   */
+  const inBook = (term: string, cfi: string | null): ReactNode => {
+    const name = cleanName(term);
+    return enabled && search && name ? (
+      <TermInBook
+        key={name}
+        term={name}
+        here={placesNowRef.current(cfi).here}
+        book={{ id: bookId, title: about?.title ?? "", author: about?.author, series: about?.series }}
+        search={search}
+        chapterOf={chapterOf}
+        wiki={about?.title ? wiki : "off"}
+        onJump={goTo}
+      />
+    ) : null;
+  };
+
   return {
     /** The switch is on: the reader shows the "Characters" button and "Who is this?". */
     enabled,
+    inBook,
     /** The card, to put in the selection bar's dock; null when nothing is open. */
     card,
     cardOpen: Boolean(card),

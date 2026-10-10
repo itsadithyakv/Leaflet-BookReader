@@ -53,6 +53,8 @@ type Options = {
   /** Something else is over the text, or hovering is switched off. */
   blocked?: () => boolean;
   isCommon: (key: string) => boolean;
+  /** The fan wiki's page for a word written small, where its pages are known (`terms.ts`: `termsAt`). */
+  ownPage?: (key: string) => string | null;
 };
 
 type Chapter = {
@@ -63,7 +65,7 @@ type Chapter = {
   unbind: () => void;
 };
 
-export const termHover = ({ onAsk, onLeave, blocked, isCommon }: Options): TermHover => {
+export const termHover = ({ onAsk, onLeave, blocked, isCommon, ownPage }: Options): TermHover => {
   const chapters = new Map<Document, Chapter>();
   let dwell: number | null = null;
   let leaving: number | null = null;
@@ -153,7 +155,7 @@ export const termHover = ({ onAsk, onLeave, blocked, isCommon }: Options): TermH
     if (at === null) {
       return;
     }
-    const candidates = termsAt(index.text, at, isCommon);
+    const candidates = termsAt(index.text, at, isCommon, ownPage);
     if (candidates.length === 0) {
       return;
     }

@@ -35,7 +35,7 @@ type Answer =
   | { status: "searching" }
   /** Not a name the book uses, or the place cannot be told: nothing is shown. */
   | { status: "none" }
-  | { status: "found"; name: string; person: PersonView | null; summary: TermSummary };
+  | { status: "found"; name: string; person: PersonView | null; summary: TermSummary; page?: string };
 
 type WikiState =
   | { status: "idle" }
@@ -48,6 +48,12 @@ const GAP = 10;
 const EDGE = 8;
 /** A search that takes longer than this shows that it is looking. */
 const SLOW_MS = 450;
+/**
+ * A word of the book's own that it writes small is explained while it is
+ * new. Past this many uses the reader knows it, and a card each time the
+ * pointer rests on "mist" in a book named for it would be in the way.
+ */
+const OWN_WORD_MOST = 30;
 
 /**
  * What the book has said of the name the pointer is resting on, as far as
@@ -84,6 +90,16 @@ export const TermPeek = ({ ask, here, book, entries, order, search, chapterOf, w
     const slowly = window.setTimeout(() => setSlow(true), SLOW_MS);
     const names = namesOf(cast);
     void (async () => {
+      // A word of the book's own that it writes small: every use of it so
+      // far, however it is written. The book's wiki has a page for it, which
+      // is all that says it is one, so it is not held to a name's rules.
+      const own = ask.candidates.find((candidate) => candidate.small);
+      if (own) {
+        const summary = await search.about([{ text: own.text, person: "?", exact: false }], "?", here, { signal: stop.signal });
+        return summary && summary.count > 0 && summary.count <= OWN_WORD_MOST
+          ? ({ status: "found", name: own.text, person: null, summary, page: own.page } as Answer)
+          : ({ status: "none" } as Answer);
+      }
       // Someone the reader has written down: theirs, under every name learned so far.
       for (const candidate of ask.candidates) {
         const id = whoIs(names, candidate.text);
@@ -131,22 +147,24 @@ export const TermPeek = ({ ask, here, book, entries, order, search, chapterOf, w
 
   const found = answer.status === "found" ? answer : null;
   const name = found?.name ?? null;
+  /** What the wiki is asked for: its own page for a word written small ("Obligator" for "obligators"), else the name. */
+  const asked = found?.page ?? name;
 
   const askWiki = useCallback(() => {
-    if (!name) {
+    if (!asked) {
       return;
     }
     setFromWiki({ status: "loading" });
     wikiService
       .siteFor(book)
-      .then(async (site) => ({ site, summary: site ? await wikiService.summary(site.host, name) : null }))
+      .then(async (site) => ({ site, summary: site ? await wikiService.summary(site.host, asked) : null }))
       .then(
         (done) => setFromWiki({ status: "done", ...done }),
         (cause) => setFromWiki({ status: "failed", message: cause instanceof WikiFailure ? cause.message : "The wiki could not be asked." })
       );
     // The book is the reader's for as long as the peek shows.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [name, book.id]);
+  }, [asked, book.id]);
 
   // "Show the wiki's summary straight away" (Settings): asked for with the peek.
   useEffect(() => {

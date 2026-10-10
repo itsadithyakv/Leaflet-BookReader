@@ -14,6 +14,31 @@ const at = (text: string, word: string, nth = 0) => {
   return termsAt(text, from, isCommon).map((term) => term.text);
 };
 
+describe("a word of the book's own, written small", () => {
+  const WIKI = new Map([["shelldry", "Shelldry"], ["obligator", "Obligator"], ["then", "Then"]]);
+  const ownPage = (key: string) => WIKI.get(key) ?? (key.endsWith("s") ? WIKI.get(key.slice(0, -1)) ?? null : null);
+  const text = "“Would you join us for a game of shelldry tomorrow?” Then the obligators left.";
+  const on = (word: string) => termsAt(text, text.indexOf(word) + 1, isCommon, ownPage);
+
+  it("is one when the book's wiki has a page for it", () => {
+    const from = text.indexOf("shelldry");
+    expect(on("shelldry")).toEqual([{ text: "shelldry", start: from, end: from + 8, small: true, page: "Shelldry" }]);
+    // As the book writes it, and the page the wiki keeps it under.
+    expect(on("obligators").map((term) => [term.text, term.page])).toEqual([["obligators", "Obligator"]]);
+  });
+
+  it("is not one without a wiki to say so, on a word the wiki has no page for, or on an everyday word it has", () => {
+    expect(termsAt(text, text.indexOf("shelldry") + 1, isCommon)).toEqual([]);
+    expect(on("tomorrow")).toEqual([]);
+    expect(on("game")).toEqual([]);
+    expect(termsAt("He left, and then came back.", 14, isCommon, ownPage)).toEqual([]);
+  });
+
+  it("leaves a name a name", () => {
+    expect(termsAt("Ash fell. Then Vin watched the flakes.", 16, isCommon, ownPage).map((term) => [term.text, term.small])).toEqual([["Vin", undefined]]);
+  });
+});
+
 describe("the name under the pointer", () => {
   it("is the word, when the word is a name", () => {
     expect(at("Ash fell. Then Vin watched the flakes.", "Vin")).toEqual(["Vin"]);

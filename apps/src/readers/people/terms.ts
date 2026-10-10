@@ -33,6 +33,13 @@ export type TermCandidate = {
   end: number;
   /** It begins with a title ("Lord Renoux"): the name without it is offered too, and is usually the one meant. */
   titled?: boolean;
+  /**
+   * A word of the book's own that it writes small ("shelldry", "skaa"), known
+   * for one only because the book's fan wiki has a page for it; `page` is
+   * that page. The only candidate when there is one.
+   */
+  small?: boolean;
+  page?: string;
 };
 
 type Token = { start: number; end: number; word: string };
@@ -68,8 +75,16 @@ const owned = (word: string) => ADDED.test(word);
  *
  * `text` is a chapter's text (or the paragraph's) and `offset` the place in
  * it under the pointer. `isCommon` says a lower-case word is an everyday one.
+ * `ownPage`, where the book's fan wiki has been read, gives the wiki's page
+ * for a word written small: nothing in the book tells "shelldry" (a game it
+ * made up, and names twice) from a word, and a wiki with a page for it does.
  */
-export const termsAt = (text: string, offset: number, isCommon: (key: string) => boolean): TermCandidate[] => {
+export const termsAt = (
+  text: string,
+  offset: number,
+  isCommon: (key: string) => boolean,
+  ownPage?: (key: string) => string | null
+): TermCandidate[] => {
   if (offset < 0 || offset > text.length) {
     return [];
   }
@@ -118,7 +133,12 @@ export const termsAt = (text: string, offset: number, isCommon: (key: string) =>
     return [{ text: word[0] + word.slice(1).toLocaleLowerCase(), start: hovered.start, end: hovered.start + word.length }];
   }
   if (!nameish(at) && !joiner(at)) {
-    return [];
+    // Written small: a word of the book's own if its wiki has a page for
+    // it, and never an everyday word, whatever a wiki has pages for.
+    const word = bare(hovered.word);
+    const key = keyOf(word);
+    const page = ownPage && !startsUpper(hovered.word) && !isCommon(key) ? ownPage(key) : null;
+    return page ? [{ text: word, start: hovered.start, end: hovered.start + word.length, small: true, page }] : [];
   }
 
   /**
