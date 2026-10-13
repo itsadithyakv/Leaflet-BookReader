@@ -43,7 +43,8 @@ below.
 If you connect Google Drive, Leaflet copies your book files and a small file of
 your reading progress and history (including your highlights, notes, bookmarks,
 collections and reading pace) into a folder called "Leaflet" in **your** Google
-Drive.
+Drive. A book file larger than 10 MB is copied only if you say yes when
+Leaflet asks; your place and notes in that book are backed up either way.
 
 - Leaflet asks Google only for the `drive.file` permission. It can see only the
   files it created itself, and nothing else in your Drive.
@@ -80,12 +81,56 @@ one, we store the following on our server:
   expires, or when you ask for a new one. We also store whether, and when,
   your address was confirmed. Your account works whether or not you confirm.
 - **Profile:** a handle you choose (shown as `@handle`), your display name,
-  and whether the profile is public or private. While it is public we also
-  store what it shows: this week's reading minutes, your streak, how many
-  books you have finished, a shelf of up to twelve titles from your recent
-  reading sessions, and the date of the last day you read on, which is used
+  and whether the profile is public, kept to followers, or private. While it
+  is public or kept to followers we also store what it shows: this week's
+  reading minutes, your streak, how many books you have finished, a shelf of
+  up to twelve titles from your recent reading (the books you read lately,
+  with or without a focus session), the book you have open now (its title,
+  author and how far through it you are), your level and the badges your
+  reading has earned, your best scores in Pip's three arcade games, and the
+  date of the last day you read on, which is used
   only to tell a friend (a reader you follow who also follows you) that you
-  have read today; the date itself is never shown to anyone. See "Your profile" below.
+  have read today; the date itself is never shown to anyone. It also shows
+  the levels of the buildings in Pip's camp (the arcade's building game), how
+  many magpie camps you have beaten, how many banners and trophies the camp
+  has, where its buildings, fence, decorations, landscape and defences
+  stand, and the rank of the guardian at each of its posts, never the books
+  behind the trophies. See "Your profile" below.
+- **Your library, if you share it** (off unless you turn on "Readers who
+  follow me can see my library"): for each book in your library, its title,
+  its author, whether you are reading it, have finished it or have not
+  started, and how far through it you are. Never the files, their names or
+  where they are. See "Your library, for the readers you accept" below.
+- **What you post:** when you post about a book (that you finished it, a
+  review, or a quote), the book's title and author, the stars you gave it
+  and the words you wrote or quoted, whether it is for your followers or for
+  everyone, and whether you marked it as a spoiler. A quote is text you
+  chose to send from your highlights; your other highlights and notes are
+  not sent.
+- **Likes and dislikes:** which posts, threads and replies you liked or
+  disliked. Other readers see the totals, not who gave them.
+- **Book communities:** which communities you joined or started, and the
+  threads and replies you wrote in them.
+- **Reports and blocks:** if you report something, that you did, what it
+  was, the reason you chose and anything you added; if you block a reader,
+  that you did. The reader you report or block is not told.
+- **The community guidelines:** the date you accepted them, and, if we have
+  suspended your account from posting, until when. So that a suspension is
+  not escaped by deleting the account and making another, we keep a keyed
+  hash of a suspended account's email address (not the address) until the
+  suspension ends, and it is then deleted.
+- **Book clubs you make or join:** the club's name, its weekly goal, the
+  titles added to it, and who its members are.
+- **Presents:** when you send a friend's Pip a thing from the shop, or are
+  sent one: who sent it, to whom, which thing, and when. Seeds themselves are
+  never on our server: each reader's are worked out on their own device.
+- **Raids:** when you raid a friend's camp (a reader you follow who also
+  follows you), we keep who raided whom, how many stars the raid won and
+  when, and show it to that friend. It is kept for up to 30 days, and
+  deleted sooner if either of you deletes your account. Nothing about
+  either camp is added to what the profile already shows. You can switch
+  raids on your own camp off (in Pip's camp, under Raids, beside "Friends'
+  camps"), and we keep that choice with your profile.
 - **Synced reading state** (only while you are signed in and either a Google
   Drive backup is connected, or you have turned on "Back up reading to my
   Leaflet account" in Settings): a compressed copy of your progress and
@@ -112,7 +157,7 @@ what it makes visible before you create the account.
   created. Other readers can see your display name, your `@handle`, your Pip
   (the avatar you picked), this week's reading minutes, your streak, how many
   books you have finished, and your shelf (up to twelve titles from your recent
-  reading sessions). You appear on the weekly leaderboard and can be found by
+  reading, with or without a focus session). You appear on the weekly leaderboard and can be found by
   your handle. A reader you follow who also follows you can see that you have
   read today: on such a day your Pip may visit theirs in the app, shown with your
   `@handle`, your name, your streak and this week's minutes.
@@ -130,16 +175,76 @@ what it makes visible before you create the account.
   were private unless the owner had shared them, and they stay that way:
   updating the app does not make an existing profile public.
 
-**Readers you interact with.** If your profile is public, other signed-in
-readers can follow you, send you kudos and challenge you to a weekly reading
-duel, and we store those interactions (who, to whom, and when) so they can be
-shown. Readers with a private profile cannot be followed, sent kudos or
-challenged.
+- **Kept to followers** (the middle choice, under Social → You): other
+  readers can find you by your handle and see your Pip, name and handle, and
+  nothing else, until you accept their request to follow you. You are not on
+  the public leaderboard. The readers you accept see what a public profile
+  shows. A request you have not answered is stored (who asked, and when)
+  until you accept or decline it, or they take it back.
+
+### Your library, for the readers you accept
+
+Sharing your library is a separate switch, off unless you turn it on, and it
+needs a profile that is public or kept to followers. While it is on, the
+readers who follow you (for a profile kept to followers, the ones you
+accepted) can see the list described above, and Leaflet can tell them and you
+which books you have in common, who among the readers you follow is reading
+one of your books and how far along they are, and how many of them finished
+it. Turning the switch off, or making your profile private, deletes the list
+from our server. To find what two libraries share, your app sends us short
+keys made from the titles and authors of up to 500 of your books; they are
+used to answer that one request and are not stored.
+
+### Posting for everyone, and book communities
+
+Nothing is public unless you make it so. A post goes to the readers who
+follow you unless you choose "Everyone" for that post, and you are in no
+community you did not join. To post for everyone, or to join or write in a
+community, your profile must be public, your email address confirmed, your
+account a few days old, and you must have accepted the
+[community guidelines](community-guidelines.md).
+
+- **A post for everyone** is shown, with your Pip, name and handle, to any
+  signed-in reader with a shared profile: on the Discover feed, on the page
+  of the book it is about, and on your profile.
+- **A thread or a reply in a community** is shown, with your Pip, name and
+  handle, to any signed-in reader with a shared profile who opens that
+  community.
+- **Spoilers are kept from a reader by their own app**, which compares how
+  far a thread says it goes with that reader's place in the book on their
+  own device. Your place in a book is not sent to us for this.
+- **If you report something, or something of yours is reported,** we look at
+  the thing reported, as it was posted, and who posted it, to decide whether
+  to remove it. A post, thread or reply that several readers report is
+  hidden from other readers until we have looked. We can remove content,
+  remove a community, and suspend an account from posting.
+- **If you block a reader,** you stop being shown each other's posts,
+  threads and replies, and neither can follow, challenge or send the other
+  anything.
+- **Making your profile private or kept to followers** hides what you posted
+  for everyone and your threads and replies, and takes you out of your
+  communities. **Deleting your account** deletes your posts, likes, replies,
+  reports and blocks. A thread you started that other readers replied to is
+  kept, so their conversation is not lost, with your name removed from it.
+
+**Readers you interact with.** If your profile is public or kept to
+followers, other signed-in readers can follow you (or ask to), send you kudos
+and challenge you to a weekly reading duel, and we store those interactions
+(who, to whom, and when; for a duel, the number of seeds each side agreed to
+put on it) so they can be shown. What you post for your followers is shown
+to the readers who follow you. The members of a
+book club see each other's Pip, name, handle and this week's reading minutes,
+whether or not they follow each other: joining a club is agreeing to that.
+Readers with a private profile cannot be followed, sent kudos or challenged,
+and cannot post, join a club or send presents.
 
 ## Other services Leaflet talks to
 
 - **Open Library and Wikipedia.** To fill in missing titles, authors and
   covers, Leaflet sends the book's title and author to these public catalogues.
+  When you press **Covers** on a series, it asks Open Library the same way for
+  the editions of each of its books, and fetches the cover pictures you are
+  shown from it.
   No account or identifier of yours is included. You can see their privacy
   policies on their websites.
 - **Wiktionary and Wikipedia (looking a word up).** When you select a word or
@@ -192,12 +297,22 @@ We keep your account information until you delete your account. Sign-in
 sessions expire after 90 days without use, an email confirmation code after 30 minutes, and a password reset code after 15
 minutes. Community data is kept only as long
 as it is useful: kudos for 21 days, your inbox of notifications for 60 days,
-weekly duels for 90 days, and a follow until either reader removes it. Making
-your profile private hides you from boards, inboxes and duels straight away,
-and removes the reading figures and shelf stored for it. When you delete your account from
+weekly duels for 90 days, and a follow until either reader removes it. A
+present is kept until it is unwrapped and for 30 days after; a request to
+follow until it is answered or withdrawn; a post, a thread or a reply until
+you remove it (or we do); a like, a block and your community memberships
+until you take them back; a report until it has been dealt with and for 180
+days after; a book
+club until its last member leaves. Making
+your profile private hides you from boards, inboxes, duels, feeds and clubs
+straight away, removes the reading figures, shelf, badges and scores stored
+for it, and deletes your shared library and the requests waiting on you;
+your posts are kept, unseen, and show again if you share your profile again.
+When you delete your account from
 Settings, we delete your account, profile, synced reading state, all sign-in
-sessions, and every follow, kudos, duel and notification that involves you,
-straight away.
+sessions, your shared library, your posts and your club memberships, and
+every follow, request, kudos, duel, present and notification that involves
+you, straight away.
 
 ## Your choices and rights
 
@@ -218,6 +333,21 @@ contact us and we will delete it.
 If this policy changes, we will update the date above and, for significant
 changes, say so in the app.
 
+- **Leaflet 1.4:** new and optional, each off until you use it: posting a
+  review or a quote, for your followers or for everyone; liking and
+  disliking posts; book communities with threads and replies; reporting and
+  blocking; and [community guidelines](community-guidelines.md) that are
+  accepted before anything is posted for everyone. A profile can be kept to
+  followers, with requests you
+  accept or decline. A shared profile now also shows the book you have open,
+  your level, badges and arcade scores. New and optional, each off until you
+  use it: sharing your library with the readers who follow you; posting a
+  book you finished; book clubs; presents between readers who follow each
+  other. The shelf on a shared profile names the books you read
+  lately whether or not a focus session was running (it used to show only
+  focus sessions, and "Untitled" for one started without a book). A book file
+  larger than 10 MB is copied to your Drive or sync folder only when you say
+  so. Existing profiles were not changed: a private profile stays private.
 - **4 October 2026 (Leaflet 1.2):** visitors. A public profile now also
   stores the date you last read on, so that a reader you follow who also
   follows you can be told you read today. Words you look up, Pip's diary and its weekly postcard,

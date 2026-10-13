@@ -186,8 +186,21 @@ stays up for as long as its length needs (`toastMs`: as before to 45
 characters, then 55 ms a character, 14 s at most).
 
 Known and left: the same book in two formats is two books with separate
-progress, listed under "Possible duplicates" and counted once in its series;
-a PDF's subject and keywords are not read as genres.
+progress, listed under "Possible duplicates" and counted once in its series.
+
+**A PDF's subject and keywords are its genres** (2026-10-12; `storage/pdf.rs`,
+`metadata/normalize.rs`). They were not read. The Subject and Keywords of
+the file's own description (or, where it has neither, the keyword list in
+its XMP) are cut at commas, semicolons and the like, and go through the same
+cleaning and the same cap of eight as an EPUB's. A PDF's are doubted first
+(`tool_subjects`): a field that reads as a sentence is dropped whole, and so
+is an entry that is the book's own title, its writer, a program's name, a
+file name, an address, or has a digit in it. PDFs already in a library get
+theirs the first time 1.4 is opened: the library is read again once
+(`SERIES_SCAN_VERSION` 5, as it was for versions 2 to 4). Known soft spots:
+keywords separated only by spaces become one tile, a short phrase that is
+not a genre ("Annual report") passes, and "20th century" is dropped for its
+digit. Tried with made-up inputs only, not with a real PDF.
 
 Covers come **from inside the book first**: at import, the EPUB's own cover
 image (the EPUB 3 `cover-image` item, the EPUB 2 `<meta name="cover">`, or an
@@ -330,6 +343,71 @@ the backup document, where the newest edit of a collection wins and a delete
 travels as a tombstone, as for highlights.
 
 ---
+
+**Genres are a wall of tiles, each a shelf of its own** (1.4;
+`library/genres.ts`, `components/collections/GenreTile.tsx`). The owner asked
+for the library "by genres in collections... similar to how spotify shows".
+A genre was a chip under "Browse by" that sent the reader to the library with
+a filter set. It is now a block of colour with the genre's name, how many
+books, and one of its covers leaning out of the corner; twelve show, with
+"Show all". Selecting one opens that genre inside Collections: its books,
+the ones being read first, then the unread (newest first), then the
+finished. "Fantasy" and "fantasy " are one genre, under the spelling most
+books use; a book with several genres stands in each. The colours are the
+session shelf's twelve cloths, handed out so that neighbours differ. Authors
+are still chips. Nothing is stored: it is worked out from the genres the
+books already have. Not done: rows inside a genre (new, popular), since a
+library has no "popular". The commonest other spellings of a genre are one
+tile now (`library/genres.ts`, a short alias list: "Sci-fi", "SF" and
+"Science Fiction"; "YA"; "Non-fiction"; "Biographies"): that was a limit
+written here, closed on 2026-10-12. The Library page's genre filter still
+lists the spellings as the books have them.
+
+**The Bharat Trilogy** (1.4; `library/knownSeries.ts`). The second book's
+file names the trilogy and the first's says nothing, so the series had one
+book and one book is not listed. It is in the known list now, which numbers
+the first. The general case stands: a series only one of whose books names
+it, and that the list does not know, is not gathered.
+
+**A PDF takes its first page for a cover without being opened** (1.4;
+`library/pageCoverQueue.ts`, `hooks/usePageCovers.ts`). It did so only when
+opened (below, "A PDF's first page as its cover"), so a PDF added and not yet
+read stood as "No cover yet": the owner's 43 MB scan of a history book,
+which no catalogue has a cover for. The library now makes them itself: four
+seconds after it settles, one book at a time, for each PDF with no cover
+that a lookup has had its turn at; never while a book is open. The file is
+read, the page drawn and the file let go; the PDF reader's code is loaded
+only then. A PDF over 200 MB is left for its reader, as before (the whole
+file is held in memory to draw one page). A book tried is not tried again
+for 14 days (`leaflet.pageCoverTried`), so a file that cannot be drawn is
+not read at every launch. And a blank first page gives way to the second or
+third (`COVER_PAGES`): a scan often opens on a blank sheet. Checked on the
+owner's file in the preview: 500 pages, a 600 x 849 JPEG of 85 KB, about a
+second. Not checked in the installed app.
+
+**The Hobbit stands with The Lord of the Rings** (1.4;
+`library/knownSeries.ts`). It was in the library and not on the series' page:
+it is not one of the three. It is listed as the optional book before them
+("Prequel · optional", number 0), and The Silmarillion as a companion after;
+the count stays "of 3".
+
+**A series can change its covers** (1.4; `metadata/editions.rs`,
+`commands/covers.rs`, `components/collections/SeriesCovers.tsx`). The owner
+found the covers a lookup gave The Lord of the Rings ugly, and asked to choose
+"which series of covers" from the top of its page. **Covers**, beside the
+series' Start button, asks Open Library for every edition of each book (the
+work is found as a lookup finds it, by the series list's own title where the
+series is a known one, so a translated file's title does not get in the way)
+and offers them as sets: one row a publisher, its cover for each book it
+published, the publisher with most of the series first. "Use these" puts
+that row's covers on the books it has. A chosen cover is kept as
+`<hash>-chosen-<cover id>.jpg`, apart from a looked-up one, so a lookup
+neither replaces it nor is blocked by it. The pictures are fetched by the
+backend and shown as `data:` URLs: the webview may not load pictures from
+the web. Two requests a book, one after another, at most 24 books. Not
+tried against Open Library itself: the grouping, the parsing and the storage
+are unit-tested, the requests are not. A set is by publisher, not by print
+run, so one publisher's two designs can be mixed in a row.
 
 ## Formats
 
@@ -668,7 +746,14 @@ with odd and even page widths (`readers/pageTurn.ts`, `readers/pagesStyle.ts`):
   **Ctrl+Home and Ctrl+End** to the book's; Back returns.
 - **In a right-to-left book** the pages run the other way: the left side of
   the page, the Left arrow and a swipe to the right go on; Space and Page Down
-  always do. The dock's arrows and the shortcuts sheet are not mirrored.
+  always do. The dock and the shortcuts sheet follow (2026-10-12): "next
+  page" is on the left and points left, the chapter chevrons swap sides with
+  it, the tooltips name the arrow that really turns the page, and the sheet
+  lists the keys that way round. The mirroring lives in the key table
+  (`readers/readerKeys.ts`), which the sheet and the key handler both read.
+  Left as it was: Ctrl with an arrow for the next and previous chapter is
+  the same in every book, so in such a book the "next chapter" button is on
+  the left while its key is Ctrl+Right.
 
 Known and left: a book last read in Smart Read stays in standard reading
 after a visit to pages; the book's time left can step up by one rounding
@@ -1033,8 +1118,13 @@ and neither drawn nor gone to until the book has been opened once (next
 paragraph). Each keeps the Kindle's date (`annotation_save`
 takes an optional creation time, used only for a new row). Its id comes from
 the book, the place and the words, so the same file imported again adds
-nothing and changes nothing. Known: one removed in Leaflet comes back if the
-file is imported again, and one edited on the Kindle since arrives as a
+nothing and changes nothing. One removed in Leaflet stays removed when the
+file is imported again (2026-10-12): the import asks which of a book's
+highlights were removed (`annotations_removed`) and leaves those out, and
+says how many ("2 you removed"). Undo in the Highlights dialog still brings
+one back. This lasts as long as the removal is remembered, which on a device
+that backs up is ninety days (`sync/merge.rs`); after that the same file
+would bring it back. Known: one edited on the Kindle since arrives as a
 second row. Checked in the preview with an invented file (a highlight, its
 note, a book not in the library); not with a real Kindle's.
 
@@ -2560,7 +2650,10 @@ forgotten after five seconds. The pointer rubbed over Pip is petting (it leans
 in, hearts, a purr), rubbed fast a tickle. Picked up, Pip swings from its leaf
 like a pendulum; let go while moving it is tossed, spins, bounces off the walls
 and lands. A ball (scrap paper, or the Bouncy Ball if owned) is thrown and
-fetched, three times before Pip is puffed. The rail's **Play** key turns it
+fetched, three times before Pip is puffed (since 2026-10-13 it is a game of
+catch instead: she throws it back to the pointer, a press on it in the air
+catches it, and catches in a row are counted beside it; pip.md, "The ball is
+a game of catch"). The rail's **Play** key turns it
 into a play rail (Pet, Tickle, Toss, Ball, Dance, Snack, Done), so every way
 has a key; the up arrow tosses. The first hover invites it, and the
 walkthrough has two more steps (Pip, Play). Play cheers Pip up by 1 a bout
@@ -2604,6 +2697,12 @@ what it does, and a key that does the same.
   floor. Pip hears it and comes over hopefully. The Play rail's **Snack** key
   sends her to it: she opens it, waits while a snack is chosen and eats it
   there. Opening it gives nothing; snacks are still bought as they are given.
+  Since 2026-10-13 (the owner's asking) what is in it is real: each snack
+  bought stocks it for a day, three days at most, and with none bought lately
+  the shelves are drawn bare. Pip, finding it so, droops and gets nothing, and
+  the first such look of a day takes 3 off her mood (never under the floor of
+  40, and never for time the app was shut); a snack puts it right and she
+  cheers at the next look (`pip/fridge.rs`; pip.md has the rules).
   It is a fixture, not decor (`home.js`, `fridgeBox`; id `minifridge`, since
   `fridge` is the unshipped Kitchen's decor item): every Pip has one, it is in
   no slot, shop, catalogue or saved layout, it cannot be moved in Decorate,
@@ -2624,9 +2723,11 @@ glance, the fridge a short look; one read in five drifts to the phone and the
 book wins. In the morning she hits snooze once, and about every other morning
 looks in the fridge on getting up. Asleep for the night she stirs now and then
 (a 0.3 chance each half minute, at least 3 minutes apart), but not within 20
-minutes of the reader putting her to bed (`TUCKED_QUIET_MIN`). All of it is
-for show: no seeds, no mood, nothing bought. Under reduced motion: still poses
-with the lines.
+minutes of the reader putting her to bed (`TUCKED_QUIET_MIN`). The habits
+themselves are for show: no seeds, nothing bought. The one that is not, since
+2026-10-13, is what she finds in the fridge (above), and being woken, which
+wears on her temper (`pip/temper.ts`). Under reduced motion: still poses with
+the lines.
 
 **Book nods** (`pip/bookNods.ts`, scenes in `pip/books/`, tests in
 `pip/bookNods.test.ts`). Pip knows 549 books and series (336 entries): fantasy,
@@ -2804,6 +2905,37 @@ with an **Undo** toast for a few seconds, and is bought only when they are up
 (title matching like Pip's book scenes, `nodMatches`), the tile wears a "From
 your library" ribbon.
 
+**The room is painted far less often, and faster by night** (1.4;
+`HouseScene.tsx` `roomFrames`, `pip/house.js` `nightLight`). The owner: "pip
+feels a little laggy at times". Two causes, both measured in the preview.
+
+- A frame of the room takes 2 to 9 ms to paint by day, there are 48 to a
+  loop, and each is painted on the 12-a-second tick that first shows it. The
+  frames were kept inside the scene's effect, so they were thrown away on
+  every visit to the page, every change of floor or decor, every ten minutes
+  (the sky), and all together whenever a fifth state came along (a lamp
+  switched, the fridge opened), the one on screen with them. Each time meant
+  four seconds of heavy ticks, on the same thread that moves Pip. They are
+  kept outside the scene now, the four latest states, the oldest going
+  first; away from Pip's page only the last is kept (about 5 MB).
+- By night (from seven in the evening) every pixel of every frame went
+  through `nightLight`, which made three arrays and five strings a pixel: 17
+  to 24 ms a frame against 2 to 9 by day. A pixel outside every light now
+  takes its colour from a table (the answer depends on the colour alone),
+  and the rest are worked out without the arrays. Bedroom 24.4 ms to 4.8,
+  kitchen 17 to 3.5, library 17.5 to 6.6, greenhouse 21 to 11.3 (medians of
+  twelve frames, development build, starter furniture). The pictures are the
+  same to the pixel: three frames of each of the seven floors, compared by
+  hash before and after.
+- The parsed-colour table (`pip/engine.js`) is emptied at 60,000 colours:
+  the night pass made new colours every frame and each was kept for good.
+
+Not changed: Pip out on the other pages measures the page every frame while
+she moves (`PipWorld.tsx` `readBounds`, `readLedges`); a helper's reading of
+the code put that at tenths of a millisecond, so it was left. Not measured:
+the installed app, a fully furnished room, or frames a second on screen (the
+preview's pane was hidden, where nothing animates).
+
 ### The Attic Arcade
 
 Floor 3 in the lift, in every build. Each machine opens its game (the cabinet
@@ -2840,6 +2972,1106 @@ at the book's saved progress, so it cannot spoil. **My words** lists the words
 newest first with meaning, book and place, Open in book and Remove. The quiz
 pays nothing: no seeds, no mood, no score (it is not recorded as a game
 played). Keys: 1 to 4, Enter, Esc.
+
+**The games are played on an old television set, large if wanted** (1.4;
+`ArcadeOverlay.tsx`). The owner asked for full screen, then for "an old crt
+screen like effect" in its place. The canvas sits in a dark frame behind
+glass with a tube's lines over it (one to a game pixel) and darker corners;
+nothing flickers or rolls. There was a "Big screen" switch; it went when the
+arcade itself took the whole window (see "The arcade fills the window, in
+Pip's own hand" below), and a game is now always as large as the window
+allows.
+
+**A game that ends stays ended for a moment.** A press used to start the
+next one at once, and the press was nearly always the jump that came too
+late, so the game vanished before the reader saw how it ended. Now the
+picture dims, the score and the best are said, and a press starts the next
+game only after 0.9 s (`PLAY_AGAIN_AFTER_MS`), when "Space or tap to play
+again" appears.
+
+**And it no longer starts again by itself** (2026-10-12; the real cause of
+"when you lose the game, it resets abruptly", found by playing a run in the
+preview). Recording a finished game brings back a fresh overview from Rust,
+and with it a new list of the same clothes for Pip. The game's loop was set
+up again whenever that list changed, so every game began again the moment
+its result was saved, and the game-over picture was on screen for as long as
+Rust took to answer. The loop now goes by what Pip wears (`wornKey`), not by
+which list holds it. Measured in the preview: before, the screen was back at
+"Press Space or tap to start" within the second; after, "Game over" was
+still there three seconds on.
+
+### A book can be removed from any card
+
+The owner could not find how to delete a book. It could be done, but only
+from a row of the list view (and for duplicates): the cards' own menu had no
+such thing. "Remove from library..." is now the last item of every book's
+menu (`components/BookMenu.tsx`), set apart and asked about first. What goes
+is Leaflet's own copy of the file (an import copies the book in); the file it
+was added from is never touched, and the reading done in it stays in the
+history.
+
+**And from Google Drive.** Removing a book starts a backup run a moment
+later, and that run deletes the file of every removed book from the Drive
+folder (`sync/drive.rs`; the same for a backup folder). A run that fails
+tries again on every later run for ninety days. This was already so and was
+read through, not run: the owner's Drive was not touched.
+
+### The Hollow: Pip's camp, the arcade's building game
+
+*It is no longer in the arcade: since 2026-10-12 Pip's tab opens on it. See
+"The Hollow grows up: one level, four shelves, and Pip's tab opens on it"
+for that and for everything added after this section was written.*
+
+The owner asked for "something like what clash of clans does" on the arcade
+floor, then, as it took shape: "a mix of clash of clans and sims with a
+unique twist of pip", "funded primarily from reading and streaks", with
+"strategy" from "placement of buildings", heroes that nod to the books readers
+know, and "easy but still enough to make it interesting". A fifth tile in the
+arcade, "The Hollow".
+
+**Its history, because the first version was wrong.** The first slice (six
+buildings on fixed plots, a number for attack and one for defence, dice for
+raids) was played through for seven kinds of reader
+(`apps/node_modules/.leaflet-test/hollow-sim.ts`) and came out as a progress
+bar: nothing to do on two days in three, magpies that never won a night,
+raids that were a roll of dice, a reader who could spend the first twenty
+acorns into a corner for good, and no end but running out. Everything below
+was written against that list, and against the same simulation.
+
+**How it fits together** (the "(i)" on its screen says this in six lines):
+
+- **Reading runs the camp.** Every ten minutes read, the oak drops acorns.
+  Every quarter hour read rests the scouts for one raid (three in hand at
+  most). Every ten minutes read earns one paid run at the arcade's games
+  (five in hand). A building is paid for in acorns and finished by so many
+  minutes read after it was begun; no waiting finishes one. A day's reading
+  goal met lights the lookout's lantern that night. A reading streak makes
+  the oak richer (10% from 3 days, 20% from 7, 30% from 14, 50% from 30).
+  Pip has a wish each day, and it is always some reading. So the game is
+  never somewhere to be instead of a book: reading is what lets it be played.
+- **Acorns** are its money and its own. Never seeds (those still come only
+  from reading in focus and buy Pip's things); nothing a server counts.
+- **The camp** (`pip/base/rules.ts`): the burrow (nothing is built past its
+  level), the acorn oak, the larder (how much the camp holds, and how much it
+  hides from magpies), the lookout, the scouts' hut, the fence, and a yard of
+  two plots that take two of four things: a workshop (a second builder), bees
+  (honey each day), a well (a richer oak), a market stall (better-paid
+  games). At level 3 the oak, the lookout and the hut each take one of two
+  paths. A new camp has its oak already standing.
+- **Where things stand matters, and is the reader's to choose.** "Arrange"
+  turns the picture into the place the camp is laid out: a building is
+  picked up and put down (free, as often as wanted); fence goes down a piece
+  at a time, three pieces to a level, on a grid the pieces join up on.
+- **The night is a battle on that layout** (`pip/base/battle.ts`,
+  `campStructures`, `nightOutcome`). Magpies come once the burrow is level 2,
+  from a side the day decides, which the lookout names beforehand. They make
+  straight for the larder, and whatever stands on their line (fence, a
+  building, a construct) has to come down first; from a bolder flock some
+  fly over all of it. The lookout throws at what comes in
+  reach (further and harder with the lantern lit), so do the scouts from
+  their hut's roof and Pip from the burrow. What they take is by how far
+  they got with the larder: untouched, the camp held. Never more than a fifth
+  of what the camp has, never what the larder hides. A lost night also
+  knocks down the fence pieces they broke (to be put up again, free) and, if
+  the larder was emptied, carries off one decoration, which a won road raid
+  brings home. A night comes only after the reader has read since the last
+  one: a camp nobody has read for is left alone, however long. "Tonight" says
+  how it will go as the camp stands, and "Watch it" plays it through, so a
+  layout is tried before the night comes.
+- **Raids are fought the same way round the other way.** The reader puts
+  scouts down anywhere outside a magpie camp, one at a time, and they fight
+  by themselves: each makes for the nearest thing, a wall in the way is
+  pulled down first, a mole goes under and for the loot, a slinger throws
+  from where a sentry may not reach. Where, in what order and from which side
+  is the skill. Half the camp is a star, the nest is a star, all of it is
+  three; what came down is what is brought home, won or not. Three kinds:
+  **camps on the road** (three new ones every day, each raided once: an easy
+  one, an even one and a rich one), the next **stronghold** on the ladder
+  (taking it moves the camp on; it never ends, and gets harder), and each
+  month the **Magpie King**, who wants two stars and gives up that month's
+  banner. "Left to themselves" on each card is how it goes if the scouts are
+  simply sent: a camp is the same camp each time, so that is a fact, not a
+  guess, and nobody pays for a raid that cannot be won without being told.
+  "Send" does exactly that for 60% of the loot, for a reader who would rather
+  not fight (or cannot).
+- **Heroes come out of the reading** (`pip/base/heroes.ts`). Every book
+  finished is a trophy in the clearing, shaped by the kind of book it was
+  (`trophies.ts`), and a trophy of the right kind brings a hero (so does
+  simply finishing enough books, for a library whose genres say little). One
+  goes on a raid and does one thing no scout does: a young wizard who strikes
+  from far off, a sea-born fighter whose blow everything nearby feels, a
+  thief who leaps walls for the loot, an archer for the sentries, a detective
+  no sentry sees, an old wizard every sentry throws at first, a star captain
+  who cuts walls, two who mend the scouts, a hunter made for nests and
+  champions. They are the camp's own characters. Each tips a hat to a kind of
+  hero every reader has met and none is anybody else's: the names, the looks
+  and the words are Leaflet's (no borrowed names, marks or lines).
+- **Villains.** The last stronghold of each name is held by its lord, who
+  comes out to meet whoever gets near and goes for a hero first; the King has
+  his own. A hero within reach turns and fights him.
+- **Small things for most days**: the hedgehog brings three things each day
+  and one may be taken; Pip's list is twenty-three things to do in order, each
+  for acorns (it is what a new camp is steered by); the word quiz gives a tip
+  (two more scouts on one raid) for seven right of ten; a club that reads an
+  hour each in a week beats its boss, and every member's camp has a share;
+  eighteen things can be bought and set down anywhere in the clearing for
+  their own sake (charm, which fills the hedgehog's sack and brings the
+  animals).
+- **The arcade's games** pay the camp a little for each paid run (up to 8
+  acorns), and can be wagered on: acorns on beating the reader's own usual
+  score, taken when placed and settled by the next finished run. That is the
+  one way acorns are lost by playing.
+
+**What the simulations say** (two, both kept): raids played by rule get a
+hut of level 1 to about the sixth stronghold and a hut of level 5 to about
+the twenty-sixth, with the best side a camp or two better than the near one
+(`battle-tune.ts`). The same camp on the same night loses its larder from one
+side and holds from another, and holds more often built up, fenced and lit
+(`night-tune.ts`). A reader of 30 minutes a day who fights raids has all six
+buildings at level 5 in about 45 days, with something going up on all but
+one of them; one who reads 20 minutes and never raids, about 83. Acorns come
+45 to 70% straight from reading (the oak and Pip's wishes) and 13 to 45%
+from raids, which reading rests the scouts for. A reader who never arranges
+the camp loses about one night in three: laying it out is worth doing.
+
+**The screen** (`components/pip/arcade/base/`): three pages. *Camp*: what
+to do next, the clearing as a picture (in its season, by day or night, the
+buildings in the night's own light), the plots as pictures to press, the
+chosen one's card, tonight, the hedgehog, a trophy to raise, things to set
+down. *Raids*: who goes, the road, the strongholds. *Journal*: what the camp
+has done and what happened lately. A raid being fought or a night being
+watched takes the whole screen. Words are kept for names and numbers;
+buildings, heroes, camps, prices and directions are pictures, and what a
+thing means is in its tooltip. Everything the picture does is also on a
+button. The art is `pip/base-art.js` (`GAME_SPRITES.base`).
+
+**Elsewhere in the app**: a line at the end of a reading session ("The
+Hollow. The lookout is finished, 12 acorns on the oak."), a dot on the
+arcade's button when something is waiting, and a reader's camp on their card
+for those who may see their profile (its levels and counts only: where they
+put things, their acorns and which books stand behind their trophies are
+theirs).
+
+**Kept** in one settings row (`pip.base`), in the backup (newest wins, like
+Pip's look), and its summary on a shared profile. The rules are the app's
+(TypeScript), and Rust keeps what it is handed after checking it is a small
+JSON object. That is deliberate and safe only because acorns buy nothing
+outside the game: if they are ever to buy what a seed buys, or be ranked
+between readers, the rules have to move to Rust first.
+
+**Decided, and how to undo each:**
+
+- *Its own money rather than seeds.* The games have never paid seeds, and a
+  game that paid them would let the arcade buy what reading is meant to earn.
+- *Raids against the computer; friends only visit.* Raiding a friend needs
+  the server to hold every camp and referee every raid, and would let one
+  reader take from another.
+- *Heroes are original.* They are meant to be recognised as kinds, not as
+  anybody's characters.
+- *No night without reading, and a fifth at most.* The owner's rule: it must
+  not be a game one signs in to every day. Raiders come only to a camp that
+  has been read for since they last came, so being away costs nothing.
+
+**Its limits, plainly.** No person has played it over days: every number is
+from the simulations and from reasoning, and a simulated reader is not a
+bored one. (Four limits written here first were taken away the same day:
+see the next two sections. The camp is reached from a "Camp" key on the rail
+under every floor of Pip's house now, as well as from the arcade.)
+
+### The Hollow after its first look: the critique, answered
+
+The first report on the Hollow listed what was wrong with it, and the owner
+said "fix all of those critiques". Each, and what was done:
+
+- **"Still dense", and no walk-through.** The camp page is three things now:
+  what Pip has to say, the picture, and one card for whatever is chosen from
+  a row of tiles under the picture (the eight plots, tonight, the hedgehog,
+  things to set down). Tonight, the hedgehog and the decorations used to be
+  cards of their own down the page; a trophy to raise and the morning's
+  report are lines of Pip's. Pip says the to-dos herself, in a speech bubble
+  beside her own face (as the reader dressed her). The next thing on her
+  list is **marked where it is done** (a tile, or the Raids tab, with a mark
+  that jumps), and a tap on its line goes there: each thing on the list
+  (`QUESTS`) now says where (`at`, `questAt`). A new reader gets three
+  bubbles from Pip once (`leaflet.pip.base.intro`).
+- **"Raids are too safe early".** Four changes (`battle.ts`, `rules.ts`):
+  - *Stars are graded.* The nest counted for 40% of a camp, so "half the
+    camp" could hardly be had without it and results were nearly all none,
+    two or three. It counts as two buildings now: scouts who cannot crack
+    the nest can still take a star off the rest.
+  - *A champion can be set on.* Only the scout he had hold of fought back,
+    one at a time, which made every third stronghold a wall. Any scout close
+    by turns on him now.
+  - *A camp's newest sentry is green.* A camp gains a sentry every third
+    camp; the new one throws 45% as hard in its first camp and 70% in its
+    second, so the ladder climbs instead of stepping.
+  - *The road is measured against the scouts.* The three camps of the day
+    were three, one and minus one behind the ladder, so a reader whose hut
+    had outgrown the ladder saw three stars on everything. Each is now at
+    least as hard as scouts of that hut are a match for (`ROAD_AT`, and
+    `ROAD_AT_HERO` once any hero has come): sent by themselves they take the
+    first whole, the second with about two stars, the third with one or two.
+    What a road camp costs and pays still goes by the ladder alone.
+  - And *three stars on a stronghold empties the next one too* (unless that
+    one is a lord's own), so a camp that has fallen behind catches up in
+    half the raids.
+- **"Heroes may be too strong".** Mending is one scout at a time now, the
+  worst hurt near her (it was every scout in reach at once, which out-mended
+  a sentry). The young wizard strikes from inside a sentry's reach, not
+  outside it; the archer is slower; the old wizard is frailer and no longer
+  splashes; the hunter less. The thief is sturdier (she was dying alone).
+  **The King is measured against the hut, not the ladder** (`KING_AT`): set
+  where scouts sent alone do not take him and where, with a hero, four to
+  nine of the ten do with two stars and none with three. So he is not an
+  easy banner for a reader who has taken few strongholds, and not out of
+  reach for one who has taken many.
+- **"Tooltips carry a lot", and a finger cannot hover.** `Tips.tsx`: a finger
+  held on anything that has words to say shows them in a bubble (and does
+  not press it); a tap or a click on a thing that only explains shows them
+  too. One layer serves the whole arcade.
+- **"Small in a narrow window".** The picture was sized to whole screen
+  pixels only, which in a narrow window left up to half the width empty.
+  `fit.ts`: where the whole size would leave more than a quarter empty the
+  picture fills the room instead, drawn at the next whole size up and
+  brought down smoothly. In a 480-wide window it is 360 wide where it was
+  240.
+- **"No sound".** Nine sounds in Pip's own synth (`pip/sound.ts`): a hammer,
+  a scout's feet, a pebble, a thing coming down, a star, a raid won and one
+  lost, the magpies, the horn. They follow Pip's sounds switch, which is
+  also on the camp's own screen now (off unless turned on).
+- **"Friends see a default layout".** The camp's summary on a profile now
+  carries where each building stands, each piece of fence and each
+  decoration (`camp_summary` in Rust, `sanitiseCamp` on the server, both
+  clamped and capped; `lookOfSummary` draws it). An older server drops them
+  and the card falls back to the default layout.
+
+**What the tables say now** (`raid-band.ts`, `road-band.ts`, `king-band.ts`,
+kept beside the others): scouts sent alone take strongholds to about the 7th
+with a level 1 hut, the 10th, the 13th, the 19th and the 25th with a level
+5. The economy did not move: a reader of 30 minutes a day who fights raids
+has all six buildings at level 5 in about 47 days (45 before), one of 20
+minutes who never raids in 83, and one of 60 in 32. The reader of 10 minutes
+a day who only sends raids is slower, about 162 days from 133, because the
+road is harder for scouts sent alone.
+
+### The arcade fills the window, in Pip's own hand
+
+Three asks from the owner, on seeing the above: "add more whimsy to the pip
+UI, it being neumorphic all around is kind of annoying"; "the animations on
+them feel very jittery, add more personality to them too"; "instead of it
+being in a popup can you make them full screen"; and "the pick a game menu
+could look better, while describing what the game could be about too".
+
+- **Not a popup.** The arcade takes the whole window (`.pip-arcade`), its
+  name and its way out held at the top, its pages in a column 1240 wide at
+  most. The "Big screen" switch is gone: a game always has what the window
+  can give. On a wide window the camp's picture has the left of the page
+  and Pip's words and the card sit beside it; in a narrow one they stack.
+- **Pip's hand, not the app's.** The rest of the app is soft raised paper.
+  The arcade and the Hollow now use the look Pip's house already had for
+  its own controls: dotted paper, a hard ink line with notched corners, keys
+  that sink into a lip, the camp's picture in a wooden frame, tabs like a
+  ring binder's, price-tag labels. Every `tactile-button` inside the arcade
+  is restyled by one rule (`.pip-arcade .tactile-button`), and the six left
+  on Pip's other surfaces (shop, drawer, album, seeds) became `pip-key`s.
+  The arcade's standing line about seeds and mood went behind a small chip.
+- **The front page** (`GamePicker.tsx`): a card for each of the five things
+  to play, and the picture on each card is the game itself. Each runs its
+  game with a stand-in at the controls far enough for something to be on
+  screen, and holds that frame; under the pointer (or with the keyboard on
+  it) the card's game plays on. The camp's card is the reader's own camp.
+  Under the picture: what the game is about in a sentence, the keys it is
+  played with as keys, and the reader's best.
+- **Why it shivered, and what was done.** Three causes, none of them the
+  art. (1) A raid's simulation steps thirty times a second and its pieces
+  were drawn at whole art pixels: at three or four screen pixels to the art
+  pixel, a scout at twenty pixels a second moved in uneven jumps. A piece is
+  now drawn between the last step and this one, and placed to the screen's
+  pixels (`View.at`, `snap`). The simulation is untouched. (2) Keys, tiles
+  and cards moved when the pointer came to them, so they moved out from
+  under it and back. Nothing moves on hover now but what is inside a key;
+  a card that lifts keeps an unseen skirt under the pointer. (3) A tab grew
+  under the pointer and pushed the page down a pixel.
+- **Personality.** In a raid: a scout drops in and lands in a puff of dust,
+  has a spring in its step, and jumps when the raid is won; a thing that is
+  hit rocks on its feet; a thing that falls goes in a burst (loot from a
+  hoard); each star pops over the nest as it is won; the champion stamps. In
+  the camp: Pip goes on her rounds between the burrow, the oak and the
+  larder when nothing is going up (`pipRounds`, by the clock, so it needs no
+  memory), a chosen building gives a bounce, gathered acorns fly from the
+  oak to the larder, the hedgehog trundles in, and there is something on the
+  air for the season (butterflies, leaves, snow, petals; fireflies by
+  night). In the page: a jump that lands and then waits, jelly on a tile.
+  None of it runs for a reader who has asked for less motion.
+
+**Checked**: 2,689 app tests, 760 Rust, 186 server, the type check, clippy
+and the production build. In the preview: the front page, the camp at 1280
+wide (picture left, cards right, no scrolling at 820 high) and at 480 wide,
+the dark theme, each card of the camp, arranging, a tip shown by a tap, and
+two raids fought to their end ("Taken!", stars, acorns, back to camp), with
+no errors in the console.
+
+**Not checked**: how the motion feels. The preview's pane was too small to
+judge it and a screenshot cannot show a shiver: that the pieces now move
+between steps is from the code and its numbers, not from watching. The
+sounds were not heard. Holding a finger for a tip was not tried on a touch
+screen (a tap was, with a mouse). The friend's layout was not looked at on a
+card. Nothing in the installed app.
+
+### The camp is lived in, and belongs to the house
+
+The owner, next: "add some unique features to this game too. Add animations
+to everything like the stars. Add a sims like element to it too. Like the
+pip home already exists, tie them all together. Also I think after the taken
+screen, the animations don't pop up."
+
+**After "Taken!", nothing showed, and why.** The end of a raid was said in a
+panel laid over the field with the field dimmed to 42% under it, and the
+field is where the star and the cheering are drawn. The result is now a
+panel *under* the field (`RaidResult` in `BattleScreen.tsx`): the word, the
+three stars landing one at a time (each heard), then what was carried home,
+counted up. The field stays as it is: whoever is left jumps, and paper comes
+down the width of it for a raid won. Back in the camp, what was won is seen
+going into the larder.
+
+**The house and the camp are one place** (the tie the owner asked for):
+
+- A **Camp** key on the rail under every floor of Pip's house
+  (`pages/pip/PipRail.tsx`) goes straight out to the Hollow; the dot for
+  "something is waiting" is on it. The camp was only reachable through the
+  arcade's list on the attic floor.
+- **Pip brings her mood with her.** Her mood in the house (what reading, play
+  and a snack lift) is told to the camp (`ArcadeOverlay` to
+  `baseStore.setMood`, `Now.mood`): at 75 or more she builds a tenth
+  quicker, at 90 a fifth (`moodQuicker`). Never slower: a low mood costs
+  nothing. Her hearts show in the camp beside her name.
+- She is the same Pip, dressed as in the house, and at night she is asleep
+  at the burrow's door.
+
+**Who lives here** (the Sims in it; `rules.ts`, "who lives here"). The heroes
+a reader's finished books have brought are not only raiders: they live in
+the camp, and can be seen about it, each on a round of their own. Each has
+**one want a day**: some reading (10, 15 or 20 minutes), the day's goal, the
+oak gathered, a raid won with them along, or a thing for the clearing that
+is not there yet. Every want is reading or something reading pays for.
+Seeing to one is a step of **friendship** (five steps, "new here" to "sworn
+to the Hollow") and a few acorns from them, and each step makes that hero 3%
+sturdier and surer on a raid (15% at most). A tile in the row under the
+picture opens the list: a face, hearts, what they said, and a button when it
+has come true.
+
+**Things that are this game's own:**
+
+- **Pip's walks.** She can be sent for a walk of 10, 20 or 30 minutes, and
+  the minutes are minutes of *reading*: she is back when they have been
+  read, not before, with a share of what the oak gave for them (40%) and,
+  often, a **tale**: one line of what she saw ("A snail was reading a leaf.
+  It was on the same line when I came back."). There are 36, each found
+  once, kept in the journal. While she is out she is not in the picture.
+- **The first acorns of the day** have the dew on them: one more fall of the
+  oak comes with the day's first gathering. It is worth most to who reads
+  least (double for ten minutes, a sixth more for an hour), and it took the
+  reader of ten minutes a day from about 162 days to 115 in the simulation,
+  which was the one number in the last report that had got worse.
+- **A week's streak puts a rainbow over the trees.**
+
+**Everything moves a little now** (`index.css`, "the camp, moving"): a card
+rises into place when it changes; the tiles, the raids, the residents and
+the tales are dealt in one after another; Pip's lines come from her side;
+promised stars turn up in turn; hearts fill one by one; a building's bar
+crawls while there is reading still to do; the chosen thing's picture
+breathes. None of it for a reader who has asked for less motion.
+
+**Kept**: five more parts of the camp's one row (`dewDay`, `bonds`, `wants`,
+`trip`, `tales`). A camp kept before them reads as one that never used them.
+
+**Checked**: 2,710 app tests (12 new, `life.test.ts`), 761 Rust, 186 server,
+the type check, clippy, the production build. In the preview: the Camp key
+on the rail and the dot on it, the list of who lives here with Pip's hearts
+from the house and four heroes' wants, a walk under way and then welcomed
+back after the reading was done, the tales in the journal, and a raid fought
+to its end with the result under the field and no dimming.
+
+**Checked afterwards** (the owner: "fix the critiques where you can"): a
+raid *won* ("Taken!", three stars landed, +40 counted up, "The next
+stronghold emptied at the news"); the hero who went had his "take me on a
+raid, and win it" ready to be seen to when the camp came back; a want seen
+to on screen (two hearts to three, 200 acorns to 210, "Seen to today."); a
+finger held on a tile, with a made-up touch (its name shown, and the press
+that followed not taken as a press). Pip's walks are in the economy
+simulation now: a reader of 30 minutes who fights raids is done in about 43
+days with them (45 without), one of ten minutes in 111; walks are 6 to 11%
+of a camp's acorns, and reading's own share (the oak, the wishes, the walks)
+is 60 to 76%.
+
+**Still not checked**: the motion, the sounds and the paper were not
+watched: the preview's pane was in the background, where nothing animates,
+so every check above read the page rather than looked at it. Friendship
+over days. The mood bonus with a real mood from Rust. Nothing in the
+installed app.
+
+### The Hollow grows up: one level, four shelves, and Pip's tab opens on it
+
+Written 2026-10-12, for what was added after "The camp is lived in". The
+owner's steer for all of it: reading lets you play, playing gives you a camp
+to show friends; it must not be a daily chore; raiders should differ enough
+to make where things stand matter; a reader should be able to lose a little;
+book homages are welcome but must be original.
+
+**Where it is now.** Pip's tab opens on the Hollow, in the page, not in a
+window over it (`HollowPlace.tsx`, `PipPage` `place`). It used to be a card
+in the attic's arcade cabinet, three taps from the tab that is about Pip.
+The clearing is where she lives and the burrow in it is her house: "Go
+inside" (at the top, and on the burrow's card) shows her rooms, and the
+rail's last key there says "Outside". The house stays mounted behind the
+clearing, `inert` and not shown, so it is as it was left. The arcade keeps
+the games that are games (three and the word quiz); the Hollow's card is
+gone from its front page. The app's own tour is shown the house, and the
+house's first-visit walk waits until the reader first goes in.
+*The garden* has a place of its own outside since (next section); its
+floor is still in the lift.
+
+**One level.** The camp's level is the burrow's (`campOpens`, `PLOT_FROM`,
+`plotOpen`, `standing`). It is on a chip at the top, and the Camp shelf
+shows what the next level brings as a row of small pictures, each named on
+its tooltip. That list is read off the gates themselves and a test holds
+each claim to its gate (`levels.test.ts`). What each brings:
+
+| Level | Brings |
+| --- | --- |
+| 2 | a plot in the yard; decorations and landscape; magpies by night |
+| 3 | a second plot; the meadow; guardians; paths; ward stone and hedge; the Mudtusk rabble |
+| 4 | thumper and smoke brazier; the Gilded and the Stumbling; the yard to level 3 |
+| 5 | Frostwights; everything to its top |
+
+A plot of the yard is what a level brings. Before, two "Empty plot" tiles
+marked 0 stood in the dock and the clearing from the first minute and could
+not be used until level 2. Now there is no plot until its level comes: not
+drawn, not on a shelf, not in the way of anything being placed. When it
+comes it is seated on free ground (`seatPlots`). A plot already built on
+under the old rule stays. The second plot now comes at level 3, not 2; the
+simulation moved by two days at most (30 minutes a day, fighting raids: all
+six buildings at level 5 on day 45).
+
+**Four shelves.** Everything to build, post or buy is sorted by what it is
+for (`SHELVES` in `BaseScreen.tsx`). Which shelf is open follows from what
+is chosen, so tapping a building in the picture opens its own.
+
+- *Camp*: burrow, oak, larder, the yard's plots.
+- *Defence*: fence, lookout, tonight; the four constructs.
+- *Heroes*: everyone in the camp. The scouts' hut, who lives here (wants,
+  walks, blades), and the seven guardians. The guardians were under Defence
+  at first; the owner looked for the figures on the map under Heroes and
+  did not find them, so that is where they are.
+- *Decorate*: eighteen decorations and ten pieces of landscape, with the
+  camp's charm against the next animal's.
+
+A thing a level has yet to bring is shown greyed with that level on it.
+The hedgehog and the meadow keep their own keys.
+
+**Guardians** (`guards.ts`, `GUARDIANS`). Seven, one to a building, posted
+for acorns and trained by reading to rank 3: Halvar Longstride (lookout:
+reach), Corwin Blackcloak (fence: sturdier), Mossgather (oak: slows
+walkers), Dame Berit Tallshield (burrow: a tougher larder), Emberling
+(larder: throws, fire), Pim Greenhand (yard: hides more), Ilsa Reedwhistle
+(hut: everything throws quicker). The first design was measured and four of
+the seven changed nothing; they were redone so each makes the one number its
+building is for bigger at every rank, and a test says so.
+
+**Raiders** (`FOES`, `FACTIONS`). Five kinds, each wanting a different
+answer: Magpies (some fly), the Mudtusk rabble (many, hard on fence), the
+Gilded (few, sturdy, not drawn by the thumper), the Stumbling (slow, get up
+once), Frostwights (slow what throws near them; fire is what they fear).
+"Tonight" says who is coming.
+
+**Constructs** (`WORKS`). One of each, moved for nothing: ward stone (fliers
+must walk inside its ring), whip-thorn hedge (cuts walkers), thumper (draws
+walkers to it first), smoke brazier (hides the larder).
+
+**Blades** (`BLADES`). Nine, won from the magpies' lords and the King or
+given by a hero at friendship 3, carried by a hero on raids with their own
+numbers.
+
+**The land** (`SCENERY`, `placeLand`). Ten pieces (pond, knoll, trees,
+flowers and the like), thirty at most, set down anywhere; they do nothing
+but look as the reader wants. **The meadow** opens at level 3: a second
+clearing, where six animals come to live as the camp's charm grows (hen,
+cat, goat, owl, fox, tortoise), each with a small gift.
+
+**Seeing reach.** While arranging, or with a thrower chosen, the picture
+shows how far it reaches and the line raiders will take. The lookout's two
+paths are two towers to look at: the White Spire and the Dark Watch.
+
+**Small things.** "Collect all" takes everything that is ready in one go. A
+chip says what ten minutes of reading drops. Two-frame sprites are never
+flipped between frames: the second is faded over the first on a slow wave,
+each thing in its own time; figures at rest breathe, figures walking step.
+
+**Still not checked**: the garden question above; the new raiders watched
+through a night; a lost night's losses on screen; the motion by eye (the
+preview's pane was in the background for every check); a first-time reader
+going from the clearing indoors with the house's walkthrough; anything in
+the installed app. No person has played it over days: the numbers are from
+the simulations beside it.
+
+### The Hollow is the page: the picture, and what goes on in it
+
+Written 2026-10-13, for what followed the section above in the same sitting.
+The owner's words for it: "make the pip tab the game. Options etc are inside
+that."
+
+**The picture is the page** (`BaseScreen.tsx` `lay`, `fit.ts`, CSS "The
+picture is the page"). No title, no box. Where Pip's tab is at least 820 by
+460 the clearing fills it edge to edge and everything else is laid over
+the picture: what the camp has along the top, Pip's word under that, the
+ways out (Arcade, Go inside) in the corner, the row of keys on a board at
+the foot, and whatever is opened in a panel at the side that shuts from
+its corner, with its key again, or by a tap on open ground. Raids and the
+journal are keys in the row and open as a sheet over the picture. The
+clearing is 240 by 120; where the page is taller than that, the first of
+the spare height is ground at the foot for the keys to stand on and the
+rest is sky (at most 90 art pixels), with stars of its own by night. In a
+smaller window the picture is hung first and the rest follows under it.
+
+**Everything stands smaller** (`THINGS` 0.75 in `scene.ts`, `FOOT` in
+`rules.ts`): pictures are drawn at three quarters about their feet, to the
+canvas pixel, and the ground a building takes shrinks with it, so more
+fits and a full camp is not a heap. Pip is smaller again (she was as tall
+as her burrow). Everything throws a shadow.
+
+**Hours of its own** (`duskAt`). A day in the clearing is four minutes:
+light, an eased dusk, a night of a little over a minute, a dawn. By the
+wall clock a reader who opens the app in the evening saw only night. It
+is for looking at only: the night the raiders come in is the calendar's.
+By night the burrow's windows are lit, a lantern post, a campfire, the
+brazier and the lookout's lantern glow, and Pip is in bed (it says so over
+the roof). A tap on the burrow wakes her for 45 seconds.
+
+**Walking** (`walks.ts`). Pip and the camp's people go round what stands
+(a way found on a coarse grid and pulled straight) and not through it,
+in at doors, on rounds made of what the camp has: the order shuffled per
+camp, three times round before it repeats. What is set down is used: a
+nap under the oak, a drink at the water, a read on the bench, tea by the
+fire, the can to the garden. Guardians do something at each end of their
+beat. Pip is in the meadow too, seeing to the animals. The loop that
+paints is one clock however often it is begun again, and cannot outlive
+itself (a stale one was painting a small copy into the corner).
+
+**Ways in, and about.** Twice on the burrow is the way into Pip's house;
+the garden has a bed beside the burrow (`gardenSpot`), a tile and a card,
+and twice on it goes to the garden. Anything can be dragged to move it
+without "Arrange" first, held by where it was taken hold of. A tab at the
+picture's edge goes to the meadow; so does a finger swept across open
+ground (not a mouse: a drag that missed was too easily a sweep).
+
+**Prowlers** (`planProwl`, `prowlsAt`, `prowlTarget`). Between raids, one
+comes out of the wood every half minute by day and three times as often
+by night, out of sight until he is on the grass. Each kind has a mind of
+its own about what to make for: the rabble the larder, the Gilded the
+lookout or the burrow, the Stumbling whatever is nearest, the Frostwights
+the oak; and three in ten of any kind go for whatever in the camp the
+fewest things reach, so a building nobody watches is found. He has health
+(1 + the camp's level) on a bar. What throws, throws while he is in reach,
+no oftener than every 1.35 s, each stone half a second in the air. He
+carries a club and swings it. At the building he lays into it for four
+seconds; if he is still on his feet at the end of them the building is
+the worse for it (`harmSite`): four knocks at most, drawn on the building
+itself (soot, cracks, boards, smoke, stones at its foot), a bar over the
+roof for four seconds and under the pointer, acorns to fix, and not built
+on until fixed. Measured over 200 walks: one lookout alone stops 16% at
+level 3 and none at level 5; four throwers about the larder stop all of
+them. They come only while the camp is on show.
+
+**Signposts, and who fights** (`postSpotOf`, `movePost`, `fightersOf`).
+Each guardian on the ground keeps to a signpost, which starts beside
+their building and is dragged anywhere in the clearing (the dragon has
+none: she keeps to her roof). They stand by it and walk a short beat from
+it. Whoever passes within 20 of it they go out to with a blade (the
+ranger shoots from where he stands, from 34), a blow more for each rank;
+and when a prowler starts on a building, whoever is nearest within 95
+hears it and comes running, which takes as long as it is far. They go
+from wherever they were and back, never from nowhere. The first of the
+camp's heroes fights the same way, from the hut. In the night's fight
+each guardian is a figure of their own at their signpost and throws at
+what comes within reach of it, so where a post is set matters there too;
+what they do for their building they still do.
+
+**Worn out** (`woundFighter`, `isAsleep`). One who goes out to a prowler
+and does not finish him takes a knock; at three they are worn out and
+sleep for three hours by the wall clock, laid down by their post, and
+fight nobody: not prowlers, and not at night. Knocks an hour old are
+shaken off. A friend's raid of two stars or three leaves every guardian
+on the ground asleep the same way. It mends by itself whether the reader
+is there or not.
+
+**Eight constructs** (`WORKS` in `guards.ts`; `battle.ts` `zone`, `slows`,
+`stings`, `traps`, `rouses`). Four were added to the first four, each a
+different answer and each coming with a level of the camp:
+
+| Construct | Level | What it does |
+| --- | --- | --- |
+| Tanglefoot patch | 2 | Whoever walks through it goes at less than half pace (so is thrown at for longer). Walked into, not stopped at. |
+| Hornet jar | 3 | Stings whatever is on the wing within 26 of it. |
+| Pitfall | 4 | The first three on foot to step on it are gone, sturdy or not: the answer to the Gilded. Nobody makes for it, it is in nobody's way, and it is not counted with what there was to pull down. A hero goes round. |
+| Watch bell | 5 | While anyone is within 32 of it, everything that throws waits 0.7 as long between throws. |
+
+They act on the night's raiders and, like the hedge now, on a friend's
+scouts (`Setup.works`); the ward, the thumper and the brazier are still
+for the night only, being about where raiders fly and what they make
+for. Against a prowler: the patch slows him, the hedge cuts him every
+1.2 s he is in it, the pit has one in two outright, and the bell brings
+the next throw sooner. The friend's card carries kinds 0 to 7, eight at
+most, one of a kind (Rust and server both; the widest card is 2,233
+bytes of the 3,072 its test allows). An older server drops the new four
+from a card and nothing else.
+
+**Something to do.** Standing about, the camp's people are at something,
+with a thing in the hand and in whole pixels: a pass with a blade, a
+blade raised with the light on it, an edge put on it with sparks, a glass
+to the eye, a practice shot, a tune, the can, a book, two acorns up and
+over, a breath of fire from the dragon. (The first try breathed and
+leaned them by fractions of a pixel, which at this size read as
+sneezing.)
+
+**Raiding a friend** (`startFriendRaid`, `sufferRaids`; server
+`routes/raids.js`). Readers who follow each other can fight over each
+other's camps, once a day each, for a raid's worth of the scouts' rest.
+The fight is on the raider's device against the camp as the friend's card
+shows it, twice as sturdy and throwing twice as hard as it
+does against the night. That was three times until the guardians stood
+in the fight at their signposts, and is twice now (measured again:
+scouts against a camp of their own level take two stars, guardians
+posted or not; a bare one three; one two levels up with every guardian
+trained, none). Nothing is taken from the friend: a star is worth 6 acorns from
+the game. The friend is told who came; a raid that took a star knocks
+down a piece of fence a star and leaves the camp to be mended by reading,
+four minutes a star and never more than twenty, during which nothing new
+is begun; a raid that took none pays the defender 8 acorns for holding.
+Raids can be switched off on the raids' sheet. **This needs the server
+deployed** (one new collection, no migration).
+
+**The game's Pip is the reader's Pip**: it always was drawn from the
+chosen look and outfit; it now follows a look the moment it is picked.
+
+**Not done, and said so**: a friend's card does not carry where the
+signposts were moved to, so a raid on a friend meets their guardians
+beside their buildings; a hero who is worn out can still be sent on a
+raid; the night watched as a battle still draws things at their
+full size; the garden's floor is still in the house.
+
+**Still not checked**: all motion by eye for more than a few frames;
+dragging with a real mouse or finger (it was driven by script); a friend
+raid end to end in the app (the server and Rust halves are tested, and
+the rules; the screen was not opened against a server); the installed
+app; anything played by a person over days.
+
+
+### The Hollow defended: what there is to defend with, and against (1.4)
+
+Written 2026-10-13, not committed. The rules are in
+`apps/src/pip/base/rules.ts` and `guards.ts`, the picture in
+`apps/src/components/pip/arcade/base/scene.ts`, the screen in
+`BaseScreen.tsx`.
+
+**Room.** Things stand at 0.64 of their pictures' size (`THINGS`, and
+`FOOT` in the rules, which must agree). A camp does not shrink to make
+room as it grows: the wood is cleared, further for every level of the
+burrow (`WOOD`, `woodAt`), so a first camp is a small clearing and a fifth
+level one is the whole picture.
+
+**Limits, each tied to a building.**
+
+| What | How many | By |
+|---|---|---|
+| Pieces of fence | 6 a level, 30 at the fifth (+2 with the goat) | the fence |
+| Heroes about the camp | 1, 2, 3, 5, 7, 10 beds (`HUT_BEDS`) | the hut |
+| Scouts on a raid | as before | the hut |
+| Constructs | twelve kinds, one of each, each from a level of the burrow | the burrow |
+| Guardians | seven, each at a building that has to be built | their building |
+| Acorns held, and hidden | as before | the larder |
+
+A hero comes for books finished and is never taken back; a bed decides
+who is *about the camp* (seen in it, and out to prowlers). Whoever leads
+the raids has the first bed, so nobody loses the hero they raid with;
+the rest are by friendship, then as listed (`lodgers`, `hasBed`).
+
+**Twelve constructs.** The eight there were, and: caltrops (cheap, hurt
+once), a stone thrower (far, hard, slow), an archer's nest (near, light,
+quick: a second thing that throws, to put where the lookout does not
+reach) and a dread totem (half the harm in the night's fight; one prowler
+in three turns back). Kinds 9 and 10 are the stone thrower and the nest,
+in that order, in the rules, the art and the card.
+
+**The fence is a wall.** Six pieces a level, laid by dragging across the
+ground in fence mode (a piece for every square the pointer crosses; a tap
+on a piece takes it up). A prowler on foot who comes to a piece is held
+there 1.4 seconds and 0.6 more for every level of the fence, with
+whatever throws having him standing still. That is what a fence is for:
+it does not stop anybody, it buys time under the throwers.
+
+**Space in red, reach in blue.** Whatever is chosen, in hand, or being
+placed shows the ground it takes as a red patch and how far it reaches
+as a blue one; arranging shows them all. Both are ovals, wider than they
+are deep, because the camp is seen from a slant and not from above; and
+reach against prowlers is *measured* as that oval (`SQUAT`, `offBy`), so
+what the blue covers is what is reached. The night's fight
+(`battle.ts`) still measures round, which is never less than what is
+drawn.
+
+**Who comes out of the wood** (`prowlStart`, `planProwl`, eight kinds):
+
+| Kind | After | His way |
+|---|---|---|
+| Mudtusk rabble | the larder | on foot, with a club |
+| The Gilded | the lookout, or the burrow | on foot |
+| The Stumbling | whatever is nearest | on foot |
+| Frostwights | the oak | on foot |
+| A magpie | the larder | on the wing: over fence, hedge, tanglefoot, pitfall and caltrops, and past anyone with a blade. A ward stone brings it down; hornets sting it; a bow reaches it |
+| Rattlenut, the great squirrel | the oak | the quickest thing there is, half as sturdy, over a fence in a bound |
+| The Rootgnaw, a mole (burrow 3) | the larder | under the ground, under the fence and under what throws, and up only 24 pixels from what he came for; a thumper brings him up where it is |
+| Fizzwick (burrow 4) | whatever is nearest | slow; hisses for 1.8 seconds and goes off with a pop, which is two knocks and the end of him |
+
+Rattlenut tips a hat to the squirrel who runs up and down the world's
+tree in the old northern stories, and Fizzwick to a certain green fellow
+who goes off; neither is anybody else's design or name. Three in ten of
+any kind still go for whatever the fewest things reach.
+
+**What getting through costs.** A prowler who is at a building for his
+whole time (4.4 seconds) knocks it about, once. From the larder or the
+oak he also makes off with a few acorns (`robSite`: 2 and 2 more for
+every level of the burrow; never what the larder hides, and off the oak
+only what was hanging ready). Prowlers only come while the camp is on
+screen: nothing is lost while the app is shut.
+
+**Broken** is four knocks (`isBroken`, `BROKEN_DOES`): the lookout, hut
+and burrow throw at nobody; the larder hides nothing; the oak drops half
+(never none, so a camp with nothing can still earn its mending); the hut
+has one bed; a yard building does nothing. Mending is acorns, as before.
+Constructs are not knocked about by prowlers.
+
+**Who fights.** Everything that throws, each guardian at their signpost,
+and every hero with a bed who is awake, from the hut. Whoever throws
+from a building is seen to: a scout with a sling is up on the roof for
+the throw, and the stone is a grey pebble (it used to be a pale dot from
+nowhere, which read as snowballs). The nest looses arrows; the stone
+thrower's stone is bigger and counts twice. Running to a fight is at 38
+pixels a second, there and back, a stride for every two and a half
+pixels of ground, with dust; it used to be home in half a second from
+however far. Nobody swings a blade or looses an arrow at nothing while
+standing about: a blade is leant on, or has an edge put on it.
+
+**Guardians look their rank** (`guardian` sprite, `rank` 1 to 3, six
+frames of which 2 to 5 are a step). Dame Berit begins in a padded tunic
+with no shield, has a breastplate and her tall shield at the second
+rank, and a plumed helm and gilded plate at the third; the other six
+change in their own ways. The sprite cache is keyed by rank
+(`gameArt.ts`).
+
+**The worn out and the fire.** Three knocks and a fighter sleeps three
+hours; with a campfire in the camp they are laid by it and are up in
+half the time (a third, in winter).
+
+**The sky.** The sun crosses by day and the moon by night, in the
+camp's own four-minute day, up into whatever more sky the page has.
+
+**Seasons** follow the calendar (the northern year; nothing is stored)
+and each does one thing (`SEASONS`): summer, raids bring a tenth more;
+autumn, a fifth more from every gathering; winter, more prowlers and a
+warmer fire; spring, mending costs a quarter less. A chip at the top
+says which, with what it does behind it.
+
+**Pip settles.** A nap, a read, tea: four times as long as they were,
+and everything else two and a half.
+
+**Three sorts of people, each for one thing.** The shelf is called
+People, and says so in a word or two beside each name.
+
+| | Scouts | Heroes | Guardians |
+|---|---|---|---|
+| Who | nameless, and many | ten, out of the stories | seven, the camp's own |
+| Got by | building up the hut | books finished, with the reading behind them; never bought | acorns to hire, reading to train |
+| For | the army: every raid, and the throwing from the roofs at home | leading a raid (a trait, a blade); at home, answering the alarm | holding a post |
+| Where | the hut | a bed in the hut | a signpost the reader places |
+| Against a prowler | throw from roofs | one of them runs to whichever building he gets to, turn and turn about | fight on the ground about their post, and for the building that stands on it; never leave it |
+| Go raiding | always | one, as leader | never |
+| Grow by | the hut's level | friendship | rank, and look it |
+
+So a guardian across the camp does not come running (`roams` in
+`scene.ts`): where the signposts are put matters, and so does how many
+beds the hut has.
+
+**A trophy stands on reading** (`TROPHY_MINUTES`, `trophyWaits`,
+`claimed` in the camp's state). Heroes come for trophies, and a trophy
+used to take nothing but a book marked as finished, which anyone can do
+to a shelf of downloads. Each trophy now wants ninety minutes of reading
+behind it that no other trophy has, by the same ledger the oak drops by.
+A finished book whose reading is not there yet waits ("Read 40 min" on
+the button) and is raised when it is. Books finished before the camp was
+made are given trophies only as far as has been read. A camp kept before
+this keeps every trophy and hero it has, and is given room for one more
+(whoever is half way through a book), not for a hundred hours' worth.
+It does not ask which book the minutes were read in: Leaflet keeps the
+days a book was opened, not the minutes in each. What it settles is that
+a hero costs reading. Nothing changed on the server or in Rust: the
+number rides in the camp's own document.
+
+**By night a tap no longer flashes daylight**: the picture's first
+drawing after any change was made without the camp's clock, and so as
+day, for one frame.
+
+**The book itself comes into the camp** (`pip/base/storyFeed.ts`,
+`storyRead` in the rules). Until this the camp answered to how much was
+read and never to where in a book the reader was. Now, when the reading
+passes out of one stretch of a book into the next (a chapter, where the
+book has chapters: the EPUB reader says which is on screen; a twentieth
+of the book otherwise), a parcel comes up the path and waits by the
+burrow's door, six at most, to be tapped open for a few acorns (3, and
+one more for every level of the burrow). It stands on reading like
+everything else: a parcel wants eight minutes read since the last one,
+so twenty chapters turned in a minute bring one parcel or none. The
+library tells the feed at every saved place; the feed tells the camp
+only when a stretch is finished, and fetches the camp's store (which is
+not loaded until Pip's tab is opened) only then. Another book taken up
+starts from where it is opened.
+
+**The book being read has a say in who comes** (`GENRE_FOE`): three in
+ten of the prowlers are of the kind its sort of book brings (the Gilded
+for fantasy and the classics, Fizzwick for science fiction, the mole for
+a mystery, magpies for a romance, the Stumbling for horror, the rabble
+for history, the Frostwights for science, the squirrel for adventures
+and young readers' books). A chip at the top says so, in its tooltip.
+
+**The lie of the land matters** (`prowlBlocks`, `findWay`). Whoever
+comes on foot goes round water, a knoll, boulders, a trunk and every
+building but the one he is after, by the same way-finding Pip walks by.
+So a pond or a knoll is a wall that cannot be climbed, and turns him the
+way the reader chose. What is set down to be walked into (hedge,
+tanglefoot, pitfall, caltrops) is not gone round. One on the wing goes
+over; the mole goes under.
+
+**A fence is gone round where it can be, and there is a gate**
+(`gateOf`, `setGate`, `DETOUR`). A lone piece of fence is walked round:
+a wall has to be a wall. Where the fence is in the way and there is a
+way round it (an open end, or the gate) that is no more than 2.2 times
+the straight way, he takes it; otherwise he comes straight on and
+climbs, held at each piece as before. The gate is one piece of the
+fence made the way in (from the fence's second level; "Gate" beside the
+fence button while arranging, then a tap on a piece): he is twice as
+long getting through it as over a piece, and the camp's own people walk
+through it. So the reader says where the fight is, and stands what
+throws over it. The squirrel does not go round a fence: he is over it.
+
+**A fence joins itself up the picture and on the slant** (`fenceLinks`).
+Pieces are laid on a grid ten apart and each is drawn facing the reader:
+side by side they met, but one behind another they stood apart like the
+rungs of a ladder, and two on the diagonal did not meet at all. Each
+piece is now joined to the one behind it (straight behind, or behind and
+to one side where the two are not joined round a corner already), drawn
+as the fence seen from its end in the fence's own colours (taken from
+its picture, so a paling is joined in wood and a wall in stone); a piece
+with nothing beside it is drawn as a post. The joins are fence to
+everybody: Pip walks round them, a prowler cannot slip between two
+pieces on the slant, and one who climbs there is held as at a piece.
+
+**Depth.** The picture is a clearing seen from a slant, and read as a
+map seen from above. Three things say otherwise without changing the
+size of anything (a sprite this small cannot be scaled by a little
+without shimmering as it walks): shadows lie on the ground away from the
+sun or the moon, longer the lower it is (`leanAt`); the far end of the
+clearing is a little paler than the near, in bands (`haze`); and a
+fence that runs away from the reader shows its side and its lit top.
+
+**What happens is seen to happen** (`floats` in `CampExtras`,
+`floatsOf`). A parcel opened, the oak gathered, acorns made off with: a
+burst of bits at the place and the figure going up from it ("+7"; a loss
+in red, "-10"). A building, a signpost or a construct set down lands
+with dust and settles; one mended does the same. A building being
+knocked at jolts with each blow. Whoever of the camp sees a prowler has
+a "!" over their head for half a second before they go; whoever sees
+him off stands over it a moment with the blade up before going home. A
+stone or a blade that lands shows as a star of light; Fizzwick goes off
+with a flash. The trees a prowler comes out between shake their leaves
+loose.
+
+**Life when nothing is happening.** Birds cross the sky by day, a pair
+or three, one way and then the other. By night there are fireflies over
+the grass, and by day or night a glint now and then on any water. (The
+moon is the one painted in the night's own picture: a second one that
+crossed the sky was taken out again, and night shadows lie away from the
+painted one.)
+
+**How long it lasts, measured** (`node_modules/.leaflet-test/full-sim.ts`,
+the real rules played for a reader who builds, hires and buys as acorns
+allow). A level of a building takes 5, 20, 40, 70 and 100 minutes of
+reading; of a yard building 15, 35 and 60; a guardian's rank 20, 45 and
+80.
+
+| Reading a day | Six buildings at 5 | All seven guardians at 3 | Acorns in, a day |
+|---|---|---|---|
+| 10 minutes | day 158 | day 212 | 65 |
+| 30 minutes | day 72 | day 92 | 166 |
+| 60 minutes | day 46 | day 60 | 260 |
+
+The oak is about half of what comes in, raids a sixth, parcels a
+twelfth.
+
+**What prowlers can cost is small, and capped** (`KNOCKS_A_DAY`,
+`THEFTS_A_DAY`). They come only while the camp is on screen, so the loss
+went by how long it was looked at: measured, a camp that stopped nothing
+and was watched lost as much to knocks, mending and theft as it earned.
+Now two knocks and one theft are the most a day can bring, whatever gets
+through; a knock is put right for 2 acorns and one more for every level
+of the building (it was 3 and two), and a theft is 2 and one for every
+level of the burrow (it was two). Measured again at half an hour a day,
+the most careless camp loses about 13 acorns a day of the 169 it earns
+(8%), and is five to eight days later to everything: a nudge to stand
+something by the larder, not a tax on looking. (Not re-measured at ten
+minutes a day with the final caps; with the first caps tried it was a
+quarter of that reader's income, which is why they were lowered.)
+
+**A fence does not get in the way of the hand**: fence under the
+pointer, or standing in front of the building pointed at or chosen, is
+drawn thin (`through`, `peek`), so that what is behind it can be seen.
+A tap goes to what is behind it in any case: fence is only taken hold
+of while arranging.
+
+**Pip's tips: how the camp is learnt** (`pip/base/tips.ts`, `taught` in
+the camp's state). The list of things to do says what next and never
+how, and a good deal of the camp cannot be found by looking (that
+anything is dragged, that fence is drawn across the grass, that a
+signpost is where a guardian stands). A tip is Pip saying one of those
+in her bubble, once, when the thing it is about has just become
+possible: thirteen of them, one at a time. A tip is done with when the
+reader does the thing (most can be told from the camp, so a reader who
+found it out is never told, and a camp kept from before gets only the
+three it cannot show it knows), or presses "Got it", or "No tips", which
+ends them for good. The first three on a new camp (the oak, a building,
+moving it) are the whole of a first visit; there is no tour to sit
+through. The (i) at the top was rewritten to the camp as it now is:
+eight lines.
+
+**Everything is dragged and dropped.** With nothing chosen first, any
+building, decoration, construct, signpost, piece of landscape or piece of
+fence is taken hold of, carried and set down where it is let go
+(`moveWall` for fence: the gate goes with its piece, and a piece is moved
+even when every piece the fence allows is down). While arranging it is
+the same: a building is dragged in "Move", and in the fence's mode a
+piece is dragged to move it, tapped to take it up, and the grass is
+dragged across to lay more. New things are dragged off a shelf onto the
+grass (`offShelf`): with a mouse or pen, moving is carrying; under a
+finger a drag on a shelf scrolls it, so there the thing is held for a
+third of a second first, and is then in hand (and the page is kept from
+scrolling under it). While something is carried off a shelf the shelf
+stays where it is, faint and out of the pointer's way: taken away at
+once, the page closed up and the picture moved under the hand. The older
+"tap it, then tap where it goes" still works everywhere.
+
+**A wall that runs away from the reader** is drawn as its top, lit, all
+the way along, with a face only at its near end; on the slant, its top
+and the side turned this way. It was its side all the way up, a dark bar
+with posts through it. At a corner the length of fence along the front
+is drawn only from the outer edge of the wall running back, so the two
+meet flush. A piece with nothing to either side of it is a post, in a
+run going back and standing alone alike: a wall has no direction of its
+own and nothing to turn, it goes the way its pieces are laid, and a lone
+piece drawn as a length facing the reader looked as if it wanted
+turning. The square shown while one is being put down is drawn the way
+it would stand there.
+
+**Fewer prowlers, a cost to every knock, and heroes who go out.**
+Prowlers come one in eight of the camp's eight-second slots by day and
+one in three by night (it was one in four and three in four): five or so
+in each four-minute day, twice that in winter. A knock left unmended
+costs a tenth of what the building does (`WEAR_A_KNOCK`: the oak drops a
+tenth fewer, the larder hides a tenth less, what throws throws a tenth
+less hard), for each knock, where a knocked building used to be as good
+as new until the fourth broke it. Broken, it looks it: the top of it
+down, what is left dark, rubble at its foot, and a red mark over it for
+as long as it is. And the camp's people do their job: whoever's turn it
+is sees a prowler as soon as he is within sight of the hut and runs out
+to meet him where he has got to (they used to stir only once he was
+knocking at something); three blows each, so one of them alone sees off
+what comes to a small camp and needs what throws behind them in a big
+one. One of them is the worse for it only if he got through in the end.
+
+**A trophy says its book**: a tap on one names the book, its author and
+the day it was finished. **A postcard** of the camp can be saved or
+copied (`HollowPostcard.tsx`): the clearing, and under it whose it is,
+its level, books, hours and streak, and the books lately finished.
+
+Not done: more than one of a construct; a broken construct; the night
+watch's picture still draws guardians at their top rank and things at
+full size; the meadow has no sun or moon; minutes are not kept per book,
+so a trophy cannot ask that its own book was the one read. The gate and
+the lie of the land tell against prowlers only: the night's fight
+(`battle.ts`) does not know of either, and a friend's card does not
+carry the gate. A finished series raises nothing yet, and a new kind of
+book opens no new ground.
+
+### The rest of the app, looked at with fresh eyes
+
+Asked to "critique the app", a read of everything outside the arcade found
+fifteen things worth fixing, and all but one claim held. Fixed the same day:
+
+- "Mark as not started" wiped a book's place with one click under "Mark as
+  finished": it asks first now, and both say when they fail.
+- The list view's Remove turned into Confirm under the pointer, so a
+  double-click deleted a book (and its Drive copy) with no dialog. The row's
+  button is gone; the menu's "Remove from library..." is the one way.
+- Pip's drawers said "Pip is getting dressed..." for ever when her things
+  failed to load: there is a line and "Try again" now.
+- The Library's hidden half of the session card could be tabbed onto,
+  including a full-screen switch nobody could see (`inert` on it now).
+- The Library counted finished books by progress, Social by the finished
+  date: both use the date (`hasFinished`).
+- Failures that showed nothing (rename, delete and add in Collections; new
+  collection, tick and "back up this file" in a book's menu; a failed search
+  for communities, which read as "none yet") are shown.
+- Escape threw away a typed session note; it saves it, as Done does.
+- Labels are tied to their fields, placeholder-only fields have names, and
+  five toggles say they are switches (Settings, the sign-in forms, Library,
+  Collections, the reading pace card).
+- Standing explanations moved into tooltips (Collections, three in
+  Settings, the library-copy card, the line under "Social").
+- A book's menu can be used by keyboard: it takes the focus, and the arrows,
+  Home and End move in it.
+- A keeper can remove a member (the docs said so; nothing called it), an
+  admin can pin, a book's posts have "Older", eight dead-end error lines
+  have "Try again" (`ErrorLine.tsx`), a follow request answered elsewhere
+  says "Answered" and not "Accepted", and the reader's own profile has one
+  name everywhere ("Social → Board → You"; it had four).
+- The owner's last missing control and the two spellings of a genre: see
+  where each is written above.
+
+What was left on that list was done next, on the owner's "fix the critiques
+where you can": the right-to-left dock and shortcuts sheet, removed Kindle
+highlights staying removed, and a PDF's subject and keywords as genres (each
+written up where the feature is, above); the Library page no longer redraws
+every second during a session (the countdown is a small part of its own);
+a book's menu closes on Tab and keeps the focus after "Add"; removing a book
+from its menu says "Removed <title>."; the Library's genre filter has one
+entry for a genre however its books spell it; a launch-time read of reading
+statistics that nothing used is gone; the PDF and text readers' Back buttons
+have a name for a screen reader in a narrow window; and the reason "Connect
+Drive" is disabled is on the button as well as the heading.
+
+Still open, and why each is the owner's: a removed Kindle highlight is
+forgotten after ninety days on a device that backs up (keeping it for ever
+is a change to what the backup carries); Ctrl with an arrow is not mirrored
+in a right-to-left book (it is a tested rule that it is the same in every
+book); an admin as well as a keeper may remove a member and pin a thread
+(the server allows it; say if it should be the keeper alone). None of these
+fixes was looked at in a running app: they were read, type-checked and
+(where there are tests) tested. Tests after them: 2,719 app, 765 Rust, 186
+server.
+
+**Page Flap's background no longer stutters** (`gameArt.ts`). A sprite with
+no frame count was drawn again for every frame number that came by, twelve
+times a second, and each kept: the whole 240 x 120 backdrop and every
+pillar. Such a sprite is a still now, drawn once (the falling letters in
+Leaf Catch, which do move, say their sixteen frames). All three games did
+it; Page Flap had the most to redraw. The games were not played by hand
+after the change: the preview's pane was hidden, where nothing animates.
 
 ### Pip's diary
 
@@ -3130,6 +4362,32 @@ something:
 The newest spine drops in when the shelf is next opened, and the wrap-up says
 "Shelved as book #N".
 
+**Every spine and loose page says which book it was** (1.4;
+`habit/names.rs`, `commands/habits.rs` `ReadNames`, `commands/social.rs`
+`shared_shelf`). The owner: "the sessions in social are all titled untitled.
+Give them names of the book they were reading, even for sessions that are
+not tracked or in focus." Two causes. A session started from the library (or
+by Pip) has no book, since the timer is started first and a book opened
+after: it was shelved with no name, "Free read" on the reader's own shelf
+and "Untitled" on the one other readers see. And reading with no session
+never had a book at all, and was not on the shared shelf.
+
+- From now on a session started on no book takes the first book opened
+  while it runs (`habitStore.nameSession`, called where a book is opened),
+  and is recorded with it.
+- For what is already on the shelf, the snapshot works the book out: the
+  library keeps when each book was last opened on each day
+  (`reading_sessions`), so a session is of the book opened while it ran
+  (the latest), failing that the one opened nearest to it that day; a day's
+  free reading is of the book opened last that day. A session started on a
+  book shows the title the book has now. Nothing is written back: a guess
+  stays a guess. With two books opened on one day it can pick the wrong one.
+- The shelf others see is the twelve latest of both kinds, newest first, a
+  day's loose pages after that day's sessions. Reading no book can be named
+  for is left off, where it used to stand as "Untitled". A reader who never
+  starts a timer now has a shelf. The server is unchanged: it stores the
+  titles it is sent.
+
 ### Community (leaderboards)
 
 Behind `FEATURES.community`, and needs a Leaflet account. In order:
@@ -3198,6 +4456,196 @@ is shown on the board with "Send again".
 Server side is in `server/`; see `server/README.md`.
 
 ---
+
+### Friends: what readers who follow each other share (1.4)
+
+Everything here needs the server of this version (`server/README.md`,
+"Deploying this version"); against an older one the new calls fail quietly
+and the page says so. None of it was run against a live server from the app:
+the server's own tests pass (139), the app's parts are unit-tested and
+type-checked, and the two have not been joined by hand.
+
+- **A profile kept to followers** (`ProfileCard.tsx`). The switch is three
+  ways now: Public, Followers, Private. "Followers" is found by handle and
+  shows only a Pip, a name and a handle until its owner accepts a request;
+  it is not on the public board. Requests are answered on the profile card
+  and in the inbox. Private means what it always did. A released app (1.3.2)
+  meeting a locked profile is sent an empty card it can draw.
+- **A reader's library** (`commands/friends.rs`, `ReaderLibrary.tsx`). Off
+  until "Readers who follow me can see my library" is ticked. Titles,
+  authors, reading/finished/not started and percent: never a file, a path
+  or a hash (a test reads what is sent). Sent after the profile's figures,
+  and only when it has changed. On a reader's card it is a tab, with filters
+  (all, in common, reading, finished) and "Yours too" on the books both
+  libraries have. Two libraries match a book by `book_key`: the title
+  without subtitle or leading article, and the first author's surname, so an
+  EPUB and a PDF of one book are one, and two books that differ only in
+  subtitle are wrongly one too.
+- **Reading with friends** (`FriendsPanel.tsx`). For this library's books:
+  who among the readers followed is reading the same one, with each one's
+  progress bar beside the reader's own, and how many finished it. Up to 500
+  books are asked about, the ones being read first.
+- **Finished books and the feed** (`Posts.tsx`). "Tell your followers…" on a
+  finished book's menu, or "I finished a book" on the feed: one to five
+  stars (optional) and a line of up to 280 characters. The feed is the
+  reader's own posts and those of the readers they follow, newest first; a
+  reader's posts are also a tab on their card.
+- **Book clubs.** A name, a code to join by, an optional weekly goal in
+  minutes, a list of books anyone in it can add to, and a board of its
+  members' week. Up to 10 clubs a reader, 50 members a club. The goal is in
+  minutes because pages are not counted anywhere in the app.
+- **On the board and the card:** the book a reader has open ("Dune · 34%",
+  the last opened that is begun and unfinished, within 30 days), their level
+  and their badges; on the card, their arcade bests.
+
+### Discover and book communities: the public, optional half (1.4)
+
+(`commands/discuss.rs`, `services/discussService.ts`, `components/discuss/`,
+`components/community/Posts.tsx`; the rules are the server's,
+`server/README.md` "Moderation"; what readers agree to is
+`docs/legal/community-guidelines.md`.) The owner asked for "a social media
+feed kind of thing, to scroll book recommendations", quotes from highlights,
+proper reviews with like and dislike, and communities for a book "to discuss
+theories and stuff", all optional, and "creation of communities has to be
+well thought of so people don't abuse it". The Social page has five tabs
+now: Stats, Board (it was "Community"), Friends, Discover, Communities.
+
+**What can be posted.** A post is one of three things about a book: that it
+is finished (stars and a line, as before), a review (stars and up to 3,000
+characters; one a book a reader, a new one replaces the old), or a quote (up
+to 500 characters, with a note; at most 30 from one book). "Post" on a
+highlight's share dialog starts a quote with its words in. Each post is for
+"My followers" unless "Everyone" is chosen, and can be marked as giving the
+book away, which covers it until a reader asks. Every post can be liked or
+disliked (not by its writer), and its title opens what else was said of
+that book, with how its reviews average and its community.
+
+**Discover.** What readers anywhere posted for everyone: the newest, or the
+best liked of the last month.
+
+**Communities.** One for each book and one for each series, named after the
+book. Threads (a title, up to 5,000 characters, a spoiler mark) and flat
+replies, both with like and dislike.
+
+**Spoilers.** A thread says how far into its book it goes: nothing, the
+first so many percent, or all of it; for a series, up to which book. The app
+knows the reader's own place from their library (`spoilers.ts`), so a thread
+past it is a cover that says how far it goes and opens only if asked. A
+reader who does not have the book has everything marked covered. Their
+place is not sent anywhere for this: the server could reveal the titles of
+marked threads to a reader who says how far they are (`?at=`), and the app
+does not ask it to, so in a community's list a marked thread that is not
+past the reader shows as "A thread with spoilers" with how far it goes, and
+has its title once opened.
+
+**What keeps it from being abused.** Decided before any of it was built:
+
+- *Nobody names a community.* It is its book's or series' title and there is
+  one a book (the same key a shared library and a review use). There is
+  nothing to squat on and no free text to be offensive in.
+- *A new community is invisible to everyone else* until three readers with
+  accounts a week old and a confirmed email address have joined it. A
+  made-up or offensive "book" stays unlisted and unsearchable.
+- *Who may start one:* a public profile, a confirmed email address, an
+  account a week old, the guidelines accepted; one a day, five in all.
+- *Who may post for everyone, join, or write in a community:* a public
+  profile, a confirmed email address, an account three days old, the
+  guidelines accepted (asked once, the first time), and not suspended. The
+  server says which is missing, in words the app shows.
+- *Limits:* 20 posts a day, 10 of them quotes, 5 threads, 60 replies, 20
+  reports; 30 quotes a book; deleting something does not give the day's
+  allowance back. Discover shows at most three posts by one reader a page.
+  Nothing in a post is a link (it is plain text, and the app does not make
+  text clickable). A like or a dislike needs a confirmed email address and
+  an account three days old.
+- *Reports:* on every post, thread, reply, community and reader. Three
+  readers' reports hide a post, thread or reply at once, before anyone has
+  looked; two for an unmarked spoiler mark it as one instead; five unlist a
+  community. Only reports from readers with a confirmed address and an
+  account three days old count, a reader whose reports keep being dismissed
+  stops counting, and once the owner has looked at a thing and let it
+  stand, more reports no longer hide it. The writer sees their own hidden
+  post, with why.
+- *Blocks:* either way, the two stop seeing each other everywhere and cannot
+  follow, challenge or send each other anything; the refusal does not say
+  who blocked whom. Undone under Board → You.
+- *A keeper:* the reader who started a community pins threads and removes
+  threads, replies and members in it; the role passes on when they leave.
+- *The owner:* an account marked admin in the database sees a Reports panel
+  on Discover (the server answers "no such route" to anyone else), and can
+  dismiss, restore or remove what was reported, suspend its writer for 7 or
+  30 days, and pause public posting altogether. A suspension outlasts
+  deleting the account and signing up again with the same address. The
+  owner can also correct a community's title and author, replace its
+  keeper, lift a ban, and list or unlist it by hand: an "Owner" button in a
+  community's own header, seen only by an admin (`Communities.tsx`, the
+  `admin_community` request in `discuss.rs`). That was the last admin route
+  with no control in the app.
+- *Leaving:* making a profile private or kept to followers hides everything
+  it posted for everyone and takes it out of its communities; deleting the
+  account deletes it, except a thread others replied to, which stays, by "a
+  reader who left".
+
+**Not done, and known.** Three established accounts are enough to list a
+community, and three to hide a post: someone with several confirmed email
+addresses and a week's patience can do either, and only the owner's review
+undoes it. A community's title is what its first reader's app sent. There
+is no filter on words. A review's text is read by nobody before it is
+posted. Posts do not show covers (the server has none). There is no "save
+for later" list and no notification when someone replies to a thread. None
+of it has been run against a live server from the app: the screens were
+filled with stand-in data in the preview and worked there, and the server's
+own tests cover its rules.
+
+### Badges, levels and the month's challenge (1.4)
+
+(`habit/badges.rs`, `pip/levels.rs`, `components/community/badges.ts`,
+`BadgesCard.tsx`.) The owner: "people should be able to show off... badges
+when you complete difficult milestones, similar to Strava". Twenty-eight badges
+worked out by the backend from the ledger, the shelf and the shop (streaks
+of 7, 30, 100 and 365 days; 10 to 500 hours; 1 to 100 books; focus sessions;
+a two-hour day; harvests; things owned; arcade scores; levels), and two a
+calendar month for 500 and 1,000 minutes read in it. Stats shows the earned
+ones as medals in four metals, the six nearest dimmed with a bar, and this
+month's challenge as a line. A shared profile publishes the ids of the
+earned ones. The level is from seeds ever earned, spent or not (level n
+begins at 50 x (n - 1) x n seeds), and not from what a bet or a duel won.
+
+### More to do with seeds (1.4)
+
+The owner: "there is actually not that much motivation to get seeds, other
+than cosmetics". All in the Seeds drawer on Pip's page (`SeedUses.tsx`)
+unless said; the rules are the backend's and nothing is stored as a balance.
+
+- **A streak freeze**, 120 seeds, at most two a month and two held. It lives
+  on the device that bought it (the streak's state is not synced); the
+  charge is.
+- **A bet on the week's goal** (`pip/stakes.rs`). 10 to 100 seeds that the
+  goal will be met on 3 to 7 days of this week, placed Monday to Wednesday.
+  A day counts with the goal met and at least 20 minutes read, whatever the
+  goal is set to. Won, the stake comes back with a fifth of it for each day
+  beyond two (three days: 1.2 times; seven: double). Whether it was won is
+  read from the day ledger every time, never written down.
+- **Seeds on a duel.** A challenge can carry 10, 25 or 50 seeds each. Nothing
+  is taken until the other reader accepts (and they cannot without the
+  seeds); then each app puts its own stake down, and when the week is
+  settled the winner's comes back doubled, a tie's as it was. The server
+  only carries the number. It is trust-based: each reader's seeds are on
+  their own device, and a prize counts for no more than twice a stake that
+  is on record.
+- **Presents** (`GiftDialog.tsx`). "Send a present" on the card of a reader
+  who follows you back: a thing from the shop that Pip keeps, paid for here,
+  theirs when their app next looks (as it opens, then every five minutes). Five a
+  day.
+- **Rare things by level** (`pip/shop.js` `RARE_LEVELS`). Six new things to
+  wear that the shop sells only from a level: a magnifying glass (3), a
+  quill (5), a scholar's cap (8), a reading lantern (10), a starry wizard
+  hat (12) and a starry cloak (16).
+- **Three sounds for the radio**, 150 seeds each: a summer night, a stream,
+  a night train. The six there were stay free. Not heard by anyone: their
+  levels were set by measurement against the others.
+- Not built: new arcade games, expedition places, page finishes or fonts to
+  unlock.
 
 ## Sync, sold as backup
 
@@ -3278,6 +4726,31 @@ pagination through `nextPageToken`, and typed errors for 401 / 403 / 429 instead
 of feeding an error body to the JSON decoder.
 
 ---
+
+### A large file waits for the reader's word
+
+(1.4; `sync/large.rs`, `library/largeBooks.ts`,
+`hooks/useLargeBookPrompt.ts`.) The owner: "this book is quite large, 45 mb.
+If a book is that large, ask users permission before backing it up. Set a
+10mb limit." A backup to Drive or a folder sent every file, whatever its
+size, into a quota the reader shares with everything else.
+
+- A file over 10 MB (`LARGE_BOOK_BYTES`) is sent only when the reader has
+  said yes. Only the file waits: the book's place, notes and highlights are
+  in the shared document and go either way.
+- A backup that held files back says how many (`booksHeld`); the app then
+  asks once, in its own dialog, about the books not yet answered for: one by
+  name and size, or several with what they come to. Not while a book is
+  open. "Yes" backs up again at once. Escape counts as "no".
+- A "no" is taken back from the book's ⋯ menu ("Back up this file", with
+  its size), shown where a backup carries files and this one is not sent.
+- The answers are this device's (the setting `backup_large_books`), not
+  synced. A large file already in the backup when this arrived is recorded
+  as "yes" and never asked about. A "no" does not remove a file the backup
+  already holds, and a "yes" cannot be withdrawn in the app.
+- The account's own backup carries no files, so it never asks.
+- Not tried against a real Drive or a real sync folder: the rule and the
+  answers are unit-tested, the two transports' use of them is not.
 
 ## Accounts
 
@@ -3406,6 +4879,17 @@ The reader has its own finishes on top: paper, dark paper, true white, true blac
 
 ---
 
+**The bar at the foot of the page can be made small, and is not on Pip's
+page** (1.4; `App.tsx`). The bar with the book being read sat over Pip's own
+row of buttons ("kind of disturbing"). It is not drawn on Pip's page, where
+"Continue" is among her buttons already. Elsewhere a small arrow at its end
+makes it a cover and a play button; the cover opens it out again. Kept in
+`leaflet.nowReading.small`.
+
+**Pip holds still in the logo** (1.4; `PipHome.tsx`). At home she is the
+logo, and she breathed and blinked there, beside the page being read. She
+is drawn as one still pose now, asleep or awake.
+
 ## Settings
 
 `pages/SettingsPage.tsx`. A few short sections behind tabs (**General**,
@@ -3514,7 +4998,8 @@ row rather than scroll.
 - A drawer stands beside the house from 900 px wide, and from 768 px on a
   window 520 px tall or less; it is a sheet at the bottom (44dvh) only under
   that. The rail shares one row whenever it is under 560 px wide (a container
-  query), and Play's eight keys shrink to their names before they wrap.
+  query), and Play's keys (eleven, since the cuddle, the high five and the spin
+  were added on 2026-10-13) shrink to their names before they wrap.
 - The shop's tabs are one scrolling row under 900 px wide or 620 px tall; its
   detail goes under the grid only under 700 px.
 - Cards over the room (and a visitor's card) are laid over the whole window

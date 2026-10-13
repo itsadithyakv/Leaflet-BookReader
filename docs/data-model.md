@@ -184,6 +184,14 @@ book copies folder (`library_copy_enabled`, `library_copy_folder`,
 `library_copy_index`, `library_copy_problem`), which is this device's alone:
 never in the sync document or the backup.
 
+Pip's camp in the Hollow, the arcade's building game, is two rows written
+together: `pip.base` (the game's state as the app wrote it, a JSON object of
+at most 32 KB) and `pip.base.at` (when `pip_base_save` last wrote it). Both
+travel in the sync document as `camp`, and the stamp is what decides between
+two devices' camps. A `pip.base` with no `pip.base.at` beside it was kept by
+a build from before the stamp, and gives way to any stamped camp. The
+arcade's best scores (`pip.arcade`) stay this device's alone.
+
 **Device-only keys in the webview's storage** added in 1.2, none synced, all
 removed by Delete All Data (`services/deviceData.ts`): `leaflet.pip.lastStop`
 (the last book closed, when, how far through its chapter, how long it was
@@ -272,9 +280,56 @@ Defined in `sync/merge.rs`. This is what crosses between devices — as
     "limits": { "updatedAt": "…", "minWpm": 90, "maxWpm": 700 },  // Dotty's range
     "books":  { "<sha256>": { "updatedAt": "…", "wpm": 240, "minutes": 12, "difficulty": 1.04 } },
     "resetAt": "…"              // optional: "forget my pace"
+  },
+  "camp": {                     // optional: left out until there is one
+    "state": "{\"v\":2,…}",     // Pip's camp in the Hollow, as the app wrote it: a JSON object, kept as text
+    "savedAt": "…"              // when it was saved; "" or absent for one kept before saves were stamped
   }
 }
 ```
+
+What is inside `camp.state` belongs to the app too (`pip/base/rules.ts`): Rust
+checks only that it is a JSON object of at most 32 KB, and reads from it
+nothing but what a shared profile shows (`commands/pip_shop.rs`,
+`camp_summary`): the levels and counts, and where the camp's buildings,
+fence and decorations stand (`spots`, `walls` and `decor`: at most seven
+places, 32 pieces of fence and 24 decorations, whole numbers inside the
+240 by 120 scene). Four more parts are read the same way: `land`, the
+landscape set about the camp (at most 30 of `{kind, x, y}`, `kind` 0 to 9);
+`works`, its defences (at most 12 of `{kind, x, y}`, `kind` 0 to 11); and
+`guards`, the rank of the guardian at each of seven posts (seven whole
+numbers, 0 for none, 3 at most). A fourth, `posts`, says where each
+guardian's signpost was carried to: the camp keeps them by guardian number
+(`"0"` to `"6"`, `[x, y]` each, only the ones moved), and the summary lists
+all seven in order, `[x, y]` or `null` for one not moved. The dragon's (the
+fifth, who has no post) and an unposted guardian's are always `null`, and
+the part is left out when none was moved. A part the kept camp does not have, or
+that cannot be read, is left out of the summary. So is `guards` when no
+guardian is posted. An entry that cannot be read is dropped from its list,
+and a rank that cannot be read is 0. The whole summary stays under 3 KB.
+A friend's card draws the camp from these. A camp kept
+with no layout is shown by its levels and counts alone, and the card draws
+it as a camp begins. A build from before the camp
+travelled ignores the field and writes documents without it, which takes
+nothing away from the devices that have it.
+
+A raid on a friend's camp is played against that summary, as the friend's
+profile shows it, and carrying it between the two readers keeps nothing in
+SQLite or in this document. What is kept is on the server, and is a note
+that the raid happened: a row in its `raids` collection with `fromId` and
+`toId` (the raider and the reader raided), `by` and `name` (the raider's
+handle and display name as they were), `stars` (0 to 3), `day` (the UTC
+date, which is what "one raid a day on one camp" is counted by),
+`createdAt`, and `seenAt` (null until the raided reader's app acknowledges
+it, or a newer raid pushes it out of the 20 that wait). No camp, no layout
+and nothing about reading. A row is deleted 30 days after it was made.
+Whether friends may raid at all is `profiles.raidable`, which is on unless
+it is `false`. The routes are `GET /v1/raids/targets`, `POST /v1/raids`,
+`GET /v1/raids` and `POST /v1/raids/ack`, with `raidable` on `GET` and
+`PUT /v1/profile/me` (`server/README.md`); the app reaches them through
+`community_raid_targets`, `community_raid`, `community_raids`,
+`community_raids_ack`, `community_raidable` and `community_set_raidable`
+(`commands/community.rs`).
 
 What is inside each part of `readingProfile` belongs to the app
 (`readers/paceModel.ts`); Rust carries the fields as they are, so a device on an
@@ -323,6 +378,15 @@ Book files live beside it as `books/<sha256>.<ext>` and are fetched on demand.
   devices that both learned keep both. A reset (`resetAt`) drops book entries
   older than it on every device; past 400 books the least recently read leave.
   `sync/reading.rs` (`merge_core`), mirrored by `mergeProfiles`.
+- **Pip's camp** — newest `savedAt` wins, whole; a tie is settled by content.
+  The camp's rules are the app's, so nothing here can merge two camps part by
+  part. A camp with no stamp (kept before saves were stamped) loses to any
+  stamped one. A document without a camp never takes one away, and a `state`
+  no device would keep (not a JSON object, or over 32 KB) is passed over as if
+  it were absent. On arrival it is compared with the camp kept at that
+  moment, not with the snapshot the run began from, so a camp saved while a
+  sync was talking to the network is not rolled back (`sync/store.rs`,
+  `absorb_camp`).
 
 Exact timestamp ties fall back to comparing the values themselves, so the result
 cannot depend on argument order. Output is ordered by a `BTreeMap`, so two

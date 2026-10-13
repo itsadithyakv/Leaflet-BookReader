@@ -59,6 +59,290 @@ holds:**
   in the startup script (about 150 kB before minifying).
   `apps/node_modules/.leaflet-test/chunks.mjs` prints what each chunk is
   made of.
+- **2026-10-12, not committed: the app was joined to a real server for the
+  first time, and the arcade got its building game.**
+  - **The join** (`apps/src-tauri/src/commands/e2e.rs`, an ignored test, and
+    `server/scripts/e2e-server.mjs`, which serves the real routes on this
+    machine from a throwaway local database and refuses any other). It sends
+    what the app itself sends (the profile as `ProfileUpdate` serialises it,
+    the library as `shared_library` lists it, every public-community request
+    as `discuss::ask_for` builds it) and reads the answers with the app's own
+    types. The top of `e2e.rs` says how to run it. It signs readers up by
+    calling the server directly, never `cloud::signup`: that writes the
+    session to the system keychain and would replace the owner's sign-in.
+  - **It found one real bug, now fixed**: every *listed* post (feed,
+    Discover, a book's posts, a reader's posts) answered the poster's profile
+    as a list where the book's author should be, with the profile's database
+    id and visibility in it. The lookup of the poster was written to
+    `author`, over the post's own. The feed would have thrown on its first
+    row. Both suites were green: the server's never looked at a listed
+    post's author, and the app's used canned answers. `withAuthor` now takes
+    the name to write to, posts use `poster`, and both sides test it
+    (180 server tests).
+  - **The Hollow** (features.md, "The Hollow: Pip's camp, the arcade's
+    building game"), built twice: the first slice was played through by
+    simulation and was a progress bar, so it was rebuilt as the owner
+    steered it. Reading runs it (the oak, the scouts' rest, building, the
+    lantern, the streak, Pip's wish); the camp is laid out by the reader and
+    the night is fought on that layout; raids are small battles the reader
+    sets going; heroes come from the books finished. In the backup, and its
+    summary on a shared profile (both by a helper, with the server and Rust
+    tests: 184 and 757). Tried in the preview: a camp arranged until the
+    night held, the night watched, a stronghold raided with a hero.
+  - **A book can be removed from any card's menu** (features.md, "A book can
+    be removed from any card"), and its file goes from Google Drive on the
+    next backup run. The Drive half was read, not run.
+  - **A game no longer starts again the moment it ends** (features.md, "And
+    it no longer starts again by itself"): the real cause of the owner's
+    "resets abruptly", which the 0.9 s pause of 1.4 had not reached.
+  - **Later the same day, the Hollow's own critique was answered and the
+    arcade restyled** (features.md, "The Hollow after its first look" and
+    "The arcade fills the window, in Pip's own hand"). Raids rebalanced
+    (graded stars, champions that can be set on, the road and the King
+    measured against the scouts, three stars skipping a stronghold, heroes
+    trimmed); the camp page cut to Pip's words, the picture and one card,
+    with the next to-do marked where it is done; sounds; tips for touch; the
+    picture sized for narrow windows; the friend's card showing the real
+    layout (Rust and server, by a helper). Then, on the owner's word: the
+    arcade fills the window and is drawn Pip's way instead of the app's soft
+    style, the front page shows each game playing on its own card, and a
+    raid's pieces move between simulation steps. Tests: 2,689 app, 760 Rust,
+    186 server. **The server changed again** (`sanitiseCamp` takes the
+    layout): one more thing in the next deploy, no migration.
+  - **Last that day: the camp is lived in and tied to the house, and the
+    rest of the app was audited** (features.md, "The camp is lived in, and
+    belongs to the house" and "The rest of the app, looked at with fresh
+    eyes"). A Camp key on Pip's rail; her mood from the house speeds her
+    building; heroes live in the camp with a want a day and a friendship
+    that grows; Pip's walks (measured in minutes read) and their 36 tales;
+    a first-gather bonus that brought the ten-minute reader back from 162
+    days to 115; the raid's result moved under the field, because over it
+    it hid the very animations it was meant to show. The audit's fifteen
+    findings outside the arcade were fixed by two helpers (a book's place
+    could be wiped with one click; a double-click deleted a book from the
+    list view; a keeper could not remove a member; the owner's
+    `admin/community` control; and the rest), and what that left was done
+    after: the right-to-left dock, removed Kindle highlights staying
+    removed, a PDF's subject and keywords as genres (**the library is read
+    again once on first launch**: `SERIES_SCAN_VERSION` is 5), and the
+    smaller ones. Tests: 2,719 app, 765 Rust, 186 server. No server change
+    in this part.
+  - **After that, still 2026-10-12 and not committed: the Hollow grew, and
+    Pip's tab now opens on it** (features.md, "The Hollow grows up: one
+    level, four shelves, and Pip's tab opens on it"). Guardians, five kinds
+    of raider, four constructs, nine blades, landscape, the meadow and its
+    animals; nights only after reading; a lost night costs a little. The
+    camp has one level (the burrow's) and each level's list of what it
+    brings is made from the gates and tested; a yard plot exists only once
+    its level has come (second plot at level 3, was 2). Buying is sorted on
+    four shelves: Camp, Defence, Heroes, Decorate. `PipPage` has a `place`:
+    it opens on the Hollow (`HollowPlace.tsx`), the house is behind "Go
+    inside", and the arcade no longer lists the Hollow. Tests: 2,757 app
+    (1 skipped), 766 Rust; clippy clean; build passes. The server's tests
+    were not re-run after this part (nothing in `server/` changed in it;
+    188 passed when the friend's card last changed). **The server did
+    change earlier that day** (the friend's card carries land, constructs
+    and guardians): it is in the next deploy, no migration.
+  - **Into 2026-10-13, not committed: the picture is the page**
+    (features.md, "The Hollow is the page: the picture, and what goes on in
+    it"). The clearing fills Pip's tab with everything laid over it;
+    things stand at three quarters with shadows; a four-minute day and
+    night with lights; walking that goes round things; drag to move;
+    prowlers between raids that the camp's defences fight, and that knock
+    a building about when they get through; and raids on friends' camps.
+    **The server changed again** (`server/src/routes/raids.js`, collection
+    `raids`, `profiles.raidable`; no migration): until it is deployed the
+    app's raid lists are empty and nothing else is affected. Then:
+    guardians on signposts that can be dragged (and that count in the
+    night's fight), fighters who wear out and sleep three hours, prowlers
+    with preferences and clubs, and real things for the camp's people to
+    do. A helper tightened the raid routes for a small server, and the
+    same faults in `GET /v1/visitors` and `GET /v1/gifts`. Tests: 2,793
+    app (1 skipped), 770 Rust, 211 server.
+    Last: four more constructs (tanglefoot patch, hornet jar, pitfall,
+    watch bell), eight in all; the friend's card carries kinds 0 to 7,
+    eight at most, in Rust and on the server (**in the same deploy**; an
+    older server only drops the new four from a card).
+    Open: the garden's floor, signposts on a friend's card,
+    `POST /v1/gifts` (reads two whole profiles; the helper offered).
+  - **Later on 2026-10-13, not committed: the Hollow defended**
+    (features.md, "The Hollow defended: what there is to defend with, and
+    against"). Things at 0.64 and a clearing that widens with the burrow;
+    six pieces of fence a level, laid by dragging, that hold a prowler up;
+    twelve constructs; eight kinds of prowler (a magpie on the wing, a
+    squirrel after the oak, a mole under the fence, Fizzwick who pops);
+    acorns taken from the larder or the oak by one who is not stopped;
+    what each broken building stops doing; beds in the hut; the campfire;
+    seasons that each do one thing; the sun and moon; reach drawn (blue)
+    and measured as an oval, ground taken in red; guardians who look
+    their rank and walk on real steps. **The card changed in Rust and on
+    the server** (constructs 0 to 11, fence up to 32, signposts; widest
+    card 2,588 bytes of 3,072): same deploy, no migration; an older
+    server only drops what it does not know.
+    Last on that day: a trophy (and so a hero) stands on ninety minutes of
+    reading, not on a book marked finished (`claimed` in the camp's
+    state; nothing on the server); scouts, heroes and guardians each do
+    one thing, and the shelf is called People; guardians keep to their
+    posts and heroes answer the alarm.
+  - **The same day, not committed: the server was sized for 100 to 200
+    people on the free database** (server/README.md, "Capacity"; the
+    load script is `server/scripts/load.mjs`). One client, a pool of
+    ten, a short wait and a 503 rather than a pile-up; at most forty
+    requests in flight; a session remembered for a minute; a profile
+    save that says nothing new writes nothing; projections on the
+    lists; three new indexes and two partial ones that were never being
+    used; rate limits on the profile and state routes; two password
+    hashes at once. Measured locally with 200 open apps: about 320
+    requests a minute, 25 database operations a second, 12 connections,
+    97 MB, 7 MB stored. **Same deploy, no migration, no new environment
+    values**; indexes are made at first start. The Atlas limits it was
+    measured against (500 connections, 512 MB, about 100 operations a
+    second, 10 GB of transfer a week) are from memory and want checking
+    against the cluster's own page.
+    Then, on the owner's word ("anything to upgrade performance"): the
+    app publishes every five minutes while reading (it was one), pulses
+    every ten (five), asks for presents only when the inbox says one
+    was sent, refreshes the board every five minutes (one), and asks
+    for nothing while another app is in front
+    (`socialService.ts`, `useCommunityPulse.ts`, `SocialPanel.tsx`). A
+    friend's "reading now" can so be five minutes behind. In Rust the
+    sync no longer uploads a document that says nothing new
+    (`sync/cloud.rs`, `has_news`) and its publish is throttled like the
+    rest (`commands/social.rs`). On the server a changed save is five
+    operations (seven), the inbox seven (nine), and the unit's heap is
+    128 MB (160): about 20 operations a second for 200 open apps (24),
+    p95 at four times that load 437 ms (788). Transfer, about 0.54 MB
+    an app-hour as the server was measured, is what the free database
+    runs out of first (about 330 people at eight hours a day by the
+    assumed limit); the app's slower polling is not in that figure.
+    Left alone because they change what a reader sees: the public
+    board's cache, the size of what a profile save sends back, the
+    library list re-sent as reading moves a percent.
+    Tests: 2,840 app (1 skipped), 776 Rust, 228 server.
+  - **After that, not committed: the book comes into the camp, the land
+    and a gate matter, and the camp can be shown** (features.md, the
+    end of "The Hollow defended"). A chapter read sends a parcel up the
+    path (`storyFeed.ts`; eight minutes of reading behind each); the
+    kind of book being read brings its own prowlers oftener; prowlers on
+    foot go round water, knolls and buildings, and round a fence by its
+    gate or open end where that is not far; a trophy tapped names its
+    book; a postcard of the camp is saved or copied. App only: nothing
+    on the server or in Rust. The reader's one new line is in
+    `readers/text/useBookOpening.ts` (it says which chapter is on
+    screen), and `libraryStore.updateBookProgress` tells the feed.
+    Then a polish pass (figures that float up where something happened,
+    a jolt, a "!", birds and fireflies), fences that join up the picture
+    and on the slant, depth by shadow and haze, and a balance pass
+    measured by `full-sim.ts`: prowlers' harm and theft are capped at two
+    knocks and one theft a day and cost less to put right; everything
+    else stood as it was (about three months to all of it at half an
+    hour a day). Last: Pip's tips (`tips.ts`: thirteen, one at a time,
+    each gone when the thing is done or dismissed) and the (i) panel
+    rewritten. Then drag and drop for everything (fence pieces, buildings
+    while arranging, new things off the shelves) and walls that run back
+    drawn by their tops, flush at the corners. Tests: 2,886 app.
+    In Pip's house (docs/pip.md), the same day and not committed: four
+    more ways to play with her by hand (a cuddle, a high five, a
+    tickled leaf that ends in a sneeze, a whirl), a finger that can rub
+    her, thirty-odd pieces of furniture that answer a tap (`VISITS` in
+    `pip/furnish.ts`; for show, no mood or seeds), and thirty more
+    decorations in the shipped shop (`MORE_DECOR` in
+    `pages/pip/common.ts`: 27 already drawn and three new toys, a
+    trampoline, a music box and a bubble machine). `catalogue.json`
+    gained the three toys, so Rust was re-tested (776 pass). **Two
+    things to decide before release, because they cannot be taken back
+    after:** the wider shelf and the toys; and that the Greenhouse set
+    can now be completed (+50 seeds). Tests: 2,938 app.
+    The shelf now stays put while a thing is carried off it (it used
+    to give way at once, and the page moved under the pointer), and a
+    finger carries a thing off a shelf by holding it first. The touch
+    path was tried with made-up touch events, not with a finger.
+    Later the same day in her house, at the owner's asking and not
+    committed. Curtains are drawn by a pull anywhere on the window
+    (`curtainTug`, `curtainLetGo` in `pip/furnish.ts`), and a picture
+    knocked a third time the same way comes off its nail and lies on
+    the floor until it is picked up (`comesDown`, `fallStep`). **The
+    fridge is no longer for show:** each snack bought stocks it for a
+    day (`pip/fridge.rs`, new: `HOURS_PER_SNACK` 24, `MAX_HOURS` 72),
+    read back out of the ledger, not counted; found bare, it takes 3
+    off her mood once a local day (`BARE_MOOD`, never under the floor
+    of 40, and only when she is up and looks, never for time away).
+    That is a new command, `pip_fridge_bare`, which takes no
+    arguments. **She has a temper** (`pip/temper.ts`, new, this device
+    only, kept in localStorage against the clock): patience that
+    annoyances wear down and kindness mends, a tantrum when it is gone
+    (one in 8 minutes at most), a huff of 2 minutes in which she will
+    not be played with, a sulk of 15 to 30 minutes that eases, good
+    moods of 10 to 20 minutes, and making up by a cuddle or a snack.
+    It is laid over the hearts and never sent to Rust. Tests: 3,003
+    app, 789 Rust, clippy clean. Seen in the preview; not in the
+    installed app, not with a real purchase, not by ear, not under a
+    finger. One thing to decide: a new reader's fridge is bare, so the
+    first look costs 3 (70 to 67, which the hearts do not show).
+    **The ball is a game of catch** (`pip/catch.ts`, new; pip.md has
+    the rules): she throws it back to the pointer, a press on it in the
+    air catches it, a rally is counted beside it, and left alone she
+    nudges it over, lies down on it and at last puts it away. Played in
+    the preview with made-up presses: a rally to 19 with her cheer at
+    5, the wait through to her putting it away, a cancelled press and
+    a lost window each dropping the ball where it was, a flick off the
+    wall. Not seen: a bonk or a miss of hers (tests only), the making
+    up by a rolled ball, reduced motion, a finger. Tests: 3,042 app.
+  - Not checked: any of it in the installed app; the Hollow played by a
+    person over days (its numbers are from two simulations kept beside it);
+    the arcade's games and the raids by hand (the preview's pane was in the
+    background, so a timer stood in for frames); the remove-book menu on a
+    real card (the preview's library was empty); a camp arriving by backup
+    on a second computer.
+- **The public community was added last on 2026-10-11, not committed**
+  (features.md, "Discover and book communities: the public, optional half";
+  `docs/legal/community-guidelines.md` is new and is published with the
+  privacy policy). Reviews and quotes for followers or for everyone, like
+  and dislike, a Discover feed, one community a book or series with threads
+  and replies, spoilers covered by the reader's own place, reports, blocks,
+  and the owner's review. It needs the same server deploy as the rest.
+  - **The owner's to do, besides deploying:** mark their own account as the
+    admin in the database (`server/README.md`, "Moderation", says how) or
+    nobody can review reports; and decide that they will look at reports,
+    because three reports hide a thing until somebody does.
+  - **Until the owner is ready to moderate,** the admin panel's "Pause
+    public posting" turns every public write off and leaves reading on.
+  - The released 1.3.2 cannot see any of it and is not affected by it.
+- **Also added to 1.4.0 on 2026-10-11, not committed, and it needs a server
+  deploy** (features.md: "Friends", "Badges, levels and the month's
+  challenge", "More to do with seeds", "A series can change its covers").
+  Three helpers built the server routes, the seed rules and the shop content
+  in parallel and each was reviewed. 2,582 app tests, 738 Rust tests and 139
+  server tests pass; `tsc` and clippy are clean; `vite build` succeeds. What
+  is not known: none of it has been run in the installed app, and the app
+  has not been joined to a server of this version by hand.
+  - **The owner's to do, in this order:** deploy the server
+    (`server/README.md`, "Deploying this version": five new collections made
+    at start, no new secret or environment value), then release the app. An
+    app of this version against the old server loses only the new things.
+    The released 1.3.2 keeps working against the new server (a locked
+    profile is sent as an empty card it can draw; three new inbox kinds show
+    as lines with no words).
+  - `server/src/pipParts.json` changed (six new accessories): until the
+    server is deployed it refuses a profile picture wearing one.
+  - The privacy policy is rewritten for all of it and wants the effective
+    date set at release.
+  - The base to build on the arcade floor ("like Clash of Clans") was only
+    designed that day; its first slice was built the next (the entry above).
+- **Added to 1.4.0 on 2026-10-11, not committed** (the owner asked for each;
+  features.md has them under "1.4"): a PDF's first page as its cover without
+  the book being opened; a file over 10 MB waits for the reader's word
+  before it is backed up; every session and day of reading named after its
+  book, on the reader's shelf and the shared one; genres as a wall of tiles
+  in Collections; the Bharat Trilogy; the foot bar made small, and off
+  Pip's page; the arcade on a CRT set with a big screen, a pause at game
+  over, and Page Flap's background drawn once; Pip still in the logo; and the
+  room on Pip's page painted far less often, and faster by night.
+  2,520 app tests and 660 Rust tests passed with these in, `tsc` and clippy
+  clean. Asked for and not built, each needing the server and the privacy
+  policy: a followed reader's library, follow requests for a profile kept
+  to followers, and badges and a show-off profile (the reply of that day
+  has the design).
 - **The next release is 1.4.0** (2026-10-10). The owner did not ship 1.3.3
   or 1.3.4, so what the two hold (the next entry, and "1.3.3" further
   down) goes out together as 1.4.0, the first release after `v1.3.2`.

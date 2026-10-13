@@ -53,6 +53,49 @@ name must match the reserved name exactly ("Leaflet Book Reader", as in
 
 ## What's new in this version
 
+For 1.4.0 (the first release after 1.3.2; the Store's field takes 1,500
+characters, this is about 1,450):
+
+> Friends and a place to talk about books, all optional. Follow readers, see
+> what they are reading, and open the library of anyone who shares theirs.
+> Post a finished book, a proper review or a quote from your highlights, to
+> your followers or to everyone, and like or dislike what others post.
+> Discover is a feed of reviews and quotes from readers everywhere. Every
+> book and series can have its own community with threads for theories;
+> spoilers stay covered until you have read that far. Report and block are
+> on everything.
+>
+> Book clubs with a shared weekly goal, badges for hard milestones, levels,
+> duels with seeds staked on them, and presents for a friend's Pip.
+>
+> More to do with seeds: a streak freeze, a stake on your own reading goal,
+> rarer things in Pip's shop that open at higher levels, and three new
+> sounds for the reading room.
+>
+> Your library: PDFs get their cover without being opened, genres are a wall
+> of tiles in Collections, a series can change which set of covers it wears,
+> The Hobbit sits with The Lord of the Rings, and a file over 10 MB asks
+> before it is backed up. Every session on your shelf is named after the book
+> you were reading.
+>
+> New in Pip's arcade: the Hollow, a camp your reading builds. Lay it out,
+> hold it against the magpies at night, raid their camps with Pip's scouts,
+> and bring along heroes who turn up as you finish books. They live in the
+> camp, and Pip goes for walks while you read and comes back with tales.
+>
+> Pip's arcade now fills the window, and each game plays on its own card
+> before you pick it. A game that ends stays on screen so you can see how it
+> went.
+> You can remove a book from any card's menu.
+
+Before 1.4.0 is submitted: the age-rating questionnaire has to be answered
+again, because readers can now write things other readers see (reviews,
+quotes, threads and replies), with reporting and blocking; and the privacy
+policy and the community guidelines have to be published at the address
+below, with the policy's effective date set.
+
+The first release said:
+
 > The first release of Leaflet: your library, series and shelves that organise
 > themselves, a reader with page turning, search, highlights and notes, Smart
 > Read that learns your pace, daily streaks and full-screen focus sessions, Pip

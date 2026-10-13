@@ -55,6 +55,10 @@ There is exactly one Pip on screen at any time. Its home is the **header logo**:
 | `src/components/pip/arcade/quiz/` | The Word Quiz, "Who is this?" and My words. |
 | `src/ambience/` | The radio: `scenes.ts` (each scene as data), `schedule.ts` (seeded, pure), `grains.ts`, `engine.ts` (the Web Audio graph), `state.ts` (when it sounds), `ambience.ts` (the store), `ReaderAmbience.tsx`, `AmbiencePanel.tsx`, `measure.ts`. |
 | `src/desktop-pip/`, `src-tauri/src/desktop_pip/` | Pip on the desktop: her page and brain (poses `sit` and `holdup` in `moves.js` load only in her window), and the window, its thread and the Win32 calls. |
+| `src/pip/play.ts` | Playing with Pip, as pure rules: the poke ladder (shared with the desktop Pip), a high five (`tapAgain`), a cuddle (`pressOf`), strokes and where they fall (`strokeMove`, `zoneOf`, `rubOf`), a finger's rub or carry (`fingerLifts`), the swing in the hand, a whirl (`whirlMove`, `whirled`), flight, and what counts (`PLAYS`, kept in step with `pip/mod.rs`). |
+| `src/pip/furnish.ts`, `src/components/pip/furnishings.tsx` | The room under the hand: what each kind of furnishing does (curtains, pictures, the bed, lights, the fridge, the things that open a card), the pieces that answer a tap and have Pip come over (`VISITS`), and the buttons laid over them. |
+|  | Curtains are worked by a tap or by a pull anywhere on the window, any way (`curtainTug`, `curtainLetGo`): they used to want the hand to go towards the middle of the window, so a press on the glass could not draw them, and a tap with an unsteady hand did nothing. A picture knocked the same way once it is as crooked as it goes comes off its nail (`comesDown`, `fallStep`): it falls, bounces, lies on the floor and gives Pip a start; a press on it hangs it again, and so does Pip when she next goes to straighten it. Fallen is not remembered: reopened, it hangs crooked. |
+| `src/pages/pip/common.ts` | What the shop's Decor shelf sells without the whole house: `STARTER_DECOR` and `MORE_DECOR` (`onShelf`). |
 
 ## The Pip tab: Pip's house
 
@@ -78,6 +82,114 @@ Pip side.
   falls back to the floor), walks with the arrow keys when focused, and is
   poked by a click. One requestAnimationFrame loop on refs, stopped when the
   tab is hidden.
+- **Playing with Pip.** What the hand does to her is worked out in
+  `pip/play.ts` (pure, `play.test.ts`) and drawn by `HouseScene`. Every way
+  has a pointer, a finger where a finger can do it, and a key; without motion
+  each has a still answer (a pose and a line).
+
+  | Way | Mouse | Finger | Keys | Counts as |
+  | --- | --- | --- | --- | --- |
+  | Poke (a ladder of five answers, then a surprise) | click | tap | Enter on Pip | nothing |
+  | High five | two clicks within 320 ms | two taps | Enter twice; H on Pip; **High 5** on the Play rail | `pet` |
+  | Cuddle | press and hold still for 0.55 s; it lasts until the button lifts | the same | C on Pip; **Cuddle** on the rail | `pet` |
+  | Stroke | rub slowly across her, no button | rub across her, finger down | **Pet** on the rail | `pet` |
+  | Tickle | rub fast across her belly | the same, finger down | **Tickle** on the rail | `tickle` |
+  | Tickled leaf (a sneeze) | rub fast across her leaf, the top two fifths of her | the same | L on Pip | `tickle` |
+  | Carry, drop, throw, catch | drag by more than 4 px | drag off her: up or down by a third of her height, or sideways by most of her width | arrows walk her, up arrow tosses her; **Toss** | `toss` |
+  | Whirl (giddy when let go) | swing her round in a circle twice while she is held | the same | S on Pip; **Spin** on the rail | `toss` |
+  | Ball, dance | the ball is thrown by hand too | the same | their keys on the rail | `fetch`, `dance` |
+
+  **The ball is a game of catch** (`pip/catch.ts`, tests beside it; since
+  2026-10-13, the owner's asking: it used to be fetch and nothing else, ten
+  seconds a go). The ball that reaches her she throws back, in an arc that
+  comes down where the pointer is (`lob`, `throwTarget`; the middle of the
+  floor with no pointer in the room). A press on it in the air is a catch; a
+  press let go without moving tosses it gently to her (`underarm`), and so
+  does the rail's **Ball** key, a little differently each time; a drag let go
+  throws it as fast as the hand was going over its last 80 ms (`flick`, at
+  most 420 floor pixels a second). A press that is cancelled, or lost to
+  another window, drops it where it is and never throws it. The press area is
+  44 CSS pixels however small the ball is drawn (`GRAB_MIN`).
+
+  | Rule | Value | Constant |
+  | --- | --- | --- |
+  | How she takes one | a catch mostly; 26 in 100 a header or a kick straight back; 9 in 100 it bonks her on the head; 11 in 100 she jumps and misses | `FLOURISH_CHANCE`, `BONK_CHANCE`, `MISS_CHANCE` |
+  | A fumble | never her first of a game, never two running; it ends the rally | `receive` |
+  | The rally | catches in a row, hers and the reader's; shown beside the ball from 2; she cheers at 5, 10, 20 and each ten after | `RALLY_SHOWS`, `RALLY_CHEERS` |
+  | A rally that is a game | 4 catches: her temper takes it as `game` | `RALLY_IS_GAME` |
+  | Her wind-up | 680 ms, down to 320 as the rally grows; 1,100 when she is sulking | `WINDUP_MS`, `WINDUP_HALF_MS` |
+  | Nobody catches hers | she tries twice more, then waits | `TRIES` |
+  | The wait | at 6 s she nudges the ball over, at 22 s lies down with her chin on it, at 55 s puts it away | `ASK_NUDGE_MS`, `ASK_CHIN_MS`, `ASK_AWAY_MS` |
+  | A ball rolled gently to her feet in a huff | a peace offering: the huff is over and she pats it back | `peaceOffering`, `offerPeace` in `pip/temper.ts` |
+
+  The ball itself has weight (`ballStep`: gravity 640, a bounce that keeps
+  0.58, a roll that stops dead under 5 pixels a second), stepped 120 times a
+  second whatever the frame rate, a frame of more than a tenth of a second
+  cut short. It squashes on what it hits, stretches at speed and has a shadow
+  that shrinks as it rises, all in whole pixels (`ballShape`, `shadowOf`).
+  Nothing is won by a rally, kept from it or lost when it ends. With reduced
+  motion there are no arcs: the ball is placed, she hands it back, the rally
+  still counts.
+
+  The second of two quick taps is a high five instead of a second poke, and
+  the poke ladder goes back to where it was before the pair (`tapAgain`); a
+  third quick tap pokes again, so hammering at her still climbs the ladder.
+  A finger cannot hover, so a finger that stays on her rubs her and only one
+  that leaves her picks her up (`fingerLifts`); a mouse still picks her up at
+  the first 4 px. A whirl is the turn of the hand's heading added up
+  (`whirlMove`): a shake to and fro adds up to nothing. No new kind of play
+  was added: `PLAYS` is still the five that Rust knows, and each new way
+  counts as the nearest of them, at most once every six seconds a kind.
+- **Things that answer a tap.** A piece of decor of the furnishing kind
+  `visit` (`pip/furnish.ts`: `KIND_OF`, and `VISITS` for what each one does)
+  gets a button like the bed and the lamps (`components/pip/furnishings.tsx`:
+  its own label and tooltip, Enter, a press area of at least 24 px, 44 under a
+  finger). Chosen, the thing answers at once (a sound from `pip/sound.ts`,
+  and notes, bubbles, hearts or sparks off it), and Pip, if she is free,
+  walks over and does what one does with it; she also goes to most of them of
+  her own accord now and then (`visitOffer`, the planner's `potter`). All of
+  it is for show: no mood, no seeds, nothing told to the page. A dance at one
+  is a dance she owns, or her little bop: never a move the shop sells.
+
+  | Piece | What happens |
+  | --- | --- |
+  | Aquarium, Goldfish Bowl | she comes and peers in with her magnifying glass; bubbles |
+  | Fireplace | she warms herself, and yawns |
+  | Cuckoo Clock | the cuckoo; she jumps where she stands, then laughs |
+  | Spinning Globe | she watches it go round and is dizzy |
+  | Record Player, Disco Ball, Robot Buddy | a tune (a beep from the robot), and she dances (the disco or the robot if she owns it) |
+  | Music Box | a tune, and her little bop |
+  | Upright Piano | she plays it |
+  | Cat & Cat Bed | she fusses the cat; a mew, a purr, hearts |
+  | Cat Tower | she calls the cat down, and is ignored |
+  | Potted Monstera, Tulip Planter, Tall Sunflowers, Bonsai Tree | she waters it |
+  | Hanging Fern, Fairy Lights, Globe String Lights, Lava Lamp | she comes and looks up at it |
+  | Mushroom Lamp | a lightbulb over her head |
+  | Trophy Shelf, Trophy Wall | she holds a trophy up |
+  | Reading Nook Tent | she plays ghosts in its doorway |
+  | Beanbag, Hammock | she floats off to sleep on it |
+  | Garden Gnome | she inspects him, then looks over her shoulder |
+  | Lily Pond | she looks for the frog |
+  | Neon READ Sign, Ceiling Fan, Game Controller | she reads it; cools off under it; has a go |
+  | Trampoline | she bounces on it four times (thrown by the scene, as a toss is), then cheers |
+  | Bubble Machine | bubbles, and she pops them on her toes |
+
+  The Velvet Armchair and the Retro Fridge are not among them
+  (`furnish.test.ts` and `fridge.test.ts` pin both); nor is the arcade's
+  jukebox, which is one of its machines and plays a dance that counts.
+- **What the shop sells for the house.** With `FEATURES.fullPipHouse` off the
+  Decor shelf is the bedroom's own twenty pieces (`room.js`) and the 27 named
+  in `MORE_DECOR` (`pages/pip/common.ts`): 24 of the house's pieces that were
+  drawn and priced all along and go on any floor or in the garden, and three
+  toys drawn for it (Trampoline, Music Box, Bubble Machine: the only new rows
+  in `catalogue.json`). A piece is only offered where this house has a floor
+  to put it (`placeable`), so the Bookshelf and the Writing Desk, which are
+  the library's, still wait; the Spinning Globe, the Record Player and the
+  Reading Nook Tent used to wait with them and now go on any floor
+  (`LEVEL` in `room.js`). Not sold: other floors' pieces, any floor's starter
+  piece, the book nods, and the Lily Pond (the garden's furrows are drawn
+  across it). The Greenhouse set can now be finished without the whole
+  house; no set, wish list, price or reward changed.
 - **The fridge and the phone.** The Bedroom has a mini fridge (a fixture of
   the floor: `FIXTURES` in `house.js`, placed by `home.js`, used through
   `furnish.ts` like the other furnishings). Pip's night life is planned in
@@ -87,9 +199,58 @@ Pip side.
   scroll-* / phone-* (the phone, in bed and standing), innocent, snooze;
   and for her book life and the rest: glance, quilt-hide, underbed, inspect,
   trail, knight, march, swordplay, hangover, dust, bring, show, cold-idle,
-  sniffle, tissue, shuffle. A Pip
-  the reader tucked in is left asleep for 20 minutes. None of it touches mood,
-  seeds or the shop.
+  sniffle, tissue, shuffle; and for her temper: stamp, sulk. A Pip
+  the reader tucked in is left asleep for 20 minutes. The phone touches
+  neither mood, seeds nor the shop. The fridge did not either, and this
+  paragraph used to say so; that changed on 2026-10-13, at the owner's request
+  (next two points).
+- **What is in the fridge** (2026-10-13, the owner: "make Pip sad by not
+  having food in the fridge if you don't buy"). Nothing is counted: Rust works
+  out from the purchase ledger until when the fridge is stocked
+  (`pip/fridge.rs`: each snack bought stocks it for `HOURS_PER_SNACK`, 24, on
+  top of what is still in hand, never more than `MAX_HOURS`, 72, from the
+  moment it is bought) and sends that with the overview (`fridge.stockedUntil`).
+  The open fridge is drawn stocked or bare (`minifridge-open`, `data.bare`),
+  its label and tooltip say which, and the mood panel says how long the food
+  will last. Bare, a Pip who looks in (of her own accord, or because the
+  reader opened it) droops and says so, with no nibble: a couple of times a
+  day at the very most and not twice in three hours (`bareMinds` in
+  `furnish.ts`, kept in localStorage), after which a look is only a look. The
+  first look of a local day takes `BARE_MOOD`, 3, off her mood
+  (`pip_fridge_bare`; the day is a device setting, `pip.bareFridge`), never
+  below the floor the drift stops at (`mood_minus`, 40), and it is the one
+  thing in the mood log with a gain below zero. Nothing is worked out for
+  time the app was shut: she has to be up, at home and looking. One snack
+  mends it, and the first time she finds food in a fridge that was bare she
+  cheers and is in a good mood for a quarter of an hour.
+- **Her temper, and the mood she is in** (2026-10-13, the owner: "let her
+  throw tantrums", then "let it stay for a bit"). Rules in `pip/temper.ts`
+  (pure, `temper.test.ts`), played by `HouseScene`, kept in localStorage
+  (`leaflet.pip.temper`) and worked out from the clock, so it survives leaving
+  the room or the app and is simply gone past its time. Never sent to Rust:
+  the page lays it over the hearts (`onTemper`, `heartsOff`).
+
+  | What | Number | Where |
+  | --- | --- | --- |
+  | Patience | 0 to 100; comes back at 15 a minute | `PATIENCE_PER_MIN` |
+  | What wears on it | poked at or past the last rung 20, woken 30, dropped from a height 15, tossed 8, whirled giddy 25, a sneeze 20, the light flicked at her 12, a picture knocked off the wall 25, the ball taken mid-fetch 12, the fridge found bare 35 | `ANNOYS` |
+  | What gives it back | cuddle 30, stroke 15, tickle 5, high five 10, fetch 8, dance 20, a game 10, put to bed 15, a snack 40, food found in a bare fridge 25 | `SOOTHES` |
+  | A tantrum | when patience is at 10 or under; at most one in 8 minutes | `PATIENCE_GONE`, `TANTRUM_EVERY_MS` |
+  | The sulk after | 15 to 25 minutes by cause (a second within the hour 1.25 times as long, 30 at most): 2 minutes of huff (will not be picked up or played with), then sulking, then cool, easing evenly | `SULK_MS`, `HUFF_MS`, `SPELL_MAX_MS` |
+  | Making up | a cuddle or a snack, even in the huff: 4 tender minutes at two fifths strength; a stroke or a dance after the huff takes a quarter off what is left | `TENDER_MS`, `TENDER_FROM`, `KINDNESS_SHORTENS` |
+  | A good mood | snack 20 minutes, food found 15, dance 12, game 12, a cuddle of 2.5 s or more 10: full for the first half, then easing | `GLAD_MS` |
+  | On the hearts | a sulk up to 30 points down, a good mood up to 20 up, thin patience up to 20 down (a heart is 20) | `SULK_POINTS`, `GLAD_POINTS`, `CROSS_POINTS` |
+
+  Each cause has its own tantrum (`tantrumPlan`): woken is a yawn, a glare and
+  back to bed; dropped, tossed or whirled is indignant (steamed, then the new
+  `stamp`); a bare fridge is theatre (`faint`, `sob`); the rest stamp and
+  steam. All end with her back turned at the nearer wall (the new `sulk`
+  move), which is also how she stands for the huff; sulking she stands in
+  `mope`, answers a poke with a "hmph", keeps to the window and her book, and
+  glances over her shoulder; glad she hums, dances more and plays more.
+  Coming round is a sniff, a look over her shoulder and a word (`comeRound`).
+  With motion reduced a tantrum is one line and the pose. The house only: the
+  reader, the roaming Pip and the desktop Pip are untouched.
 - **Decorating** snaps items into each floor's slots (`fits`: ceiling, wall,
   window, top, stand, rug); an item goes where its `fits` includes the slot's,
   on its own floor (`level`) or anywhere (`"any"`).
