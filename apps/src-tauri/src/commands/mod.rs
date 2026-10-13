@@ -23,6 +23,9 @@ mod library;
 mod backup;
 mod social;
 mod community;
+mod friends;
+mod discuss;
+mod covers;
 mod account;
 mod comics;
 mod habits;
@@ -42,11 +45,17 @@ mod power;
 mod search;
 mod fonts;
 mod tidy;
+// The community requests against a real server; ignored unless asked for.
+#[cfg(test)]
+mod e2e;
 
 pub use library::*;
 pub use backup::*;
 pub use social::*;
 pub use community::*;
+pub use friends::*;
+pub use discuss::*;
+pub use covers::*;
 pub use account::*;
 pub use comics::*;
 pub use habits::*;

@@ -200,6 +200,62 @@ pub fn set_sync_folder(path: Option<String>, state: State<'_, AppState>) -> Resu
   read_sync_status(&db)
 }
 
+/// A book whose file is over the size a backup sends without asking
+/// (`sync::large`), and what the reader has said about it.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LargeBook {
+  pub id: String,
+  pub title: String,
+  pub bytes: u64,
+  /// `true` to back the file up, `false` not to; nothing when not yet asked.
+  pub back_up: Option<bool>
+}
+
+pub(crate) fn large_books_in(db: &db::Database) -> Result<Vec<LargeBook>, String> {
+  let answers = crate::sync::large::Answers::load(db);
+  let mut large: Vec<LargeBook> = db
+    .list_books()
+    .map_err(|e| e.to_string())?
+    .into_iter()
+    .filter_map(|book| {
+      let entry = crate::sync::merge::BookEntry::from_record(&book);
+      let path = crate::sync::store::local_path_for(&entry).ok()?;
+      let bytes = crate::sync::large::file_bytes(&path);
+      (bytes > crate::sync::large::LARGE_BOOK_BYTES).then(|| LargeBook {
+        back_up: answers.get(&book.id),
+        id: book.id,
+        title: book.title,
+        bytes
+      })
+    })
+    .collect();
+  large.sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.title.cmp(&b.title)));
+  Ok(large)
+}
+
+/// The library's large books on this device, largest first, each with the
+/// reader's answer. The app asks about the ones with none after a backup
+/// reports files held back, and a book's menu reads its own.
+#[tauri::command]
+pub fn large_books(state: State<'_, AppState>) -> Result<Vec<LargeBook>, String> {
+  let db = state.db.guard();
+  large_books_in(&db)
+}
+
+/// Records the reader's answer for some large books: back their files up, or
+/// not. The next backup acts on it. A "no" sends nothing more; it does not
+/// take away a file the backup already holds.
+#[tauri::command]
+pub fn set_large_book_backup(book_ids: Vec<String>, back_up: bool, state: State<'_, AppState>) -> Result<(), String> {
+  let db = state.db.guard();
+  let mut answers = crate::sync::large::Answers::load(&db);
+  for id in &book_ids {
+    answers.set(id, back_up);
+  }
+  answers.save(&db).map_err(|e| e.to_string())
+}
+
 /// Runs whichever transports are configured.
 ///
 /// Both may be: a folder covers this machine's other desktops, Drive covers a
@@ -263,7 +319,9 @@ pub(crate) async fn run_sync(state: &State<'_, AppState>) -> Result<crate::sync:
       .await
       .map_err(|e| e.to_string())?;
     report.merge_in(cloud_report);
-    let _ = publish_profile(state).await;
+    // When one is due: the app publishes on its own clock as well, and a
+    // sync follows every book closed and every line marked.
+    let _ = publish_profile_after_sync(state).await;
   }
 
   {

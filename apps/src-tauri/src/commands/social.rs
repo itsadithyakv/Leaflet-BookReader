@@ -2,6 +2,8 @@
 
 use super::*;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 // ---- social ----------------------------------------------------------------
 
@@ -47,43 +49,67 @@ pub(crate) fn build_profile_update(db: &db::Database, today_key: &str) -> Result
     .map(|day| day.minutes)
     .sum();
 
-  let books_finished = db
-    .list_books()
-    .map_err(|e| e.to_string())?
+  let books = db.list_books().map_err(|e| e.to_string())?;
+  // What the profile shows off: the level, the badges, the arcade's bests
+  // and Pip's camp.
+  let extras = social_extras(db, today_key)?;
+  let books_finished = books
     .iter()
     .filter(|book| has_finished(book))
     .count() as i64
     // And those finished and since removed from the library.
     + db.finished_and_removed().map_err(|e| e.to_string())?.len() as i64;
 
-  // The most recent books still on the shelf -- a burned one is not something
-  // to show off.
-  let mut shelf: Vec<&FocusSessionRecord> = snapshot
-    .sessions
-    .iter()
-    .filter(|session| session.burned_at.is_none())
-    .collect();
-  shelf.sort_by(|a, b| b.ended_at.cmp(&a.ended_at));
+  let shelf = shared_shelf(&snapshot.sessions, &snapshot.free_reads);
 
   Ok(cloud::ProfileUpdate {
     week_key: Some(iso_week_key(today_key)),
     week_minutes: Some(week_minutes),
     streak: Some(snapshot.streak),
     books_finished: Some(books_finished),
-    shelf: Some(
-      shelf
-        .into_iter()
-        .take(12)
-        .map(|session| cloud::ShelfBook {
-          title: session.title.clone().unwrap_or_else(|| "Untitled".to_string()),
-          author: None,
-          style_seed: session.style_seed.clone()
-        })
-        .collect()
-    ),
+    shelf: Some(shelf),
     read_day: read_day(&snapshot.days, today_key),
+    // The book open now, or JSON null for none: sent every time, so a book
+    // finished or put down stops being "reading".
+    reading: Some(reading_now(&books, chrono::Utc::now()).unwrap_or(serde_json::Value::Null)),
+    level: Some(extras.level),
+    badges: Some(extras.badges),
+    arcade: Some(serde_json::json!({ "dash": extras.arcade.0, "catch": extras.arcade.1, "flap": extras.arcade.2 })),
+    // The camp's levels, counts and layout, or JSON null for none (or one
+    // that cannot be read): sent every time, so a profile that had one loses it.
+    camp: Some(extras.camp.unwrap_or(serde_json::Value::Null)),
     ..cloud::ProfileUpdate::default()
   })
+}
+
+/// How many books the shelf others see holds.
+pub(crate) const SHARED_SHELF: usize = 12;
+
+/// The shelf other readers see: the latest reading, newest first, each named
+/// after its book. Focus sessions and, a day at a time, reading outside one
+/// (it used to be sessions only, so a reader who never starts a timer showed
+/// an empty shelf). The snapshot has named them (`ReadNames`); reading no
+/// book can be named for is left off, where it used to stand as "Untitled".
+/// A burned session is not something to show off.
+pub(crate) fn shared_shelf(sessions: &[FocusSessionRecord], free_reads: &[habit::FreeRead]) -> Vec<cloud::ShelfBook> {
+  let named = |title: &Option<String>| title.as_deref().map(str::trim).filter(|title| !title.is_empty()).map(str::to_string);
+  // The day it stands under, whether it is the day's loose pages (which
+  // stand after that day's sessions), when it ended, and the book.
+  let mut shelf: Vec<(&str, bool, &str, cloud::ShelfBook)> = Vec::new();
+  for session in sessions.iter().filter(|session| session.burned_at.is_none()) {
+    if let Some(title) = named(&session.title) {
+      let book = cloud::ShelfBook { title, author: None, style_seed: session.style_seed.clone() };
+      shelf.push((session.date_key.as_str(), false, session.ended_at.as_str(), book));
+    }
+  }
+  for free in free_reads {
+    if let Some(title) = named(&free.title) {
+      let book = cloud::ShelfBook { title, author: None, style_seed: format!("free-{}", free.date_key) };
+      shelf.push((free.date_key.as_str(), true, "", book));
+    }
+  }
+  shelf.sort_by(|a, b| (b.0, b.1, b.2).cmp(&(a.0, a.1, a.2)));
+  shelf.into_iter().take(SHARED_SHELF).map(|(_, _, _, book)| book).collect()
 }
 
 /// A day counts as read from this many minutes on its ledger. The same number
@@ -146,7 +172,53 @@ pub(crate) async fn publish_profile(state: &State<'_, AppState>) -> Result<bool,
     VISIBILITY_CONFIRMED.store(false, Ordering::Relaxed);
     return Ok(false);
   }
+  // The library, where it is shared and has changed. The figures above went
+  // through whatever happens to it: a list that will not send is not a
+  // reason to say the week's minutes did not.
+  if let Err(error) = publish_library(state).await {
+    crate::diag::warn(&format!("the shared library was not sent: {error}"));
+  }
+  *LAST_PUBLISHED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Instant::now());
   Ok(true)
+}
+
+/// When the figures were last published, this run.
+static LAST_PUBLISHED: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// How long after a publish the one that follows a sync is left out: what
+/// the app waits between the publishes it makes of its own accord
+/// (`PUBLISH_EVERY_MS` in `apps/src/services/socialService.ts`).
+const PUBLISH_EVERY: Duration = Duration::from_secs(5 * 60);
+
+/// Whether a publish that nobody asked for is due: none yet this run, or the
+/// last one long enough ago.
+pub(crate) fn publish_due(last: Option<Instant>, now: Instant) -> bool {
+  last.is_none_or(|at| now.saturating_duration_since(at) >= PUBLISH_EVERY)
+}
+
+/// The publish at the end of a sync, when one is due.
+///
+/// A sync used to end with a publish every time, whatever had just been
+/// sent: the app publishes on a clock of its own and when a session ends,
+/// and a sync follows every book closed and every line marked, so the same
+/// figures went up twice within seconds (at launch, and at the end of every
+/// session), and once for each highlight while a reader marked a page. It
+/// now waits its turn like the app's own. Nothing needs it sooner: the end
+/// of a session is published by the app, at once; and what a sync brings
+/// from another device goes up with the next publish, minutes later at most.
+///
+/// A reader this run has not yet asked the server about is always let
+/// through: that first publish is also what learns whether they share.
+pub(crate) async fn publish_profile_after_sync(state: &State<'_, AppState>) -> Result<bool, String> {
+  let known = {
+    let db = state.db.guard();
+    cloud::known_visibility(&db)
+  };
+  let last = *LAST_PUBLISHED.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+  if known.is_some() && VISIBILITY_CONFIRMED.load(Ordering::Relaxed) && !publish_due(last, Instant::now()) {
+    return Ok(false);
+  }
+  publish_profile(state).await
 }
 
 /// Whether the server's answer to a profile save says the profile is private.
@@ -219,6 +291,11 @@ pub async fn social_profile(state: State<'_, AppState>) -> Result<cloud::Profile
   // What the server says about sharing is what publishing goes by.
   let db = state.db.guard();
   cloud::remember_visibility(&db, &profile.visibility);
+  // Whether the library is shared, too (set on another device, perhaps);
+  // only when it differs, so what was last sent is not forgotten for nothing.
+  if shares_library(&db) != profile.shares_library {
+    remember_share_library(&db, profile.shares_library);
+  }
   Ok(profile)
 }
 
@@ -229,9 +306,12 @@ pub async fn save_social_profile(
   handle: Option<String>,
   display_name: Option<String>,
   visibility: Option<String>,
+  share_library: Option<bool>,
   state: State<'_, AppState>
 ) -> Result<cloud::Profile, String> {
-  let going_public = visibility.as_deref() == Some("public");
+  // Shared with everyone or kept to followers: either way the figures go up
+  // with the switch, so the profile is never a week behind it.
+  let going_public = matches!(visibility.as_deref(), Some("public") | Some("followers"));
   // Handles are shown with an "@" and stored without one.
   let handle = handle.map(|value| bare_handle(&value));
   let renamed = display_name.clone();
@@ -240,6 +320,7 @@ pub async fn save_social_profile(
     handle,
     display_name,
     visibility: visibility.clone(),
+    share_library,
     ..cloud::ProfileUpdate::default()
   };
 
@@ -252,9 +333,34 @@ pub async fn save_social_profile(
     update.books_finished = stats.books_finished;
     update.shelf = stats.shelf;
     update.read_day = stats.read_day;
+    update.reading = stats.reading;
+    update.level = stats.level;
+    update.badges = stats.badges;
+    update.arcade = stats.arcade;
+    update.camp = stats.camp;
   }
 
   cloud::put_profile(&state.db, &update).await.map_err(|e| e.to_string())?;
+
+  // The library follows its switch at once: sent when it is turned on, taken
+  // away when it is turned off or the profile is made private (the server
+  // drops it then too; this device must forget that it was sent).
+  let now_private = visibility.as_deref() == Some("private");
+  if share_library == Some(false) || now_private {
+    {
+      let db = state.db.guard();
+      remember_share_library(&db, false);
+    }
+    if share_library == Some(false) && !now_private {
+      withdraw_library(&state).await?;
+    }
+  } else if share_library == Some(true) {
+    {
+      let db = state.db.guard();
+      remember_share_library(&db, true);
+    }
+    publish_library(&state).await?;
+  }
 
   // The account's own copy of the name follows (`cloud::set_display_name`).
   // The save is not failed for it: the profile's is the one readers see.
@@ -288,6 +394,32 @@ pub(crate) fn bare_handle(typed: &str) -> String {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// The publish that follows a sync waits its turn; the first of a run never does.
+  #[test]
+  fn a_publish_nobody_asked_for_is_due_once_the_last_is_long_enough_ago() {
+    let now = Instant::now();
+    let ago = |seconds: u64| now.checked_sub(Duration::from_secs(seconds));
+    // None yet this run: due. (Where the machine has not been up that long, there is no such moment, and it is due too.)
+    assert!(publish_due(None, now));
+    // Published seconds ago (the app's own, as a session ended; or the sync before this one): not again.
+    assert!(!publish_due(Some(now), now));
+    for seconds in [2, 59, 299] {
+      if let Some(last) = ago(seconds) {
+        assert!(!publish_due(Some(last), now), "{seconds} s ago");
+      }
+    }
+    // The same wait as the app's own publishes, and then it is due.
+    for seconds in [300, 301, 3600] {
+      if let Some(last) = ago(seconds) {
+        assert!(publish_due(Some(last), now), "{seconds} s ago");
+      }
+    }
+    // A clock that reads earlier than the last publish is not a reason to publish, or to panic.
+    if let Some(earlier) = ago(10) {
+      assert!(!publish_due(Some(now), earlier));
+    }
+  }
 
   /// The week the board ranks is the reader's own Monday to Sunday.
   #[test]
@@ -369,11 +501,57 @@ mod tests {
     let update = build_profile_update(&db, "2026-10-03").expect("update");
     assert_eq!(update.week_key.as_deref(), Some("2026-W40"));
     assert_eq!(update.week_minutes, Some(137.5));
-    assert!(update.shelf.expect("shelf").is_empty(), "the shelf is sessions only");
+    assert!(update.shelf.expect("shelf").is_empty(), "reading no book can be named for is not on the shelf");
     // Read on the day itself: that day is published, for a friend's Pip to visit on.
     assert_eq!(update.read_day.as_deref(), Some("2026-10-03"));
     // Nothing a reader did not choose to change rides along.
     assert!(update.visibility.is_none() && update.handle.is_none() && update.display_name.is_none());
+  }
+
+  /// The shelf others see says which book each stretch of reading was, with
+  /// or without a timer, and never "Untitled".
+  #[test]
+  fn the_shared_shelf_names_every_read_after_its_book() {
+    let session = |id: &str, day: &str, ended: &str, title: Option<&str>| FocusSessionRecord {
+      id: id.to_string(),
+      started_at: ended.to_string(),
+      ended_at: ended.to_string(),
+      date_key: day.to_string(),
+      minutes: 20.0,
+      book_id: None,
+      title: title.map(str::to_string),
+      notes: None,
+      ended_reason: "completed".to_string(),
+      clean: true,
+      style_seed: id.to_string(),
+      burned_at: None,
+      flower: None,
+      flower_bloomed: false
+    };
+    let free = |day: &str, title: Option<&str>| habit::FreeRead { title: title.map(str::to_string), ..habit::FreeRead::of(day, 30.0) };
+    let mut burned = session("burned", "2026-10-03", "2026-10-03T09:00:00+00:00", Some("Ulysses"));
+    burned.burned_at = Some("2026-10-04T00:00:00+00:00".to_string());
+    let sessions = [
+      session("morning", "2026-10-02", "2026-10-02T08:00:00+00:00", Some("Dune")),
+      session("evening", "2026-10-02", "2026-10-02T21:00:00+00:00", Some("Emma")),
+      session("no-name", "2026-10-03", "2026-10-03T10:00:00+00:00", None),
+      session("blank", "2026-10-03", "2026-10-03T11:00:00+00:00", Some("  ")),
+      burned
+    ];
+    let frees = [free("2026-10-01", Some("Dune")), free("2026-10-02", Some("Emma")), free("2026-10-03", None)];
+    let shelf = shared_shelf(&sessions, &frees);
+    let shown: Vec<(&str, &str)> = shelf.iter().map(|book| (book.title.as_str(), book.style_seed.as_str())).collect();
+    // Newest first; a day's loose pages stand after that day's sessions.
+    assert_eq!(shown, vec![("Emma", "free-2026-10-02"), ("Emma", "evening"), ("Dune", "morning"), ("Dune", "free-2026-10-01")]);
+    assert!(shelf.iter().all(|book| book.title != "Untitled" && book.author.is_none()));
+
+    // Twelve at most, the newest.
+    let many: Vec<FocusSessionRecord> = (10..30)
+      .map(|day| session(&format!("s{day}"), &format!("2026-09-{day}"), &format!("2026-09-{day}T10:00:00+00:00"), Some("Dune")))
+      .collect();
+    let shelf = shared_shelf(&many, &[]);
+    assert_eq!(shelf.len(), SHARED_SHELF);
+    assert_eq!(shelf[0].style_seed, "s29");
   }
 
   #[test]

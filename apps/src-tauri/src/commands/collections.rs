@@ -26,9 +26,10 @@ const MAX_BOOKS: usize = 10_000;
 /// edit them and an older version stored "Title (Author) (z-library.sk, ...)"
 /// and "Brown, Pierce" as they came. Version 3 reads a PDF's own title and
 /// author (`storage/pdf.rs`), which nothing read before. Version 4 takes
-/// the author away from a book whose file wrote its title there.
+/// the author away from a book whose file wrote its title there. Version 5
+/// reads a PDF's subject and keywords as its genres (`storage/pdf.rs`).
 const SERIES_SCAN_KEY: &str = "series_scan_version";
-const SERIES_SCAN_VERSION: &str = "4";
+const SERIES_SCAN_VERSION: &str = "5";
 
 fn clip(value: &str, max: usize) -> String {
   value.trim().chars().take(max).collect::<String>().trim().to_string()
@@ -151,10 +152,12 @@ fn reread(book: &BookRecord, basic: Option<&storage::BasicMetadata>) -> Option<R
   let own = basic.filter(|basic| basic.title.as_deref().is_some_and(|title| !normalize::is_noisy_title(title)));
   // A PDF's own title is taken only where it is the stored one written
   // properly (with the colon its file's name lost): a title a lookup has
-  // since settled is not put back. Its author still fills a gap.
+  // since settled is not put back. Its author still fills a gap, and so do
+  // its subject and keywords, for a book with no genres.
   let pdf = basic.filter(|basic| basic.doubtful).map(|basic| storage::BasicMetadata {
     title: basic.title.clone().filter(|title| normalize::is_same_title(&stored.title, title)),
     authors: basic.authors.clone(),
+    subjects: basic.subjects.clone(),
     doubtful: true,
     ..storage::BasicMetadata::default()
   });
@@ -200,8 +203,8 @@ pub async fn scan_series(state: State<'_, AppState>) -> Result<usize, String> {
       .filter_map(|book| {
         let path = std::path::Path::new(&book.local_path);
         let basic = book.available.then(|| storage::extract_basic_metadata(path).ok()).flatten();
-        // Nothing is read from a PDF, a comic or a missing file.
-        let basic = basic.filter(|basic| basic.title.is_some() || !basic.authors.is_empty() || basic.series.is_some());
+        // Nothing is read from a comic, a missing file, or a PDF that says nothing.
+        let basic = basic.filter(|basic| basic.title.is_some() || !basic.authors.is_empty() || basic.series.is_some() || !basic.subjects.is_empty());
         reread(book, basic.as_ref())
       })
       .collect::<Vec<_>>()
@@ -321,6 +324,17 @@ mod tests {
       reread(&settled, Some(&says_pdf(Some("Chapter 1"), Some("Ellison, Mara")))),
       Some(Reread { id: "abc".into(), named: Some(("The Tide Table".into(), Some("Mara Ellison".into()), vec![])), series: None })
     );
+
+    // A PDF's subject and keywords give it genres where they are a list of
+    // them and it has none; the genres a book has stay.
+    let about = storage::BasicMetadata { doubtful: true, ..says(None, &[], &["A report on the harbour for its board.", "tides, Oceanography, 2019"]) };
+    assert_eq!(
+      reread(&settled, Some(&about)),
+      Some(Reread { id: "abc".into(), named: Some(("The Tide Table".into(), None, vec!["Tides".into(), "Oceanography".into()])), series: None })
+    );
+    let mut shelved = stored("The Tide Table", None);
+    shelved.genres = vec!["Science".into()];
+    assert_eq!(reread(&shelved, Some(&about)), None);
 
     // A lookup once named a book whose own metadata is a file's name or
     // names no one: its answer is kept.

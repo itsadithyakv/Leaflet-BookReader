@@ -17,6 +17,7 @@
 
 use crate::db::Database;
 use crate::sync::folder::SyncReport;
+use crate::sync::large;
 use crate::sync::merge::{self, BookEntry, SyncDoc};
 use crate::sync::store;
 use crate::sync::{DriveState, PendingAuth};
@@ -981,18 +982,43 @@ pub async fn sync(db_mutex: &std::sync::Mutex<Database>, now: &str) -> Result<Sy
   }
 
   // Publish anything this device holds that Drive does not. Downloads stay on
-  // demand, so connecting a new device does not pull a whole library.
+  // demand, so connecting a new device does not pull a whole library. A large
+  // file goes only with the reader's word (`sync::large`).
+  let mut answers = {
+    let db = db_mutex.guard();
+    large::Answers::load(&db)
+  };
+  // Whatever happens to an upload, the answers found on the way are kept.
+  let mut failed = None;
   for entry in merged.live_books() {
     let name = entry.remote_name();
-    if remote_files.contains_key(&name) {
-      continue;
-    }
     let path = store::local_path_for(entry)?;
     if !path.exists() {
       continue;
     }
-    upload_book(&client, &token, &books_folder, &path, &name).await?;
-    report.books_uploaded += 1;
+    let bytes = large::file_bytes(&path);
+    if remote_files.contains_key(&name) {
+      answers.found_backed_up(&entry.id, bytes);
+      continue;
+    }
+    match large::decide(bytes, answers.get(&entry.id)) {
+      large::Decision::Send => {
+        if let Err(error) = upload_book(&client, &token, &books_folder, &path, &name).await {
+          failed = Some(error);
+          break;
+        }
+        report.books_uploaded += 1;
+      }
+      large::Decision::Ask => report.books_held += 1,
+      large::Decision::Skip => {}
+    }
+  }
+  {
+    let db = db_mutex.guard();
+    answers.save(&db)?;
+  }
+  if let Some(error) = failed {
+    return Err(error);
   }
 
   Ok(report)

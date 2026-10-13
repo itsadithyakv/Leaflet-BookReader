@@ -107,6 +107,75 @@ pub(crate) fn free_reads_from(
   habit::free_reads(days, &spans)
 }
 
+/// What names reading that has no book of its own: every book's title, and
+/// when each was opened on each day (`habit::names`).
+pub(crate) struct ReadNames {
+  titles: std::collections::HashMap<String, String>,
+  opens: Vec<habit::names::Open>
+}
+
+impl ReadNames {
+  pub(crate) fn load(db: &db::Database) -> Result<Self, String> {
+    // Removed books too: a session read from one keeps its name.
+    let titles = db
+      .list_books_for_sync()
+      .map_err(|e| e.to_string())?
+      .into_iter()
+      .filter(|book| !book.title.trim().is_empty())
+      .map(|book| (book.id, book.title))
+      .collect();
+    let opens = db
+      .book_opens()
+      .map_err(|e| e.to_string())?
+      .into_iter()
+      .filter_map(|(book_id, opened_at)| {
+        let at = chrono::DateTime::parse_from_rfc3339(&opened_at).ok()?;
+        Some(habit::names::Open {
+          book_id,
+          at: at.timestamp_millis(),
+          day: at.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string()
+        })
+      })
+      .collect();
+    Ok(ReadNames { titles, opens })
+  }
+
+  /// Gives a session its book's name: the title the book has now, for one
+  /// started on a book; for one started on none, the book that was opened
+  /// (`habit::names::book_in_session`). In the snapshot only: nothing is
+  /// written to the shelf, so a better guess later is free to replace it.
+  pub(crate) fn name_session(&self, session: &mut FocusSessionRecord) {
+    if let Some(id) = session.book_id.as_deref() {
+      if let Some(title) = self.titles.get(id) {
+        session.title = Some(title.clone());
+      }
+      return;
+    }
+    if session.title.as_deref().is_some_and(|title| !title.trim().is_empty()) {
+      return;
+    }
+    let at = |stamp: &str| chrono::DateTime::parse_from_rfc3339(stamp).ok().map(|at| at.timestamp_millis());
+    let (Some(started), Some(ended)) = (at(&session.started_at), at(&session.ended_at)) else {
+      return;
+    };
+    let started_day = started_day(session);
+    let found = habit::names::book_in_session(started, ended, &session.date_key, &started_day, &self.opens);
+    if let Some((id, title)) = found.and_then(|id| self.titles.get(id).map(|title| (id, title))) {
+      session.book_id = Some(id.to_string());
+      session.title = Some(title.clone());
+    }
+  }
+
+  /// Names a day's free reading after the book opened last that day.
+  pub(crate) fn name_free_read(&self, free: &mut habit::FreeRead) {
+    let found = habit::names::book_on_day(&free.date_key, &self.opens);
+    if let Some((id, title)) = found.and_then(|id| self.titles.get(id).map(|title| (id, title))) {
+      free.book_id = Some(id.to_string());
+      free.title = Some(title.clone());
+    }
+  }
+}
+
 pub(crate) fn build_snapshot(db: &db::Database, today_key: &str) -> Result<HabitSnapshot, String> {
   let goal_minutes = read_goal(db);
   let previous = read_streak_state(db);
@@ -130,9 +199,14 @@ pub(crate) fn build_snapshot(db: &db::Database, today_key: &str) -> Result<Habit
   write_streak_state(db, &state)?;
 
   let day_map = db.reading_days().map_err(|e| e.to_string())?;
-  let sessions = db.focus_sessions().map_err(|e| e.to_string())?;
+  let mut sessions = db.focus_sessions().map_err(|e| e.to_string())?;
   let (garden, seeds_earned) = garden_totals(db, &day_map, &sessions)?;
-  let free_reads = free_reads_from(&day_map, &sessions);
+  let mut free_reads = free_reads_from(&day_map, &sessions);
+  // Every spine and every loose page says which book it was, where that is
+  // known: on the reader's own shelf and on the one others see.
+  let names = ReadNames::load(db)?;
+  sessions.iter_mut().for_each(|session| names.name_session(session));
+  free_reads.iter_mut().for_each(|free| names.name_free_read(free));
   // Read from the ledger as it stands with this walk's covers stamped on it:
   // a miss that grace or a freeze paid for is no break.
   let cold = habit::cold(&day_map, today_key, goal_minutes);
@@ -483,7 +557,7 @@ mod tests {
     assert_eq!(snapshot.today_minutes, 15.0);
     assert!(snapshot.sessions.is_empty(), "no session is made up for it");
     assert_eq!(snapshot.shelf_count, 0);
-    assert_eq!(snapshot.free_reads, vec![habit::FreeRead { date_key: today, minutes: 15.0 }]);
+    assert_eq!(snapshot.free_reads, vec![habit::FreeRead::of(&today, 15.0)]);
   }
 
   #[test]
@@ -498,7 +572,62 @@ mod tests {
     // Reading on after the timer ran out is free reading.
     let snapshot = credit_reading(&db, &today, 8.0, None).expect("after it");
     assert_eq!(snapshot.today_minutes, 20.0);
-    assert_eq!(snapshot.free_reads, vec![habit::FreeRead { date_key: today, minutes: 8.0 }]);
+    assert_eq!(snapshot.free_reads, vec![habit::FreeRead::of(&today, 8.0)]);
+  }
+
+  fn book(id: &str, title: &str) -> BookRecord {
+    BookRecord {
+      id: id.to_string(),
+      title: title.to_string(),
+      author: None,
+      genres: Vec::new(),
+      cover_url: None,
+      local_path: format!("/{id}.epub"),
+      file_hash: id.to_string(),
+      progress: 0.0,
+      position: None,
+      series: None,
+      series_index: None,
+      last_opened: None,
+      created_at: "2026-01-01T00:00:00+00:00".to_string(),
+      metadata_checked_at: None,
+      metadata_updated_at: None,
+      progress_updated_at: None,
+      finished_at: None,
+      deleted_at: None,
+      available: true
+    }
+  }
+
+  /// The reported case: a timer started from the library, then a book
+  /// opened, was shelved with no name; and reading with no timer never had one.
+  #[test]
+  fn reading_with_no_book_of_its_own_is_named_after_the_book_that_was_opened() {
+    let db = memory_db();
+    let (now, today, _) = clock();
+    db.upsert_book(&book("dune", "Dune")).expect("book");
+    db.upsert_book(&book("emma", "Emma")).expect("book");
+    db.log_reading_session("dune", &now.with_timezone(&chrono::Utc).to_rfc3339()).expect("opened");
+
+    credit_reading(&db, &today, 12.0, None).expect("in the session");
+    db.insert_focus_session(&session("no-book", &today, &now, 12.0)).expect("session");
+    let mut started_on_one = session("on-emma", &today, &now, 0.0);
+    started_on_one.book_id = Some("emma".to_string());
+    started_on_one.title = Some("Emma (the old file name)".to_string());
+    db.insert_focus_session(&started_on_one).expect("session");
+    let snapshot = credit_reading(&db, &today, 9.0, None).expect("and on, with no timer");
+
+    let named = |id: &str| snapshot.sessions.iter().find(|session| session.id == id).expect("session").clone();
+    assert_eq!(named("no-book").title.as_deref(), Some("Dune"));
+    assert_eq!(named("no-book").book_id.as_deref(), Some("dune"));
+    // One started on a book has the title the book has now.
+    assert_eq!(named("on-emma").title.as_deref(), Some("Emma"));
+    assert_eq!(snapshot.free_reads.len(), 1);
+    assert_eq!(snapshot.free_reads[0].title.as_deref(), Some("Dune"));
+    assert_eq!(snapshot.free_reads[0].book_id.as_deref(), Some("dune"));
+    // Named in the snapshot only: the shelf itself is as it was recorded.
+    let kept = db.focus_sessions().expect("shelf");
+    assert!(kept.iter().find(|session| session.id == "no-book").expect("kept").title.is_none());
   }
 
   #[test]

@@ -128,6 +128,40 @@ pub struct SessionEntry {
   pub flower_bloomed: bool
 }
 
+/// The most a kept camp may be. A camp is a few hundred bytes and then the id
+/// of each book it has raised a trophy for, some seventy bytes apiece: this is
+/// room for a few hundred of those, and a stop to anything else.
+pub(crate) const CAMP_MAX_BYTES: usize = 32 * 1024;
+
+/// Pip's camp in the Hollow, the arcade's building game, as a device keeps
+/// it: the game's own state, which only the app's rules read, and when it
+/// was saved.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CampEntry {
+  /// The camp as the app wrote it: a JSON object, kept as its text so that
+  /// what one version of the game wrote reaches another unchanged.
+  pub state: String,
+  /// When it was saved. Empty for a camp kept before saves were stamped,
+  /// which reads as the beginning of time and so loses to any stamped one.
+  #[serde(default)]
+  pub saved_at: String
+}
+
+impl CampEntry {
+  /// Why `state` cannot be kept as a camp, or nothing when it can: it has to
+  /// be a JSON object, and no larger than a camp could be.
+  pub(crate) fn problem(state: &str) -> Option<&'static str> {
+    if state.len() > CAMP_MAX_BYTES {
+      return Some("The camp is too large to keep.");
+    }
+    match serde_json::from_str::<serde_json::Value>(state) {
+      Ok(value) if value.is_object() => None,
+      _ => Some("That is not a camp.")
+    }
+  }
+}
+
 /// What travels between devices. A few kilobytes: book files are not in here,
 /// and are fetched on demand instead.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -165,7 +199,12 @@ pub struct SyncDoc {
   /// `reading`). Left out of documents without one, so older builds read them
   /// as before.
   #[serde(default, skip_serializing_if = "Option::is_none")]
-  pub reading_profile: Option<crate::sync::reading::ReadingProfile>
+  pub reading_profile: Option<crate::sync::reading::ReadingProfile>,
+  /// Pip's camp in the Hollow. One record, newest save wins, as for `pip`.
+  /// Left out of documents without one, so they read as before and a build
+  /// from before the camp travelled passes over it.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub camp: Option<CampEntry>
 }
 
 impl SyncDoc {
@@ -182,7 +221,8 @@ impl SyncDoc {
       pip: None,
       annotations: Vec::new(),
       collections: Vec::new(),
-      reading_profile: None
+      reading_profile: None,
+      camp: None
     }
   }
 
@@ -439,6 +479,33 @@ fn merge_pip(a: &Option<PipState>, b: &Option<PipState>) -> Option<PipState> {
   }
 }
 
+/// Pip's camp seen by two devices: the one saved later wins whole, as Pip's
+/// state does, because the game's rules are the app's and nothing here can
+/// tell which half of two camps to keep. A camp with no stamp was kept
+/// before saves were stamped and loses to any stamped one. An exact tie is
+/// settled by the content, so the answer does not depend on which side is `a`.
+///
+/// A side that no device would keep (not a JSON object, or too large) is
+/// passed over as if it were absent: a damaged document must not replace a
+/// real camp, or be handed on.
+pub(crate) fn merge_camp(a: &Option<CampEntry>, b: &Option<CampEntry>) -> Option<CampEntry> {
+  let kept = |side: &Option<CampEntry>| side.clone().filter(|camp| CampEntry::problem(&camp.state).is_none());
+  match (kept(a), kept(b)) {
+    (Some(x), Some(y)) => Some(match instant(&x.saved_at).cmp(&instant(&y.saved_at)) {
+      Ordering::Greater => x,
+      Ordering::Less => y,
+      Ordering::Equal => {
+        if (&x.state, &x.saved_at) >= (&y.state, &y.saved_at) {
+          x
+        } else {
+          y
+        }
+      }
+    }),
+    (x, y) => x.or(y)
+  }
+}
+
 /// A record edited as a whole, deleted as a tombstone: annotations and
 /// collections.
 trait Edited: Clone + Ord {
@@ -592,7 +659,8 @@ pub fn merge(local: &SyncDoc, remote: &SyncDoc, now: &str) -> SyncDoc {
     sessions: sessions.into_values().collect(),
     purchases: purchases.into_values().collect(),
     pip: merge_pip(&local.pip, &remote.pip),
-    reading_profile: crate::sync::reading::merge(&local.reading_profile, &remote.reading_profile)
+    reading_profile: crate::sync::reading::merge(&local.reading_profile, &remote.reading_profile),
+    camp: merge_camp(&local.camp, &remote.camp)
   }
 }
 
@@ -802,7 +870,8 @@ mod tests {
       pip: None,
       annotations: Vec::new(),
       collections: Vec::new(),
-      reading_profile: None
+      reading_profile: None,
+      camp: None
     }
   }
 
@@ -1583,6 +1652,85 @@ mod tests {
     assert_eq!(merge(&none, &older, NOW).pip, older.pip, "a device that never opened the Pip tab loses nothing");
   }
 
+  fn camp_at(saved_at: &str, state: &str) -> SyncDoc {
+    SyncDoc { camp: Some(CampEntry { state: state.to_string(), saved_at: saved_at.to_string() }), ..doc(vec![]) }
+  }
+
+  fn camp_state(doc: &SyncDoc) -> Option<&str> {
+    doc.camp.as_ref().map(|camp| camp.state.as_str())
+  }
+
+  #[test]
+  fn the_camp_saved_later_wins_whichever_side_holds_it() {
+    let older = camp_at("2026-10-01T10:00:00+00:00", r#"{"v":2,"camps":3}"#);
+    let newer = camp_at("2026-10-02T10:00:00+00:00", r#"{"v":2,"camps":4}"#);
+    assert_eq!(merge(&older, &newer, NOW).camp, newer.camp);
+    assert_eq!(merge(&newer, &older, NOW).camp, newer.camp);
+    assert_eq!(merge(&older, &merge(&older, &newer, NOW), NOW).camp, newer.camp, "syncing again changes nothing");
+
+    // As instants: half past nine in the evening in India is before five in
+    // the afternoon in Greenwich, though it sorts after it as text.
+    let east = camp_at("2026-10-03T21:30:00+05:30", r#"{"v":2,"camps":5}"#);
+    let west = camp_at("2026-10-03T17:00:00+00:00", r#"{"v":2,"camps":6}"#);
+    assert_eq!(camp_state(&merge(&east, &west, NOW)), Some(r#"{"v":2,"camps":6}"#));
+    assert_eq!(camp_state(&merge(&west, &east, NOW)), Some(r#"{"v":2,"camps":6}"#));
+
+    // An exact tie is settled the same way on both devices.
+    let tie_a = camp_at("2026-10-01T10:00:00+00:00", r#"{"v":2,"camps":1}"#);
+    let tie_b = camp_at("2026-10-01T10:00:00+00:00", r#"{"v":2,"camps":2}"#);
+    assert_eq!(merge(&tie_a, &tie_b, NOW).camp, merge(&tie_b, &tie_a, NOW).camp);
+  }
+
+  #[test]
+  fn a_document_without_a_camp_does_not_erase_one() {
+    let mine = camp_at("2026-10-01T10:00:00+00:00", r#"{"v":2,"camps":3}"#);
+    let none = doc(vec![]);
+    assert_eq!(merge(&mine, &none, NOW).camp, mine.camp);
+    assert_eq!(merge(&none, &mine, NOW).camp, mine.camp);
+    assert_eq!(merge(&none, &none, NOW).camp, None);
+  }
+
+  #[test]
+  fn a_camp_with_no_stamp_loses_to_any_stamped_one() {
+    // Kept by a build from before saves were stamped.
+    let unstamped = camp_at("", r#"{"v":1,"acorns":999}"#);
+    let stamped = camp_at("2026-01-01T00:00:00+00:00", r#"{"v":2,"camps":0}"#);
+    assert_eq!(merge(&unstamped, &stamped, NOW).camp, stamped.camp);
+    assert_eq!(merge(&stamped, &unstamped, NOW).camp, stamped.camp);
+    // Alone it is still the camp, and two of them settle the same both ways.
+    assert_eq!(merge(&unstamped, &doc(vec![]), NOW).camp, unstamped.camp);
+    let other = camp_at("", r#"{"v":1,"acorns":5}"#);
+    assert_eq!(merge(&unstamped, &other, NOW).camp, merge(&other, &unstamped, NOW).camp);
+  }
+
+  #[test]
+  fn what_is_not_a_camp_never_replaces_one_and_is_not_handed_on() {
+    let mine = camp_at("2026-10-01T10:00:00+00:00", r#"{"v":2,"camps":3}"#);
+    let too_large = format!(r#"{{"pad":"{}"}}"#, "x".repeat(CAMP_MAX_BYTES));
+    for broken in ["", "not json", "[1,2,3]", "null", too_large.as_str()] {
+      let damaged = camp_at("2027-01-01T00:00:00+00:00", broken);
+      assert_eq!(merge(&mine, &damaged, NOW).camp, mine.camp, "{:.20}", broken);
+      assert_eq!(merge(&damaged, &mine, NOW).camp, mine.camp, "{:.20}", broken);
+      assert_eq!(merge(&damaged, &doc(vec![]), NOW).camp, None, "{:.20}", broken);
+    }
+  }
+
+  /// The field is left out until there is a camp, and is read as written.
+  #[test]
+  fn the_camp_is_in_the_document_only_when_there_is_one() {
+    let without = serde_json::to_string(&doc(vec![])).expect("json");
+    assert!(!without.contains("camp"), "{without}");
+    let with = camp_at("2026-10-01T10:00:00+00:00", r#"{"v":2,"camps":3}"#);
+    let json = serde_json::to_value(&with).expect("json");
+    assert_eq!(json["camp"], serde_json::json!({ "state": r#"{"v":2,"camps":3}"#, "savedAt": "2026-10-01T10:00:00+00:00" }));
+    let back: SyncDoc = serde_json::from_value(json).expect("parses");
+    assert_eq!(back.camp, with.camp);
+    // A camp whose stamp is missing altogether reads as unstamped.
+    let bare: SyncDoc =
+      serde_json::from_str(r#"{"version":1,"updatedAt":"2026-08-01T00:00:00Z","books":[],"camp":{"state":"{}"}}"#).expect("parses");
+    assert_eq!(bare.camp, Some(CampEntry { state: "{}".to_string(), saved_at: String::new() }));
+  }
+
   /// A document written before the shop existed still parses, with no purchases.
   #[test]
   fn a_document_from_before_the_shop_parses() {
@@ -1590,6 +1738,7 @@ mod tests {
     let parsed: SyncDoc = serde_json::from_str(json).expect("parses");
     assert!(parsed.purchases.is_empty());
     assert!(parsed.pip.is_none());
+    assert!(parsed.camp.is_none());
   }
 
   /// The garden's records merge like purchases: a union by id, the same on

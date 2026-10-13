@@ -55,6 +55,17 @@ pub fn annotations_highlight_counts(state: State<'_, AppState>) -> Result<Vec<Hi
   db.highlight_counts().map_err(|e| e.to_string())
 }
 
+/// The ids of the bookmarks and highlights the reader removed from a book,
+/// while their tombstones last. An import from elsewhere (a Kindle's
+/// clippings, whose ids come from the book, the place and the words) leaves
+/// these out, so a highlight removed here does not come back with the same
+/// file. Saving one again on purpose (Undo) still brings it back: see `save`.
+#[tauri::command]
+pub fn annotations_removed(book_id: String, state: State<'_, AppState>) -> Result<Vec<String>, String> {
+  let db = state.db.guard();
+  db.removed_annotation_ids(&book_id).map_err(|e| e.to_string())
+}
+
 /// Adds an annotation, or updates one (a note added to a highlight, say).
 ///
 /// The table also holds rows of other kinds (a character sheet's, the words
@@ -201,6 +212,50 @@ mod tests {
     gone.deleted_at = Some(NOW.into());
     db.put_annotation(&gone).expect("put");
     assert!(save(&db, input("p2", "highlight"), LATER).is_err());
+  }
+
+  /// What an import asks before it brings a highlight in: the ones removed
+  /// here are named for as long as their tombstones are kept.
+  #[test]
+  fn what_the_reader_removed_is_remembered_until_it_is_put_back() {
+    let db = memory_db();
+    let removed = |book: &str| db.removed_annotation_ids(book).expect("removed");
+    // Two brought from a Kindle and one made here, and another book's.
+    for id in ["kindle-00aa", "kindle-00bb", "h1"] {
+      save(&db, input(id, "highlight"), NOW).expect("save");
+    }
+    save(&db, input("m1", "bookmark"), NOW).expect("save");
+    let mut elsewhere = input("kindle-00cc", "highlight");
+    elsewhere.book_id = "b2".into();
+    save(&db, elsewhere, NOW).expect("save");
+    assert!(removed("b1").is_empty(), "nothing has been removed");
+
+    delete(&db, "kindle-00bb", LATER).expect("delete");
+    delete(&db, "m1", LATER).expect("delete");
+    delete(&db, "kindle-00cc", LATER).expect("delete");
+    assert_eq!(removed("b1"), ["kindle-00bb", "m1"]);
+    assert_eq!(removed("b2"), ["kindle-00cc"]);
+    assert!(removed("b3").is_empty());
+    // Those still there are not named, and are listed as before.
+    let listed: Vec<String> = db.annotations_for_book("b1").expect("list").into_iter().map(|row| row.id).collect();
+    assert_eq!(listed, ["h1", "kindle-00aa"]);
+
+    // Put back on purpose (Undo saves it again under its id): no longer removed.
+    save(&db, input("kindle-00bb", "highlight"), LATER).expect("save");
+    assert_eq!(removed("b1"), ["m1"]);
+    // Removed twice, it is named once.
+    delete(&db, "kindle-00bb", LATER).expect("delete");
+    delete(&db, "kindle-00bb", LATER).expect("delete");
+    assert_eq!(removed("b1"), ["kindle-00bb", "m1"]);
+
+    // A character or a word that was removed is not a highlight's business.
+    let mut gone = other("p1", "person");
+    gone.deleted_at = Some(NOW.into());
+    db.put_annotation(&gone).expect("put");
+    assert_eq!(removed("b1"), ["kindle-00bb", "m1"]);
+    // Once the backup has let a tombstone go, nothing remembers it.
+    db.retire_annotation_tombstones(&["m1".to_string()]).expect("retire");
+    assert_eq!(removed("b1"), ["m1"]);
   }
 
   #[test]

@@ -799,6 +799,20 @@ impl Database {
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
   }
 
+  /// The ids of a book's bookmarks and highlights that were deleted, for as
+  /// long as their tombstones are kept. What brings highlights in from
+  /// elsewhere (a Kindle's clippings) asks, so one removed here is not brought
+  /// back. Rows of other kinds (a character, a word) are not its business.
+  pub fn removed_annotation_ids(&self, book_id: &str) -> Result<Vec<String>> {
+    let mut stmt = self.conn.prepare(
+      "SELECT id FROM annotations
+       WHERE book_id = ?1 AND deleted_at IS NOT NULL AND kind IN ('bookmark', 'highlight')
+       ORDER BY id"
+    )?;
+    let rows = stmt.query_map([book_id], |row| row.get::<_, String>(0))?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+  }
+
   /// Every annotation, deleted ones included, for the backup document.
   pub fn all_annotations(&self) -> Result<Vec<Annotation>> {
     let mut stmt = self
@@ -1082,6 +1096,18 @@ impl Database {
       params![book_id, opened_at, date_key]
     )?;
     Ok(())
+  }
+
+  /// Every book opened on every day, with when it was last opened that day:
+  /// what names reading that has no book of its own (`habit::names`).
+  pub fn book_opens(&self) -> Result<Vec<(String, String)>> {
+    let mut stmt = self.conn.prepare("SELECT book_id, opened_at FROM reading_sessions")?;
+    let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?;
+    let mut opens = Vec::new();
+    for row in rows {
+      opens.push(row?);
+    }
+    Ok(opens)
   }
 
   pub fn reading_stats(&self) -> Result<ReadingStats> {

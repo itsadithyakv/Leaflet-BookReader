@@ -14,13 +14,17 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Badges: what a reader has done, worked out from the same records.
+pub mod badges;
 /// The currency Pip's shop takes, derived from this same ledger.
+pub mod names;
 pub mod seeds;
 
 /// Days of streak needed to earn one freeze.
 const DAYS_PER_FREEZE: i64 = 5;
-/// Most freezes a reader can bank at once.
-const MAX_FREEZES: i64 = 2;
+/// Most freezes a reader can bank at once, earned by the streak or bought
+/// with seeds (`pip::freezes`).
+pub const MAX_FREEZES: i64 = 2;
 /// The shortest streak whose breaking gives Pip a cold. A day or two lost is
 /// not worth one.
 pub const COLD_MIN_STREAK: i64 = 3;
@@ -373,7 +377,18 @@ pub struct SessionSpan<'a> {
 #[serde(rename_all = "camelCase")]
 pub struct FreeRead {
   pub date_key: String,
-  pub minutes: f64
+  pub minutes: f64,
+  /// The book it was of, where the library can say (`names::book_on_day`):
+  /// filled in by the snapshot, never by `free_reads`.
+  pub book_id: Option<String>,
+  pub title: Option<String>
+}
+
+impl FreeRead {
+  /// A day's free reading with no book named yet.
+  pub fn of(date_key: &str, minutes: f64) -> Self {
+    FreeRead { date_key: date_key.to_string(), minutes, book_id: None, title: None }
+  }
 }
 
 /// Reading done with no focus session running, a day at a time, oldest first.
@@ -423,7 +438,7 @@ pub fn free_reads(days: &HashMap<String, DayRecord>, sessions: &[SessionSpan<'_>
   left
     .into_iter()
     .filter(|(_, minutes)| *minutes >= FREE_READ_MIN_MINUTES)
-    .map(|(date_key, minutes)| FreeRead { date_key: date_key.to_string(), minutes })
+    .map(|(date_key, minutes)| FreeRead::of(date_key, minutes))
     .collect()
 }
 
@@ -906,7 +921,7 @@ mod tests {
   }
 
   fn free(date_key: &str, minutes: f64) -> FreeRead {
-    FreeRead { date_key: date_key.to_string(), minutes }
+    FreeRead::of(date_key, minutes)
   }
 
   #[test]

@@ -10,7 +10,7 @@
 
 use crate::db::Database;
 use crate::storage;
-use crate::sync::merge::{BookEntry, DayEntry, SessionEntry, SyncDoc};
+use crate::sync::merge::{merge_camp, BookEntry, CampEntry, DayEntry, SessionEntry, SyncDoc};
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
@@ -61,8 +61,49 @@ pub fn snapshot(db: &Database, now: &str) -> Result<SyncDoc> {
     pip: db.pip_state()?,
     annotations: db.all_annotations()?,
     collections: db.all_collections()?,
-    reading_profile: crate::sync::reading::load(db)?
+    reading_profile: crate::sync::reading::load(db)?,
+    camp: kept_camp(db)?
   })
+}
+
+/// Pip's camp in the Hollow is two settings rows: the game's state as the app
+/// wrote it, and when it was saved, which is what decides between two
+/// devices' camps (`merge::merge_camp`).
+pub(crate) const CAMP_SETTING: &str = "pip.base";
+pub(crate) const CAMP_SAVED_AT_SETTING: &str = "pip.base.at";
+
+/// The camp this device keeps, or nothing before the first. One kept by a
+/// build from before saves were stamped has an empty stamp.
+pub(crate) fn kept_camp(db: &Database) -> Result<Option<CampEntry>> {
+  let Some(state) = db.get_setting(CAMP_SETTING)? else {
+    return Ok(None);
+  };
+  let saved_at = db.get_setting(CAMP_SAVED_AT_SETTING)?.unwrap_or_default();
+  Ok(Some(CampEntry { state, saved_at }))
+}
+
+/// Keeps a camp and its stamp together: a camp under another save's stamp
+/// would win or lose a sync it should not.
+pub(crate) fn keep_camp(db: &Database, camp: &CampEntry) -> Result<()> {
+  db.in_transaction(|| write_camp(db, camp))
+}
+
+/// `keep_camp`'s rows, for a caller already inside a transaction (`apply`).
+fn write_camp(db: &Database, camp: &CampEntry) -> Result<()> {
+  db.set_setting(CAMP_SETTING, &camp.state)?;
+  db.set_setting(CAMP_SAVED_AT_SETTING, &camp.saved_at)
+}
+
+/// Takes a document's camp if it beats the one kept here. Decided against
+/// what is stored now, not against the snapshot the run started from: a camp
+/// saved while the run was away talking to the network is the newer one, and
+/// must not be rolled back by the answer. Inside `apply`'s transaction.
+fn absorb_camp(db: &Database, theirs: &CampEntry) -> Result<()> {
+  let here = kept_camp(db)?;
+  match merge_camp(&here, &Some(theirs.clone())) {
+    Some(camp) if Some(&camp) != here.as_ref() => write_camp(db, &camp),
+    _ => Ok(())
+  }
 }
 
 /// What `apply` changed, so the caller can report it and fetch missing files.
@@ -194,6 +235,9 @@ fn write(db: &Database, doc: &SyncDoc, gone: &mut Vec<String>) -> Result<Applied
   // learned something here since the snapshot this run started from.
   if let Some(profile) = &doc.reading_profile {
     crate::sync::reading::absorb(db, profile)?;
+  }
+  if let Some(camp) = &doc.camp {
+    absorb_camp(db, camp)?;
   }
 
   // Tombstones the merge has retired can finally leave the database.
@@ -334,7 +378,8 @@ mod tests {
       pip: None,
       annotations: Vec::new(),
       collections: Vec::new(),
-      reading_profile: None
+      reading_profile: None,
+      camp: None
     };
 
     apply(&db, &doc).expect("apply");
@@ -366,7 +411,8 @@ mod tests {
       pip: None,
       annotations: Vec::new(),
       collections: Vec::new(),
-      reading_profile: None
+      reading_profile: None,
+      camp: None
     };
     apply(&db, &doc).expect("apply");
 
@@ -399,7 +445,8 @@ mod tests {
       pip: None,
       annotations: Vec::new(),
       collections: Vec::new(),
-      reading_profile: None
+      reading_profile: None,
+      camp: None
     };
     apply(&db, &doc).expect("apply");
 
@@ -436,7 +483,8 @@ mod tests {
       pip: None,
       annotations: Vec::new(),
       collections: Vec::new(),
-      reading_profile: None
+      reading_profile: None,
+      camp: None
     };
     let counted = |db: &Database| db.finished_and_removed().expect("counted").into_iter().map(|book| (book.id, book.finished_at)).collect::<Vec<_>>();
     let dated = vec![("aaa".to_string(), Some("2026-08-01T00:00:00+00:00".to_string()))];
@@ -487,7 +535,8 @@ mod tests {
       pip: None,
       annotations: Vec::new(),
       collections: Vec::new(),
-      reading_profile: None
+      reading_profile: None,
+      camp: None
     };
     let applied = apply(&db, &doc).expect("apply");
 
@@ -520,7 +569,8 @@ mod tests {
       pip: None,
       annotations: Vec::new(),
       collections: Vec::new(),
-      reading_profile: None
+      reading_profile: None,
+      camp: None
     };
     let applied = apply(&db, &doc).expect("apply");
 
@@ -551,7 +601,8 @@ mod tests {
       pip: None,
       annotations: Vec::new(),
       collections: Vec::new(),
-      reading_profile: None
+      reading_profile: None,
+      camp: None
     };
 
     apply(&db, &doc).expect("first");
@@ -601,7 +652,8 @@ mod tests {
       pip: None,
       annotations: Vec::new(),
       collections: Vec::new(),
-      reading_profile: None
+      reading_profile: None,
+      camp: None
     };
 
     apply(&db, &doc).expect("apply");
@@ -712,6 +764,69 @@ mod tests {
     apply(&to, &doc).expect("apply");
     assert_eq!(to.pip_purchases().expect("purchases").len(), 1);
     assert_eq!(to.pip_state().expect("state").map(|s| s.signature).as_deref(), Some("moonwalk"));
+  }
+
+  fn camp(saved_at: &str, state: &str) -> CampEntry {
+    CampEntry { state: state.to_string(), saved_at: saved_at.to_string() }
+  }
+
+  /// The camp is in the backup: a camp takes months to build, and a new
+  /// computer gets it back, with the stamp that says how new it is.
+  #[test]
+  fn the_camp_and_its_stamp_travel() {
+    let from = memory_db();
+    assert!(snapshot(&from, NOW).expect("snapshot").camp.is_none(), "no camp kept, none in the document");
+    let built = camp("2026-10-01T10:00:00+00:00", r#"{"v":2,"camps":7,"raised":["aaa"]}"#);
+    keep_camp(&from, &built).expect("kept");
+    let doc = snapshot(&from, NOW).expect("snapshot");
+    assert_eq!(doc.camp, Some(built.clone()));
+
+    // Through the document as a transport writes and reads it.
+    let sent: SyncDoc = serde_json::from_str(&serde_json::to_string(&doc).expect("json")).expect("parses");
+    let to = memory_db();
+    apply(&to, &sent).expect("apply");
+    assert_eq!(to.get_setting(CAMP_SETTING).expect("row").as_deref(), Some(r#"{"v":2,"camps":7,"raised":["aaa"]}"#));
+    assert_eq!(to.get_setting(CAMP_SAVED_AT_SETTING).expect("row").as_deref(), Some("2026-10-01T10:00:00+00:00"));
+    // And on from there, unchanged.
+    assert_eq!(snapshot(&to, NOW).expect("snapshot").camp, Some(built));
+  }
+
+  /// What a sync may do to the camp kept here: replace it with one saved
+  /// later, and nothing else.
+  #[test]
+  fn applying_a_document_never_takes_a_camp_away_or_rolls_one_back() {
+    let db = memory_db();
+    let mine = camp("2026-10-05T10:00:00+00:00", r#"{"v":2,"camps":5}"#);
+    keep_camp(&db, &mine).expect("kept");
+    let with = |camp: Option<CampEntry>| SyncDoc { camp, ..SyncDoc::empty(NOW) };
+
+    // A document with no camp (an older build's, or a device that never played).
+    apply(&db, &with(None)).expect("apply");
+    assert_eq!(kept_camp(&db).expect("camp"), Some(mine.clone()));
+    // One saved earlier: a camp saved here while a run was away at the
+    // network is newer than what that run merged, and stays.
+    apply(&db, &with(Some(camp("2026-10-04T10:00:00+00:00", r#"{"v":2,"camps":4}"#)))).expect("apply");
+    assert_eq!(kept_camp(&db).expect("camp"), Some(mine.clone()));
+    // Something that is not a camp, however new it says it is.
+    apply(&db, &with(Some(camp("2027-01-01T00:00:00+00:00", "[1,2,3]")))).expect("apply");
+    assert_eq!(kept_camp(&db).expect("camp"), Some(mine));
+    // One saved later replaces it, state and stamp together.
+    let theirs = camp("2026-10-06T10:00:00+00:00", r#"{"v":2,"camps":6}"#);
+    apply(&db, &with(Some(theirs.clone()))).expect("apply");
+    assert_eq!(kept_camp(&db).expect("camp"), Some(theirs));
+
+    // A camp kept before saves were stamped gives way to any stamped one.
+    let old = memory_db();
+    old.set_setting(CAMP_SETTING, r#"{"v":1,"acorns":20}"#).expect("an unstamped camp");
+    assert_eq!(snapshot(&old, NOW).expect("snapshot").camp, Some(camp("", r#"{"v":1,"acorns":20}"#)));
+    let stamped = camp("2026-01-01T00:00:00+00:00", r#"{"v":2,"camps":0}"#);
+    apply(&old, &with(Some(stamped.clone()))).expect("apply");
+    assert_eq!(kept_camp(&old).expect("camp"), Some(stamped));
+
+    // And nothing that is not a camp is written to a device with none.
+    let bare = memory_db();
+    apply(&bare, &with(Some(camp("2027-01-01T00:00:00+00:00", "not json")))).expect("apply");
+    assert_eq!(kept_camp(&bare).expect("camp"), None);
   }
 
   /// The garden is in the backup: a restored device grows the same plants.

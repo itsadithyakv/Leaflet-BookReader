@@ -739,6 +739,76 @@ pub fn clean_subjects(raw: &[String]) -> Vec<String> {
   out
 }
 
+/// What parts the entries of a list of keywords, as programs write one.
+static LIST_MARK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[,;|•·]| / | -- ").expect("list mark"));
+/// A genre is a word or a few: more in one entry, and it is a phrase.
+const MAX_GENRE_WORDS: usize = 3;
+
+/// Whether an entry of a Subject or of Keywords is writing and not a tag: too
+/// many words, too long for a genre, the end of a sentence, or words that
+/// begin as a phrase does ("a history of ...", "and their keepers").
+fn reads_as_prose(entry: &str) -> bool {
+  let words: Vec<&str> = entry.split_whitespace().collect();
+  words.len() > MAX_GENRE_WORDS
+    || entry.chars().count() > 40
+    || (words.len() >= 3 && entry.ends_with(['.', '!', '?']))
+    || (words.len() >= 2 && SMALL_WORDS.contains(&words[0].to_lowercase().as_str()))
+}
+
+/// The subjects a PDF may be given from what its maker wrote as its Subject
+/// and its Keywords (`fields`, each as written), for `clean_subjects` to make
+/// genres of as it does a book's own. Each field is cut where a list is (a
+/// comma, a semicolon, a bar, " / "), and is believed only as a list of
+/// genres: one that holds any writing (a sentence about the document, a
+/// blurb) is left out whole, since its other pieces are then parts of
+/// sentences. Of a list, an entry with a number in it, a program's name, a
+/// file's name, a path or an address, the book's own title, or its writer's
+/// name, is no genre. (The title and the writer are taken out first, so a
+/// list that names them is still a list, though a title is a phrase.) A tile
+/// that should not be there is worse than a PDF with no genre, which a lookup
+/// may still give it.
+fn tool_subjects(fields: &[String], titles: &[&str], authors: &[&str]) -> Vec<String> {
+  // A title by its telling words, so "Tide Table" is "The Tide Table".
+  let telling = |text: &str| -> Vec<String> { name_words(text).into_iter().filter(|word| !SMALL_WORDS.contains(&word.as_str())).collect() };
+  let title_words: Vec<Vec<String>> = titles.iter().map(|title| telling(title)).filter(|words| !words.is_empty()).collect();
+  // A title with a comma of its own would be cut into entries that are not
+  // it: such a one is looked for whole, before the list is cut.
+  let cut_titles: Vec<Regex> = titles
+    .iter()
+    .map(|title| collapse_spaces(title))
+    .filter(|title| LIST_MARK.is_match(title) && title.chars().count() <= 250)
+    .filter_map(|title| Regex::new(&format!("(?i){}", regex::escape(&title))).ok())
+    .collect();
+  let writers: Vec<String> = authors.iter().flat_map(|author| name_words(author)).collect();
+  let mut out = Vec::new();
+  for field in fields {
+    let mut field = collapse_spaces(&decode_entities(field));
+    for title in &cut_titles {
+      field = title.replace_all(&field, ",").into_owned();
+    }
+    let entries: Vec<String> = LIST_MARK
+      .split(&field)
+      .map(|entry| BISAC_CODE.replace(entry.trim(), "").trim().to_string())
+      .filter(|entry| {
+        // Nothing but small words or marks; the title; the writer, either way round.
+        let (words, told) = (name_words(entry), telling(entry));
+        !(told.is_empty() || title_words.contains(&told) || words.iter().all(|word| writers.contains(word)))
+      })
+      .collect();
+    if entries.iter().any(|entry| reads_as_prose(entry)) {
+      continue;
+    }
+    out.extend(entries.into_iter().filter(|entry| {
+      !(entry.chars().any(char::is_numeric)
+        || entry.contains('@')
+        || entry.to_lowercase().starts_with("www.")
+        || TOOL_TITLE.is_match(entry)
+        || WORKING_FILE.is_match(entry))
+    }));
+  }
+  out
+}
+
 /// Genres a lookup found, added after the ones the book already has.
 pub fn merge_genres(own: &[String], found: &[String]) -> Vec<String> {
   let both: Vec<String> = own.iter().chain(found).cloned().collect();
@@ -811,7 +881,17 @@ pub fn identify(file_stem: &str, basic: &crate::storage::BasicMetadata) -> Ident
   // and a catalogue may then say who did write it.
   let author = author.filter(|author| name_words(author) != name_words(&title));
 
-  Identity { title, author, series, series_index, genres: clean_subjects(&basic.subjects) }
+  // A PDF's Subject and Keywords are its maker's word too: genres only where
+  // they read as a list of them.
+  let genres = if basic.doubtful {
+    let titles: Vec<&str> = std::iter::once(title.as_str()).chain(basic.title.as_deref()).collect();
+    let authors: Vec<&str> = author.as_deref().into_iter().chain(basic.authors.iter().map(String::as_str)).collect();
+    clean_subjects(&tool_subjects(&basic.subjects, &titles, &authors))
+  } else {
+    clean_subjects(&basic.subjects)
+  };
+
+  Identity { title, author, series, series_index, genres }
 }
 
 /// The same rules for a book already in the library, whose stored title and
@@ -1237,6 +1317,72 @@ mod tests {
     assert_eq!(clean_subjects(&many).len(), 8);
     // What the book has comes first; a lookup adds to it.
     assert_eq!(merge_genres(&["Apocalyptic".to_string()], &["genre:science fiction".to_string(), "apocalyptic".to_string()]), ["Apocalyptic", "Science fiction"]);
+  }
+
+  /// A PDF's Subject and Keywords, as `storage::extract_basic_metadata` hands
+  /// them over (the Subject first, each as written), and the genres they make.
+  fn pdf_genres(subject: Option<&str>, keywords: Option<&str>) -> Vec<String> {
+    let says = BasicMetadata {
+      doubtful: true,
+      subjects: subject.into_iter().chain(keywords).map(str::to_string).collect(),
+      ..book(Some("Night Ferry"), &["Mara Ellison"])
+    };
+    let identity = identify("Night Ferry (Mara Ellison) (z-library.sk, 1lib.sk, z-lib.sk)", &says);
+    assert_eq!((identity.title.as_str(), identity.author.as_deref()), ("Night Ferry", Some("Mara Ellison")), "the name is not theirs to change");
+    identity.genres
+  }
+
+  #[test]
+  fn a_pdf_s_subject_and_keywords_are_genres_where_they_are_a_list_of_them() {
+    let none = Vec::<String>::new();
+    // Keywords, however they are parted, cleaned as a book's own subjects are.
+    assert_eq!(pdf_genres(None, Some("science fiction, Space opera; FICTION | sea stories")), ["Science fiction", "Space opera", "Fiction", "Sea stories"]);
+    assert_eq!(pdf_genres(None, Some("Sea stories; Historical fiction")), ["Sea stories", "Historical fiction"]);
+    assert_eq!(pdf_genres(None, Some("Science &amp; nature · Tides")), ["Science & nature", "Tides"]);
+    // The Subject first, then the keywords, each once.
+    assert_eq!(pdf_genres(Some("FIC055000 Fiction / Dystopian"), Some("dystopian, Politics, genre:satire, series:Saltmarsh")), ["Fiction", "Dystopian", "Politics", "Satire"]);
+    assert_eq!(pdf_genres(Some("Thriller"), None), ["Thriller"]);
+    assert_eq!(pdf_genres(None, None), none);
+    // Eight at most, as for any book.
+    let many = (0..12).map(|at| format!("Shelf {}", char::from(b'a' + at))).collect::<Vec<_>>().join(", ");
+    assert_eq!(pdf_genres(None, Some(&many)).len(), 8);
+  }
+
+  #[test]
+  fn a_pdf_s_subject_that_is_writing_is_no_genre() {
+    let none = Vec::<String>::new();
+    // A sentence about the document, a blurb: none of it, however it is cut.
+    assert_eq!(pdf_genres(Some("A study of how harbours rise and fall."), None), none);
+    assert_eq!(pdf_genres(Some("Tides, harbours, and the people who watch them"), None), none);
+    assert_eq!(pdf_genres(Some("The definitive guide"), None), none);
+    assert_eq!(pdf_genres(None, Some("Fiction, a novel of the sea")), none);
+    assert_eq!(pdf_genres(None, Some("Fiction, Winner of the Harbour Prize")), none);
+    assert_eq!(pdf_genres(None, Some("Fiction, Supercalifragilisticexpialidocious-and-more")), none, "too long for a tile");
+    // One field that is writing does not take the other with it.
+    assert_eq!(pdf_genres(Some("Everything a harbour master needs to know about tides."), Some("Oceanography, Tides")), ["Oceanography", "Tides"]);
+    assert_eq!(pdf_genres(Some("Oceanography"), Some("this book explains the tides")), ["Oceanography"]);
+
+    // In a list, what is plainly no genre goes and the rest stays: the book's
+    // own name and its writer's, numbers, addresses, files and programs.
+    assert_eq!(
+      pdf_genres(
+        None,
+        Some(
+          "Night Ferry, Mara Ellison, Ellison, ebook, pdf, 2019, 978-0-00-000000-2, 20th century, www.example.com, https://example.org/x, \
+           night_ferry_final.docx, Microsoft Word, mara@example.com, z-lib.org, The, Thriller"
+        )
+      ),
+      ["Thriller"]
+    );
+    assert_eq!(pdf_genres(Some("Microsoft Word document"), Some("Acrobat Distiller")), none);
+    assert_eq!(pdf_genres(Some("Night Ferry"), Some("the night ferry; ELLISON, MARA")), none);
+    // A title with a comma of its own is still the title.
+    let fields = ["Don't Wake, There Are Wolves, Horror".to_string(), "don't wake, there are wolves".to_string()];
+    assert_eq!(tool_subjects(&fields, &["Don't Wake, There Are Wolves"], &[]), ["Horror"]);
+
+    // A book that lists its own subjects is taken at its word, as before.
+    let epub = BasicMetadata { subjects: vec!["A Novel of the Sea and Its Keepers".to_string(), "Mara Ellison".to_string()], ..book(Some("Night Ferry"), &["Mara Ellison"]) };
+    assert_eq!(identify("Night Ferry", &epub).genres, ["A Novel of the Sea and Its Keepers", "Mara Ellison"]);
   }
 
   #[test]

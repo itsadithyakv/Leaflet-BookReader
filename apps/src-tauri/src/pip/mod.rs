@@ -18,8 +18,18 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::sync::OnceLock;
 
+/// What is in Pip's fridge, from the snacks on record; and what finding it bare costs her.
+pub mod fridge;
+/// Streak freezes, bought with seeds.
+pub mod freezes;
+/// A thing paid for here and owned by a friend.
+pub mod gifts;
+/// The reader's level, from every seed ever earned.
+pub mod levels;
 /// Seeds Pip gives back: first steps, the starter chest, sets, the daily wish.
 pub mod rewards;
+/// Seeds bet on the week's reading goal, or on a duel.
+pub mod stakes;
 
 /// Most accessories worn at once: one per slot.
 pub const MAX_OUTFIT: usize = 5;
@@ -67,7 +77,10 @@ pub struct Item {
   /// A floor's starter piece: owned once that floor (a "level") is, and
   /// never sold on its own. Its price says what it is worth.
   #[serde(default)]
-  pub free_with: Option<String>
+  pub free_with: Option<String>,
+  /// A rare thing: the reader's level (`levels`) needed to buy it. 0 for none.
+  #[serde(default)]
+  pub level: i64
 }
 
 impl Item {
@@ -139,21 +152,45 @@ pub struct Purchase {
   pub bought_at: String
 }
 
-/// Seeds spent. Food and seed packets count every time; anything kept (a skin,
-/// a chair) counts once, however many records say it was bought: two devices
-/// offline can each buy the same thing, and a sync must not charge twice.
-pub fn spent(catalogue: &Catalogue, purchases: &[Purchase]) -> i64 {
+/// Records in the ledger that are not things: a stake and the prize it won
+/// (`stakes`), a streak freeze (`freezes`), a gift sent to a friend (`gifts`).
+/// They are spending or income, and never owned.
+const NOT_THINGS: [&str; 4] = [stakes::KIND_STAKE, stakes::KIND_PRIZE, freezes::KIND_FREEZE, gifts::KIND_GIFT];
+
+/// The records in the order they are replayed in: when they were made, then
+/// by id, so every device takes "the first" of two to be the same one.
+pub(crate) fn in_order(purchases: &[Purchase]) -> Vec<&Purchase> {
   let mut ordered: Vec<&Purchase> = purchases.iter().collect();
   ordered.sort_by(|a, b| a.bought_at.cmp(&b.bought_at).then_with(|| a.id.cmp(&b.id)));
-  let mut kept: BTreeSet<(&str, &str)> = BTreeSet::new();
   ordered
+}
+
+/// An id minted elsewhere (a duel's, a gift's): 24 lowercase hex digits.
+pub fn hex_id(id: &str) -> bool {
+  id.len() == 24 && id.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// Seeds spent. Food, seed packets and streak freezes count every time;
+/// anything kept (a skin, a chair) counts once, however many records say it
+/// was bought: two devices offline can each buy the same thing, and a sync
+/// must not charge twice. The same goes for a stake (one a week on the goal,
+/// one a duel: see `stakes::charge_key`) and for a gift, which is one record
+/// per gift. A prize is income (`stakes::duel_prizes`), never spending.
+pub fn spent(catalogue: &Catalogue, purchases: &[Purchase]) -> i64 {
+  let mut kept: BTreeSet<(&str, &str)> = BTreeSet::new();
+  in_order(purchases)
     .into_iter()
     .filter(|purchase| {
-      let consumable = catalogue
-        .get(&purchase.item_kind, &purchase.item_id)
-        .map(|item| item.consumable)
-        .unwrap_or(false);
-      consumable || kept.insert((purchase.item_kind.as_str(), purchase.item_id.as_str()))
+      if purchase.item_kind == stakes::KIND_PRIZE {
+        return false;
+      }
+      // A freeze is used up, whether or not this build's catalogue lists it.
+      let consumable = purchase.item_kind == freezes::KIND_FREEZE
+        || catalogue
+          .get(&purchase.item_kind, &purchase.item_id)
+          .map(|item| item.consumable)
+          .unwrap_or(false);
+      consumable || kept.insert((purchase.item_kind.as_str(), stakes::charge_key(purchase)))
     })
     .map(|purchase| purchase.price.max(0))
     .sum()
@@ -186,9 +223,25 @@ pub(crate) fn owned_free(catalogue: &Catalogue) -> BTreeSet<(String, String)> {
   owned
 }
 
-/// Adds one purchase to what is owned: food is eaten, and a floor brings its
-/// starter pieces with it.
+/// How many things the reader owns because a record says so: bought, or given
+/// by a friend. Not the free things everyone has, and not the starter pieces
+/// that came with a floor.
+pub fn bought_count(catalogue: &Catalogue, purchases: &[Purchase]) -> i64 {
+  let free = owned_free(catalogue);
+  owned(catalogue, purchases)
+    .iter()
+    .filter(|thing| !free.contains(*thing))
+    .filter(|(kind, id)| catalogue.get(kind, id).map(|item| item.free_with.is_none()).unwrap_or(true))
+    .count() as i64
+}
+
+/// Adds one purchase to what is owned: food is eaten, a floor brings its
+/// starter pieces with it, and a stake, a prize, a freeze or a gift sent is
+/// not a thing at all.
 pub(crate) fn own(catalogue: &Catalogue, owned: &mut BTreeSet<(String, String)>, purchase: &Purchase) {
+  if NOT_THINGS.contains(&purchase.item_kind.as_str()) {
+    return;
+  }
   let consumable = catalogue
     .get(&purchase.item_kind, &purchase.item_id)
     .map(|item| item.consumable)
@@ -222,7 +275,11 @@ pub enum ShopError {
   /// So many focus sessions come first.
   NeedsSessions { left: i64 },
   /// A floor's starter piece: it comes with the floor, not from the shop.
-  ComesWithFloor
+  ComesWithFloor,
+  /// A rare thing: the reader's level comes first.
+  NeedsLevel { level: i64 },
+  /// Not something one reader can pay for and another keep (`gifts`).
+  NotAGift
 }
 
 impl fmt::Display for ShopError {
@@ -238,17 +295,21 @@ impl fmt::Display for ShopError {
       }
       ShopError::NotOwned => write!(f, "Pip doesn't have that yet."),
       ShopError::CannotAfford { short } => write!(f, "{short} more seeds needed. Read in focus to earn them."),
-      ShopError::ComesWithFloor => write!(f, "That one comes free with its floor of the house.")
+      ShopError::ComesWithFloor => write!(f, "That one comes free with its floor of the house."),
+      ShopError::NeedsLevel { level } => write!(f, "That opens at level {level}. Seeds you earn count, spent or not."),
+      ShopError::NotAGift => write!(f, "That one can't be given as a gift.")
     }
   }
 }
 
-/// Whether a thing can be bought now, and at what price.
+/// Whether a thing can be bought now, and at what price. `level` is the
+/// reader's (`levels::level_for`), for the rare things that ask for one.
 pub fn check_buy<'a>(
   catalogue: &'a Catalogue,
   owned: &BTreeSet<(String, String)>,
   balance: i64,
   sessions_done: i64,
+  level: i64,
   kind: &str,
   id: &str
 ) -> Result<&'a Item, ShopError> {
@@ -273,6 +334,10 @@ pub fn check_buy<'a>(
   }
   if sessions_done < item.sessions {
     return Err(ShopError::NeedsSessions { left: item.sessions - sessions_done });
+  }
+  // Said before the price: seeds alone do not open a rare thing.
+  if level < item.level {
+    return Err(ShopError::NeedsLevel { level: item.level });
   }
   if balance < item.price {
     return Err(ShopError::CannotAfford { short: item.price - balance });
@@ -656,9 +721,11 @@ const MOOD_LOG_JOIN_MS: i64 = 10 * 60 * 1000;
 pub struct MoodEvent {
   /// When, RFC 3339.
   pub at: String,
-  /// "reading", "session", "treat:<id>", "harvest", "game:<id>", "play:<kind>" or "wish".
+  /// "reading", "session", "treat:<id>", "harvest", "game:<id>", "play:<kind>" or "wish";
+  /// or "fridge", the one thing that lowers it (she found her fridge bare: `fridge`).
   pub cause: String,
-  /// How much the mood actually rose (less than the rule says at the top of the scale).
+  /// How much the mood actually rose (less than the rule says at the top of the scale);
+  /// below zero for the one thing that lowers it (less than the rule says near the floor).
   pub gain: f64,
   /// The mood afterwards.
   pub mood: f64
@@ -668,11 +735,13 @@ fn stamp_ms(value: &str) -> i64 {
   chrono::DateTime::parse_from_rfc3339(value).map(|at| at.timestamp_millis()).unwrap_or(0)
 }
 
-/// The log with one more event, oldest first. An event that raised nothing
-/// (Pip was already as happy as she gets) is not an event.
+/// The log with one more event, oldest first. An event that changed nothing
+/// (Pip was already as happy as she gets, or already at the floor a small
+/// sadness stops at) is not an event. A loss is one, and is kept as a gain
+/// below zero.
 pub fn log_mood(log: &[MoodEvent], event: MoodEvent) -> Vec<MoodEvent> {
   let mut next = log.to_vec();
-  if event.gain <= 0.0 {
+  if event.gain == 0.0 || event.gain.is_nan() {
     return next;
   }
   match next.last_mut() {
@@ -784,7 +853,7 @@ mod tests {
   fn the_price_comes_from_the_catalogue() {
     let catalogue = catalogue();
     let owned = owned(&catalogue, &[]);
-    let item = check_buy(&catalogue, &owned, 1_000, 0, "skin", "robot").expect("buyable");
+    let item = check_buy(&catalogue, &owned, 1_000, 0, 1, "skin", "robot").expect("buyable");
     assert_eq!(item.price, 700);
   }
 
@@ -792,13 +861,13 @@ mod tests {
   fn buying_refuses_what_it_should() {
     let catalogue = catalogue();
     let owned = owned(&catalogue, &[bought("accessory", "tophat", 120)]);
-    assert_eq!(check_buy(&catalogue, &owned, 999, 0, "skin", "nope"), Err(ShopError::Unknown));
-    assert_eq!(check_buy(&catalogue, &owned, 999, 0, "skin", "golden"), Err(ShopError::NotForSale));
-    assert_eq!(check_buy(&catalogue, &owned, 999, 0, "skin", "sprout"), Err(ShopError::AlreadyOwned));
-    assert_eq!(check_buy(&catalogue, &owned, 999, 0, "accessory", "tophat"), Err(ShopError::AlreadyOwned));
-    assert_eq!(check_buy(&catalogue, &owned, 999, 0, "treat", "apple"), Err(ShopError::GiveInstead));
+    assert_eq!(check_buy(&catalogue, &owned, 999, 0, 1, "skin", "nope"), Err(ShopError::Unknown));
+    assert_eq!(check_buy(&catalogue, &owned, 999, 0, 1, "skin", "golden"), Err(ShopError::NotForSale));
+    assert_eq!(check_buy(&catalogue, &owned, 999, 0, 1, "skin", "sprout"), Err(ShopError::AlreadyOwned));
+    assert_eq!(check_buy(&catalogue, &owned, 999, 0, 1, "accessory", "tophat"), Err(ShopError::AlreadyOwned));
+    assert_eq!(check_buy(&catalogue, &owned, 999, 0, 1, "treat", "apple"), Err(ShopError::GiveInstead));
     assert_eq!(
-      check_buy(&catalogue, &owned, 100, 0, "move", "moonwalk"),
+      check_buy(&catalogue, &owned, 100, 0, 1, "move", "moonwalk"),
       Err(ShopError::CannotAfford { short: 300 })
     );
   }
@@ -1119,6 +1188,11 @@ mod tests {
     assert_eq!(log.len(), 4);
     // Nothing gained is nothing to say.
     assert_eq!(log_mood(&log, cheered("2026-10-03T12:01:00+00:00", "treat:cake", 0.0, 100.0)), log);
+    // The one thing that lowers her mood is said, as a loss; and one that took nothing (she was at the floor) is not.
+    let sadder = log_mood(&log, cheered("2026-10-03T13:00:00+00:00", fridge::CAUSE_BARE, -3.0, 63.0));
+    assert_eq!(sadder.len(), 5);
+    assert_eq!(sadder[4], cheered("2026-10-03T13:00:00+00:00", "fridge", -3.0, 63.0));
+    assert_eq!(log_mood(&sadder, cheered("2026-10-04T13:00:00+00:00", fridge::CAUSE_BARE, 0.0, 40.0)), sadder);
     // Only the last few are kept, oldest dropped first.
     for hour in 0..30 {
       log = log_mood(&log, cheered(&format!("2026-10-04T{:02}:00:00+00:00", hour % 24), if hour % 2 == 0 { "session" } else { "harvest" }, 2.0, 70.0));
@@ -1171,10 +1245,10 @@ mod tests {
     )
     .expect("parses");
     let none = owned(&catalogue, &[]);
-    assert_eq!(check_buy(&catalogue, &none, 9999, 1, "level", "kitchen"), Err(ShopError::NeedsSessions { left: 2 }));
-    assert!(check_buy(&catalogue, &none, 9999, 3, "level", "kitchen").is_ok());
-    assert_eq!(check_buy(&catalogue, &none, 9999, 50, "level", "library"), Err(ShopError::NeedsFirst));
-    assert_eq!(check_buy(&catalogue, &none, 9999, 0, "plot", "plot-5"), Err(ShopError::NeedsFirst));
+    assert_eq!(check_buy(&catalogue, &none, 9999, 1, 1, "level", "kitchen"), Err(ShopError::NeedsSessions { left: 2 }));
+    assert!(check_buy(&catalogue, &none, 9999, 3, 1, "level", "kitchen").is_ok());
+    assert_eq!(check_buy(&catalogue, &none, 9999, 50, 1, "level", "library"), Err(ShopError::NeedsFirst));
+    assert_eq!(check_buy(&catalogue, &none, 9999, 0, 1, "plot", "plot-5"), Err(ShopError::NeedsFirst));
     assert_eq!(plot_count(&none), FREE_PLOTS);
     let more = owned(&catalogue, &[bought("plot", "plot-4", 200)]);
     assert_eq!(plot_count(&more), FREE_PLOTS + 1);
@@ -1214,8 +1288,8 @@ mod tests {
   fn a_starter_piece_is_never_sold_on_its_own() {
     let catalogue = starters();
     let none = owned(&catalogue, &[]);
-    assert_eq!(check_buy(&catalogue, &none, 999, 0, "room", "kettle"), Err(ShopError::ComesWithFloor));
-    assert_eq!(check_buy(&catalogue, &none, 999, 0, "room", "window"), Err(ShopError::AlreadyOwned));
+    assert_eq!(check_buy(&catalogue, &none, 999, 0, 1, "room", "kettle"), Err(ShopError::ComesWithFloor));
+    assert_eq!(check_buy(&catalogue, &none, 999, 0, 1, "room", "window"), Err(ShopError::AlreadyOwned));
     assert_eq!(spent(&catalogue, &[bought("level", "kitchen", 450)]), 450, "the kettle costs nothing more");
   }
 
@@ -1228,6 +1302,135 @@ mod tests {
     layout.room.insert("kitchen/top-1".into(), "kettle".into());
     assert!(check_look(&catalogue, &owned(&catalogue, &[]), &layout).is_err(), "no kitchen yet");
     assert!(check_look(&catalogue, &owned(&catalogue, &[bought("level", "kitchen", 450)]), &layout).is_ok());
+  }
+
+  fn rare() -> Catalogue {
+    Catalogue::parse(
+      r#"{ "items": [
+        {"kind":"skin","id":"sprout","price":0},
+        {"kind":"skin","id":"robot","price":700},
+        {"kind":"skin","id":"dragon","price":900,"level":8},
+        {"kind":"level","id":"bedroom","price":0},
+        {"kind":"move","id":"read","price":0},
+        {"kind":"level","id":"attic","price":800,"requires":"cellar","sessions":10,"level":5},
+        {"kind":"level","id":"cellar","price":300},
+        {"kind":"room","id":"window","price":120,"freeWith":"bedroom"},
+        {"kind":"room","id":"lamp","price":90},
+        {"kind":"treat","id":"apple","price":10,"consumable":true,"mood":8},
+        {"kind":"freeze","id":"freeze","price":120,"consumable":true}
+      ] }"#
+    )
+    .expect("parses")
+  }
+
+  #[test]
+  fn a_rare_thing_opens_at_its_level() {
+    let catalogue = rare();
+    let none = owned(&catalogue, &[]);
+    assert_eq!(catalogue.get("skin", "robot").map(|item| item.level), Some(0), "no level asked unless one is given");
+    assert_eq!(check_buy(&catalogue, &none, 9999, 0, 7, "skin", "dragon"), Err(ShopError::NeedsLevel { level: 8 }));
+    assert_eq!(check_buy(&catalogue, &none, 9999, 0, 8, "skin", "dragon").map(|item| item.price), Ok(900));
+    assert!(check_buy(&catalogue, &none, 9999, 0, 30, "skin", "dragon").is_ok());
+    // A thing with no level opens for a reader on any.
+    assert!(check_buy(&catalogue, &none, 9999, 0, 1, "skin", "robot").is_ok());
+    assert_eq!(
+      ShopError::NeedsLevel { level: 8 }.to_string(),
+      "That opens at level 8. Seeds you earn count, spent or not."
+    );
+  }
+
+  #[test]
+  fn the_level_is_said_before_the_price_and_after_what_else_is_missing() {
+    let catalogue = rare();
+    let none = owned(&catalogue, &[]);
+    // Not enough seeds and not the level: the level is what to say, since
+    // seeds alone would not open it.
+    assert_eq!(check_buy(&catalogue, &none, 0, 0, 1, "skin", "dragon"), Err(ShopError::NeedsLevel { level: 8 }));
+    assert_eq!(check_buy(&catalogue, &none, 100, 0, 8, "skin", "dragon"), Err(ShopError::CannotAfford { short: 800 }));
+    // The floor before it, then the sessions, then the level.
+    assert_eq!(check_buy(&catalogue, &none, 9999, 0, 1, "level", "attic"), Err(ShopError::NeedsFirst));
+    let with_cellar = owned(&catalogue, &[bought("level", "cellar", 300)]);
+    assert_eq!(check_buy(&catalogue, &with_cellar, 9999, 4, 1, "level", "attic"), Err(ShopError::NeedsSessions { left: 6 }));
+    assert_eq!(check_buy(&catalogue, &with_cellar, 9999, 10, 4, "level", "attic"), Err(ShopError::NeedsLevel { level: 5 }));
+    assert!(check_buy(&catalogue, &with_cellar, 9999, 10, 5, "level", "attic").is_ok());
+    // Owned already is owned already, whatever the level.
+    let with_dragon = owned(&catalogue, &[bought("skin", "dragon", 900)]);
+    assert_eq!(check_buy(&catalogue, &with_dragon, 9999, 0, 1, "skin", "dragon"), Err(ShopError::AlreadyOwned));
+  }
+
+  /// One record of each kind that is not a thing.
+  fn not_things() -> Vec<Purchase> {
+    let mut records = vec![
+      bought("stake", "goal:2026-W41:5", 20),
+      bought("stake", "duel:0123456789abcdef01234567", 10),
+      bought("prize", "duel:0123456789abcdef01234567", 20),
+      bought("freeze", "freeze", 120),
+      bought("gift", "skin:robot:89abcdef0123456789abcdef", 700)
+    ];
+    for (n, record) in records.iter_mut().enumerate() {
+      record.id = format!("buy-{n}");
+    }
+    records
+  }
+
+  #[test]
+  fn a_stake_a_prize_a_freeze_and_a_gift_sent_are_never_owned() {
+    // Whether or not the catalogue lists a freeze.
+    for catalogue in [rare(), catalogue()] {
+      let records = not_things();
+      assert_eq!(owned(&catalogue, &records), owned(&catalogue, &[]));
+      let mut some = owned_free(&catalogue);
+      for record in &records {
+        own(&catalogue, &mut some, record);
+      }
+      assert_eq!(some, owned_free(&catalogue));
+      assert_eq!(bought_count(&catalogue, &records), 0);
+    }
+    // A gift sent of a skin is not the skin.
+    assert!(check_look(&rare(), &owned(&rare(), &not_things()), &look("sprout", &[], "read")).is_ok());
+    assert!(check_look(&rare(), &owned(&rare(), &not_things()), &look("robot", &[], "read")).is_err());
+  }
+
+  #[test]
+  fn spending_counts_a_stake_a_freeze_and_a_gift_and_never_a_prize() {
+    // The two stakes, the freeze and the gift; the prize is income.
+    assert_eq!(spent(&rare(), &not_things()), 20 + 10 + 120 + 700);
+    // A freeze is used up: a second one is a second charge, in a build
+    // whose catalogue lists it and in one whose catalogue does not.
+    let mut again = bought("freeze", "freeze", 120);
+    again.id = "buy-again".into();
+    for catalogue in [rare(), catalogue()] {
+      assert_eq!(spent(&catalogue, &[bought("freeze", "freeze", 120), again.clone()]), 240);
+    }
+    // A prize alone spends nothing, and takes nothing off either.
+    assert_eq!(spent(&rare(), &[bought("prize", "duel:0123456789abcdef01234567", 40)]), 0);
+  }
+
+  #[test]
+  fn what_was_bought_is_counted_apart_from_what_everyone_has() {
+    let catalogue = rare();
+    assert_eq!(bought_count(&catalogue, &[]), 0, "the free things and the bedroom's window are everyone's");
+    let records = [
+      bought("skin", "robot", 700),
+      bought("room", "lamp", 90),
+      bought("treat", "apple", 10),
+      bought("level", "cellar", 300),
+      // Given by a friend: owned by a record all the same.
+      Purchase { id: "gift-89abcdef0123456789abcdef".into(), ..bought("skin", "dragon", 0) }
+    ];
+    assert_eq!(bought_count(&catalogue, &records), 4, "the skin, the lamp, the cellar and the gift; the apple was eaten");
+    // The same thing on two records is one thing.
+    let mut twice = bought("skin", "robot", 700);
+    twice.id = "other-device".into();
+    assert_eq!(bought_count(&catalogue, &[bought("skin", "robot", 700), twice]), 1);
+  }
+
+  #[test]
+  fn an_id_from_elsewhere_is_twenty_four_hex_digits() {
+    assert!(hex_id("0123456789abcdef01234567"));
+    for id in ["", "0123456789abcdef0123456", "0123456789abcdef012345678", "0123456789ABCDEF01234567", "0123456789abcdef0123456z", "0123456789abcdef:1234567"] {
+      assert!(!hex_id(id), "{id}");
+    }
   }
 
   #[test]

@@ -1,5 +1,6 @@
-//! What a PDF says it is called: the Title and Author of its Info dictionary,
-//! or, where that is empty, of its XMP metadata.
+//! What a PDF says it is called and is about: the Title, Author, Subject and
+//! Keywords of its Info dictionary, or, where that is empty, of its XMP
+//! metadata.
 //!
 //! Nothing in a PDF used to be read at import, so a PDF came in under its
 //! file's name ("The J Curve A New Way to Understand ..." for a book whose own
@@ -7,13 +8,14 @@
 //! purpose, not a PDF parser: it follows the cross-reference tables from the
 //! end of the file (the classic kind, the compressed kind of PDF 1.5, and a
 //! chain of updates), finds the Info object, wherever it is kept, and reads
-//! two strings out of it. A few kilobytes of the file are read, never the
+//! four strings out of it. A few kilobytes of the file are read, never the
 //! whole of it. A file it cannot follow (damaged tables, encryption, a filter
 //! it does not know) has no title as far as import is concerned: every failure
 //! is an empty answer, and nothing here can panic on a bad file.
 //!
 //! What it finds is the word of whatever program made the file, which is as
-//! often "Microsoft Word - draft3.doc" as a title. Whether to believe it is
+//! often "Microsoft Word - draft3.doc" as a title, and a sentence about the
+//! document as often as a subject. Whether to believe it is
 //! `metadata::normalize`'s business.
 
 use anyhow::{anyhow, bail, Result};
@@ -25,7 +27,12 @@ use std::path::Path;
 #[derive(Debug, Default, PartialEq)]
 pub struct Info {
   pub title: Option<String>,
-  pub author: Option<String>
+  pub author: Option<String>,
+  /// What it says it is about, as written: a word, a list or a sentence.
+  pub subject: Option<String>,
+  /// Its keywords, as written: one string, with whatever its maker put
+  /// between them (XMP's list of them is joined with "; ").
+  pub keywords: Option<String>
 }
 
 /// A dictionary is a few hundred bytes; an object this large is not one.
@@ -722,8 +729,9 @@ fn text(bytes: &[u8]) -> Option<String> {
   Some(line).filter(|line| !line.is_empty())
 }
 
-/// The text of `<dc:title>` or `<dc:creator>` in an XMP packet: its list's
-/// entries (a title has one a language; a book's creators are one each).
+/// The text of `<dc:title>`, `<dc:creator>` or `<dc:subject>` in an XMP
+/// packet: its list's entries (a title has one a language; a book's creators
+/// are one each, and so are its keywords, which XMP calls its subject).
 fn xmp_field(xmp: &str, tag: &str) -> Vec<String> {
   let Some(start) = xmp.find(&format!("<{tag}")) else {
     return Vec::new();
@@ -755,8 +763,8 @@ fn xmp_field(xmp: &str, tag: &str) -> Vec<String> {
     .collect()
 }
 
-/// What the PDF at `path` says it is called. Empty for one that says nothing,
-/// or whose strings are encrypted.
+/// What the PDF at `path` says it is called and is about. Empty for one that
+/// says nothing, or whose strings are encrypted.
 pub fn info(path: &Path) -> Result<Info> {
   let mut pdf = Pdf::open(path)?;
   pdf.load()?;
@@ -777,9 +785,14 @@ pub fn info(path: &Path) -> Result<Info> {
     };
     info.title = field("Title");
     info.author = field("Author");
+    info.subject = field("Subject");
+    info.keywords = field("Keywords");
   }
 
-  if info.title.is_none() || info.author.is_none() {
+  // XMP keeps a document's keywords as its `dc:subject`; they are looked for
+  // there only where Info says nothing of what the document is about.
+  let about = info.subject.is_some() || info.keywords.is_some();
+  if info.title.is_none() || info.author.is_none() || !about {
     let xmp = newest(&pdf, "Root")
       .and_then(|number| pdf.object(number, 0))
       .and_then(|root| match root {
@@ -795,6 +808,10 @@ pub fn info(path: &Path) -> Result<Info> {
       if info.author.is_none() {
         let creators = xmp_field(&xmp, "dc:creator");
         info.author = (!creators.is_empty()).then(|| creators.join("; "));
+      }
+      if !about {
+        let keywords = xmp_field(&xmp, "dc:subject");
+        info.keywords = (!keywords.is_empty()).then(|| keywords.join("; "));
       }
     }
   }
@@ -848,7 +865,7 @@ mod tests {
   }
 
   fn named(title: &str, author: &str) -> Info {
-    Info { title: Some(title.to_string()), author: Some(author.to_string()) }
+    Info { title: Some(title.to_string()), author: Some(author.to_string()), ..Info::default() }
   }
 
   #[test]
@@ -956,6 +973,51 @@ mod tests {
     assert_eq!(read("both.pdf", &file), named("From Info", "Mara Ellison; Tobias Wren"));
     assert_eq!(xmp_field("<dc:title>Plain</dc:title>", "dc:title"), ["Plain"]);
     assert_eq!(xmp_field("<dc:title><rdf:Alt><rdf:li>cut off", "dc:title"), Vec::<String>::new());
+  }
+
+  #[test]
+  fn reads_the_subject_and_the_keywords_as_they_are_written() {
+    let about = |info: &Info| (info.subject.clone(), info.keywords.clone());
+    let some = |text: &str| Some(text.to_string());
+    // Both, one kept in an object of its own, in two encodings; nothing is split or judged here.
+    let utf16: String = "\u{FEFF}Sea stories; Fiction — Historical".encode_utf16().map(|unit| format!("{unit:04X}")).collect();
+    let (file, _) = classic(
+      &[(1, "<</Type/Catalog>>"), (3, &format!("<</Title(Night Ferry)/Subject 4 0 R/Keywords <{utf16}>>>")), (4, "( A life\\nat sea )")],
+      "/Root 1 0 R/Info 3 0 R",
+      None
+    );
+    let both = read("about.pdf", &file);
+    assert_eq!(both.title.as_deref(), Some("Night Ferry"));
+    assert_eq!(about(&both), (some("A life at sea"), some("Sea stories; Fiction — Historical")));
+    // One of them, or neither; an empty one, or one that is not a string, is none.
+    let (file, _) = classic(&[(1, "<</Type/Catalog>>"), (3, "<</Keywords(ferries, tides)/Subject( )>>")], "/Root 1 0 R/Info 3 0 R", None);
+    assert_eq!(about(&read("keywords.pdf", &file)), (None, some("ferries, tides")));
+    // And so they reach the book, as its maker's word: genres where they are a list of them.
+    let basic = crate::storage::extract_basic_metadata(&saved("keywords.pdf", &file)).expect("metadata");
+    assert!(basic.doubtful);
+    assert_eq!(basic.subjects, ["ferries, tides"]);
+    assert_eq!(crate::metadata::normalize::identify("Night Ferry", &basic).genres, ["Ferries", "Tides"]);
+    let (file, _) = classic(&[(1, "<</Type/Catalog>>"), (3, "<</Title(Night Ferry)/Subject 12>>")], "/Root 1 0 R/Info 3 0 R", None);
+    assert_eq!(about(&read("neither.pdf", &file)), (None, None));
+
+    // XMP's keywords (its `dc:subject`), where Info says nothing of what the file is about.
+    let xmp = r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF><rdf:Description xmlns:dc="http://purl.org/dc/elements/1.1/">
+        <dc:subject><rdf:Bag><rdf:li>Sea stories</rdf:li><rdf:li> Historical
+          fiction </rdf:li></rdf:Bag></dc:subject>
+      </rdf:Description></rdf:RDF></x:xmpmeta>"#;
+    let metadata = format!("<</Type/Metadata/Subtype/XML/Length {}>>\nstream\n{xmp}\nendstream", xmp.len());
+    let objects = [(1, "<</Type/Catalog/Metadata 5 0 R>>"), (3, "<</Title(Night Ferry)/Author(Mara Ellison)>>"), (5, metadata.as_str())];
+    let (file, _) = classic(&objects, "/Root 1 0 R/Info 3 0 R", None);
+    let from_xmp = read("xmp-subject.pdf", &file);
+    assert_eq!((from_xmp.title.as_deref(), from_xmp.author.as_deref()), (Some("Night Ferry"), Some("Mara Ellison")));
+    assert_eq!(about(&from_xmp), (None, some("Sea stories; Historical fiction")));
+    // Info's own word comes first, a Subject as much as Keywords.
+    let said = [(1, "<</Type/Catalog/Metadata 5 0 R>>"), (3, "<</Subject(Ferries)>>"), (5, metadata.as_str())];
+    let (file, _) = classic(&said, "/Root 1 0 R/Info 3 0 R", None);
+    assert_eq!(about(&read("info-first.pdf", &file)), (some("Ferries"), None));
+    // A locked file says nothing of this either.
+    let (file, _) = classic(&[(1, "<</Type/Catalog>>"), (3, "<</Keywords(\\235\\021x)>>"), (9, "<</Filter/Standard>>")], "/Root 1 0 R/Info 3 0 R/Encrypt 9 0 R", None);
+    assert_eq!(about(&read("locked-about.pdf", &file)), (None, None));
   }
 
   #[test]

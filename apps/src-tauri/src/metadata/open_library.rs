@@ -21,7 +21,6 @@ struct SearchDoc {
   author_name: Option<Vec<String>>,
   subject: Option<Vec<String>>,
   cover_i: Option<i64>,
-  #[allow(dead_code)]
   key: Option<String>
 }
 
@@ -86,6 +85,18 @@ pub async fn fetch_metadata(title: &str, author: Option<&str>, isbn: Option<&str
     subjects,
     cover_url
   }))
+}
+
+/// The catalogue's key for the work a book is (`/works/OL27448W`), found the
+/// way a lookup finds the book; `None` when the catalogue does not know it.
+/// What the covers of its other editions are read by (`metadata::editions`).
+pub async fn work_key(title: &str, author: Option<&str>) -> Result<Option<String>> {
+  let client = Client::builder()
+    .user_agent(crate::http::user_agent())
+    .timeout(std::time::Duration::from_secs(15))
+    .build()?;
+  let response: SearchResponse = client.get(search_url(title, author, None)).send().await?.json().await?;
+  Ok(best_match(title, author, &response.docs).and_then(|doc| doc.key.clone()))
 }
 
 /// The result that is the book, among a search's first five: the closest

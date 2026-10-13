@@ -94,17 +94,18 @@ pub struct SeedEarnings {
   pub sets: i64,
   /// ...and daily wishes granted.
   pub wishes: i64,
+  /// Stakes on the week's goal that were won (`pip::stakes`): each pays
+  /// twice what was staked, and the stake itself is in what was spent.
+  pub stakes: i64,
+  /// Duel prizes (`pip::stakes::duel_prizes`), never more than twice a stake.
+  pub prizes: i64,
   pub total: i64
 }
 
 impl SeedEarnings {
-  /// Adds Pip's rewards to what the reading earned, and totals it all again.
-  pub fn with_rewards(mut self, goals: i64, chest: i64, sets: i64, wishes: i64) -> Self {
-    self.goals = goals.max(0);
-    self.chest = chest.max(0);
-    self.sets = sets.max(0);
-    self.wishes = wishes.max(0);
-    self.total = self.harvests
+  /// Every part added up: what `total` is, always.
+  fn sum(&self) -> i64 {
+    self.harvests
       + self.goal_days
       + self.streak_bonus
       + self.welcome
@@ -112,7 +113,27 @@ impl SeedEarnings {
       + self.goals
       + self.chest
       + self.sets
-      + self.wishes;
+      + self.wishes
+      + self.stakes
+      + self.prizes
+  }
+
+  /// Adds Pip's rewards to what the reading earned, and totals it all again.
+  pub fn with_rewards(mut self, goals: i64, chest: i64, sets: i64, wishes: i64) -> Self {
+    self.goals = goals.max(0);
+    self.chest = chest.max(0);
+    self.sets = sets.max(0);
+    self.wishes = wishes.max(0);
+    self.total = self.sum();
+    self
+  }
+
+  /// Adds what stakes won (on the week's goal, and in duels), and totals it
+  /// all again.
+  pub fn with_winnings(mut self, stakes: i64, prizes: i64) -> Self {
+    self.stakes = stakes.max(0);
+    self.prizes = prizes.max(0);
+    self.total = self.sum();
     self
   }
 }
@@ -248,7 +269,7 @@ pub fn earnings(days: &HashMap<String, DayRecord>, sessions: &[SessionSeeds<'_>]
     }
   }
 
-  result.total = result.harvests + result.goal_days + result.streak_bonus + result.welcome + result.earlier;
+  result.total = result.sum();
   result
 }
 
@@ -445,6 +466,19 @@ pub fn mood_plus(now: f64, gain: f64) -> f64 {
   (now + gain.max(0.0)).clamp(0.0, 100.0)
 }
 
+/// The mood after something saddened Pip a little (she found her fridge bare:
+/// `pip::fridge`), from the mood now. Like the drift, it stops at
+/// `MOOD_DRIFT_FLOOR`, and a mood already at or under the floor is left where
+/// it is: nothing but the reader's own long absence under the old rule ever
+/// put a Pip below content, and this does not either.
+pub fn mood_minus(now: f64, loss: f64) -> f64 {
+  let now = now.clamp(0.0, 100.0);
+  if now <= MOOD_DRIFT_FLOOR || loss.is_nan() {
+    return now;
+  }
+  (now - loss.max(0.0)).max(MOOD_DRIFT_FLOOR)
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -548,6 +582,42 @@ mod tests {
     let result = earnings(&HashMap::new(), &[], 4).with_rewards(10, 30, 0, 8);
     assert_eq!((result.goals, result.chest, result.sets, result.wishes), (10, 30, 0, 8));
     assert_eq!(result.total, WELCOME_GIFT + 4 + 10 + 30 + 8);
+  }
+
+  #[test]
+  fn what_stakes_won_joins_the_total() {
+    let result = earnings(&HashMap::new(), &[], 4).with_rewards(10, 30, 0, 8).with_winnings(40, 20);
+    assert_eq!((result.stakes, result.prizes), (40, 20));
+    assert_eq!(result.total, WELCOME_GIFT + 4 + 10 + 30 + 8 + 40 + 20);
+    // In either order, and a loss is never a debt: what was staked is in
+    // what was spent, not taken off what was earned.
+    let other_way = earnings(&HashMap::new(), &[], 4).with_winnings(40, 20).with_rewards(10, 30, 0, 8);
+    assert_eq!(other_way, result);
+    assert_eq!(earnings(&HashMap::new(), &[], 0).with_winnings(-40, -20).total, WELCOME_GIFT);
+  }
+
+  #[test]
+  fn the_total_is_always_the_sum_of_its_parts() {
+    let days = ledger(vec![day("2026-09-20", 30.0, 20), day("2026-10-01", 20.0, 20), day("2026-10-02", 25.0, 20)]);
+    let result = earnings(&days, &[session("a", "2026-09-20", 0, 25.0, true)], 24).with_rewards(40, 30, 25, 16).with_winnings(200, 60);
+    let parts = [
+      result.harvests,
+      result.goal_days,
+      result.streak_bonus,
+      result.welcome,
+      result.earlier,
+      result.goals,
+      result.chest,
+      result.sets,
+      result.wishes,
+      result.stakes,
+      result.prizes
+    ];
+    assert!(parts.iter().all(|part| *part > 0), "every part is in play: {parts:?}");
+    assert_eq!(result.total, parts.iter().sum::<i64>());
+    // And it is told as it is named.
+    let json = serde_json::to_value(&result).expect("encodes");
+    assert_eq!((json["stakes"].as_i64(), json["prizes"].as_i64()), (Some(200), Some(60)));
   }
 
   #[test]
@@ -797,5 +867,27 @@ mod tests {
   fn cheering_up_is_capped_at_a_hundred() {
     assert_eq!(mood_plus(95.0, 20.0), 100.0);
     assert_eq!(mood_plus(40.0, -10.0), 40.0);
+  }
+
+  #[test]
+  fn a_small_sadness_stops_at_the_floor_the_drift_stops_at() {
+    assert_eq!(mood_minus(70.0, 3.0), 67.0);
+    // Down to the floor, and not a hair under it.
+    assert_eq!(mood_minus(41.5, 3.0), MOOD_DRIFT_FLOOR);
+    assert_eq!(mood_minus(MOOD_DRIFT_FLOOR, 3.0), MOOD_DRIFT_FLOOR);
+    assert_eq!(mood_minus(100.0, 500.0), MOOD_DRIFT_FLOOR);
+    // A mood already under the floor is left alone: not lowered, not lifted.
+    assert_eq!(mood_minus(12.5, 3.0), 12.5);
+    assert_eq!(mood_minus(0.0, 3.0), 0.0);
+    // Nothing that is not a loss is one.
+    assert_eq!(mood_minus(70.0, -5.0), 70.0);
+    assert_eq!(mood_minus(70.0, f64::NAN), 70.0);
+    assert_eq!(mood_minus(140.0, 3.0), 97.0);
+    // Day after day of it, with nothing to cheer her up between, ends at the floor like the drift does.
+    let mut mood = MOOD_START;
+    for _ in 0..365 {
+      mood = mood_minus(mood, 3.0);
+    }
+    assert_eq!(mood, MOOD_DRIFT_FLOOR);
   }
 }

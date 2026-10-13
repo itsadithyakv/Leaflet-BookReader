@@ -406,6 +406,18 @@ fn page_cover_bytes(image: &str) -> Result<Vec<u8>, String> {
   }
 }
 
+/// How large a book's file is, in bytes; `None` when it is not on this
+/// device. The library asks before reading a whole PDF for its cover.
+#[tauri::command]
+pub fn book_file_size(book_id: String, state: State<'_, AppState>) -> Result<Option<u64>, String> {
+  let db = state.db.guard();
+  let book = db
+    .find_by_id(&book_id)
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| "Book not found".to_string())?;
+  Ok(std::fs::metadata(&book.local_path).ok().filter(|file| file.is_file()).map(|file| file.len()))
+}
+
 /// A PDF's first page as its cover, for a PDF that has none: nothing is read
 /// from inside a PDF at import, and a lookup finds a cover only for a book a
 /// catalogue knows. The page reader draws the page the first time the book is

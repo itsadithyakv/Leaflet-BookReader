@@ -130,17 +130,34 @@ fn compress(doc: &SyncDoc) -> Result<String> {
   Ok(base64::engine::general_purpose::STANDARD.encode(encoder.finish()?))
 }
 
-fn decompress(encoded: &str, now: &str) -> SyncDoc {
-  let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(encoded) else {
-    return SyncDoc::empty(now);
-  };
+/// The document the server holds, or nothing for one that cannot be read.
+fn decode(encoded: &str) -> Option<SyncDoc> {
+  let bytes = base64::engine::general_purpose::STANDARD.decode(encoded).ok()?;
   let mut json = Vec::new();
-  if GzDecoder::new(&bytes[..]).read_to_end(&mut json).is_err() {
-    return SyncDoc::empty(now);
-  }
-  // A corrupt document must not take the library down; republishing this
-  // device's own state is the recoverable outcome.
-  serde_json::from_slice(&json).unwrap_or_else(|_| SyncDoc::empty(now))
+  GzDecoder::new(&bytes[..]).read_to_end(&mut json).ok()?;
+  serde_json::from_slice(&json).ok()
+}
+
+/// Whether the merged document has to be sent: whether it says anything the
+/// one the server holds (`held`) does not.
+///
+/// A sync used to end by writing the whole document back every time, though
+/// most syncs find the server's copy already has all this device has (the
+/// one at launch, the one after a book is closed with nothing read in it):
+/// the merge comes out as what was pulled, to the letter, but for the moment
+/// it was made (`updated_at`, which every merge sets to now). Such a
+/// document is not sent.
+///
+/// Always sent: the first there is (the server holds none), one in place of
+/// a copy that could not be read (so a damaged one is put right), and one
+/// that differs from the server's in anything at all, however small.
+fn has_news(merged: &SyncDoc, held: Option<&SyncDoc>) -> bool {
+  let Some(held) = held else {
+    return true;
+  };
+  let mut undated = merged.clone();
+  undated.updated_at.clone_from(&held.updated_at);
+  undated != *held
 }
 
 async fn describe_failure(response: reqwest::Response) -> anyhow::Error {
@@ -160,12 +177,29 @@ async fn describe_failure(response: reqwest::Response) -> anyhow::Error {
   }
 }
 
+/// The one HTTP client every call to the Leaflet server goes through.
+///
+/// It used to be built anew for each call, and a client keeps its own
+/// connections: so each of the four requests the app makes every few minutes
+/// (and the three a minute with the board open) opened a connection of its
+/// own and shook hands over TLS again, which is most of what a request costs
+/// a small server. One client holds a connection open between requests, and
+/// lets it go after a minute and a half idle. (A clone is a handle to the
+/// same client, not another one.)
+///
+/// In tests each call still builds its own: a test has its own runtime, and
+/// a connection kept from one that has ended is of no use to the next.
 fn client() -> Result<reqwest::Client> {
-  Ok(
-    reqwest::Client::builder()
-      .timeout(Duration::from_secs(45))
-      .build()?
-  )
+  let build = || reqwest::Client::builder().timeout(Duration::from_secs(45)).build();
+  if cfg!(test) {
+    return Ok(build()?);
+  }
+  static SHARED: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+  if let Some(shared) = SHARED.get() {
+    return Ok(shared.clone());
+  }
+  let built = build()?;
+  Ok(SHARED.get_or_init(|| built).clone())
 }
 
 /// A 401 on an authenticated call means the session is gone server-side
@@ -704,17 +738,28 @@ pub async fn sync(db_mutex: &std::sync::Mutex<Database>, now: &str) -> Result<Sy
       return Err(describe_failure(response).await);
     }
     let pulled: StateResponse = response.json().await?;
-    let remote = pulled
-      .state
-      .as_deref()
-      .map(|encoded| decompress(encoded, now))
-      .unwrap_or_else(|| SyncDoc::empty(now));
+    // What the server holds, where it holds a document that can be read. A
+    // corrupt one must not take the library down: it is merged as an empty
+    // one, and republishing this device's own state puts it right.
+    let held = pulled.state.as_deref().and_then(decode);
+    let nothing;
+    let remote = match &held {
+      Some(remote) => remote,
+      None => {
+        nothing = SyncDoc::empty(now);
+        &nothing
+      }
+    };
 
     let local = {
       let db = db_mutex.guard();
       store::snapshot(&db, now)?
     };
-    let merged = merge::merge(&local, &remote, now);
+    let merged = merge::merge(&local, remote, now);
+    // Nothing here the server's copy lacks: it is left as it is.
+    if !has_news(&merged, held.as_ref()) {
+      break merged;
+    }
     let payload = compress(&merged)?;
 
     let push = http
@@ -801,7 +846,33 @@ pub struct ProfileUpdate {
   /// a day with reading in it, so a friend's Pip can visit "on a day you both
   /// read". A server from before visitors ignores it.
   #[serde(skip_serializing_if = "Option::is_none")]
-  pub read_day: Option<String>
+  pub read_day: Option<String>,
+  /// Whether the readers who follow this one may see its whole library.
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub share_library: Option<bool>,
+  /// Whether friends may raid the reader's camp in the Hollow. A server from
+  /// before raids ignores it.
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub raidable: Option<bool>,
+  /// The book being read (`title`, `author`, `percent`); JSON `null` to say
+  /// "none now". Left out, the server keeps what it has.
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub reading: Option<serde_json::Value>,
+  /// The level seeds ever earned have reached, the badges earned, and the
+  /// arcade's best scores: what a profile shows off.
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub level: Option<i64>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub badges: Option<Vec<String>>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub arcade: Option<serde_json::Value>,
+  /// Pip's camp in the Hollow as a profile shows it: building levels,
+  /// counts and where things stand (`commands::pip_shop::camp_summary`),
+  /// never the camp itself. JSON `null` to say "none now"; left out, the
+  /// server keeps what it has. A server from before the camp ignores it,
+  /// and one from before the layout keeps the levels and counts alone.
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub camp: Option<serde_json::Value>
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -831,11 +902,41 @@ pub struct Profile {
   #[serde(default)]
   pub shelf: Vec<ShelfBook>,
   #[serde(default)]
-  pub rank: Option<i64>
+  pub rank: Option<i64>,
+  /// What a newer server adds; each is absent from an older one.
+  #[serde(default)]
+  pub shares_library: bool,
+  /// Whether friends may raid the camp: yes until the reader says no, so
+  /// yes from a server that does not say.
+  #[serde(default = "raids_allowed")]
+  pub raidable: bool,
+  #[serde(default)]
+  pub reading: Option<serde_json::Value>,
+  #[serde(default)]
+  pub level: Option<i64>,
+  #[serde(default)]
+  pub badges: Vec<String>,
+  #[serde(default)]
+  pub arcade: Option<serde_json::Value>,
+  /// Pip's camp as the profile shows it, or nothing for none.
+  #[serde(default)]
+  pub camp: Option<serde_json::Value>,
+  /// Whether the community guidelines were accepted; whether this is the
+  /// owner's account; until when posting is suspended, if it is.
+  #[serde(default)]
+  pub rules_accepted: bool,
+  #[serde(default)]
+  pub is_admin: bool,
+  #[serde(default)]
+  pub suspended_until: Option<String>
 }
 
 fn private_visibility() -> String {
   "private".to_string()
+}
+
+fn raids_allowed() -> bool {
+  true
 }
 
 pub async fn get_profile(db_mutex: &std::sync::Mutex<Database>) -> Result<Profile> {
@@ -1057,7 +1158,7 @@ mod tests {
     let doc = store::snapshot(&db, NOW).expect("snapshot");
 
     let encoded = compress(&doc).expect("compress");
-    let back = decompress(&encoded, NOW);
+    let back = decode(&encoded).expect("a document");
 
     assert_eq!(back.days.len(), 1);
     assert_eq!(back.days[0].minutes, 25.0);
@@ -1089,8 +1190,87 @@ mod tests {
   /// own state instead of the library disappearing.
   #[test]
   fn a_corrupt_blob_is_survivable() {
-    assert!(decompress("not base64 at all !!!", NOW).books.is_empty());
-    assert!(decompress("aGVsbG8gd29ybGQ=", NOW).books.is_empty());
+    assert!(decode("not base64 at all !!!").is_none());
+    assert!(decode("aGVsbG8gd29ybGQ=").is_none());
+    // And what is absent is replaced: this device's document is sent in its place.
+    let db = memory_db();
+    db.credit_minutes("2026-09-01", 25.0, 20).expect("credit");
+    assert!(has_news(&synced(&db, None, NOW), decode("aGVsbG8gd29ybGQ=").as_ref()));
+  }
+
+  /// What a sync on this device comes to: its own state merged over what the
+  /// server holds (`held`), or over nothing.
+  fn synced(db: &Database, held: Option<&SyncDoc>, now: &str) -> SyncDoc {
+    let local = store::snapshot(db, now).expect("snapshot");
+    merge::merge(&local, held.unwrap_or(&SyncDoc::empty(now)), now)
+  }
+
+  const LATER: &str = "2026-09-04T18:30:00+00:00";
+
+  #[test]
+  fn the_first_document_is_always_sent() {
+    // The server holds none: a new account, or backing up to it switched on
+    // just now. Sent whatever is in it, and an empty library's as well.
+    let db = memory_db();
+    assert!(has_news(&synced(&db, None, NOW), None));
+    db.credit_minutes("2026-09-01", 25.0, 20).expect("credit");
+    assert!(has_news(&synced(&db, None, NOW), None));
+  }
+
+  #[test]
+  fn a_sync_that_finds_nothing_new_sends_nothing() {
+    let db = memory_db();
+    db.credit_minutes("2026-09-01", 25.0, 20).expect("credit");
+    db.credit_minutes("2026-09-02", 40.0, 20).expect("credit");
+    // What the first sync sent, as the server hands it back.
+    let held = decode(&compress(&synced(&db, None, NOW)).expect("compress")).expect("a document");
+
+    // Hours later with nothing read since (the app opened again, a book
+    // closed unread): the merge is the server's copy but for its date.
+    let merged = synced(&db, Some(&held), LATER);
+    assert_ne!(merged.updated_at, held.updated_at);
+    assert!(!has_news(&merged, Some(&held)));
+
+    // A device with nothing of its own (a new install signing in) takes the
+    // document in and has nothing to send back.
+    let fresh = memory_db();
+    let taken = synced(&fresh, Some(&held), LATER);
+    assert_eq!(taken.days.len(), 2);
+    assert!(!has_news(&taken, Some(&held)));
+  }
+
+  #[test]
+  fn a_device_with_anything_the_server_lacks_still_sends_it() {
+    let db = memory_db();
+    db.credit_minutes("2026-09-01", 25.0, 20).expect("credit");
+    let held = synced(&db, None, NOW);
+
+    // Another day read; or only a minute more on a day already there.
+    db.credit_minutes("2026-09-03", 10.0, 20).expect("credit");
+    let another_day = synced(&db, Some(&held), LATER);
+    assert!(has_news(&another_day, Some(&held)));
+    db.credit_minutes("2026-09-03", 1.0, 20).expect("credit");
+    assert!(has_news(&synced(&db, Some(&another_day), LATER), Some(&another_day)));
+
+    // A second device with reading of its own: what it sends holds both.
+    let other = memory_db();
+    other.credit_minutes("2026-08-30", 15.0, 20).expect("credit");
+    let both = synced(&other, Some(&held), LATER);
+    assert!(has_news(&both, Some(&held)));
+    assert_eq!(both.days.len(), 2);
+    // And once that is on the server, the first device has only to take it in.
+    assert!(has_news(&synced(&db, Some(&both), LATER), Some(&both)), "the first device read on since");
+    let all = synced(&db, Some(&both), LATER);
+    assert!(!has_news(&synced(&other, Some(&all), LATER), Some(&all)));
+  }
+
+  #[test]
+  fn a_document_from_an_older_format_is_sent_again_in_this_one() {
+    let db = memory_db();
+    db.credit_minutes("2026-09-01", 25.0, 20).expect("credit");
+    let mut held = synced(&db, None, NOW);
+    held.version -= 1;
+    assert!(has_news(&synced(&db, Some(&held), LATER), Some(&held)));
   }
 
   #[test]

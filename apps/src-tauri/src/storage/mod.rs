@@ -32,10 +32,12 @@ pub struct BasicMetadata {
   pub subjects: Vec<String>,
   pub series: Option<String>,
   pub series_index: Option<f32>,
-  /// The title and authors are the word of whatever program made the file (a
-  /// PDF's Info), which is as often "Microsoft Word - draft3.doc" and
-  /// "Administrator" as a book and its writer. `metadata::normalize` weighs
-  /// them against the file's name before it believes them.
+  /// The title, authors and subjects are the word of whatever program made
+  /// the file (a PDF's Info), which is as often "Microsoft Word - draft3.doc"
+  /// and "Administrator" as a book and its writer, and a sentence about the
+  /// document as often as a genre. `metadata::normalize` weighs the first two
+  /// against the file's name before it believes them, and takes the subjects
+  /// only where they read as a list of genres.
   pub doubtful: bool
 }
 
@@ -1078,10 +1080,56 @@ fn thumbnail_into(dir: &Path, cover: &Path, hash: &str) -> Result<PathBuf> {
   Ok(dest)
 }
 
+/// A cover the reader chose for a book (from the series page's sets) is kept
+/// as `<hash>-chosen-<cover id>.jpg`: a name of its own, so a lookup, which
+/// writes `<hash>-cover.jpg` only where there is none, neither takes its
+/// place nor is taken for it, and the name changes with the cover, which is
+/// what tells the library to draw the new one.
+const CHOSEN_COVER_MARK: &str = "-chosen-";
+
+/// Saves a chosen cover in place of the one chosen before, and drops the
+/// thumbnail made from the old cover.
+pub fn store_chosen_cover(bytes: &[u8], hash: &str, cover_id: i64) -> Result<PathBuf> {
+  if sniff_image_mime(bytes).is_none() {
+    return Err(anyhow::anyhow!("cover was not an image"));
+  }
+  chosen_cover_into(&covers_dir()?, bytes, hash, cover_id)
+}
+
+fn chosen_cover_into(dir: &Path, bytes: &[u8], hash: &str, cover_id: i64) -> Result<PathBuf> {
+  fs::create_dir_all(dir)?;
+  let dest = dir.join(format!("{hash}{CHOSEN_COVER_MARK}{cover_id}.jpg"));
+  let staging = dir.join(format!("{hash}-chosen.part"));
+  fs::write(&staging, bytes)?;
+  if let Err(error) = fs::rename(&staging, &dest) {
+    let _ = fs::remove_file(&staging);
+    return Err(error.into());
+  }
+  drop_chosen_covers(dir, hash, Some(&dest));
+  let _ = fs::remove_file(dir.join(format!("{hash}-thumb.jpg")));
+  Ok(dest)
+}
+
+/// Removes a book's chosen covers, all but `keep`.
+fn drop_chosen_covers(dir: &Path, hash: &str, keep: Option<&Path>) {
+  let prefix = format!("{hash}{CHOSEN_COVER_MARK}");
+  let Ok(entries) = fs::read_dir(dir) else {
+    return;
+  };
+  for entry in entries.flatten() {
+    let path = entry.path();
+    let named = path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with(&prefix) && name.ends_with(".jpg"));
+    if named && keep != Some(path.as_path()) {
+      let _ = fs::remove_file(path);
+    }
+  }
+}
+
 /// What a deleted book leaves besides its own file: the cover, its thumbnail,
 /// and the EPUB made when another format was converted. Best effort.
 pub fn remove_book_extras(hash: &str, book_path: &Path) {
   if let Ok(dir) = covers_dir() {
+    drop_chosen_covers(&dir, hash, None);
     let _ = fs::remove_file(dir.join(format!("{}-cover.jpg", hash)));
     let _ = fs::remove_file(dir.join(format!("{hash}{PAGE_COVER_SUFFIX}")));
     let _ = fs::remove_file(dir.join(format!("{}-thumb.jpg", hash)));
@@ -1132,7 +1180,15 @@ pub fn extract_basic_metadata(path: &Path) -> Result<BasicMetadata> {
   }
   if ext == "pdf" {
     if let Ok(info) = pdf::info(path) {
-      return Ok(BasicMetadata { title: info.title, authors: info.author.into_iter().collect(), doubtful: true, ..BasicMetadata::default() });
+      return Ok(BasicMetadata {
+        title: info.title,
+        authors: info.author.into_iter().collect(),
+        // Its Subject, then its Keywords, each as its maker wrote it: one
+        // string that may be a list, a sentence or a program's name.
+        subjects: info.subject.into_iter().chain(info.keywords).collect(),
+        doubtful: true,
+        ..BasicMetadata::default()
+      });
     }
   }
   // A comic, a text file, or a book whose metadata cannot be read: the
@@ -1156,6 +1212,36 @@ fn extract_epub_metadata(path: &Path) -> Result<BasicMetadata> {
 mod tests {
   use crate::LockExt;
   use super::*;
+
+  /// A cover the reader chose takes the place of the one chosen before, under
+  /// a name that changes with it; a looked-up cover and another book's are
+  /// left alone, and the old thumbnail goes so the next is made from the new.
+  #[test]
+  fn a_chosen_cover_replaces_the_last_one_chosen_and_nothing_else() {
+    let dir = std::env::temp_dir().join(format!("leaflet-chosen-cover-test-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("dir");
+    let mut png = Vec::new();
+    image::RgbImage::from_pixel(8, 12, image::Rgb([40, 90, 60]))
+      .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+      .expect("png");
+    for kept in ["h-cover.jpg", "h-thumb.jpg", "other-chosen-7.jpg", "h-page.jpg"] {
+      fs::write(dir.join(kept), &png).expect("file");
+    }
+    let first = chosen_cover_into(&dir, &png, "h", 101).expect("first");
+    assert!(first.ends_with("h-chosen-101.jpg"));
+    assert!(!dir.join("h-thumb.jpg").exists(), "the thumbnail of the old cover is dropped");
+    let second = chosen_cover_into(&dir, &png, "h", 202).expect("second");
+    assert!(second.ends_with("h-chosen-202.jpg") && second.exists());
+    assert!(!first.exists(), "one chosen cover a book");
+    for kept in ["h-cover.jpg", "other-chosen-7.jpg", "h-page.jpg"] {
+      assert!(dir.join(kept).exists(), "{kept} is not this function's to remove");
+    }
+    // Removing the book takes its chosen cover with it, and not another book's.
+    drop_chosen_covers(&dir, "h", None);
+    assert!(!second.exists() && dir.join("other-chosen-7.jpg").exists());
+    let _ = fs::remove_dir_all(&dir);
+  }
 
   /// A PDF's first page is kept under a name of its own, so it can be told
   /// from a real cover and replaced by one; and it is written again each time.

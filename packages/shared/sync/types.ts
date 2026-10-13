@@ -44,6 +44,20 @@ export type SyncReport = {
   booksRemoved: number;
   booksPending: number;
   entriesUpdated: number;
+  /** Large files not sent because the reader has not been asked about them yet. */
+  booksHeld?: number;
+};
+
+/**
+ * A book whose file is over the size a backup sends without asking (10 MB),
+ * and what the reader has said: `true` to back the file up, `false` not to,
+ * `null` when not yet asked.
+ */
+export type LargeBook = {
+  id: string;
+  title: string;
+  bytes: number;
+  backUp: boolean | null;
 };
 
 export const EMPTY_SYNC_STATUS: SyncStatus = {
@@ -67,21 +81,46 @@ export type ShelfBook = {
   styleSeed: string;
 };
 
+/** Who may see a profile: everyone, only the readers whose follow it accepted, or nobody. */
+export type ProfileVisibility = "private" | "followers" | "public";
+
+/** The book a reader has open, as their profile and the board say it. */
+export type ReadingNow = { title: string; author: string | null; percent: number };
+
+/** Best scores in Pip's three arcade games. */
+export type ArcadeBests = { dash: number; catch: number; flap: number };
+
 /**
  * A reader's public face.
  *
  * `private` is the default and means exactly that: the profile appears on no
  * board and is readable by nobody. Reading history says a lot about a person,
- * so publishing it is a decision rather than a default.
+ * so publishing it is a decision rather than a default. `followers` is in
+ * between: findable by handle, and read only by the readers whose request to
+ * follow it accepted.
  */
 export type SocialProfile = {
   handle: string | null;
   displayName: string | null;
-  visibility: "private" | "public";
+  visibility: ProfileVisibility;
   weekMinutes: number;
   streak: number;
   booksFinished: number;
   shelf: ShelfBook[];
+  /** Whether the readers who follow this one may see its whole library. Absent from older servers. */
+  sharesLibrary?: boolean;
+  reading?: ReadingNow | null;
+  /** The level seeds ever earned have reached. */
+  level?: number | null;
+  /** The ids of the badges earned (components/community/badges.ts names them). */
+  badges?: string[];
+  arcade?: ArcadeBests | null;
+  /** Whether the community guidelines were accepted: needed before posting where everyone can read. */
+  rulesAccepted?: boolean;
+  /** The owner's account: sees reports and can act on them. */
+  isAdmin?: boolean;
+  /** Until when posting is suspended, if it is. */
+  suspendedUntil?: string | null;
   /** Position on this week's board, when the entry came from one. */
   rank?: number | null;
 };

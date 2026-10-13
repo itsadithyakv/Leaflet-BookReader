@@ -13,6 +13,7 @@
 //! ```
 
 use crate::db::Database;
+use crate::sync::large::{self, Decision};
 use crate::sync::merge::{self, SyncDoc};
 use crate::sync::store;
 use anyhow::{anyhow, Result};
@@ -35,7 +36,10 @@ pub struct SyncReport {
   pub books_removed: usize,
   /// In the library but not on this device yet, and not fetched this run.
   pub books_pending: usize,
-  pub entries_updated: usize
+  pub entries_updated: usize,
+  /// Large files not sent because the reader has not been asked about them
+  /// yet (`sync::large`).
+  pub books_held: usize
 }
 
 impl SyncReport {
@@ -48,6 +52,8 @@ impl SyncReport {
     self.books_removed += other.books_removed;
     self.entries_updated += other.entries_updated;
     self.books_pending = other.books_pending;
+    // The same books wait on every transport: they are counted once.
+    self.books_held = self.books_held.max(other.books_held);
   }
 }
 
@@ -140,17 +146,23 @@ pub fn sync(db: &Database, root: &Path, now: &str) -> Result<SyncReport> {
     let _ = fs::remove_file(books_root.join(entry.remote_name()));
   }
 
+  let mut answers = large::Answers::load(db);
   for entry in merged.live_books() {
     let shared = books_root.join(entry.remote_name());
     let local_path = store::local_path_for(entry)?;
 
     match (local_path.exists(), shared.exists()) {
-      // Ours and not theirs: publish it, once, for good.
-      (true, false) => {
-        if copy_atomically(&local_path, &shared).is_ok() {
-          report.books_uploaded += 1;
+      // Ours and not theirs: publish it, once, for good. A large file only
+      // with the reader's word (`sync::large`).
+      (true, false) => match large::decide(large::file_bytes(&local_path), answers.get(&entry.id)) {
+        Decision::Send => {
+          if copy_atomically(&local_path, &shared).is_ok() {
+            report.books_uploaded += 1;
+          }
         }
-      }
+        Decision::Ask => report.books_held += 1,
+        Decision::Skip => {}
+      },
       // Theirs and not ours: fetch it now. Files come from a folder on this
       // machine, so there is no reason to defer the copy the way the Drive
       // transport does.
@@ -165,9 +177,10 @@ pub fn sync(db: &Database, root: &Path, now: &str) -> Result<SyncReport> {
         }
       }
       (false, false) => report.books_pending += 1,
-      (true, true) => {}
+      (true, true) => answers.found_backed_up(&entry.id, large::file_bytes(&local_path))
     }
   }
+  answers.save(db)?;
 
   Ok(report)
 }
