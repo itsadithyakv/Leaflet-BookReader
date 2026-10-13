@@ -9,6 +9,9 @@ import {
   type InboxEvent
 } from "../../services/socialService";
 import { errorText, readJson, writeJson } from "./format";
+import { STAKES_KEY, readStakeBook, stakeJobs, withStep, type StakeStep } from "./duelStakes";
+import { seedService } from "../../services/seedService";
+import { usePipWardrobeStore } from "../../store/pipWardrobeStore";
 
 /**
  * Shared community state: the boards, duels, inbox and which reader card is
@@ -72,6 +75,47 @@ type CommunityState = {
 };
 
 const byNewest = (a: InboxItem, b: InboxItem) => b.createdAt.localeCompare(a.createdAt);
+
+const stakeBook = () => {
+  try {
+    return readStakeBook(localStorage.getItem(STAKES_KEY));
+  } catch {
+    return {};
+  }
+};
+const noteStake = (duelId: string, step: StakeStep) => {
+  try {
+    localStorage.setItem(STAKES_KEY, JSON.stringify(withStep(stakeBook(), duelId, step)));
+  } catch {
+    // Rust refuses a second stake or prize for one duel anyway.
+  }
+};
+
+/**
+ * Puts this reader's seeds on the staked duels that are on, and tells the
+ * ledger how the finished ones went (community/duelStakes.ts). One after
+ * another, quietly: a stake that cannot be met (too few seeds by now) is
+ * noted as skipped, and nothing rides on that duel here.
+ */
+const keepStakes = async (duels: Duel[]) => {
+  for (const job of stakeJobs(duels, stakeBook())) {
+    try {
+      if (job.do === "stake") {
+        await seedService.stakeDuel(job.duelId, job.seeds);
+        noteStake(job.duelId, "staked");
+      } else {
+        await seedService.settleDuel(job.duelId, job.outcome);
+        noteStake(job.duelId, "settled");
+      }
+    } catch (cause) {
+      // Short of seeds: skipped for good. Anything else (the app's own
+      // database busy) is tried again the next time the duels are read.
+      if (job.do === "stake" && /more seeds/i.test(errorText(cause))) {
+        noteStake(job.duelId, "skipped");
+      }
+    }
+  }
+};
 
 /**
  * Counts sign-outs. An answer still on its way when the reader signs out is
@@ -167,6 +211,7 @@ export const useCommunityStore = create<CommunityState>((set, get) => ({
       const duels = await socialService.duels();
       if (asked === epoch) {
         set({ duels });
+        void keepStakes(duels);
       }
     } catch {
       // Signed out or offline: keep what is shown.
@@ -222,6 +267,22 @@ export const useCommunityStore = create<CommunityState>((set, get) => ({
   },
 
   async respondToDuel(id, accept) {
+    if (accept) {
+      // A staked duel is accepted with the seeds to meet it, or not at all.
+      const invited = get().inbox.flatMap((item) => (item.type === "duel_invite" && item.duel?.id === id ? [item.duel] : []))[0];
+      const known = get().duels.find((duel) => duel.id === id) ?? invited;
+      const stake = Math.floor(known?.stake ?? 0);
+      if (stake > 0) {
+        const wardrobe = usePipWardrobeStore.getState();
+        if (!wardrobe.overview) {
+          await wardrobe.load();
+        }
+        const balance = usePipWardrobeStore.getState().overview?.wallet.balance ?? 0;
+        if (balance < stake) {
+          throw new Error(`This duel is for ${stake} seeds each, and you have ${balance}.`);
+        }
+      }
+    }
     const result = await socialService.respondToDuel(id, accept);
     set((state) => ({
       inbox: state.inbox.map((item) =>

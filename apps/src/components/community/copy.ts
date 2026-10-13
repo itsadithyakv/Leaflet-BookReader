@@ -16,6 +16,14 @@ import { at } from "./format";
 
 export const WEEK_ENDS = "Sunday at midnight";
 
+/**
+ * Where a reader's own profile is: the "You" card at the top of the Board
+ * tab of the Social page. It went by four names ("Social → You", "Board →
+ * You", "Social → Community"); every sentence that sends a reader there
+ * takes it from here.
+ */
+export const PROFILE_PLACE = "Social → Board → You";
+
 export const COPY = {
   signIn: "Sign in under Settings → Account to join in.",
   signInTitle: "Join the community",
@@ -37,9 +45,9 @@ export const COPY = {
   handleHint: "Letters, numbers, - and _. It's how other readers find you.",
   /** Under the switch on the sign-up form: exactly what sharing shows. */
   shareAtSignUp:
-    "Other readers can see your name, your @handle, your Pip, this week's reading minutes, your streak, how many books you've finished and your shelf (the titles of up to 12 books from your recent reading sessions), and you appear on the weekly board. You can switch this off at any time under Social → You.",
-  privateAtSignUp: "Nobody else can see you, and you're not on the board. You can share your profile later under Social → You.",
-  shareLater: "You can share it any time under Social → You.",
+    `Other readers can see your name, your @handle, your Pip, this week's reading minutes, your streak, how many books you've finished, your shelf (the titles of up to 12 books you read lately), the book you have open, and your level and badges, and you appear on the weekly board. You can switch this off at any time under ${PROFILE_PLACE}.`,
+  privateAtSignUp: `Nobody else can see you, and you're not on the board. You can share your profile later under ${PROFILE_PLACE}.`,
+  shareLater: `You can share it any time under ${PROFILE_PLACE}.`,
   boardFailed: "Couldn't load the board.",
   boardStale: "Couldn't refresh the board, so what's below may be out of date.",
   profileLoading: "Checking your profile…",

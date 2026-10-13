@@ -1,0 +1,210 @@
+/* The friends half of the community: badges, a reader's library, posts, clubs. */
+
+/* ---- badges ---------------------------------------------------------------- */
+
+/* A medal in its tier's metal: bronze, silver, gold, emerald. */
+.badge-medal {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--medal-ink);
+  background:
+    radial-gradient(circle at 32% 26%, rgb(255 255 255 / 0.55), transparent 46%),
+    linear-gradient(150deg, var(--medal-light), var(--medal-dark));
+  box-shadow:
+    inset 0 0 0 2px rgb(255 255 255 / 0.28),
+    inset 0 -2px 3px rgb(0 0 0 / 0.22),
+    0 1px 3px rgb(0 0 0 / 0.28);
+}
+
+.badge-tier-1 {
+  --medal-light: #d9a06a;
+  --medal-dark: #96592a;
+  --medal-ink: #3f2109;
+}
+
+.badge-tier-2 {
+  --medal-light: #e4e8ee;
+  --medal-dark: #8b95a3;
+  --medal-ink: #2b323c;
+}
+
+.badge-tier-3 {
+  --medal-light: #ffe07a;
+  --medal-dark: #c58a10;
+  --medal-ink: #4a3100;
+}
+
+.badge-tier-4 {
+  --medal-light: #8fe3b0;
+  --medal-dark: #1f8a55;
+  --medal-ink: #06301c;
+}
+
+.badge-medal.is-unearned {
+  color: rgb(var(--color-on-surface-variant) / 0.7);
+  background: rgb(var(--color-surface-dim) / 0.7);
+  box-shadow: inset 0 0 0 2px rgb(var(--color-outline-variant) / 0.35);
+}
+
+.badge-wall {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 14px 8px;
+}
+
+.badge-wall li {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  text-align: center;
+}
+
+.badge-wall-name {
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: rgb(var(--color-on-surface-variant));
+  overflow-wrap: anywhere;
+}
+
+.badge-wall li.is-earned .badge-wall-name {
+  color: rgb(var(--color-on-surface));
+}
+
+.badge-wall-bar {
+  width: 70%;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgb(var(--color-surface-dim) / 0.8);
+}
+
+.badge-wall-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: rgb(var(--color-primary) / 0.75);
+}
+
+/* ---- a level, as a small chip ----------------------------------------------- */
+
+.level-chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: rgb(var(--color-on-primary-container));
+  background: rgb(var(--color-primary-container) / 0.85);
+}
+
+/* ---- stars ------------------------------------------------------------------ */
+
+.rating-stars {
+  display: inline-flex;
+  gap: 1px;
+  color: #d9a21b;
+}
+
+.rating-stars .is-off {
+  color: rgb(var(--color-outline-variant) / 0.7);
+}
+
+.rating-pick button {
+  padding: 2px;
+  border-radius: 6px;
+}
+
+.rating-pick button:focus-visible {
+  outline: 2px solid rgb(var(--color-primary));
+}
+
+/* ---- a reader's library ----------------------------------------------------- */
+
+.reader-library {
+  display: flex;
+  max-height: 22rem;
+  flex-direction: column;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.reader-library li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  border-bottom: 1px solid rgb(var(--color-outline-variant) / 0.22);
+  padding: 7px 2px;
+}
+
+.reader-library li:last-child {
+  border-bottom: 0;
+}
+
+.state-chip {
+  flex: none;
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: rgb(var(--color-on-surface-variant));
+  background: rgb(var(--color-surface-dim) / 0.7);
+}
+
+.state-chip.is-reading {
+  color: rgb(var(--color-on-primary-container));
+  background: rgb(var(--color-primary-container) / 0.8);
+}
+
+.state-chip.is-yours {
+  color: rgb(var(--color-primary));
+  background: rgb(var(--color-primary) / 0.12);
+}
+
+/* ---- progress beside a friend's name ---------------------------------------- */
+
+.friend-bar {
+  height: 4px;
+  min-width: 3rem;
+  flex: 1;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgb(var(--color-surface-dim) / 0.8);
+}
+
+.friend-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: rgb(var(--color-tertiary, var(--color-primary)) / 0.8);
+}
+
+/* ---- a quote, in a post ------------------------------------------------------ */
+
+.post-quote {
+  position: relative;
+  border-left: 3px solid rgb(var(--color-primary) / 0.55);
+  border-radius: 0 10px 10px 0;
+  padding: 8px 12px 8px 30px;
+  background: rgb(var(--color-surface-dim) / 0.45);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  color: rgb(var(--color-on-surface));
+}
+
+.post-quote-mark {
+  position: absolute;
+  top: 10px;
+  left: 9px;
+  color: rgb(var(--color-primary) / 0.7);
+}

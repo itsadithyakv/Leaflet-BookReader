@@ -1,3 +1,4 @@
+import { watchForeground } from "../services/windowService";
 import { useCallback, useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import type { Book } from "@shared/models/book";
@@ -15,7 +16,6 @@ import { Leaderboard } from "./community/Leaderboard";
 import { DuelCards } from "./community/DuelCards";
 import { Inbox } from "./community/Inbox";
 import { ReaderSearch } from "./community/ReaderSearch";
-import { ReaderCard } from "./community/ReaderCard";
 import { ProfileCard } from "./community/ProfileCard";
 
 /** Where the community sends a reader: to set up an account, dress Pip, or pick a book. */
@@ -30,8 +30,14 @@ type SocialPanelProps = {
   onNavigate: (tab: SocialNavTarget) => void;
 };
 
-/** How often the board refreshes while the Social page is on screen. */
-const LIVE_MS = 60_000;
+/**
+ * How often the board refreshes while the Social page is on screen. It
+ * counts a week's reading: five minutes is as live as it needs to be, and a
+ * fifth of what it asked of the server at one.
+ */
+const LIVE_MS = 5 * 60_000;
+/** Coming back to the window refreshes it, but not at every switch between windows. */
+const BACK_MS = 60_000;
 
 /**
  * The community, in the order a reader comes for it: who you are, the board,
@@ -69,7 +75,8 @@ export const SocialPanel = ({ configured, showToast, nowReading, onReadNow, onNa
     }))
   );
   const live = FEATURES.community && configured;
-  const canJoin = signedIn && me?.visibility === "public" && Boolean(me.handle);
+  // Shared with everyone or kept to followers: either may follow, send kudos and duel.
+  const canJoin = signedIn && Boolean(me) && me?.visibility !== "private" && Boolean(me?.handle);
 
   useEffect(() => {
     if (live) {
@@ -93,29 +100,45 @@ export const SocialPanel = ({ configured, showToast, nowReading, onReadNow, onNa
       return;
     }
     let stopped = false;
-    const refresh = async () => {
-      if (document.hidden) {
+    let inFront = true;
+    let arrivedAt = Date.now();
+    // Arriving (the page opened, or come back to): the reader's own minutes first, and their duels. On the timer after
+    // that, the board alone: the pulse keeps the reader's own numbers and their duels up to date between.
+    const refresh = async (arriving: boolean) => {
+      if (document.hidden || !inFront) {
         return;
       }
-      if (signedIn) {
+      if (signedIn && arriving) {
         await publish();
       }
       if (stopped) {
         return;
       }
       void loadBoard(scope === "following" && !signedIn ? "everyone" : scope);
-      if (signedIn) {
+      if (signedIn && arriving) {
         void loadDuels();
       }
     };
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), LIVE_MS);
-    const onVisible = () => !document.hidden && void refresh();
-    document.addEventListener("visibilitychange", onVisible);
+    void refresh(true);
+    const timer = window.setInterval(() => void refresh(false), LIVE_MS);
+    const back = () => {
+      if (document.hidden || !inFront || Date.now() - arrivedAt < BACK_MS) {
+        return;
+      }
+      arrivedAt = Date.now();
+      void refresh(true);
+    };
+    document.addEventListener("visibilitychange", back);
+    // Behind another window nobody is looking at it: nothing is asked for until it is in front again.
+    const unwatch = watchForeground((front) => {
+      inFront = front;
+      if (front) back();
+    });
     return () => {
       stopped = true;
       window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVisible);
+      unwatch();
+      document.removeEventListener("visibilitychange", back);
     };
   }, [live, scope, signedIn, loadBoard, loadDuels, publish]);
 
@@ -214,8 +237,6 @@ export const SocialPanel = ({ configured, showToast, nowReading, onReadNow, onNa
         {signedIn && <Inbox showToast={showToast} />}
         <ReaderSearch />
       </div>
-
-      <ReaderCard signedIn={signedIn} canJoin={canJoin} showToast={showToast} onChanged={refreshAll} />
     </>
   );
 };

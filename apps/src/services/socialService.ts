@@ -1,8 +1,13 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import { EMPTY_PROFILE, type SocialProfile, type SyncStatus } from "@shared/sync/types";
+import { EMPTY_PROFILE, type ArcadeBests, type ProfileVisibility, type ReadingNow, type SocialProfile, type SyncStatus } from "@shared/sync/types";
 
-/** Publishing is cheap but not free; once a minute is plenty for a weekly board. */
-const PUBLISH_EVERY_MS = 60_000;
+/**
+ * Publishing is cheap but not free: it was the server's largest writer at
+ * once a minute for everybody reading, and the board it feeds counts a
+ * week. Every five minutes is plenty. A finished session, and arriving at
+ * the board, publish at once whatever this says (`force`).
+ */
+const PUBLISH_EVERY_MS = 5 * 60_000;
 let lastPublish = 0;
 let publishing: Promise<boolean> | null = null;
 /** Why the last publish failed, or null when it went through (or had nothing to send). */
@@ -34,6 +39,9 @@ export type BoardEntry = CommunityPerson & {
   streak: number;
   booksFinished: number;
   isYou: boolean;
+  /** The book they have open, and the level their seeds have reached. Absent from older servers. */
+  reading?: ReadingNow | null;
+  level?: number | null;
 };
 
 export type CommunityBoard = {
@@ -71,10 +79,67 @@ export type Duel = {
   };
   them: DuelSide | null;
   result: "won" | "lost" | "tie" | null;
+  /** Seeds each side put on it; 0 or absent for none. The two apps settle it (pip/stakes.ts). */
+  stake?: number;
 };
 
+/**
+ * A profile kept to followers, seen by a reader it has not accepted: who
+ * they are, and whether this reader has asked.
+ */
+export type LockedProfile = CommunityPerson & {
+  visibility: "followers";
+  locked: true;
+  requested: boolean;
+  isYou?: boolean;
+  isFollowing?: boolean;
+};
+
+/**
+ * Pip's camp in the Hollow, as its reader shows it: building levels and
+ * counts, and how it is laid out. The layout is where each building stands
+ * (`spots`), each piece of fence (`walls`, 32 at most) and each thing set
+ * down (`decor`, 24 at most), in the scene's own pixels. With them come the
+ * landscape set about the camp (`land`, 30 at most, kinds 0 to 9), its
+ * defences (`works`, 12 at most, kinds 0 to 11) and the rank of the guardian
+ * at each of seven posts (`guards`, 0 for none, 3 at most), and where each
+ * guardian's signpost was carried to (`posts`, always seven, in the
+ * guardians' order: `[x, y]`, or `null` for one not moved, for the dragon
+ * and for a guardian not posted). Each part of it is absent from a camp
+ * shared by an older app, or kept by an older server, `guards` also from a
+ * camp with no guardian posted, and `posts` from one with no signpost moved.
+ */
+export type CampSummary = {
+  levels: Record<"burrow" | "oak" | "store" | "fence" | "tower" | "hut", number>;
+  yard: Array<{ kind: "workshop" | "hive" | "well" | "stall" | null; level: number }>;
+  camps: number;
+  banners: number;
+  trophies: number;
+  spots?: Partial<Record<"burrow" | "oak" | "store" | "tower" | "hut" | "yard0" | "yard1", [number, number]>>;
+  walls?: Array<[number, number]>;
+  decor?: Array<{ kind: number; x: number; y: number }>;
+  land?: Array<{ kind: number; x: number; y: number }>;
+  works?: Array<{ kind: number; x: number; y: number }>;
+  guards?: number[];
+  posts?: Array<[number, number] | null>;
+};
+
+/** A reader whose camp can be raided: you follow each other, they share a camp, and they have not switched raids off. */
+export type RaidTarget = { handle: string; name: string; camp: CampSummary; raidedToday: boolean };
+/** A raid a friend made on this reader's camp, not yet seen here. */
+export type CampRaid = { id: string; by: string; name: string; stars: number; at: string };
+
 export type ReaderProfile = CommunityPerson & {
-  visibility: "public";
+  visibility: "public" | "followers";
+  locked?: false;
+  /** Whether a request to follow is waiting (never, on a profile already read). */
+  requested?: boolean;
+  sharesLibrary?: boolean;
+  reading?: ReadingNow | null;
+  level?: number | null;
+  badges?: string[];
+  arcade?: ArcadeBests | null;
+  camp?: CampSummary | null;
   weekKey: string;
   weekMinutes: number;
   streak: number;
@@ -91,7 +156,17 @@ export type ReaderProfile = CommunityPerson & {
   activeDuel?: { id: string; status: "pending" | "accepted" | "declined"; youChallenged: boolean } | null;
 };
 
-export type InboxEventType = "follow" | "kudos" | "duel_invite" | "duel_accepted" | "duel_result";
+export type InboxEventType =
+  | "follow"
+  | "kudos"
+  | "duel_invite"
+  | "duel_accepted"
+  | "duel_result"
+  /** Someone asked to follow a profile kept to followers, or such a request was accepted. */
+  | "follow_request"
+  | "follow_accept"
+  /** A friend bought something for Pip. */
+  | "gift";
 
 export type InboxEvent = {
   id: string;
@@ -99,6 +174,8 @@ export type InboxEvent = {
   createdAt: string;
   actor: CommunityPerson;
   duel?: Duel;
+  /** On a `follow_request`: whether it still waits for an answer. */
+  pending?: boolean;
 };
 
 export type SearchResult = CommunityPerson & { weekMinutes: number; streak: number };
@@ -169,7 +246,9 @@ export const socialService = {
   async saveProfile(update: {
     handle?: string | null;
     displayName?: string | null;
-    visibility?: "private" | "public";
+    visibility?: ProfileVisibility;
+    /** Whether the readers who follow this one may see its whole library. */
+    shareLibrary?: boolean;
   }): Promise<SocialProfile> {
     if (!isTauri()) {
       return EMPTY_PROFILE;
@@ -177,7 +256,8 @@ export const socialService = {
     return call<SocialProfile>("save_social_profile", {
       handle: update.handle ?? null,
       displayName: update.displayName ?? null,
-      visibility: update.visibility ?? null
+      visibility: update.visibility ?? null,
+      shareLibrary: update.shareLibrary ?? null
     });
   },
 
@@ -259,15 +339,20 @@ export const socialService = {
     return call<CommunityBoard>("community_leaderboard", { scope });
   },
 
-  /** A reader's card. 404s (rejects) for private or unknown handles. */
-  async reader(handle: string): Promise<ReaderProfile> {
+  /**
+   * A reader's card. 404s (rejects) for private or unknown handles. A profile
+   * kept to followers answers with little more than a name until it has
+   * accepted this reader (`LockedProfile`).
+   */
+  async reader(handle: string): Promise<ReaderProfile | LockedProfile> {
     if (!isTauri()) {
       throw new Error("No shared profile with that handle.");
     }
-    return call<ReaderProfile>("community_profile", { handle });
+    return call<ReaderProfile | LockedProfile>("community_profile", { handle });
   },
 
-  async setFollowing(handle: string, follow: boolean): Promise<{ following: boolean }> {
+  /** Follows, or asks to (`requested`) where the profile is kept to followers; `follow` false unfollows or takes the request back. */
+  async setFollowing(handle: string, follow: boolean): Promise<{ following: boolean; requested?: boolean }> {
     if (!isTauri()) {
       return { following: false };
     }
@@ -282,11 +367,12 @@ export const socialService = {
     return call("community_kudos", { handle });
   },
 
-  async challenge(handle: string): Promise<Duel> {
+  /** `stake`: seeds each side puts on it, 0 for a duel for its own sake. */
+  async challenge(handle: string, stake = 0): Promise<Duel> {
     if (!isTauri()) {
       throw new Error("Duels need the desktop app.");
     }
-    return call<Duel>("community_challenge", { handle });
+    return call<Duel>("community_challenge", { handle, stake });
   },
 
   async respondToDuel(id: string, accept: boolean): Promise<Partial<Duel> & { id: string; status: Duel["status"] }> {
@@ -330,5 +416,64 @@ export const socialService = {
       return null;
     }
     return call<unknown | null>("community_visitors");
+  },
+
+  // ---- raids ----------------------------------------------------------------
+  //
+  // A raid is played here, against the camp a friend's profile shows; the
+  // server only keeps that it happened (who, whom, the stars, when) and hands
+  // it to the friend. The two lists are empty for a reader who is signed out,
+  // and from a server that has no raids yet.
+
+  /** The friends whose camp could be raided, by handle, at most 50. */
+  async raidTargets(): Promise<RaidTarget[]> {
+    if (!isTauri()) {
+      return [];
+    }
+    return (await call<{ targets: RaidTarget[] }>("community_raid_targets")).targets;
+  },
+
+  /**
+   * Tells the server a friend's camp was raided and how many stars it won
+   * (0 to 3). Once a day (UTC) for each friend; rejects with the server's
+   * reason when it is refused.
+   */
+  async reportRaid(handle: string, stars: number): Promise<void> {
+    if (!isTauri()) {
+      return;
+    }
+    await call("community_raid", { handle, stars: Math.round(stars) });
+  },
+
+  /** The raids on this reader's camp that have not been acknowledged, oldest first, at most 20. */
+  async raidsOnMe(): Promise<CampRaid[]> {
+    if (!isTauri()) {
+      return [];
+    }
+    return (await call<{ raids: CampRaid[] }>("community_raids")).raids;
+  },
+
+  /** Marks raids as seen, so they are not handed over again. Ids that are not this reader's are passed over. */
+  async ackRaids(ids: string[]): Promise<void> {
+    if (!isTauri() || ids.length === 0) {
+      return;
+    }
+    await call("community_raids_ack", { ids });
+  },
+
+  /** Whether friends may raid this reader's camp. On until it is switched off. */
+  async raidable(): Promise<boolean> {
+    if (!isTauri()) {
+      return true;
+    }
+    return call<boolean>("community_raidable");
+  },
+
+  /** Switches raids on this reader's camp on or off; rejects when it could not be saved. */
+  async setRaidable(on: boolean): Promise<void> {
+    if (!isTauri()) {
+      return;
+    }
+    await call("community_set_raidable", { on });
   }
 };

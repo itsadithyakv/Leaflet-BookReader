@@ -3,6 +3,9 @@ import { UiIcon } from "../UiIcon";
 import { copyPicture, savePicture } from "../pip/diary/picture";
 import { CARD_HEIGHT, CARD_STYLES, CARD_WIDTH, drawQuoteCard, quoteFileName } from "./quoteCard";
 import { closeQuoteCard, useShareStore } from "./shareStore";
+import { FEATURES } from "../../constants/features";
+import { useAccountStore } from "../../store/accountStore";
+import { composePost } from "../community/postStore";
 import "./share.css";
 
 const STYLE_KEY = "leaflet.share.quoteStyle";
@@ -23,6 +26,8 @@ const keptStyle = () => {
  */
 export const QuoteCardDialog = () => {
   const quote = useShareStore((state) => state.quote);
+  // Signed in, a quote can also go to the readers who follow you (or to everyone): the post dialog takes it from here.
+  const canPost = useAccountStore((state) => state.status.signedIn) && FEATURES.community;
   const [styleId, setStyleId] = useState(keptStyle);
   const [said, setSaid] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -144,6 +149,22 @@ export const QuoteCardDialog = () => {
               <span className="text-xs text-on-surface-variant" role="status">
                 {said}
               </span>
+            )}
+            {canPost && (
+              <button
+                type="button"
+                className="share-action"
+                disabled={busy}
+                title="Post it as a quote, to your followers or to everyone"
+                onClick={() => {
+                  const about = { title: quote.title, author: quote.author ?? null };
+                  const text = quote.text.replace(/\s+/g, " ").trim();
+                  closeQuoteCard();
+                  composePost(about, { kind: "quote", quote: text });
+                }}
+              >
+                Post
+              </button>
             )}
             <button
               type="button"

@@ -82,7 +82,7 @@ export const signUpWithProfile = async (steps: SignUpSteps, input: SignUpInput):
       status,
       profile: null,
       shared: false,
-      note: `Your handle wasn't saved (${reasonOf(cause)}) Pick one under Social → You.`
+      note: `Your handle wasn't saved (${reasonOf(cause)}) Pick one under Social → Board → You.`
     };
   }
 };

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { PipSprite } from "../PipSprite";
+import { friendsService } from "../../services/friendsService";
 import { useCommunityStore, type InboxItem } from "./communityStore";
 import { PipAvatar } from "./PipAvatar";
 import { at, errorText, relativeTime } from "./format";
@@ -25,7 +26,56 @@ const describe = (item: InboxItem): string => {
           : `Your duel with ${who} ended in a tie.`;
     case "passed":
       return `${who} just passed you on the Following board.`;
+    case "follow_request":
+      return `${who} asked to follow you.`;
+    case "follow_accept":
+      return `${who} accepted your request. You follow them now.`;
+    case "gift":
+      return `${who} sent Pip a gift.`;
+    // A kind of news this version does not know (a newer server's): still a line, not a blank one.
+    default:
+      return `News from ${who}.`;
   }
+};
+
+/** Accept or decline, beside a request to follow a profile kept to followers. */
+const RequestActions = ({ item, showToast }: { item: InboxItem; showToast: (message: string) => void }) => {
+  // "elsewhere": answered before this press reached the server, and which way is not known here.
+  const [answered, setAnswered] = useState<"accepted" | "declined" | "elsewhere" | null>(null);
+  const [busy, setBusy] = useState(false);
+  if (item.type !== "follow_request") {
+    return null;
+  }
+  if (answered === "accepted" || answered === "declined") {
+    return <span className="shrink-0 text-[11px] text-on-surface-variant">{answered === "accepted" ? "Accepted" : "Declined"}</span>;
+  }
+  // Answered already (from the profile card, or on another device): nothing left to press.
+  if (answered === "elsewhere" || item.pending === false) {
+    return <span className="shrink-0 text-[11px] text-on-surface-variant">Answered</span>;
+  }
+  const answer = (accept: boolean) => {
+    setBusy(true);
+    friendsService
+      .answerRequest(item.actor.handle, accept)
+      .then(() => {
+        setAnswered(accept ? "accepted" : "declined");
+        showToast(accept ? `${at(item.actor.handle)} follows you now.` : "Declined.");
+      })
+      // Already answered (from the profile card, or on another device): say so, not an error.
+      // Not "Accepted": it may have been declined, and Decline may be what was pressed just now.
+      .catch((cause) => (/no such request|not found/i.test(errorText(cause)) ? setAnswered("elsewhere") : showToast(errorText(cause))))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <span className="flex shrink-0 gap-2">
+      <button type="button" disabled={busy} className="tactile-button px-3 py-1.5 text-xs disabled:opacity-60" onClick={() => answer(false)}>
+        Decline
+      </button>
+      <button type="button" disabled={busy} className="tactile-button tactile-button-primary px-3 py-1.5 text-xs disabled:opacity-60" onClick={() => answer(true)}>
+        Accept
+      </button>
+    </span>
+  );
 };
 
 const InviteActions = ({ item, showToast }: { item: InboxItem; showToast: (message: string) => void }) => {
@@ -105,6 +155,7 @@ export const Inbox = ({ showToast }: { showToast: (message: string) => void }) =
                 <span className="block text-[11px] text-on-surface-variant">{relativeTime(item.createdAt)}</span>
               </span>
               <InviteActions item={item} showToast={showToast} />
+              <RequestActions item={item} showToast={showToast} />
             </li>
           ))}
         </ul>

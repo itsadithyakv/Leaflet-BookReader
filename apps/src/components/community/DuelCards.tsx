@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Swords, Trophy } from "lucide-react";
 import type { Duel } from "../../services/socialService";
+import { stakeText } from "./duelStakes";
 import { useCommunityStore } from "./communityStore";
 import { PipAvatar } from "./PipAvatar";
 import { at, errorText, localWeekEnd, minutesText, nameOf, timeLeftText } from "./format";
@@ -81,6 +82,11 @@ const DuelCard = ({ duel, showToast }: { duel: Duel; showToast: (message: string
           <span>{incoming ? `${at(them.handle)} challenged you.` : `Waiting for ${at(them.handle)} to accept.`}</span>
         ) : (
           <span>Ends in {timeLeftText(localWeekEnd())} · most minutes wins</span>
+        )}
+        {stakeText(duel) && (
+          <span className="rounded-full bg-surface-container-high px-2 py-0.5 font-semibold tabular-nums text-on-surface" title="Seeds each of you put on it: the winner's come back doubled">
+            {stakeText(duel)}
+          </span>
         )}
         {incoming && !duel.weekOver && (
           <span className="flex gap-2">

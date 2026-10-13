@@ -84,6 +84,8 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
   const handleId = useId();
   const handleNoteId = useId();
   const shareNoteId = useId();
+  // Ties each label to its field (the form can be on a page and in a dialog at once).
+  const fieldId = useId();
 
   // Closed half-way (the dialog's X, another page): the account is real and
   // signed in, so the app is told, with a profile that stayed private.
@@ -389,8 +391,9 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
             <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
               We'll email you a code to set a new password. Your library on this computer is not affected.
             </p>
-            <label className={labelClass}>Email</label>
+            <label htmlFor={`${fieldId}-reset-email`} className={labelClass}>Email</label>
             <input
+              id={`${fieldId}-reset-email`}
               type="email"
               autoComplete="email"
               autoCapitalize="none"
@@ -427,8 +430,9 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
               is on its way. It works for {codeSent.minutes} minutes. Not there after a minute? Check spam. (An
               account can be reset three times a year.)
             </p>
-            <label className={labelClass}>Code from the email</label>
+            <label htmlFor={`${fieldId}-reset-code`} className={labelClass}>Code from the email</label>
             <input
+              id={`${fieldId}-reset-code`}
               autoComplete="one-time-code"
               autoCapitalize="characters"
               spellCheck={false}
@@ -438,8 +442,9 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
               onChange={(event) => setCode(event.target.value.toUpperCase())}
               className={`${fieldClass} font-mono tracking-[0.2em]`}
             />
-            <label className={labelClass}>New password</label>
+            <label htmlFor={`${fieldId}-reset-password`} className={labelClass}>New password</label>
             <input
+              id={`${fieldId}-reset-password`}
               type="password"
               autoComplete="new-password"
               value={password}
@@ -498,8 +503,9 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
           }
         }}
       >
-        <label className={labelClass}>Email</label>
+        <label htmlFor={`${fieldId}-email`} className={labelClass}>Email</label>
         <input
+          id={`${fieldId}-email`}
           type="email"
           autoComplete="email"
           autoCapitalize="none"
@@ -526,8 +532,9 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
         )}
         {signingUp && (
           <>
-            <label className={labelClass}>Name (optional)</label>
+            <label htmlFor={`${fieldId}-name`} className={labelClass}>Name (optional)</label>
             <input
+              id={`${fieldId}-name`}
               autoComplete="nickname"
               maxLength={40}
               value={displayName}
@@ -539,8 +546,9 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
             <AvatarPicker value={avatar} onChange={setAvatar} disabled={busy} label="Your Pip" />
           </>
         )}
-        <label className={labelClass}>Password</label>
+        <label htmlFor={`${fieldId}-password`} className={labelClass}>Password</label>
         <input
+          id={`${fieldId}-password`}
           type="password"
           autoComplete={signingUp ? "new-password" : "current-password"}
           value={password}

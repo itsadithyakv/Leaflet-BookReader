@@ -19,13 +19,17 @@ describe("publishing the reader's minutes", () => {
     vi.restoreAllMocks();
   });
 
-  it("goes out at most once a minute, unless forced", async () => {
+  it("goes out at most once in five minutes, unless forced", async () => {
     const clock = vi.spyOn(Date, "now").mockReturnValue(NOON);
     expect(await socialService.publishStats()).toBe(true);
     clock.mockReturnValue(NOON + 30_000);
     expect(await socialService.publishStats()).toBe(false);
     expect(await socialService.publishStats({ force: true })).toBe(true);
+    // A minute and a half on, it is still too soon: it was every minute once, for everybody reading.
     clock.mockReturnValue(NOON + 95_000);
+    expect(await socialService.publishStats()).toBe(false);
+    // Five minutes from the last one that went (the forced one), it goes.
+    clock.mockReturnValue(NOON + 30_000 + 5 * 60_000 + 1000);
     expect(await socialService.publishStats()).toBe(true);
     expect(invoke).toHaveBeenCalledTimes(3);
   });
@@ -96,8 +100,11 @@ describe("calls to the server", () => {
   it("send an emptied name as empty, which removes it, and leave out what was not given", async () => {
     invoke.mockResolvedValue({});
     await socialService.saveProfile({ handle: "adi", displayName: "", visibility: "public" });
-    expect(invoke).toHaveBeenLastCalledWith("save_social_profile", { handle: "adi", displayName: "", visibility: "public" });
+    expect(invoke).toHaveBeenLastCalledWith("save_social_profile", { handle: "adi", displayName: "", visibility: "public", shareLibrary: null });
     await socialService.saveProfile({ visibility: "private" });
-    expect(invoke).toHaveBeenLastCalledWith("save_social_profile", { handle: null, displayName: null, visibility: "private" });
+    expect(invoke).toHaveBeenLastCalledWith("save_social_profile", { handle: null, displayName: null, visibility: "private", shareLibrary: null });
+    // The library's switch goes by itself, and only when it is the thing being changed.
+    await socialService.saveProfile({ handle: "adi", visibility: "followers", shareLibrary: true });
+    expect(invoke).toHaveBeenLastCalledWith("save_social_profile", { handle: "adi", displayName: null, visibility: "followers", shareLibrary: true });
   });
 });

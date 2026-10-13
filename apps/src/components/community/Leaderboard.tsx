@@ -8,6 +8,7 @@ import { COPY, streakText } from "./copy";
 import type { BoardEntry, BoardScope, CommunityBoard } from "../../services/socialService";
 import { useAccountStore } from "../../store/accountStore";
 import { useHabitStore } from "../../store/habitStore";
+import "./friends.css";
 import { useCommunityStore } from "./communityStore";
 import { CountUp } from "./CountUp";
 import { PipAvatar } from "./PipAvatar";
@@ -175,7 +176,15 @@ const Row = ({ entry, leader, delta, onOpen, rowRef, pinned }: RowProps) => {
           <span className="flex items-baseline gap-2">
             <span className="truncate text-sm font-semibold text-on-surface">{nameOf(entry)}</span>
             {entry.isYou && <span className="text-[10px] font-semibold uppercase tracking-wider text-primary">you</span>}
-            <span className="hidden truncate text-xs text-on-surface-variant sm:inline">{at(entry.handle)}</span>
+            {typeof entry.level === "number" && entry.level > 1 && (
+              <span className="level-chip" title={`Level ${entry.level}`}>
+                {entry.level}
+              </span>
+            )}
+            {/* What they have open, where they say; else the handle, as before. */}
+            <span className="hidden truncate text-xs text-on-surface-variant sm:inline">
+              {entry.reading ? `${entry.reading.title} · ${entry.reading.percent}%` : at(entry.handle)}
+            </span>
           </span>
           <span className="mt-1.5 block h-1.5 w-full overflow-hidden rounded-full bg-surface-container-highest">
             <span

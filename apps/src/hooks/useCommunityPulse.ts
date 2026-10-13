@@ -1,3 +1,4 @@
+import { watchForeground } from "../services/windowService";
 import { useEffect } from "react";
 import { FEATURES } from "../constants/features";
 import { useAccountStore } from "../store/accountStore";
@@ -8,6 +9,8 @@ import { pickBeat, type PipMoment } from "../pip/moments";
 import { selectUnread, useCommunityStore, type InboxItem } from "../components/community/communityStore";
 import { at, readJson, writeJson } from "../components/community/format";
 import type { CommunityBoard } from "../services/socialService";
+import { friendsService } from "../services/friendsService";
+import { seedService } from "../services/seedService";
 
 /**
  * The community's heartbeat, mounted once in App.
@@ -17,11 +20,18 @@ import type { CommunityBoard } from "../services/socialService";
  * notices when someone on that board has just passed the reader, and lets Pip
  * react — once per poll at most, to the most interesting thing that happened.
  * A finished session publishes straight away, and reading outside a session
- * as its minutes are credited (at most once a minute), so the board reflects
+ * as its minutes are credited (at most once in five minutes), so the board reflects
  * both when the reader goes to look. Returns the unread count for the nav badge.
  */
 
-const POLL_MS = 5 * 60_000;
+/**
+ * Ten minutes: the inbox is news of kudos and follows, which keep. It was
+ * five, for every open app whether or not anybody was looking at it; the
+ * server is small and the database is a free one.
+ */
+const POLL_MS = 10 * 60_000;
+/** Coming back to the window catches up, but not more often than this: switching between windows is not a reason to ask again. */
+const CATCH_UP_MS = POLL_MS / 2;
 const REACTED_KEY = "leaflet.community.pipReactedAt";
 
 /** What deserves Pip's one reaction, most first. */
@@ -30,7 +40,10 @@ const PRIORITY: Record<InboxItem["type"], number> = {
   duel_invite: 5,
   duel_accepted: 4,
   passed: 3,
+  gift: 3,
+  follow_request: 2,
   kudos: 2,
+  follow_accept: 1,
   follow: 1
 };
 
@@ -39,7 +52,11 @@ const momentFor = (item: InboxItem): PipMoment => {
     case "kudos":
       return "kudosReceived";
     case "follow":
+    case "follow_request":
+    case "follow_accept":
       return "newFollower";
+    case "gift":
+      return "kudosReceived";
     case "duel_invite":
       return "duelInvite";
     case "duel_accepted":
@@ -89,13 +106,17 @@ export const useCommunityPulse = () => {
     let stopped = false;
     let running = false;
     let lastRun = 0;
+    /** Leaflet is the app in front. Behind another window nothing is asked for: nobody is looking. */
+    let inFront = true;
+    /** Presents are asked for at the first pulse, and after that only when the inbox says one was sent. */
+    let giftsAsked = false;
     let snapshot: RankSnapshot | null = null;
     // Events older than this have had their moment (or predate the app);
     // a first run starts a day back so a fresh install is not a parade.
     let reactedAt = readJson<string>(REACTED_KEY, new Date(Date.now() - 86_400_000).toISOString());
 
     const tick = async () => {
-      if (stopped || running || document.hidden) {
+      if (stopped || running || document.hidden || !inFront) {
         return;
       }
       running = true;
@@ -140,6 +161,28 @@ export const useCommunityPulse = () => {
       if (candidates.some((item) => item.type.startsWith("duel_"))) {
         void store.loadDuels();
       }
+      // A present from a friend: Pip's from now, and then told to the server
+      // as unwrapped. One this build does not know (a newer app's thing) is
+      // left wrapped for a build that does. Asked for when the app starts,
+      // and after that only when the inbox says one was sent: it used to be
+      // asked at every pulse, and the answer was nearly always "none".
+      if (!giftsAsked || candidates.some((item) => item.type === "gift")) {
+        try {
+          const gifts = await friendsService.gifts();
+          giftsAsked = true;
+          for (const gift of gifts) {
+            try {
+              await seedService.receiveGift(gift.kind, gift.itemId, gift.id);
+              await friendsService.claimGift(gift.id);
+            } catch {
+              // One that would not unwrap is tried again at the next pulse.
+              giftsAsked = false;
+            }
+          }
+        } catch {
+          // No presents today, or a server from before them: asked again at the next pulse.
+        }
+      }
 
       // One reaction per poll, to the best of what is new.
       const fresh = candidates.filter((item) => item.createdAt > reactedAt);
@@ -160,7 +203,7 @@ export const useCommunityPulse = () => {
       if (state.snapshot.sessions.length === previous.snapshot.sessions.length) {
         // Reading with no session running moves the ledger too (the board
         // ranks the ledger, not sessions), and used to wait for the next
-        // five-minute pulse. Sent as it is credited, at most once a minute.
+        // pulse. Sent as it is credited, at most once in five minutes.
         if (state.snapshot.todayMinutes !== previous.snapshot.todayMinutes) {
           void useCommunityStore.getState().publish();
         }
@@ -178,16 +221,21 @@ export const useCommunityPulse = () => {
         void store.loadDuels();
       });
     });
-    // Back from another window: catch up, but not more often than every minute.
+    // Back from another window (or from being minimised): catch up, but not at every switch between windows.
     const onVisible = () => {
-      if (!document.hidden && Date.now() - lastRun > 60_000) {
+      if (!document.hidden && inFront && Date.now() - lastRun > CATCH_UP_MS) {
         void tick();
       }
     };
     document.addEventListener("visibilitychange", onVisible);
+    const unwatch = watchForeground((front) => {
+      inFront = front;
+      if (front) onVisible();
+    });
     return () => {
       stopped = true;
       unsubscribe();
+      unwatch();
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };

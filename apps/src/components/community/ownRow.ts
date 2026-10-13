@@ -111,7 +111,7 @@ export type OwnInputs = {
   /** The week this device's figures are for (see `weekKeyOf`). */
   weekKey?: string;
   /** The reader's profile as the server has it, or null when it is not known. */
-  profile: { handle: string | null; displayName: string | null; visibility: "private" | "public" } | null;
+  profile: { handle: string | null; displayName: string | null; visibility: "private" | "followers" | "public" } | null;
   account: { displayName: string | null; avatar: string | null } | null;
   /** This device's own figures (see `weekMinutesOf`). */
   weekMinutes: number;
@@ -152,7 +152,10 @@ export const ownRow = ({ signedIn, scope, board, weekKey, profile, account, week
     };
   }
 
-  const shares = profile?.visibility === "public" && Boolean(handle);
+  // A profile kept to followers is on the Following board (of the readers it
+  // accepted), never on Everyone's: there its row is this device's own.
+  const shares =
+    (profile?.visibility === "public" || (profile?.visibility === "followers" && scope === "following")) && Boolean(handle);
   const minutes = Math.max(0, weekMinutes);
   const ahead = aheadOf(entries, { weekMinutes: minutes, streak, handle });
   // The rows are another week's than these minutes. The server answers for
