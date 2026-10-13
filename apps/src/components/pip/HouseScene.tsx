@@ -11,7 +11,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode
 } from "react";
-import { itemBox, renderHouseLevel, renderItem, type HouseLevel, type HouseSlot, type LevelDecor } from "../../pip/home.js";
+import { houseGlows, itemBox, lightOn, litBy, renderHouseLevel, renderItem, type Glow, type HouseLevel, type HouseSlot, type LevelDecor } from "../../pip/home.js";
 import { LIB, SKINS, renderFrame, resolve } from "../../pip/core";
 import {
   ASK_AWAY_MS,
@@ -1259,6 +1259,10 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
   const arriving = useRef(new Map<string, number>());
   const [arrivals, setArrivals] = useState<Arrival[]>([]);
   const redraw = useRef<(() => void) | null>(null);
+  // By night: the lights the room is drawn by just now (and the room and moment they are of), and how bright Pip and
+  // her ball were last told to be (`lightThings`).
+  const roomLights = useRef<{ key: string; glows: Glow[] | null }>({ key: "", glows: null });
+  const litSeen = useRef({ pip: { lit: "" }, ball: { lit: "" } });
   // The decor as it was last drawn, to tell what arrived and what left.
   const drawn = useRef<{ level: string; placed: Map<string, string>; wallpaper: string | null; floor: string | null } | null>(null);
   const timers = useRef(new Set<number>());
@@ -1395,15 +1399,37 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       const hidden = `${[...out].sort().join(",")}|${[...unlit].sort().join(",")}|${(fixtures ?? []).map(fixtureKey).join(",")}`;
       hour = now;
       // The frames drawn so far for the room as it stands (`roomFrames`).
-      const frames = roomFramesFor(`${level.id}|${decorKey}|${hour}|${openSky ? 1 : 0}|${hidden}`);
+      const stands = `${level.id}|${decorKey}|${hour}|${openSky ? 1 : 0}|${hidden}`;
+      const frames = roomFramesFor(stands);
+      const shown = {
+        ...decor,
+        placed: out.size > 0 || unlit.size > 0 ? decor.placed.filter((entry) => !out.has(entry.slot)).map((entry) => (unlit.has(entry.slot) ? { ...entry, off: true } : entry)) : decor.placed,
+        ...(fixtures ? { fixtures } : {})
+      };
+      // By night, the lights the room is drawn by, for what is laid over its picture and is not part of it (Pip, her
+      // ball): they are as bright as the light on them (`lightThings`). Asked for again when the room changes, and a
+      // few times a second besides, for the lights that flicker.
+      const dark = level.night || isEvening(Math.floor(hour));
+      const lightsKey = dark ? `${stands}|${next >> 2}` : "";
+      if (lightsKey !== roomLights.current.key) {
+        let glows: Glow[] | null = null;
+        if (dark) {
+          try {
+            glows = houseGlows(level, next, shown, hour);
+          } catch {
+            // Art mid-edit can throw: the lights as they were.
+            glows = roomLights.current.glows;
+          }
+        }
+        const changed = JSON.stringify(glows) !== JSON.stringify(roomLights.current.glows);
+        roomLights.current = { key: lightsKey, glows };
+        // What the furnishings draw themselves (the clock, drawn curtains) is in the room's light too.
+        if (changed) furnishRef.current?.relight();
+      }
+      lightThings();
       let image = frames.get(next);
       if (!image) {
         try {
-          const shown = {
-            ...decor,
-            placed: out.size > 0 || unlit.size > 0 ? decor.placed.filter((entry) => !out.has(entry.slot)).map((entry) => (unlit.has(entry.slot) ? { ...entry, off: true } : entry)) : decor.placed,
-            ...(fixtures ? { fixtures } : {})
-          };
           // The garden's glass is left clear: the living sky (GardenSky) shows through it.
           const art = renderHouseLevel(level, next, shown, isEvening(Math.floor(hour)), hour, openSky) ?? renderGardenFloor(level.w, level.h, level.floorY, next);
           image = toCanvas(art);
@@ -1499,7 +1525,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
 
   // ---- Pip --------------------------------------------------------------------------
   // What the furnishings ask of Pip, and the furnishings for the loop to move (both set further down).
-  const furnishPip = useRef<FurnishPip>({ react: () => undefined, bed: () => undefined, asleep: () => false, wake: () => false, go: () => undefined, visit: () => undefined, fridge: () => undefined, vex: () => undefined, clock: nowMs, redraw: () => undefined });
+  const furnishPip = useRef<FurnishPip>({ react: () => undefined, bed: () => undefined, asleep: () => false, wake: () => false, go: () => undefined, visit: () => undefined, fridge: () => undefined, vex: () => undefined, clock: nowMs, redraw: () => undefined, light: () => [0, 0, 0, 0] });
   const furnishRef = useRef<ReturnType<typeof useFurnishings> | null>(null);
   // Where her phone lights the bed, while it does (the room's picture draws the light).
   const phoneGlow = useRef<{ x: number; y: number } | null>(null);
@@ -1523,10 +1549,36 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     setView({ move, loops, key, flip: st.current.facing < 0 });
   };
 
+  /**
+   * By night Pip and her ball are as bright as the light that falls on them
+   * (pip/home.js, `litBy`): dim in a dark room, lit under a lamp, by the open
+   * fridge, by her phone. They are laid over the room's picture, which the
+   * night darkens, and used to be left as bright as by day: a Pip glowing in
+   * a dark room (the owner, 2026-10-13: "Pip being bright randomly looks
+   * off"). Said to the style sheet as `--lit`, which eases from one to the
+   * next; by day there is none, and nothing is dimmed.
+   */
+  const lightThings = () => {
+    const glows = roomLights.current.glows;
+    const s = st.current;
+    const set = (node: HTMLElement | null, seen: { lit: string }, x: number, y: number) => {
+      if (!node) return;
+      const lit = glows ? String(litBy(lightOn(glows, x, y)[0])) : "";
+      if (lit === seen.lit && (lit === "" || node.style.getPropertyValue("--lit") === lit)) return;
+      seen.lit = lit;
+      if (lit) node.style.setProperty("--lit", lit);
+      else node.style.removeProperty("--lit");
+    };
+    // (Her middle, not her feet: it is her face the light is seen on.)
+    set(pipRef.current, litSeen.current.pip, s.x, s.y - 12);
+    if (s.ball) set(ballRef.current, litSeen.current.ball, s.ball.body.x, s.ball.body.y);
+  };
+
   const place = () => {
     const s = st.current;
     const node = pipRef.current;
     if (!node) return;
+    lightThings();
     const { scale: k } = live.current;
     // (A hop in a game of catch lifts her whole pixels off the floor: pip/catch.ts, `hopLift`.)
     const hop = s.phase === "catch" || s.phase === "fetch" ? s.play.hop : null;
@@ -1556,6 +1608,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     const s = st.current;
     const ball = s.ball;
     if (!node || !ball) return;
+    lightThings();
     const { scale: k, level: lv, ownBall: own } = live.current;
     const now = nowMs();
     const ratio = window.devicePixelRatio || 1;
@@ -4816,7 +4869,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     wake: () => !outRef.current && wake("morning! is that the sun?"),
     vex: (what) => vex(what),
     clock: nowMs,
-    redraw: () => redraw.current?.()
+    redraw: () => redraw.current?.(),
+    light: (x, y) => (roomLights.current.glows ? lightOn(roomLights.current.glows, x, y) : [0, 0, 0, 0])
   };
   const furnish = useFurnishings({ level, decor, scale, night: nightNow(level), decorating, roomRef, pip: furnishPip });
   furnishRef.current = furnish;

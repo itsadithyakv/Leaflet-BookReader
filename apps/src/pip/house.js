@@ -119,7 +119,11 @@ export const HOUSE_LEVELS = [
       calendar: [[18, 58], [48, 58], [33, 58]],
       wallclock: [[40, 61], [12, 61], [26, 61]],
       corkboard: [[108, 67]],
-      radio: [[63, 84], [115, 84], [169, 84]]
+      radio: [[63, 84], [115, 84], [169, 84]],
+      // The room's own light: in the middle of the ceiling, or to one side of whatever the reader hangs there.
+      ceilinglight: [[113, 0], [81, 0], [145, 0]],
+      // And its switch: on the wall by the right-hand edge of the room, past the shelf; or by the left.
+      lightswitch: [[233, 62], [0, 46]]
     },
     // What stands on the fridge, wherever the fridge is.
     onFridge: "plantpot",
@@ -1070,6 +1074,47 @@ export function renderLevel(levelId, f = 0, opts = {}) {
   if (L.glow) for (const [x, y, r, c] of L.glow) glows.push([x, y, r, rgba(c)]);
   if (opts.night ?? L.night) nightLight(g, glows);
   return g.toImageData();
+}
+
+/**
+ * The lights of a floor as `renderLevel` would pool them, without painting
+ * it: each `[x, y, reach, [r, g, b, a]]` in the floor's pixels. For whatever
+ * is laid over the room's picture and is not part of it (Pip, her ball): by
+ * night those are as bright as the light that falls on them (`lightAt`).
+ * Takes what `renderLevel` takes.
+ */
+export function levelGlows(levelId, f = 0, opts = {}) {
+  if (opts.hour != null) return withSkyHour(opts.hour, () => levelGlows(levelId, f, { ...opts, hour: null }));
+  const L = LEVEL.get(levelId) || HOUSE_LEVELS[0];
+  const glows = [];
+  for (const p of opts.placed || []) {
+    const item = ITEM.get(p.itemId || p.id);
+    if (!item || p.off || !item.glow) continue;
+    const slot = p.slot != null ? L.slots.find((s) => s.id === p.slot) : null;
+    const pos = slot ? placeAt(item, slot) : p.x != null ? { x: Math.round(p.x), y: Math.round(p.y) } : null;
+    if (!pos) continue;
+    const gl = typeof item.glow === "function" ? item.glow(f, p.data) : item.glow;
+    if (gl) for (const [x, y, r, c] of gl) glows.push([pos.x + x, pos.y + y, r, rgba(c)]);
+  }
+  if (L.glow) for (const [x, y, r, c] of L.glow) glows.push([x, y, r, rgba(c)]);
+  return glows;
+}
+
+/**
+ * The light on a place by night, as `nightLight` has it: how much, 0 (none)
+ * to 1 (at a light), which is the strongest of `glows` there; and the colour
+ * the lights add to whatever is there, `[light, red, green, blue]`.
+ */
+export function lightAt(glows, x, y) {
+  let most = 0, tr = 0, tg = 0, tb = 0;
+  for (const [gx, gy, r, col] of glows) {
+    const dist = Math.hypot(x - gx, (y - gy) * 1.1);
+    if (dist >= r) continue;
+    const k = (1 - dist / r) ** 1.4;
+    if (k > most) most = k;
+    tr += col[0] * k * 0.22; tg += col[1] * k * 0.22; tb += col[2] * k * 0.22;
+  }
+  return [most, tr, tg, tb];
 }
 
 /**

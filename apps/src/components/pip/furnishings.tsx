@@ -104,6 +104,8 @@ type Thing = {
   up: boolean;
   /** A fixture with art of its own: where that is drawn, and how big it is (the part that is chosen may be less of it: `box`). */
   at?: Box;
+  /** A thing that is another's handle (the switch on the wall, for the light on the ceiling): the key of the one whose state it works and shows. */
+  works?: string;
 };
 
 /** A fixture's name among the frames the scene keeps: which art, where, and what it shows. */
@@ -167,6 +169,8 @@ export type FurnishPip = {
   clock: () => number;
   /** The room's picture drawn again: a piece has come off it, or gone back on. */
   redraw: () => void;
+  /** The light on a place of the room by night (floor pixels): how much, and the colour the lights add (pip/home.js, `lightOn`). */
+  light: (x: number, y: number) => Light;
 };
 
 type FurnishingsOptions = {
@@ -199,22 +203,29 @@ const writeRemembered = (all: Remembered) => {
 
 // Art drawn once and kept: the curtains at each step across, a picture at each frame of the room's loop.
 const art = new Map<string, ImageData>();
-const kept = (key: string, night: boolean, draw: () => ImageData) => {
-  const id = `${key}|${night}`;
+/** The light on a place by night: how much (0 to 1), and the red, green and blue the lights add there. */
+export type Light = readonly [number, number, number, number];
+/** No light at all: the dark of an unlit room. */
+const NO_LIGHT: Light = [0, 0, 0, 0];
+/** The light on a thing, in steps: so a lamp that flickers a hair does not have its neighbours drawn again. */
+const lightStep = (light: Light): Light => [Math.round(light[0] * 16) / 16, Math.round(light[1] / 4) * 4, Math.round(light[2] / 4) * 4, Math.round(light[3] / 4) * 4];
+const kept = (key: string, night: boolean, draw: () => ImageData, light: Light = NO_LIGHT) => {
+  const lit = night ? lightStep(light) : NO_LIGHT;
+  const id = `${key}|${night}|${lit.join(",")}`;
   let image = art.get(id);
   if (!image) {
     if (art.size > 400) art.clear();
     const drawn = draw();
-    image = night ? dimForNight(drawn) : drawn;
+    image = night ? dimForNight(drawn, lit) : drawn;
     art.set(id, image);
   }
   return image;
 };
-const curtainImage = (closed: number, w: number, h: number, night: boolean) => {
+const curtainImage = (closed: number, w: number, h: number, night: boolean, light: Light) => {
   const step = Math.round(Math.max(0, Math.min(1, closed)) * CURTAIN_STEPS);
-  return kept(`curtains|${w}x${h}|${step}`, night, () => renderCurtains(step / CURTAIN_STEPS, w, h));
+  return kept(`curtains|${w}x${h}|${step}`, night, () => renderCurtains(step / CURTAIN_STEPS, w, h), light);
 };
-const pictureImage = (itemId: string, frame: number, night: boolean) => kept(`item|${itemId}|${frame}`, night, () => renderItem(itemId, frame));
+const pictureImage = (itemId: string, frame: number, night: boolean, light: Light) => kept(`item|${itemId}|${frame}`, night, () => renderItem(itemId, frame), light);
 
 const prefersReducedMotion = () => {
   try {
@@ -312,7 +323,9 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
     const still = { min: 0, max: 0 };
     const fixture = (itemId: string, box: Box, up: boolean, at?: Box) => {
       const kind = kindOf(itemId);
-      if (kind) out.push({ key: furnishKey(level.id, FIXTURE_SLOT, itemId), slot: FIXTURE_SLOT, kind, itemId, name: THING_NAMES[itemId] ?? itemId, box, span: still, up, at });
+      // (The switch on the wall is the ceiling light's: the two are one light, on or off.)
+      const works = itemId === "lightswitch" ? furnishKey(level.id, FIXTURE_SLOT, "ceilinglight") : undefined;
+      if (kind) out.push({ key: furnishKey(level.id, FIXTURE_SLOT, itemId), slot: FIXTURE_SLOT, kind, itemId, name: THING_NAMES[itemId] ?? itemId, box, span: still, up, at, works });
     };
     if (fridge) fixture("minifridge", fridge, false);
     // What is pinned to its lower door, once there is anything: chosen there, and the fridge by the rest of it.
@@ -330,14 +343,15 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
   if (remembered.current === null) remembered.current = readRemembered();
   const live = useRef(new Map<string, Live>());
   const liveOf = (thing: Thing) => {
-    let state = live.current.get(thing.key);
+    const key = thing.works ?? thing.key;
+    let state = live.current.get(key);
     if (!state) {
-      const saved: FurnishState = remembered.current?.[thing.key] ?? {};
+      const saved: FurnishState = remembered.current?.[key] ?? {};
       const hang = hangingFrom(saved);
       // The room may have changed since it was hung there: still within what is free now.
       hang.dx = withinSpan(hang.dx, thing.span);
       state = { closed: saved.closed ?? 0, target: null, was: saved.closed ?? 0, hang, dragging: false, moving: false, wasTilt: hang.tilt, fall: null, off: saved.off === true, open: false, openedAt: 0, pipAt: null, held: false, humAt: 0 };
-      live.current.set(thing.key, state);
+      live.current.set(key, state);
     }
     return state;
   };
@@ -366,7 +380,7 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
   lifted.current = new Set(things.filter((thing) => off(thing, liveOf(thing))).map((thing) => thing.slot));
   // The slots whose light is switched off, for the room's picture to draw unlit.
   const unlit = useRef(new Set<string>());
-  unlit.current = new Set(things.filter((thing) => thing.kind === "lamp" && liveOf(thing).off).map((thing) => thing.slot));
+  unlit.current = new Set(things.filter((thing) => thing.kind === "lamp" && thing.slot !== FIXTURE_SLOT && liveOf(thing).off).map((thing) => thing.slot));
   /** A thing this layer draws on a canvas of its own, not the room's picture: one whose art changes by the minute (the clock). */
   const ownArt = (thing: Thing) => thing.kind === "clock";
   // The floor's fixtures as the room's picture is to draw them: the fridge, shut (with the notes on its door) or open; the rest, each with what it shows.
@@ -378,6 +392,11 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
         return [liveOf(thing).open ? { itemId: "minifridge-open", x: thing.box.x, y: thing.box.y, ...inside } : { itemId: "minifridge", x: thing.box.x, y: thing.box.y, ...room.fridge }];
       }
       if (!thing.at || ownArt(thing)) return [];
+      // The room's own light and its switch: drawn on or off, as the light is.
+      if (thing.kind === "lamp") {
+        const dark = liveOf(thing).off;
+        return [{ itemId: thing.itemId, x: thing.at.x, y: thing.at.y, data: { off: dark }, rev: dark ? "off" : "on" }];
+      }
       const view = views[thing.itemId];
       return [{ itemId: thing.itemId, x: thing.at.x, y: thing.at.y, data: view?.data, rev: view?.rev }];
     });
@@ -405,6 +424,9 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
     const canvas = canvases.current.get(thing.key);
     const state = liveOf(thing);
     const k = latest.current.scale;
+    // By night it is in the light the room has where it is (its middle), like the wall behind it.
+    const where = thing.at ?? thing.box;
+    const light = latest.current.night ? pip.current.light(where.x + where.w / 2 + (thing.kind === "picture" ? state.hang.dx : 0), where.y + where.h / 2) : NO_LIGHT;
     if (thing.kind === "picture") {
       // Fallen, it is as far down the wall as it has got; and its button goes down with it, to be picked up by.
       const down = `translateY(${((state.fall?.y ?? 0) * k).toFixed(2)}px)`;
@@ -417,19 +439,19 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
       canvas.style.visibility = show ? "visible" : "hidden";
       if (!show) return;
       canvas.style.transform = `${slide} rotate(${hangingAngle(state.hang).toFixed(4)}rad)`;
-      canvas.getContext("2d")?.putImageData(pictureImage(thing.itemId, frame.current, latest.current.night), 0, 0);
+      canvas.getContext("2d")?.putImageData(pictureImage(thing.itemId, frame.current, latest.current.night, light), 0, 0);
       return;
     }
     if (canvas && ownArt(thing)) {
       // Drawn as the fixture's art draws it, with what it shows now; kept, so each minute's face is drawn once.
       const view = latest.current.views[thing.itemId];
-      canvas.getContext("2d")?.putImageData(kept(`own|${thing.itemId}|${view?.rev ?? ""}`, latest.current.night, () => renderItem(thing.itemId, 0, view?.data)), 0, 0);
+      canvas.getContext("2d")?.putImageData(kept(`own|${thing.itemId}|${view?.rev ?? ""}`, latest.current.night, () => renderItem(thing.itemId, 0, view?.data), light), 0, 0);
       return;
     }
     if (!canvas || thing.kind !== "curtains") return;
     const show = state.closed > 0.001;
     canvas.style.visibility = show ? "visible" : "hidden";
-    if (show) canvas.getContext("2d")?.putImageData(curtainImage(state.closed, thing.box.w, thing.box.h, latest.current.night), 0, 0);
+    if (show) canvas.getContext("2d")?.putImageData(curtainImage(state.closed, thing.box.w, thing.box.h, latest.current.night, light), 0, 0);
   };
   const shade = () => {
     const node = shadeRef.current;
@@ -458,7 +480,7 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
   }, []);
 
   const save = (thing: Thing, state: FurnishState) => {
-    remembered.current = withRemembered(remembered.current ?? {}, thing.key, thing.kind, state);
+    remembered.current = withRemembered(remembered.current ?? {}, thing.works ?? thing.key, thing.kind, state);
     writeRemembered(remembered.current);
   };
   const middle = (thing: Thing, state: Live) => thing.box.x + thing.box.w / 2 + (thing.kind === "picture" ? state.hang.dx : 0);
@@ -688,11 +710,16 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
   /** A light switched: drawn lit or unlit by the room's own picture, remembered, and Pip may have a word about it. */
   const switchLamp = (thing: Thing, state: Live) => {
     state.off = !state.off;
-    if (state.off) unlit.current.add(thing.slot);
+    if (thing.slot === FIXTURE_SLOT) {
+      // The room's own light: it and its switch are drawn again as they are now.
+      fixtures.current = fixturesNow(latest.current.things);
+    } else if (state.off) unlit.current.add(thing.slot);
     else unlit.current.delete(thing.slot);
     save(thing, { off: state.off });
     playSound("click", { pitch: state.off ? 0.85 : 1.1 });
     pip.current.redraw();
+    // What this layer draws itself (the clock, a picture off its nail, drawn curtains) is in the new light too.
+    for (const each of latest.current.things) draw(each);
     const reaction = lampReaction(state.off, new Date().getHours());
     if (reaction) pip.current.react(reaction, middle(thing, state), state.off ? "light-off" : "light-on");
     // Switched again within a few seconds of the last time: that is flicking the light at her, and it wears on her.
@@ -1039,5 +1066,9 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
     return thing ? liveOf(thing).hang.dx : 0;
   };
 
-  return { layer, step, state, lifted, unlit, fixtures, fridge, spots, pipUse, use, offsetOf };
+  /** The room's light has changed: what this layer draws itself is drawn again, in it. */
+  const relight = () => {
+    for (const thing of latest.current.things) draw(thing);
+  };
+  return { layer, step, state, lifted, unlit, fixtures, fridge, spots, pipUse, use, offsetOf, relight };
 };

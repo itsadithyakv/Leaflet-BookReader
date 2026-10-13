@@ -120,5 +120,29 @@ export const ROOM_FIXTURES = [
       if (finds[i]) drawFindMini(g, x, 3, finds[i], f);
       g.px(x + 3, 2, finds[i] ? PINS[i] : "#8C7A5A");
     }
+  }),
+  // `data`: { off }. The room's own light, on the ceiling: every bedroom has one, so there is always a light to see
+  // by after dark, whatever the reader has or has not bought. Lit, it pools over most of the room (the corners stay
+  // dim); switched off (at the switch, or by choosing the light itself) it is drawn dull and throws nothing.
+  fixture("ceilinglight", "Ceiling Light", "ceiling", 15, 8, (g, f, data) => {
+    const off = Boolean(data && data.off);
+    g.stamp((l) => {
+      l.rect(5, 0, 5, 2, "#8A5A34").rect(5, 0, 5, 1, "#B07A4A");
+      l.rect(2, 2, 11, 1, off ? "#A89A7C" : "#FFE9A0");
+      l.rect(1, 3, 13, 2, off ? "#9A8C70" : "#FFF6D0");
+      l.rect(3, 5, 9, 1, off ? "#8A7C62" : "#FFD27A");
+      l.rect(5, 6, 5, 1, off ? "#7A6E58" : "#FFC870");
+    }, "#3A2A1E");
+    if (!off) g.px(3, 3, "#FFFFFF").px(4, 3, "#FFFFFF");
+    void f;
+  }, { fits: ["ceiling"], glow: (f, data) => (data && data.off ? [] : [[7, 5, 230, "#FFE9B8"]]) }),
+  // `data`: { off }: the ceiling light's switch, on the wall. Its rocker is up and shows a green pip while the light
+  // is on, and is down when it is off.
+  fixture("lightswitch", "Light Switch", "wall", 7, 9, (g, f, data) => {
+    const off = Boolean(data && data.off);
+    g.stamp((l) => l.rect(1, 1, 5, 7, "#F2E3C2").rect(1, 1, 5, 1, "#FFF6DF").rect(1, 7, 5, 1, "#D9C7A0"), "#3A2A1E");
+    g.rect(2, off ? 4 : 2, 3, 3, "#8C7A5A").rect(2, off ? 4 : 2, 3, 1, off ? "#6E6248" : "#B8A888");
+    g.px(3, off ? 3 : 6, off ? "#6E6248" : "#3FA35E");
+    void f;
   })
 ];

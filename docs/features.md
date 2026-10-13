@@ -2690,7 +2690,10 @@ what it does, and a key that does the same.
 - **Windows without curtains**: select and Pip comes to look out. **Books**:
   select and Pip comes and reads one. **Lights**: select to switch off or on;
   off, a light is drawn unlit and casts no glow after dark (the floor lamp
-  now casts one when lit).
+  now casts one when lit). Since 2026-10-13 the bedroom has a light of its
+  own on the ceiling with a switch on the wall, and after dark Pip and her
+  ball are as bright as the light that falls on them: dim in a dark room,
+  lit under a lamp (pip.md, "The room's own light, and who it falls on").
 - **The fridge** (the Bedroom's mini fridge): select to open it, and again to
   shut it; left open it shuts itself after 8 seconds. Lit shelves, a hum while
   open, a click and thud as it shuts, and after dark its light pools on the

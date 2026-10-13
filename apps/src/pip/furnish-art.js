@@ -51,13 +51,18 @@ export function renderCurtains(closed, w = 36, h = 30) {
  * A sprite as the room's picture would show it after dark, away from any
  * lamp: the same dimming house.js gives every pixel no light reaches.
  */
-export function dimForNight(image) {
+export function dimForNight(image, light = [0, 0, 0, 0]) {
   const out = new ImageData(new Uint8ClampedArray(image.data), image.width, image.height);
   const d = out.data;
+  // As the room's own pixels are (house.js, `nightColour`): `light` is how much light is on it and the colour the
+  // lights add (pip/home.js, `lightOn`); with none it is the dark of an unlit room.
+  const [L, tr, tg, tb] = light;
+  const m = 0.34 + 0.66 * Math.min(1, L * 1.25);
   for (let i = 0; i < d.length; i += 4) {
-    d[i] = Math.round(d[i] * 0.34 * 0.78);
-    d[i + 1] = Math.round(d[i + 1] * 0.34 * 0.82);
-    d[i + 2] = Math.round(d[i + 2] * 0.34);
+    if (!d[i + 3]) continue;
+    d[i] = Math.round(d[i] * m * (0.78 + 0.22 * L) + tr);
+    d[i + 1] = Math.round(d[i + 1] * m * (0.82 + 0.18 * L) + tg);
+    d[i + 2] = Math.round(d[i + 2] * m + tb);
   }
   return out;
 }

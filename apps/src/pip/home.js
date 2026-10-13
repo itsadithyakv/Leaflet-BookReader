@@ -470,6 +470,32 @@ export const renderHouseLevel = (level, frame, decor, night, hour, openSky = fal
   return art.renderRoom(decor.wallpaper ?? "cozy", frame, placed);
 };
 
+/**
+ * The lights of a floor with its decor, as `renderHouseLevel` pools them by
+ * night (`[x, y, reach, colour]`, floor pixels); none for a floor another
+ * module draws. With `lightOn`, how bright something laid over the room is
+ * to be drawn where it stands.
+ */
+export const houseGlows = (level, frame, decor, hour) => {
+  if (level.fallback || typeof art.levelGlows !== "function") return [];
+  return art.levelGlows(level.id, frame, { placed: [...decor.placed, ...(decor.fixtures ?? levelFixtures(level, decor))], hour });
+};
+
+/**
+ * The light on a place of a floor by night, from its `houseGlows`: how much
+ * (0 to 1), and the colour the lights add there, `[light, red, green, blue]`.
+ */
+export const lightOn = (glows, x, y) => (typeof art.lightAt === "function" ? art.lightAt(glows, x, y) : [0, 0, 0, 0]);
+
+/**
+ * How bright Pip and her ball are drawn by night, from how much light is on
+ * them: a little over half as bright as by day with none (the room itself
+ * goes to a third, but she is who the room is for, and must be seen), and as
+ * by day in any light worth the name, in steps of a twentieth so it does not
+ * creep.
+ */
+export const litBy = (light) => Math.round((0.55 + 0.45 * Math.min(1, Math.max(0, light) * 2.2)) * 20) / 20;
+
 /** The anchor the art placed a slot by (see slotBox), from its box. */
 const slotAnchor = (slot) => {
   if (slot.fits === "ceiling") return { x: slot.x + slot.w / 2, y: slot.y };

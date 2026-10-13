@@ -3,7 +3,7 @@
 /** The Window's curtains, `closed` of the way across (0 tied back, 1 shut), on a clear ground. */
 export declare function renderCurtains(closed: number, w?: number, h?: number): ImageData;
 /** A sprite dimmed as the room's picture dims after dark. */
-export declare function dimForNight(image: ImageData): ImageData;
+export declare function dimForNight(image: ImageData, light?: readonly number[]): ImageData;
 
 /** The engine's painter, or the room's: the same drawing API. */
 type Paints = { rect(x: number, y: number, w: number, h: number, colour: string): unknown };

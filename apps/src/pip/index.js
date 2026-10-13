@@ -18,6 +18,8 @@ export {
   BOOKCASE_DIARY,
   placeAt,
   renderLevel,
+  levelGlows,
+  lightAt,
   renderHouseItem,
   renderSwatch
 } from "./house.js";

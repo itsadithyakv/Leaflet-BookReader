@@ -72,8 +72,21 @@
   will-change: transform;
 }
 
-.pip-house-room[data-night] .pip-house-ball > .pip-sprite {
-  filter: brightness(0.72);
+/* By night Pip and her ball are as bright as the light on them: `--lit` is
+   set by the scene (HouseScene.tsx, `lightThings`), from half (no light) to
+   one (under a lamp). A little of the colour goes with the light, as the
+   room's does. */
+.pip-house-room[data-night] .pip-house-ball > .pip-sprite,
+.pip-house-room[data-night] .pip-house-pip-button {
+  filter: brightness(var(--lit, 0.72)) saturate(calc(0.7 + 0.3 * var(--lit, 0.72)));
+  transition: filter 260ms linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pip-house-room[data-night] .pip-house-ball > .pip-sprite,
+  .pip-house-room[data-night] .pip-house-pip-button {
+    transition: none;
+  }
 }
 
 /* Pip's mood, explained (pages/pip/MoodPanel.tsx): the word and the hearts,

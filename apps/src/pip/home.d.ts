@@ -100,6 +100,11 @@ export type FixtureBox = { x: number; y: number; w: number; h: number; hit: { x:
 export declare function fixtureBoxes(level: HouseLevel, decor: Pick<LevelDecor, "placed"> | null | undefined): Record<string, FixtureBox>;
 /** The floor's fixtures as its picture draws them: the fridge, shut or open, and the rest, each with what it shows (`data`, by fixture id). */
 export declare function levelFixtures(level: HouseLevel, decor: Pick<LevelDecor, "placed"> | null | undefined, open?: boolean, data?: Record<string, unknown>): Fixture[];
+/** A light of a floor: where (floor pixels), how far it reaches, and its colour. */
+export type Glow = [x: number, y: number, reach: number, colour: number[]];
+export declare function houseGlows(level: HouseLevel, frame: number, decor: LevelDecor, hour?: number): Glow[];
+export declare function lightOn(glows: readonly Glow[], x: number, y: number): [light: number, red: number, green: number, blue: number];
+export declare function litBy(light: number): number;
 export declare function renderHouseLevel(level: HouseLevel, frame: number, decor: LevelDecor, night?: boolean, hour?: number, openSky?: boolean): ImageData | null;
 /** Where an item is drawn in a slot: its box in the floor's pixels, as the art places it. */
 export declare function itemBox(item: PipRoomItem | string, slot: HouseSlot): { x: number; y: number; w: number; h: number } | null;

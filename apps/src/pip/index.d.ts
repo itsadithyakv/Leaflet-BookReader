@@ -159,6 +159,10 @@ export declare const BOOKCASE_TAG: number;
 /** Where the diary lies on the bookcase's art, in the art's own pixels. */
 export declare const BOOKCASE_DIARY: { x: number; y: number; w: number; h: number };
 export declare function placeAt(item: PipRoomItem, slot: { fits: string; x: number; y: number }): { x: number; y: number };
+/** The lights of a floor as `renderLevel` pools them by night: each `[x, y, reach, [r, g, b, a]]`, floor pixels. */
+export declare function levelGlows(levelId: string, frame?: number, opts?: { placed?: ReadonlyArray<Record<string, unknown>>; hour?: number | null }): Array<[number, number, number, number[]]>;
+/** The light on a place by night from those: how much (0 to 1), and the red, green and blue the lights add. */
+export declare function lightAt(glows: ReadonlyArray<readonly [number, number, number, number[]]>, x: number, y: number): [number, number, number, number];
 export declare function renderLevel(
   levelId: string,
   frame: number,

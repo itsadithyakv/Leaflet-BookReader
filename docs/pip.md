@@ -77,6 +77,29 @@ Pip side.
   single room from room.js if the house art is missing. The scene loops a few
   seconds of animation from the current hour's sky (`skyFrame`), so windows
   show the real time of day, and dims in the evening so lamps glow.
+- **The room's own light, and who it falls on** (since 2026-10-13, the
+  owner's asking: "Add light sources, maybe a toggle switch. Pip being bright
+  randomly looks off"). Every bedroom has a ceiling light and a switch on the
+  wall (`pip/house-fixtures.js`: `ceilinglight`, `lightswitch`; fixtures,
+  like the fridge: in no shop, slot or saved layout). They are one light:
+  either switches it, it is on in a new room, and off or on is remembered on
+  this device. It pools over most of the room (reach 230 floor pixels) and
+  moves to one side of whatever the reader hangs in the middle of the
+  ceiling. Pip answers it as she does any lamp, and flicking it at her wears
+  on her temper as before.
+  What is laid over the room's picture is now lit by the room's lights too.
+  By night Pip and her ball used to be drawn as bright as by day in a dark
+  room. Now the scene asks for the floor's lights (`houseGlows`, the same
+  list the night picture is pooled from), and each is as bright as the light
+  where it stands (`lightOn`, `litBy`: 0.55 with none, 1 from a light of
+  0.45 up, in steps of a twentieth), said to the style sheet as `--lit` and
+  eased over a quarter of a second. So she is dim in a dark room and lit
+  under the lamp, by the open fridge, or by her phone in bed. The clock, a
+  picture off its nail and drawn curtains, which the furnishings layer draws
+  itself, are darkened by the same rule as the wall behind them
+  (`dimForNight` with the light on them) and drawn again when a light is
+  switched. A frame of the lit room costs about 10 ms to paint the first
+  time (3 ms dark, 2 by day) and is kept after that.
 - **Pip in the house** (`components/pip/HouseScene.tsx`) strolls, fills free
   moments with its signature move or a hobby, can be dragged and dropped (it
   falls back to the floor), walks with the arrow keys when focused, and is

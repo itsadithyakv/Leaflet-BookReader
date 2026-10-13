@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as pip from "./index";
-import { fixtureBoxes, houseItems, houseLevels, levelDecor, levelFixtures, registerHouseArt, withLevelDecor, type HouseLevel } from "./home.js";
+import { fixtureBoxes, houseGlows, houseItems, houseLevels, levelDecor, levelFixtures, lightOn, litBy, registerHouseArt, withLevelDecor, type HouseLevel } from "./home.js";
+import { dimForNight } from "./furnish-art.js";
 import { catalogue } from "./shop";
 import { KINDS, MIN_TARGET, THING_NAMES, TOUCH_TARGET, kindOf, opensCard, pressAreas, type FurnishKind, type PressArea } from "./furnish";
 import { PLANT, plantLines, plantNow, plantOf, plantReport, plantWants, type FreeDay } from "./houseplant";
@@ -34,7 +35,7 @@ const inHerVoice = (lines: readonly string[]) => {
   }
 };
 
-const ROOM = ["bookcase", "calendar", "wallclock", "corkboard", "radio", "plantpot"];
+const ROOM = ["bookcase", "calendar", "wallclock", "corkboard", "radio", "plantpot", "ceilinglight", "lightswitch"];
 
 describe("the room's own things", () => {
   it("are every reader's: fixtures of the bedroom, in no shop, catalogue, slot or saved layout", () => {
@@ -533,5 +534,86 @@ describe("her diary", () => {
     expect(both.count("#FFF6DF")).toBeGreaterThan(40);
     // A number too long for the room beside the diary is said short.
     expect(drawn("bookcase", { shelves: [], count: 1200, diary: { today: false } }).count("#7A4BB0")).toBe(blank.count("#7A4BB0"));
+  });
+});
+
+describe("the room's own light", () => {
+  const room = () => houseLevels().find((entry) => entry.id === "bedroom") as HouseLevel;
+  const lights = (off: boolean) => {
+    const level = room();
+    const decor = levelDecor({}, level);
+    const fixtures = levelFixtures(level, decor).map((entry) => (entry.itemId === "ceilinglight" || entry.itemId === "lightswitch" ? { ...entry, data: { off } } : entry));
+    return houseGlows(level, 0, { ...decor, fixtures }, 21);
+  };
+
+  it("is in every bedroom, with a switch on the wall, and both are the one light", () => {
+    const boxes = fixtureBoxes(room(), levelDecor({}, room()));
+    // In the middle of the ceiling of a new room; its switch by the right-hand edge.
+    expect(boxes.ceilinglight.hit).toEqual({ x: 113, y: 0, w: 15, h: 8 });
+    expect(boxes.lightswitch.hit).toEqual({ x: 233, y: 62, w: 7, h: 9 });
+    expect(kindOf("ceilinglight")).toBe("lamp");
+    expect(kindOf("lightswitch")).toBe("lamp");
+    expect(KINDS.lamp.remembers).toEqual(["off"]);
+    // Something hung in the middle of the ceiling: the light is to one side of it.
+    const hung = fixtureBoxes(room(), levelDecor({ "bedroom/ceiling-2": "chandelier" }, room()));
+    expect(hung.ceilinglight.x).not.toBe(113);
+  });
+
+  it("lights most of the room when it is on, and nothing when it is off", () => {
+    const on = lights(false);
+    const off = lights(true);
+    expect(on.length).toBe(off.length + 1);
+    // Under it, the middle of the floor, and a far corner: less and less, but some everywhere.
+    const under = lightOn(on, 120, 20)[0];
+    const floor = lightOn(on, 120, 105)[0];
+    const corner = lightOn(on, 4, 110)[0];
+    expect(under).toBeGreaterThan(0.85);
+    expect(floor).toBeGreaterThan(0.35);
+    expect(floor).toBeLessThan(under);
+    expect(corner).toBeGreaterThan(0.05);
+    expect(corner).toBeLessThan(floor);
+    // Warm: more red than blue is added.
+    const [, red, , blue] = lightOn(on, 120, 60);
+    expect(red).toBeGreaterThan(blue);
+    expect(lightOn(off, 120, 105)).toEqual([0, 0, 0, 0]);
+    // Drawn dull, and its switch down, when it is off.
+    expect(drawn("ceilinglight", { off: false }).count("#FFF6D0")).toBeGreaterThan(0);
+    expect(drawn("ceilinglight", { off: true }).count("#FFF6D0")).toBe(0);
+    expect(drawn("lightswitch", { off: false }).count("#3FA35E")).toBe(1);
+    expect(drawn("lightswitch", { off: true }).count("#3FA35E")).toBe(0);
+  });
+
+  it("is what Pip is seen by after dark: dim with none, as by day in any light worth the name", () => {
+    expect(litBy(0)).toBe(0.55);
+    expect(litBy(1)).toBe(1);
+    // Where she stands under the room's light she is all but as bright as by day; in the dark, a little over half.
+    expect(litBy(lightOn(lights(false), 120, 93)[0])).toBeGreaterThanOrEqual(0.9);
+    expect(litBy(lightOn(lights(true), 120, 93)[0])).toBe(0.55);
+    // Never brighter than by day, never less than seen, and in steps (it does not creep).
+    for (let light = -0.2; light <= 1.2; light += 0.013) {
+      const lit = litBy(light);
+      expect(lit).toBeGreaterThanOrEqual(0.55);
+      expect(lit).toBeLessThanOrEqual(1);
+      expect(Math.abs(lit * 20 - Math.round(lit * 20))).toBeLessThan(1e-9);
+    }
+  });
+
+  it("falls on what is laid over the room as it does on the wall behind it", () => {
+    // (No canvas here: a picture is its numbers and its size, which is all that is asked of one.)
+    class Picture {
+      constructor(public data: Uint8ClampedArray, public width: number, public height: number) {}
+    }
+    const had = (globalThis as { ImageData?: unknown }).ImageData;
+    (globalThis as { ImageData?: unknown }).ImageData = had ?? Picture;
+    const image = new Picture(new Uint8ClampedArray([200, 200, 200, 255, 0, 0, 0, 0]), 2, 1) as unknown as ImageData;
+    const dark = dimForNight(image);
+    expect([...dark.data.slice(0, 4)]).toEqual([53, 56, 68, 255]);
+    const lit = dimForNight(image, [1, 20, 18, 12]);
+    expect([...lit.data.slice(0, 4)]).toEqual([220, 218, 212, 255]);
+    // Nothing is added where there is nothing.
+    expect([...lit.data.slice(4, 8)]).toEqual([0, 0, 0, 0]);
+    // And the picture handed in is left as it was.
+    expect([...image.data.slice(0, 4)]).toEqual([200, 200, 200, 255]);
+    if (!had) delete (globalThis as { ImageData?: unknown }).ImageData;
   });
 });

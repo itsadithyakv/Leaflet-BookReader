@@ -288,6 +288,17 @@ holds:**
     a lost window each dropping the ball where it was, a flick off the
     wall. Not seen: a bonk or a miss of hers (tests only), the making
     up by a rolled ball, reduced motion, a finger. Tests: 3,042 app.
+    **A light of the room's own, and Pip lit by it** (pip.md has the
+    rule): a ceiling light and a wall switch in every bedroom, on in a
+    new room and remembered; and after dark Pip, her ball, the clock
+    and whatever else is laid over the room's picture are as bright as
+    the light on them, where they used to be as bright as by day in a
+    dark room. Seen in the preview after dark: on and off from the
+    switch, Pip at 0.55 in the dark and 0.95 to 1 under the light, the
+    clock following, the state kept over a reload. Not seen: the
+    always-dark floors (the arcade, where she is now dim away from
+    its lights), a lamp of the shop's beside it, daytime (nothing
+    should change by day). Tests: 3,046 app.
   - Not checked: any of it in the installed app; the Hollow played by a
     person over days (its numbers are from two simulations kept beside it);
     the arcade's games and the raids by hand (the preview's pane was in the

@@ -206,6 +206,8 @@ export const THING_NAMES: Readonly<Record<string, string>> = {
   plantpot: "Houseplant",
   radio: "Radio",
   corkboard: "Album board",
+  ceilinglight: "Ceiling light",
+  lightswitch: "Light switch",
   diary: "Pip's diary"
 };
 
@@ -378,6 +380,9 @@ const KIND_OF: Record<string, FurnishKind> = {
   plantpot: "plant",
   radio: "radio",
   corkboard: "album",
+  // The room's own light and the switch on the wall that works it: one light, switched from either (house-fixtures.js).
+  ceilinglight: "lamp",
+  lightswitch: "lamp",
   diary: "diary",
   // Things that answer a tap, and have Pip come over (`VISITS`, below, says what each one does).
   // The bedroom's own: (the armchair is not one of these: she sits in it of her own accord.)
