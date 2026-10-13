@@ -316,7 +316,14 @@ const NEW_ITEMS = [
     }), "#1B2230");
     const s = f % 16;
     if (s < 4) g.px(5 + s * 3, 11 + (s % 2) * 6, "#FFFFFF");
-  }, { glow: (f) => [[11, 15, 44, ["#FF4DB8", "#7FE0FF", "#FFE36B", "#9CE07A"][Math.floor(f / 12) % 4]]] }),
+  }, {
+    // Bright round the ball itself, and a fainter wash of the same colour down to the floor: it is the room that
+    // turns pink and blue under a disco ball, and whoever is dancing in it.
+    glow: (f) => {
+      const colour = ["#FF4DB8", "#7FE0FF", "#FFE36B", "#9CE07A"][Math.floor(f / 12) % 4];
+      return [[11, 15, 44, colour], [11, 15, 140, colour]];
+    }
+  }),
   it("paperlantern", "Paper Lantern", "ceiling", ["ceiling"], "any", 120, 18, 30, (g, f) => {
     const sw = Math.round(Math.sin(f * 0.08));
     g.line(9, 0, 9 + sw, 9, "#3A2A1E");

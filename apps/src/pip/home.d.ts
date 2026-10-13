@@ -105,6 +105,10 @@ export type Glow = [x: number, y: number, reach: number, colour: number[]];
 export declare function houseGlows(level: HouseLevel, frame: number, decor: LevelDecor, hour?: number): Glow[];
 export declare function lightOn(glows: readonly Glow[], x: number, y: number): [light: number, red: number, green: number, blue: number];
 export declare function litBy(light: number): number;
+export declare const COLOUR_SHOWS: number;
+export declare const WHITE_SHOWS: number;
+export declare const LIT_BY_DAY: string;
+export declare function litMatrix(light: readonly number[]): string;
 export declare function renderHouseLevel(level: HouseLevel, frame: number, decor: LevelDecor, night?: boolean, hour?: number, openSky?: boolean): ImageData | null;
 /** Where an item is drawn in a slot: its box in the floor's pixels, as the art places it. */
 export declare function itemBox(item: PipRoomItem | string, slot: HouseSlot): { x: number; y: number; w: number; h: number } | null;

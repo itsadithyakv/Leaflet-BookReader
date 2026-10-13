@@ -92,9 +92,16 @@ Pip side.
   room. Now the scene asks for the floor's lights (`houseGlows`, the same
   list the night picture is pooled from), and each is as bright as the light
   where it stands (`lightOn`, `litBy`: 0.55 with none, 1 from a light of
-  0.45 up, in steps of a twentieth), said to the style sheet as `--lit` and
-  eased over a quarter of a second. So she is dim in a dark room and lit
-  under the lamp, by the open fridge, or by her phone in bed. The clock, a
+  0.45 up, in steps of a twentieth). So she is dim in a dark room and lit
+  under the lamp, by the open fridge, or by her phone in bed. She takes the
+  light's colour as well (`litMatrix`): each has an SVG colour filter in the
+  room whose twenty numbers the scene sets (`lightThings`). A light that is
+  all colour shows on her up to seven times as strongly as on the wall
+  (`COLOUR_SHOWS`), a white one hardly at all (`WHITE_SHOWS`), so a warm
+  lamp only warms her and she is not washed out. The Disco Ball now throws a
+  fainter wash of its colour down to the floor (reach 140 beside its old
+  44), so in the arcade the room and Pip turn pink, blue, yellow and green
+  with it, a second each. The clock, a
   picture off its nail and drawn curtains, which the furnishings layer draws
   itself, are darkened by the same rule as the wall behind them
   (`dimForNight` with the light on them) and drawn again when a light is

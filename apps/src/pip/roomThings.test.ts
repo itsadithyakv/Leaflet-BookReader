@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as pip from "./index";
-import { fixtureBoxes, houseGlows, houseItems, houseLevels, levelDecor, levelFixtures, lightOn, litBy, registerHouseArt, withLevelDecor, type HouseLevel } from "./home.js";
+import { fixtureBoxes, LIT_BY_DAY, houseGlows, houseItems, houseLevels, levelDecor, levelFixtures, lightOn, litBy, litMatrix, registerHouseArt, withLevelDecor, type HouseLevel } from "./home.js";
 import { dimForNight } from "./furnish-art.js";
 import { catalogue } from "./shop";
 import { KINDS, MIN_TARGET, THING_NAMES, TOUCH_TARGET, kindOf, opensCard, pressAreas, type FurnishKind, type PressArea } from "./furnish";
@@ -596,6 +596,57 @@ describe("the room's own light", () => {
       expect(lit).toBeLessThanOrEqual(1);
       expect(Math.abs(lit * 20 - Math.round(lit * 20))).toBeLessThan(1e-9);
     }
+  });
+
+  /** What a colour matrix adds to red, green and blue, and how bright it leaves a grey. */
+  const read = (matrix: string) => {
+    const n = matrix.split(" ").map(Number);
+    expect(n.length).toBe(20);
+    return { add: [n[4], n[9], n[14]], bright: n[0] + n[1] + n[2], alpha: n.slice(15) };
+  };
+
+  it("colours her as well as lighting her: a warm lamp warms her a little, and nothing is added in the dark", () => {
+    expect(read(LIT_BY_DAY)).toEqual({ add: [0, 0, 0], bright: 1, alpha: [0, 0, 0, 1, 0] });
+    const none = read(litMatrix([0, 0, 0, 0]));
+    expect(none.add).toEqual([0, 0, 0]);
+    expect(none.bright).toBeCloseTo(0.55, 2);
+    // Under the room's own light: as bright as by day, a touch warmer, and not washed out.
+    const lamp = read(litMatrix(lightOn(lights(false), 120, 93)));
+    expect(lamp.bright).toBeGreaterThan(0.9);
+    expect(lamp.add[0]).toBeGreaterThan(lamp.add[2]);
+    expect(Math.max(...lamp.add)).toBeLessThan(0.16);
+    // Whatever the light, she is never made see-through or more than herself.
+    for (const light of [[0, 0, 0, 0], [0.3, 12, 3, 9], [1, 56, 51, 40], [1, 200, 0, 200]]) {
+      const lit = read(litMatrix(light));
+      expect(lit.alpha).toEqual([0, 0, 0, 1, 0]);
+      expect(lit.bright).toBeLessThanOrEqual(1 + 1e-9);
+      for (const add of lit.add) expect(add).toBeLessThanOrEqual(96 / 255 + 1e-9);
+    }
+  });
+
+  it("is the disco ball's too, in the arcade: its colour comes down to the floor and turns on her as it turns", () => {
+    const arcade = houseLevels().find((entry) => entry.id === "arcade") as HouseLevel;
+    const decor = levelDecor({ "arcade/ceiling-1": "discoball" }, arcade);
+    const bare = levelDecor({}, arcade);
+    const where = [120, arcade.walkY - 12] as const;
+    const at = (frame: number, with_ = decor) => lightOn(houseGlows(arcade, frame, with_, 21), ...where);
+    // Without the ball no light of that kind reaches her where she stands; with it, some does.
+    expect(at(0)[0]).toBeGreaterThan(at(0, bare)[0] + 0.1);
+    // Pink, then blue, then yellow, then green: a second each (12 frames of the room's 48).
+    const pink = read(litMatrix(at(0))).add;
+    const blue = read(litMatrix(at(12))).add;
+    const yellow = read(litMatrix(at(24))).add;
+    const green = read(litMatrix(at(36))).add;
+    expect(pink[0]).toBeGreaterThan(pink[1] + 0.1);
+    expect(pink[2]).toBeGreaterThan(pink[1] + 0.05);
+    expect(blue[2]).toBeGreaterThan(blue[0] + 0.05);
+    expect(yellow[0]).toBeGreaterThan(yellow[2] + 0.08);
+    expect(yellow[1]).toBeGreaterThan(yellow[2] + 0.05);
+    expect(green[1]).toBeGreaterThan(green[0]);
+    expect(green[1]).toBeGreaterThan(green[2]);
+    // And it is plainer on her than the lamp's warmth is.
+    const lamp = read(litMatrix(lightOn(lights(false), 120, 93))).add;
+    expect(pink[0] - pink[1]).toBeGreaterThan((lamp[0] - lamp[2]) * 1.5);
   });
 
   it("falls on what is laid over the room as it does on the wall behind it", () => {

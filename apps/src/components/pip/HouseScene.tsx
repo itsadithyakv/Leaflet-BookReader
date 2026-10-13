@@ -1,6 +1,7 @@
 import {
   forwardRef,
   useEffect,
+  useId,
   useImperativeHandle,
   useLayoutEffect,
   useMemo,
@@ -11,7 +12,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode
 } from "react";
-import { houseGlows, itemBox, lightOn, litBy, renderHouseLevel, renderItem, type Glow, type HouseLevel, type HouseSlot, type LevelDecor } from "../../pip/home.js";
+import { LIT_BY_DAY, houseGlows, itemBox, lightOn, litMatrix, renderHouseLevel, renderItem, type Glow, type HouseLevel, type HouseSlot, type LevelDecor } from "../../pip/home.js";
 import { LIB, SKINS, renderFrame, resolve } from "../../pip/core";
 import {
   ASK_AWAY_MS,
@@ -1263,6 +1264,11 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
   // her ball were last told to be (`lightThings`).
   const roomLights = useRef<{ key: string; glows: Glow[] | null }>({ key: "", glows: null });
   const litSeen = useRef({ pip: { lit: "" }, ball: { lit: "" } });
+  // The two colour filters that light is put on them by (an SVG filter each, in the room), and the button that is Pip.
+  const litId = `pip-lit-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
+  const pipLitRef = useRef<SVGFEColorMatrixElement | null>(null);
+  const ballLitRef = useRef<SVGFEColorMatrixElement | null>(null);
+  const pipButtonRef = useRef<HTMLButtonElement | null>(null);
   // The decor as it was last drawn, to tell what arrived and what left.
   const drawn = useRef<{ level: string; placed: Map<string, string>; wallpaper: string | null; floor: string | null } | null>(null);
   const timers = useRef(new Set<number>());
@@ -1550,28 +1556,30 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
   };
 
   /**
-   * By night Pip and her ball are as bright as the light that falls on them
-   * (pip/home.js, `litBy`): dim in a dark room, lit under a lamp, by the open
-   * fridge, by her phone. They are laid over the room's picture, which the
-   * night darkens, and used to be left as bright as by day: a Pip glowing in
-   * a dark room (the owner, 2026-10-13: "Pip being bright randomly looks
-   * off"). Said to the style sheet as `--lit`, which eases from one to the
-   * next; by day there is none, and nothing is dimmed.
+   * By night Pip and her ball are in the light that falls on them (pip/home.js,
+   * `litMatrix`): dim in a dark room, lit under a lamp, by the open fridge,
+   * by her phone, and the colour of a coloured light (pink, then blue, under
+   * the disco ball). They are laid over the room's picture, which the night
+   * darkens, and used to be left as bright as by day: a Pip glowing in a
+   * dark room (the owner, 2026-10-13: "Pip being bright randomly looks
+   * off"). Each has a colour filter of its own in the room, whose numbers
+   * are set here when they change; by day there is none.
    */
   const lightThings = () => {
     const glows = roomLights.current.glows;
     const s = st.current;
-    const set = (node: HTMLElement | null, seen: { lit: string }, x: number, y: number) => {
-      if (!node) return;
-      const lit = glows ? String(litBy(lightOn(glows, x, y)[0])) : "";
-      if (lit === seen.lit && (lit === "" || node.style.getPropertyValue("--lit") === lit)) return;
+    const set = (node: HTMLElement | null, filter: SVGFEColorMatrixElement | null, which: "pip" | "ball", seen: { lit: string }, x: number, y: number) => {
+      if (!node || !filter) return;
+      const lit = glows ? litMatrix(lightOn(glows, x, y)) : "";
+      const wanted = lit ? `url(#${litId}-${which})` : "";
+      if (node.style.filter !== wanted) node.style.filter = wanted;
+      if (lit === seen.lit && (lit === "" || filter.getAttribute("values") === lit)) return;
       seen.lit = lit;
-      if (lit) node.style.setProperty("--lit", lit);
-      else node.style.removeProperty("--lit");
+      filter.setAttribute("values", lit || LIT_BY_DAY);
     };
     // (Her middle, not her feet: it is her face the light is seen on.)
-    set(pipRef.current, litSeen.current.pip, s.x, s.y - 12);
-    if (s.ball) set(ballRef.current, litSeen.current.ball, s.ball.body.x, s.ball.body.y);
+    set(pipButtonRef.current, pipLitRef.current, "pip", litSeen.current.pip, s.x, s.y - 12);
+    if (s.ball) set(ballArtRef.current, ballLitRef.current, "ball", litSeen.current.ball, s.ball.body.x, s.ball.body.y);
   };
 
   const place = () => {
@@ -5070,11 +5078,21 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
           </button>
         )}
 
+        {/* The light on Pip and on her ball by night: a colour filter each, set by `lightThings`. (With room round it: what she holds up is hers too.) */}
+        <svg className="pip-house-lit" width="0" height="0" aria-hidden="true" focusable="false">
+          <filter id={`${litId}-pip`} x="-60%" y="-120%" width="220%" height="260%" colorInterpolationFilters="sRGB">
+            <feColorMatrix ref={pipLitRef} type="matrix" values={LIT_BY_DAY} />
+          </filter>
+          <filter id={`${litId}-ball`} x="-20%" y="-20%" width="140%" height="140%" colorInterpolationFilters="sRGB">
+            <feColorMatrix ref={ballLitRef} type="matrix" values={LIT_BY_DAY} />
+          </filter>
+        </svg>
         {!hidePip && !out && (
           <div ref={pipRef} className="pip-house-pip" style={{ width: pipSize, height: pipSize }}>
             <div ref={spinRef} className="pip-house-pip-spin">
               <div ref={turnRef} className="pip-house-pip-turn">
               <button
+                ref={pipButtonRef}
                 type="button"
                 className="pip-house-pip-button"
                 style={{ width: pipSize, height: pipSize, transform: view.flip ? "scaleX(-1)" : undefined }}

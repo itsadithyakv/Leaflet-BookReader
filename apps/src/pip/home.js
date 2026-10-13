@@ -496,6 +496,47 @@ export const lightOn = (glows, x, y) => (typeof art.lightAt === "function" ? art
  */
 export const litBy = (light) => Math.round((0.55 + 0.45 * Math.min(1, Math.max(0, light) * 2.2)) * 20) / 20;
 
+/**
+ * How much more of a light's colour shows on Pip than on the wall behind her
+ * (she is small, and a wash that tints a wall is lost on her): by one and
+ * this much again for a light that is all colour, and not at all for a white
+ * one. So the pink of a disco ball is plain on her, and a warm lamp only
+ * warms her.
+ */
+export const COLOUR_SHOWS = 6;
+/** And how much of what a light adds that is no colour at all (the white in it) shows on her: she is already as bright as by day under it. */
+export const WHITE_SHOWS = 0.4;
+
+/** By day: everything as it is drawn. */
+export const LIT_BY_DAY = "1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0";
+
+/**
+ * Pip (or her ball) by night in the light on her (`lightOn`), as the twenty
+ * numbers of a colour matrix (an SVG `feColorMatrix`): as bright as `litBy`
+ * says, a little of her colour gone with the light as the room's is, and
+ * the colour of the lights added. A white or a warm light adds little (she
+ * is not washed out under the ceiling light); a coloured one shows plainly
+ * (`COLOUR_SHOWS`), so under a disco ball she turns with it.
+ */
+export const litMatrix = (light) => {
+  const [amount, red, green, blue] = light;
+  const b = litBy(amount);
+  const s = 0.7 + 0.3 * b;
+  // What the lights add: the grey of it as it is, the colour of it made more of; in steps, like the rest.
+  const grey = Math.min(red, green, blue);
+  const most = Math.max(red, green, blue);
+  const shows = 1 + (most > 0 ? (most - grey) / most : 0) * COLOUR_SHOWS;
+  const add = (c) => Math.round(Math.min(96, grey * WHITE_SHOWS + (c - grey) * shows) / 4) / 63.75;
+  const n = (v) => String(Math.round(v * 1000) / 1000);
+  const [lr, lg, lb] = [0.213, 0.715, 0.072];
+  return [
+    b * (lr + (1 - lr) * s), b * (lg - lg * s), b * (lb - lb * s), 0, add(red),
+    b * (lr - lr * s), b * (lg + (1 - lg) * s), b * (lb - lb * s), 0, add(green),
+    b * (lr - lr * s), b * (lg - lg * s), b * (lb + (1 - lb) * s), 0, add(blue),
+    0, 0, 0, 1, 0
+  ].map(n).join(" ");
+};
+
 /** The anchor the art placed a slot by (see slotBox), from its box. */
 const slotAnchor = (slot) => {
   if (slot.fits === "ceiling") return { x: slot.x + slot.w / 2, y: slot.y };

@@ -299,6 +299,17 @@ holds:**
     always-dark floors (the arcade, where she is now dim away from
     its lights), a lamp of the shop's beside it, daytime (nothing
     should change by day). Tests: 3,046 app.
+    **After the 1.4.0 package was built, and so not in it** (the owner
+    asked whether the disco ball's lights fall on Pip in the arcade;
+    they did not): she takes the colour of the light on her as well as
+    its strength (an SVG colour filter each for her and her ball,
+    `litMatrix` in `pip/home.js`), and the Disco Ball's colour reaches
+    the floor. Seen in the preview: Pip under the bedroom's light
+    through the new filter; the arcade with a disco ball painted at
+    each of its four colours, with a green stand-in under each
+    matrix, not Pip herself in the arcade (the preview cannot buy the
+    floor or the ball). Tests: 3,048 app. **The package must be built
+    again to have it.**
   - Not checked: any of it in the installed app; the Hollow played by a
     person over days (its numbers are from two simulations kept beside it);
     the arcade's games and the raids by hand (the preview's pane was in the
