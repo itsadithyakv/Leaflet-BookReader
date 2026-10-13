@@ -13,6 +13,8 @@ import {
 import { fixtureBoxes, fridgeBox, houseItems, itemBox, renderItem, type Fixture, type HouseLevel, type LevelDecor } from "../../pip/home.js";
 import { BOOKCASE_DIARY, FRIDGE_DOOR } from "../../pip";
 import {
+  FRIDGE_HOW_BARE,
+  FRIDGE_HOW_STOCKED,
   FRIDGE_HOW_WITH_NOTES,
   FRIDGE_HUM_S,
   FURNISH_STORE,
@@ -21,12 +23,19 @@ import {
   THING_NAMES,
   TOUCH_TARGET,
   crookedReaction,
-  curtainPull,
   curtainReaction,
   curtainSettle,
   curtainStep,
   curtainToggle,
+  curtainLetGo,
+  curtainTug,
+  comesDown,
+  fallStart,
+  fallStep,
+  fallenReaction,
+  type Fall,
   freeSpan,
+  fridgeHolds,
   fridgeShutsAt,
   furnishKey,
   hangStep,
@@ -44,6 +53,8 @@ import {
   roomShade,
   slideTo,
   straighten,
+  visitOf,
+  visitOffer,
   withRemembered,
   withinSpan,
   type FurnishKind,
@@ -57,7 +68,8 @@ import type { Spot } from "../../pip/behaviour";
 import { holdStart, type Sample } from "../../pip/play";
 import { dimForNight, renderCurtains } from "../../pip/furnish-art.js";
 import { subscribeTick } from "../../pip/ticker";
-import { playSound } from "../../pip/sound";
+import { playSound, type PipSound } from "../../pip/sound";
+import { burst, puff } from "./fx";
 import { floorPoint } from "./layout";
 import { RoomCard } from "./RoomCard";
 import { useRoomThings } from "./roomThings";
@@ -72,6 +84,8 @@ const CURTAIN_STEPS = 18;
 const ROOM_LOOP = 48;
 /** An arrow key moves a picture this far along the wall, in floor pixels. */
 const KEY_SLIDE = 4;
+/** A light switched again within this long of the last switch is being flicked at her (pip/temper.ts, `ANNOYS.light`). */
+const LIGHT_AGAIN_MS = 12_000;
 /** The "slot" a fixture is named by (it is in none): the floor's fridge. */
 const FIXTURE_SLOT = "fixture";
 
@@ -106,6 +120,8 @@ type Live = {
   dragging: boolean;
   moving: boolean;
   wasTilt: number;
+  /** A picture that has come off the wall: on its way down, or lying on the floor until it is hung again. */
+  fall: Fall | null;
   /** A lamp: switched off. */
   off: boolean;
   /**
@@ -138,8 +154,15 @@ export type FurnishPip = {
   wake: () => boolean;
   /** She comes over to this thing and does that with it (reads one of these books, looks out of that window), if she is free to. */
   go: (what: "read" | "window", spot: Spot) => void;
+  /**
+   * A thing that answers a tap was chosen (pip/furnish.ts, `VISITS`): she comes over and does what one does with
+   * it, if she is free to. `key` is the thing's name among the furnishings, for it to answer again as she gets there.
+   */
+  visit: (itemId: string, spot: Spot, key: string) => void;
   /** The fridge's door was opened by the reader, or has shut (by the hand, or by itself): what she makes of it. */
   fridge: (what: "opened" | "shut", fridge: Fridge) => void;
+  /** Something done to the room that wears on her patience (pip/temper.ts): the light switched on and off at her, a picture knocked off the wall. */
+  vex: (what: "light" | "picture") => void;
   /** The scene's clock, in milliseconds. */
   clock: () => number;
   /** The room's picture drawn again: a piece has come off it, or gone back on. */
@@ -313,7 +336,7 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
       const hang = hangingFrom(saved);
       // The room may have changed since it was hung there: still within what is free now.
       hang.dx = withinSpan(hang.dx, thing.span);
-      state = { closed: saved.closed ?? 0, target: null, was: saved.closed ?? 0, hang, dragging: false, moving: false, wasTilt: hang.tilt, off: saved.off === true, open: false, openedAt: 0, pipAt: null, held: false, humAt: 0 };
+      state = { closed: saved.closed ?? 0, target: null, was: saved.closed ?? 0, hang, dragging: false, moving: false, wasTilt: hang.tilt, fall: null, off: saved.off === true, open: false, openedAt: 0, pipAt: null, held: false, humAt: 0 };
       live.current.set(thing.key, state);
     }
     return state;
@@ -326,6 +349,8 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
   // A finger's press areas are a thumb's size.
   const touch = useCoarsePointer();
   const shadeRef = useRef<HTMLDivElement | null>(null);
+  // When a light was last switched (the scene's clock), for telling a flick from a switch.
+  const switchedAt = useRef(-Infinity);
   // Counted up when something settles, so labels and pressed states follow.
   const [, setSettled] = useState(0);
   // The thing whose card is open over the room (its key), if one is.
@@ -335,7 +360,7 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
   const frame = useRef(0);
 
   /** Whether this layer, not the room's picture, is drawing a thing just now. */
-  const off = (thing: Thing, state: Live) => thing.kind === "picture" && (state.dragging || state.moving || hangsOff(state.hang));
+  const off = (thing: Thing, state: Live) => thing.kind === "picture" && (state.dragging || state.moving || state.fall !== null || hangsOff(state.hang));
   // The slots this layer is drawing, worked out as it renders so the room's picture can leave them out from its first frame.
   const lifted = useRef(new Set<string>());
   lifted.current = new Set(things.filter((thing) => off(thing, liveOf(thing))).map((thing) => thing.slot));
@@ -347,7 +372,11 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
   // The floor's fixtures as the room's picture is to draw them: the fridge, shut (with the notes on its door) or open; the rest, each with what it shows.
   const fixturesNow = (all: readonly Thing[]): Fixture[] =>
     all.flatMap((thing): Fixture[] => {
-      if (thing.kind === "fridge") return [liveOf(thing).open ? { itemId: "minifridge-open", x: thing.box.x, y: thing.box.y } : { itemId: "minifridge", x: thing.box.x, y: thing.box.y, ...room.fridge }];
+      // (Open, it shows what is in it: stocked, or bare when no snack has been bought lately.)
+      if (thing.kind === "fridge") {
+        const inside = room.bare ? { data: { bare: true }, rev: "bare" } : {};
+        return [liveOf(thing).open ? { itemId: "minifridge-open", x: thing.box.x, y: thing.box.y, ...inside } : { itemId: "minifridge", x: thing.box.x, y: thing.box.y, ...room.fridge }];
+      }
       if (!thing.at || ownArt(thing)) return [];
       const view = views[thing.itemId];
       return [{ itemId: thing.itemId, x: thing.at.x, y: thing.at.y, data: view?.data, rev: view?.rev }];
@@ -377,10 +406,12 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
     const state = liveOf(thing);
     const k = latest.current.scale;
     if (thing.kind === "picture") {
-      const slide = `translateX(${(state.hang.dx * k).toFixed(2)}px)`;
+      // Fallen, it is as far down the wall as it has got; and its button goes down with it, to be picked up by.
+      const down = `translateY(${((state.fall?.y ?? 0) * k).toFixed(2)}px)`;
+      const slide = `translateX(${(state.hang.dx * k).toFixed(2)}px) ${down}`;
       const button = buttons.current.get(thing.key);
       // Its button was laid out where it hung then: only what it has moved since.
-      if (button) button.style.transform = `translateX(${((state.hang.dx - (placedDx.current.get(thing.key) ?? 0)) * k).toFixed(2)}px)`;
+      if (button) button.style.transform = `translateX(${((state.hang.dx - (placedDx.current.get(thing.key) ?? 0)) * k).toFixed(2)}px) ${down}`;
       if (!canvas) return;
       const show = off(thing, state);
       canvas.style.visibility = show ? "visible" : "hidden";
@@ -528,8 +559,18 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
         if (state.closed === state.target) settleCurtains(thing, state);
       } else if (thing.kind === "picture" && (state.moving || state.dragging)) {
         state.hang = hangStep(state.hang, dt, still);
+        if (state.fall && !state.fall.landed) {
+          // Off its nail: down the wall to the floor, with a bounce, and Pip jumps.
+          const was = state.fall;
+          state.fall = fallStep(was, dt, Math.max(0, level.h - 11 - (thing.box.y + thing.box.h)), still);
+          if (state.fall.landed) {
+            playSound("place", { pitch: 0.7, volume: 0.6 });
+            pip.current.react(fallenReaction(), middle(thing, state));
+            pip.current.vex("picture");
+          } else if (was.vy > 0 && state.fall.vy < 0) playSound("bounce", { volume: 0.5 });
+        }
         draw(thing);
-        if (!state.dragging && hangsStill(state.hang)) settlePicture(thing, state);
+        if (!state.dragging && hangsStill(state.hang) && (!state.fall || state.fall.landed)) settlePicture(thing, state);
       }
     }
   };
@@ -543,20 +584,23 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
     const state = liveOf(thing);
     const centre = thing.box.x + thing.box.w / 2;
     const half = thing.box.w / 2;
-    const from = Math.abs((pointerAt(event)?.x ?? centre) - centre);
+    const from = pointerAt(event);
     const before = state.closed;
+    let most = 0;
     state.target = null;
+    void centre;
     followPress(event, {
       onMove: (e) => {
-        // Pulled: towards the middle of the window draws them, away from it opens them.
+        // Pulled, anywhere on the window and any way: open ones are drawn by it, drawn ones opened.
         const hand = pointerAt(e);
-        if (!hand) return;
-        state.closed = curtainPull(before, from, Math.abs(hand.x - centre), half);
+        if (!hand || !from) return;
+        state.closed = curtainTug(before, Math.hypot(hand.x - from.x, hand.y - from.y), half);
+        most = Math.max(most, Math.abs(state.closed - before));
         draw(thing);
         shade();
       },
-      // Let go part way, they settle the nearer way; a tap sends them the other way.
-      onEnd: (how, moved) => glide(thing, moved ? curtainSettle(state.closed) : how === "up" ? curtainToggle(before) : curtainSettle(before))
+      // Let go, they go the rest of the way (or the other way, for a tap, however unsteady the hand); lost, they go back.
+      onEnd: (how, moved) => glide(thing, how !== "up" ? curtainSettle(before) : moved ? curtainLetGo(before, state.closed, most) : curtainToggle(before))
     });
   };
 
@@ -565,6 +609,11 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
     const from = pointerAt(event);
     const before = state.hang.dx;
     let last: Sample | undefined;
+    if (state.fall) {
+      // Lying on the floor: any press on it hangs it up again.
+      followPress(event, { onMove: () => undefined, onEnd: (how) => how === "up" && rehang(thing) });
+      return;
+    }
     followPress(event, {
       onMove: (e) => {
         // Slid along the wall, as far as there is room; it swings behind the hand.
@@ -591,8 +640,28 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
     });
   };
 
+  /** Picked up off the floor and hung again, straight. */
+  const rehang = (thing: Thing) => {
+    const state = liveOf(thing);
+    if (!state.fall) return;
+    state.fall = null;
+    swing(thing, state, straighten(state.hang));
+    playSound("place", { pitch: 1.4, volume: 0.45 });
+  };
+
   const knock = (thing: Thing, side: 1 | -1) => {
     const state = liveOf(thing);
+    if (state.fall) {
+      rehang(thing);
+      return;
+    }
+    if (comesDown(state.hang, side)) {
+      // One knock too many: it swings once more and comes off its nail.
+      state.fall = fallStart();
+      swing(thing, state, { ...state.hang, hold: { ...state.hang.hold, swing: { angle: state.hang.hold.swing.angle, spin: state.hang.hold.swing.spin + side * 4 } } });
+      playSound("place", { pitch: 2, volume: 0.5 });
+      return;
+    }
     swing(thing, state, nudge(state.hang, side));
     playSound("place", { pitch: 1.7, volume: 0.45 });
   };
@@ -626,13 +695,46 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
     pip.current.redraw();
     const reaction = lampReaction(state.off, new Date().getHours());
     if (reaction) pip.current.react(reaction, middle(thing, state), state.off ? "light-off" : "light-on");
+    // Switched again within a few seconds of the last time: that is flicking the light at her, and it wears on her.
+    const at = pip.current.clock();
+    if (at - switchedAt.current < LIGHT_AGAIN_MS) pip.current.vex("light");
+    switchedAt.current = at;
     setSettled((count) => count + 1);
+  };
+
+  /**
+   * A thing that answers a tap, answering: its sound, and whatever comes off
+   * it (notes off a record, bubbles off a tank). For show: nothing is kept.
+   */
+  const answer = (thing: Thing) => {
+    const visit = visitOf(thing.itemId);
+    if (!visit) return;
+    if (visit.sound) playSound(visit.sound, { pitch: visit.pitch ?? 1 });
+    const room = roomRef.current?.getBoundingClientRect();
+    // (Without motion nothing flies off it: the effects draw nothing then, and the sound and Pip say it.)
+    if (!room || !visit.fx || prefersReducedMotion()) return;
+    const k = latest.current.scale;
+    const box = { left: room.left + thing.box.x * k, top: room.top + thing.box.y * k, width: thing.box.w * k, height: thing.box.h * k };
+    const middle = { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+    const top = { x: middle.x, y: box.top + box.height * 0.25 };
+    const wide = Math.max(10 * k, box.width * 0.6);
+    if (visit.fx === "notes") burst(top, { px: k, count: 4, sprite: "note", spread: wide, lift: 9 * k, fall: 0, duration: 1100 });
+    else if (visit.fx === "bubbles") burst(top, { px: k, count: 6, sprite: "bubble", spread: wide * 0.8, lift: 10 * k, fall: -2 * k, duration: 1000 });
+    else if (visit.fx === "hearts") burst(top, { px: k, count: 3, sprite: "heart", spread: wide, lift: 8 * k, fall: 2, duration: 900 });
+    else if (visit.fx === "sparks") burst(middle, { px: k, count: 6, sprite: "spark", spread: wide, lift: 4 * k, fall: 6 });
+    else if (visit.fx === "lights") burst(middle, { px: k, count: 18, colors: ["#FF4DB8", "#7FE0FF", "#FFE36B", "#9CE07A"], spread: 46 * k, lift: 0, fall: 18 * k, duration: 1300 });
+    else puff({ x: middle.x, y: box.top + box.height * 0.3 }, { px: k, count: 5, color: "#BFE6FF", edge: "#7CC8FF", spread: wide, rise: 3 * k });
   };
 
   /** A thing chosen: by the keyboard, or (for a thing that is only ever tapped) by the pointer. */
   const choose = (thing: Thing, keyboard: boolean) => {
     const state = liveOf(thing);
     if (thing.kind === "bed") pip.current.bed();
+    else if (thing.kind === "visit") {
+      // It answers whether or not she can come (she may be asleep, or in the hand): the tap is never met with nothing.
+      answer(thing);
+      pip.current.visit(thing.itemId, { kind: "thing", x: middle(thing, state), w: thing.box.w, up: thing.up, id: thing.key }, thing.key);
+    }
     else if (thing.kind === "lamp") switchLamp(thing, state);
     else if (thing.kind === "fridge") {
       // Opened, or pushed shut again: either way Pip has something to say about it.
@@ -706,9 +808,11 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
       thing.kind === "curtains"
         ? `the curtains are ${state.closed >= 0.5 ? "drawn" : "open"}`
         : thing.kind === "picture"
-          ? state.hang.tilt !== 0
-            ? "hanging crooked"
-            : "hanging straight"
+          ? state.fall
+            ? "fallen off the wall"
+            : state.hang.tilt !== 0
+              ? "hanging crooked"
+              : "hanging straight"
           : thing.kind === "bed"
             ? pip.current.asleep()
               ? "Pip is asleep in it"
@@ -718,14 +822,20 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
                 ? "switched off"
                 : "on"
               : thing.kind === "fridge"
-                ? state.open
-                  ? "open"
-                  : "shut"
+                ? `${state.open ? "open" : "shut"}${room.bare === null ? "" : `, ${fridgeHolds(room.bare)}`}`
                 : views[thing.itemId]?.now ?? null;
     return `${thing.name}${now ? `: ${now}` : ""}. ${how(thing)} ${spec.keys}`;
   };
-  /** What the hand does with a thing, for its label and its tooltip. With notes on its door, the fridge is opened by the rest of it, and says so. */
-  const how = (thing: Thing) => (thing.kind === "fridge" && pinned ? FRIDGE_HOW_WITH_NOTES : KINDS[thing.kind].how);
+  /**
+   * What the hand does with a thing, for its label and its tooltip. With notes on its door, the fridge is opened by the
+   * rest of it, and says so; a thing Pip comes over to says what she comes to do.
+   */
+  const how = (thing: Thing) =>
+    thing.kind === "fridge"
+      ? `${pinned ? FRIDGE_HOW_WITH_NOTES : KINDS.fridge.how}${room.bare === null ? "" : ` ${room.bare ? FRIDGE_HOW_BARE : FRIDGE_HOW_STOCKED}`}`
+      : thing.kind === "visit"
+        ? visitOf(thing.itemId)?.how ?? KINDS.visit.how
+        : KINDS[thing.kind].how;
   const pressed = (thing: Thing) =>
     thing.kind === "curtains" ? liveOf(thing).closed >= 0.5 : thing.kind === "bed" ? pip.current.asleep() : thing.kind === "lamp" ? !liveOf(thing).off : thing.kind === "fridge" ? liveOf(thing).open : undefined;
 
@@ -836,6 +946,12 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
     latest.current.things.flatMap((thing): Spot[] => {
       const state = liveOf(thing);
       if (thing.kind === "fridge") return [{ kind: "fridge" as const, x: middle(thing, state), w: thing.box.w, id: thing.key }];
+      if (thing.kind === "visit") {
+        // A thing that answers a tap is somewhere she goes by herself too, now and then: the fish, the fire.
+        const visit = visitOf(thing.itemId);
+        const offered = visit ? visitOffer(visit) : null;
+        return visit && offered ? [{ kind: "thing" as const, x: middle(thing, state), w: thing.box.w, up: thing.up || visit.stand === "at", id: thing.key, offer: offered }] : [];
+      }
       const offer = latest.current.views[thing.itemId]?.offer;
       // Her bookcase is books to take one from, like the Book Tower, besides what it offers.
       if (offer || thing.kind === "bookcase") return [{ kind: thing.kind === "bookcase" ? ("books" as const) : ("thing" as const), x: middle(thing, state), w: thing.box.w, up: thing.up, id: thing.key, offer }];
@@ -853,6 +969,12 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
     const thing = latest.current.things.find((entry) => entry.key === key);
     if (!thing) return;
     const state = liveOf(thing);
+    if (thing.kind === "visit") {
+      // She has reached it (`answer`: it answers her as it answered the tap), or a beat of hers has a sound to it.
+      if (what === "answer") answer(thing);
+      else if (what.startsWith("sound:")) playSound(what.slice(6) as PipSound);
+      return;
+    }
     if (thing.kind === "radio") {
       if (what === "dial") playSound("click", { pitch: 1.3, volume: 0.5 });
       return;
@@ -864,6 +986,8 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
       return;
     }
     if (thing.kind !== "picture" || what !== "straighten") return;
+    // One that has fallen she picks up and hangs again.
+    state.fall = null;
     swing(thing, state, straighten(state.hang));
     playSound("place", { pitch: 1.4, volume: 0.4 });
   };
@@ -874,9 +998,9 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
     return thing ? fridgeOf(thing, liveOf(thing)) : null;
   };
 
-  /** The first furnishing of a kind on this floor, used as a tap would (for the Play keys). */
-  const use = (kind: FurnishKind) => {
-    const thing = latest.current.things.find((entry) => entry.kind === kind);
+  /** The first furnishing of a kind on this floor (or the one piece named), used as a tap would (for the Play keys). */
+  const use = (kind: FurnishKind, itemId?: string) => {
+    const thing = latest.current.things.find((entry) => entry.kind === kind && (itemId === undefined || entry.itemId === itemId));
     if (thing) choose(thing, true);
     return Boolean(thing);
   };
@@ -889,6 +1013,7 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
       return {
         key: thing.key,
         kind: thing.kind,
+        itemId: thing.itemId,
         box: thing.box,
         label: label(thing),
         card: card === thing.key,

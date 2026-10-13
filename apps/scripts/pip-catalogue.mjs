@@ -1,7 +1,9 @@
 // Writes the two copies of the Pip shop's catalogue that live outside the app:
 //
 //   src-tauri/src/pip/catalogue.json  prices, which Rust checks every purchase
-//                                     against (the webview never names a price)
+//                                     against (the webview never names a price),
+//                                     with what gates one: the floor below, focus
+//                                     sessions, the reader's level
 //   ../server/src/pipParts.json       the parts the server accepts in a
 //                                     reader's own-Pip avatar
 //
@@ -35,7 +37,6 @@ const seedsOk = (value) => Number.isInteger(value) && value > 0;
  * impossible to finish or a wish impossible to grant.
  */
 const checkRewards = (shop, items) => {
-  const has = (kind, id) => items.some((item) => item.kind === kind && item.id === id);
   const chest = shop.STARTER_CHEST;
   if (!seedsOk(chest.seeds) || !(chest.minutes > 0)) throw new Error("Pip catalogue: the starter chest needs seeds and minutes.");
   const goalIds = new Set();
@@ -49,7 +50,10 @@ const checkRewards = (shop, items) => {
     if (!ID.test(set.id) || setIds.has(set.id)) throw new Error(`Pip catalogue: set ${set.id} is not a valid, unique id.`);
     if (!seedsOk(set.seeds) || set.items.length < 2) throw new Error(`Pip catalogue: set ${set.id} needs pieces and a reward.`);
     for (const id of set.items) {
-      if (!has(set.kind, id)) throw new Error(`Pip catalogue: set ${set.id} wants ${set.kind} ${id}, which is not in the catalogue.`);
+      const piece = items.find((item) => item.kind === set.kind && item.id === id);
+      if (!piece) throw new Error(`Pip catalogue: set ${set.id} wants ${set.kind} ${id}, which is not in the catalogue.`);
+      // A set is of things kept: a snack or a streak freeze is used up, never owned.
+      if (piece.consumable) throw new Error(`Pip catalogue: set ${set.id} wants ${set.kind} ${id}, which is bought each time and never owned.`);
     }
     setIds.add(set.id);
   }
@@ -66,6 +70,8 @@ const checkRewards = (shop, items) => {
         // Snacks and packets are bought as they are used; the rest must be for sale.
         const buyable = kind === "treat" || kind === "plant" ? item.consumable : item.price > 0 && !item.freeWith && !item.earnedOnly;
         if (!buyable) throw new Error(`Pip catalogue: Pip wishes for ${kind} ${id}, which cannot be bought that way.`);
+        // A wish is for today: not for a thing the reader's level may not reach for months.
+        if (item.level) throw new Error(`Pip catalogue: Pip wishes for ${kind} ${id}, which opens only at level ${item.level}.`);
       }
     }
   });
@@ -102,6 +108,13 @@ export const buildCatalogue = async () => {
     if (!ID.test(item.id)) throw new Error(`Pip catalogue: ${key} is not a valid id (a-z, 0-9, _ and -).`);
     if (!Number.isInteger(item.price) || item.price < 0) throw new Error(`Pip catalogue: ${key} has price ${item.price}.`);
     if (item.kind === "accessory" && !SLOTS.has(item.slot)) throw new Error(`Pip catalogue: ${key} has slot ${item.slot}.`);
+    // A reader's level a thing opens at: a whole number, and for something that is sold.
+    if (item.level !== undefined) {
+      if (!Number.isInteger(item.level) || item.level < 1 || item.level > 99) throw new Error(`Pip catalogue: ${key} opens at level ${item.level}.`);
+      if (item.price <= 0 || item.earnedOnly || item.freeWith) throw new Error(`Pip catalogue: ${key} opens at a level, but is not for sale.`);
+    }
+    // The streak freeze is used up, and costs something: free, it would be owned from the start.
+    if (item.kind === "freeze" && (!item.consumable || item.price <= 0)) throw new Error(`Pip catalogue: ${key} must be bought each time, at a price.`);
     const move = item.kind === "move" ? item.id : item.kind === "treat" ? item.move : null;
     if (move && !LIB.some((entry) => entry.id === move)) warnings.push(`${key} plays "${move}", which is not a move yet.`);
     if (item.freeWith && !items.some((other) => other.kind === "level" && other.id === item.freeWith)) {
@@ -122,6 +135,7 @@ export const buildCatalogue = async () => {
       ...(item.kind === "treat" ? { mood: item.mood ?? 0 } : {}),
       ...(item.requires ? { requires: item.requires } : {}),
       ...(item.sessions ? { sessions: item.sessions } : {}),
+      ...(item.level ? { level: item.level } : {}),
       ...(item.kind === "plant" ? { water: item.water, yield: item.yield } : {}),
       ...(item.light ? { light: true } : {}),
       ...(item.freeWith ? { freeWith: item.freeWith } : {})

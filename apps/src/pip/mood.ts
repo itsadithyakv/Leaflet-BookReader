@@ -9,8 +9,15 @@
  * which come from Rust with the overview. Nothing here is decided or guessed:
  * every sentence is one of those numbers, said aloud. Pure, so the wording is
  * tested (mood.test.ts).
+ *
+ * Two things were added on 2026-10-13, at the owner's request, and are said
+ * here too: her fridge (bare, it takes a little off her mood when she finds
+ * it so: pip/fridge.rs), and the mood she is in for the moment (a sulk after
+ * a tantrum, a good mood after a snack: pip/temper.ts), which is laid over
+ * the hearts for as long as it lasts and never changes the number Rust keeps.
  */
 import type { MoodEvent, MoodRules } from "../services/pipService";
+import { GLAD_POINTS, SULK_POINTS, type Humour } from "./temper";
 
 /**
  * Below this she mopes (pages/pip/common.ts keeps the same number). The drift
@@ -48,6 +55,13 @@ export type MoodInputs = {
   /** Names for the things the log mentions. */
   treatName: (id: string) => string;
   gameName: (id: string) => string;
+  /**
+   * Her fridge, where Rust says anything of it: bare or not as of now, the hours of food left in it, whether
+   * finding it bare has taken its toll today, and how long a snack stocks it for (and the most it holds).
+   */
+  fridge?: { bare: boolean; hoursLeft: number; mindedToday: boolean; hoursPerSnack: number; maxHours: number } | null;
+  /** The mood she is in for now (pip/temper.ts): what it adds to the hearts, in points, and how long it has left. */
+  temper?: { off: number; humour: Humour; minutesLeft: number } | null;
 };
 
 export type MoodLine = { id: string; text: string; tone: "down" | "up" | "plain" };
@@ -55,8 +69,10 @@ export type MoodLift = { id: "wish" | "snack" | "reading" | "session" | "harvest
 
 export type MoodReport = {
   word: string;
-  /** The mood as a whole number, 0 to 100. */
+  /** The mood as a whole number, 0 to 100: the one Rust keeps. */
   level: number;
+  /** What the hearts show: that, with the mood she is in for now laid over it. */
+  felt: number;
   /** One sentence: how she is and the main reason. */
   headline: string;
   /** What is acting on her mood now. */
@@ -106,13 +122,25 @@ export const causeWords = (cause: string, names: Pick<MoodInputs, "treatName" | 
   if (kind === "game") return `A game of ${names.gameName(id)}`;
   if (kind === "play") return PLAY_WORDS[id] ?? "Playing";
   if (kind === "wish") return "Her wish coming true";
+  if (kind === "fridge") return "Finding her fridge bare";
   return "Something";
+};
+
+/** "about 5 hours", "about a day", "about 2 days". */
+const about = (hours: number) => {
+  if (hours < 1) return "less than an hour";
+  if (hours < 20) return `about ${plural(whole(hours), "hour")}`;
+  const days = whole(hours / 24);
+  return days <= 1 ? "about a day" : `about ${days} days`;
 };
 
 export const explainMood = (input: MoodInputs): MoodReport => {
   const { rules, now } = input;
   const level = whole(Math.max(0, Math.min(100, input.mood)));
-  const word = moodWord(level);
+  // What the hearts show: the mood she is in for now, laid over the one that is kept.
+  const temper = input.temper && input.temper.off !== 0 ? input.temper : null;
+  const felt = whole(Math.max(0, Math.min(100, level + (temper?.off ?? 0))));
+  const word = moodWord(felt);
   const since = Math.max(0, now - Date.parse(input.moodUpdatedAt));
   const days = since / 86_400_000;
   // What the drift would have taken since she was last cheered up. It stops
@@ -177,17 +205,61 @@ export const explainMood = (input: MoodInputs): MoodReport => {
   if (input.wish?.granted) why.push({ id: "wish", tone: "up", text: `Her wish was granted today: +${input.wish.mood}.` });
   if (level < MOPES_BELOW) why.push({ id: "mope", tone: "plain", text: `Under ${MOPES_BELOW} she mopes. That is all it does: nothing is lost, and nothing withers.` });
 
+  // Her fridge: bare, it costs her a little when she finds it so (once a day, never below the floor); stocked, it says for how long.
+  const fridge = input.fridge ?? null;
+  const bareCost = rules.bareFridge ?? 0;
+  if (fridge?.bare) {
+    const stocks = `A snack stocks it for ${about(fridge.hoursPerSnack)}.`;
+    why.push({
+      id: "fridge",
+      tone: "down",
+      text:
+        bareCost <= 0
+          ? `Her fridge is bare. ${stocks}`
+          : fridge.mindedToday
+            ? `Her fridge is bare, and she has found it so today: that took up to ${whole(bareCost)}, and takes no more today. ${stocks}`
+            : `Her fridge is bare. When she looks in it and finds it so, that takes ${whole(bareCost)}: once a day at most, never below ${floor}, and never while Leaflet is shut. ${stocks}`
+    });
+  } else if (fridge) {
+    why.push({ id: "fridge", tone: "plain", text: `There is food in her fridge for ${about(fridge.hoursLeft)} more.` });
+  }
+
+  // The mood she is in for now: on the hearts for as long as it lasts, and nowhere else.
+  let temperLine: string | null = null;
+  if (temper) {
+    const left = temper.minutesLeft > 0 ? ` for about ${plural(temper.minutesLeft, "more minute")}` : "";
+    const by = Math.abs(temper.off);
+    temperLine =
+      temper.humour === "glad"
+        ? `She is in a good mood: the hearts show ${by} more${left}.`
+        : temper.humour === "huff"
+          ? `She has had a tantrum and is in a huff: the hearts show ${by} less${left}. It passes by itself; a cuddle or a snack makes it up sooner.`
+          : temper.humour === "sulk"
+            ? `She is sulking: the hearts show ${by} less${left}. It eases by itself; a cuddle or a snack makes it up sooner.`
+            : temper.humour === "cool"
+              ? `She is still a little cool with you: the hearts show ${by} less${left}.`
+              : temper.off < 0
+                ? `Her patience is thin just now: the hearts show ${by} less. It comes back in a minute or two.`
+                : null;
+    if (temperLine) why.push({ id: "temper", tone: temper.off < 0 ? "down" : "up", text: temperLine });
+  }
+
   const newest = input.log[input.log.length - 1];
-  const last = newest
-    ? `${causeWords(newest.cause, input)} cheered her up by ${points(newest.gain)}, ${ago(now - Date.parse(newest.at))}.`
-    : null;
+  const last = !newest
+    ? null
+    : newest.gain < 0
+      ? `${causeWords(newest.cause, input)} took ${points(-newest.gain)} off her mood, ${ago(now - Date.parse(newest.at))}.`
+      : `${causeWords(newest.cause, input)} cheered her up by ${points(newest.gain)}, ${ago(now - Date.parse(newest.at))}.`;
 
   const lifts: MoodLift[] = [];
   if (level >= 100) {
     // As happy as she gets: nothing to add.
   } else {
     if (input.wish && !input.wish.granted) lifts.push({ id: "wish", gain: input.wish.mood, text: `Grant today's wish: +${input.wish.mood}.` });
-    if (input.snack) lifts.push({ id: "snack", gain: input.snack.mood, text: `Give her ${input.snack.name} (${plural(input.snack.price, "seed")}): +${input.snack.mood}.` });
+    if (input.snack) {
+      const stocks = fridge?.bare ? ", and it stocks her fridge" : "";
+      lifts.push({ id: "snack", gain: input.snack.mood, text: `Give her ${input.snack.name} (${plural(input.snack.price, "seed")}): +${input.snack.mood}${stocks}.` });
+    }
     if (readingLeft > 1e-6 && rules.perReadingMinute > 0) {
       const minutesLeft = Math.ceil(readingLeft / rules.perReadingMinute - 1e-6);
       lifts.push({
@@ -203,14 +275,22 @@ export const explainMood = (input: MoodInputs): MoodReport => {
     lifts.sort((a, b) => b.gain - a.gain);
   }
 
-  const main = why[0]?.tone === "down" ? why[0].text : why.find((line) => line.tone === "up")?.text ?? why[0]?.text ?? "";
+  const main = temperLine ?? (why[0]?.tone === "down" ? why[0].text : why.find((line) => line.tone === "up")?.text ?? why[0]?.text ?? "");
+  const fridgeRule =
+    bareCost > 0 && fridge
+      ? ` Finding her fridge bare takes ${whole(bareCost)}: once a day at most, only when she looks, and never below ${rules.driftFloor}. Each snack stocks the fridge for ${about(fridge.hoursPerSnack)}, ${about(fridge.maxHours)} at most.`
+      : "";
+  const temperRule = input.temper
+    ? ` What you do with her in a sitting shows on the hearts for a while without changing that number: a tantrum and the sulk after it take up to ${SULK_POINTS} for up to half an hour, a good mood adds up to ${GLAD_POINTS} for ten or twenty minutes, and both run out by the clock, whether Leaflet is open or not.`
+    : "";
   return {
     word,
     level,
-    headline: `${word}: ${level} out of 100. ${main}`.trim(),
+    felt,
+    headline: (temper ? `${word} for now: the hearts show ${felt} out of 100 (${level} without the mood she is in). ${main}` : `${word}: ${level} out of 100. ${main}`).trim(),
     why,
     last,
     lifts,
-    rule: `Her mood drifts down ${rules.driftPerDay} a day from the last time she was cheered up, whether Leaflet is open or not, and the drift stops at ${rules.driftFloor}. Reading adds ${rules.perReadingMinute} a minute, in a focus session or not, up to ${rules.readingPerDay} a day. A focus session adds ${rules.perSession} more. Games and play add up to ${rules.playPerDay} a day between them, picking a ripe plant adds ${rules.perHarvest}, her wish coming true adds ${rules.perWish}, and each snack or toy adds its own amount.`
+    rule: `Her mood drifts down ${rules.driftPerDay} a day from the last time she was cheered up, whether Leaflet is open or not, and the drift stops at ${rules.driftFloor}. Reading adds ${rules.perReadingMinute} a minute, in a focus session or not, up to ${rules.readingPerDay} a day. A focus session adds ${rules.perSession} more. Games and play add up to ${rules.playPerDay} a day between them, picking a ripe plant adds ${rules.perHarvest}, her wish coming true adds ${rules.perWish}, and each snack or toy adds its own amount.${fridgeRule}${temperRule}`
   };
 };

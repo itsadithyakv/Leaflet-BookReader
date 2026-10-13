@@ -84,9 +84,25 @@ export type PipReadingMood = { days: Record<string, number> };
  * Something that cheered Pip up: when, what ("reading", "session",
  * "treat:<id>", "harvest", "game:<id>", "play:<kind>", "wish"), by how much
  * (reading's is a fraction, a minute at a time), and the mood after it. Kept
- * by Rust on this device, to explain the mood.
+ * by Rust on this device, to explain the mood. One cause lowers it, with a
+ * gain below zero: "fridge" (she found her fridge bare).
  */
 export type MoodEvent = { at: string; cause: string; gain: number; mood: number };
+
+/**
+ * Pip's fridge, as Rust works it out from the snacks on record
+ * (pip/fridge.rs): each snack bought stocks it for `hoursPerSnack`, up to
+ * `maxHours` in hand. `stockedUntil` is when the food runs out (null: it is
+ * bare now); `mindedToday` says finding it bare has already taken its toll
+ * on her mood today.
+ */
+export type PipFridge = { stockedUntil: string | null; mindedToday: boolean; hoursPerSnack: number; maxHours: number };
+
+/** Whether the fridge is bare at `now` (milliseconds): the food has run out, or there never was any. */
+export const fridgeIsBare = (fridge: PipFridge, now: number) => {
+  const until = fridge.stockedUntil ? Date.parse(fridge.stockedUntil) : NaN;
+  return !(Number.isFinite(until) && now < until);
+};
 
 /** What moves the mood and by how much, as Rust has it (habit/seeds.rs, pip/mod.rs). */
 export type MoodRules = {
@@ -107,6 +123,11 @@ export type MoodRules = {
   playPerDay: number;
   perWish: number;
   start: number;
+  /**
+   * What finding her fridge bare takes off, once a day at most and never
+   * below `driftFloor`. Missing from an older Rust side: then nothing does.
+   */
+  bareFridge?: number;
 };
 
 export type PipOverview = {
@@ -131,6 +152,15 @@ export type PipOverview = {
   /** The last few things that cheered Pip up, oldest first. */
   moodLog: MoodEvent[];
   moodRules: MoodRules;
+  /**
+   * The reader's level, from the seeds ever earned (spent or not): `floor`
+   * is where this level began and `next` where the one after begins. Rare
+   * things open at a level (shop.js RARE_LEVELS). Missing from an older Rust
+   * side and from the browser preview: read it as level 1.
+   */
+  level?: { level: number; earned: number; floor: number; next: number };
+  /** Her fridge. Missing from an older Rust side: then it is for show, as it used to be. */
+  fridge?: PipFridge;
 };
 
 /**
@@ -149,8 +179,12 @@ const PREVIEW_RULES: MoodRules = {
   perPlay: 1,
   playPerDay: 12,
   perWish: 10,
-  start: 70
+  start: 70,
+  bareFridge: 3
 };
+
+/** The fridge's rules for the browser preview, copied from Rust (pip/fridge.rs). */
+const PREVIEW_FRIDGE = { hoursPerSnack: 24, maxHours: 72 };
 
 /**
  * The browser preview's Pip: a mood that play and games can move, kept in
@@ -160,7 +194,9 @@ const preview = {
   mood: PREVIEW_RULES.start,
   moodUpdatedAt: new Date().toISOString(),
   arcade: { best: {}, day: "", moodToday: 0 } as PipArcade,
-  log: [] as MoodEvent[]
+  log: [] as MoodEvent[],
+  /** The day finding the fridge bare last took its toll (nothing can be bought here, so the preview's fridge is always bare). */
+  bareDay: ""
 };
 
 /**
@@ -191,6 +227,25 @@ const previewCheer = (amount: number, cause: string) => {
     if (last && last.cause === cause) preview.log = [...preview.log.slice(0, -1), { at, cause, gain: last.gain + (after - before), mood: after }];
     else preview.log = [...preview.log, { at, cause, gain: after - before, mood: after }].slice(-12);
   }
+};
+
+/**
+ * The preview's Pip finding her fridge bare, as pip_shop.rs does
+ * (`find_fridge_bare`): a little off her mood, once a day, never below the
+ * floor the drift stops at, and a mood already at or under it left alone.
+ */
+const previewFindsFridgeBare = () => {
+  const today = getDateKey();
+  if (preview.bareDay === today) return;
+  preview.bareDay = today;
+  const before = previewMoodNow();
+  if (before <= PREVIEW_RULES.driftFloor) return;
+  const after = Math.max(PREVIEW_RULES.driftFloor, before - (PREVIEW_RULES.bareFridge ?? 0));
+  if (after >= before) return;
+  const at = new Date().toISOString();
+  preview.mood = after;
+  preview.moodUpdatedAt = at;
+  preview.log = [...preview.log, { at, cause: "fridge", gain: after - before, mood: after }].slice(-12);
 };
 
 /**
@@ -244,7 +299,9 @@ const browserOverview = (): PipOverview => {
     // Rust chooses the wish (pip/rewards.rs); with no Rust there is none.
     wish: null,
     moodLog: preview.log,
-    moodRules: PREVIEW_RULES
+    moodRules: PREVIEW_RULES,
+    // No snack can be bought here, so there is never any food in it.
+    fridge: { stockedUntil: null, mindedToday: preview.bareDay === getDateKey(), ...PREVIEW_FRIDGE }
   };
 };
 
@@ -303,6 +360,18 @@ export const pipService = {
       return browserOverview();
     }
     return invoke<PipOverview>("pip_played", { kind, todayKey: getDateKey() });
+  },
+  /**
+   * Pip went to her fridge and found it bare: a little off her mood, once a
+   * day at most, never below the floor. Rust reads the fridge itself from
+   * the snacks on record, so asking about a stocked one costs nothing.
+   */
+  async fridgeBare(): Promise<PipOverview> {
+    if (!isTauri()) {
+      previewFindsFridgeBare();
+      return browserOverview();
+    }
+    return invoke<PipOverview>("pip_fridge_bare");
   },
   async feed(treatId: string): Promise<PipOverview> {
     if (!isTauri()) {

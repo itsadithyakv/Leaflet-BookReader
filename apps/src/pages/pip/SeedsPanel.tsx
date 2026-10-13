@@ -4,6 +4,7 @@ import { Hint, Hints } from "../../components/pip/shopParts";
 import { PipAvatar } from "../../components/community/PipAvatar";
 import { CountUp } from "../../components/community/CountUp";
 import { UiIcon } from "../../components/UiIcon";
+import { SeedUses } from "./SeedUses";
 
 type SeedsPanelProps = {
   /** Seeds to spend now. */
@@ -84,12 +85,25 @@ export const SeedsPanel = ({ spendable, earned, spent, ahead, water, onMood, onW
             <dd>{earned.earlier}</dd>
           </>
         )}
-        <dt>Spent on Pip</dt>
+        {((earned as { stakes?: number }).stakes ?? 0) > 0 && (
+          <>
+            <dt>Bets won</dt>
+            <dd>{(earned as { stakes?: number }).stakes}</dd>
+          </>
+        )}
+        {((earned as { prizes?: number }).prizes ?? 0) > 0 && (
+          <>
+            <dt>Duels won</dt>
+            <dd>{(earned as { prizes?: number }).prizes}</dd>
+          </>
+        )}
+        <dt>Spent</dt>
         <dd>−{(spent ?? 0) + ahead}</dd>
         <dt>Water poured, all told</dt>
         <dd>{Math.round(water ?? 0)}</dd>
       </dl>
     )}
+    <SeedUses />
     <div className="section-rule mt-4 flex flex-wrap gap-2 pt-3">
       <button type="button" className="pip-key" onClick={() => onMood()}>
         <UiIcon name="heart" size={15} />
@@ -108,7 +122,7 @@ export const SeedsPanel = ({ spendable, earned, spent, ahead, water, onMood, onW
           {signedIn ? (
             <button
               type="button"
-              className="tactile-button mt-1 px-3 py-1.5 text-xs disabled:cursor-default disabled:opacity-60"
+              className="pip-key pip-key-small mt-1"
               onClick={() => void onUseMyPip()}
               disabled={avatarInUse}
             >

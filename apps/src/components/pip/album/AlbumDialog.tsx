@@ -71,7 +71,7 @@ export const AlbumDialog = ({ onClose, album, initial }: AlbumDialogProps) => {
             </h2>
             <p className="text-xs text-on-surface-variant">What she brought back from her expeditions, one for every focus session.</p>
           </div>
-          <button type="button" className="tactile-button px-3 py-1.5 text-xs" onClick={onClose}>
+          <button type="button" className="pip-key pip-key-small" onClick={onClose}>
             Close
           </button>
         </header>

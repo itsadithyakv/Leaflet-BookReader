@@ -718,7 +718,9 @@ const ITEMS = [
 // Where each item snaps in Pip's house (house.js): which slot types it fits,
 // and which floor of the house it belongs to ("any" = anywhere).
 const FITS = { window: ["window"], poster: ["wall"], fairylights: ["wall"], trophyshelf: ["wall"], clock: ["wall"], rug: ["rug"], globe: ["top", "stand"], bookstack: ["stand", "top"] };
-const LEVEL = { aquarium: "any", fireplace: "bedroom", readingnook: "library", bookshelf: "library", desk: "library", globe: "library", catbed: "any", recordplayer: "arcade", plant: "greenhouse" };
+// (The globe, the record player and the reading tent used to be the library's and the arcade's alone, which a
+// house of a bedroom and a garden has neither of to put them in: they are things Pip plays with, so they go anywhere.)
+const LEVEL = { aquarium: "any", fireplace: "bedroom", readingnook: "any", bookshelf: "library", desk: "library", globe: "any", catbed: "any", recordplayer: "any", plant: "greenhouse" };
 for (const it of ITEMS) {
   it.fits = FITS[it.id] || ["stand"];
   it.level = LEVEL[it.id] || (it.starter ? "bedroom" : "any");

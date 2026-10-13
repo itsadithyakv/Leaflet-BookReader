@@ -1,6 +1,7 @@
 /**
  * Things in Pip's house the reader can use: curtains to draw, a picture to
- * knock crooked, a bed to put her in. One small system rather than a special
+ * knock crooked, a bed to put her in, fish for her to come and watch (the
+ * pieces that answer a tap: `VISITS`). One small system rather than a special
  * case each: a *kind* of furnishing says what the hand can do with it (in
  * words, for its label, and as a cursor), what is remembered about it on this
  * device, and what Pip makes of it; the pieces of decor that are of that kind
@@ -9,15 +10,43 @@
  * keyboard, and draws what changes; the rules are here, pure
  * (furnish.test.ts).
  *
- * Nothing here earns seeds or mood, and nothing here is saved with the house:
- * what is remembered (drawn curtains, a picture hung a little to the left) is
- * a preference of this device, in localStorage, outside the backup. The saved
+ * Nothing here earns seeds, and nothing here is saved with the house: what
+ * is remembered (drawn curtains, a picture hung a little to the left) is a
+ * preference of this device, in localStorage, outside the backup. The saved
  * layout (which piece is in which slot) is read and never written.
+ *
+ * Nor does anything here touch her mood, with one exception. This comment
+ * used to say "nothing here earns seeds or mood", and the fridge was for
+ * show. On 2026-10-13 the owner asked for the fridge to mean something
+ * ("make Pip sad by not having food in the fridge if you don't buy"): it now
+ * has food in it or has not, by the snacks on record (Rust: pip/fridge.rs),
+ * and her finding it bare takes a little off her mood, once a day at most and
+ * never below the floor (Rust decides: `pip_fridge_bare`). What is here is
+ * the webview's part: how often she droops over a bare one (`bareMinds`), and
+ * what she does when she looks.
  */
 import { holdMove, holdStart, holdStep, type Hold, type Sample } from "./play";
 import type { PipSound } from "./sound";
+import type { Offer } from "./behaviour";
 
-export type FurnishKind = "curtains" | "picture" | "bed" | "window" | "books" | "lamp" | "fridge" | "bookcase" | "notes" | "calendar" | "clock" | "plant" | "radio" | "album" | "diary";
+export type FurnishKind =
+  | "curtains"
+  | "picture"
+  | "bed"
+  | "window"
+  | "books"
+  | "lamp"
+  | "fridge"
+  | "bookcase"
+  | "notes"
+  | "calendar"
+  | "clock"
+  | "plant"
+  | "radio"
+  | "album"
+  | "diary"
+  /** A thing that answers a tap and has Pip come over to it: the fish to watch, the cuckoo to set off (`VISITS` says what, piece by piece). */
+  | "visit";
 
 /** What can be remembered about one furnishing. Each kind keeps only its own fields. */
 export type FurnishState = {
@@ -45,14 +74,14 @@ export type KindSpec = {
 export const KINDS: Record<FurnishKind, KindSpec> = {
   curtains: {
     noun: "curtains",
-    how: "Select to draw or open the curtains, or drag across the window to pull them part way.",
+    how: "Select to draw or open the curtains, or pull anywhere on the window, any way.",
     keys: "Enter draws or opens them.",
     cursor: "ew-resize",
     remembers: ["closed"]
   },
   picture: {
     noun: "picture",
-    how: "Select to nudge it (it swings, and may hang crooked), or drag it along the wall to hang it somewhere else.",
+    how: "Select to nudge it (it swings, and may hang crooked; once too often and it comes down), or drag it along the wall. Fallen, select it to hang it again.",
     keys: "Enter nudges it; left and right arrows move it along the wall.",
     cursor: "grab",
     remembers: ["dx", "tilt"]
@@ -146,6 +175,14 @@ export const KINDS: Record<FurnishKind, KindSpec> = {
     noun: "diary",
     how: "Select to read Pip's diary: a line a day about your reading.",
     keys: "Enter opens it.",
+    cursor: "pointer",
+    remembers: []
+  },
+  visit: {
+    noun: "thing",
+    // What each piece says for itself is in `VISITS`; this is for one that says nothing.
+    how: "Select to have Pip come over to it.",
+    keys: "Enter does the same.",
     cursor: "pointer",
     remembers: []
   }
@@ -341,7 +378,44 @@ const KIND_OF: Record<string, FurnishKind> = {
   plantpot: "plant",
   radio: "radio",
   corkboard: "album",
-  diary: "diary"
+  diary: "diary",
+  // Things that answer a tap, and have Pip come over (`VISITS`, below, says what each one does).
+  // The bedroom's own: (the armchair is not one of these: she sits in it of her own accord.)
+  aquarium: "visit",
+  fireplace: "visit",
+  clock: "visit",
+  globe: "visit",
+  recordplayer: "visit",
+  catbed: "visit",
+  plant: "visit",
+  trophyshelf: "visit",
+  readingnook: "visit",
+  beanbag: "visit",
+  fairylights: "visit",
+  // And the house's:
+  lavalamp: "visit",
+  mushroomlamp: "visit",
+  fishbowl: "visit",
+  cattower: "visit",
+  piano: "visit",
+  gnome: "visit",
+  tulips: "visit",
+  sunflowers: "visit",
+  bonsai: "visit",
+  hangingplant: "visit",
+  pond: "visit",
+  hammock: "visit",
+  stringlights: "visit",
+  neonread: "visit",
+  ceilingfan: "visit",
+  trophywall: "visit",
+  discoball: "visit",
+  robotbuddy: "visit",
+  controller: "visit",
+  // The toys: drawn to be played with.
+  trampoline: "visit",
+  musicbox: "visit",
+  bubblemachine: "visit"
 };
 
 export const kindOf = (itemId: string): FurnishKind | null => KIND_OF[itemId] ?? null;
@@ -439,6 +513,31 @@ export const CURTAIN_GLIDE = 0.28;
  */
 export const curtainPull = (closed: number, from: number, to: number, half: number) => clamp01(closed + (from - to) / Math.max(1, half));
 
+/**
+ * A pull on them, anywhere and any way: open ones are drawn by it and drawn
+ * ones opened, by how far the hand has gone as a share of half the window
+ * (and a good deal quicker than the hand: a short pull is enough). Going
+ * back undoes it. `curtainPull` above wanted the hand to go towards the
+ * middle of the window to draw them, which is how a curtain is drawn and
+ * not how anybody guesses a picture of one works: a press in the middle of
+ * the glass could not draw them at all.
+ */
+export const curtainTug = (before: number, moved: number, half: number) => clamp01(before + (before >= 0.5 ? -1 : 1) * (moved / Math.max(1, half)) * 1.6);
+
+/**
+ * Where they end up when the hand lets go. `most` is the most they were
+ * moved from how they were, `closed` how they are now. Hardly moved at all,
+ * it was a tap with an unsteady hand, and a tap sends them the other way;
+ * pulled and then put back, they stay as they were; pulled and let go,
+ * they go the rest of the way, however short the pull was.
+ */
+export const curtainLetGo = (before: number, closed: number, most: number): 0 | 1 => {
+  const was: 0 | 1 = before >= 0.5 ? 1 : 0;
+  const other: 0 | 1 = was === 1 ? 0 : 1;
+  if (most < 0.1) return other;
+  return Math.abs(closed - before) < 0.05 ? was : other;
+};
+
 /** Where curtains let go of at `closed` end up: closed, or open. */
 export const curtainSettle = (closed: number): 0 | 1 => (closed >= 0.5 ? 1 : 0);
 
@@ -506,6 +605,30 @@ export const nudge = (picture: Hanging, side: 1 | -1): Hanging => {
   return { ...picture, tilt, hold: { ...picture.hold, swing: { angle: picture.tilt + swing.angle - tilt, spin: swing.spin + side * NUDGE_SPIN } } };
 };
 
+/** As crooked as it goes, and knocked the same way once more: it comes off its nail. */
+export const comesDown = (picture: Hanging, side: 1 | -1) => Math.abs(picture.tilt) >= TILT_MAX - 1e-9 && Math.sign(picture.tilt) === side;
+
+/** A picture on its way to the floor: how far down it has got (floor pixels), how fast, and whether it has come to rest. */
+export type Fall = { y: number; vy: number; landed: boolean };
+const FALL_GRAVITY = 560;
+export const fallStart = (): Fall => ({ y: 0, vy: 0, landed: false });
+/**
+ * A moment later on the way down. `drop` is how far below where it hung the
+ * floor is. It bounces once, a little, and lies there. At once when motion
+ * is reduced.
+ */
+export const fallStep = (fall: Fall, dt: number, drop: number, still = false): Fall => {
+  if (fall.landed) return fall;
+  if (still) return { y: drop, vy: 0, landed: true };
+  const vy = fall.vy + FALL_GRAVITY * dt;
+  const y = fall.y + vy * dt;
+  if (y < drop) return { y, vy, landed: false };
+  // Hard enough, it comes up again a little; else that is where it stays.
+  return vy > 110 ? { y: drop, vy: -vy * 0.28, landed: false } : { y: drop, vy: 0, landed: true };
+};
+/** What Pip makes of a picture coming down. */
+export const fallenReaction = (): Reaction => ({ move: "jumpscare", loops: 1, line: "it fell off the wall!" });
+
 /** Set straight (by Pip): it swings a little about plumb and settles there. */
 export const straighten = (picture: Hanging): Hanging => {
   const { swing } = picture.hold;
@@ -572,6 +695,351 @@ export const lampReaction = (off: boolean, hour: number): Reaction | null => {
   return off ? { move: "squint", loops: 1, line: "who turned out the light?" } : { move: "look", loops: 1, line: "ah. that's better." };
 };
 
+// ---- things she comes over to ---------------------------------------------------------------
+//
+// Most of the room's pieces are something to her: fish to watch, a fire to
+// warm her leaf at, a cuckoo that makes her jump every time. Chosen, the
+// thing answers at once (a sound, a few bubbles or notes off it), and Pip, if
+// she is free, comes over and does what one does with it. All for show: no
+// seeds, no mood, nothing bought or kept (pip/behaviour.ts says why, by the
+// fridge). The moves are ones she already has; a dance is one of her own
+// (a move the reader bought her, or a little bop if she has none), so a
+// record player never gives away what the shop sells.
+
+/** What comes off a thing as it answers: drawn by the room (components/pip/furnishings.tsx). */
+export type VisitFx = "notes" | "bubbles" | "hearts" | "sparks" | "lights" | "drops";
+
+/**
+ * One thing she does there. `move: "dance"` is one of her dances (`visitBeats`
+ * chooses), and `move: "bounce"` is not a move at all but so many bounces on
+ * the thing (`bounces`: the house scene throws her up, as a hand would; without
+ * motion she stays on her feet, knees bent). One of `lines` is said as it
+ * starts; `sound` is heard then.
+ */
+export type VisitBeat = { move: string; seconds: number; lines?: readonly string[]; sound?: PipSound; bounces?: number };
+
+export type Visit = {
+  /** What choosing it does, for its label and its tooltip. */
+  how: string;
+  /** What she is doing there, in plain words, for her own label: "watching the fish". */
+  label: string;
+  /**
+   * Where she does it: `beside` the thing, turned to it; `at` it (in front of
+   * it, or under it); or wherever she is (`stay`: the cuckoo is heard from
+   * anywhere). A thing up on a wall, a shelf or the ceiling is always stood under.
+   */
+  stand: "beside" | "at" | "stay";
+  /** What the thing itself does as it is chosen (and again as she reaches it, if she had some way to come). */
+  sound?: PipSound;
+  pitch?: number;
+  fx?: VisitFx;
+  /** The dance she would rather do here, if it is one of hers (the disco ball: the disco). */
+  dance?: string;
+  beats: readonly VisitBeat[];
+};
+
+const watering = (what: string, lines: readonly string[]): Visit => ({
+  how: `Select to have Pip come and water the ${what}.`,
+  label: `watering the ${what}`,
+  stand: "beside",
+  fx: "drops",
+  beats: [{ move: "water", seconds: 4, lines, sound: "splash" }]
+});
+
+const VISITS: Readonly<Record<string, Visit>> = {
+  aquarium: {
+    how: "Select to have Pip come and watch the fish.",
+    label: "watching the fish",
+    stand: "beside",
+    sound: "bubble",
+    fx: "bubbles",
+    beats: [{ move: "inspect", seconds: 4, lines: ["hello in there.", "blub. blub.", "that one's my favourite."] }]
+  },
+  fireplace: {
+    how: "Select to have Pip come and warm herself by the fire.",
+    label: "warming herself by the fire",
+    stand: "beside",
+    sound: "crackle",
+    fx: "sparks",
+    beats: [
+      { move: "stretch", seconds: 3.3, lines: ["ahh. toasty.", "warm leaf. happy leaf."] },
+      { move: "yawn", seconds: 4, lines: ["...so warm."] }
+    ]
+  },
+  clock: {
+    how: "Select to set the cuckoo off.",
+    label: "being made to jump by the cuckoo",
+    stand: "stay",
+    sound: "cuckoo",
+    beats: [
+      { move: "boop", seconds: 1, lines: ["eep!"] },
+      { move: "laugh", seconds: 2, lines: ["it gets me every time.", "cuckoo yourself."] }
+    ]
+  },
+  globe: {
+    how: "Select to give the globe a spin.",
+    label: "watching the globe go round",
+    stand: "beside",
+    sound: "swish",
+    beats: [{ move: "dizzy", seconds: 4, lines: ["round and round and... whoa.", "where does it stop? there. no, there."] }]
+  },
+  recordplayer: {
+    how: "Select to put a record on: Pip comes to dance.",
+    label: "dancing to a record",
+    stand: "beside",
+    sound: "tune",
+    fx: "notes",
+    beats: [{ move: "dance", seconds: 5, lines: ["this is my song.", "turn it up!"] }]
+  },
+  catbed: {
+    how: "Select to have Pip come and fuss the cat.",
+    label: "fussing the cat",
+    stand: "beside",
+    sound: "mew",
+    fx: "hearts",
+    beats: [{ move: "smitten", seconds: 4, lines: ["who's the softest? you are.", "she lets me do that. only me."], sound: "purr" }]
+  },
+  plant: watering("monstera", ["drink up.", "there you go, big leaf."]),
+  trophyshelf: {
+    how: "Select to have Pip come and admire the trophies.",
+    label: "admiring the trophies",
+    stand: "at",
+    sound: "star",
+    fx: "sparks",
+    beats: [{ move: "champ", seconds: 4, lines: ["most chapters in one sitting: me.", "we earned every one."] }]
+  },
+  readingnook: {
+    how: "Select for a game of ghosts at the tent.",
+    label: "playing ghosts at the tent",
+    stand: "at",
+    beats: [
+      { move: "ghost", seconds: 5.3, lines: ["boo!", "whooo. i am the ghost of the tent."] },
+      { move: "laugh", seconds: 2, lines: ["it was me. it was pip."] }
+    ]
+  },
+  beanbag: {
+    how: "Select to have Pip come and flop on the beanbag.",
+    label: "flopped on the beanbag",
+    stand: "at",
+    sound: "bounce",
+    beats: [{ move: "floatnap", seconds: 4, lines: ["flump.", "just resting my leaf."] }]
+  },
+  fairylights: {
+    how: "Select to have Pip come and look at the lights.",
+    label: "looking at the fairy lights",
+    stand: "at",
+    sound: "chime",
+    pitch: 1.4,
+    fx: "sparks",
+    beats: [{ move: "gaze", seconds: 4, lines: ["twinkle, twinkle.", "like reading under the stars."] }]
+  },
+  lavalamp: {
+    how: "Select to have Pip come and watch the lamp.",
+    label: "watching the lava lamp",
+    stand: "beside",
+    sound: "bubble",
+    pitch: 0.6,
+    beats: [{ move: "gaze", seconds: 4, lines: ["bloop. bloop.", "it never does the same thing twice."] }]
+  },
+  mushroomlamp: {
+    how: "Select to have Pip come and look at the mushroom.",
+    label: "looking at the mushroom lamp",
+    stand: "beside",
+    sound: "chime",
+    pitch: 1.5,
+    beats: [{ move: "idea", seconds: 3.3, lines: ["it glows. i glow. friends.", "a night light for a sprout."] }]
+  },
+  fishbowl: {
+    how: "Select to have Pip come and watch the goldfish.",
+    label: "watching the goldfish",
+    stand: "at",
+    sound: "bubble",
+    fx: "bubbles",
+    beats: [{ move: "inspect", seconds: 3, lines: ["one fish. i named her chapter.", "hello, chapter."] }]
+  },
+  cattower: {
+    how: "Select to have Pip come and call the cat down.",
+    label: "calling the cat down",
+    stand: "beside",
+    sound: "mew",
+    beats: [
+      { move: "pointup", seconds: 2.7, lines: ["pspsps.", "come down? please?"] },
+      { move: "shift", seconds: 2, lines: ["...fine. be like that."] }
+    ]
+  },
+  piano: {
+    how: "Select to have Pip come and play the piano.",
+    label: "playing the piano",
+    stand: "at",
+    sound: "tune",
+    fx: "notes",
+    beats: [{ move: "gamer", seconds: 4, lines: ["i only know one song.", "and now, the difficult bit."] }]
+  },
+  gnome: {
+    how: "Select to have Pip come and inspect the gnome.",
+    label: "inspecting the gnome",
+    stand: "beside",
+    beats: [
+      { move: "inspect", seconds: 3, lines: ["he moved. i saw him move.", "what are you guarding, then?"] },
+      { move: "glance", seconds: 3 }
+    ]
+  },
+  tulips: watering("tulips", ["a drink for each of you.", "drink up."]),
+  sunflowers: watering("sunflowers", ["up you grow.", "taller than me. show-offs."]),
+  bonsai: watering("bonsai", ["just a sip. you're small.", "a hundred years old, and thirsty."]),
+  hangingplant: {
+    how: "Select to have Pip come and say hello to the fern.",
+    label: "saying hello to the fern",
+    stand: "at",
+    beats: [{ move: "gaze", seconds: 4, lines: ["hello up there.", "nice fronds."] }]
+  },
+  pond: {
+    how: "Select to have Pip come and look in the pond.",
+    label: "looking in the pond",
+    stand: "beside",
+    sound: "splash",
+    fx: "drops",
+    beats: [
+      { move: "inspect", seconds: 3, lines: ["is that a frog?"] },
+      { move: "boop", seconds: 1, lines: ["it *is* a frog."] }
+    ]
+  },
+  hammock: {
+    how: "Select to have Pip come and lie in the hammock.",
+    label: "swinging in the hammock",
+    stand: "at",
+    beats: [{ move: "floatnap", seconds: 6, lines: ["five minutes.", "wake me at the good bit."] }]
+  },
+  stringlights: {
+    how: "Select to have Pip come and look at the lights.",
+    label: "looking at the string lights",
+    stand: "at",
+    sound: "chime",
+    pitch: 1.4,
+    fx: "sparks",
+    beats: [{ move: "gaze", seconds: 4, lines: ["twinkle, twinkle.", "one's out. no, it's back."] }]
+  },
+  neonread: {
+    how: "Select to have Pip come and read the sign.",
+    label: "reading the sign",
+    stand: "at",
+    sound: "click",
+    beats: [{ move: "pointup", seconds: 2.7, lines: ["r. e. a. d. good advice.", "it says read. so."] }]
+  },
+  ceilingfan: {
+    how: "Select to have Pip come and cool off under the fan.",
+    label: "cooling off under the fan",
+    stand: "at",
+    sound: "swish",
+    beats: [{ move: "stretch", seconds: 3.3, lines: ["ahh. breezy.", "it ruffles my leaf."] }]
+  },
+  trophywall: {
+    how: "Select to have Pip come and admire the medals.",
+    label: "admiring the medals",
+    stand: "at",
+    sound: "star",
+    fx: "sparks",
+    beats: [{ move: "champ", seconds: 4, lines: ["gold, silver, bronze. all for reading.", "we earned every one."] }]
+  },
+  discoball: {
+    how: "Select to start the disco: Pip comes to dance.",
+    label: "dancing under the disco ball",
+    stand: "at",
+    sound: "tune",
+    fx: "lights",
+    dance: "disco",
+    beats: [{ move: "dance", seconds: 5, lines: ["lights!", "it's a disco now."] }]
+  },
+  robotbuddy: {
+    how: "Select to have Pip come and dance with the robot.",
+    label: "dancing with the robot",
+    stand: "beside",
+    sound: "click",
+    pitch: 1.3,
+    dance: "robot",
+    beats: [{ move: "dance", seconds: 4, lines: ["beep boop. we are dancing.", "he taught me this one."] }]
+  },
+  controller: {
+    how: "Select to have Pip come and have a go.",
+    label: "having a go on the controller",
+    stand: "at",
+    sound: "click",
+    beats: [{ move: "gamer", seconds: 3, lines: ["player two has entered the game.", "one more level."] }]
+  },
+  trampoline: {
+    how: "Select to have Pip come and bounce on the trampoline.",
+    label: "bouncing on the trampoline",
+    stand: "at",
+    sound: "bounce",
+    pitch: 0.8,
+    beats: [
+      { move: "bounce", seconds: 2.5, bounces: 4, lines: ["boing!", "watch this!", "higher!"] },
+      { move: "cheer", seconds: 2, lines: ["again! again!", "did you see how high?"] }
+    ]
+  },
+  musicbox: {
+    how: "Select to wind the music box: Pip comes to listen.",
+    label: "listening to the music box",
+    stand: "beside",
+    sound: "tune",
+    pitch: 1.5,
+    fx: "notes",
+    // (Her little bop, not a dance of her own: it is that sort of tune.)
+    beats: [{ move: "bop", seconds: 5, lines: ["plink. plink. plink.", "wind it again?"] }]
+  },
+  bubblemachine: {
+    how: "Select to switch the bubbles on: Pip comes to pop them.",
+    label: "popping bubbles",
+    stand: "beside",
+    sound: "bubble",
+    pitch: 1.2,
+    fx: "bubbles",
+    beats: [
+      { move: "beg", seconds: 3, lines: ["pop! pop! pop!", "that one's mine."], sound: "bubble" },
+      { move: "laugh", seconds: 2, lines: ["one landed on my leaf."] }
+    ]
+  }
+};
+
+/** What a piece of decor does when it is chosen and Pip comes over; null for a piece that is not one of these. */
+export const visitOf = (itemId: string): Visit | null => VISITS[itemId] ?? null;
+
+/** Every piece that is one of these, for the tests. */
+export const VISIT_IDS: readonly string[] = Object.keys(VISITS);
+
+/** The dance she falls back on, with no dance of her own (the Play rail's Dance key does the same). */
+export const BOP = "bop";
+
+/** How a bounce on a thing is written among the beats: not a move (see `VisitBeat`). */
+export const BOUNCE = "bounce";
+
+/** A beat, ready to play: the move it comes to, for how long, the line said and the sound heard as it starts; or (`BOUNCE`) so many bounces. */
+export type VisitStep = { move: string; seconds: number; line?: string; sound?: PipSound; bounces?: number };
+
+/**
+ * A visit's beats as she will do them now: each `dance` turned into one of
+ * her dances (`dances`: the ones she owns), the one the thing asks for if she
+ * has it, a bop if she has none; and one of each beat's lines chosen.
+ */
+export const visitBeats = (visit: Visit, dances: readonly string[], rand: () => number): VisitStep[] =>
+  visit.beats.map((beat) => {
+    const move = beat.move !== "dance" ? beat.move : visit.dance && dances.includes(visit.dance) ? visit.dance : dances.length > 0 ? pickLine(dances, rand) : BOP;
+    const line = beat.lines && beat.lines.length > 0 ? pickLine(beat.lines, rand) : undefined;
+    return { move, seconds: beat.seconds, line, sound: beat.sound, ...(beat.move === BOUNCE ? { bounces: Math.max(1, beat.bounces ?? 3) } : {}) };
+  });
+
+/**
+ * What a visit offers Pip of her own accord, in a free moment
+ * (pip/behaviour.ts, `Offer`): its first beat, now and then. Not the music:
+ * she dances by herself already, at a record player or without one.
+ */
+export const visitOffer = (visit: Visit): Offer | null => {
+  const first = visit.beats[0];
+  // (Nor a bounce, which is not a move she can be handed.)
+  if (!first || first.move === "dance" || first.move === BOUNCE || visit.stand === "stay") return null;
+  return { label: visit.label, move: first.move, seconds: first.seconds, lines: first.lines, weight: 0.4, use: "answer" };
+};
+
 // ---- the fridge ---------------------------------------------------------------------------
 //
 // A fixture of the bedroom, not decor (pip/home.js stands it where there is
@@ -580,6 +1048,13 @@ export const lampReaction = (off: boolean, hour: number): Reaction | null => {
 // still bought as they are given, from Pip's things. What it is for is Pip,
 // who hears it open and comes over hopefully, goes to it for the snack the
 // reader is about to choose, and (pip/behaviour.ts) raids it at night.
+//
+// Since 2026-10-13 (the owner's request) what she finds there matters. Each
+// snack bought stocks the fridge for a day, three days at most in hand; Rust
+// works that out from the purchases (pip/fridge.rs) and the art draws it
+// stocked or bare. Bare, she droops when she looks, and the first look of a
+// day costs her a little mood (never below the floor being away stops at).
+// Nothing is charged for time the app was shut: she has to look.
 
 /** A door the reader opened shuts itself after this long, in seconds. */
 export const FRIDGE_OPEN_S = 8;
@@ -614,6 +1089,54 @@ export const fridgeShutOnHer = (rand: () => number): Reaction => ({ move: "shift
 export const fridgeFetch = (rand: () => number): Reaction => ({ move: "beg", loops: Math.round(FRIDGE_WAIT_S / (16 / 12)), line: pickLine(FETCH_LINES, rand) });
 /** No snack came: she shuts the door again. */
 export const fridgeNothing = (rand: () => number): Reaction => ({ move: "shift", loops: 1, line: pickLine(NOTHING_LINES, rand) });
+
+/** What its label and its tooltip say of what is in it. */
+export const fridgeHolds = (bare: boolean) => (bare ? "nothing in it" : "food in it");
+export const FRIDGE_HOW_BARE = "It is bare: a snack for Pip stocks it for a day.";
+export const FRIDGE_HOW_STOCKED = "There is food in it: each snack for Pip stocks it for a day.";
+
+// How often she droops over a bare fridge is this device's to remember (one
+// localStorage entry, like the furnishings above): a couple of times a day at
+// the very most, and not twice in an afternoon. The mood it costs is Rust's
+// business, and stricter: once a day. Also remembered: that she last found it
+// bare, so that the first time she finds food in it again she can be pleased.
+
+export const BARE_STORE = "leaflet.pip.bareFridge";
+/** She droops over a bare fridge at most this often in a day... */
+export const BARE_DROOPS_PER_DAY = 2;
+/** ...and not again within this long of the last time, in milliseconds. */
+export const BARE_DROOP_GAP_MS = 3 * 60 * 60 * 1000;
+
+/** `day`: the local day `times` belongs to; `at`: when she last drooped (epoch ms); `wasBare`: she last found it bare. */
+export type BareSeen = { day: string; times: number; at: number; wasBare: boolean };
+
+export const bareSeenStart = (): BareSeen => ({ day: "", times: 0, at: 0, wasBare: false });
+
+export const parseBareSeen = (text: string | null | undefined): BareSeen => {
+  if (!text) return bareSeenStart();
+  try {
+    const raw = JSON.parse(text) as Partial<BareSeen> | null;
+    if (!raw || typeof raw !== "object") return bareSeenStart();
+    return {
+      day: typeof raw.day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(raw.day) ? raw.day : "",
+      times: finite(raw.times) ? Math.max(0, Math.floor(raw.times)) : 0,
+      at: finite(raw.at) ? Math.max(0, raw.at) : 0,
+      wasBare: raw.wasBare === true
+    };
+  } catch {
+    return bareSeenStart();
+  }
+};
+
+/** Whether a bare fridge still gets a droop out of her, on the local day `today` at `now` (epoch ms). */
+export const bareMinds = (seen: BareSeen, today: string, now: number) =>
+  seen.day !== today ? true : seen.times < BARE_DROOPS_PER_DAY && now - seen.at >= BARE_DROOP_GAP_MS;
+
+/** She has looked in a bare fridge and drooped over it. */
+export const bareFound = (seen: BareSeen, today: string, now: number): BareSeen => ({ day: today, times: seen.day === today ? seen.times + 1 : 1, at: now, wasBare: true });
+
+/** She has found food in it: what she remembers of it being bare is over. */
+export const foodFound = (seen: BareSeen): BareSeen => ({ ...seen, wasBare: false });
 
 /** Where Pip stands at a fridge whose box is this: at its handle (the left; the door swings out to the right), turned to it. */
 export const fridgeStand = (box: { x: number; w: number }, floorW: number): { x: number; face: 1 | -1 } => {

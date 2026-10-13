@@ -4,9 +4,14 @@
  * a seed popping into the soil, seeds dropping into the counter, a chime for
  * a first step or a wish, a piece of decor set down, rain on the garden; and
  * Pip herself under the reader's hand: a squeak when poked, a giggle when
- * tickled, a purr when stroked, a whee when tossed, the ball's bounce; and
+ * tickled, a purr when stroked, a whee when tossed, the ball's bounce, the
+ * pat of a catch and the bonk of one that came down on her head; and
  * the room under the hand: the swish of a curtain, the fridge's hum while
- * its door is open and the click and thud of it shutting.
+ * its door is open and the click and thud of it shutting; a clap for a high
+ * five and a sneeze for a tickled leaf; and the things in the room that
+ * answer a tap: the cuckoo, a tune, bubbles, a fire, a cat. And the camp in
+ * the arcade: a hammer on a new building, a scout sent in, a thing pulled
+ * down, a star won, a raid's end either way, and the magpies at night.
  *
  * Off unless the reader turns it on (Settings, Pip), and quiet on purpose:
  * every sound is short and soft, well under the system's other sounds, and
@@ -19,7 +24,41 @@
  */
 import { useSyncExternalStore } from "react";
 
-export type PipSound = "pick" | "pop" | "chime" | "coin" | "place" | "splash" | "squeak" | "giggle" | "purr" | "whee" | "bounce" | "swish" | "click" | "hum" | "shut" | "knock";
+export type PipSound =
+  | "pick"
+  | "pop"
+  | "chime"
+  | "coin"
+  | "place"
+  | "splash"
+  | "squeak"
+  | "giggle"
+  | "purr"
+  | "whee"
+  | "bounce"
+  | "caught"
+  | "bonk"
+  | "swish"
+  | "click"
+  | "hum"
+  | "shut"
+  | "knock"
+  | "hammer"
+  | "march"
+  | "crumble"
+  | "star"
+  | "fanfare"
+  | "womp"
+  | "caw"
+  | "pebble"
+  | "horn"
+  | "clap"
+  | "achoo"
+  | "cuckoo"
+  | "tune"
+  | "bubble"
+  | "crackle"
+  | "mew";
 
 const KEY = "leaflet.pip.sound";
 /** The loudest any voice gets, before the per-sound levels below. */
@@ -169,6 +208,17 @@ const RECIPES: Record<PipSound, (ctx: AudioContext, out: AudioNode, at: number, 
   whee: (ctx, out, at, pitch) => tone(ctx, out, { type: "sine", from: 520 * pitch, to: 1320 * pitch, at, length: 0.3, peak: 0.26, attack: 0.02 }),
   // The ball on the floor: a round, short thump.
   bounce: (ctx, out, at, pitch) => tone(ctx, out, { type: "sine", from: 300 * pitch, to: 140 * pitch, at, length: 0.09, peak: 0.5 }),
+  // The ball into a pair of hands, hers or the reader's: a soft pat, with a little lift in it.
+  caught: (ctx, out, at, pitch) => {
+    hiss(ctx, out, { at, length: 0.05, peak: 0.26, freq: 1300 * pitch, q: 0.8 });
+    tone(ctx, out, { type: "sine", from: 420 * pitch, to: 560 * pitch, at, length: 0.07, peak: 0.36, attack: 0.004 });
+  },
+  // The ball off the top of her head: a hollow knock, and the wobble after it.
+  bonk: (ctx, out, at, pitch) => {
+    tone(ctx, out, { type: "triangle", from: 520 * pitch, to: 300 * pitch, at, length: 0.07, peak: 0.5, attack: 0.003 });
+    tone(ctx, out, { type: "sine", from: 240 * pitch, to: 330 * pitch, at: at + 0.07, length: 0.09, peak: 0.24, attack: 0.02 });
+    tone(ctx, out, { type: "sine", from: 330 * pitch, to: 220 * pitch, at: at + 0.16, length: 0.14, peak: 0.2, attack: 0.02 });
+  },
   // Curtains drawn along their rail: a soft breath of cloth.
   swish: (ctx, out, at, pitch) => hiss(ctx, out, { at, length: 0.26, peak: 0.24, freq: 2100 * pitch, q: 0.8 }),
   // A lamp's switch: a small dry tick.
@@ -190,6 +240,95 @@ const RECIPES: Record<PipSound, (ctx: AudioContext, out: AudioNode, at: number, 
       tone(ctx, out, { type: "sine", from: 260 * pitch, to: 130 * pitch, at: at + index * 0.17, length: 0.07, peak: 0.7, attack: 0.003 });
       hiss(ctx, out, { at: at + index * 0.17, length: 0.03, peak: 0.12, freq: 1100, q: 1 });
     }
+  },
+  // Work begun on a building: two taps of a hammer, the second surer.
+  hammer: (ctx, out, at, pitch) => {
+    for (let index = 0; index < 2; index += 1) {
+      tone(ctx, out, { type: "triangle", from: (520 + index * 60) * pitch, to: 240 * pitch, at: at + index * 0.14, length: 0.06, peak: 0.5, attack: 0.002 });
+      hiss(ctx, out, { at: at + index * 0.14, length: 0.04, peak: 0.2, freq: 3200, q: 1.4 });
+    }
+  },
+  // A scout put down: two quick feet on the grass.
+  march: (ctx, out, at, pitch) => {
+    tone(ctx, out, { type: "sine", from: 330 * pitch, to: 220 * pitch, at, length: 0.05, peak: 0.45 });
+    tone(ctx, out, { type: "sine", from: 392 * pitch, to: 262 * pitch, at: at + 0.07, length: 0.05, peak: 0.45 });
+  },
+  // A thing pulled down: twigs giving way, and a low thump under them.
+  crumble: (ctx, out, at, pitch) => {
+    hiss(ctx, out, { at, length: 0.28, peak: 0.34, freq: 700 * pitch, q: 0.6 });
+    tone(ctx, out, { type: "sine", from: 140 * pitch, to: 55 * pitch, at: at + 0.02, length: 0.22, peak: 0.6 });
+  },
+  // A star won: one bright note that climbs; pitched up for the second and the third.
+  star: (ctx, out, at, pitch) => {
+    tone(ctx, out, { type: "triangle", from: 784 * pitch, to: 1175 * pitch, at, length: 0.16, peak: 0.36 });
+    tone(ctx, out, { type: "sine", from: 2349 * pitch, at: at + 0.05, length: 0.3, peak: 0.08 });
+  },
+  // A raid won: four notes up a chord, and the last one held.
+  fanfare: (ctx, out, at, pitch) => {
+    [523, 659, 784, 1047].forEach((note, index) =>
+      tone(ctx, out, { type: "triangle", from: note * pitch, at: at + index * 0.11, length: index === 3 ? 0.6 : 0.12, peak: index === 3 ? 0.36 : 0.3 })
+    );
+    tone(ctx, out, { type: "sine", from: 1568 * pitch, at: at + 0.33, length: 0.5, peak: 0.1 });
+  },
+  // A raid beaten back: two notes going down, the second sagging.
+  womp: (ctx, out, at, pitch) => {
+    tone(ctx, out, { type: "triangle", from: 311 * pitch, at, length: 0.2, peak: 0.34, attack: 0.02 });
+    tone(ctx, out, { type: "triangle", from: 233 * pitch, to: 175 * pitch, at: at + 0.2, length: 0.42, peak: 0.34, attack: 0.02 });
+  },
+  // Magpies: two harsh chatters, as heard from a hedge.
+  caw: (ctx, out, at, pitch) => {
+    for (let index = 0; index < 2; index += 1) {
+      tone(ctx, out, { type: "sawtooth", from: 620 * pitch, to: 430 * pitch, at: at + index * 0.16, length: 0.1, peak: 0.12, attack: 0.01 });
+      hiss(ctx, out, { at: at + index * 0.16, length: 0.09, peak: 0.16, freq: 2400, q: 2.2 });
+    }
+  },
+  // A pebble landing: a small dry tock.
+  pebble: (ctx, out, at, pitch) => tone(ctx, out, { type: "sine", from: 880 * pitch, to: 420 * pitch, at, length: 0.035, peak: 0.26, attack: 0.002 }),
+  // The scouts setting out: a little horn, two notes a fourth apart.
+  horn: (ctx, out, at, pitch) => {
+    tone(ctx, out, { type: "sawtooth", from: 294 * pitch, at, length: 0.16, peak: 0.1, attack: 0.03 });
+    tone(ctx, out, { type: "sawtooth", from: 392 * pitch, at: at + 0.16, length: 0.34, peak: 0.12, attack: 0.03 });
+    tone(ctx, out, { type: "sine", from: 392 * pitch, at: at + 0.16, length: 0.34, peak: 0.2, attack: 0.03 });
+  },
+  // A high five: two small hands meeting, a slap with a bright ring to it.
+  clap: (ctx, out, at, pitch) => {
+    hiss(ctx, out, { at, length: 0.07, peak: 0.5, freq: 1900 * pitch, q: 0.9 });
+    tone(ctx, out, { type: "triangle", from: 1320 * pitch, to: 880 * pitch, at, length: 0.06, peak: 0.2, attack: 0.002 });
+  },
+  // A tickled leaf: the breath going in, then all of it out at once.
+  achoo: (ctx, out, at, pitch) => {
+    tone(ctx, out, { type: "sine", from: 520 * pitch, to: 900 * pitch, at, length: 0.22, peak: 0.16, attack: 0.08 });
+    hiss(ctx, out, { at: at + 0.26, length: 0.2, peak: 0.42, freq: 2600 * pitch, q: 0.7 });
+    tone(ctx, out, { type: "triangle", from: 980 * pitch, to: 380 * pitch, at: at + 0.26, length: 0.16, peak: 0.3 });
+  },
+  // The clock on the wall: cuckoo, twice, a falling third each time.
+  cuckoo: (ctx, out, at, pitch) => {
+    for (let index = 0; index < 2; index += 1) {
+      tone(ctx, out, { type: "sine", from: 784 * pitch, at: at + index * 0.5, length: 0.16, peak: 0.34, attack: 0.02 });
+      tone(ctx, out, { type: "sine", from: 622 * pitch, at: at + index * 0.5 + 0.18, length: 0.22, peak: 0.34, attack: 0.02 });
+    }
+  },
+  // A record, a piano, a jukebox: six notes of a tune that goes up and comes home.
+  tune: (ctx, out, at, pitch) => {
+    [523, 659, 784, 659, 880, 784].forEach((note, index) =>
+      tone(ctx, out, { type: "triangle", from: note * pitch, at: at + index * 0.14, length: index === 5 ? 0.34 : 0.13, peak: 0.26, attack: 0.01 })
+    );
+  },
+  // A fish tank, a lava lamp, a pond: three bubbles, each a little higher.
+  bubble: (ctx, out, at, pitch) => {
+    [0, 0.11, 0.19].forEach((when, index) =>
+      tone(ctx, out, { type: "sine", from: (380 + index * 110) * pitch, to: (760 + index * 160) * pitch, at: at + when, length: 0.07, peak: 0.28, attack: 0.01 })
+    );
+  },
+  // A fire in the grate: a low breath, and a few sparks snapping in it.
+  crackle: (ctx, out, at, pitch) => {
+    hiss(ctx, out, { at, length: 0.5, peak: 0.1, freq: 420 * pitch, q: 0.5 });
+    [0.03, 0.12, 0.19, 0.31, 0.42].forEach((when, index) => hiss(ctx, out, { at: at + when, length: 0.025, peak: 0.3, freq: (2400 + index * 380) * pitch, q: 3 }));
+  },
+  // A cat with something to say: one small note, up and back down.
+  mew: (ctx, out, at, pitch) => {
+    tone(ctx, out, { type: "triangle", from: 660 * pitch, to: 990 * pitch, at, length: 0.12, peak: 0.22, attack: 0.03 });
+    tone(ctx, out, { type: "triangle", from: 990 * pitch, to: 740 * pitch, at: at + 0.12, length: 0.2, peak: 0.22, attack: 0.01 });
   }
 };
 
@@ -197,7 +336,42 @@ const RECIPES: Record<PipSound, (ctx: AudioContext, out: AudioNode, at: number, 
  * The same sound again this soon is dropped: a dozen seeds landing are a
  * patter, not a dozen coins at once.
  */
-const GAP_MS: Record<PipSound, number> = { pick: 90, pop: 60, chime: 280, coin: 50, place: 90, splash: 220, squeak: 70, giggle: 320, purr: 380, whee: 260, bounce: 70, swish: 200, click: 80, hum: 1000, shut: 200, knock: 900 };
+const GAP_MS: Record<PipSound, number> = {
+  pick: 90,
+  pop: 60,
+  chime: 280,
+  coin: 50,
+  place: 90,
+  splash: 220,
+  squeak: 70,
+  giggle: 320,
+  purr: 380,
+  whee: 260,
+  bounce: 70,
+  caught: 90,
+  bonk: 400,
+  swish: 200,
+  click: 80,
+  hum: 1000,
+  shut: 200,
+  knock: 900,
+  hammer: 300,
+  march: 70,
+  crumble: 140,
+  star: 120,
+  fanfare: 1200,
+  womp: 1200,
+  caw: 700,
+  pebble: 190,
+  horn: 800,
+  clap: 200,
+  achoo: 900,
+  cuckoo: 1200,
+  tune: 1000,
+  bubble: 300,
+  crackle: 600,
+  mew: 500
+};
 const lastPlayed = new Map<PipSound, number>();
 
 /** Whether a sound may play at `now`, given when it last did. Pure, for the tests. */

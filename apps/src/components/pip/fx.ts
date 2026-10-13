@@ -102,6 +102,16 @@ const SPRITES = {
   spark: {
     rows: ["..w..", "..y..", "wyWyw", "..y..", "..w.."],
     colors: { w: "#FFFFFF", y: "#FFE36B", W: "#FFFFFF" }
+  },
+  // Off a record player or a piano: one note.
+  note: {
+    rows: ["..###", "..#h#", "..#..", "###..", "#b#..", "###.."],
+    colors: { "#": "#3A1E6B", h: "#C89BFF", b: "#8E5CFF" }
+  },
+  // Off a fish tank: a bubble, with the light on it.
+  bubble: {
+    rows: [".###.", "#hw.#", "#w..#", "#...#", ".###."],
+    colors: { "#": "#4FA8D8", h: "#FFFFFF", w: "#D6F4FF" }
   }
 } satisfies Record<string, Sprite>;
 

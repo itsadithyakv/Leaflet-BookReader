@@ -107,6 +107,59 @@ export const EXTRA_PLOTS = [
 export const FREE_PLOTS = 3;
 
 /**
+ * A streak freeze: seeds buying a day of cover for the streak. A day missed
+ * with one in hand does not break it. Bought each time, like a snack, and at
+ * most two a month, which Rust enforces (as it does the price); so is what a
+ * freeze then does, which is the streak engine's business, not the shop's.
+ * About a week's reading at an easy pace: dear enough that the streak is
+ * still kept by reading, cheap enough to save one after a bad week.
+ *
+ * Not a thing to collect: it has no tile in the shop, no place in a set or
+ * a wish, and is counted nowhere. Its own button sells it.
+ */
+export const STREAK_FREEZE = { id: "freeze", name: "Streak freeze", price: 120 };
+
+/**
+ * Sounds for the radio (src/ambience), beside the ones every reader has:
+ * each a common thing, about a week of reading, bought once and kept. The
+ * names are the radio's own (ambience/scenes.ts, where a test holds the two
+ * lists together); a scene that is not listed here is free, and stays free.
+ */
+export const SOUNDS = [
+  { id: "crickets", name: "Summer night", price: 150 },
+  { id: "stream", name: "Stream", price: 150 },
+  { id: "train", name: "Night train", price: 150 }
+];
+
+/**
+ * Rare things, each opening at a level. A reader's level comes from the
+ * seeds they have ever earned, spent or not (level n begins at
+ * 50 * (n - 1) * n: 100 for 2, 300 for 3, 1,000 for 5, 4,500 for 10, 19,000
+ * for 20), worked out in Rust, which also refuses a purchase below it. The
+ * level is the gate and the price is still real: dearer than anything else
+ * in the wardrobe, between a fortnight and three weeks of reading each
+ * (their prices are the art's, like every accessory's).
+ *
+ * Spread out so there is always one not far ahead. A thing's level may come
+ * down in a later version, never up: nothing a reader could buy is taken
+ * back out of reach.
+ */
+export const RARE_LEVELS = [
+  { kind: "accessory", id: "magnifier", level: 3 },
+  { kind: "accessory", id: "quill", level: 5 },
+  { kind: "accessory", id: "mortarboard", level: 8 },
+  { kind: "accessory", id: "lantern", level: 10 },
+  { kind: "accessory", id: "wizardhat", level: 12 },
+  { kind: "accessory", id: "starcloak", level: 16 }
+];
+
+/** The level a thing opens at, or null for the many that open at once. */
+export const levelFor = (kind, id) => RARE_LEVELS.find((entry) => entry.kind === kind && entry.id === id)?.level ?? null;
+
+/** The seeds ever earned at which a level begins. */
+export const levelStart = (level) => 50 * (level - 1) * level;
+
+/**
  * Achievement skins: shown in the wardrobe as goals, never sold. The art marks
  * them `earnedOnly`; these ids are the fallback, and match the server's
  * long-standing rule that an avatar never passes for an achievement.
@@ -334,11 +387,13 @@ const moveName = (id) => LIB.find((move) => move.id === id)?.name ?? id;
  * Every priced thing, flattened: `{ kind, id, name, price, ... }`.
  *
  * kind: "skin" | "accessory" | "room" | "style" | "treat" | "move" | "level"
- * | "wallpaper" | "flooring" | "plant" | "plot". A floor of the house is a
- * "level". Free things (price 0) are owned from the start, except achievement
- * skins. Food and seed packets are `consumable`: bought each time. Everything
- * else is bought once; `requires` names what must be owned first (the floor
- * below), `sessions` how many focus sessions first. A room item with
+ * | "wallpaper" | "flooring" | "plant" | "plot" | "sound" | "freeze". A floor
+ * of the house is a "level" (the kind); a reader's level is the `level` field,
+ * below. Free things (price 0) are owned from the start, except achievement
+ * skins. Food, seed packets and the streak freeze are `consumable`: bought
+ * each time. Everything else is bought once; `requires` names what must be
+ * owned first (the floor below), `sessions` how many focus sessions first,
+ * `level` the reader's level first (RARE_LEVELS). A room item with
  * `freeWith` is a floor's starter piece: owned with that floor, never sold
  * (its price says what it is worth); `light` marks decor that lights a room.
  */
@@ -397,8 +452,13 @@ export const catalogue = () => {
       ...(index > 0 ? { requires: EXTRA_PLOTS[index - 1].id } : {})
     })),
     ...FREE_SIGNATURES.map((id) => ({ kind: "move", id, name: moveName(id), price: 0 })),
-    ...PREMIUM_MOVES.map((move) => ({ kind: "move", id: move.id, name: moveName(move.id), price: move.price }))
-  ];
+    ...PREMIUM_MOVES.map((move) => ({ kind: "move", id: move.id, name: moveName(move.id), price: move.price })),
+    ...SOUNDS.map((sound) => ({ kind: "sound", id: sound.id, name: sound.name, price: sound.price })),
+    { kind: "freeze", id: STREAK_FREEZE.id, name: STREAK_FREEZE.name, price: STREAK_FREEZE.price, consumable: true }
+  ].map((item) => {
+    const level = levelFor(item.kind, item.id);
+    return level ? { ...item, level } : item;
+  });
 };
 
 /** One catalogue entry, for its price. Built once: the catalogue does not change while the app runs. */

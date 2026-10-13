@@ -4,7 +4,9 @@ import { UiIcon, type UiIconName } from "../UiIcon";
 import { CountUp } from "../community/CountUp";
 import { isComplete, tallyLabel, tallyText, type Tally } from "./collection";
 import { canBeGoal } from "./goal";
+import { levelHint, levelLabel } from "./rare";
 import { shortfall } from "./shopParts";
+import "./rare.css";
 
 /** What previewing an entry on Pip changes: the look, and a move to show it off. */
 export type PreviewLook = { variant?: string; outfit?: string[]; move?: string };
@@ -19,8 +21,12 @@ export type ShopEntry = {
   owned: boolean;
   /** A badge for an owned thing: "Equipped", "In the house", "Signature"... */
   badge?: string | null;
-  /** Why it cannot be bought yet (earned by reading, a floor first...). */
+  /** Why it cannot be bought yet (earned by reading, a floor first, "Level 8"...). */
   locked?: string | null;
+  /** The rest of why, for a tooltip: the tile itself says little. */
+  lockedHint?: string | null;
+  /** A rare thing: the reader's level it opens at, reached or not. */
+  level?: number | null;
   /** Bought each time it is used (snacks), so never "owned". */
   consumable?: boolean;
   art: (size: number, hot: boolean) => ReactNode;
@@ -154,11 +160,19 @@ export const PipShop = ({ categories, balance, request, goal, onGoal, onBuy, onP
 
   const statusOf = (entry: ShopEntry) => {
     if (entry.owned && !entry.consumable) return { text: entry.badge ?? "Owned", tone: "owned" as const };
-    if (entry.locked) return { text: entry.locked, tone: "locked" as const };
+    if (entry.locked) return { text: entry.locked, tone: "locked" as const, hint: entry.lockedHint ?? undefined };
     const lacking = shortfall(entry.price, balance);
     if (lacking) return { text: `${plural(lacking.short, "more seed")} · ~${lacking.minutes} min of reading`, tone: "short" as const };
     return null;
   };
+
+  /** A rare thing's level, as a chip: once reached (or owned). Before that the lock says it. */
+  const levelChip = (entry: ShopEntry, inline = false) =>
+    entry.level && !(entry.locked && !entry.owned) ? (
+      <span className="pip-shop-level" data-inline={inline || undefined} title={levelHint(entry.level)}>
+        {levelLabel(entry.level)}
+      </span>
+    ) : null;
 
   const card = (entry: ShopEntry, index: number) => {
     const key = keyOf(entry);
@@ -173,8 +187,9 @@ export const PipShop = ({ categories, balance, request, goal, onGoal, onBuy, onP
         style={{ "--i": Math.min(index, 12) } as CSSProperties}
         data-tone={status?.tone ?? "buy"}
         data-goal={goal === key || undefined}
+        data-rare={entry.level ? true : undefined}
         aria-pressed={chosen === key}
-        aria-label={`${entry.name}. ${entry.owned && !entry.consumable ? entry.badge ?? "Owned" : `${entry.price} seeds`}. ${status && status.tone !== "owned" ? status.text : ""}${entry.fromLibrary ? " From your library." : ""}${goal === key ? " Your goal." : ""}`}
+        aria-label={`${entry.name}. ${entry.owned && !entry.consumable ? entry.badge ?? "Owned" : `${entry.price} seeds`}. ${status && status.tone !== "owned" ? status.text : entry.level ? `${levelLabel(entry.level)}.` : ""}${entry.fromLibrary ? " From your library." : ""}${goal === key ? " Your goal." : ""}`}
         onClick={() => setChosen(key)}
         onMouseEnter={() => setHot(key)}
         onMouseLeave={() => setHot((current) => (current === key ? null : current))}
@@ -182,6 +197,7 @@ export const PipShop = ({ categories, balance, request, goal, onGoal, onBuy, onP
         onBlur={() => setHot((current) => (current === key ? null : current))}
       >
         {entry.fromLibrary && <span className="pip-shop-ribbon">From your library</span>}
+        {levelChip(entry)}
         {goal === key && (
           <span className="pip-shop-goal-flag" aria-hidden="true">
             <UiIcon name="goal" size={12} />
@@ -201,7 +217,11 @@ export const PipShop = ({ categories, balance, request, goal, onGoal, onBuy, onP
               {entry.price}
             </span>
           )}
-          {status && status.tone !== "owned" && <span className="pip-shop-card-note">{status.text}</span>}
+          {status && status.tone !== "owned" && (
+            <span className="pip-shop-card-note" title={status.tone === "locked" ? status.hint : undefined}>
+              {status.text}
+            </span>
+          )}
         </span>
       </button>
     );
@@ -238,7 +258,7 @@ export const PipShop = ({ categories, balance, request, goal, onGoal, onBuy, onP
               <CountUp value={balance} />
             </span>
           </span>
-          <button type="button" className="tactile-button px-3 py-1.5 text-xs" onClick={onClose}>
+          <button type="button" className="pip-key pip-key-small" onClick={onClose}>
             Close
           </button>
         </header>
@@ -313,7 +333,17 @@ export const PipShop = ({ categories, balance, request, goal, onGoal, onBuy, onP
 
           <aside className="pip-shop-detail" aria-live="polite">
             {selected ? (
-              <Detail key={chosen} entry={selected} status={statusOf(selected)} balance={balance} goal={goal} onGoal={onGoal} onBuy={onBuy} onPreview={onPreview} />
+              <Detail
+                key={chosen}
+                entry={selected}
+                status={statusOf(selected)}
+                levelChip={levelChip(selected, true)}
+                balance={balance}
+                goal={goal}
+                onGoal={onGoal}
+                onBuy={onBuy}
+                onPreview={onPreview}
+              />
             ) : suggestion ? (
               <>
                 <p className="pip-shop-suggest">
@@ -324,6 +354,7 @@ export const PipShop = ({ categories, balance, request, goal, onGoal, onBuy, onP
                   key={`suggest-${keyOf(suggestion.entry)}`}
                   entry={suggestion.entry}
                   status={statusOf(suggestion.entry)}
+                  levelChip={levelChip(suggestion.entry, true)}
                   balance={balance}
                   goal={goal}
                   onGoal={onGoal}
@@ -348,6 +379,7 @@ export const PipShop = ({ categories, balance, request, goal, onGoal, onBuy, onP
 const Detail = ({
   entry,
   status,
+  levelChip,
   balance,
   goal,
   onGoal,
@@ -355,7 +387,9 @@ const Detail = ({
   onPreview
 }: {
   entry: ShopEntry;
-  status: { text: string; tone: "owned" | "locked" | "short" } | null;
+  status: { text: string; tone: "owned" | "locked" | "short"; hint?: string } | null;
+  /** A rare thing's level, once reached. */
+  levelChip?: ReactNode;
   balance: number;
   goal: string | null;
   onGoal: (entry: ShopEntry | null) => void;
@@ -391,8 +425,11 @@ const Detail = ({
             {entry.price}
           </span>
         )}
+        {levelChip}
         {status && status.tone !== "owned" ? (
-          <span className="text-xs text-on-surface-variant">{status.text}</span>
+          <span className="text-xs text-on-surface-variant" title={status.hint}>
+            {status.text}
+          </span>
         ) : (
           (!entry.owned || entry.consumable) && <span className="text-xs text-on-surface-variant">{plural(balance - entry.price, "seed")} left after</span>
         )}

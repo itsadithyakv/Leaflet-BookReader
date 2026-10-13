@@ -8,9 +8,16 @@ const TAU = Math.PI * 2;
 
 // ---------------------------------------------------------------- colour
 const cache = new Map();
+/**
+ * How many colours are kept parsed. The art's own palette is a few hundred,
+ * but the room by night makes a new colour for nearly every lit pixel of
+ * every frame, and each was kept for as long as the app ran.
+ */
+const COLOURS_KEPT = 60000;
 function rgba(c) {
   let v = cache.get(c);
   if (v) return v;
+  if (cache.size >= COLOURS_KEPT) cache.clear();
   const h = c.replace("#", "");
   const n = parseInt(h.slice(0, 6), 16);
   v = [(n >> 16) & 255, (n >> 8) & 255, n & 255, h.length === 8 ? parseInt(h.slice(6, 8), 16) : 255];

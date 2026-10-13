@@ -8,9 +8,9 @@ import { renderPacket } from "../pip/garden.js";
 import { ownsItem, usePipWardrobeStore } from "../store/pipWardrobeStore";
 import { usePipStore } from "../store/pipStore";
 import { useLibraryStore } from "../store/libraryStore";
-import type { PipLook } from "../services/pipService";
+import { fridgeIsBare, type PipLook } from "../services/pipService";
 import type { WishView } from "../pip/wish";
-import { HouseScene, type HouseSceneHandle } from "../components/pip/HouseScene";
+import { HouseScene, type HouseSceneHandle, type TemperShown } from "../components/pip/HouseScene";
 import { bump, capture, centerOf, clearEffects, collect, floatText, reducedMotion, seedPixel, type Captured } from "../components/pip/fx";
 import { playSound } from "../pip/sound";
 import type { PlayKind } from "../pip/play";
@@ -26,6 +26,7 @@ import { PacketPicker } from "../components/pip/PacketPicker";
 import { Walkthrough } from "../components/pip/Walkthrough";
 import { WALK, markWalkSeen, walkSeen, type WalkStep, type WalkTarget } from "../components/pip/walkSteps";
 import { ArcadeOverlay, type ArcadePage } from "../components/pip/arcade/ArcadeOverlay";
+import { HollowPlace } from "../components/pip/arcade/base/HollowPlace";
 import type { GameId } from "../components/pip/arcade/games";
 import { MOOD_LOW, aOrAn, errorText, moodWord, pickOne, priceOf, storage, wait, type Drawer, type FinishPanel } from "./pip/common";
 import { usePipActs } from "./pip/usePipActs";
@@ -108,7 +109,7 @@ export type PipPageProps = {
  * rail and the drawers.
  */
 export const PipPage = ({ showToast, openSocial }: PipPageProps) => {
-  const { overview, load, buy, setLook, feed, plant, harvest, gamePlayed, played } = usePipWardrobeStore(
+  const { overview, load, buy, setLook, feed, plant, harvest, gamePlayed, played, fridgeBare } = usePipWardrobeStore(
     useShallow((state) => ({
       overview: state.overview,
       load: state.load,
@@ -118,9 +119,12 @@ export const PipPage = ({ showToast, openSocial }: PipPageProps) => {
       plant: state.plant,
       harvest: state.harvest,
       gamePlayed: state.gamePlayed,
-      played: state.played
+      played: state.played,
+      fridgeBare: state.fridgeBare
     }))
   );
+  // Why Pip's things could not be read, when they could not: the drawers say so and offer another try.
+  const loadError = usePipWardrobeStore((state) => state.loadError);
   const { reaction, suspended, finishReaction, setOnStage, tour } = usePipStore(
     useShallow((state) => ({
       reaction: state.reaction,
@@ -146,6 +150,8 @@ export const PipPage = ({ showToast, openSocial }: PipPageProps) => {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [slotFocus, setSlotFocus] = useState<string | null>(null);
   const [pickerPlot, setPickerPlot] = useState<number | null>(null);
+  // Where in Pip's world the tab is: out in the Hollow, which is where it opens, or in through the burrow's door to her rooms.
+  const [place, setPlace] = useState<"hollow" | "home">("hollow");
   // The arcade's games, open; and the game a machine opened it at, if one did.
   const [arcadeOpen, setArcadeOpen] = useState(false);
   // (Or one of its other pages: a thing in the room may open it straight onto the word quiz, or "My words".)
@@ -170,6 +176,9 @@ export const PipPage = ({ showToast, openSocial }: PipPageProps) => {
   // they land; hearts likewise wait for the hearts flying to them.
   const [heldSeeds, setHeldSeeds] = useState<number | null>(null);
   const [heldMood, setHeldMood] = useState<number | null>(null);
+  // The mood she is in for now (a sulk after a tantrum, a good mood after a snack: pip/temper.ts), as the house
+  // scene reports it. Laid over the hearts here and never sent to Rust, so no swing leaves a lasting wrong number.
+  const [temper, setTemper] = useState<TemperShown>({ off: 0, humour: null, minutesLeft: 0 });
   const [countMs, setCountMs] = useState(700);
   // Effects timed to Pip's current act (crumbs at each bite): a new act cancels them.
   const actTimers = useRef(new Set<number>());
@@ -211,7 +220,9 @@ export const PipPage = ({ showToast, openSocial }: PipPageProps) => {
   const mood = state?.mood ?? 70;
   /** The hearts: held while hearts fly to them, and with a snack's cheer counted as it is eaten. */
   const shownMood = heldMood ?? Math.min(100, mood + standIns.moodAhead);
-  const hearts = Math.round(shownMood / 10) / 2;
+  /** What the hearts show: that, with the mood she is in for now on top of it. */
+  const feltMood = Math.max(0, Math.min(100, shownMood + temper.off));
+  const hearts = Math.round(feltMood / 10) / 2;
   const variant = state?.variant ?? "sprout";
   const outfit = useMemo(() => state?.outfit ?? [], [state?.outfit]);
   const signature = state?.signature ?? "read";
@@ -423,7 +434,14 @@ export const PipPage = ({ showToast, openSocial }: PipPageProps) => {
 
   // ---- the arcade -----------------------------------------------------------------------------
 
-  const onGameFinished = useCallback(async (game: GameId, score: number) => Math.round(await gamePlayed(game, score)), [gamePlayed]);
+  const onGameFinished = useCallback(
+    async (game: GameId, score: number) => {
+      // A game played to a score leaves her in a good mood for a while (pip/temper.ts).
+      if (score > 0) sceneRef.current?.kindness("game");
+      return Math.round(await gamePlayed(game, score));
+    },
+    [gamePlayed]
+  );
   const closeArcade = () => {
     setArcadeOpen(false);
     play("cheer", 1, "that was fun. back to the books?");
@@ -454,10 +472,22 @@ export const PipPage = ({ showToast, openSocial }: PipPageProps) => {
   const danceWithPip = () => {
     const move = repertoire.dances.length > 0 ? pickOne([...repertoire.dances]) : "bop";
     play(move, move === "bop" ? 3 : 4, pickOne(["dance with me!", "this is my song.", "one, two, three!"]));
+    // (And it leaves her in a good mood for a while: pip/temper.ts.)
+    sceneRef.current?.kindness("dance");
     void onPlayed("dance");
   };
 
-  const playWith = (how: "pet" | "tickle" | "ball" | "toss" | "dance" | "bed") => {
+  /**
+   * She has looked in her fridge and found it bare (the scene says so, when she minds): Rust takes a little off
+   * her mood, the first time in a day and never below the floor, and what it took drifts off her, quietly.
+   */
+  const onFridgeBare = useCallback(async () => {
+    const lost = await fridgeBare();
+    const head = sceneRef.current?.pipPoint("head");
+    if (lost >= 0.5 && head) floatText({ x: head.x, y: head.y - 14 }, `-${Math.round(lost)}`, "mood");
+  }, [fridgeBare]);
+
+  const playWith = (how: "pet" | "cuddle" | "tickle" | "highfive" | "spin" | "ball" | "toss" | "dance" | "bed") => {
     if (how === "dance") danceWithPip();
     else sceneRef.current?.playWith(how);
   };
@@ -529,17 +559,22 @@ export const PipPage = ({ showToast, openSocial }: PipPageProps) => {
     setWalking(true);
   };
 
-  // The first visit: once the house has loaded, and not over the app's own tour.
+  // The app's own tour points at things in the house: it is shown the house.
+  useEffect(() => {
+    if (tour !== null) setPlace("home");
+  }, [tour]);
+
+  // The first visit indoors: once the house has loaded, and not over the app's own tour.
   const loaded = overview !== null;
   useEffect(() => {
-    if (!loaded || walking || tour !== null || suspended || walkSeen(storage())) return;
+    if (place !== "home" || !loaded || walking || tour !== null || suspended || walkSeen(storage())) return;
     const timer = window.setTimeout(() => {
       markWalkSeen(storage());
       setWalking(true);
     }, 700);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, tour, suspended]);
+  }, [loaded, tour, suspended, place]);
 
   const findWalk = (target: WalkTarget): Element | null =>
     target === "plot"
@@ -578,7 +613,17 @@ export const PipPage = ({ showToast, openSocial }: PipPageProps) => {
       ripe,
       snack: snack ? { name: aOrAn(snack.name), price: priceOf("treat", snack.id), mood: snack.mood } : null,
       treatName,
-      gameName: (id) => GAMES.find((game) => game.id === id)?.name ?? "the arcade"
+      gameName: (id) => GAMES.find((game) => game.id === id)?.name ?? "the arcade",
+      fridge: overview?.fridge
+        ? {
+            bare: fridgeIsBare(overview.fridge, Date.now()),
+            hoursLeft: overview.fridge.stockedUntil ? Math.max(0, (Date.parse(overview.fridge.stockedUntil) - Date.now()) / 3_600_000) : 0,
+            mindedToday: overview.fridge.mindedToday,
+            hoursPerSnack: overview.fridge.hoursPerSnack,
+            maxHours: overview.fridge.maxHours
+          }
+        : null,
+      temper
     });
   };
 
@@ -727,14 +772,43 @@ export const PipPage = ({ showToast, openSocial }: PipPageProps) => {
   return (
     <div
       className="pip-house-page"
+      data-place={place}
       onClickCapture={(event) => {
         lastClicked.current = event.target instanceof Element ? event.target : null;
       }}
     >
+      {place === "hollow" && (
+        <HollowPlace
+          // The Pip the reader has chosen, in what she is wearing: the same one as indoors, the moment a look is picked.
+          skin={shownVariant}
+          outfit={shownOutfit}
+          mood={overview ? shownMood : undefined}
+          onInside={() => setPlace("home")}
+          onArcade={() => openArcade()}
+          garden={
+            garden
+              ? {
+                  plots: plotCount,
+                  growing: garden.plants.filter((entry) => !entry.ripe && !entry.harvested).length,
+                  ripe,
+                  // The bed by the burrow is the garden's door: in, and up to its floor (or to its list, in a house with no such floor).
+                  onOpen: () => {
+                    setPlace("home");
+                    if (gardenLevel) {
+                      if (level.id !== gardenLevel.id) goToFloor(gardenLevel);
+                    } else setDrawer("garden");
+                  }
+                }
+              : undefined
+          }
+        />
+      )}
       <h2 className="sr-only">Pip's house</h2>
       <section
         className="pip-house"
         aria-label={`Pip's house: the ${level.name}`}
+        // Out in the Hollow the house is behind its door: kept as it was, and out of reach of keys and screen readers.
+        {...(place === "hollow" ? { inert: "" } : {})}
         style={frame}
         data-decorating={decorating || undefined}
         data-sheet={sheet ? "open" : undefined}
@@ -749,7 +823,7 @@ export const PipPage = ({ showToast, openSocial }: PipPageProps) => {
           heldSeeds={heldSeeds}
           countMs={countMs}
           hearts={hearts}
-          shownMood={shownMood}
+          shownMood={feltMood}
           openMe={() => openDrawer("me")}
           openMood={() => openDrawer("mood")}
           onGoalsFlight={(phase, seeds) => {
@@ -804,7 +878,7 @@ export const PipPage = ({ showToast, openSocial }: PipPageProps) => {
             slotLabel={slotLabel}
             onArcade={openArcade}
             onJukebox={danceWithPip}
-            hidePip={arcadeOpen}
+            hidePip={arcadeOpen || place === "hollow"}
             plots={plots}
             onPlot={level.garden ? onPlot : undefined}
             onEmptyPlot={level.garden ? (plot) => setPickerPlot(plot.plot) : undefined}
@@ -812,11 +886,13 @@ export const PipPage = ({ showToast, openSocial }: PipPageProps) => {
             reserveBelow={reserve}
             world={world}
             onWelcomed={markSeen}
+            onFridgeBare={() => void onFridgeBare()}
+            onTemper={setTemper}
             overlay={(frame) => (
               <Visitors
                 frame={frame}
                 taken={frame.floor()}
-                busy={decorating || arcadeOpen}
+                busy={decorating || arcadeOpen || place === "hollow"}
                 away={pipOut}
                 onEvent={(event) => sceneRef.current?.visitor(event.type)}
                 onOpenProfile={
@@ -829,7 +905,7 @@ export const PipPage = ({ showToast, openSocial }: PipPageProps) => {
                 }
               />
             )}
-            label={`The ${level.name}, with Pip in ${SKINS.find((entry) => entry.id === shownVariant)?.name ?? "its"} outfit. ${moodWord(shownMood)}.`}
+            label={`The ${level.name}, with Pip in ${SKINS.find((entry) => entry.id === shownVariant)?.name ?? "its"} outfit. ${moodWord(feltMood)}.`}
           />
 
           {levels.length > 1 && roomBox && (
@@ -870,6 +946,12 @@ export const PipPage = ({ showToast, openSocial }: PipPageProps) => {
           stopDecorating={stopDecorating}
           toggleFinish={toggleFinish}
           openArcade={() => openArcade()}
+          openCamp={() => {
+            setDrawer(null);
+            setPickerPlot(null);
+            setPlaying(false);
+            setPlace("hollow");
+          }}
           playing={playing}
           startPlaying={() => {
             setDrawer(null);
@@ -891,7 +973,18 @@ export const PipPage = ({ showToast, openSocial }: PipPageProps) => {
           // house on a wide window (so it never pushes the rail down), a sheet
           // at the bottom on a narrow one.
           <PipDrawer key={sheet.key} ref={drawerRef} title={sheet.title} note={sheet.note} size={sheet.size} onClose={sheet.close}>
-            {overview === null ? <Empty>Pip is getting dressed…</Empty> : sheet.body}
+            {overview !== null ? (
+              sheet.body
+            ) : loadError ? (
+              <Empty>
+                <span title={loadError}>Pip's things did not load.</span>{" "}
+                <button type="button" className="font-semibold text-primary underline" onClick={() => void load()}>
+                  Try again
+                </button>
+              </Empty>
+            ) : (
+              <Empty>Pip is getting dressed…</Empty>
+            )}
           </PipDrawer>
         )}
       </section>
@@ -929,6 +1022,7 @@ export const PipPage = ({ showToast, openSocial }: PipPageProps) => {
           outfit={outfit}
           best={overview?.arcade.best ?? {}}
           moodToday={overview?.arcade.moodToday ?? 0}
+          mood={overview ? shownMood : undefined}
           moodCap={overview?.moodRules.playPerDay ?? 12}
           onFinished={onGameFinished}
           onClose={closeArcade}

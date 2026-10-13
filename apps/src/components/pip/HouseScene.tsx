@@ -12,19 +12,67 @@ import {
   type ReactNode
 } from "react";
 import { itemBox, renderHouseLevel, renderItem, type HouseLevel, type HouseSlot, type LevelDecor } from "../../pip/home.js";
-import { LIB } from "../../pip/core";
+import { LIB, SKINS, renderFrame, resolve } from "../../pip/core";
 import {
+  ASK_AWAY_MS,
+  BALL_FORGOTTEN_MS,
+  BALL_RADIUS,
+  CATCH_RUN,
+  GRAB_MIN,
+  HALF_PACE,
+  HEAD_HIGH,
+  RALLY_SHOWS,
+  REACH_X,
+  ballAt,
+  ballDown,
+  ballShape,
+  ballStep,
+  ballStill,
+  fetched,
+  flick,
+  hopLift,
+  keenness,
+  landing,
+  lob,
+  peaceOffering,
+  rallyStart,
+  reachOf,
+  readerBack,
+  readerCaught,
+  readerMissed,
+  receive,
+  shadowOf,
+  spinFrame,
+  throwSpot,
+  throwTarget,
+  tossFrom,
+  turnOf,
+  underarm,
+  windupMs,
+  type Ask,
+  type BallBody,
+  type Hit,
+  type Rally,
+  type Room,
+  type Tally
+} from "../../pip/catch";
+import {
+  FOUND_BARE,
+  FOUND_FOOD,
   PEEK_S,
   activityAt,
+  bareFridgeLine,
   bedtimeScroll,
   bundled,
   caughtLine,
   chooseActivity,
   coldPace,
   coldRest,
+  crossesVisitor,
   fidget,
   fidgetGap,
   fidgetsBetween,
+  foodAgainLine,
   fridgeVisit,
   gazeAt,
   gazeMove,
@@ -38,6 +86,8 @@ import {
   planActivity,
   quiltLine,
   spookedTonight,
+  standAt,
+  stillBareLine,
   stopForVisitor,
   scrollSession,
   scrollWindDown,
@@ -51,14 +101,18 @@ import {
   type ScrollBeat,
   type Spot,
   type SpotKind,
+  type Step,
   type World
 } from "../../pip/behaviour";
 import { markStopSaid, readStop, stopRemark } from "../../pip/readingMoments";
 import { setWorldStub, worldStub } from "../../pip/worldStub";
 import {
+  CUDDLE_SLACK,
   HARD_LANDING,
   PIP_BOUNCE,
+  POKE_RUNGS,
   caught,
+  fingerLifts,
   flyStep,
   holdMove,
   holdStart,
@@ -68,15 +122,23 @@ import {
   playCounts,
   pokeAgain,
   pokeReaction,
+  pressOf,
   releaseVelocity,
-  rollStep,
+  rubOf,
   strokeMove,
   strokeStart,
-  type Body,
+  tapAgain,
+  whirlMove,
+  whirlStart,
+  whirled,
+  zoneOf,
   type PlayKind,
   type Poke,
+  type Rub,
   type Sample,
-  type Stroke
+  type Stroke,
+  type Taps,
+  type Whirl
 } from "../../pip/play";
 import { BARREL_H, BARREL_W, PLOT_H, PLOT_W, renderBarrel, renderGardenBed, renderGardenFloor, renderPlant } from "../../pip/garden.js";
 import { gardenLayout } from "../../pip/gardenRows";
@@ -93,7 +155,46 @@ import { watchPixelRatio } from "./pixelRatio";
 import { floorPoint } from "./layout";
 import { fixtureKey, useFurnishings, type FurnishPip, type Fridge, type RoomChange } from "./furnishings";
 import { readingMove } from "../../pip/furnish-art.js";
-import { bedSleep, dark, fridgeFetch, fridgeHope, fridgeNothing, fridgeShutOnHer, fridgeStand, type Reaction } from "../../pip/furnish";
+import {
+  BARE_STORE,
+  bareFound,
+  bareMinds,
+  bedSleep,
+  dark,
+  foodFound,
+  fridgeFetch,
+  fridgeHope,
+  fridgeNothing,
+  fridgeShutOnHer,
+  fridgeStand,
+  parseBareSeen,
+  visitBeats,
+  visitOf,
+  type Reaction
+} from "../../pip/furnish";
+import {
+  SULK_MOVE,
+  TEMPER_STORE,
+  annoy,
+  comeRound,
+  gladLine,
+  heartsOff,
+  huffLine,
+  humourOf,
+  keepTemper,
+  offerPeace,
+  parseTemper,
+  soothe,
+  spellMinutesLeft,
+  sulkLine,
+  tantrumPlan,
+  temperAt,
+  type Annoyance,
+  type Humour,
+  type Kindness,
+  type Temper
+} from "../../pip/temper";
+import { getDateKey } from "../../services/habitService";
 import type { GameId } from "./arcade/games";
 import type { ArcadePage } from "./arcade/ArcadeOverlay";
 import { GardenSky } from "./GardenSky";
@@ -111,15 +212,38 @@ const ROOM_LOOP = 48;
 const WALK_SPEED = 22;
 /** On tiptoe to the fridge after dark, in floor pixels per second. */
 const TIPTOE_SPEED = 13;
-/** After the ball, and bringing it back, in floor pixels per second. */
+/** In a hurry (to the fridge, to the door), in floor pixels per second. After the ball she is quicker still: pip/catch.ts, `CATCH_RUN`. */
 const RUN_SPEED = 66;
-const CARRY_SPEED = 34;
-/** The ball's middle rests this far above where Pip's feet go. */
-const BALL_RADIUS = 3;
-/** The ball's button, in floor pixels: a little more than the ball, so it is easy to take hold of. */
+/** The ball's button, in floor pixels: a little more than the ball. On screen it is never smaller than a finger (pip/catch.ts, `GRAB_MIN`). */
 const BALL_BOX = 12;
-/** A ball nobody has touched for this long is put away. */
-const BALL_IDLE_MS = 30_000;
+/** Where the ball is while she has it, from her feet (floor pixels; `x` is to the side she faces): over her head as she runs, behind her as she winds up, under her chin. As house-moves.js draws them. */
+const BALL_CARRIED = { x: 5, y: -18 };
+const BALL_WOUND = { x: -6, y: -16 };
+const BALL_CHIN = { x: 6, y: -4 };
+/** Her hands as she throws, from her feet. */
+const HANDS = { x: 6, y: -19 };
+/** How long each small thing in a game of catch takes, in milliseconds: the throw's follow-through, a header or a kick, sat down after a bonk, a jump at nothing, a hop for the reader's catch. */
+const FLING_MS = 520;
+const FLOURISH_MS = 560;
+const BONK_MS = 2900;
+const WHIFF_MS = 620;
+const YAY_MS = 420;
+/** A pat that sends the ball rolling to the reader, and the look between them and it after. */
+const NUDGE_MS = 520;
+const NUDGE_LOOK_MS = 2600;
+const NUDGE_SPEED = 95;
+/** Putting the ball away: held up a moment, and gone. */
+const AWAY_MS = 900;
+/** Making up over the ball: a look at it and at the reader, then the pat back. */
+const PEACE_LOOK_MS = 2400;
+/** Without motion, she has the ball this long before it is handed back; and a ball handed back is the reader's to take for this long before the rally lapses. */
+const HANDBACK_MS = 900;
+const OFFER_MS = 6000;
+
+const CAUGHT_LINES = ["got it!", "mine!", "ha!"];
+const BONK_LINES = ["ow. ...i meant to do that.", "bonk.", "that was my head."];
+const WHIFF_LINES = ["almost!", "nearly had it.", "too high!"];
+const PEACE_LINES = ["...fine. one throw.", "hmph. ...here.", "...okay. catch."];
 /** Stroking that stops this long has ended; shorter than this, it was a brush, not a stroke. */
 const TOUCH_GAP_MS = 750;
 const TOUCH_MIN_MS = 900;
@@ -136,6 +260,25 @@ const JUST_NOW_MS = 60_000;
 const STILL_GAP_MS = 14_000;
 /** How far the pointer moves before a press on Pip becomes a carry. */
 const DRAG_SLOP = 4;
+/** Once she is being cuddled, the hand may shift this far before it has picked her up instead. */
+const CUDDLE_SLOP = 12;
+/** A cuddle let go of ends this soon after (a stroke, which has no letting go, takes TOUCH_GAP_MS to be over). */
+const CUDDLE_END_MS = 160;
+/** A Play key's cuddle, which no hand is holding, lasts this long. */
+const CUDDLE_KEY_MS = 2400;
+/** A tickled leaf makes her sneeze, and then she is not tickled again until the sneeze is over (the move is five seconds). */
+const SNEEZE_MS = 5200;
+/** When the sneeze's sound starts: its breath in ends as the move's "achoo" comes, 20 frames in (pip/anims.js). */
+const SNEEZE_AT_MS = 1400;
+/** A trampoline throws her up this fast (floor pixels a second: about 29 pixels high, half a second in the air), from this far above the floor (its mat). */
+const TRAMPOLINE_VY = 230;
+const TRAMPOLINE_LIFT = 4;
+
+const CUDDLE_LINES = ["mmm. warm.", "oh. a cuddle.", "stay like that.", "this is nice."];
+const CUDDLED_LINES = ["one more minute?", "best bit of my day.", "again later?"];
+const HIGH_FIVE_LINES = ["high five!", "up top!", "yes! team.", "slap. perfect."];
+const SNEEZE_LINES = ["ah... ah... my leaf!", "not the leaf! ah...", "that tickles my... ah..."];
+const GIDDY_LINES = ["the room is going round.", "wheee... oh. oh no.", "which way is the floor?", "again! ...in a minute."];
 /** Where the hand holds Pip: by the leaf, so its feet hang this far below. */
 const HOLD_DROP = 26;
 /**
@@ -270,6 +413,8 @@ type Errand = {
   scroll?: ScrollBeat[];
   /** The fridge it is about (its name among the furnishings). */
   fridge?: string;
+  /** What she finds in it when she gets there, where that is known: told as she looks (`foundFridge`). */
+  found?: "bare" | "food";
   /** The move she walks there with, when it is not her stroll (`back`: the find held up). */
   as?: string;
 };
@@ -281,6 +426,45 @@ type Errand = {
  */
 let clockSkew = 0;
 const nowMs = () => performance.now() + clockSkew;
+/**
+ * The time of day, wound on with the scene's clock: for what outlives the page (her temper and the mood she is in,
+ * kept on this device and worked out from the clock: pip/temper.ts).
+ */
+const wallMs = () => Date.now() + clockSkew;
+
+/** The mood she is in, as the page is told of it, for the hearts and the words behind them. */
+export type TemperShown = {
+  /** What it adds to the mood the hearts show, in points (below zero: takes). */
+  off: number;
+  humour: Humour;
+  /** Minutes of it left, or 0. */
+  minutesLeft: number;
+};
+
+/** How often the scene looks at her temper again (it eases by the clock), in milliseconds. */
+const TEMPER_LOOK_MS = 1000;
+/** A hand that will not leave a huffing Pip alone gets a word no more often than this. */
+const HUFF_WORD_MS = 2500;
+/** A drop from this fast (floor pixels a second, about a third of the room's height) is being dropped, not put down. */
+const DROPPED_HARD = 250;
+/** A cuddle held at least this long is a long one: it can put her in a good mood, not only soothe her. */
+const LONG_CUDDLE_MS = 2500;
+
+const readText = (key: string) => {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
+const writeText = (key: string, value: string | null) => {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  } catch {
+    // Remembered for this visit only.
+  }
+};
 
 const prefersReducedMotion = () => {
   try {
@@ -319,6 +503,14 @@ export type ScenePlot = {
 };
 
 /**
+ * The ways of playing with Pip that the scene does itself, each as the hand
+ * would: a stroke, a tickle, a cuddle (a press held on her), a high five (two
+ * quick taps), a whirl (swung round in the hand until she is giddy), a
+ * tickled leaf (which makes her sneeze), the ball, a toss, bed, a snack.
+ */
+export type PlayKey = "pet" | "tickle" | "cuddle" | "highfive" | "spin" | "sneeze" | "ball" | "toss" | "bed" | "snack";
+
+/**
  * What the page can ask of the scene: where things are on screen (for effects
  * that fly to them) and the garden's own moments, which need the plot sprites.
  */
@@ -345,9 +537,11 @@ export type HouseSceneHandle = {
   /** Confetti and a title over the room, for a big moment. */
   celebrate: (title: string, note: string) => void;
   /** Plays with Pip as the hand would: for the Play keys, so nothing needs a pointer. */
-  playWith: (how: "pet" | "tickle" | "ball" | "toss" | "bed" | "snack") => void;
+  playWith: (how: PlayKey) => void;
   /** A visitor has knocked, has reached their place, or has left: she answers, if she is free to. */
   visitor: (what: "knocked" | "arrived" | "left") => void;
+  /** Something kind the page did with her that the scene cannot see for itself (a dance together, a game in the arcade): pip/temper.ts. */
+  kindness: (what: "dance" | "game") => void;
 };
 
 /**
@@ -384,6 +578,45 @@ const plantStage = (progress: number) => (progress <= 0.02 ? 0 : progress < 0.34
 /** The time of day the windows show: the hour, to the nearest 10 minutes. */
 const clockHour = (date = new Date()) => date.getHours() + Math.floor(date.getMinutes() / 10) / 6;
 
+/**
+ * The room's frames, for each way a floor has stood lately (which floor, its
+ * decor, the ten minutes of the day, a lamp off, the fridge open): going
+ * back to one costs nothing.
+ *
+ * Kept here, outside the scene: a frame of the room takes 2 to 9 ms to paint
+ * by day and more by night, and there are 48 to a loop, each painted on the
+ * tick that first shows it. Kept inside the scene's effect they were thrown
+ * away on every visit to the page, every change of floor and of decor, and
+ * all together whenever a fifth state came along (the one on screen with
+ * them): four seconds of heavy ticks each time, which is when Pip's walk
+ * stuttered. The oldest state goes when there are too many.
+ */
+const ROOM_STATES_KEPT = 4;
+const roomFrames = new Map<string, Map<number, HTMLCanvasElement>>();
+const roomFramesFor = (state: string) => {
+  let frames = roomFrames.get(state);
+  if (frames) {
+    // Used again: last to go.
+    roomFrames.delete(state);
+  } else {
+    trimRoomFrames(ROOM_STATES_KEPT - 1);
+    frames = new Map();
+  }
+  roomFrames.set(state, frames);
+  return frames;
+};
+const trimRoomFrames = (keep: number) => {
+  while (roomFrames.size > keep) {
+    const oldest = roomFrames.keys().next().value;
+    if (oldest === undefined) break;
+    roomFrames.delete(oldest);
+  }
+};
+// Art edited while the app runs (development) is drawn afresh.
+if (import.meta.hot) {
+  import.meta.hot.on("vite:afterUpdate", () => roomFrames.clear());
+}
+
 /** Where the garden's plots sit on a floor: in two rows across the lawn (pip/gardenRows.ts). */
 export const plotBoxes = (level: HouseLevel, count: number) => gardenLayout(level.w, level.floorY, count).plots;
 
@@ -396,7 +629,8 @@ const MACHINES: Record<string, { game: GameId | "dance"; label: string }> = {
 };
 
 /** How to play with Pip, for her label: every way has a key. */
-const PIP_HOW = "Select to poke, drag to carry and throw, left and right arrows to walk, up arrow to toss. More ways to play are under Play.";
+const PIP_HOW =
+  "Select to poke, select twice quickly for a high five, press and hold for a cuddle, drag to carry and throw. Left and right arrows walk her, up arrow tosses her; C cuddles, H is a high five, S spins her giddy, L tickles her leaf. More ways to play are under Play.";
 
 /** The piece of decor Pip sleeps in. */
 const BED_ID = "bed";
@@ -410,6 +644,8 @@ const bedBox = (level: HouseLevel, decor: LevelDecor) => {
 
 /** The air Pip can be thrown through: in from the walls, under the ceiling, down to where she walks. */
 const airBounds = (level: HouseLevel) => ({ left: 12, right: level.w - 12, top: 30, floor: level.walkY });
+/** The room the ball flies in: the walls, the ceiling, and the floor its middle rests above. (It is in front of the furniture, where Pip walks, so nothing else is in its way.) */
+const ballRoom = (level: HouseLevel): Room => ({ left: 6, right: level.w - 6, top: 6, floor: level.walkY - BALL_RADIUS });
 
 /** What each piece of decor is to Pip: somewhere to take a book from, to sit, to look out of. */
 const SPOT_OF: Record<string, SpotKind> = {
@@ -474,6 +710,29 @@ export const roomSpots = (level: HouseLevel, decor: LevelDecor, plots: readonly 
 /** A move's length in frames (12 a second), for turning seconds into whole loops. */
 const loopFrames = (move: string) => LIB.find((entry) => entry.id === move)?.loop ?? 48;
 const loopsFor = (move: string, seconds: number) => Math.max(1, Math.round((seconds * 12) / loopFrames(move)));
+
+/**
+ * One frame of a part (the ball as it turns, the rally's count), as a
+ * picture: a pure function of the frame, so each is drawn once and kept. The
+ * scene puts them on its own canvases, a frame at a time, by where the ball
+ * is; nothing plays by itself.
+ */
+const partFrames = new Map<string, ImageData | null>();
+const partFrame = (id: string, frame: number): ImageData | null => {
+  const key = `${id}|${frame}`;
+  let image = partFrames.get(key);
+  if (image === undefined) {
+    const move = LIB.find((entry) => entry.id === id);
+    try {
+      image = move ? renderFrame(move, frame, resolve(SKINS[0], frame)) : null;
+    } catch {
+      // Art mid-edit: nothing drawn.
+      image = null;
+    }
+    partFrames.set(key, image);
+  }
+  return image;
+};
 
 /** Where the rain barrel stands on a garden floor: the right-hand corner, beyond the last plot. */
 const barrelBox = (level: HouseLevel) => ({ x: level.w - BARREL_W - 1, y: level.h - BARREL_H - 2, w: BARREL_W, h: BARREL_H });
@@ -626,19 +885,41 @@ export type HouseSceneProps = {
   overlay?: (frame: RoomFrame) => ReactNode;
   /** She has come in and shown what she brought back (`world.back`, by its key): the page files it. Called once a find. */
   onWelcomed?: (key: string) => void;
+  /** She has looked in her fridge, found it bare, and minded: the page tells Rust, which takes a little off her mood (once a day). */
+  onFridgeBare?: () => void;
+  /** The mood she is in has changed, or eased (pip/temper.ts): the page lays it over the hearts. */
+  onTemper?: (shown: TemperShown) => void;
   label: string;
 };
 
 /**
  * `doing`: a step of an activity; `fidget`: a small thing while standing
  * about; `errand`: doing a free moment's errand; `tuck`: hopping into bed;
- * `sleep`: in it.
+ * `sleep`: in it. With the ball out: `fetch`, running to it (or to where it
+ * will come down); `carry`, running back with it; `catch`, one of the small
+ * things a game of catch is made of (`CatchAct`).
  */
-type Phase = "rest" | "walk" | "act" | "doing" | "fidget" | "held" | "fall" | "land" | "errand" | "tuck" | "sleep" | "petted" | "fetch" | "carry";
+type Phase = "rest" | "walk" | "act" | "doing" | "fidget" | "held" | "fall" | "land" | "errand" | "tuck" | "sleep" | "petted" | "fetch" | "carry" | "catch";
 /** When the reader's hand can have her attention: not in mid-air, not mid-act. */
 const TOUCHABLE: ReadonlySet<Phase> = new Set<Phase>(["rest", "walk", "doing", "fidget", "errand", "petted", "sleep", "tuck", "land"]);
-/** The ball: in the air, rolling, lying still, in the reader's hand, or in Pip's. */
-type Ball = { body: Body; state: "air" | "roll" | "still" | "held" | "carried"; home: number; touched: number };
+/**
+ * The ball: in the air (bouncing counts), rolling, lying still, in the
+ * reader's hand, or in Pip's. `by`: who sent it last (nobody, if it was only
+ * put down). `live`: thrown by her and not yet down, so the reader can still
+ * catch it. `speed`: how fast it left the hand that threw it. `touched`: when
+ * the reader last had a hand on it; `rested`: when it last came to rest.
+ */
+type Ball = { body: BallBody; state: "air" | "roll" | "still" | "held" | "carried"; by: "reader" | "pip" | null; live: boolean; speed: number; touched: number; rested: number };
+/**
+ * A small thing she is doing in a game of catch, until `until`: winding up
+ * with the ball, the throw's follow-through, a header or a kick, sat down
+ * after a bonk, a jump at nothing, a hop for the reader's catch, a pat that
+ * rolls the ball over and the look after it, lying with her chin on it,
+ * putting it away, a look at a peace offering, and (without motion) holding
+ * it before it is handed back. `soft`: nothing she would not drop for a ball
+ * coming her way.
+ */
+type CatchAct = { kind: "windup" | "fling" | "flourish" | "bonk" | "whiff" | "yay" | "nudge" | "look" | "chin" | "away" | "peace" | "handback"; until: number; soft?: boolean };
 /** The bed's front, in floor pixels, drawn over Pip while he sleeps. */
 type Tucked = { x: number; y: number; w: number; h: number };
 /** A piece of decor on its way into a slot: dropping in over the art, which leaves it out until it lands. */
@@ -695,6 +976,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     world,
     overlay,
     onWelcomed,
+    onFridgeBare,
+    onTemper,
     label
   },
   ref
@@ -706,8 +989,12 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
   const spinRef = useRef<HTMLDivElement | null>(null);
   const turnRef = useRef<HTMLDivElement | null>(null);
   const ballRef = useRef<HTMLButtonElement | null>(null);
-  // Whether the ball is out (its place is the loop's, on a ref).
+  const ballArtRef = useRef<HTMLCanvasElement | null>(null);
+  const ballShadowRef = useRef<HTMLSpanElement | null>(null);
+  const tallyRef = useRef<HTMLCanvasElement | null>(null);
+  // Whether the ball is out (its place is the loop's, on a ref), and the rally as its label reads it.
   const [ballOut, setBallOut] = useState(false);
+  const [rallyShown, setRallyShown] = useState(0);
   // How big the room is drawn: device pixels per art pixel, and the display's scaling that was worked out for.
   // The two are kept together: the scaling can change on its own (the window dragged to another monitor), and a
   // room that read it afresh at each render kept its old size until something else made it render.
@@ -716,8 +1003,15 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
   const out = Boolean(world?.away);
   const outRef = useRef(out);
   outRef.current = out;
-  // Resting, she stands as she feels: under a blanket with a cold, drooping when glum.
-  const base = bundled(world?.cold) ? "cold-idle" : mopey ? "mope" : "idle";
+  // Her temper, and the mood she is in (pip/temper.ts): kept on this device, so it is there when the reader comes
+  // back to the room (or to the app, within the time it lasts), and worked out from the clock, so past its time it is gone.
+  const temper = useRef<Temper | null>(null);
+  if (temper.current === null) temper.current = parseTemper(readText(TEMPER_STORE), wallMs());
+  const [humour, setHumour] = useState<Humour>(() => humourOf(temper.current ?? parseTemper(null, wallMs()), wallMs()));
+  const humourRef = useRef(humour);
+  humourRef.current = humour;
+  // Resting, she stands as she feels: under a blanket with a cold, her back turned in a huff, drooping when glum or sulking.
+  const base = bundled(world?.cold) ? "cold-idle" : humour === "huff" ? SULK_MOVE : mopey || humour === "sulk" ? "mope" : "idle";
   const [view, setView] = useState<{ move: string; loops?: number; key: string | number; flip: boolean }>({ move: base, key: "rest", flip: false });
   // What is showing, for the loop to compare against without waiting for a render.
   const viewRef = useRef({ move: base });
@@ -767,7 +1061,12 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     pace: WALK_SPEED,
     facing: 1,
     nextFree: 0,
-    drag: null as null | { id: number; startX: number; startY: number; moved: boolean },
+    /**
+     * The press that has hold of her, while there is one: where it began and when, whether it has become a carry
+     * (`moved`), a cuddle (a press held still: pip/play.ts) or a finger's rub, and how far it has strayed from where
+     * it began (CSS pixels). `judged`: it has been held long enough to be a cuddle, and has been one or could not be.
+     */
+    drag: null as null | { id: number; startX: number; startY: number; moved: boolean; at: number; far: number; judged: boolean; cuddling: boolean; rubbed: boolean; refused: boolean },
     /** What Pip is off to do, and what is waiting to be done. */
     errand: null as Errand | null,
     queue: [] as Errand[],
@@ -798,11 +1097,27 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     fedAt: -Infinity,
     playedAt: -Infinity,
     gamedAt: -Infinity,
-    /** Pokes in a row, and the stroke the pointer is making over her. */
+    /** Pokes in a row, the taps that made them (two quick ones are a high five), and the stroke the pointer is making over her. */
     poke: null as Poke | null,
+    taps: null as Taps | null,
     stroke: null as Stroke | null,
-    /** Being stroked or tickled: since when, until when, and when hearts next rise. */
-    touch: null as null | { kind: "pet" | "tickle"; since: number; last: number; fxAt: number },
+    /** Being stroked, tickled or cuddled: since when, until when, and when hearts next rise. */
+    touch: null as null | { kind: "pet" | "tickle" | "cuddle"; since: number; last: number; fxAt: number },
+    /** A tickled leaf has her sneezing until then: she is not rubbed again before it is over. */
+    sneezeUntil: 0,
+    /** Held: the hand's path, for whether she is being whirled round; whether she has said so; and (let go) whether she comes down giddy. */
+    whirl: null as Whirl | null,
+    whirlTold: false,
+    giddy: false,
+    /** Her temper: a tantrum she is about to throw (when she is next on her feet), a coming-round she owes, and when things were last looked at or said. */
+    tantrumDue: null as Annoyance | null,
+    roundDue: null as null | "madeUp" | "eased",
+    temperSeenAt: 0,
+    temperTold: "",
+    huffWordAt: -Infinity,
+    /** On a trampoline: how many more times it throws her up, and how high its mat is (where she comes down on it); and what she says as she starts. */
+    bounce: null as null | { left: number; floor: number },
+    bounceSay: null as string | null,
     /** Held: where the hand is and has been (floor pixels), and how she swings from it. */
     hand: [] as Sample[],
     handAt: { x: 0, y: 0 },
@@ -815,9 +1130,29 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     spin: 0,
     tossed: false,
     hardest: 0,
-    /** The ball, when it is out; and fetches in a row. */
+    /**
+     * The ball, when it is out, and the game of catch (pip/catch.ts). `rally`: the catches in a row, and the chance
+     * in it. `act`: the small thing she is doing about it. `why`: what she is running to the ball for. `goal`: where
+     * a ball in the air will come down. `spot`: where she is running back to throw from. `passed`: this throw has
+     * gone by her (a miss, a bonk), and is not hers to take again until it is down. `asked`: how far her asking to
+     * play has got. `impact`: what the ball last met, for its squash. `hop`: a hop where she stands. `seen`: what
+     * of the ball is on screen, so its canvases are only drawn when that changes.
+     */
     ball: null as Ball | null,
-    fetches: 0,
+    play: {
+      rally: rallyStart(Math.floor(Math.random() * 0x7fffffff)) as Rally,
+      act: null as CatchAct | null,
+      why: "fetch" as "fetch" | Ask,
+      goal: null as number | null,
+      spot: null as number | null,
+      passed: false,
+      asked: 0,
+      impact: null as null | (Hit & { at: number }),
+      hop: null as null | { at: number; lasts: number; high: number },
+      seen: { art: "", shadow: "", tally: -1 }
+    },
+    /** Where the reader's own pointer is in the room (floor pixels), while it is in it: where her throws are meant for. (`pointer` is what her eyes follow, which is the ball while it flies.) */
+    reader: null as null | { x: number; y: number },
     /** When each kind of play last counted. */
     playLast: {} as Partial<Record<PlayKind, number>>,
     /** She has said hello to the hand this visit. */
@@ -849,8 +1184,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     welcomed: null as string | null,
     toldWelcomed: null as string | null
   });
-  const live = useRef({ scale, level, base, repertoire, mood, onActDone, onPoke, onPlayed, ownBall, attentive, decor, plots, decorating, world, onWelcomed });
-  live.current = { scale, level, base, repertoire, mood, onActDone, onPoke, onPlayed, ownBall, attentive, decor, plots, decorating, world, onWelcomed };
+  const live = useRef({ scale, level, base, repertoire, mood, onActDone, onPoke, onPlayed, ownBall, attentive, decor, plots, decorating, world, onWelcomed, onFridgeBare, onTemper });
+  live.current = { scale, level, base, repertoire, mood, onActDone, onPoke, onPlayed, ownBall, attentive, decor, plots, decorating, world, onWelcomed, onFridgeBare, onTemper };
   /** The world as she knows it now: the page's, under anything set by hand (pip/worldStub.ts; the page lays it over too, a render later). */
   const worldNow = (): World | undefined => {
     const stub = worldStub();
@@ -1046,9 +1381,6 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       return out;
     };
     let hour = clockHour();
-    // The frames drawn so far, for each way the room has stood this hour (a
-    // lamp off, the fridge open): going back to one costs nothing.
-    let kept = new Map<string, Map<number, HTMLCanvasElement>>();
     let step = 0;
     const draw = (next: number) => {
       step = next;
@@ -1061,16 +1393,9 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       const fridges = furnishRef.current?.fixtures.current;
       const fixtures = fridges || phoneGlow.current ? [...(fridges ?? []), ...(phoneGlow.current ? [{ itemId: "phoneglow", ...phoneGlow.current }] : [])] : undefined;
       const hidden = `${[...out].sort().join(",")}|${[...unlit].sort().join(",")}|${(fixtures ?? []).map(fixtureKey).join(",")}`;
-      if (now !== hour) {
-        hour = now;
-        kept = new Map();
-      }
-      let frames = kept.get(hidden);
-      if (!frames) {
-        if (kept.size >= 4) kept = new Map();
-        frames = new Map();
-        kept.set(hidden, frames);
-      }
+      hour = now;
+      // The frames drawn so far for the room as it stands (`roomFrames`).
+      const frames = roomFramesFor(`${level.id}|${decorKey}|${hour}|${openSky ? 1 : 0}|${hidden}`);
       let image = frames.get(next);
       if (!image) {
         try {
@@ -1111,6 +1436,9 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     // decorKey stands in for decor, a new object on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [level, decorKey]);
+
+  // Away from Pip's page only the room as it was left is kept (about 5 MB of frames a state).
+  useEffect(() => () => trimRoomFrames(1), []);
 
   // ---- the garden's plots ------------------------------------------------------------
   const plotsKey = JSON.stringify(plots ?? []);
@@ -1171,7 +1499,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
 
   // ---- Pip --------------------------------------------------------------------------
   // What the furnishings ask of Pip, and the furnishings for the loop to move (both set further down).
-  const furnishPip = useRef<FurnishPip>({ react: () => undefined, bed: () => undefined, asleep: () => false, wake: () => false, go: () => undefined, fridge: () => undefined, clock: nowMs, redraw: () => undefined });
+  const furnishPip = useRef<FurnishPip>({ react: () => undefined, bed: () => undefined, asleep: () => false, wake: () => false, go: () => undefined, visit: () => undefined, fridge: () => undefined, vex: () => undefined, clock: nowMs, redraw: () => undefined });
   const furnishRef = useRef<ReturnType<typeof useFurnishings> | null>(null);
   // Where her phone lights the bed, while it does (the room's picture draws the light).
   const phoneGlow = useRef<{ x: number; y: number } | null>(null);
@@ -1179,6 +1507,9 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
   /** Ends the press that has hold of Pip, if there is one (see "carrying Pip", below). */
   const dragEnd = useRef<null | ((how: "up" | "cancel") => void)>(null);
   useEffect(() => () => dragEnd.current?.("cancel"), []);
+  /** And the press that has hold of the ball (see "a game of catch", below). */
+  const ballDragEnd = useRef<null | ((how: "up" | "cancel") => void)>(null);
+  useEffect(() => () => ballDragEnd.current?.("cancel"), []);
 
   /** A pointer's place in the room, in floor pixels (layout.ts: by the room's own box). */
   const pointerAt = (pointer: { clientX: number; clientY: number }) => {
@@ -1197,7 +1528,10 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     const node = pipRef.current;
     if (!node) return;
     const { scale: k } = live.current;
-    node.style.transform = `translate(${(s.x - 16) * k}px, ${(s.y - 30) * k}px)`;
+    // (A hop in a game of catch lifts her whole pixels off the floor: pip/catch.ts, `hopLift`.)
+    const hop = s.phase === "catch" || s.phase === "fetch" ? s.play.hop : null;
+    const lift = hop ? hopLift(nowMs() - hop.at, hop.lasts, hop.high) : 0;
+    node.style.transform = `translate(${(s.x - 16) * k}px, ${(s.y - 30 - lift) * k}px)`;
     // Held, she swings from the hand by her leaf; thrown, she turns about her middle.
     const spin = spinRef.current;
     if (!spin) return;
@@ -1209,14 +1543,67 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     }
   };
 
-  /** Where the ball is drawn: its middle at its place, turned as it rolls. Hidden in Pip's hands. */
+  /**
+   * Where the ball is drawn, and how: its button's middle at its place (to a
+   * whole device pixel), the picture of it for its shape and how far it has
+   * turned (pip/catch.ts: `ballShape`, `spinFrame`), its shadow on the floor
+   * under it, and the rally's count beside it. In Pip's hands her own sprite
+   * draws it, so only the button is there, to take it from her by. The
+   * canvases are drawn again only when what they show changes.
+   */
   const placeBall = () => {
     const node = ballRef.current;
-    const ball = st.current.ball;
+    const s = st.current;
+    const ball = s.ball;
     if (!node || !ball) return;
-    const { scale: k } = live.current;
-    node.style.visibility = ball.state === "carried" ? "hidden" : "visible";
-    node.style.transform = `translate(${(ball.body.x - BALL_BOX / 2) * k}px, ${(ball.body.y - BALL_BOX / 2) * k}px) rotate(${ball.body.angle.toFixed(2)}rad)`;
+    const { scale: k, level: lv, ownBall: own } = live.current;
+    const now = nowMs();
+    const ratio = window.devicePixelRatio || 1;
+    const snap = (css: number) => Math.round(css * ratio) / ratio;
+    const grab = Math.max(BALL_BOX * k, GRAB_MIN);
+    node.style.transform = `translate(${snap(ball.body.x * k - grab / 2)}px, ${snap(ball.body.y * k - grab / 2)}px)`;
+    const seen = s.play.seen;
+    const inPaws = ball.state === "carried";
+    const impact = s.play.impact;
+    const shape = inPaws || ball.state === "held" ? "round" : ballShape(ball.body, impact ? { on: impact.on, speed: impact.speed, ago: now - impact.at } : null);
+    const frame = spinFrame(ball.body.angle);
+    const id = `ball${shape === "round" ? "" : `-${shape}`}${own ? "" : "-paper"}`;
+    const art = inPaws ? "" : `${id}|${frame}`;
+    const canvas = ballArtRef.current;
+    if (canvas && art !== seen.art) {
+      seen.art = art;
+      canvas.style.visibility = art ? "visible" : "hidden";
+      const image = art ? partFrame(id, frame) : null;
+      if (image) canvas.getContext("2d")?.putImageData(image, 0, 0);
+    }
+    const shadow = ballShadowRef.current;
+    if (shadow) {
+      const { half, faint } = shadowOf(lv.walkY - BALL_RADIUS - ball.body.y);
+      const key = inPaws ? "" : `${half}|${faint ? 1 : 0}|${k}`;
+      if (key !== seen.shadow) {
+        seen.shadow = key;
+        shadow.style.visibility = key ? "visible" : "hidden";
+        shadow.style.width = `${half * 2 * k}px`;
+        shadow.style.opacity = faint ? "0.55" : "1";
+      }
+      // On the floor's own pixels, under the ball.
+      shadow.style.transform = `translate(${snap((Math.round(ball.body.x) - half) * k)}px, ${snap(lv.walkY * k)}px)`;
+    }
+    const tally = tallyRef.current;
+    if (tally) {
+      const count = s.play.rally.count >= RALLY_SHOWS ? Math.min(99, s.play.rally.count) : 0;
+      if (count !== seen.tally) {
+        seen.tally = count;
+        tally.style.visibility = count ? "visible" : "hidden";
+        const image = count ? partFrame("tally", count) : null;
+        if (image) tally.getContext("2d")?.putImageData(image, 0, 0);
+      }
+      if (count) {
+        // Up and to one side of the ball, whole pixels at a time; on the other side by the right-hand wall.
+        const side = ball.body.x > lv.w - 24 ? -1 : 1;
+        tally.style.transform = `translate(${snap((Math.round(ball.body.x) + side * 8 - 16) * k)}px, ${snap((Math.max(10, Math.round(ball.body.y) - 9) - 16) * k)}px)`;
+      }
+    }
   };
 
   /**
@@ -1251,7 +1638,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     const s = st.current;
     const { level: lv, decor: dc, plots: shown, repertoire: can, mood: feeling } = live.current;
     return {
-      mood: feeling,
+      // (The mood she is in is laid over the long one here too: sulking she chooses as a glummer Pip would, glad as a brighter.)
+      mood: Math.max(0, Math.min(100, feeling + (temper.current ? heartsOff(temper.current, wallMs()) : 0))),
       hour: new Date().getHours(),
       floor: { w: lv.w, garden: lv.garden, arcade: lv.arcade },
       x: s.x,
@@ -1263,8 +1651,147 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       recent: s.recent,
       justNow: { fed: now - s.fedAt < JUST_NOW_MS, played: now - s.playedAt < JUST_NOW_MS, gamed: now - s.gamedAt < JUST_NOW_MS },
       reduced,
-      world: worldNow()
+      world: worldFelt()
     };
+  };
+
+  // ---- her temper, and the mood she is in ----------------------------------------------------
+  // The rules are pip/temper.ts's: what wears on her patience and what gives it back, when a tantrum starts, how
+  // long the sulk after it lasts and how it eases, and the good moods. Here they meet the scene: what the reader
+  // does is reported (`vex`, `please`), the tantrum and the coming-round are played when she is next on her feet
+  // (see the loop), she stands as she feels (`base`), and the page is told for the hearts. Kept on this device
+  // every time it changes, so leaving the room, or the app, does not wipe it: the clock runs it out.
+
+  /** How she is, as of now. */
+  const humourNow = (): Humour => (temper.current ? humourOf(temper.current, wallMs()) : null);
+  /** In the huff after a tantrum: she will have nothing to do with the reader. */
+  const inHuff = () => humourNow() === "huff";
+
+  /** What is in her fridge, with what this device remembers of her finding it bare (pip/furnish.ts, `bareMinds`). */
+  const larderNow = (known: World | undefined): World["fridge"] => {
+    const fridge = known?.fridge;
+    if (!fridge) return fridge ?? null;
+    const seen = parseBareSeen(readText(BARE_STORE));
+    return { bare: fridge.bare, resigned: fridge.bare && !bareMinds(seen, getDateKey(), wallMs()), wasBare: seen.wasBare };
+  };
+
+  /** The world as she knows it, with how she feels about it: her fridge as she has found it, and the mood she is in. */
+  const worldFelt = (): World => {
+    const known = worldNow();
+    const stage = humourNow();
+    return { ...known, fridge: larderNow(known), humour: stage === "huff" ? "sulk" : stage };
+  };
+
+  /** Tells the page how she is (it lays that over the hearts), and has her stand as she feels. Says nothing twice. */
+  const tellTemper = () => {
+    const s = st.current;
+    if (!temper.current) return;
+    const wall = wallMs();
+    const shown: TemperShown = { off: heartsOff(temper.current, wall), humour: humourOf(temper.current, wall), minutesLeft: spellMinutesLeft(temper.current, wall) };
+    const told = `${shown.off}|${shown.humour}|${shown.minutesLeft}`;
+    if (told === s.temperTold) return;
+    s.temperTold = told;
+    live.current.onTemper?.(shown);
+    if (shown.humour !== humourRef.current) {
+      // The huff is over by itself: she owes a look over her shoulder (unless she has been made up with, which has its own).
+      if (humourRef.current === "huff" && !s.roundDue) s.roundDue = "eased";
+      humourRef.current = shown.humour;
+      setHumour(shown.humour);
+    }
+  };
+
+  const keepTemperNow = () => {
+    if (temper.current) writeText(TEMPER_STORE, keepTemper(temper.current, wallMs()));
+  };
+
+  /** Something the reader did that wears on her patience. The last straw is a tantrum, thrown when she is next on her feet. */
+  const vex = (what: Annoyance) => {
+    if (outRef.current || !temper.current) return;
+    const result = annoy(temper.current, what, wallMs());
+    temper.current = result.temper;
+    if (result.tantrum) {
+      st.current.tantrumDue = result.tantrum;
+      st.current.roundDue = null;
+    }
+    keepTemperNow();
+    tellTemper();
+  };
+
+  /** Something kind. Sulking, a cuddle or a snack makes up with her, and she comes round when she is next on her feet. */
+  const please = (what: Kindness) => {
+    if (outRef.current || !temper.current) return;
+    const result = soothe(temper.current, what, wallMs());
+    temper.current = result.temper;
+    if (result.madeUp) {
+      st.current.roundDue = "madeUp";
+      st.current.tantrumDue = null;
+    }
+    keepTemperNow();
+    tellTemper();
+  };
+
+  /** A hand on a Pip in a huff: a word over her shoulder, now and then, and nothing else. */
+  const rebuff = () => {
+    const s = st.current;
+    const now = nowMs();
+    if (now - s.huffWordAt < HUFF_WORD_MS) return;
+    s.huffWordAt = now;
+    say(huffLine(Math.random));
+    playSound("squeak", { pitch: 0.6, volume: 0.5 });
+  };
+
+  /** The tantrum she owes: the performance for what set her off (pip/temper.ts, `tantrumPlan`), from where she stands. */
+  const throwTantrum = () => {
+    const s = st.current;
+    const cause = s.tantrumDue;
+    if (!cause) return;
+    const { level: lv, decor: dc } = live.current;
+    s.tantrumDue = null;
+    s.roundDue = null;
+    s.errand = null;
+    s.touch = null;
+    dropPlan();
+    s.fidgets = 0;
+    s.plan = { activity: tantrumPlan(cause, { x: s.x, floorW: lv.w, bed: bedBox(lv, dc) ? BED_ID : null, reduced: prefersReducedMotion() }, Math.random), index: -1 };
+    playSound("squeak", { pitch: 0.55 });
+    nextStep();
+  };
+
+  /** Coming round: made up with, or the huff simply over (pip/temper.ts, `comeRound`). */
+  const comeRoundNow = () => {
+    const s = st.current;
+    const how = s.roundDue;
+    s.roundDue = null;
+    if (!how) return;
+    s.errand = null;
+    s.touch = null;
+    dropPlan();
+    s.fidgets = 0;
+    s.plan = { activity: comeRound(how === "madeUp", Math.random, prefersReducedMotion()), index: -1 };
+    nextStep();
+  };
+
+  // She is as she was left, when the room is come back to: the page is told at once, and nothing is performed.
+  useEffect(() => {
+    st.current.temperTold = "";
+    tellTemper();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /**
+   * She has looked in her fridge. Bare (and she minds): remembered on this device, the page is told (Rust takes a
+   * little off her mood, the first time in a day), and it wears on her. Food, where she last found none: she is glad of it.
+   */
+  const foundFridge = (what: "bare" | "food") => {
+    const seen = parseBareSeen(readText(BARE_STORE));
+    if (what === "bare") {
+      writeText(BARE_STORE, JSON.stringify(bareFound(seen, getDateKey(), wallMs())));
+      live.current.onFridgeBare?.();
+      vex("fridge");
+    } else if (seen.wasBare) {
+      writeText(BARE_STORE, JSON.stringify(foodFound(seen)));
+      please("food");
+    }
   };
 
   /** Her stroll, as she is: a shuffle in her blanket with a cold. And how fast she goes, as a share of her usual pace. */
@@ -1325,6 +1852,13 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       s.napFor = step.seconds;
       s.hiding = true;
       tuck(prefersReducedMotion());
+    } else if (step.kind === "use" && step.what === "thing" && (step.verb === FOUND_BARE || step.verb === FOUND_FOOD)) {
+      // She has looked in the fridge, and this is what she found (pip/behaviour.ts, `fridgeVisit`).
+      foundFridge(step.verb === FOUND_BARE ? "bare" : "food");
+      nextStep();
+    } else if (step.kind === "use" && step.what === "thing" && step.verb.startsWith("bounce:")) {
+      // A trampoline: that is hers to do, not the thing's. The plan goes on when she is down again (see `onSpriteDone`).
+      bounceOn(Number(step.verb.slice(7)) || 1);
     } else if (step.kind === "use" && step.what === "thing") {
       // A thing in the room she is about to use: it is told, in its own word (the furnishings know what to do).
       (furnishRef.current?.pipUse as undefined | ((key: string, what: string) => void))?.(step.id, step.verb);
@@ -1358,6 +1892,29 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       s.nextFree = nowMs() + step.seconds * 1000;
       show(live.current.base, undefined, "rest");
     }
+  };
+
+  /**
+   * On a trampoline: thrown straight up from where she stands, so many times
+   * (the loop sends her up again each time she comes down on it: see "fall"),
+   * arms out, and then a small hop off. For show, like everything the room
+   * does with her: it is not told to the page, so it is not a toss that counts.
+   */
+  const bounceOn = (times: number) => {
+    const s = st.current;
+    s.bounce = { left: Math.max(0, times - 1), floor: live.current.level.walkY - TRAMPOLINE_LIFT };
+    s.vx = 0;
+    s.vy = -TRAMPOLINE_VY;
+    s.angle = 0;
+    s.spin = 0;
+    s.tossed = false;
+    s.giddy = false;
+    s.hardest = 0;
+    s.phase = "fall";
+    show("tossed", undefined, "fall");
+    say(s.bounceSay);
+    s.bounceSay = null;
+    playSound("bounce", { pitch: 0.8, volume: 0.6 });
   };
 
   /**
@@ -1555,6 +2112,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       } else if (fridge?.open) {
         // The reader's doing: it waits for her to have her look.
         furnishRef.current?.pipUse(errand.fridge, "linger");
+        if (errand.found) foundFridge(errand.found);
       } else {
         // It shut before she got there.
         s.errand = null;
@@ -1706,7 +2264,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     s.errand = null;
     s.plan = null;
     s.touch = null;
-    s.ball = null;
+    ballGone();
     // Nothing of the night comes along: no phone, no fridge door held (the furnishings shut it), nobody tucked in.
     s.abed = null;
     s.pendingScroll = null;
@@ -1715,7 +2273,6 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     s.hiding = false;
     s.tuckedAt = -Infinity;
     phoneGlow.current = null;
-    setBallOut(false);
     s.queue = s.queue.filter((errand) => errand.kind === "cue");
     s.x = level.w / 2;
     s.y = level.walkY;
@@ -1800,6 +2357,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     // A snack is remembered a while: a full Pip is a sleepy Pip.
     const snack = /^treat-/.test(act.move) && !live.current.repertoire.toys.includes(act.move);
     if (snack) s.fedAt = nowMs();
+    // A snack is the surest kindness there is: it makes up with a sulking Pip, and leaves a happy one happy for a while.
+    if (snack) please("treat");
     // At the fridge she opened for it: she eats it there, in its light, and shuts the door after.
     if (snack && s.fridgeHold) s.fridgeHold = { ...s.fridgeHold, why: "eating" };
     s.phase = "act";
@@ -1874,6 +2433,9 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       }
     } else if (s.phase === "doing") {
       nextStep();
+    } else if (s.phase === "land" && s.plan) {
+      // Down off the trampoline, in the middle of what she came to it for: on with it.
+      nextStep();
     } else if (s.phase === "fidget" || s.phase === "land") {
       rest();
     } else if (s.phase === "sleep" && s.abed) {
@@ -1894,6 +2456,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     if (hidePip) {
       st.current.gamedAt = nowMs();
       dragEnd.current?.("cancel");
+      ballDragEnd.current?.("cancel");
       dropPlan();
     }
     if (hidePip) untuck();
@@ -1913,7 +2476,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       const { level: lv } = live.current;
       if (outRef.current) {
         // She is out: the room goes on without her.
-        stepBall(time, dt, reduced);
+        stepBall(time, dt);
         furnishRef.current?.step(dt, reduced);
         return;
       }
@@ -1921,6 +2484,30 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       if (holdingRef.current && s.errand?.kind !== "back") {
         setHolding(null);
         tellWelcomed();
+      }
+      // Off the trampoline by any road but her own (caught in the air, called away): its bounces do not wait for her next fall.
+      if (s.bounce && s.phase !== "fall") s.bounce = null;
+      // Her temper eases by the clock: looked at once a second, for the hearts and for how she stands.
+      if (time - s.temperSeenAt > TEMPER_LOOK_MS) {
+        s.temperSeenAt = time;
+        tellTemper();
+      }
+      // A tantrum she owes, or a coming-round: once she is on her feet and nothing else has her (never from her bed,
+      // the hand or the air; never while the room is being rearranged or she is being pointed at).
+      if (s.tantrumDue || s.roundDue) {
+        if (s.phase === "sleep" || s.phase === "tuck") s.roundDue = null;
+        const up = s.phase === "rest" || s.phase === "walk" || s.phase === "doing" || s.phase === "errand";
+        if (up && !live.current.decorating && !live.current.attentive && s.plan?.activity.id !== "tantrum") {
+          if (s.tantrumDue) throwTantrum();
+          else if (s.phase === "rest") comeRoundNow();
+        }
+      }
+      // A press held still on her has become a cuddle (pip/play.ts): it begins under the hand, not when the hand lifts.
+      const press = s.drag;
+      if (press && !press.moved && !press.judged && !press.rubbed && press.far <= CUDDLE_SLACK && pressOf(time - press.at) === "cuddle") {
+        press.judged = true;
+        touchPip("cuddle");
+        press.cuddling = s.touch?.kind === "cuddle";
       }
       if (s.phase === "walk") {
         const dir = s.target < s.x ? -1 : 1;
@@ -1946,28 +2533,52 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
         place();
       } else if (s.phase === "fall") {
         // Dropped or thrown: an arc, off the walls and the ceiling, a bounce or two on the floor.
-        const flight = flyStep({ x: s.x, y: s.y, vx: s.vx, vy: s.vy, angle: s.angle, spin: s.spin }, dt, airBounds(lv), PIP_BOUNCE, true);
+        // (On a trampoline the floor is its mat, once she is on her way down: she jumps up onto it from the floor.)
+        const air = airBounds(lv);
+        const flight = flyStep({ x: s.x, y: s.y, vx: s.vx, vy: s.vy, angle: s.angle, spin: s.spin }, dt, s.bounce && s.vy >= 0 ? { ...air, floor: s.bounce.floor } : air, PIP_BOUNCE, true);
         ({ x: s.x, y: s.y, vx: s.vx, vy: s.vy, angle: s.angle, spin: s.spin } = flight.body);
-        s.hardest = Math.max(s.hardest, flight.impact);
-        if (flight.hit) playSound("bounce", { pitch: 1.3, volume: Math.min(0.7, 0.25 + Math.max(flight.impact, 150) / 600) });
-        if (flight.landed) {
+        const sprung = s.bounce !== null && flight.impact > 0;
+        if (s.bounce && sprung) {
+          // Down on the trampoline: up she goes again, as many times as she came for, and then a small hop off it.
+          const off = s.bounce.left <= 0;
+          s.vy = off ? -TRAMPOLINE_VY * 0.45 : -TRAMPOLINE_VY;
+          s.angle = 0;
+          s.spin = 0;
+          if (off) s.bounce = null;
+          else s.bounce.left -= 1;
+          playSound("bounce", { pitch: off ? 1 : 0.8, volume: 0.6 });
+        } else {
+          s.hardest = Math.max(s.hardest, flight.impact);
+          if (flight.hit) playSound("bounce", { pitch: 1.3, volume: Math.min(0.7, 0.25 + Math.max(flight.impact, 150) / 600) });
+        }
+        if (flight.landed && !sprung) {
           // A hard landing (or one still spinning) leaves her seeing stars, and wanting another go.
           const hard = s.tossed && (s.hardest > HARD_LANDING || Math.abs(s.spin) > 4);
           const tilt = nearUpright(s.angle);
+          // What it was, to her patience: whirled giddy, thrown (fun, until it is again and again), or simply dropped from a height.
+          if (s.giddy) vex("whirled");
+          else if (s.tossed) vex("tossed");
+          else if (s.hardest > DROPPED_HARD) vex("dropped");
           s.vx = 0;
           s.angle = 0;
           s.spin = 0;
           s.hardest = 0;
           s.phase = "land";
-          if (hard) {
+          if (s.giddy) {
+            // Whirled round in the hand before she was let go: the room is still going round.
+            show("dizzy", 2);
+            say(pickOne(GIDDY_LINES));
+          } else if (hard) {
             show("dizzy", 1);
             say(pickOne(["whee! again!", "again! again!", "whoa. do that again."]));
           } else {
             show("land", 1);
           }
           playSound("place", { pitch: 1.2, volume: 0.5 });
-          if (s.tossed) played("toss");
+          // (A whirl is a kind of toss, as far as cheering her up goes, even when she was only set down after it.)
+          if (s.tossed || s.giddy) played("toss");
           s.tossed = false;
+          s.giddy = false;
           // Down at a tilt: she rights herself, the short way round.
           if (Math.abs(tilt) > 0.02) {
             spinRef.current?.animate(
@@ -1992,72 +2603,122 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
         place();
       } else if (s.phase === "petted" && s.touch) {
         const touch = s.touch;
-        if (time - touch.last > TOUCH_GAP_MS) {
-          // The hand has gone: a happy sigh if it stayed a while.
-          const stayed = touch.last - touch.since >= TOUCH_MIN_MS;
+        // A cuddle lasts as long as the hand is held on her.
+        if (touch.kind === "cuddle" && s.drag?.cuddling) touch.last = time;
+        if (time - touch.last > (touch.kind === "cuddle" ? CUDDLE_END_MS : TOUCH_GAP_MS)) {
+          // The hand has gone: a happy sigh if it stayed a while (a cuddle always has: it took a held press to start one).
+          const stayed = touch.kind === "cuddle" || touch.last - touch.since >= TOUCH_MIN_MS;
           s.touch = null;
           s.phase = "fidget";
           if (stayed) {
-            played(touch.kind);
-            show(touch.kind === "pet" ? "smitten" : "shift", 1);
+            // It is kind, and she takes it so: a long cuddle more than a short one or a stroke (pip/temper.ts).
+            please(touch.kind === "tickle" ? "tickle" : touch.kind === "cuddle" && touch.last - touch.since >= LONG_CUDDLE_MS ? "cuddle" : "stroke");
+            // (A cuddle cheers her up as a stroke does: pip/play.ts, `PLAYS`.)
+            played(touch.kind === "cuddle" ? "pet" : touch.kind);
+            show(touch.kind === "pet" ? "smitten" : touch.kind === "cuddle" ? "pet" : "shift", 1);
+            if (touch.kind === "cuddle") say(pickOne(CUDDLED_LINES));
           } else {
             rest();
           }
         } else if (time > touch.fxAt) {
           touch.fxAt = time + TOUCH_FX_MS;
-          playSound(touch.kind === "pet" ? "purr" : "giggle", { volume: 0.7 });
+          playSound(touch.kind === "tickle" ? "giggle" : "purr", { volume: 0.7, pitch: touch.kind === "cuddle" ? 0.85 : 1 });
           const head = headPoint();
-          if (head && !reduced && touch.kind === "pet") burst(head, { px: live.current.scale, count: 2, sprite: "heart", spread: 30 * live.current.scale * 0.4, lift: 22, fall: 2, duration: 900 });
+          if (head && !reduced && touch.kind !== "tickle") {
+            burst(head, { px: live.current.scale, count: touch.kind === "cuddle" ? 3 : 2, sprite: "heart", spread: 30 * live.current.scale * 0.4, lift: 22, fall: 2, duration: 900 });
+          }
         }
-      } else if ((s.phase === "fetch" || s.phase === "carry") && s.ball) {
+      } else if (s.phase === "fetch" && s.ball) {
+        // After the ball: under it while it is in the air (and it is hers the moment it is in reach), or to where it lies.
         const ball = s.ball;
-        // After the ball (wherever it has rolled to), or back to where it was thrown from.
-        const to = s.phase === "fetch" ? ball.body.x : ball.home;
-        const dir = to < s.x ? -1 : 1;
-        if (s.phase === "fetch" && (ball.state === "held" || ball.state === "air")) {
-          // The reader has it again: she waits to see where it goes.
+        const play = s.play;
+        const flying = ball.state === "air";
+        if (ball.state === "held" || ball.state === "carried" || (flying && (ball.by !== "reader" || play.passed)) || inHuff()) {
+          // The reader has it again, or it is not hers to take: she waits to see where it goes.
           rest();
-        } else if (Math.abs(to - s.x) > 6 && stopForVisitor(worldNow()?.visitor, s.x, clampX(s.x + dir * (s.phase === "fetch" ? RUN_SPEED : CARRY_SPEED) * dt)) !== null) {
-          // The ball (or the way back with it) is beyond the visitor: she leaves it, rather than run through them.
-          ball.home = ball.state === "carried" ? s.x : ball.body.x;
-          answer({ move: "shift", loops: 1, line: s.phase === "fetch" ? "it's behind our guest. yours!" : null });
-        } else if (Math.abs(to - s.x) > 6) {
-          face(dir);
-          s.x = clampX(s.x + dir * (s.phase === "fetch" ? RUN_SPEED : CARRY_SPEED) * dt);
-          // The floor's edge: as near as she can get is near enough.
-          if ((s.x <= 18 && dir < 0) || (s.x >= lv.w - 18 && dir > 0)) ball.body.x = s.x;
-          place();
-        } else if (s.phase === "fetch") {
-          if (ball.state === "still" || ball.state === "roll") {
-            // Got it: up over her head, and back.
-            ball.state = "carried";
-            ball.touched = time;
-            placeBall();
-            playSound("pop", { pitch: 1.3 });
-            s.phase = "carry";
-            face(ball.home < s.x ? -1 : 1);
-            show(live.current.ownBall ? "carry" : "carry-paper", undefined, "carry");
-          }
+        } else if (flying && Math.abs(ball.body.x - s.x) <= REACH_X && reachOf(ball.body.y, lv.walkY) !== "over" && (ball.body.vy > 0 || ball.body.y > lv.walkY - HEAD_HIGH)) {
+          takeBall();
         } else {
-          // Back: the ball goes down in front of her, and she is pleased with herself.
-          ball.state = "still";
-          ball.body = { x: clampX(s.x + s.facing * 10), y: lv.walkY - BALL_RADIUS, vx: 0, vy: 0, angle: 0, spin: 0 };
-          ball.touched = time;
-          placeBall();
-          s.fetches += 1;
-          s.phase = "fidget";
-          // Three in a row and she is puffed.
-          if (s.fetches % 3 === 0) {
-            show("hydrate", 1);
-            say("phew. one more?");
+          if (flying && play.goal === null) aimForBall();
+          const to = flying ? play.goal ?? ball.body.x : ball.body.x;
+          const gap = to - s.x;
+          const dir = gap < 0 ? -1 : 1;
+          const pace = (play.why === "fetch" ? CATCH_RUN * (halfHearted() ? HALF_PACE : 1) : WALK_SPEED * 1.6) * paceNow();
+          const next = clampX(s.x + dir * Math.min(Math.abs(gap), pace * dt));
+          // (At the floor's edge, as near as she can get is near enough.)
+          const there = Math.abs(gap) <= (flying ? 2 : 6) || next === s.x;
+          if (!there && stopForVisitor(worldNow()?.visitor, s.x, next) !== null) {
+            // The ball is beyond the visitor: she leaves it where it is, rather than run through them.
+            ball.by = null;
+            ball.rested = time;
+            play.asked = 3;
+            answer({ move: "shift", loops: 1, line: "it's behind our guest. yours!" });
+          } else if (!there) {
+            if (Math.abs(gap) > 3) face(dir);
+            s.x = next;
+            if (viewRef.current.move === "reach") show("scamper", undefined, `fetch-again-${Date.now()}`);
+            place();
+          } else if (flying) {
+            // Under where it will come down: arms up, eyes on it.
+            if (viewRef.current.move !== "reach") show("reach", undefined, `ready-${Date.now()}`);
+            if (Math.abs(ball.body.x - s.x) > 4) face(ball.body.x < s.x ? -1 : 1);
+            place();
           } else {
-            show("cheer", 1);
-            if (s.fetches === 1) say(pickOne(["got it!", "again?", "throw it again!"]));
+            atBall();
           }
-          played("fetch");
         }
-      } else if (s.phase === "fetch" || s.phase === "carry") {
-        // The ball has gone (put away, another floor): nothing to fetch.
+      } else if (s.phase === "carry" && s.ball) {
+        // Back with it, at a run, to where she can throw it from.
+        const ball = s.ball;
+        if (ball.state !== "carried") {
+          // Taken out of her paws.
+          rest();
+        } else {
+          const to = s.play.spot ?? s.x;
+          const gap = to - s.x;
+          const dir = gap < 0 ? -1 : 1;
+          const next = clampX(s.x + dir * Math.min(Math.abs(gap), CATCH_RUN * (halfHearted() ? HALF_PACE : 1) * paceNow() * dt));
+          // (With a visitor in the way she throws from where she has got to.)
+          if (Math.abs(gap) <= 1 || next === s.x || stopForVisitor(worldNow()?.visitor, s.x, next) !== null) {
+            if (ball.by === "reader") {
+              // Fetched and brought back: that is the old game, and still counts as it.
+              please("fetch");
+              played("fetch");
+            }
+            windUp();
+          } else {
+            face(dir);
+            s.x = next;
+            place();
+          }
+        }
+      } else if (s.phase === "catch" && s.ball && s.play.act) {
+        // One of the small things a game of catch is made of, until its time is up.
+        const act = s.play.act;
+        const ball = s.ball;
+        const holding = act.kind === "windup" || act.kind === "chin" || act.kind === "away" || act.kind === "handback";
+        if (holding && ball.state !== "carried") {
+          // Taken out of her paws (or from under her chin): up she gets, to see where it goes.
+          rest();
+        } else if (act.soft && ball.state === "air" && ball.by === "reader" && !s.play.passed && !inHuff()) {
+          // Another one on its way already.
+          chase();
+        } else if (time >= act.until) {
+          endCatchAct(act);
+        } else {
+          if (act.kind === "look" && time > s.gazeAt) {
+            // Asking: her eyes go from the reader to the ball and back.
+            s.gazeAt = time + 700;
+            const atReader = Math.floor((act.until - time) / 700) % 2 === 0;
+            const point = atReader ? s.reader : { x: ball.body.x, y: ball.body.y };
+            const gaze = point ? gazeAt({ x: s.x, y: s.y - 15 }, point, 9) : { dx: 0 as const, dy: 0 as const };
+            const wanted = gazeMove(s.facing < 0 ? { dx: (gaze.dx * -1) as -1 | 0 | 1, dy: gaze.dy } : gaze, "idle");
+            if (wanted !== viewRef.current.move) show(wanted, undefined, "rest");
+          }
+          place();
+        }
+      } else if (s.phase === "fetch" || s.phase === "carry" || s.phase === "catch") {
+        // The ball has gone (put away, another floor): nothing to play with.
         rest();
       } else if (s.phase === "tuck" && s.hop) {
         // A little arc from beside the bed into it.
@@ -2129,9 +2790,11 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
           else if (stir === "scroll") startScroll(scrollSession(hour, Math.random, reduced));
           else if (stir === "peek") peek();
         }
-      } else if (s.phase === "rest" && s.ball && (s.ball.state === "roll" || s.ball.state === "still") && Math.abs(s.ball.body.x - s.ball.home) > 14 && !reduced) {
-        // The ball is down, away from where it was thrown: after it.
-        chase();
+      } else if (s.phase === "rest" && s.ball && ballTurn(time, reduced)) {
+        // The ball is out, and it is her turn: she is off after it, or asking to play (see `ballTurn`).
+      } else if (s.phase === "rest" && time > s.nextFree && !s.plan && inHuff()) {
+        // In a huff: her back to the room, and nothing doing. (It passes: pip/temper.ts, `HUFF_MS`.)
+        s.nextFree = time + 3000;
       } else if (s.phase === "rest" && time > s.nextFree) {
         const errand = s.plan ? null : plan(time, reduced);
         if (errand) {
@@ -2145,7 +2808,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
         } else if (s.fidgets > 0 && !reduced) {
           // A small thing while standing about.
           s.fidgets -= 1;
-          const small = fidget({ mood: live.current.mood, hour: new Date().getHours(), world: worldNow() }, s.lastFidget, Math.random);
+          const small = fidget({ mood: outlook(time, reduced).mood, hour: new Date().getHours(), world: worldFelt() }, s.lastFidget, Math.random);
           s.lastFidget = small.move;
           s.phase = "fidget";
           show(small.move, loopsFor(small.move, small.seconds), `fidget-${Date.now()}`);
@@ -2168,7 +2831,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       // Called away from the fridge she had open (picked up, poked, a ball thrown): the door goes to behind her.
       const hold = s.fridgeHold;
       if (hold && !(hold.why === "snack" ? s.phase === "errand" && s.errand?.kind === "snack" : hold.why === "eating" ? s.phase === "act" : s.plan?.activity.id === "fridge")) shutFridge();
-      stepBall(time, dt, reduced);
+      stepBall(time, dt);
       furnishRef.current?.step(dt, reduced);
     };
     stepRef.current = step;
@@ -2218,6 +2881,22 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       state: () => {
         const s = st.current;
         const ball = s.ball ? `${s.ball.state}@${Math.round(s.ball.body.x)},${Math.round(s.ball.body.y)}` : null;
+        // The game of catch: the rally, who threw the ball last and whether it can still be caught, the small thing she is doing about it, and what of the ball is drawn.
+        const game = s.ball
+          ? {
+              rally: s.play.rally.count,
+              by: s.ball.by,
+              live: s.ball.live,
+              act: s.phase === "catch" ? s.play.act?.kind ?? null : null,
+              why: s.phase === "fetch" ? s.play.why : null,
+              unanswered: s.play.rally.unanswered,
+              asked: s.play.asked,
+              v: [Math.round(s.ball.body.vx), Math.round(s.ball.body.vy)],
+              art: s.play.seen.art,
+              shadow: s.play.seen.shadow,
+              tally: s.play.seen.tally
+            }
+          : null;
         const fixed = (value: number, places = 2) => Number(value.toFixed(places));
         return {
           phase: s.phase,
@@ -2243,6 +2922,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
           fridge: furnishRef.current?.fridge() ?? null,
           fidgets: s.fidgets,
           ball,
+          game,
           angle: fixed(s.angle),
           // Held and thrown, to the hundredth: where, how fast, which way up, and the swing in the hand.
           at: [fixed(s.x), fixed(s.y)],
@@ -2250,26 +2930,77 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
           spin: fixed(s.spin),
           swing: [fixed(s.hold.swing.angle, 3), fixed(s.hold.swing.spin)],
           turn: spinRef.current?.style.transform ?? "",
-          dragging: s.drag !== null
+          dragging: s.drag !== null,
+          // Under the hand: stroked, tickled or cuddled; the press that has her; the pokes so far; how far round she has been whirled.
+          touch: s.touch?.kind ?? null,
+          press: s.drag ? { moved: s.drag.moved, cuddling: s.drag.cuddling, rubbed: s.drag.rubbed } : null,
+          pokes: s.poke?.count ?? 0,
+          whirl: s.whirl ? fixed(s.whirl.turned / (Math.PI * 2)) : null,
+          giddy: s.giddy,
+          // Her temper: how she is, her patience, what it adds to the hearts, and what she owes.
+          humour: humourNow(),
+          patience: temper.current ? fixed(temperAt(temper.current, wallMs()).patience, 1) : null,
+          hearts: temper.current ? heartsOff(temper.current, wallMs()) : 0,
+          spellLeft: temper.current ? spellMinutesLeft(temper.current, wallMs()) : 0,
+          owes: s.tantrumDue ?? s.roundDue
         };
       },
+      /** A tap, as the pointer's or the keyboard's: a poke, or (the second of two quick ones) a high five. */
       poke: () => {
-        if (!outRef.current) pokePip();
+        if (!outRef.current) tapPip();
         return hook.state();
       },
-      play: (how: "pet" | "tickle" | "ball" | "toss") => {
+      play: (how: "pet" | "tickle" | "cuddle" | "highfive" | "spin" | "sneeze" | "ball" | "toss") => {
         if (outRef.current) return hook.state();
         if (how === "pet") touchPip("pet", 2600);
         else if (how === "tickle") touchPip("tickle", 2200);
-        else if (how === "ball") throwBall();
+        else if (how === "cuddle") touchPip("cuddle", CUDDLE_KEY_MS);
+        else if (how === "highfive") highFivePip();
+        else if (how === "spin") spinPip();
+        else if (how === "sneeze") sneezePip();
+        else if (how === "ball") tossBall();
         else hop();
+        return hook.state();
+      },
+      /** The ball, as the reader's hand would throw it: from a place, at a speed (floor pixels); or, with nothing, the Ball key's toss. */
+      ball: (from?: { x: number; y: number; vx: number; vy: number }) => {
+        if (outRef.current) return hook.state();
+        if (from) readerThrow(from, from);
+        else tossBall();
+        return hook.state();
+      },
+      /** The game's chance, set by hand: the same seed plays the same game. */
+      seed: (seed: number) => {
+        st.current.play.rally = rallyStart(seed);
+        return hook.state();
+      },
+      /** Her temper, by hand: something that wears on it, something kind; or all of it forgotten. */
+      vex: (what: Annoyance) => {
+        vex(what);
+        return hook.state();
+      },
+      please: (what: Kindness) => {
+        please(what);
+        return hook.state();
+      },
+      calm: () => {
+        temper.current = parseTemper(null, wallMs());
+        st.current.tantrumDue = null;
+        st.current.roundDue = null;
+        writeText(TEMPER_STORE, null);
+        tellTemper();
+        return hook.state();
+      },
+      /** She looks in her fridge and finds this, as a step of her own visit would say. */
+      found: (what: "bare" | "food") => {
+        foundFridge(what);
         return hook.state();
       },
       /** The furnishings that can be used on this floor: where each is and how it stands. */
       furnish: () => furnishRef.current?.state() ?? [],
-      /** Uses the first furnishing of a kind as a tap would ("fridge", "bed", "lamp"...). */
-      use: (kind: Parameters<NonNullable<typeof furnishRef.current>["use"]>[0]) => {
-        furnishRef.current?.use(kind);
+      /** Uses the first furnishing of a kind as a tap would ("fridge", "bed", "lamp"...), or the one piece named ("visit", "aquarium"). */
+      use: (kind: Parameters<NonNullable<typeof furnishRef.current>["use"]>[0], itemId?: string) => {
+        furnishRef.current?.use(kind, itemId);
         return hook.state();
       },
       /** The night, on demand: up for the fridge, or (in bed) out with the phone. */
@@ -2390,8 +3121,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
         s.errand = null;
         s.touch = null;
         s.queue = [];
-        s.ball = null;
-        setBallOut(false);
+        ballGone();
         setHolding(null);
         s.phase = "rest";
       }
@@ -2582,6 +3312,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       const index = plotIndex(plot);
       return index < 0 ? null : onScreen(plotBoxes(live.current.level, plots?.length ?? 0)[index]);
     },
+    kindness: (what) => please(what),
     celebrate: (title, note) => {
       const box = roomRef.current?.getBoundingClientRect();
       if (!box) return;
@@ -2594,7 +3325,11 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       if (outRef.current) return;
       if (how === "pet") touchPip("pet", 2600);
       else if (how === "tickle") touchPip("tickle", 2200);
-      else if (how === "ball") throwBall();
+      else if (how === "cuddle") touchPip("cuddle", CUDDLE_KEY_MS);
+      else if (how === "highfive") highFivePip();
+      else if (how === "spin") spinPip();
+      else if (how === "sneeze") sneezePip();
+      else if (how === "ball") tossBall();
       else if (how === "bed") putToBed();
       else if (how === "snack") fetchSnack();
       else hop();
@@ -2606,9 +3341,14 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
 
   // ---- playing with Pip --------------------------------------------------------------
   // The reader's hand on her: a poke answered differently each time it comes
-  // again, strokes she leans into, a tickle, a ball to fetch, and (below) being
-  // picked up by the leaf, swung, and let go. The rules are in pip/play.ts;
-  // here they meet the sprite, the sounds and the page (which cheers her up).
+  // again, two quick taps that are a high five, a press held still that is a
+  // cuddle, strokes she leans into, a tickle (on her leaf, a sneeze), a ball to
+  // fetch, and (below) being picked up by the leaf, swung, whirled round until
+  // she is giddy, and let go. The rules are in pip/play.ts; here they meet the
+  // sprite, the sounds and the page (which cheers her up). Each way has a key
+  // (the Play rail, or a letter on Pip herself: `onKeyDown`), an answer without
+  // motion, and does nothing while she is out of the house. None is a new kind
+  // of play: each counts as the nearest of the five Rust knows (`PLAYS`).
 
   /** The top of her head on screen, where hearts and sparks rise from. */
   const headPoint = (): Point | null => {
@@ -2631,6 +3371,25 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     const s = st.current;
     const now = nowMs();
     if (s.phase === "held" || s.phase === "fall") return;
+    const asleep = s.phase === "sleep" || s.phase === "tuck";
+    const stage = humourNow();
+    if (!asleep && stage === "huff") {
+      // In a huff: a poke gets a word over her shoulder, and no more.
+      rebuff();
+      return;
+    }
+    if (!asleep && stage === "sulk" && s.phase !== "act") {
+      // Still sulking: she answers, without any of her usual play in it.
+      s.errand = null;
+      s.touch = null;
+      dropPlan();
+      s.poke = null;
+      s.phase = "fidget";
+      show("mope", 1, `sulky-${now}`);
+      say(sulkLine(Math.random));
+      playSound("squeak", { pitch: 0.7, volume: 0.6 });
+      return;
+    }
     if (s.phase === "sleep" && s.abed) {
       // On her phone: it is under the quilt before the hand has left her, and she was doing nothing of the kind.
       s.abed.beats.splice(s.abed.index + 1, 0, { beat: "innocent", seconds: 3, line: innocentLine(Math.random) });
@@ -2657,10 +3416,14 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       show("yawn", 1);
       say("mm? i was asleep.");
       playSound("squeak", { pitch: 0.7 });
+      // Nobody likes being woken.
+      vex("woken");
       return;
     }
     s.poke = pokeAgain(s.poke, now);
     const reaction = pokeReaction(s.poke.count);
+    // At the end of the ladder, and past it, every poke is one too many.
+    if (s.poke.count >= POKE_RUNGS) vex("poked");
     // Past her own answers (or mid-act, which is the page's to cut short): one of the page's surprises.
     if (reaction.surprise || s.phase === "act") {
       if (reaction.surprise) s.poke = null;
@@ -2673,70 +3436,540 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     dropPlan();
     s.phase = "fidget";
     show(reaction.move, reaction.loops, `poke-${now}`);
-    say(reaction.line);
+    // (In a good mood the first poke, which has no line of its own, gets a happy one.)
+    say(reaction.line ?? (stage === "glad" ? gladLine(Math.random) : null));
     playSound(reaction.sound, { pitch: reaction.pitch });
     const head = headPoint();
     if (head && !prefersReducedMotion()) burst(head, { px: live.current.scale, count: 5, sprite: "spark", spread: 44, lift: 14, fall: 8, duration: 480 });
   };
 
   /**
-   * Stroked or tickled, from now for `hold` more milliseconds (the pointer
-   * keeps it going as it rubs; a Play key holds it a moment by itself).
+   * Stroked, tickled or cuddled, from now for `hold` more milliseconds (the
+   * pointer keeps a stroke going as it rubs, and a cuddle going while it is
+   * held on her; a Play key holds either a moment by itself).
    */
-  const touchPip = (kind: "pet" | "tickle", hold = 0) => {
+  const touchPip = (kind: "pet" | "tickle" | "cuddle", hold = 0) => {
     const s = st.current;
     const now = nowMs();
     if (!TOUCHABLE.has(s.phase)) return;
+    if (inHuff()) {
+      // In a huff she will not be stroked or tickled. A cuddle is how the reader says sorry, and she lets it.
+      if (kind !== "cuddle") {
+        rebuff();
+        return;
+      }
+      please("cuddle");
+    }
     if (s.phase === "sleep" || s.phase === "tuck") untuck();
     s.errand = null;
     dropPlan();
     if (!s.touch || s.touch.kind !== kind) {
       s.touch = { kind, since: s.touch?.since ?? now, last: now + hold, fxAt: now };
       s.phase = "petted";
-      show(kind === "pet" ? "pet" : "laugh", undefined, `petted-${kind}`);
+      show(kind === "pet" ? "pet" : kind === "cuddle" ? "smitten" : "laugh", undefined, `petted-${kind}`);
       if (kind === "tickle") say("that tickles!");
+      else if (kind === "cuddle") say(pickOne(CUDDLE_LINES));
     } else {
       s.touch.last = Math.max(s.touch.last, now + hold);
     }
   };
 
-  /** After the ball. */
-  const chase = () => {
+  /**
+   * A tap on her (the pointer let go of at once, or the keyboard): a poke, or,
+   * the second of two quick ones, a high five instead of a second poke
+   * (pip/play.ts, `tapAgain`: the ladder goes back to where it was).
+   */
+  const tapPip = () => {
+    const s = st.current;
+    // A poke with an answer of its own (woken, caught on her phone, mid-act) is not half of a high five.
+    const plain = TOUCHABLE.has(s.phase) && s.phase !== "sleep" && s.phase !== "tuck";
+    const { taps, highFive } = tapAgain(plain ? s.taps : null, nowMs(), s.poke);
+    s.taps = plain ? taps : null;
+    if (highFive && plain) {
+      s.poke = taps.before;
+      highFivePip();
+    } else {
+      pokePip();
+    }
+  };
+
+  /** A high five: up goes her hand, and yours meets it. */
+  const highFivePip = () => {
+    const s = st.current;
+    if (!TOUCHABLE.has(s.phase)) return;
+    if (inHuff()) {
+      rebuff();
+      return;
+    }
+    please("highfive");
+    if (s.phase === "sleep" || s.phase === "tuck") untuck();
+    s.errand = null;
+    s.touch = null;
+    dropPlan();
+    s.phase = "fidget";
+    show("welcome", 1, `five-${nowMs()}`);
+    say(pickOne(HIGH_FIVE_LINES));
+    playSound("clap");
+    // Where the hands meet: up beside her head, on the side she faces. (Without motion the effects draw nothing.)
+    const box = spinRef.current?.getBoundingClientRect();
+    if (box) burst({ x: box.left + box.width * (0.5 + 0.3 * s.facing), y: box.top + box.height * 0.35 }, { px: live.current.scale, count: 7, sprite: "spark", spread: 40, lift: 12, fall: 8, duration: 520 });
+    // (A high five cheers her up as a stroke does: pip/play.ts, `PLAYS`.)
+    played("pet");
+  };
+
+  /**
+   * Her leaf tickled: a sneeze. One at a time: she is not rubbed again until
+   * it is over. Without motion there is no sneeze to watch, only the sniff
+   * after it (as with her cold: pip/behaviour.ts).
+   */
+  const sneezePip = () => {
+    const s = st.current;
+    const now = nowMs();
+    if (!TOUCHABLE.has(s.phase) || now < s.sneezeUntil) return;
+    if (inHuff()) {
+      rebuff();
+      return;
+    }
+    if (s.phase === "sleep" || s.phase === "tuck") untuck();
+    // One sneeze is funny. A few, one after another, and she has had enough of it.
+    vex("sneezed");
+    const reduced = prefersReducedMotion();
+    s.sneezeUntil = now + (reduced ? 3200 : SNEEZE_MS);
+    s.errand = null;
+    s.touch = null;
+    s.stroke = null;
+    dropPlan();
+    s.phase = "fidget";
+    // (Turned to the right for it: the move has "achoo" written over her, and turned the other way it reads backwards.)
+    if (!reduced) face(1);
+    show(reduced ? "sniffle" : "sneeze", 1, `sneeze-${now}`);
+    say(reduced ? "achoo! ...my leaf tickles." : pickOne(SNEEZE_LINES));
+    playSound("achoo", { delay: reduced ? 0 : SNEEZE_AT_MS });
+    // (A tickled leaf cheers her up as a tickle does: pip/play.ts, `PLAYS`.)
+    played("tickle");
+  };
+
+  /** What the hand's rub comes to (pip/play.ts, `rubOf`): a stroke, a tickle, or a sneeze. */
+  const rubPip = (rub: Rub) => {
+    if (rub === "none" || nowMs() < st.current.sneezeUntil) return;
+    if (rub === "sneeze") sneezePip();
+    else touchPip(rub);
+  };
+
+  // ---- a game of catch ---------------------------------------------------------------
+  // The ball used to be fetch and nothing else. Now it comes back: thrown to
+  // her (by hand, a tap on it, or the Ball key's gentle toss) she gets under
+  // it, takes it out of the air, wiggles, and throws it in an arc to where
+  // the reader's pointer is; the reader catches it by pressing on it before
+  // it is down. Catches in a row are a rally, counted beside the ball. She is
+  // not perfect (a bonk, a jump at nothing), and a ball that gets past her she
+  // fetches, at a run both ways. The rules, the ball's weight and the chances
+  // are pip/catch.ts's (pure, catch.test.ts); here they meet the sprite, the
+  // sounds and her temper. Without motion nothing flies: the ball is put at
+  // her feet, she hands it back, and the rally counts all the same.
+
+  /** The rally as it now stands: for the count beside the ball (the loop draws it) and the ball's label. */
+  const setRally = (rally: Rally) => {
+    st.current.play.rally = rally;
+    setRallyShown(rally.count >= RALLY_SHOWS ? rally.count : 0);
+  };
+
+  /** No ball any more (put away, another floor, she has gone out): the press that has it lets go, and the game is over. */
+  const ballGone = () => {
+    const s = st.current;
+    s.ball = null;
+    ballDragEnd.current?.("cancel");
+    const play = s.play;
+    play.rally = rallyStart(play.rally.seed);
+    play.act = null;
+    play.why = "fetch";
+    play.goal = null;
+    play.spot = null;
+    play.passed = false;
+    play.asked = 0;
+    play.impact = null;
+    play.hop = null;
+    play.seen = { art: "?", shadow: "?", tally: -1 };
+    setBallOut(false);
+    setRallyShown(0);
+  };
+
+  /** Whether her heart is only half in it: sulking, past the huff. She plays, slower, and does not cheer. */
+  const halfHearted = () => humourNow() === "sulk";
+
+  /** One of the small things a game of catch is made of, from now for `ms` (the loop ends it): the move it shows, and whether a ball coming her way cuts it short. */
+  const catchAct = (kind: CatchAct["kind"], ms: number, move: string | null, loops?: number, soft = false) => {
+    const s = st.current;
+    s.errand = null;
+    s.touch = null;
+    s.phase = "catch";
+    s.play.act = { kind, until: nowMs() + ms, soft };
+    if (move) show(move, loops, `catch-${kind}-${Date.now()}`);
+  };
+
+  /** A hop where she stands (pip/catch.ts, `hopLift`): whole pixels, up and down once. */
+  const hopNow = (high: number, lasts = 320) => {
+    st.current.play.hop = { at: nowMs(), lasts, high };
+  };
+
+  /**
+   * A catch has been counted, hers or the reader's. The first of a rally is
+   * as good as a fetch to her, and a few in a row are a game (pip/temper.ts);
+   * at a round number she cheers, unless her heart is not in it.
+   */
+  const countCatch = (tally: Tally, half: boolean) => {
+    setRally(tally.rally);
+    if (tally.rally.count === 1) please("fetch");
+    if (tally.game) please("game");
+    played("fetch");
+    if (!tally.cheer || half) return;
+    playSound("chime", { pitch: 1.3, volume: 0.4 });
+    say(`${tally.rally.count}!`);
+    hopNow(6, 380);
+    const head = headPoint();
+    if (head && !prefersReducedMotion()) burst(head, { px: live.current.scale, count: 8, sprite: "spark", spread: 50, lift: 18, fall: 8, duration: 600 });
+  };
+
+  /** Where a ball in the air will first come down: where she runs to. */
+  const aimForBall = () => {
+    const s = st.current;
+    const ball = s.ball;
+    s.play.goal = ball && ball.state === "air" ? landing(ball.body, ballRoom(live.current.level)).x : null;
+  };
+
+  /** After the ball: to where it will come down, or to where it lies. `why`: to fetch it (at a run), or one of the ways she asks to play (at a trot). */
+  const chase = (why: "fetch" | Ask = "fetch") => {
     const s = st.current;
     if (!s.ball) return;
     s.errand = null;
+    s.touch = null;
     dropPlan();
     s.phase = "fetch";
-    face(s.ball.body.x < s.x ? -1 : 1);
-    show("scamper", undefined, "fetch");
+    s.play.act = null;
+    s.play.why = why;
+    s.play.spot = null;
+    aimForBall();
+    const to = s.play.goal ?? s.ball.body.x;
+    if (Math.abs(to - s.x) > 3) face(to < s.x ? -1 : 1);
+    show(why === "fetch" ? "scamper" : strollMove(), undefined, `fetch-${why}-${Date.now()}`);
   };
 
-  /** The ball out and in the air: from the hand that threw it, or tossed up from beside Pip. */
-  const throwBall = (from?: { x: number; y: number; vx: number; vy: number }) => {
+  /** Her throw: out of `from`, in an arc that comes down where the reader's pointer is (pip/catch.ts: `throwTarget`, `lob`). The reader's to catch until it is down. */
+  const sendBack = (from: { x: number; y: number }, half: boolean) => {
     const s = st.current;
+    const ball = s.ball;
+    if (!ball) return;
+    const room = ballRoom(live.current.level);
+    const to = throwTarget(s.reader, s.x, room);
+    const start = { x: Math.max(room.left, Math.min(room.right, from.x)), y: Math.max(room.top, Math.min(room.floor - 1, from.y)) };
+    const toss = lob(start, to, room, half ? 1.12 : 1);
+    ball.body = { ...ballAt(start.x, start.y, toss.vx, toss.vy), angle: ball.body.angle };
+    ball.state = "air";
+    ball.by = "pip";
+    ball.live = true;
+    ball.speed = Math.hypot(toss.vx, toss.vy);
+    s.play.passed = false;
+    s.play.goal = null;
+    s.play.impact = null;
+    if (Math.abs(to.x - s.x) > 3) face(to.x < s.x ? -1 : 1);
+    placeBall();
+  };
+
+  /** She has the ball, and it is going back: a wiggle first, shorter the keener she is (pip/catch.ts, `windupMs`), facing where it will go. */
+  const windUp = () => {
+    const s = st.current;
+    const { level: lv, ownBall: own } = live.current;
+    const half = halfHearted();
+    const to = throwTarget(s.reader, s.x, ballRoom(lv));
+    if (Math.abs(to.x - s.x) > 3) face(to.x < s.x ? -1 : 1);
+    catchAct("windup", windupMs(s.play.rally.count, half), own ? "windup" : "windup-paper");
+    // Well into a rally she cannot keep her feet on the floor.
+    if (!half && keenness(s.play.rally.count) >= 2) hopNow(4, 280);
+  };
+
+  /** The throw itself, out of her hands, and the follow-through. */
+  const fling = () => {
+    const s = st.current;
+    const half = halfHearted();
+    sendBack({ x: s.x + s.facing * HANDS.x, y: live.current.level.walkY + HANDS.y }, half);
+    playSound("whee", { pitch: half ? 0.9 : 1.15, volume: 0.45 });
+    catchAct("fling", FLING_MS, "fling", 1, true);
+  };
+
+  /** The reader's throw has come to her. How she takes it is pip/catch.ts's (`receive`); here it is played. */
+  const takeBall = () => {
+    const s = st.current;
+    const ball = s.ball;
+    if (!ball) return;
     const { level: lv } = live.current;
     const now = nowMs();
-    const side = s.x < lv.w / 2 ? 1 : -1;
-    const start = from ?? { x: clampX(s.x + side * 14), y: lv.walkY - 34, vx: side * (70 + Math.random() * 70), vy: -210 };
-    // Where it is brought back to: where Pip stood when it was thrown.
-    s.ball = { body: { ...start, angle: 0, spin: start.vx * 0.12 }, state: "air", home: s.ball?.home ?? s.x, touched: now };
-    if (!from) s.ball.home = s.x;
-    setBallOut(true);
-    placeBall();
-    playSound("whee", { pitch: 1.2, volume: 0.6 });
-    if (prefersReducedMotion()) {
-      // Without motion nothing flies or runs: the ball is at her feet, and that is the game.
-      s.ball.state = "still";
-      s.ball.body = { x: clampX(s.x + 12), y: lv.walkY - BALL_RADIUS, vx: 0, vy: 0, angle: 0, spin: 0 };
-      placeBall();
-      if (TOUCHABLE.has(s.phase)) {
-        s.phase = "fidget";
-        show("cheer", 1);
-        played("fetch");
-      }
+    const half = halfHearted();
+    const high = reachOf(ball.body.y, lv.walkY) === "jump";
+    const taken = receive(s.play.rally, { half });
+    s.play.goal = null;
+    // Turned to where it came from.
+    if (Math.abs(ball.body.vx) > 20) face(ball.body.vx > 0 ? -1 : 1);
+    if (taken.how === "bonk") {
+      // Off the top of her head, and away; and she sits down about it.
+      setRally(taken.rally);
+      s.play.passed = true;
+      ball.body = { ...ball.body, y: Math.min(ball.body.y, lv.walkY - HEAD_HIGH), vx: (ball.body.vx >= 0 ? 1 : -1) * 46, vy: -190, down: false };
+      s.play.impact = { on: "ceiling", speed: 200, at: now };
+      playSound("bonk");
+      catchAct("bonk", BONK_MS, "bonk", 1);
+      say(pickOne(BONK_LINES));
       return;
     }
-    // Whatever she was doing can wait: there is a ball.
+    if (taken.how === "miss") {
+      // A jump, and it sails by.
+      setRally(taken.rally);
+      s.play.passed = true;
+      hopNow(7, 380);
+      catchAct("whiff", WHIFF_MS, "reach");
+      say(pickOne(WHIFF_LINES));
+      return;
+    }
+    if (high) hopNow(6);
+    if (taken.how === "flourish") {
+      // Straight back, without her hands: off her head if it is up there, off her foot if it is down here.
+      const heady = ball.body.y < lv.walkY - 13;
+      playSound("bounce", { pitch: heady ? 1.5 : 0.85, volume: 0.6 });
+      countCatch(taken, half);
+      sendBack({ x: ball.body.x, y: ball.body.y }, half);
+      catchAct("flourish", FLOURISH_MS, heady ? "header" : "punt", 1, true);
+      return;
+    }
+    ball.state = "carried";
+    ball.live = false;
+    playSound("caught", { pitch: 1 + Math.min(12, taken.rally.count) * 0.03 });
+    countCatch(taken, half);
+    if (taken.rally.received === 1 && !half) say(pickOne(CAUGHT_LINES));
+    windUp();
+  };
+
+  /** At the ball where it lies, to fetch it: up over her head, and back with it at a run, as far as where she can throw it from (pip/catch.ts, `throwSpot`). */
+  const liftBall = () => {
+    const s = st.current;
+    const ball = s.ball;
+    if (!ball) return;
+    const { level: lv, ownBall: own } = live.current;
+    // Thrown by the reader and picked up off the floor, it is a fetch, and the rally starts again. (Hers, missed: she is only trying again.)
+    if (ball.by === "reader") setRally(fetched(s.play.rally));
+    ball.state = "carried";
+    ball.live = false;
+    playSound("pop", { pitch: 1.3 });
+    s.play.spot = throwSpot(s.x, throwTarget(s.reader, s.x, ballRoom(lv)).x, 18, lv.w - 18);
+    s.play.act = null;
+    s.phase = "carry";
+    if (Math.abs(s.play.spot - s.x) > 1) face(s.play.spot < s.x ? -1 : 1);
+    show(own ? "carry" : "carry-paper", undefined, `carry-${Date.now()}`);
+  };
+
+  /** A pat that sends the ball rolling across the floor to the reader: her way of asking, and of making up. */
+  const patBall = () => {
+    const s = st.current;
+    const ball = s.ball;
+    if (!ball) return;
+    const room = ballRoom(live.current.level);
+    const to = throwTarget(s.reader, s.x, room);
+    const gap = to.x - ball.body.x;
+    const dir = Math.abs(gap) < 4 ? s.facing : gap < 0 ? -1 : 1;
+    face(dir < 0 ? -1 : 1);
+    ball.body = { ...ballDown(ball.body.x, room, ball.body.angle), vx: dir * Math.max(50, Math.min(NUDGE_SPEED, 45 + Math.abs(gap))) };
+    ball.state = "roll";
+    // Nobody's throw: it is an offer, and she waits on it rather than running after it again.
+    ball.by = null;
+    ball.live = false;
+    s.play.asked = Math.max(s.play.asked, 1);
+    playSound("bounce", { pitch: 1.2, volume: 0.35 });
+    catchAct("nudge", NUDGE_MS, "punt", 1);
+  };
+
+  /** Down on the floor with her chin on the ball, until it is taken or she gives up and puts it away. */
+  const lieDown = () => {
+    const s = st.current;
+    const ball = s.ball;
+    if (!ball) return;
+    const to = throwTarget(s.reader, s.x, ballRoom(live.current.level));
+    if (Math.abs(to.x - s.x) > 3) face(to.x < s.x ? -1 : 1);
+    ball.state = "carried";
+    ball.live = false;
+    catchAct("chin", Math.max(4000, ball.rested + ASK_AWAY_MS - nowMs()), live.current.ownBall ? "chin" : "chin-paper");
+  };
+
+  /** Nobody is playing: she picks the ball up, and it is put away. */
+  const putAway = () => {
+    const s = st.current;
+    const ball = s.ball;
+    if (!ball) return;
+    ball.state = "carried";
+    ball.live = false;
+    catchAct("away", AWAY_MS, live.current.ownBall ? "carry" : "carry-paper");
+  };
+
+  /** In a huff, and the ball has been rolled gently to her feet: a peace offering, and she takes it (pip/temper.ts, `offerPeace`). A look at it, and at the reader; then she pats it back. */
+  const makePeace = () => {
+    const s = st.current;
+    const ball = s.ball;
+    if (!ball || !temper.current) return;
+    temper.current = offerPeace(temper.current, "fetch", wallMs()).temper;
+    keepTemperNow();
+    tellTemper();
+    // This is the coming-round: the one the huff's end would have owed is not played as well.
+    s.roundDue = null;
+    dropPlan();
+    if (Math.abs(ball.body.x - s.x) > 2) face(ball.body.x < s.x ? -1 : 1);
+    if (prefersReducedMotion()) {
+      // Without motion: the look, the word, and the ball left where it is for the next throw.
+      ball.by = null;
+      answer({ move: "glance", loops: 1, line: pickOne(PEACE_LINES) });
+      return;
+    }
+    catchAct("peace", PEACE_LOOK_MS, "glance", 1);
+  };
+
+  /** What she came to the ball for, now she is at it. */
+  const atBall = () => {
+    const why = st.current.play.why;
+    if (why === "nudge") patBall();
+    else if (why === "chin") lieDown();
+    else if (why === "away") putAway();
+    else liftBall();
+  };
+
+  /** One of the small things is over: what comes after it. */
+  const endCatchAct = (act: CatchAct) => {
+    const s = st.current;
+    const ball = s.ball;
+    const { level: lv } = live.current;
+    if (act.kind === "windup") {
+      fling();
+    } else if (act.kind === "nudge") {
+      // The pat is done: she looks between the reader and the ball.
+      catchAct("look", NUDGE_LOOK_MS, null, undefined, true);
+    } else if (act.kind === "chin") {
+      putAway();
+    } else if (act.kind === "away") {
+      // Away it goes, in a puff over her head.
+      const head = headPoint();
+      if (head && !prefersReducedMotion()) puff({ x: head.x, y: head.y - 8 * live.current.scale }, { px: live.current.scale, count: 5, color: "#FFFFFF", edge: "#DCD6C8", spread: 24 });
+      playSound("pop", { pitch: 0.8, volume: 0.4 });
+      ballGone();
+      rest();
+    } else if (act.kind === "peace") {
+      say(pickOne(PEACE_LINES));
+      patBall();
+    } else if (act.kind === "handback" && ball) {
+      // Without motion: the ball is put down beside her, the reader's to take.
+      const room = ballRoom(lv);
+      const side = s.reader ? (s.reader.x < s.x ? -1 : 1) : s.x <= lv.w / 2 ? 1 : -1;
+      ball.body = ballDown(s.x + side * 16, room, ball.body.angle);
+      ball.state = "still";
+      ball.by = "pip";
+      ball.live = true;
+      ball.rested = nowMs();
+      rest();
+    } else {
+      rest();
+    }
+  };
+
+  /**
+   * Standing free, with the ball out: what, if anything, she does about it
+   * now (pip/catch.ts, `turnOf`). Says whether she has started on it. While
+   * there is a game to wait on she stays where she is and watches, rather
+   * than wandering off to read.
+   */
+  const ballTurn = (time: number, reduced: boolean): boolean => {
+    const s = st.current;
+    const ball = s.ball;
+    if (!ball || live.current.decorating || live.current.attentive) return false;
+    if (inHuff()) {
+      // In a huff she will have nothing to do with it; but a ball rolled gently to her feet is a peace offering.
+      if (ball.state !== "still" || ball.by !== "reader" || !peaceOffering(ball.body.x, s.x, ball.speed)) return false;
+      makePeace();
+      return true;
+    }
+    const watch = () => {
+      if (s.queue.length === 0 && !s.plan) s.nextFree = Math.max(s.nextFree, time + 1200);
+      return false;
+    };
+    if (ball.state === "held" || ball.state === "carried") return watch();
+    if (reduced) {
+      if (ball.state !== "still") return false;
+      if (ball.by === "reader") {
+        // Without motion: the ball at her feet is caught, and a moment later handed back.
+        const half = halfHearted();
+        ball.state = "carried";
+        ball.live = false;
+        playSound("caught");
+        countCatch(receive(s.play.rally, { half, still: true }), half);
+        catchAct("handback", HANDBACK_MS, live.current.ownBall ? "carry" : "carry-paper");
+        return true;
+      }
+      if (ball.live && time - ball.rested > OFFER_MS) {
+        // Handed back and not taken: the rally lapses, without a word.
+        ball.live = false;
+        setRally(readerMissed(s.play.rally));
+      }
+      if (time - Math.max(ball.rested, ball.touched) > ASK_AWAY_MS) {
+        ballGone();
+        return false;
+      }
+      return watch();
+    }
+    if (ball.state === "air") {
+      // The reader's throw, on its way: under it.
+      if (ball.by !== "reader" || s.play.passed) return watch();
+      chase();
+      return true;
+    }
+    const turn = turnOf({ by: ball.by, unanswered: s.play.rally.unanswered, idleMs: ball.state === "still" ? time - ball.rested : 0, asked: s.play.asked });
+    if (turn === "wait") return watch();
+    if (turn === "fetch" || turn === "retry") {
+      chase();
+      return true;
+    }
+    s.play.asked = turn === "nudge" ? 1 : turn === "chin" ? 2 : 3;
+    chase(turn);
+    return true;
+  };
+
+  /**
+   * The reader's throw: out of the hand at `from`, as fast as it was flicked
+   * (nothing: a drop). Whatever she was doing can wait, there is a ball;
+   * unless she is in a huff, and will not look at it.
+   */
+  const readerThrow = (from: { x: number; y: number }, velocity: { vx: number; vy: number }) => {
+    const s = st.current;
+    const { level: lv } = live.current;
+    const room = ballRoom(lv);
+    const now = nowMs();
+    const was = s.ball;
+    const x = Math.max(room.left, Math.min(room.right, from.x));
+    const y = Math.max(room.top, Math.min(room.floor, from.y));
+    s.ball = { body: { ...ballAt(x, y, velocity.vx, velocity.vy), angle: was?.body.angle ?? 0 }, state: "air", by: "reader", live: false, speed: Math.hypot(velocity.vx, velocity.vy), touched: now, rested: now };
+    const play = s.play;
+    play.passed = false;
+    play.goal = null;
+    play.asked = 0;
+    play.impact = null;
+    setRally(readerBack(play.rally));
+    if (!was) {
+      play.seen = { art: "?", shadow: "?", tally: -1 };
+      setBallOut(true);
+    }
+    if (prefersReducedMotion()) {
+      // Without motion nothing flies or runs: the ball is at her feet, and that is the throw.
+      const side = x < s.x ? -1 : 1;
+      s.ball.body = ballDown(s.x + side * 14, room, s.ball.body.angle);
+      s.ball.state = "still";
+      s.ball.speed = 0;
+    } else if (s.ball.speed > 0) {
+      playSound("whee", { pitch: 1.2, volume: 0.5 });
+    }
+    placeBall();
+    if (inHuff()) return;
     if (s.phase === "sleep" || s.phase === "tuck") untuck();
     if (s.phase === "doing" || s.phase === "fidget" || s.phase === "walk" || s.phase === "errand" || s.phase === "petted") {
       s.errand = null;
@@ -2746,47 +3979,125 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     }
   };
 
-  /** The ball's own motion: in the air, rolling, and put away once forgotten. */
-  const stepBall = (time: number, dt: number, reduced: boolean) => {
+  /**
+   * The Ball key, the keyboard, a tap on the ball: a gentle underarm toss to
+   * her, a little different each time (pip/catch.ts, `underarm`), from where
+   * the ball is, or from a few steps off if it is not out yet.
+   */
+  const tossBall = () => {
+    const s = st.current;
+    const { level: lv } = live.current;
+    const ball = s.ball;
+    // (She has it, and is about to throw it: it is hers. From under her chin, or on its way to being put away, it is taken: that is what she was asking for.)
+    const asking = s.phase === "catch" && (s.play.act?.kind === "chin" || s.play.act?.kind === "away");
+    if (ball?.state === "carried" && !asking) return;
+    const room = ballRoom(lv);
+    const start = ball ? { x: ball.body.x, y: Math.min(ball.body.y, room.floor - 5), seed: s.play.rally.seed } : tossFrom(s.x, room, s.play.rally.seed);
+    const toss = underarm(start, { x: s.x, y: lv.walkY + HANDS.y }, room, start.seed);
+    s.play.rally = { ...s.play.rally, seed: toss.seed };
+    readerThrow(start, toss);
+  };
+
+  /**
+   * The reader's hand has closed on the ball. Out of the air from her throw
+   * it is a catch, and she hops for it; out of her paws as she brings it back
+   * or winds up, it is snatched, which she minds (pip/temper.ts, `ball`).
+   * From the floor, or from under her chin, it is simply picked up.
+   */
+  const grabBall = () => {
+    const s = st.current;
+    const ball = s.ball;
+    if (!ball) return;
+    const now = nowMs();
+    const half = halfHearted();
+    const act = s.phase === "catch" ? s.play.act : null;
+    if (ball.state === "carried" && (s.phase === "carry" || act?.kind === "windup")) vex("ball");
+    if (ball.live && ball.by === "pip") {
+      playSound("caught", { pitch: 1.1 + Math.min(12, s.play.rally.count) * 0.03 });
+      countCatch(readerCaught(s.play.rally), half);
+      if (!half && !prefersReducedMotion() && (s.phase === "rest" || act?.soft)) {
+        hopNow(4, 300);
+        catchAct("yay", YAY_MS, "reach", undefined, true);
+      }
+    } else {
+      // Not a catch: whatever rally there was is over, and what she threw for nothing is forgotten.
+      setRally(readerBack(fetched(s.play.rally)));
+    }
+    ball.state = "held";
+    ball.live = false;
+    ball.touched = now;
+    ball.body = { ...ball.body, vx: 0, vy: 0, spin: 0, down: false, rem: 0 };
+    s.play.asked = 0;
+    s.play.goal = null;
+    s.play.impact = null;
+    placeBall();
+  };
+
+  /** The ball's own motion (pip/catch.ts, `ballStep`), what it meets, and what its coming down means for the game. */
+  const stepBall = (time: number, dt: number) => {
     const s = st.current;
     const ball = s.ball;
     if (!ball) return;
     const { level: lv } = live.current;
-    const bounds = { left: 6, right: lv.w - 6, top: 6, floor: lv.walkY - BALL_RADIUS };
-    if (ball.state === "carried" && s.phase !== "carry") {
-      // Called away with the ball in her hands (a snack, a poke, picked up): it is put down where she was.
-      ball.state = "still";
-      ball.body = { x: clampX(s.x + s.facing * 10), y: bounds.floor, vx: 0, vy: 0, angle: 0, spin: 0 };
-      ball.home = ball.body.x;
-      ball.touched = time;
-      placeBall();
-    } else if (ball.state === "air") {
-      const flight = flyStep(ball.body, dt, bounds, 0.55);
-      ball.body = flight.body;
-      if (flight.hit) playSound("bounce", { volume: Math.min(1, 0.3 + flight.impact / 500) });
-      if (flight.landed) ball.state = "roll";
+    const room = ballRoom(lv);
+    const play = s.play;
+    if (ball.state === "carried") {
+      const act = s.phase === "catch" ? play.act : null;
+      if (s.phase !== "carry" && !act) {
+        // Called away with the ball in her hands (a snack, a poke, picked up): it is put down where she was, and is nobody's throw.
+        ball.body = ballDown(s.x + s.facing * 12, room, ball.body.angle);
+        ball.state = "still";
+        ball.by = null;
+        ball.rested = time;
+      } else {
+        // In her hands: its button goes where her sprite draws it, so it can be taken from her.
+        const at = act?.kind === "windup" ? BALL_WOUND : act?.kind === "chin" ? BALL_CHIN : BALL_CARRIED;
+        ball.body = { ...ball.body, x: s.x + s.facing * at.x, y: lv.walkY + at.y, vx: 0, vy: 0 };
+      }
+    } else if (ball.state === "air" || ball.state === "roll") {
+      const flying = ball.state === "air";
+      const step = ballStep(ball.body, dt, room);
+      ball.body = step.ball;
+      const hit = step.hits[step.hits.length - 1];
+      if (hit) {
+        play.impact = { ...hit, at: time };
+        // Where it will come down has changed.
+        play.goal = null;
+        playSound("bounce", { pitch: hit.on === "floor" ? 1 : 1.25, volume: Math.min(1, 0.25 + hit.speed / 500) });
+      }
+      if (ballStill(ball.body)) {
+        ball.state = "still";
+        ball.rested = time;
+      } else if (ball.body.down) {
+        ball.state = "roll";
+      }
+      if (flying && ball.state !== "air") {
+        // Down. If it was hers, nobody caught it: the rally is over, and nothing is lost by it.
+        play.passed = false;
+        play.goal = null;
+        if (ball.live) {
+          ball.live = false;
+          setRally(readerMissed(play.rally));
+        }
+      }
       // Her eyes are on it.
-      s.pointer = { x: ball.body.x, y: ball.body.y, at: time };
-      placeBall();
-    } else if (ball.state === "roll") {
-      const roll = rollStep(ball.body, dt, bounds);
-      ball.body = roll.body;
-      if (roll.still) ball.state = "still";
-      placeBall();
-    } else if (ball.state === "still" && time - ball.touched > BALL_IDLE_MS && s.phase !== "fetch" && s.phase !== "carry") {
-      // Forgotten: put away, in a puff.
-      const box = ballRef.current?.getBoundingClientRect();
-      if (box && !reduced) puff({ x: box.left + box.width / 2, y: box.top + box.height / 2 }, { px: live.current.scale, count: 5, color: "#E9E1CF", edge: "#BDB3A0", spread: 26 });
-      s.ball = null;
-      s.fetches = 0;
-      setBallOut(false);
+      if (ball.state === "air") s.pointer = { x: ball.body.x, y: ball.body.y, at: time };
+    } else if (ball.state === "still" && time - Math.max(ball.rested, ball.touched) > BALL_FORGOTTEN_MS && s.phase !== "fetch" && s.phase !== "carry" && s.phase !== "catch") {
+      // Nobody has been in a state to put it away (asleep, a visitor in the way, in a long sulk): it goes by itself, quietly.
+      ballGone();
+      return;
     }
+    placeBall();
   };
 
   /** A little throw into the air, for the Play keys and the up arrow: what a toss by hand does. */
   const hop = () => {
     const s = st.current;
     if (!TOUCHABLE.has(s.phase)) return;
+    if (inHuff()) {
+      rebuff();
+      return;
+    }
     if (s.phase === "sleep" || s.phase === "tuck") untuck();
     s.errand = null;
     s.touch = null;
@@ -2803,59 +4114,161 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     s.angle = 0;
     s.spin = side * 9;
     s.tossed = true;
+    s.giddy = false;
     s.hardest = 0;
     s.phase = "fall";
     show("tossed", undefined, "fall");
     playSound("whee");
   };
 
-  // The ball in the reader's hand: carried about, and thrown as it is let go.
+  /**
+   * Spun round, for the Play keys and the S key: what whirling her in the hand
+   * does. Up she goes, turning twice over, and comes down giddy. Without
+   * motion she is simply giddy where she stands.
+   */
+  const spinPip = () => {
+    const s = st.current;
+    if (!TOUCHABLE.has(s.phase)) return;
+    if (inHuff()) {
+      rebuff();
+      return;
+    }
+    if (s.phase === "sleep" || s.phase === "tuck") untuck();
+    s.errand = null;
+    s.touch = null;
+    dropPlan();
+    if (prefersReducedMotion()) {
+      s.phase = "fidget";
+      show("dizzy", 1);
+      say(pickOne(GIDDY_LINES));
+      played("toss");
+      return;
+    }
+    const side = s.facing < 0 ? -1 : 1;
+    s.vx = 0;
+    s.vy = -300;
+    s.angle = 0;
+    // Twice round in the two thirds of a second she is in the air.
+    s.spin = side * 19;
+    s.tossed = true;
+    s.giddy = true;
+    s.hardest = 0;
+    s.phase = "fall";
+    show("tossed", undefined, "fall");
+    playSound("whee", { pitch: 1.25 });
+  };
+
+  // The ball in the reader's hand: caught out of the air, carried about, and
+  // thrown as it is let go, all in one press if the reader likes. The press is
+  // the ball's until it ends, wherever the pointer goes, and it never leaves
+  // the ball stuck in the hand: the button up throws it (as fast as the hand
+  // was going over its last moments: pip/catch.ts, `flick`) or, let go of
+  // slowly, drops it; a press that is taken away (the pointer cancelled or
+  // lost, the window losing focus or being hidden, another floor) drops it
+  // where it is, and never throws it. A press that does not move is a tap:
+  // a gentle toss to her.
   const onBallDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0) return;
     const s = st.current;
-    const ball = s.ball;
-    if (!ball || ball.state === "carried") return;
+    if (!s.ball) return;
     event.preventDefault();
+    // A second finger: the first lets go.
+    ballDragEnd.current?.("cancel");
+    if (!s.ball) return;
+    const button = event.currentTarget;
     const id = event.pointerId;
-    const samples: Sample[] = [];
-    let moved = false;
     const startX = event.clientX;
     const startY = event.clientY;
+    grabBall();
+    const first = pointerAt(event);
+    // Where on the ball the hand has it: it stays there, rather than jumping to the pointer.
+    const grip = first ? { x: s.ball.body.x - first.x, y: s.ball.body.y - first.y } : { x: 0, y: 0 };
+    const samples: Sample[] = first ? [{ x: first.x, y: first.y, at: nowMs() }] : [];
+    let moved = false;
+    let over = false;
+    try {
+      button.setPointerCapture(id);
+    } catch {
+      // No such pointer (a press made in a test): the window's listeners below still hear it.
+    }
     const move = (e: PointerEvent) => {
-      if (e.pointerId !== id || !s.ball) return;
+      const ball = s.ball;
+      if (over || e.pointerId !== id || !ball || ball.state !== "held") return;
       if (!moved && Math.hypot(e.clientX - startX, e.clientY - startY) < DRAG_SLOP) return;
       moved = true;
       const hand = pointerAt(e);
       if (!hand) return;
-      const { level: lv } = live.current;
+      const room = ballRoom(live.current.level);
       const now = nowMs();
-      const x = Math.max(6, Math.min(lv.w - 6, hand.x));
-      const y = Math.max(6, Math.min(lv.walkY - BALL_RADIUS, hand.y));
-      s.ball.state = "held";
-      s.ball.body = { x, y, vx: 0, vy: 0, angle: s.ball.body.angle, spin: 0 };
-      s.ball.touched = now;
-      samples.push({ x, y, at: now });
-      if (samples.length > 8) samples.shift();
-      s.pointer = { x, y, at: now };
+      ball.body = { ...ball.body, x: Math.max(room.left, Math.min(room.right, hand.x + grip.x)), y: Math.max(room.top, Math.min(room.floor, hand.y + grip.y)) };
+      ball.touched = now;
+      samples.push({ x: hand.x, y: hand.y, at: now });
+      if (samples.length > 16) samples.shift();
+      // Her eyes are on it.
+      s.pointer = { x: ball.body.x, y: ball.body.y, at: now };
       placeBall();
     };
-    const up = (e: PointerEvent) => {
-      if (e.pointerId !== id) return;
+    const end = (how: "up" | "cancel") => {
+      if (over) return;
+      over = true;
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
-      if (!s.ball) return;
-      if (!moved) {
-        // A tap on the ball throws it again.
-        throwBall();
+      window.removeEventListener("blur", lost);
+      document.removeEventListener("visibilitychange", hidden);
+      button.removeEventListener("lostpointercapture", lost);
+      if (ballDragEnd.current === end) ballDragEnd.current = null;
+      try {
+        button.releasePointerCapture(id);
+      } catch {
+        // Already let go of.
+      }
+      const ball = s.ball;
+      // Put away, or taken out of the hand by something else, while it was held: nothing to let go of.
+      if (!ball || ball.state !== "held") return;
+      if (how === "cancel") {
+        // Taken away, not let go: it drops where it is, and is nobody's throw.
+        const now = nowMs();
+        ball.body = ballAt(ball.body.x, ball.body.y);
+        ball.state = "air";
+        ball.by = null;
+        ball.speed = 0;
+        ball.rested = now;
+        if (prefersReducedMotion()) {
+          ball.body = ballDown(ball.body.x, ballRoom(live.current.level));
+          ball.state = "still";
+        }
+        placeBall();
         return;
       }
-      const velocity = releaseVelocity(samples, nowMs());
-      throwBall({ x: s.ball.body.x, y: s.ball.body.y, ...velocity });
+      if (!moved) {
+        tossBall();
+        return;
+      }
+      readerThrow(ball.body, flick(samples, nowMs()));
+    };
+    const up = (e: PointerEvent) => {
+      if (e.pointerId === id) end(e.type === "pointerup" ? "up" : "cancel");
+    };
+    const lost = () => end("cancel");
+    const hidden = () => {
+      if (document.visibilityState !== "visible") end("cancel");
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", up);
+    window.addEventListener("blur", lost);
+    document.addEventListener("visibilitychange", hidden);
+    button.addEventListener("lostpointercapture", lost);
+    ballDragEnd.current = end;
+  };
+
+  /** The keyboard on the ball (Enter, Space): taken as a hand would take it, and tossed to her. */
+  const tapBall = () => {
+    if (!st.current.ball) return;
+    ballDragEnd.current?.("cancel");
+    grabBall();
+    tossBall();
   };
 
   // The pointer rubbed over her, no button down: a stroke, or a tickle.
@@ -2867,9 +4280,11 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       s.invited = true;
       say("pat me? or pick me up by my leaf.");
     }
-    const { stroke, touch } = strokeMove(s.stroke ?? strokeStart(event.clientX), event.clientX, nowMs(), 32 * live.current.scale);
+    // Where on her matters: rubbed fast across her leaf she sneezes; across her belly, she is tickled.
+    const box = event.currentTarget.getBoundingClientRect();
+    const { stroke, touch, zone } = strokeMove(s.stroke ?? strokeStart(event.clientX), event.clientX, nowMs(), 32 * live.current.scale, zoneOf(event.clientY, box.top, box.height));
     s.stroke = stroke;
-    if (touch !== "none") touchPip(touch);
+    rubPip(rubOf(touch, zone));
   };
 
   // ---- carrying Pip ---------------------------------------------------------------
@@ -2914,6 +4329,10 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     s.vy = 0;
     s.angle = 0;
     s.spin = 0;
+    // The hand's path from here: swung round in a circle a couple of times, she is giddy when she is let go.
+    s.whirl = whirlStart(hand.x, hand.y, nowMs());
+    s.whirlTold = false;
+    s.giddy = false;
     show("held", undefined, "held");
     playSound("squeak", { pitch: 1.25, volume: 0.5 });
     // A move the page asked for is over: the page is told, so nothing waits on it.
@@ -2934,6 +4353,10 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     s.hold = holdStart();
     s.grip = { x: 0, y: 0 };
     s.hardest = 0;
+    // Whirled round in the hand (pip/play.ts): giddy when she is down. (Not if the press was only cancelled.)
+    const giddy = !gently && s.whirl !== null && whirled(s.whirl, nowMs());
+    s.whirl = null;
+    s.giddy = false;
     if (prefersReducedMotion()) {
       const bounds = airBounds(lv);
       s.x = Math.max(bounds.left, Math.min(bounds.right, s.x));
@@ -2949,11 +4372,19 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
         s.napFor = bedSleep(new Date().getHours(), Math.random);
         s.pendingScroll = null;
         s.tuckedAt = nowMs();
+        please("bed");
         tuck(true);
         return;
       }
       s.phase = "land";
-      show("land", 1);
+      if (giddy) {
+        // Without motion nothing swung, but the hand went round all the same: she says so, standing still.
+        show("dizzy", 1);
+        say(pickOne(GIDDY_LINES));
+        played("toss");
+      } else {
+        show("land", 1);
+      }
       playSound("place", { pitch: 1.2, volume: 0.5 });
       place();
       return;
@@ -2971,12 +4402,14 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       s.pendingScroll = null;
       s.tuckedAt = nowMs();
       say(pickOne(["oh. bedtime, is it?", "tucked in. goodnight.", "mm. just a little nap."]));
+      please("bed");
       tuck(false);
       place();
       return;
     }
     ({ x: s.x, y: s.y, vx: s.vx, vy: s.vy, angle: s.angle, spin: s.spin } = body);
     s.tossed = tossed;
+    s.giddy = giddy;
     s.phase = "fall";
     show(tossed ? "tossed" : "fall", undefined, "fall");
     if (tossed) playSound("whee");
@@ -2990,8 +4423,13 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     const s = st.current;
     const button = event.currentTarget;
     const id = event.pointerId;
-    const drag = { id, startX: event.clientX, startY: event.clientY, moved: false };
+    const drag = { id, startX: event.clientX, startY: event.clientY, moved: false, at: nowMs(), far: 0, judged: false, cuddling: false, rubbed: false, refused: false };
     s.drag = drag;
+    // A finger cannot hover, so it rubs her where it is: it stays on her until it leaves her (pip/play.ts, `fingerLifts`).
+    const finger = event.pointerType === "touch";
+    // Her frame on screen as the press began, for which part of her a finger is on, and how wide a rub is.
+    const frame = button.getBoundingClientRect();
+    let stroke: Stroke | null = null;
     // The press is hers until it ends, wherever the pointer goes (off the room, off the window).
     try {
       button.setPointerCapture(id);
@@ -3001,9 +4439,19 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
 
     const follow = (e: { clientX: number; clientY: number }) => {
       const hand = pointerAt(e);
-      if (!hand) return;
+      if (!hand || drag.refused) return;
       if (!drag.moved) {
+        if (inHuff() && s.phase !== "fall" && s.phase !== "sleep" && s.phase !== "tuck" && !drag.cuddling) {
+          // In a huff she will not be picked up: a shoulder turned to the hand, and that is that. (The press still ends cleanly.)
+          drag.refused = true;
+          rebuff();
+          face(hand.x < s.x ? 1 : -1);
+          return;
+        }
+        // Lifted out of her sleep: nobody likes that either.
+        if (s.phase === "sleep" && !s.abed && !s.hiding) vex("woken");
         drag.moved = true;
+        drag.cuddling = false;
         pickUp(hand);
       }
       // Where the hand has been lately: how fast it goes swings her, and throws her.
@@ -3013,12 +4461,44 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       if (s.hand.length > 8) s.hand.shift();
       s.handAt = hand;
       if (s.phase !== "held") return;
+      // Round and round: a couple of times and she says so, and is giddy when she is let go.
+      if (s.whirl) {
+        s.whirl = whirlMove(s.whirl, hand.x, hand.y, sample.at);
+        if (!s.whirlTold && whirled(s.whirl, sample.at)) {
+          s.whirlTold = true;
+          say("wheee!");
+          playSound("whee", { pitch: 1.3, volume: 0.7 });
+        }
+      }
       carry();
       place();
     };
+    /** A finger moving on her, not yet off her: side to side it is a rub (a stroke, a tickle, a sneeze on her leaf). */
+    const rub = (e: PointerEvent) => {
+      // Still where it went down: that may yet be a cuddle, or a tap.
+      if (!stroke && drag.far < DRAG_SLOP) return;
+      const next = strokeMove(stroke ?? strokeStart(drag.startX), e.clientX, nowMs(), frame.width, zoneOf(e.clientY, frame.top, frame.height));
+      stroke = next.stroke;
+      const what = rubOf(next.touch, next.zone);
+      if (what === "none") return;
+      drag.rubbed = true;
+      drag.cuddling = false;
+      rubPip(what);
+    };
     const move = (e: PointerEvent) => {
       if (e.pointerId !== id) return;
-      if (!drag.moved && Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) < DRAG_SLOP) return;
+      if (!drag.moved) {
+        const far = Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY);
+        drag.far = Math.max(drag.far, far);
+        if (finger) {
+          if (!fingerLifts({ x: drag.startX, y: drag.startY }, { x: e.clientX, y: e.clientY }, frame.width, drag.rubbed || drag.cuddling)) {
+            rub(e);
+            return;
+          }
+        } else if (far < (drag.cuddling ? CUDDLE_SLOP : DRAG_SLOP)) {
+          return;
+        }
+      }
       follow(e);
     };
     const end = (how: "up" | "cancel") => {
@@ -3035,7 +4515,9 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
         // Already let go of.
       }
       if (drag.moved) release(how === "cancel");
-      else if (how === "up") pokePip();
+      // A cuddle ends as the hand lifts (the loop sees to it); a finger's rub ends as a stroke does. Neither is a poke.
+      else if (drag.cuddling || drag.rubbed || drag.refused) return;
+      else if (how === "up") tapPip();
     };
     const up = (e: PointerEvent) => {
       if (e.pointerId === id) end(e.type === "pointerup" ? "up" : "cancel");
@@ -3058,10 +4540,26 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       hop();
       return;
     }
+    // What the hand does by holding, whirling and rubbing has a letter each, so none of it needs a pointer.
+    // (Two quick presses of Enter are a high five already, as two quick taps are; H is the same in one.)
+    if (!event.ctrlKey && !event.metaKey && !event.altKey && !outRef.current) {
+      const letter = event.key.toLowerCase();
+      const play = letter === "c" ? () => touchPip("cuddle", CUDDLE_KEY_MS) : letter === "h" ? highFivePip : letter === "s" ? spinPip : letter === "l" ? sneezePip : null;
+      if (play) {
+        event.preventDefault();
+        play();
+        return;
+      }
+    }
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     event.preventDefault();
     const s = st.current;
     if (s.phase === "held" || s.phase === "fall") return;
+    if (inHuff()) {
+      // In a huff she is not to be walked about either.
+      rebuff();
+      return;
+    }
     s.touch = null;
     const lv = live.current.level;
     const dir = event.key === "ArrowLeft" ? -1 : 1;
@@ -3098,6 +4596,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       return;
     }
     if (!TOUCHABLE.has(s.phase) || s.phase === "sleep" || s.phase === "tuck" || s.phase === "petted") return;
+    // In a huff, or in the middle of a tantrum, the room can do what it likes: she is not looking.
+    if (inHuff() || s.plan?.activity.id === "tantrum") return;
     const now = nowMs();
     if (s.plan?.activity.id === "fridge" && (what === "curtains-open" || what === "light-on") && dark(new Date().getHours())) {
       // At the fridge after dark, and the light comes in on her: caught. (The door she held goes to behind her: see the loop.)
@@ -3145,6 +4645,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       return;
     }
     if (!TOUCHABLE.has(s.phase)) return;
+    // Put to bed kindly: she takes it as that.
+    please("bed");
     s.touch = null;
     s.wokeUntil = 0;
     // The reader's doing: no phone comes too, and she is left to sleep (pip/behaviour.ts, TUCKED_QUIET_MIN).
@@ -3208,11 +4710,23 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       }
       return;
     }
-    if (!freeForFridge() || s.errand?.fridge) return;
+    if (!freeForFridge() || s.errand?.fridge || inHuff()) return;
     const at = fridgeStand(fridge.box, live.current.level.w);
-    const hope = fridgeHope(Math.random);
+    // What she will find, where that is known: nothing (she droops, a couple of times a day, and after that only
+    // looks), food where there was none (a cheer), or food as usual (and she hopes some of it is for her).
+    const larder = larderNow(worldNow());
+    const hope: Reaction = !larder
+      ? fridgeHope(Math.random)
+      : larder.bare
+        ? larder.resigned
+          ? { move: "shift", loops: 1, line: stillBareLine(Math.random) }
+          : { move: "mope", loops: 1, line: bareFridgeLine(Math.random) }
+        : larder.wasBare
+          ? { move: "cheer", loops: 2, line: foodAgainLine(Math.random) }
+          : fridgeHope(Math.random);
+    const found = !larder ? undefined : larder.bare ? (larder.resigned ? undefined : ("bare" as const)) : ("food" as const);
     s.touch = null;
-    startErrand({ kind: "hope", x: at.x, face: at.face, move: hope.move, loops: hope.loops, line: hope.line, after: 0, fridge: fridge.key }, prefersReducedMotion());
+    startErrand({ kind: "hope", x: at.x, face: at.face, move: hope.move, loops: hope.loops, line: hope.line, after: 0, fridge: fridge.key, found }, prefersReducedMotion());
   };
 
   /**
@@ -3243,6 +4757,10 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       // Called over to a thing: she drops what she was at and comes, unless she is in the hand, the air, or bed.
       const s = st.current;
       if (outRef.current || !TOUCHABLE.has(s.phase) || s.phase === "sleep" || s.phase === "tuck") return;
+      if (inHuff() || s.plan?.activity.id === "tantrum") {
+        rebuff();
+        return;
+      }
       const reduced = prefersReducedMotion();
       s.errand = null;
       s.touch = null;
@@ -3252,7 +4770,51 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       say(what === "read" ? pickOne(["ooh, that one.", "a chapter? yes.", "good choice."]) : pickOne(["let's see what's out there.", "coming to look."]));
       nextStep();
     },
+    visit: (itemId, spot, key) => {
+      // A thing that answers a tap (pip/furnish.ts, `VISITS`): she comes over and does what one does with it, as she
+      // comes to a window. For show, like the fridge: nothing here is told to the page, so no mood and no seeds.
+      const s = st.current;
+      const visit = visitOf(itemId);
+      if (!visit || outRef.current || live.current.decorating || !TOUCHABLE.has(s.phase) || s.phase === "sleep" || s.phase === "tuck") return;
+      // In a huff, or mid-tantrum, she is not to be called over to anything.
+      if (inHuff() || s.plan?.activity.id === "tantrum") {
+        rebuff();
+        return;
+      }
+      const reduced = prefersReducedMotion();
+      const lv = live.current.level;
+      s.errand = null;
+      s.touch = null;
+      dropPlan();
+      s.fidgets = 0;
+      // Beside it, turned to it; or in front of it, or under it (a thing on a wall, a shelf or the ceiling); or where she is.
+      const under = spot.up || visit.stand === "at";
+      const at = visit.stand === "stay" ? null : standAt({ ...spot, up: under }, s.x, lv.w);
+      const way: Step[] = !at || reduced ? [] : under ? [{ kind: "walk", x: at.x }] : [{ kind: "walk", x: at.x }, { kind: "face", dir: at.face }];
+      // It answered the tap; with some way to come, it answers again as she gets there (the record is still playing).
+      const again: Step[] = at && !reduced && Math.abs(at.x - s.x) > 24 ? [{ kind: "use", id: key, what: "thing", verb: "answer" }] : [];
+      s.bounceSay = null;
+      const beats = visitBeats(visit, live.current.repertoire.dances, Math.random).flatMap((beat): Step[] => {
+        if (beat.bounces) {
+          // A trampoline's bounces are thrown, not played. Without motion nothing is thrown: she is on it, knees bent, and says so.
+          if (reduced) return [{ kind: "do", move: "land", seconds: 1.5, line: beat.line }];
+          s.bounceSay = beat.line ?? null;
+          return [{ kind: "use", id: key, what: "thing", verb: `bounce:${beat.bounces}` }];
+        }
+        return [...(beat.sound ? [{ kind: "use", id: key, what: "thing", verb: `sound:${beat.sound}` } as Step] : []), { kind: "do", move: beat.move, seconds: beat.seconds, line: beat.line }];
+      });
+      let activity: Activity = { id: "potter", label: visit.label, steps: [...way, ...again, ...beats] };
+      // Not through a visitor: she does it from where she stands (all but bouncing, which wants the trampoline under her).
+      if (way.length > 0 && crossesVisitor(activity, outlook(nowMs(), reduced))) {
+        activity = { ...activity, steps: beats.filter((step) => !(step.kind === "use" && step.what === "thing" && step.verb.startsWith("bounce:"))) };
+      }
+      // Where she stands (the cuckoo, or no walking): turned to it, at least.
+      if (activity.steps[0]?.kind !== "walk" && Math.abs(spot.x - s.x) > 6) face(spot.x < s.x ? -1 : 1);
+      s.plan = { activity, index: -1 };
+      nextStep();
+    },
     wake: () => !outRef.current && wake("morning! is that the sun?"),
+    vex: (what) => vex(what),
     clock: nowMs,
     redraw: () => redraw.current?.()
   };
@@ -3269,6 +4831,10 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       })
     : [];
   const pipSize = 32 * scale;
+  // The ball's button: a little more than the ball, and never less than a finger; and where its picture (a whole
+  // 32-pixel frame, the ball in its middle) sits in it, on a whole device pixel.
+  const ballGrab = Math.max(BALL_BOX * scale, GRAB_MIN);
+  const ballInset = Math.round(((ballGrab - pipSize) / 2) * ratio) / ratio;
   // What she is in the middle of, in words (the view changes with each step, so this keeps up).
   const busyWith = st.current.plan?.activity.label ?? null;
   const night = nightNow(level);
@@ -3313,9 +4879,12 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
           // Where the pointer is, for Pip's eyes to follow. A ref, not state: nothing re-renders.
           const box = event.currentTarget.getBoundingClientRect();
           st.current.pointer = { x: (event.clientX - box.left) / scale, y: (event.clientY - box.top) / scale, at: nowMs() };
+          // And for her throws to come down at (a ball in the air takes her eyes, not her aim).
+          st.current.reader = { x: (event.clientX - box.left) / scale, y: (event.clientY - box.top) / scale };
         }}
         onPointerLeave={() => {
           st.current.pointer = null;
+          st.current.reader = null;
         }}
       >
         {openSky && <GardenSky width={level.w} scale={scale} />}
@@ -3463,10 +5032,14 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
                 }}
                 onClick={(event) => {
                   // Pointer presses are handled on release; this is the keyboard.
-                  if (event.detail === 0) pokePip();
+                  if (event.detail === 0) tapPip();
                 }}
                 onKeyDown={onKeyDown}
-                title="Poke me, stroke me, or pick me up by my leaf"
+                // A finger held still on her is a cuddle, not the long press that asks a touch screen for a menu.
+                onContextMenu={(event) => {
+                  if (st.current.drag) event.preventDefault();
+                }}
+                title="Poke me, hold me, stroke me, or pick me up by my leaf"
                 aria-label={
                   spoken
                     ? `Pip says “${spoken}” ${PIP_HOW}`
@@ -3493,23 +5066,39 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
           </div>
         )}
 
-        {/* The ball: thrown from the Play keys or by hand, fetched by Pip. Placed by the loop. */}
+        {/* The ball: thrown by hand or from the Play keys, caught and thrown back by Pip. Placed by the loop, with its
+            shadow on the floor and the rally's count beside it. Its button is a finger wide however small the ball. */}
         {ballOut && !hidePip && !out && (
-          <button
-            ref={ballRef}
-            type="button"
-            className="pip-house-ball"
-            style={{ width: BALL_BOX * scale, height: BALL_BOX * scale, ["--ball-sprite" as string]: `${pipSize}px` }}
-            onPointerDown={onBallDown}
-            onClick={(event) => {
-              // The keyboard: Enter throws it again.
-              if (event.detail === 0) throwBall();
-            }}
-            aria-label="The ball. Select to throw it for Pip, or drag and let go."
-            title="Throw it again"
-          >
-            <PipSprite move={ownBall ? "ball" : "ball-paper"} size={pipSize} still />
-          </button>
+          <>
+            <span ref={ballShadowRef} className="pip-house-ball-shadow" style={{ height: scale, ["--px" as string]: `${scale}px` }} aria-hidden="true" />
+            <button
+              ref={ballRef}
+              type="button"
+              className="pip-house-ball"
+              style={{ width: ballGrab, height: ballGrab }}
+              onPointerDown={onBallDown}
+              onClick={(event) => {
+                // Pointer presses are handled as they end; this is the keyboard.
+                if (event.detail === 0) tapBall();
+              }}
+              // A finger held on it is holding the ball, not asking a touch screen for a menu.
+              onContextMenu={(event) => {
+                if (st.current.ball?.state === "held") event.preventDefault();
+              }}
+              aria-label={`The ball.${rallyShown ? ` A rally of ${rallyShown}.` : ""} Select to toss it to Pip, or drag and let go to throw it.`}
+              title="Catch it, throw it"
+            >
+              <canvas
+                ref={ballArtRef}
+                width={32}
+                height={32}
+                className="pip-sprite"
+                style={{ left: ballInset, top: ballInset, width: pipSize, height: pipSize }}
+                aria-hidden="true"
+              />
+            </button>
+            <canvas ref={tallyRef} width={32} height={32} className="pip-sprite pip-house-tally" style={{ width: pipSize, height: pipSize }} aria-hidden="true" />
+          </>
         )}
 
         {/* The bed's front, over Pip while he sleeps: tucked in under the quilt. */}

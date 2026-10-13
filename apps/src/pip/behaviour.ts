@@ -109,6 +109,18 @@ export type World = {
   away?: { note?: string } | null;
   /** She is back with something to show, not yet shown: the scene has her come in holding it up. */
   back?: { key: string; name: string; image?: ImageData; line?: string } | null;
+  /**
+   * Her fridge, as the snacks on record leave it (Rust: pip/fridge.rs). `bare`: there is nothing in it. `resigned`:
+   * she has drooped over that as often as she will for now (the scene counts: pip/furnish.ts, `bareMinds`), so a
+   * look in it is only a look. `wasBare`: she last found it bare, and has not yet seen that there is food again.
+   * Missing: the fridge is for show, as it was before 2026-10-13.
+   */
+  fridge?: { bare: boolean; resigned?: boolean; wasBare?: boolean } | null;
+  /**
+   * The mood she is in for now (pip/temper.ts): sulking after a tantrum, cool with the reader as that eases, or
+   * glad after something lovely. It colours what she feels like doing for as long as it lasts.
+   */
+  humour?: "sulk" | "cool" | "glad" | null;
 };
 
 /**
@@ -160,7 +172,9 @@ export type ActivityId =
   /** A visitor is here: reading beside them. */
   | "company"
   /** She has a cold: tissues, tea under a blanket, a sneeze. */
-  | "nurse";
+  | "nurse"
+  /** Her temper has run out (pip/temper.ts plans it): never chosen, only thrown. */
+  | "tantrum";
 
 /** One stretch of an evening on the phone: what she does, for how long, and what she says as it starts. */
 export type ScrollBeat = {
@@ -305,6 +319,8 @@ export const weights = (state: BehaviourState): Record<ActivityId, number> => {
   const low = mood < 40;
   const bright = mood >= 60;
   const stage = coldStage(state.world?.cold);
+  const humour = state.world?.humour ?? null;
+  const larder = state.world?.fridge ?? null;
 
   const w: Record<ActivityId, number> = {
     // Reading is who she is: always possible, more so in the evening.
@@ -322,8 +338,13 @@ export const weights = (state: BehaviourState): Record<ActivityId, number> => {
     stroll: 1.5,
     // A crooked picture bothers her until it is straight.
     tidy: has("crooked") ? 5 : 0,
-    // The fridge: a habit after dark, a passing thought by day; hardly at all on a full stomach.
-    fridge: has("fridge") ? (afterDark(hour) ? 2.5 : 0.5) * (justNow.fed ? 0.2 : 1) : 0,
+    // The fridge: a habit after dark, a passing thought by day; hardly at all on a full stomach. Bare, and done
+    // drooping over it: seldom. Stocked since she last found it bare: she is over to look before long.
+    fridge: has("fridge")
+      ? larder && !larder.bare && larder.wasBare
+        ? 6
+        : (afterDark(hour) ? 2.5 : 0.5) * (justNow.fed ? 0.2 : 1) * (larder?.bare && larder.resigned ? 0.3 : 1)
+      : 0,
     // The phone: taken to bed late, and only glanced at by day.
     scroll: late(hour) ? 3 : 0,
     phone: late(hour) ? 0 : 0.5,
@@ -341,7 +362,9 @@ export const weights = (state: BehaviourState): Record<ActivityId, number> => {
     // Company: with a visitor in the room she mostly reads beside them.
     company: state.world?.visitor ? 4 : 0,
     // A cold is looked after, the more the worse it is.
-    nurse: stage === "bad" ? 5 : stage === "mending" ? 3.5 : stage === "nearly" ? 1.5 : 0
+    nurse: stage === "bad" ? 5 : stage === "mending" ? 3.5 : stage === "nearly" ? 1.5 : 0,
+    // Thrown, never chosen.
+    tantrum: 0
   };
 
   // With a cold she keeps to her blanket: nothing that bounces, more sleep, and less of everything else the worse it is.
@@ -368,6 +391,28 @@ export const weights = (state: BehaviourState): Record<ActivityId, number> => {
   } else if (low) {
     w.dance *= 0.4;
     w.exercise *= 0.6;
+  }
+  // The mood she is in (pip/temper.ts). Sulking, she keeps to herself: the window, a nap, a book, and nothing
+  // that looks like fun. Cool, she is flat. Glad, there is a spring in it: more dancing, more play, less sleep.
+  if (humour === "sulk") {
+    w.toy = 0;
+    w.dance = 0;
+    w.exercise = 0;
+    w.arcade = 0;
+    w.sunbathe = 0;
+    w.quest = 0;
+    w.window *= 2;
+    w.nap *= 1.5;
+    w.potter *= 0.5;
+  } else if (humour === "cool") {
+    w.dance *= 0.4;
+    w.exercise *= 0.6;
+    w.toy *= 0.5;
+  } else if (humour === "glad" && !glum && !stage) {
+    w.dance *= 2;
+    w.toy *= 1.5;
+    w.exercise *= 1.3;
+    w.nap *= 0.5;
   }
   // Without motion she does only what can be done standing still.
   if (state.reduced) {
@@ -612,11 +657,24 @@ const build = (id: ActivityId, state: BehaviourState, rand: Rand): Activity => {
 
 // ---- the fridge, and the phone ------------------------------------------------------
 //
-// The human habits. All of it is for show: a look in the fridge takes
-// nothing and gives nothing (no seeds, no mood, no snack bought), and an hour
-// on the phone costs her nothing either. Please do not "fix" that by wiring
-// them to the mood or the shop: a snack that counts is still the reader's to
-// give (Pip's things), and what cheers her up is still reading.
+// The human habits. The phone is for show: an hour on it costs her nothing.
+//
+// The fridge was for show too, and this comment used to ask that nobody wire
+// it to the mood or the shop. On 2026-10-13 the owner asked for exactly that
+// ("make Pip sad by not having food in the fridge if you don't buy"), so the
+// rule changed, and this is what is true now:
+//
+// - the fridge has food in it or it has not, and that is worked out in Rust
+//   from the snacks on record (pip/fridge.rs): each snack bought stocks it for
+//   a day, three days at most in hand. Nothing here keeps a count;
+// - a look in it still takes nothing out and buys nothing: her nibble is not
+//   a snack, and a snack that counts is still the reader's to give;
+// - finding it bare, she droops and says so, a couple of times a day at most
+//   (pip/furnish.ts, `bareMinds`), and the first of those in a day takes a
+//   little off her mood, never below the floor that being away stops at
+//   (Rust decides: `pip_fridge_bare`). It costs nothing while the app is shut:
+//   she has to be up, at home and looking;
+// - what cheers her up most is still reading.
 
 const STARE_LINES = ["...", "hm.", "there was cake. wasn't there cake?", "what do i even want."];
 const TAKE_LINES = ["just a little something.", "one bite. for science.", "this was here anyway."];
@@ -625,6 +683,9 @@ const AGAIN_LINES = ["maybe now?", "one more look.", "something might have chang
 const STILL_LINES = ["still nothing.", "no. same fridge.", "worth checking."];
 const PLEASED_LINES = ["worth it.", "nobody saw that.", "mm. back to bed."];
 const PECKISH_LINES = ["peckish.", "just a look.", "anything new in here?"];
+const BARE_LINES = ["empty. not even a crumb.", "oh. it's bare.", "nothing. no food at all.", "there's only the light in there."];
+const STILL_BARE_LINES = ["still bare.", "nothing new in there.", "as empty as before."];
+const FOOD_AGAIN_LINES = ["food! there's food!", "you filled it! look at it all.", "it's full again. oh, lovely."];
 const PHONE_LINES = ["no new messages.", "huh.", "just checking the time.", "right. back to it."];
 
 const BOOK_WINS_LINES = ["...no. book.", "where was i.", "the book was better anyway."];
@@ -650,6 +711,14 @@ export const hintLine = (rand: Rand) => pick(rand, HINT_LINES);
 export const innocentLine = (rand: Rand) => pick(rand, INNOCENT_LINES);
 /** The reader shut the fridge she was staring into. */
 export const shutOnHerLine = (rand: Rand) => pick(rand, SHUT_ON_HER_LINES);
+/** She has looked in the fridge and there is nothing in it; the same again, later, with less feeling; and food where there was none. */
+export const bareFridgeLine = (rand: Rand) => pick(rand, BARE_LINES);
+export const stillBareLine = (rand: Rand) => pick(rand, STILL_BARE_LINES);
+export const foodAgainLine = (rand: Rand) => pick(rand, FOOD_AGAIN_LINES);
+
+/** What the scene is told as she looks in (a `use` step's verb): she has found it bare, and minds; or found food in it. */
+export const FOUND_BARE = "fridge:bare";
+export const FOUND_FOOD = "fridge:food";
 
 /** A walk to a place she must be at (the fridge, her bed) even without motion: the scene puts her there. */
 const reach = (state: BehaviourState, at: { x: number; face: 1 | -1 }, pace?: "tiptoe"): Step[] => [
@@ -664,6 +733,14 @@ const reach = (state: BehaviourState, at: { x: number; face: 1 | -1 }, pace?: "t
  * in four she shuts it, wanders off, and comes back to look again, as if
  * something new might be there. By day it is shorter and plainer. `fromBed`:
  * she got out of bed for it, and goes back.
+ *
+ * That is a fridge nobody has said anything about (`world.fridge` missing).
+ * Told what is in it, she finds what is there: food, and something small is
+ * always eaten (with a cheer first, if she last found it bare); or nothing,
+ * and she droops over it, with no nibble (or, done drooping for now, only
+ * looks and shuts it). Either way the scene is told as she looks
+ * (`FOUND_BARE`, `FOUND_FOOD`), which is the one moment a bare fridge costs
+ * her anything.
  */
 export const fridgeVisit = (state: BehaviourState, rand: Rand, fromBed: boolean): Activity => {
   const fridge = nearest(state, "fridge");
@@ -675,6 +752,39 @@ export const fridgeVisit = (state: BehaviourState, rand: Rand, fromBed: boolean)
   const pace = dim ? ("tiptoe" as const) : undefined;
   const stare = dim ? between(rand, 8, 14) : between(rand, 4, 7);
   const open: Step[] = [...reach(state, at, pace), { kind: "use", id, what: "open" }];
+  const back: Step[] = fromBed ? [{ kind: "use", id: nearest(state, "bed")?.id ?? "bed", what: "bed" }] : [];
+  const larder = state.world?.fridge ?? null;
+  if (larder?.bare) {
+    // Nothing in it. She minds, a couple of times a day; after that it is only a look.
+    const found: Step[] = larder.resigned
+      ? [{ kind: "do", move: "fridge-stare", seconds: between(rand, 2.5, 4) }, { kind: "use", id, what: "shut" }, { kind: "do", move: "shift", seconds: 2, line: pick(rand, STILL_BARE_LINES) }]
+      : [
+          { kind: "do", move: "fridge-stare", seconds: between(rand, 2.5, 4), line: rand() < 0.5 ? "..." : undefined },
+          { kind: "use", id, what: "thing", verb: FOUND_BARE },
+          { kind: "do", move: "mope", seconds: 4, line: pick(rand, BARE_LINES) },
+          { kind: "use", id, what: "shut" },
+          { kind: "do", move: "shift", seconds: 2 }
+        ];
+    return { id: "fridge", label: "looking in a bare fridge", steps: [...open, ...found, ...back] };
+  }
+  if (larder) {
+    // Food in it: a look, something small, and pleased with herself. The first time after a bare one, a cheer first.
+    const glad: Step[] = larder.wasBare ? [{ kind: "do", move: "cheer", seconds: 2, line: pick(rand, FOOD_AGAIN_LINES) }] : [];
+    return {
+      id: "fridge",
+      label,
+      steps: [
+        ...open,
+        { kind: "do", move: "fridge-stare", seconds: larder.wasBare ? 2 : Math.min(stare, 6), line: larder.wasBare || rand() < 0.4 ? undefined : pick(rand, dim ? STARE_LINES : PECKISH_LINES) },
+        { kind: "use", id, what: "thing", verb: FOUND_FOOD },
+        ...glad,
+        { kind: "do", move: "nibble", seconds: 3, line: pick(rand, TAKE_LINES) },
+        { kind: "use", id, what: "shut" },
+        { kind: "do", move: "bop", seconds: 2.7, line: dim ? pick(rand, PLEASED_LINES) : undefined },
+        ...back
+      ]
+    };
+  }
   const steps: Step[] = [...open, { kind: "do", move: "fridge-stare", seconds: stare, line: rand() < 0.7 ? pick(rand, dim ? STARE_LINES : PECKISH_LINES) : undefined }];
   // Shut, off, and back for another look: only where there is walking to do.
   if (!state.reduced && rand() < 0.25) {
@@ -694,7 +804,7 @@ export const fridgeVisit = (state: BehaviourState, rand: Rand, fromBed: boolean)
   } else {
     steps.push({ kind: "use", id, what: "shut" }, { kind: "do", move: "shift", seconds: 2, line: pick(rand, NOTHING_LINES) });
   }
-  if (fromBed) steps.push({ kind: "use", id: nearest(state, "bed")?.id ?? "bed", what: "bed" });
+  steps.push(...back);
   return { id: "fridge", label, steps };
 };
 
@@ -1161,8 +1271,13 @@ export const fidget = (state: Pick<BehaviourState, "mood" | "hour" | "world">, l
   const stage = coldStage(state.world?.cold);
   // With a cold: sniffles in place of anything lively, the more the worse it is.
   if (stage) options.push(...Array.from({ length: stage === "nearly" ? 1 : 3 }, () => ({ move: "sniffle", seconds: 3 })));
-  if (state.mood >= 60 && !stage) options.push({ move: "bop", seconds: 2.7 });
-  if (state.mood >= GLUM && stage !== "bad") options.push({ move: "stretch", seconds: 3.3 });
+  const humour = state.world?.humour ?? null;
+  // The mood she is in shows in the small things too: sulking, a droop and a look over her shoulder to see whether
+  // anyone has noticed; glad, a hum and a little cheer to herself.
+  if (humour === "sulk") options.push({ move: "mope", seconds: 4 }, { move: "glance", seconds: 3 });
+  if (humour === "glad" && !stage) options.push({ move: "bop", seconds: 2.7 }, { move: "bop", seconds: 2.7 }, { move: "cheer", seconds: 2 });
+  if (state.mood >= 60 && !stage && humour !== "sulk" && humour !== "cool") options.push({ move: "bop", seconds: 2.7 });
+  if (state.mood >= GLUM && stage !== "bad" && humour !== "sulk") options.push({ move: "stretch", seconds: 3.3 });
   if (evening(state.hour) || night(state.hour)) options.push({ move: "yawn", seconds: 4 });
   const fresh = options.filter((option) => option.move !== last);
   return pick(rand, fresh.length > 0 ? fresh : options);

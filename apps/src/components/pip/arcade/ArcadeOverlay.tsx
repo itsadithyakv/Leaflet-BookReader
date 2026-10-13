@@ -1,30 +1,19 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { GAMES, GAME_H, GAME_W, type Controls, type Game, type GameId, type GameInfo } from "./games";
-import { gameArt } from "./gameArt";
-import { pixelsPerArtPixel } from "../PixelImage";
-import { UiIcon } from "../../UiIcon";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Info } from "lucide-react";
+import { GamePicker } from "./GamePicker";
+import { GAMES, type GameId, type GameInfo } from "./games";
+import { GameScreen, type Winnings } from "./GameScreen";
+import { WagerBar } from "./WagerBar";
 import { dayNumber } from "../../../pip/diary/seed";
 import type { SavedWord } from "../../../readers/words/rows";
 import { getDateKey } from "../../../services/habitService";
 import { wordService } from "../../../services/wordService";
+import { PURSE_EVERY, PURSE_MOST, paysMostAt } from "../../../pip/base/rules";
+import { useBaseStore } from "../../../store/baseStore";
+import { TipLayer } from "./base/Tips";
 import { dueCount } from "./quiz/boxes";
 import { MyWords } from "./quiz/MyWords";
 import { WordQuiz } from "./quiz/WordQuiz";
-
-/** Simulation ticks per second: fixed, so a run plays the same at any frame rate. */
-const TICK = 1 / 120;
-/** Longest real time folded into one frame, so a stall does not teleport Pip. */
-const MAX_FRAME = 1 / 20;
-/** Sprite animation rate, like every other Pip. */
-const ART_FPS = 12;
-
-const prefersReducedMotion = () => {
-  try {
-    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  } catch {
-    return false;
-  }
-};
 
 const BEST_KEY = "leaflet.pip.arcadeBest";
 /** Best scores kept in the browser too, for the dev server (no Rust there). */
@@ -36,7 +25,7 @@ const readLocalBest = (): Record<string, number> => {
   }
 };
 
-/** The arcade's two pages that are not games on the canvas: the word quiz, and the words it is played with. */
+/** The arcade's pages that are not games on the canvas: the word quiz, and the words it is played with. */
 export type ArcadePage = "quiz" | "words";
 
 export type ArcadeOverlayProps = {
@@ -46,6 +35,8 @@ export type ArcadeOverlayProps = {
   outfit: readonly string[];
   /** Best scores from Rust (per device). */
   best: Record<string, number>;
+  /** How Pip is at home, 0 to 100, once it is known: the camp is told. */
+  mood?: number;
   /** Mood games have given today, and the cap. */
   moodToday: number;
   moodCap: number;
@@ -53,6 +44,10 @@ export type ArcadeOverlayProps = {
   onFinished: (game: GameId, score: number) => Promise<number>;
   onClose: () => void;
 };
+
+/** What a game pays the camp: said on its card's tooltip, not on the screen. */
+const acornTerms = (game: GameId) =>
+  `Pays the camp up to ${PURSE_MOST} acorns a run (at ${paysMostAt(game)} points), for runs your reading has earned: one for every ${PURSE_EVERY} minutes read.`;
 
 /**
  * The Attic Arcade: pick a game, play it in a crisp pixel canvas.
@@ -68,10 +63,23 @@ export type ArcadeOverlayProps = {
  * The word quiz (quiz/) is the fourth game: questions, not a canvas, made
  * from the words the reader looked up. It earns nothing at all, mood
  * included: it is not recorded as a game played. "My words" lists them.
+ *
+ * The Hollow (base/) is Pip's camp, built with acorns, never seeds. It is not
+ * in here: it is the place Pip's tab opens on (HollowPlace). The three canvas
+ * games pay it a little, for runs the reader's reading has earned, and can be
+ * wagered on (WagerBar).
  */
-export const ArcadeOverlay = ({ initial = null, skin, outfit, best, moodToday, moodCap, onFinished, onClose }: ArcadeOverlayProps) => {
+export const ArcadeOverlay = ({ initial = null, skin, outfit, best, mood, moodToday, moodCap, onFinished, onClose }: ArcadeOverlayProps) => {
   const [chosen, setChosen] = useState<GameInfo | null>(() => GAMES.find((game) => game.id === initial) ?? null);
   const [page, setPage] = useState<ArcadePage | null>(initial === "quiz" || initial === "words" ? initial : null);
+  // The camp is read as the arcade opens: the games pay into it.
+  useEffect(() => {
+    void useBaseStore.getState().open();
+  }, []);
+  // How Pip is at home is what she brings to the camp: it is told so.
+  useEffect(() => {
+    useBaseStore.getState().setMood(mood);
+  }, [mood]);
   // The reader's words: fetched as the arcade opens, and again when one is removed or a round ends.
   const [words, setWords] = useState<SavedWord[] | null>(null);
   const loadWords = useCallback(() => {
@@ -90,7 +98,7 @@ export const ArcadeOverlay = ({ initial = null, skin, outfit, best, moodToday, m
   }, []);
 
   const finished = useCallback(
-    async (game: GameId, score: number) => {
+    async (game: GameId, score: number): Promise<Winnings> => {
       setLocalBest((current) => {
         if ((current[game] ?? 0) >= score) return current;
         const next = { ...current, [game]: score };
@@ -101,10 +109,12 @@ export const ArcadeOverlay = ({ initial = null, skin, outfit, best, moodToday, m
         }
         return next;
       });
+      const camp = useBaseStore.getState().played(game, score);
+      const forCamp = { paid: camp?.paid ?? 0, wager: camp?.wager ?? null };
       try {
-        return await onFinished(game, score);
+        return { mood: await onFinished(game, score), ...forCamp };
       } catch {
-        return 0;
+        return { mood: 0, ...forCamp };
       }
     },
     [onFinished]
@@ -128,7 +138,8 @@ export const ArcadeOverlay = ({ initial = null, skin, outfit, best, moodToday, m
           }
         }}
       >
-        <div className="flex items-start justify-between gap-3">
+        <div className="pip-arcade-page">
+        <div className="pip-arcade-head flex items-start justify-between gap-3">
           <div>
             <p className="text-xs uppercase tracking-[0.2em] text-on-surface-variant">Attic Arcade</p>
             <h2 id="pip-arcade-title" className="page-title text-2xl text-on-surface">
@@ -163,28 +174,22 @@ export const ArcadeOverlay = ({ initial = null, skin, outfit, best, moodToday, m
             best={bestOf(chosen.id)}
             onFinished={finished}
             onExit={() => setChosen(null)}
+            between={<WagerBar game={chosen.id} />}
           />
         ) : page === "quiz" ? (
           <WordQuiz words={words} onChanged={loadWords} onMyWords={() => setPage("words")} skin={skin} outfit={outfit} />
         ) : page === "words" ? (
           <MyWords words={words} onChanged={loadWords} onOpened={onClose} />
         ) : (
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            {GAMES.map((game) => (
-              <button key={game.id} type="button" className="pip-arcade-pick" onClick={() => setChosen(game)}>
-                <span className="font-headline text-lg font-bold text-on-surface">{game.name}</span>
-                <span className="text-xs text-on-surface-variant">{game.blurb}</span>
-                <span className="mt-auto text-[11px] font-semibold text-on-surface-variant">Best: {bestOf(game.id)}</span>
-              </button>
-            ))}
-            <button type="button" className="pip-arcade-pick" onClick={() => setPage("quiz")}>
-              <span className="font-headline text-lg font-bold text-on-surface">Word Quiz</span>
-              <span className="text-xs text-on-surface-variant">Pip holds up a word you looked up. Pick what it means.</span>
-              <span className="mt-auto text-[11px] font-semibold text-on-surface-variant">
-                {words === null ? "…" : words.length === 0 ? "No words yet" : `${words.length} ${words.length === 1 ? "word" : "words"}, ${dueCount(words, dayNumber(getDateKey()))} due`}
-              </span>
-            </button>
-          </div>
+          <GamePicker
+            skin={skin}
+            outfit={outfit}
+            bestOf={bestOf}
+            termsOf={acornTerms}
+            words={words === null ? null : words.length === 0 ? "No words yet" : `${words.length} ${words.length === 1 ? "word" : "words"}, ${dueCount(words, dayNumber(getDateKey()))} due`}
+            onGame={setChosen}
+            onQuiz={() => setPage("quiz")}
+          />
         )}
         {!chosen && !page && (
           <button type="button" className="tactile-button mt-3 px-3 py-1.5 text-xs" onClick={() => setPage("words")}>
@@ -192,296 +197,22 @@ export const ArcadeOverlay = ({ initial = null, skin, outfit, best, moodToday, m
           </button>
         )}
 
-        <p className="mt-4 text-xs text-on-surface-variant">
-          Games don't earn seeds: those come only from reading in focus. Playing cheers Pip up a little
-          {moodToday >= moodCap ? " (that's all the cheering games and play can do today)." : ` (games and play together, up to +${moodCap} mood a day).`}
-          {page ? " The word quiz earns neither." : ""}
-        </p>
-      </div>
-    </div>
-  );
-};
-
-type GameScreenProps = {
-  game: GameInfo;
-  skin: string;
-  outfit: readonly string[];
-  best: number;
-  onFinished: (game: GameId, score: number) => Promise<number>;
-  onExit: () => void;
-};
-
-const GameScreen = ({ game, skin, outfit, best, onFinished, onExit }: GameScreenProps) => {
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [per, setPer] = useState(2);
-  const [hud, setHud] = useState({ score: 0, lives: null as number | null, over: false, ready: true });
-  const [paused, setPaused] = useState(false);
-  const [result, setResult] = useState<{ score: number; mood: number; newBest: boolean } | null>(null);
-  const runs = useRef(0);
-  const [run, setRun] = useState(0);
-  // The running game's pause switch, for the Pause key (a pointer has no Esc).
-  const pauseSwitch = useRef<(() => void) | null>(null);
-
-  // Crisp: a whole number of device pixels per game pixel that fits the box.
-  useLayoutEffect(() => {
-    const wrap = wrapRef.current;
-    if (!wrap) return;
-    const measure = () => setPer(pixelsPerArtPixel(GAME_W, GAME_H, wrap.clientWidth, Math.max(180, window.innerHeight * 0.55)));
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(wrap);
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    if (!canvas || !ctx) return;
-    ctx.imageSmoothingEnabled = false;
-
-    const reduced = prefersReducedMotion();
-    const art = gameArt(game.id, skin, outfit);
-    // Each run gets the next seed: different obstacles, the same curve.
-    const sim: Game = game.create(0x5eed + runs.current * 7919);
-    const controls: Controls = { up: false, down: false, left: false, right: false, pressed: 0, pointerX: null };
-    let raf = 0;
-    let last = 0;
-    let acc = 0;
-    let elapsed = 0;
-    let isPaused = false;
-    let reported = false;
-    let lastHud = "";
-
-    const draw = () => {
-      ctx.save();
-      ctx.clearRect(0, 0, GAME_W, GAME_H);
-      if (sim.shake > 0 && !reduced) {
-        ctx.translate(Math.round((Math.random() - 0.5) * 4), Math.round((Math.random() - 0.5) * 3));
-      }
-      sim.draw(ctx, art, Math.floor(elapsed * ART_FPS));
-      ctx.restore();
-    };
-
-    const syncHud = () => {
-      const next = { score: sim.score, lives: sim.lives, over: sim.over, ready: sim.ready };
-      const key = JSON.stringify(next);
-      if (key !== lastHud) {
-        lastHud = key;
-        setHud(next);
-      }
-    };
-
-    const frame = (time: number) => {
-      const dt = last ? Math.min(MAX_FRAME, (time - last) / 1000) : 0;
-      last = time;
-      acc += dt;
-      elapsed += dt;
-      while (acc >= TICK) {
-        sim.step(TICK, controls);
-        controls.pressed = 0;
-        acc -= TICK;
-      }
-      draw();
-      syncHud();
-      if (sim.over && !reported) {
-        reported = true;
-        const score = sim.score;
-        void onFinished(game.id, score).then((mood) => setResult({ score, mood, newBest: score > best }));
-      }
-      // Once over, keep drawing a moment for the fall and the shake, then rest.
-      if (!sim.over || sim.shake > 0 || elapsed < 0.5) {
-        raf = requestAnimationFrame(frame);
-      } else {
-        raf = 0;
-      }
-    };
-
-    const start = () => {
-      if (!raf && !isPaused) {
-        last = 0;
-        raf = requestAnimationFrame(frame);
-      }
-    };
-    const pause = () => {
-      if (sim.over || sim.ready) return;
-      isPaused = true;
-      setPaused(true);
-      cancelAnimationFrame(raf);
-      raf = 0;
-    };
-    const resume = () => {
-      if (!isPaused) return;
-      isPaused = false;
-      setPaused(false);
-      start();
-    };
-
-    pauseSwitch.current = () => (isPaused ? resume() : pause());
-
-    const JUMP = new Set([" ", "Spacebar", "ArrowUp", "w", "W"]);
-    const onKey = (event: KeyboardEvent, down: boolean) => {
-      if (event.key === "Escape") {
-        if (down) {
-          event.preventDefault();
-          event.stopPropagation();
-          if (isPaused || sim.over || sim.ready) onExit();
-          else pause();
+        {
+          <p className="mt-4 flex">
+            <span
+              className="pip-base-chip"
+              title={`Games don't earn seeds: those come only from reading in focus. Playing cheers Pip up a little${
+                moodToday >= moodCap ? " (that's all the cheering games and play can do today)." : ` (games and play together, up to +${moodCap} mood a day).`
+              }${page ? " The word quiz earns neither." : ""}`}
+            >
+              <Info size={13} aria-hidden /> Seeds and mood
+            </span>
+          </p>
         }
-        return;
-      }
-      if (event.key === "Tab") return;
-      const handled = JUMP.has(event.key) || ["ArrowDown", "ArrowLeft", "ArrowRight", "s", "S", "a", "A", "d", "D", "Enter"].includes(event.key);
-      if (!handled) return;
-      event.preventDefault();
-      event.stopPropagation();
-      if (down && isPaused) {
-        resume();
-        return;
-      }
-      if (down && sim.over && (JUMP.has(event.key) || event.key === "Enter")) {
-        if (!event.repeat) restart();
-        return;
-      }
-      if (JUMP.has(event.key)) {
-        if (down && !event.repeat) controls.pressed += 1;
-        controls.up = down;
-      }
-      if (event.key === "ArrowDown" || event.key === "s" || event.key === "S") controls.down = down;
-      if (event.key === "ArrowLeft" || event.key === "a" || event.key === "A") controls.left = down;
-      if (event.key === "ArrowRight" || event.key === "d" || event.key === "D") controls.right = down;
-      if (down) start();
-    };
-    const keyDown = (event: KeyboardEvent) => onKey(event, true);
-    const keyUp = (event: KeyboardEvent) => onKey(event, false);
-
-    const toGame = (event: PointerEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      return ((event.clientX - rect.left) / rect.width) * GAME_W;
-    };
-    const pointerDown = (event: PointerEvent) => {
-      event.preventDefault();
-      if (isPaused) {
-        resume();
-        return;
-      }
-      if (sim.over) {
-        restart();
-        return;
-      }
-      controls.pressed += 1;
-      controls.up = true;
-      controls.pointerX = game.id === "catch" ? toGame(event) : null;
-      start();
-    };
-    const pointerMove = (event: PointerEvent) => {
-      if (game.id === "catch" && (event.buttons > 0 || event.pointerType === "mouse")) controls.pointerX = toGame(event);
-    };
-    const pointerUp = () => {
-      controls.up = false;
-    };
-    const pointerLeave = () => {
-      controls.pointerX = null;
-    };
-
-    const restart = () => {
-      runs.current += 1;
-      setResult(null);
-      setRun(runs.current);
-    };
-
-    const onBlur = () => pause();
-    const onVisibility = () => {
-      if (document.visibilityState !== "visible") pause();
-    };
-
-    window.addEventListener("keydown", keyDown, true);
-    window.addEventListener("keyup", keyUp, true);
-    window.addEventListener("blur", onBlur);
-    document.addEventListener("visibilitychange", onVisibility);
-    canvas.addEventListener("pointerdown", pointerDown);
-    canvas.addEventListener("pointermove", pointerMove);
-    canvas.addEventListener("pointerup", pointerUp);
-    canvas.addEventListener("pointerleave", pointerLeave);
-    // Running from the start, so the waiting screen breathes; a closed or
-    // paused game stops the loop entirely.
-    start();
-    canvas.focus();
-
-    return () => {
-      cancelAnimationFrame(raf);
-      pauseSwitch.current = null;
-      window.removeEventListener("keydown", keyDown, true);
-      window.removeEventListener("keyup", keyUp, true);
-      window.removeEventListener("blur", onBlur);
-      document.removeEventListener("visibilitychange", onVisibility);
-      canvas.removeEventListener("pointerdown", pointerDown);
-      canvas.removeEventListener("pointermove", pointerMove);
-      canvas.removeEventListener("pointerup", pointerUp);
-      canvas.removeEventListener("pointerleave", pointerLeave);
-    };
-    // `best` is read once per run for the "new best" note.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [game, skin, outfit, run]);
-
-  const ratio = window.devicePixelRatio || 1;
-  const cssW = (GAME_W * per) / ratio;
-  const cssH = (GAME_H * per) / ratio;
-  const status = paused
-    ? "Paused. Press Space or tap to carry on."
-    : hud.over
-      ? `Game over. Score ${hud.score}. Press Space or tap to play again.`
-      : hud.ready
-        ? `Press Space or tap to start. ${game.controls}`
-        : null;
-
-  return (
-    <div className="mt-3">
-      <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-        <p className="font-semibold tabular-nums text-on-surface">
-          Score {hud.score}
-          {hud.lives !== null && <span className="ml-3 text-on-surface-variant">Lives {"●".repeat(hud.lives)}{"○".repeat(Math.max(0, 3 - hud.lives))}</span>}
-        </p>
-        <p className="flex items-center gap-3 text-xs text-on-surface-variant tabular-nums">
-          Best {Math.max(best, result?.score ?? 0)}
-          {/* While a run is on: pause it, or carry on. */}
-          {!hud.ready && !hud.over && (
-            <button type="button" className="tactile-button px-2.5 py-1 text-xs" aria-pressed={paused} onClick={() => pauseSwitch.current?.()}>
-              {paused ? "Resume" : "Pause"}
-            </button>
-          )}
-        </p>
+        </div>
+        <TipLayer rootRef={dialogRef} />
       </div>
-      <div ref={wrapRef} className="pip-arcade-screen mt-2">
-        <canvas
-          ref={canvasRef}
-          width={GAME_W}
-          height={GAME_H}
-          tabIndex={0}
-          className="pip-sprite pip-arcade-canvas"
-          style={{ width: cssW, height: cssH }}
-          aria-label={`${game.name}. ${game.controls}`}
-        />
-        {status && (
-          <div className="pip-arcade-status" aria-hidden="true">
-            <p>{hud.ready && !paused ? "Press Space or tap to start" : paused ? "Paused" : "Game over"}</p>
-            {hud.over && result && (
-              <p className="text-xs">
-                {result.newBest ? "New best! " : ""}
-                {result.mood > 0 ? `Pip cheered up (+${result.mood} mood).` : "Pip had fun."}
-              </p>
-            )}
-          </div>
-        )}
-      </div>
-      <p className="sr-only" aria-live="polite">
-        {status}
-        {hud.over && result ? ` ${result.newBest ? "New best." : ""} ${result.mood > 0 ? `Pip's mood went up by ${result.mood}.` : ""}` : ""}
-      </p>
-      <p className="mt-2 flex items-center gap-1.5 text-xs text-on-surface-variant">
-        <UiIcon name="hand" size={13} />
-        {game.controls} Esc pauses.
-      </p>
     </div>
   );
 };
+

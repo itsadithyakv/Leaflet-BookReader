@@ -6,6 +6,8 @@ import { watchWorldStub, worldStub } from "../../pip/worldStub";
 import { useVisitorStore } from "../../pip/useVisitors";
 import { useExpedition } from "../../components/pip/album";
 import { useHabitStore } from "../../store/habitStore";
+import { usePipWardrobeStore } from "../../store/pipWardrobeStore";
+import { fridgeIsBare } from "../../services/pipService";
 import { CURED_LINES } from "../../pip/cold";
 import { cuePip } from "../../pip/life";
 
@@ -26,7 +28,10 @@ const LOOK_EVERY_MS = 5 * 60_000;
  * - from the visitors' layer: where a visiting Pip stands (pip/useVisitors.ts);
  * - from the habit snapshot: her cold, while she has one (`snapshot.cold`,
  *   worked out in Rust from the ledger), and the moment the reader's reading
- *   has cured it, which she says once.
+ *   has cured it, which she says once;
+ * - from the wardrobe's overview: whether her fridge is bare (Rust works out
+ *   until when the snacks on record keep it stocked: pip/fridge.rs), looked
+ *   at again with the clock, so it is seen to run out.
  *
  * Everything here is worked out from what the app already keeps; nothing is
  * stored. `markSeen` is the expedition's: the scene calls it once she has
@@ -44,6 +49,9 @@ export const usePipWorld = ({ books }: { books: readonly Book[] }): { world: Wor
   const handle = useVisitorStore((state) => state.visit?.visitor.handle);
   const visitor = useMemo(() => (standing ? { x: standing.x, w: standing.w, handle } : null), [standing, handle]);
   const cold = useHabitStore((state) => state.snapshot.cold);
+  const larder = usePipWardrobeStore((state) => state.overview?.fridge);
+  const bare = larder ? fridgeIsBare(larder, now) : null;
+  const fridge = useMemo(() => (bare === null ? null : { bare }), [bare]);
   const todayMet = useHabitStore((state) => state.snapshot.todayMet);
   // Seen with a cold, and now without one on a day whose goal is met: the reading cured it, and she says so, once.
   // (A cold that passed by itself goes without a word.)
@@ -59,8 +67,8 @@ export const usePipWorld = ({ books }: { books: readonly Book[] }): { world: Wor
   // Set by hand (the preview, the tests): laid over the rest, field by field.
   const stub = useSyncExternalStore(watchWorldStub, worldStub);
   const world = useMemo<World>(
-    () => ({ ...worldOfBooks(books, now), away: away ? { note: away.note } : null, back, visitor, cold, ...stub }),
-    [books, now, away, back, visitor, cold, stub]
+    () => ({ ...worldOfBooks(books, now), away: away ? { note: away.note } : null, back, visitor, cold, fridge, ...stub }),
+    [books, now, away, back, visitor, cold, fridge, stub]
   );
   return { world, markSeen };
 };

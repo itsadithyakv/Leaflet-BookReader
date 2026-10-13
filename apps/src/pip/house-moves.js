@@ -13,6 +13,7 @@
    tossed            thrown: a pose the scene turns as she flies
    squint            the curtains are drawn on her in the daytime
    scamper, carry    after the ball, and bringing it back
+   windup, fling, punt, header, reach, bonk, chin   a game of catch (pip/catch.ts)
    beg               a treat is on offer
    tiptoe, fridge-stare, nibble, caught   the midnight snack
    scroll..., phone...                    on her phone, in bed and on her feet
@@ -24,6 +25,7 @@
    hangover, dust                         a book just finished; a book left too long
    bring, show                            back from an expedition, the find held up
    cold-idle, sniffle, tissue, shuffle    a cold
+   stamp, sulk                            a tantrum, and her back turned after it
 
  The ones with no category (the eight ways of looking, the ball on its own)
  are parts, not moves to show off: the design kit (scripts/pip-kit.mjs) lists
@@ -242,13 +244,24 @@ def("beg", "Yes Please", "House", 16, "A treat is on offer: Pip is on her toes f
 
 // ------------------------------------------------------------ the ball
 // The ball from treats.js, or a ball of scrap paper for a Pip without one.
-const ballArt = (g, x, y, f, paper) => {
+// Turned by `rot` (radians): its quarters, or the paper's creases, go round
+// under a highlight that stays put. Three pictures of it (pip/catch.ts,
+// `ballShape`): round; flat, squashed on the floor or stretched along a fast
+// flight; tall, the same the other way up. Each is whole pixels: 6 by 6, 7 by
+// 5, 5 by 7, all sitting on the same bottom row.
+const BALL_SHAPES = { round: [0, 0, 2.8, 2.8], flat: [0.5, 0.5, 3.2, 2.4], tall: [0.5, 0.5, 2.4, 3.2] };
+const ballArt = (g, x, y, rot, paper, shape) => {
+  const [dx, dy, rx, ry] = BALL_SHAPES[shape] || BALL_SHAPES.round;
+  const cs = Math.cos(rot), sn = Math.sin(rot);
   if (paper) {
-    g.stamp((l) => l.ell(x, y, 2.8, 2.8, (nx, ny) => (nx + ny < -0.7 ? "#FFFFFF" : Math.abs(nx - ny) < 0.18 || Math.abs(nx + ny * 0.6 - 0.3) < 0.12 ? "#C9C0AC" : "#F2EAD6")), "#5E5544");
+    g.stamp((l) => l.ell(x + dx, y + dy, rx, ry, (nx, ny) => {
+      if (nx + ny < -0.7) return "#FFFFFF";
+      const u = nx * cs + ny * sn, v = ny * cs - nx * sn;
+      return Math.abs(u - v) < 0.18 || Math.abs(u + v * 0.6 - 0.3) < 0.12 ? "#C9C0AC" : "#F2EAD6";
+    }), "#5E5544");
     return;
   }
-  const rot = f * 0.5;
-  g.stamp((l) => l.ell(x, y, 2.8, 2.8, (nx, ny) => {
+  g.stamp((l) => l.ell(x + dx, y + dy, rx, ry, (nx, ny) => {
     if (nx + ny < -0.9) return WHITE;
     const a = Math.atan2(ny, nx) + rot, seg = Math.floor(((((a % TAU) + TAU) % TAU) / (TAU / 4))) % 4;
     return ["#E0393E", "#FFFFFF", "#2F80E6", "#FFD23F"][seg];
@@ -287,13 +300,180 @@ for (const paper of [false, true]) {
       feet: (A) => [[A.cx - 3 + (a ? 1.6 : -1.6), A.bottom + 1.1 - (a ? 0.8 : 0)], [A.cx + 3 + (a ? -1.6 : 1.6), A.bottom + 1.1 - (a ? 0 : 0.8)]],
       hands: (A) => [{ x: A.cx + 2, y: A.top.y + 1 }, { x: A.cx + 8, y: A.top.y + 1 }]
     });
-    ballArt(g, A.cx + 5, A.top.y - 2 - (f % 4 < 2 ? 0 : 0.6), f, paper);
+    ballArt(g, A.cx + 5, A.top.y - 2 - (f % 4 < 2 ? 0 : 0.6), f * 0.5, paper);
   });
 }
 
-/** The ball on its own, for the scene to throw: a move-shaped sprite like the scenery. */
-def("ball", "Ball", "", 8, "The ball itself, rolling.", (g, f) => ballArt(g, 16, 16, f, false));
-def("ball-paper", "Paper Ball", "", 8, "A ball of scrap paper, for a Pip without one.", (g, f) => ballArt(g, 16, 16, f * 0.5, true));
+/** The ball on its own, for the scene to throw: a move-shaped sprite like the scenery. Eight frames to a turn (the scene shows the one for how far it has rolled), in each of its three shapes. */
+for (const paper of [false, true]) {
+  for (const shape of ["round", "flat", "tall"]) {
+    const id = `ball${shape === "round" ? "" : `-${shape}`}${paper ? "-paper" : ""}`;
+    def(id, paper ? "Paper Ball" : "Ball", "", 8, paper ? "A ball of scrap paper, for a Pip without one." : "The ball itself, rolling.", (g, f) => ballArt(g, 16, 16, (f * TAU) / 8, paper, shape));
+  }
+}
+
+/** The rally's count, beside the ball: frame 7 is a 7. Hers to show, in her own lettering. */
+def("tally", "Rally", "", 100, "Catches in a row, counted beside the ball.", (g, f) => {
+  const digits = String(f);
+  g.text(digits, 16 - (digits.length * 4 - 1) / 2, 14, "#FFF6D8");
+});
+
+// ------------------------------------------------------------ a game of catch (pip/catch.ts)
+// She faces right in all of these (the scene turns her): the ball comes from,
+// and goes back to, the right of the frame. Where the ball is in her hands
+// (`windup`, `chin`) it is drawn here, as in `carry`; in the air it is the
+// scene's.
+
+// The wiggle before a throw: the ball held up behind her, her weight going from foot to foot, her tongue out.
+for (const paper of [false, true]) {
+  def(paper ? "windup-paper" : "windup", "Winding Up", paper ? "" : "House", 6, "She has the ball, and it is going back: a wiggle first.", (g, f) => {
+    const a = f % 6 < 3;
+    g.shadow(16, 6);
+    const A = drawPip(g, {
+      lean: -1.1 + (a ? 0.5 : -0.3),
+      sq: a ? 0.04 : -0.02,
+      fdx: 1,
+      look: [1, -1],
+      eyes: "determined",
+      brows: "focus",
+      mouth: "blep",
+      la: 64 + (a ? 8 : -6),
+      feet: (A) => [[A.cx - 3.5, A.bottom + 1.1 - (a ? 0.9 : 0)], [A.cx + 3.5, A.bottom + 1.1 - (a ? 0 : 0.9)]],
+      hands: (A) => [{ x: A.cx - 6, y: A.top.y + 3 }, { x: A.handR[0] + 1, y: A.cy - 1 }]
+    });
+    ballArt(g, A.cx - 6, A.top.y, 0, paper);
+  });
+}
+
+def("fling", "Throwing It Back", "House", 8, "The throw: her arm comes over, and she watches it go.", (g, f) => {
+  const s = tl(f, [2, 3, 3]);
+  g.shadow(16, 6);
+  drawPip(g, {
+    lean: s.k === 0 ? 1.8 : s.k === 1 ? 1.0 : 0.3 * (1 - s.t),
+    sq: s.k === 0 ? -0.08 : 0,
+    fdx: 1,
+    look: [1, -1],
+    eyes: s.k === 2 ? "happy" : "determined",
+    mouth: "open",
+    la: s.k === 0 ? -30 : s.k === 1 ? 0 : 20,
+    hands: (A) => [{ x: A.handL[0], y: A.handL[1] }, s.k === 0 ? { x: A.cx + 10, y: A.cy - 5 } : s.k === 1 ? { x: A.cx + 10, y: A.cy + 1 } : { x: A.handR[0], y: A.handR[1] }]
+  });
+  if (s.k === 0) fx.speed(g, 24, 9, 3);
+});
+
+def("punt", "A Kick Back", "House", 8, "No hands: the ball goes back off her foot.", (g, f) => {
+  const s = tl(f, [2, 2, 4]);
+  g.shadow(16, 6);
+  const A = drawPip(g, {
+    lean: s.k === 0 ? 0.6 : s.k === 1 ? -1.2 : -0.4 * (1 - s.t),
+    fdx: 1,
+    look: [1, s.k === 2 ? -1 : 1],
+    eyes: s.k === 2 ? "happy" : "determined",
+    mouth: s.k === 1 ? "shout" : "open",
+    la: s.k === 1 ? 70 : 34,
+    feet: (A) => [[A.cx - 3.5, A.bottom + 1.1], s.k === 0 ? [A.cx + 1, A.bottom + 0.4] : s.k === 1 ? [A.cx + 8, A.bottom - 2.2] : [A.cx + 3.5 + 2 * (1 - s.t), A.bottom + 1.1 - (1 - s.t)]],
+    hands: (A) => [{ x: A.handL[0] - 1, y: A.handL[1] - (s.k === 1 ? 2 : 0) }, { x: A.handR[0] + 1, y: A.handR[1] - (s.k === 1 ? 2 : 0) }]
+  });
+  if (s.k === 1 && s.n === 0) fx.impact(g, A.cx + 11, A.bottom - 3);
+});
+
+def("header", "A Header", "House", 8, "Up on her toes, and back it goes off the top of her head.", (g, f) => {
+  const s = tl(f, [2, 2, 2, 2]);
+  const up = s.k === 1;
+  g.shadow(16, up ? 5 : 6);
+  const A = drawPip(g, {
+    y: up ? 26 : 28,
+    sq: s.k === 0 ? 0.14 : up ? -0.12 : s.k === 2 ? 0.08 : 0,
+    fdx: 1,
+    fdy: s.k < 2 ? -1 : 0,
+    look: [1, -1],
+    eyes: up ? "squeeze" : s.k === 3 ? "happy" : "wide",
+    mouth: up ? "flat" : "open",
+    la: up ? 84 : 40,
+    feet: (A) => [[A.cx - 3.5, A.bottom + 1.1 + (up ? 1 : 0)], [A.cx + 3.5, A.bottom + 1.1 + (up ? 1 : 0)]]
+  });
+  if (up && s.n === 0) fx.impact(g, A.cx + 3, A.top.y - 3);
+});
+
+def("reach", "Mine", "House", 8, "The ball is in the air: arms up, eyes on it.", (g, f) => {
+  const a = f % 8 < 4;
+  g.shadow(16, 6);
+  drawPip(g, {
+    sq: -0.05,
+    fdx: 1,
+    fdy: -1,
+    look: [1, -1],
+    eyes: "wide",
+    brows: "up",
+    mouth: "open",
+    la: 16 + (a ? 6 : 0),
+    hands: (A) => [{ x: A.handL[0] - 1, y: A.cy - 5 - (a ? 1 : 0) }, { x: A.handR[0] + 1, y: A.cy - 5 - (a ? 0 : 1) }]
+  });
+});
+
+def("bonk", "Bonk", "House", 36, "It came down on her head instead of in her hands, and she has sat down about it.", (g, f) => {
+  // Three frames of the bonk itself, most of three seconds sat on the floor seeing stars, then up, a little sheepish.
+  const s = tl(f, [3, 27, 6]);
+  const stars = (front) => (g, A) => {
+    if (s.k !== 1 || s.n >= 16) return;
+    for (let i = 0; i < 3; i++) {
+      const turn = s.n * 0.5 + (i * TAU) / 3;
+      if ((Math.sin(turn) > 0) === front) fx.star(g, A.cx + Math.cos(turn) * 9, A.top.y - 1 + Math.sin(turn) * 2.5, 1);
+    }
+  };
+  if (s.k === 0) {
+    g.shadow(16, 7);
+    const A = drawPip(g, { sq: 0.26 - s.n * 0.04, eyes: "x", mouth: "o", la: 96 });
+    if (s.n === 0) fx.impact(g, A.cx, A.top.y - 2);
+    return;
+  }
+  if (s.k === 1) {
+    const dazed = s.n < 16;
+    g.shadow(16, 7);
+    // Sat down: low and wide, her feet out in front of her.
+    drawPip(g, {
+      sq: 0.16 + wave(s.n, 12, 0.015),
+      eyes: dazed ? "spiral" : blink(s.n, 12, 9) ? "blink" : "wide",
+      eyePhase: f,
+      brows: dazed ? null : "up",
+      mouth: dazed ? "wavy" : "o",
+      la: dazed ? 80 + wave(s.n, 8, 12) : 50,
+      behind: stars(false),
+      over: stars(true),
+      feet: (A) => [[A.cx - 6, A.bottom + 0.8, 2.6], [A.cx + 6, A.bottom + 0.8, 2.6]],
+      hands: (A) => [{ x: A.handL[0] - 1, y: A.bottom - 1 }, { x: A.handR[0] + 1, y: A.bottom - 1 }]
+    });
+    if (!dazed) g.text("?", 25, 3, GOLD);
+    return;
+  }
+  g.shadow(16, 6);
+  drawPip(g, { y: 28 + hop(s.t, 2), sq: 0.12 * (1 - s.t), eyes: s.n < 2 ? "blink" : "open", mouth: "smile", blush: "big", la: lerp(50, 28, s.t) });
+}, 12);
+
+// Waiting to be played with: flat on the floor, her chin on the ball, looking up at the reader, and now and then at the ball.
+for (const paper of [false, true]) {
+  def(paper ? "chin-paper" : "chin", "Chin on the Ball", paper ? "" : "House", 48, "Nobody has thrown it for a while: she lies down with her chin on it, and waits.", (g, f) => {
+    const k = f % 48;
+    const atBall = k >= 30 && k < 38;
+    const hope = k >= 12 && k < 20;
+    g.shadow(14, 9);
+    drawPip(g, {
+      x: 12,
+      sq: 0.3 + wave(f, 24, 0.012),
+      fdx: 2,
+      fdy: 1,
+      look: atBall ? [1, 1] : [1, -1],
+      eyes: blink(f, 48, 44) ? "blink" : "open",
+      brows: atBall ? null : "up",
+      mouth: "tiny",
+      la: hope ? 52 : 88 + wave(f, 48, 4),
+      behind: (g, A) => ballArt(g, A.cx + 10, A.bottom - 2, 0, paper),
+      feet: (A) => [[A.cx - 9, A.bottom + 0.7], [A.cx - 6, A.bottom + 1.1]],
+      hands: (A) => [{ x: A.cx + 6, y: A.bottom }, { x: A.cx + 13, y: A.bottom + 0.4 }]
+    });
+  }, 4);
+}
+
 
 // ------------------------------------------------------------ the fridge
 // The midnight snack (pip/behaviour.ts, `fridgeVisit`): over on tiptoe, a long
@@ -963,3 +1143,42 @@ def("shuffle", "Shuffling", "", 16, "Pip has a cold: from here to there in her b
   blanketHem(g, A);
   pinkNose(g, A, -1);
 }, 2);
+
+// ------------------------------------------------------------ her temper (pip/temper.ts)
+// A tantrum is mostly moves she had already (steamed, sob, faint); these two
+// are what it lacked: a foot put down, hard, and her back turned on the room.
+
+def("stamp", "Stamping", "House", 16, "Her patience has run out: Pip stamps, one foot and then the other.", (g, f) => {
+  // Eight frames a foot: up for three, down hard for two (a squash, and dust off the floor), and a beat.
+  const k = f % 8;
+  const right = f % 16 < 8;
+  const up = k < 3;
+  const hit = k === 3 || k === 4;
+  g.shadow(16, 6);
+  const A = drawPip(g, {
+    sq: hit ? 0.1 : up ? -0.04 : 0,
+    eyes: "angry",
+    brows: "angry",
+    mouth: hit ? "shout" : "grit",
+    blush: false,
+    la: hit ? 62 : 18,
+    feet: (A) => [[A.cx - 3.5, A.bottom + 1.1 - (!right && up ? 3 : 0)], [A.cx + 3.5, A.bottom + 1.1 - (right && up ? 3 : 0)]]
+  });
+  if (hit) {
+    const side = right ? 1 : -1;
+    fx.puff(g, A.cx + side * 8, A.bottom + 1, 1.3, WHITE);
+    fx.puff(g, A.cx + side * 11, A.bottom, 0.9, WHITE);
+  }
+}, 3);
+
+def("sulk", "Sulking", "House", 48, "After a tantrum: Pip turns her back on the room, and now and then lets out a hmph.", (g, f) => {
+  // Seen from behind: no face, her leaf hung low. Still, but for one small huff a loop.
+  const k = f % 48;
+  const huff = k >= 30 && k < 38;
+  g.shadow(16, 6);
+  const A = drawPip(g, { eyes: "none", mouth: "none", blush: false, sq: huff ? 0.06 : 0.03, la: 112 });
+  if (huff) {
+    const t = (k - 30) / 8;
+    fx.puff(g, A.cx + 7 + Math.round(t * 2), A.top.y + 3 - Math.round(t * 5), 0.9 + t * 0.6, WHITE);
+  }
+}, 0);

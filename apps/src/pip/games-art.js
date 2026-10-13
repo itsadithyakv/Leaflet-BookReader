@@ -5,6 +5,7 @@
    dash:  Pip Dash, an endless runner (offline-dino style)
    catch: Leaf Catch, Pip with a basket catches what falls
    flap:  Page Flap, Pip flies by leaf-copter between book-spine pillars
+   base:  The Hollow, Pip's camp in a clearing (its art is in base-art.js)
  }
 
  Two kinds of entries:
@@ -22,6 +23,7 @@
  horizontally (draw two side by side and scroll); ground strips tile too. */
 import { drawPip } from "./engine.js";
 import { Painter, rnd } from "./room.js";
+import { BASE_SPRITES } from "./base-art.js";
 
 const TAU = Math.PI * 2;
 const wave = (f, per, amp = 1, off = 0) => amp * Math.sin((TAU * f) / per + off);
@@ -244,7 +246,7 @@ const seed = {
   }
 };
 const letter = {
-  w: 11, h: 12, box: [1, 1, 9, 10],
+  w: 11, h: 12, frames: 16, box: [1, 1, 9, 10],
   draw(g, f, o) {
     const tilt = Math.round(wave(f, 16, 0.6));
     g.stamp((l) => { l.rect(1, 1 + tilt, 9, 10, "#FFF6DF").rect(1, 10 + tilt, 9, 1, "#DCC89C"); }, "#5A4A36");
@@ -369,7 +371,8 @@ export const GAME_SPRITES = {
     title: "Page Flap",
     pip: { fly: flapFly, fall: flapFall, bonk: flapBonk },
     pillar, bg: flapBg, ground: flapGround, seed: coin, cloud: dashCloud
-  }
+  },
+  base: BASE_SPRITES
 };
 
 /** All the Pip poses, for a move picker or a sprite cache. */

@@ -142,11 +142,11 @@ export const MoveCard = ({ name, art, status, selected, onPreview, previewLabel 
       <span className="w-full truncate text-xs font-semibold text-on-surface">{name}</span>
       {status}
       <span className="mt-1 flex w-full gap-1.5">
-        <button type="button" className="tactile-button flex-1 px-2 py-1 text-[11px]" onClick={onPreview} aria-label={`${previewLabel}: ${name}`}>
+        <button type="button" className="pip-key pip-key-small flex-1" onClick={onPreview} aria-label={`${previewLabel}: ${name}`}>
           {previewLabel}
         </button>
         {action && (
-          <button type="button" className="tactile-button tactile-button-primary flex-1 px-2 py-1 text-[11px]" onClick={action.run} aria-label={`${action.label}: ${name}`}>
+          <button type="button" className="pip-key pip-key-small pip-key-primary flex-1" onClick={action.run} aria-label={`${action.label}: ${name}`}>
             {action.label}
           </button>
         )}

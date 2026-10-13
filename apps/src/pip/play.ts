@@ -1,9 +1,12 @@
 /**
  * Playing with Pip: what the reader's hand does to her, worked out here and
  * drawn by the house scene. A poke that is answered differently each time it
- * comes again, strokes told from tickles, the swing of a Pip held by her
- * leaf, the arc of a Pip (or a ball) let go of. All pure: a state, what
- * happened, the state after (play.test.ts).
+ * comes again, two quick taps that are a high five, a press held still that
+ * is a cuddle, strokes told from tickles (and a tickled leaf from a tickled
+ * belly), a finger's rub told from a finger's carry, the swing of a Pip held
+ * by her leaf, a Pip whirled round until she is giddy, the arc of a Pip (or
+ * a ball) let go of. All pure: a state, what happened, the state after
+ * (play.test.ts).
  */
 
 // ---- pokes ------------------------------------------------------------------------
@@ -51,6 +54,46 @@ export const pokeReaction = (count: number): PokeReaction =>
 /** How many pokes in a row have their own answer before the surprise. */
 export const POKE_RUNGS = LADDER.length;
 
+// ---- two quick taps: a high five ---------------------------------------------------
+//
+// A poke is answered at once (waiting to see whether a second tap is coming
+// would make every poke late), so the first tap of a pair is a poke like any
+// other. The second, if it comes quickly, is a high five instead of a second
+// poke, and the ladder goes back to where it was before the pair: a high five
+// is not two pokes, nor even one. A third quick tap is a poke again, so
+// someone hammering at her still climbs the ladder.
+
+/** Two taps this close together are a pair. */
+export const HIGH_FIVE_MS = 320;
+
+/** The taps so far: when the last came, how many have come this quickly in a row, and the pokes as they stood before the first. */
+export type Taps = { at: number; run: number; before: Poke | null };
+
+/**
+ * A tap at `now`, with the pokes as they stand (`poke`). Says whether it is
+ * the second of a quick pair: a high five, for which the caller puts the pokes
+ * back to `taps.before` rather than poking again.
+ */
+export const tapAgain = (last: Taps | null, now: number, poke: Poke | null): { taps: Taps; highFive: boolean } => {
+  const quick = last !== null && now - last.at <= HIGH_FIVE_MS;
+  const run = quick ? last.run + 1 : 1;
+  return { taps: { at: now, run, before: quick ? last.before : poke }, highFive: run === 2 };
+};
+
+// ---- a press that stays put: a cuddle -------------------------------------------------
+//
+// A press let go of at once is a poke, one that moves picks her up, and one
+// that is simply held on her is a cuddle: it begins while the hand is still
+// down, and lasts until it lifts.
+
+/** A press held still on her this long is a cuddle. */
+export const CUDDLE_AFTER_MS = 550;
+/** How far a finger may wander and still be holding still, in CSS pixels (a mouse is steadier: the scene's drag slop). */
+export const CUDDLE_SLACK = 10;
+
+/** What a press that has not moved amounts to, held this long. */
+export const pressOf = (heldMs: number): "poke" | "cuddle" => (heldMs >= CUDDLE_AFTER_MS ? "cuddle" : "poke");
+
 // ---- strokes ------------------------------------------------------------------------
 //
 // The pointer rubbed back and forth over her is a stroke; rubbed fast, a
@@ -64,9 +107,24 @@ export type Stroke = {
   run: number;
   /** When each change of direction came. */
   turns: number[];
+  /** Those of them that came over her leaf (see `zoneOf`). */
+  leafy: number[];
 };
 
 export type Touch = "none" | "pet" | "tickle";
+
+/** Where on her the hand is: her leaf (and the top of her head under it), or the rest of her. */
+export type Zone = "leaf" | "body";
+
+/** Her leaf is the top of her frame: this share of its height. */
+export const LEAF_ZONE = 0.4;
+
+/** Which of her the hand is over, from how far down her frame it is (`top` and `height` are the frame's, in the pointer's pixels). */
+export const zoneOf = (y: number, top: number, height: number): Zone => (y - top < height * LEAF_ZONE ? "leaf" : "body");
+
+/** What a rub comes to: a stroke anywhere, a tickle on her belly, and a tickle on her leaf, which makes her sneeze. */
+export type Rub = Touch | "sneeze";
+export const rubOf = (touch: Touch, zone: Zone): Rub => (touch === "tickle" && zone === "leaf" ? "sneeze" : touch);
 
 /** Turns older than this no longer count. */
 const STROKE_WINDOW_MS = 1300;
@@ -74,17 +132,20 @@ const STROKE_WINDOW_MS = 1300;
 const PET_TURNS = 2;
 const TICKLE_TURNS = 5;
 
-export const strokeStart = (x: number): Stroke => ({ x, dir: 0, run: 0, turns: [] });
+export const strokeStart = (x: number): Stroke => ({ x, dir: 0, run: 0, turns: [], leafy: [] });
 
 /**
  * The stroke after the pointer moves to `x` at `now`, and what it amounts to.
  * `unit` is Pip's width in the same pixels: a run counts as a stroke once it
- * is an eighth of her wide, so a tremble of the hand is not a tickle.
+ * is an eighth of her wide, so a tremble of the hand is not a tickle. `over`
+ * is the part of her the pointer is on; `zone` says where the rub mostly is
+ * (her leaf, if more than half its turns were made there).
  */
-export const strokeMove = (stroke: Stroke, x: number, now: number, unit: number): { stroke: Stroke; touch: Touch } => {
+export const strokeMove = (stroke: Stroke, x: number, now: number, unit: number, over: Zone = "body"): { stroke: Stroke; touch: Touch; zone: Zone } => {
   const dx = x - stroke.x;
   const turns = stroke.turns.filter((at) => now - at < STROKE_WINDOW_MS);
-  if (dx === 0) return { stroke: { ...stroke, turns }, touch: touchOf(turns) };
+  const leafy = stroke.leafy.filter((at) => now - at < STROKE_WINDOW_MS);
+  if (dx === 0) return { stroke: { ...stroke, turns, leafy }, touch: touchOf(turns), zone: zoneOver(turns, leafy) };
   const dir = dx > 0 ? 1 : -1;
   let run = stroke.run;
   let going = stroke.dir;
@@ -95,11 +156,35 @@ export const strokeMove = (stroke: Stroke, x: number, now: number, unit: number)
     run += Math.abs(dx);
   } else {
     // Turned round: it counts if the run before the turn was a real one.
-    if (run >= unit / 8) turns.push(now);
+    if (run >= unit / 8) {
+      turns.push(now);
+      if (over === "leaf") leafy.push(now);
+    }
     going = dir;
     run = Math.abs(dx);
   }
-  return { stroke: { x, dir: going, run, turns }, touch: touchOf(turns) };
+  return { stroke: { x, dir: going, run, turns, leafy }, touch: touchOf(turns), zone: zoneOver(turns, leafy) };
+};
+
+const zoneOver = (turns: readonly number[], leafy: readonly number[]): Zone => (leafy.length * 2 > turns.length ? "leaf" : "body");
+
+// ---- a finger on her -------------------------------------------------------------------
+//
+// A mouse strokes her by hovering; a finger cannot hover, and a finger that
+// drags picks her up. So a finger that goes down on her and stays on her is
+// rubbing her (side to side: a stroke, a tickle, a sneeze), and only one that
+// leaves her (up, down, or off to one side) has picked her up.
+
+/**
+ * Whether a finger that went down on her at `from` and is now at `to` has
+ * picked her up. `size` is her width on screen, in the same pixels; once she
+ * is being rubbed (`rubbing`) the finger is given more room, so a wide rub
+ * does not snatch her up.
+ */
+export const fingerLifts = (from: { x: number; y: number }, to: { x: number; y: number }, size: number, rubbing = false): boolean => {
+  const across = Math.abs(to.x - from.x);
+  const along = Math.abs(to.y - from.y);
+  return across > size * (rubbing ? 1.1 : 0.7) || along > size * (rubbing ? 0.5 : 0.3);
 };
 
 const touchOf = (turns: readonly number[]): Touch => (turns.length >= TICKLE_TURNS ? "tickle" : turns.length >= PET_TURNS ? "pet" : "none");
@@ -157,6 +242,47 @@ export const holdStep = (hold: Hold, dt: number, still = false): Hold => {
   const accel = (hold.handVx - hold.swungVx) / dt;
   return { swing: swingStep(hold.swing, accel, dt), swungVx: hold.handVx, handVx: hold.handVx * Math.max(0, 1 - 9 * dt) };
 };
+
+// ---- whirled round -----------------------------------------------------------------------
+//
+// Swung round in a circle while she is held, a couple of times, and she is
+// giddy when she is let go. A circle is the hand's path turning the same way
+// right round: the turn of its heading, added up. A shake to and fro turns it
+// about and back, which adds up to nothing.
+
+/** The hand's path while she is held: where its heading was last read, the heading, how far it has turned in all (radians, signed), and when. */
+export type Whirl = { x: number; y: number; heading: number | null; turned: number; at: number };
+
+/** The hand goes this far (floor pixels) before its heading is read again: nearer than that is jitter. */
+const WHIRL_STEP = 3;
+/** A heading that swings round by more than this at once has doubled back: a shake, not a circle. */
+const WHIRL_SHARP = 2.2;
+/** This many times round and she is giddy. */
+export const WHIRL_TURNS = 2;
+/** A hand that has stopped circling this long has stopped: the turns no longer count. */
+export const WHIRL_FADES_MS = 1500;
+
+export const whirlStart = (x: number, y: number, at: number): Whirl => ({ x, y, heading: null, turned: 0, at });
+
+/** The whirl after the hand moves to (`x`, `y`) at `at`. */
+export const whirlMove = (whirl: Whirl, x: number, y: number, at: number): Whirl => {
+  const dx = x - whirl.x;
+  const dy = y - whirl.y;
+  if (Math.hypot(dx, dy) < WHIRL_STEP) return whirl;
+  const heading = Math.atan2(dy, dx);
+  // The first stretch, or the first after a pause: a heading to turn from, and nothing turned yet.
+  if (whirl.heading === null || at - whirl.at > WHIRL_FADES_MS) return { x, y, heading, turned: 0, at };
+  const turn = nearUpright(heading - whirl.heading);
+  // Doubled back: the circle is broken, and half of it forgotten.
+  if (Math.abs(turn) > WHIRL_SHARP) return { x, y, heading, turned: whirl.turned / 2, at };
+  return { x, y, heading, turned: whirl.turned + turn, at };
+};
+
+/** How many times round she has been swung, either way. */
+export const whirlTurns = (whirl: Whirl) => Math.abs(whirl.turned) / (Math.PI * 2);
+
+/** Whether she has been whirled enough to be giddy, as things stand at `now`. */
+export const whirled = (whirl: Whirl, now: number) => whirlTurns(whirl) >= WHIRL_TURNS && now - whirl.at <= WHIRL_FADES_MS;
 
 /**
  * Held, she turns about the hand (at her leaf); in the air, about her middle,

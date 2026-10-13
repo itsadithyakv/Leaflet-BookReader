@@ -7,6 +7,8 @@ import type { ShopKind } from "../pip/shop";
 type WardrobeState = {
   /** Null until the first load answers. */
   overview: PipOverview | null;
+  /** Why the last load failed, or null: what Pip's drawers show in place of waiting for ever. */
+  loadError: string | null;
   load: () => Promise<void>;
   /** Rejects with a readable message (can't afford, already owned...). */
   buy: (kind: ShopKind, id: string) => Promise<void>;
@@ -22,6 +24,8 @@ type WardrobeState = {
   gamePlayed: (game: string, score: number) => Promise<number>;
   /** Records a bout of play by hand. Resolves with the mood it added (0 once the day's allowance is used). */
   played: (kind: string) => Promise<number>;
+  /** Pip found her fridge bare. Resolves with the mood it took (0 after the first time in a day, or at the floor). */
+  fridgeBare: () => Promise<number>;
 };
 
 const lookOf = (overview: PipOverview): PipLook => ({
@@ -50,12 +54,19 @@ export const usePipWardrobeStore = create<WardrobeState>((set, get) => {
 
   return {
     overview: null,
+    loadError: null,
 
     async load() {
+      // Another try shows as loading again, not as the old failure.
+      if (get().loadError) {
+        set({ loadError: null });
+      }
       try {
-        set({ overview: await pipService.overview() });
-      } catch {
-        // Pip keeps its defaults; the tab retries when it opens.
+        set({ overview: await pipService.overview(), loadError: null });
+      } catch (cause) {
+        // Pip keeps its defaults (or what was read before); the tab retries
+        // when it opens, and its drawers offer "Try again".
+        set({ loadError: shopError(cause) });
       }
     },
 
@@ -108,6 +119,20 @@ export const usePipWardrobeStore = create<WardrobeState>((set, get) => {
         return Math.max(0, after < before ? after : after - before);
       } catch {
         // Play is never refused out loud: Pip still had fun.
+        return 0;
+      }
+    },
+
+    async fridgeBare() {
+      const asked = Date.now();
+      try {
+        const overview = await pipService.fridgeBare();
+        set({ overview });
+        // What it took is what the mood log says it took just now (the mood itself has also drifted since it was last read).
+        const last = overview.moodLog[overview.moodLog.length - 1];
+        return last && last.cause === "fridge" && last.gain < 0 && Date.parse(last.at) >= asked - 2000 ? -last.gain : 0;
+      } catch {
+        // Nothing to say out loud: her mood is simply as it was.
         return 0;
       }
     }

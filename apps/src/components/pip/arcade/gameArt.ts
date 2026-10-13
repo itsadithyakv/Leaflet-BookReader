@@ -19,7 +19,7 @@ export type GameSprite = {
   box: [number, number, number, number];
 };
 
-export type SpriteOpts = { h?: number; top?: boolean; letter?: string; variant?: number };
+export type SpriteOpts = { h?: number; top?: boolean; letter?: string; variant?: number; /** How far along something is, where its picture changes with it: a guardian's rank. */ rank?: number };
 
 export type GameArt = {
   /** A sprite by name ("books", "bat", "ground", "pillar"...), or null. */
@@ -67,8 +67,12 @@ export const gameArt = (gameId: string, skinId: string, outfit: readonly string[
   const sprite = (name: string, frame: number, opts: SpriteOpts = {}) => {
     const def = find(tree, name);
     if (!def) return null;
-    const looped = def.frames ? frame % def.frames : frame;
-    const id = `s|${name}|${looped}|${opts.h ?? ""}|${opts.top ? 1 : 0}|${opts.letter ?? ""}|${opts.variant ?? ""}`;
+    // A sprite that says no frame count is a still: drawn once. It used to be
+    // drawn again for every frame number that came by, twelve times a second
+    // and kept each time: a whole 240 x 120 backdrop, and every pillar, which
+    // is what made Page Flap's background stutter (and the memory climb).
+    const looped = def.frames ? frame % def.frames : 0;
+    const id = `s|${name}|${looped}|${opts.h ?? ""}|${opts.top ? 1 : 0}|${opts.letter ?? ""}|${opts.variant ?? ""}|${opts.rank ?? ""}`;
     if (!cache.has(id)) {
       try {
         const image = renderGameSprite(def, looped, opts);

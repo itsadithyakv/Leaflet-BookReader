@@ -9,9 +9,11 @@
   transform-origin: 50% 50%;
 }
 
-/* The ball: placed from script like Pip, at the room's scale. Its button is a
-   little bigger than the ball; the sprite (a whole 32-pixel frame with the
-   ball in its middle) is centred on it. */
+/* The ball: placed from script like Pip, at the room's scale. Its button is
+   round and a finger wide (44 px at least, however small the ball is drawn);
+   the picture of the ball (a whole 32-pixel frame with the ball in its
+   middle) is a canvas the scene sets in the middle of it and draws a frame
+   at a time. The press is the ball's own: it does not scroll the page. */
 .pip-house-ball {
   position: absolute;
   top: 0;
@@ -23,6 +25,8 @@
   background: none;
   cursor: grab;
   touch-action: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
   will-change: transform;
 }
 
@@ -32,17 +36,40 @@
 
 .pip-house-ball > .pip-sprite {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  width: var(--ball-sprite) !important;
-  height: var(--ball-sprite) !important;
-  transform: translate(-50%, -50%);
   pointer-events: none;
 }
 
 .pip-house-ball:focus-visible {
   outline: 2px solid rgb(var(--color-primary));
-  outline-offset: 2px;
+  outline-offset: -8px;
+}
+
+/* Its shadow on the floor: a row of the room's own pixels under it, fainter
+   at each end like the one under Pip, narrower the higher the ball is (the
+   scene sets the width, in whole pixels). Under Pip, over the room. */
+.pip-house-ball-shadow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  display: block;
+  background: rgb(0 0 0 / 0.25);
+  box-shadow:
+    calc(-1 * var(--px)) 0 0 rgb(0 0 0 / 0.13),
+    var(--px) 0 0 rgb(0 0 0 / 0.13);
+  pointer-events: none;
+  will-change: transform;
+}
+
+/* The rally's count, beside the ball: a number in her own lettering, and
+   nothing else. */
+.pip-house-tally {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 4;
+  pointer-events: none;
+  will-change: transform;
 }
 
 .pip-house-room[data-night] .pip-house-ball > .pip-sprite {

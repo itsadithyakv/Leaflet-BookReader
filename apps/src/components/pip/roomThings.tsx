@@ -4,6 +4,8 @@ import { useLibraryStore } from "../../store/libraryStore";
 import { sessionElapsedMs, useHabitStore } from "../../store/habitStore";
 import { annotationService } from "../../services/annotationService";
 import { getDateKey } from "../../services/habitService";
+import { fridgeIsBare } from "../../services/pipService";
+import { usePipWardrobeStore } from "../../store/pipWardrobeStore";
 import { HIGHLIGHT_COLORS } from "../../readers/highlightColors";
 import { AmbiencePanel, useAmbienceState } from "../../ambience";
 import { openHighlights, openInBook, useHighlightsStore } from "../highlights/highlightsStore";
@@ -302,6 +304,8 @@ export type RoomThings = {
   views: Record<string, RoomView>;
   /** What the fridge's door shows: the paper of each note pinned to it. */
   fridge: { data: { notes: string[] }; rev: string };
+  /** Whether the fridge is bare (no snack bought lately: Rust works it out, pip/fridge.rs); null where nothing says (an older Rust side). */
+  bare: boolean | null;
 };
 
 /** The room's things on this floor. `fridge`: the floor has one (the notes are read only then). */
@@ -316,6 +320,9 @@ export const useRoomThings = (fridge: boolean): RoomThings => {
   const radio = useAmbienceState();
   const album = useAlbumRoom();
   const diary = useDiaryStatus();
+  // Until when the snacks on record keep the fridge stocked; looked at again each minute, so it is seen to run out.
+  const larder = usePipWardrobeStore((state) => state.overview?.fridge);
+  const bare = larder ? fridgeIsBare(larder, now.getTime()) : null;
 
   return useMemo(() => {
     const views: Record<string, RoomView> = {};
@@ -406,8 +413,8 @@ export const useRoomThings = (fridge: boolean): RoomThings => {
     };
 
     const papers = notes.map(notePaper);
-    return { views, fridge: { data: { notes: papers }, rev: papers.join("") } };
+    return { views, fridge: { data: { notes: papers }, rev: papers.join("") }, bare };
     // `shelf`, `radio` and `album` are new objects only when what they say changes; `now` once a minute.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shelf, notes, now, days, goalMinutes, freeReads, running, radio, album, diary.status, diary.data.today]);
+  }, [shelf, notes, now, days, goalMinutes, freeReads, running, radio, album, diary.status, diary.data.today, bare]);
 };

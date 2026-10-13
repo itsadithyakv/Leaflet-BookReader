@@ -1,13 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
+  CUDDLE_AFTER_MS,
   HARD_LANDING,
+  HIGH_FIVE_MS,
   HOLD_REACH,
+  LEAF_ZONE,
   PIP_BOUNCE,
+  PLAYS,
   PLAY_EVERY_MS,
   POKE_CALM_MS,
   POKE_RUNGS,
   TOSS_MAX,
+  WHIRL_FADES_MS,
+  WHIRL_TURNS,
   caught,
+  fingerLifts,
   flyStep,
   holdMove,
   holdStart,
@@ -18,15 +25,26 @@ import {
   playCounts,
   pokeAgain,
   pokeReaction,
+  pressOf,
   releaseVelocity,
   rollStep,
+  rubOf,
   strokeMove,
   strokeStart,
   swingStep,
+  tapAgain,
+  whirlMove,
+  whirlStart,
+  whirlTurns,
+  whirled,
+  zoneOf,
   type Body,
   type Hold,
   type Poke,
-  type Touch
+  type Taps,
+  type Touch,
+  type Whirl,
+  type Zone
 } from "./play";
 
 describe("poking Pip", () => {
@@ -370,5 +388,191 @@ describe("what counts as play", () => {
     expect(playCounts(undefined, 0)).toBe(true);
     expect(playCounts(1000, 1000 + PLAY_EVERY_MS - 1)).toBe(false);
     expect(playCounts(1000, 1000 + PLAY_EVERY_MS)).toBe(true);
+  });
+
+  it("is still the five kinds Rust knows (pip/mod.rs): a new way of playing counts as one of them", () => {
+    expect([...PLAYS]).toEqual(["pet", "tickle", "fetch", "toss", "dance"]);
+  });
+});
+
+describe("two quick taps", () => {
+  /** Taps at these times, poked as the scene pokes: what each one was, and the pokes left at the end. */
+  const tap = (times: number[]) => {
+    let taps: Taps | null = null;
+    let poke: Poke | null = null;
+    const was: string[] = [];
+    for (const now of times) {
+      const next = tapAgain(taps, now, poke);
+      taps = next.taps;
+      if (next.highFive) {
+        poke = taps.before;
+        was.push("five");
+      } else {
+        poke = pokeAgain(poke, now);
+        was.push(`poke ${poke.count}`);
+      }
+    }
+    return { was, poke };
+  };
+
+  it("are a poke and then a high five, and leave the ladder where it was", () => {
+    const pair = tap([0, 200]);
+    expect(pair.was).toEqual(["poke 1", "five"]);
+    expect(pair.poke).toBeNull();
+    // After two pokes, a pair: the next poke is still the third.
+    expect(tap([0, 800, 1600, 1800, 2600]).was).toEqual(["poke 1", "poke 2", "poke 3", "five", "poke 3"]);
+  });
+
+  it("are two pokes when they are not quick", () => {
+    expect(tap([0, HIGH_FIVE_MS + 1]).was).toEqual(["poke 1", "poke 2"]);
+    expect(tap([0, HIGH_FIVE_MS]).was).toEqual(["poke 1", "five"]);
+  });
+
+  it("are one high five however many taps follow: someone hammering at her still climbs the ladder", () => {
+    const hammered = tap([0, 150, 300, 450, 600, 750, 900]);
+    expect(hammered.was).toEqual(["poke 1", "five", "poke 1", "poke 2", "poke 3", "poke 4", "poke 5"]);
+  });
+
+  it("start again after a pause", () => {
+    expect(tap([0, 200, 2000, 2200]).was).toEqual(["poke 1", "five", "poke 1", "five"]);
+  });
+});
+
+describe("a press held still", () => {
+  it("is a poke let go of at once, and a cuddle once it has stayed", () => {
+    expect(pressOf(0)).toBe("poke");
+    expect(pressOf(CUDDLE_AFTER_MS - 1)).toBe("poke");
+    expect(pressOf(CUDDLE_AFTER_MS)).toBe("cuddle");
+    expect(pressOf(4000)).toBe("cuddle");
+    // Longer than a pair of taps, shorter than a wait.
+    expect(CUDDLE_AFTER_MS).toBeGreaterThan(HIGH_FIVE_MS);
+    expect(CUDDLE_AFTER_MS).toBeLessThan(900);
+  });
+});
+
+describe("where she is rubbed", () => {
+  /** The pointer swept left and right across her `sweeps` times, over that part of her. */
+  const rub = (sweeps: number, period: number, over: (sweep: number) => Zone) => {
+    let stroke = strokeStart(0);
+    let touch: Touch = "none";
+    let zone: Zone = "body";
+    let now = 0;
+    for (let sweep = 0; sweep < sweeps; sweep += 1) {
+      for (let step = 1; step <= 5; step += 1) {
+        now += period / 5;
+        const x = sweep % 2 === 0 ? 4 * step : 20 - 4 * step;
+        ({ stroke, touch, zone } = strokeMove(stroke, x, now, 64, over(sweep)));
+      }
+    }
+    return rubOf(touch, zone);
+  };
+
+  it("is her leaf at the top of her frame, and the rest of her below", () => {
+    expect(zoneOf(100, 100, 96)).toBe("leaf");
+    expect(zoneOf(100 + 96 * LEAF_ZONE - 1, 100, 96)).toBe("leaf");
+    expect(zoneOf(100 + 96 * LEAF_ZONE, 100, 96)).toBe("body");
+    expect(zoneOf(195, 100, 96)).toBe("body");
+  });
+
+  it("is a tickle on her belly and a sneeze on her leaf", () => {
+    expect(rub(8, 110, () => "body")).toBe("tickle");
+    expect(rub(8, 110, () => "leaf")).toBe("sneeze");
+  });
+
+  it("is a stroke wherever it is slow: her leaf can be petted too", () => {
+    expect(rub(3, 350, () => "leaf")).toBe("pet");
+    expect(rub(3, 350, () => "body")).toBe("pet");
+  });
+
+  it("goes by where most of the rub was", () => {
+    expect(rub(8, 110, (sweep) => (sweep < 2 ? "leaf" : "body"))).toBe("tickle");
+    expect(rub(8, 110, (sweep) => (sweep < 2 ? "body" : "leaf"))).toBe("sneeze");
+  });
+
+  it("is on her body unless it is told otherwise", () => {
+    let stroke = strokeStart(0);
+    let zone: Zone = "leaf";
+    for (const [x, at] of [[20, 100], [0, 200], [20, 300], [0, 400]] as const) ({ stroke, zone } = strokeMove(stroke, x, at, 64));
+    expect(zone).toBe("body");
+    expect(stroke.leafy).toEqual([]);
+  });
+});
+
+describe("a finger on her", () => {
+  const from = { x: 200, y: 300 };
+
+  it("stays on her while it rubs from side to side", () => {
+    expect(fingerLifts(from, { x: 230, y: 304 }, 96)).toBe(false);
+    expect(fingerLifts(from, { x: 150, y: 296 }, 96)).toBe(false);
+  });
+
+  it("picks her up when it leaves her: up, down, or well off to one side", () => {
+    expect(fingerLifts(from, { x: 202, y: 260 }, 96)).toBe(true);
+    expect(fingerLifts(from, { x: 202, y: 340 }, 96)).toBe(true);
+    expect(fingerLifts(from, { x: 280, y: 300 }, 96)).toBe(true);
+  });
+
+  it("is given more room once it is rubbing her", () => {
+    const wide = { x: 280, y: 300 };
+    expect(fingerLifts(from, wide, 96, false)).toBe(true);
+    expect(fingerLifts(from, wide, 96, true)).toBe(false);
+    expect(fingerLifts(from, { x: 200, y: 240 }, 96, true)).toBe(true);
+  });
+});
+
+describe("whirled round", () => {
+  /** The hand taken round a circle `turns` times (negative: the other way), a step every 16 ms. */
+  const circle = (turns: number, radius = 20, start: Whirl = whirlStart(140, 60, 0), from = 0) => {
+    let whirl = start;
+    const steps = Math.ceil(Math.abs(turns) * 40);
+    let at = from;
+    for (let step = 1; step <= steps; step += 1) {
+      at += 16;
+      const angle = (step / 40) * Math.PI * 2 * Math.sign(turns);
+      whirl = whirlMove(whirl, 120 + Math.cos(angle) * radius, 60 + Math.sin(angle) * radius, at);
+    }
+    return { whirl, at };
+  };
+
+  it("counts the times round, either way", () => {
+    expect(whirlTurns(circle(1).whirl)).toBeGreaterThan(0.8);
+    expect(whirlTurns(circle(1).whirl)).toBeLessThan(1.1);
+    expect(whirlTurns(circle(3).whirl)).toBeGreaterThan(2.8);
+    expect(whirlTurns(circle(-3).whirl)).toBeGreaterThan(2.8);
+  });
+
+  it("leaves her giddy after a couple of times round, and not after one", () => {
+    const once = circle(1);
+    expect(whirled(once.whirl, once.at)).toBe(false);
+    const more = circle(WHIRL_TURNS + 0.5);
+    expect(whirled(more.whirl, more.at)).toBe(true);
+  });
+
+  it("is not a shake: to and fro adds up to nothing", () => {
+    let whirl = whirlStart(100, 60, 0);
+    for (let step = 1; step <= 200; step += 1) whirl = whirlMove(whirl, 100 + (step % 8 < 4 ? 30 : -30), 60 + (step % 3) - 1, step * 16);
+    expect(whirlTurns(whirl)).toBeLessThan(1);
+    expect(whirled(whirl, 200 * 16)).toBe(false);
+  });
+
+  it("is not a carry in a straight line, however far", () => {
+    let whirl = whirlStart(20, 60, 0);
+    for (let step = 1; step <= 100; step += 1) whirl = whirlMove(whirl, 20 + step * 2, 60 + Math.sin(step) * 0.5, step * 16);
+    expect(whirlTurns(whirl)).toBeLessThan(0.3);
+  });
+
+  it("ignores a trembling hand", () => {
+    let whirl = whirlStart(100, 60, 0);
+    for (let step = 1; step <= 300; step += 1) whirl = whirlMove(whirl, 100 + Math.cos(step) * 1.2, 60 + Math.sin(step) * 1.2, step * 16);
+    expect(whirl.turned).toBe(0);
+  });
+
+  it("wears off once the hand has stopped circling", () => {
+    const thrice = circle(3);
+    expect(whirled(thrice.whirl, thrice.at + WHIRL_FADES_MS)).toBe(true);
+    expect(whirled(thrice.whirl, thrice.at + WHIRL_FADES_MS + 1)).toBe(false);
+    // And circling again after a pause starts from nothing.
+    const again = circle(1, 20, thrice.whirl, thrice.at + WHIRL_FADES_MS + 500);
+    expect(whirlTurns(again.whirl)).toBeLessThan(1.1);
   });
 });

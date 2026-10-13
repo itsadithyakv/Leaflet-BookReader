@@ -50,7 +50,7 @@ export const PipDrawer = forwardRef<HTMLElement, PipDrawerProps>(function PipDra
           </h3>
           {note && <p className="mt-0.5 text-xs text-on-surface-variant">{note}</p>}
         </div>
-        <button type="button" className="tactile-button shrink-0 px-3 py-1.5 text-xs" onClick={onClose}>
+        <button type="button" className="pip-key pip-key-small shrink-0" onClick={onClose}>
           Close
         </button>
       </div>

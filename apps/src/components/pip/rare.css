@@ -1,0 +1,36 @@
+/* Rare things in the shop (components/pip/PipShop.tsx): the level a thing
+   opens at, as a small gold chip in the corner of its tile once the reader
+   has reached it. Before that the tile says "Level N" where a floor says
+   "3 more focus sessions first", and needs nothing from here. */
+.pip-shop-level {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #ffd23f;
+  color: #3b2a00;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1.5;
+  box-shadow: 0 0 0 2px #1f2a22;
+}
+
+/* In the detail pane it sits in the row with the price, not in a corner. */
+.pip-shop-level[data-inline] {
+  position: static;
+  box-shadow: none;
+}
+
+/* A rare tile's edge, a little gold: findable at a glance down the grid. */
+.pip-shop-card[data-rare] {
+  border-color: rgb(217 169 0 / 0.55);
+}
+
+.pip-shop-card[data-rare][aria-pressed="true"] {
+  border-color: rgb(var(--color-primary));
+}

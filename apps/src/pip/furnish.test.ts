@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  comesDown,
+  curtainLetGo,
+  curtainTug,
+  fallStart,
+  fallStep,
+  fallenReaction,
   CURTAIN_GLIDE,
   KINDS,
   TILT_MAX,
@@ -338,5 +344,84 @@ describe("where the things in a room are pressed", () => {
         expect(across > 0.01 && down > 0.01).toBe(false);
       }
     }
+  });
+});
+
+describe("curtains that are easy to draw", () => {
+  it("are drawn by a pull anywhere on the window, any way, and opened by one when they are drawn", () => {
+    // Open: a pull of a third of half the window is past half way already.
+    expect(curtainTug(0, 0, 20)).toBe(0);
+    expect(curtainTug(0, 7, 20)).toBeGreaterThan(0.5);
+    expect(curtainTug(0, 40, 20)).toBe(1);
+    // Drawn: the same pull opens them.
+    expect(curtainTug(1, 7, 20)).toBeLessThan(0.5);
+    expect(curtainTug(1, 40, 20)).toBe(0);
+    // It is how far the hand has gone that counts, not which way.
+    expect(curtainTug(0, 5, 20)).toBe(curtainTug(0, 5, 20));
+  });
+
+  it("go the rest of the way when let go, however short the pull", () => {
+    expect(curtainLetGo(0, 0.2, 0.2)).toBe(1);
+    expect(curtainLetGo(1, 0.8, 0.2)).toBe(0);
+    expect(curtainLetGo(0, 1, 1)).toBe(1);
+  });
+
+  it("take a tap with an unsteady hand for a tap", () => {
+    // Hardly moved: the other way, as a tap sends them.
+    expect(curtainLetGo(0, 0.04, 0.04)).toBe(1);
+    expect(curtainLetGo(1, 0.97, 0.03)).toBe(0);
+  });
+
+  it("stay as they were when pulled and put back", () => {
+    expect(curtainLetGo(0, 0.02, 0.6)).toBe(0);
+    expect(curtainLetGo(1, 0.99, 0.5)).toBe(1);
+  });
+});
+
+describe("a picture knocked once too often", () => {
+  const crooked = (tilt: number) => ({ ...hangingFrom({}), tilt });
+
+  it("comes down only when it is as crooked as it goes and is knocked the same way again", () => {
+    expect(comesDown(crooked(0), 1)).toBe(false);
+    expect(comesDown(crooked(TILT_MAX / 2), 1)).toBe(false);
+    expect(comesDown(crooked(TILT_MAX), 1)).toBe(true);
+    expect(comesDown(crooked(-TILT_MAX), -1)).toBe(true);
+    // Knocked from the other side it goes back to straight, as before.
+    expect(comesDown(crooked(TILT_MAX), -1)).toBe(false);
+    // Three knocks one way, from straight, are what it takes: two leave it hanging.
+    let picture = hangingFrom({});
+    let knocks = 0;
+    while (!comesDown(picture, 1) && knocks < 10) {
+      picture = nudge(picture, 1);
+      knocks += 1;
+    }
+    expect(knocks).toBeGreaterThanOrEqual(2);
+    expect(knocks).toBeLessThanOrEqual(4);
+  });
+
+  it("falls to the floor, bounces a little, and lies there", () => {
+    let fall = fallStart();
+    let bounced = false;
+    let lowest = 0;
+    for (let frame = 0; frame < 600 && !fall.landed; frame++) {
+      const before = fall;
+      fall = fallStep(fall, 1 / 60, 50);
+      if (before.vy > 0 && fall.vy < 0) bounced = true;
+      lowest = Math.max(lowest, fall.y);
+      // Never through the floor.
+      expect(fall.y).toBeLessThanOrEqual(50);
+    }
+    expect(fall).toEqual({ y: 50, vy: 0, landed: true });
+    expect(bounced).toBe(true);
+    expect(lowest).toBe(50);
+    // Once down it stays down.
+    expect(fallStep(fall, 1, 50)).toBe(fall);
+    // With no motion it is simply on the floor.
+    expect(fallStep(fallStart(), 0, 50, true)).toEqual({ y: 50, vy: 0, landed: true });
+  });
+
+  it("gives Pip a start", () => {
+    expect(fallenReaction().move).toBe("jumpscare");
+    expect(fallenReaction().line?.length ?? 0).toBeGreaterThan(5);
   });
 });

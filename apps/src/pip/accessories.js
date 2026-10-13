@@ -167,6 +167,61 @@ const head = [
         l.rect(h.x - w, h.y - 3, w, 1, c > 0 ? "#E0393E" : "#2F80E6").rect(h.x, h.y - 3, w, 1, c > 0 ? "#2F80E6" : "#E0393E");
       }, "#14161C");
     }
+  },
+  // ---- rare: these open at a reader's level (shop.js RARE_LEVELS), as do the
+  // starry cloak and, in the hand, the magnifying glass, the quill and the lantern ----
+  {
+    // A scholar's cap: the flat board seen from just below, and a gold tassel that swings.
+    id: "mortarboard", name: "Scholar's Cap", slot: "head", price: 640,
+    draw(g, A) {
+      const h = hatAt(A), k = kw(A), sway = Math.round(Math.sin(g.f * 0.3) * 0.7);
+      const w = (n) => Math.max(1, Math.round(n * k));
+      g.stamp((l) => {
+        l.rect(h.x - w(3), h.y, w(3) * 2 + 1, 2, "#1E2233").rect(h.x - w(3), h.y, 1, 2, "#333A52");
+        l.rect(h.x - w(1), h.y - 4, w(1) * 2 + 1, 1, "#3B4360");
+        l.rect(h.x - w(4), h.y - 3, w(4) * 2 + 1, 1, "#333A52");
+        l.rect(h.x - w(6), h.y - 2, w(6) * 2 + 1, 1, "#262B40");
+        l.rect(h.x - w(4), h.y - 1, w(4) * 2 + 1, 1, "#161927");
+        l.px(h.x, h.y - 3, "#FFD23F");
+      }, "#F4F1E8");
+      // The tassel: a cord from the button to the board's edge, then hanging.
+      const tx = h.x + w(5);
+      g.px(h.x + 1, h.y - 3, "#E0A800").px(h.x + 2, h.y - 3, "#E0A800").px(h.x + 3, h.y - 2, "#E0A800").px(h.x + 4, h.y - 2, "#E0A800");
+      g.stamp((l) => {
+        l.px(tx, h.y - 2, "#FFD23F").px(tx, h.y - 1, "#FFD23F").px(tx + sway, h.y, "#FFD23F");
+        l.rect(tx + sway, h.y + 1, 1, 2, "#FFD23F").px(tx + sway, h.y + 2, "#E0A800");
+      }, "#4A3100");
+    }
+  },
+  {
+    // A wizard's hat with the night sky on it: a bent point, a gold band, stars that twinkle.
+    id: "wizardhat", name: "Starry Wizard Hat", slot: "head", price: 840,
+    draw(g, A) {
+      const h = hatAt(A), k = kw(A), f = g.f;
+      const bw = Math.round(6 * k);
+      const rows = [];
+      g.stamp((l) => {
+        l.rect(h.x - bw, h.y + 1, bw * 2 + 1, 1, "#3B2E9C").rect(h.x - bw + 1, h.y + 2, bw * 2 - 1, 1, "#2A2075");
+        for (let j = 0; j < 10; j++) {
+          const wd = Math.max(1, Math.round((9 - j * 0.9) * (j < 3 ? k : 1)));
+          const bend = j > 5 ? Math.round((j - 5) * 0.75) : 0;
+          const x = h.x - Math.floor(wd / 2) + bend, y = h.y - j;
+          rows.push([x, y, wd]);
+          l.rect(x, y, wd, 1, "#4B3BB8");
+          l.px(x, y, "#6F60E6");
+          if (wd > 2) l.px(x + wd - 1, y, "#30267F");
+        }
+        // The point flops over.
+        const [tx, ty] = rows[9];
+        l.px(tx + 1, ty, "#4B3BB8").px(tx + 2, ty + 1, "#30267F");
+        l.rect(rows[0][0], h.y, rows[0][2], 1, "#FFD23F").px(rows[0][0] + rows[0][2] - 1, h.y, "#E0A800");
+      }, "#12082A");
+      const tw = (i) => (f + i * 7) % 24 < 5;
+      g.px(h.x - 1, h.y - 2, tw(0) ? "#FFFFFF" : "#FFD23F");
+      g.px(h.x + 2, h.y - 4, tw(1) ? "#FFFFFF" : "#FFE36B");
+      g.px(h.x, h.y - 6, tw(2) ? "#FFFFFF" : "#FFD23F");
+      if (tw(1)) g.px(h.x + 2, h.y - 5, "#FFE36B").px(h.x + 1, h.y - 4, "#FFE36B").px(h.x + 3, h.y - 4, "#FFE36B").px(h.x + 2, h.y - 3, "#FFE36B");
+    }
   }
 ];
 
@@ -430,6 +485,29 @@ const back = [
       }, "#3A2A6B");
       if (g.f % 16 < 4) g.px(Math.round(A.cx - A.rx - 5), Math.round(A.cy - 7), "#FFFFFF");
     }
+  },
+  {
+    // Rare. A cloak of night sky, wide enough to show it: a gold hem, stars that come and go.
+    id: "starcloak", name: "Starry Cloak", slot: "back", price: 960,
+    draw(g, A) {
+      const f = g.f;
+      behind(g, (l) => {
+        const top = Math.round(A.cy - A.ry * 0.45), bot = Math.round(A.bottom + 2);
+        for (let y = top; y <= bot; y++) {
+          const t = (y - top) / Math.max(1, bot - top);
+          const flap = Math.sin(f * 0.45 + y * 0.6) * t * 0.8;
+          const half = A.rx * 1.05 + t * 4.6, c = midX(A, y);
+          for (let x = Math.floor(c - half + flap); x <= Math.ceil(c + half + flap); x++) {
+            const fromEdge = Math.min(x - (c - half + flap), c + half + flap - x);
+            // Stars keep their place on the cloth, so they move as it does.
+            const u = Math.round(x - c - flap), star = rnd(u * 13 + (y - top) * 31);
+            const lit = star > 0.8 && fromEdge > 1.2 && y < bot;
+            const twinkle = (f + Math.round(star * 60)) % 20 < 4;
+            l.px(x, y, y === bot || fromEdge < 0.9 ? "#FFD23F" : lit ? (twinkle ? "#FFFFFF" : "#FFE36B") : (u + y) % 5 === 0 ? "#2B3A8C" : "#1B2460");
+          }
+        }
+      }, "#070A1E");
+    }
   }
 ];
 
@@ -554,6 +632,72 @@ const hand = [
         }
         l.ell(fx, fy, 2.2, 2.2, (nx, ny) => (nx * nx + ny * ny > 0.55 ? "#FFC53D" : "#7A4A22"));
       }, "#4A3100");
+    }
+  },
+  {
+    // Rare. A magnifying glass for the small print, held up: a brass rim, a glint that crosses the lens.
+    id: "magnifier", name: "Magnifying Glass", slot: "hand", price: 480,
+    draw(g, A, p) {
+      const h = handAt(A, p);
+      if (!h) return;
+      const x = Math.round(h.x), y = Math.round(h.y);
+      const cx = Math.max(4, x - 3), cy = Math.max(4, y - 8), glint = Math.floor(g.f / 2) % 16;
+      g.stamp((l) => l.line(x, y, cx + 2, cy + 3, "#8A5424"), "#2B1608");
+      g.stamp((l) => {
+        l.ell(cx, cy, 3.4, 3.4, (nx, ny) => {
+          if (nx * nx + ny * ny > 0.52) return nx + ny > 0.45 ? "#C68A2E" : nx + ny < -0.6 ? "#FFE98A" : "#FFD23F";
+          return nx + ny < -0.2 ? "#E6F6FF" : "#A9D8F5";
+        });
+        if (glint < 3) l.px(cx - 2 + glint, cy + glint - 1, "#FFFFFF");
+        else l.px(cx - 2, cy - 1, "#FFFFFF");
+      }, "#2B1608");
+    }
+  },
+  {
+    // Rare. A feather quill: a plume the colour of a cardinal, a pale shaft, an inked nib below the hand.
+    id: "quill", name: "Feather Quill", slot: "hand", price: 520,
+    draw(g, A, p) {
+      const h = handAt(A, p);
+      if (!h) return;
+      const x = Math.round(h.x), y = Math.round(h.y), sway = Math.round(Math.sin(g.f * 0.22) * 0.6);
+      g.stamp((l) => {
+        // The nib, under the hand.
+        l.px(x, y + 2, "#E8DFC8").px(x + 1, y + 3, "#2A2F3A");
+        // The plume, row by row up the shaft: how far it reaches on the outer side, and the inner.
+        const vane = [[0, 0], [0, 0], [1, 1], [2, 1], [3, 1], [2, 2], [3, 2], [3, 1], [2, 1], [2, 1], [1, 0]];
+        vane.forEach(([out, inn], j) => {
+          // It bends over towards the tip.
+          const sx = x - Math.round(j * 0.25 + (j > 7 ? (j - 7) * 0.6 : 0)) + (j > 8 ? sway : 0), sy = y - 1 - j;
+          for (let i = 1; i <= out; i++) l.px(sx - i, sy, i === out ? "#FF8A7A" : "#E0393E");
+          for (let i = 1; i <= inn; i++) l.px(sx + i, sy, "#A81E2A");
+          l.px(sx, sy, "#FFF1D6");
+        });
+      }, "#3A0A10");
+    }
+  },
+  {
+    // Rare. A lantern to read by, carried low: brass, a flame that flickers, a little light round it.
+    id: "lantern", name: "Reading Lantern", slot: "hand", price: 720,
+    draw(g, A, p) {
+      const h = handAt(A, p);
+      if (!h) return;
+      // Below the hand; beside it where the hand is nearly on the ground.
+      const x = Math.round(h.x) - 4, y = Math.min(Math.round(h.y) + 1, 24), f = g.f;
+      const flick = rnd(Math.floor(f / 2)) > 0.5;
+      // Its light, only where nothing is drawn yet: nearer, then farther and thinner.
+      for (let dy = -2; dy <= 8; dy++) for (let dx = -3; dx <= 7; dx++) {
+        const d = Math.hypot(dx - 2, dy - 3.5);
+        if (d < (flick ? 4.4 : 3.9) && !g.L.get(x + dx, y + dy) && (d < 3.2 || (dx + dy) % 2 === 0)) g.px(x + dx, y + dy, d < 3.2 ? "#FFE36B4D" : "#FFD23F33");
+      }
+      g.stamp((l) => {
+        // The ring it hangs by, the cap, the glass between two posts, the foot.
+        l.px(x + 2, y - 1, "#C68A2E").px(x + 1, y, "#C68A2E").px(x + 3, y, "#C68A2E");
+        l.rect(x + 1, y, 3, 1, "#C68A2E").rect(x, y + 1, 5, 1, "#8A5A14").px(x, y + 1, "#C68A2E").px(x + 1, y + 1, "#E0A84A");
+        l.rect(x, y + 2, 5, 3, "#FFE9A0").rect(x, y + 2, 1, 3, "#8A5A14").rect(x + 4, y + 2, 1, 3, "#6B4410");
+        l.px(x + 2, y + 2 + (flick ? 0 : 1), "#FFFFFF").px(x + 2, y + 3, flick ? "#FFF3B0" : "#FFFFFF").px(x + 2, y + 4, "#FF8A2A");
+        l.px(x + 1, y + 4, "#FFC53D").px(x + 3, y + 4, "#FFC53D");
+        l.rect(x, y + 5, 5, 1, "#8A5A14").px(x, y + 5, "#C68A2E").px(x + 1, y + 5, "#E0A84A");
+      }, "#2B1608");
     }
   }
 ];

@@ -9,7 +9,7 @@ import { Empty, Group, Status, Tile } from "../../components/pip/shopParts";
 import { fly, type Box, type Captured } from "../../components/pip/fx";
 import { UiIcon } from "../../components/UiIcon";
 import type { shopEntries } from "./shopEntries";
-import { PLACED, STARTER_DECOR, pickOne, type FinishPanel } from "./common";
+import { PLACED, onShelf, pickOne, type FinishPanel } from "./common";
 
 /**
  * Decorating's sheets: what goes in a spot (a pin in the room), and the
@@ -19,7 +19,7 @@ import { PLACED, STARTER_DECOR, pickOne, type FinishPanel } from "./common";
 
 // What Decorate offers is what Pip owns; the shop has the rest. It used to
 // sell the whole catalogue here too, book nods and all, that the shop keeps back.
-const onSale = (item: PipRoomItem) => FEATURES.fullPipHouse || (!item.nod && STARTER_DECOR.has(item.id));
+const onSale = (item: PipRoomItem) => FEATURES.fullPipHouse || (!item.nod && onShelf(item.id));
 
 const shopLink = (count: number, what: string, open: () => void) =>
   count > 0 ? (

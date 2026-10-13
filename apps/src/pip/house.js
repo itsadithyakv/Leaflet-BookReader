@@ -839,6 +839,50 @@ const NEW_ITEMS = [
       l.rect(1, 15, 3, 2, "#A9B5C4").rect(16, 15 - (f % 36 < 12 ? 3 : 0), 3, 2, "#A9B5C4");
       l.rect(5, 22, 4, 3, "#5A606E").rect(11, 22, 4, 3, "#5A606E");
     }, "#171D29");
+  }),
+
+  // ---------------------------------------------------------- toys (Pip plays with them: pip/furnish.ts, `VISITS`)
+  // A trampoline stands still until somebody is on it: the bouncing is Pip's, in the house scene.
+  it("trampoline", "Trampoline", "furniture", ["stand"], "any", 250, 30, 12, (g) => {
+    g.shadow(15, 14, 11);
+    g.stamp((l) => { l.rect(3, 6, 2, 5, "#5A606E").rect(25, 6, 2, 5, "#5A606E").rect(14, 8, 2, 3, "#4A505C"); }, "#14161C");
+    g.stamp((l) => {
+      l.ell(15, 5, 14, 3.8, (nx, ny) => (ny < -0.45 ? "#8FCBFF" : "#2F80E6"));
+      l.ell(15, 4.6, 11, 2.4, (nx, ny) => (nx + ny < -0.7 ? "#3E4558" : "#262B38"));
+    }, "#0E1A33");
+    for (let i = 0; i < 6; i++) g.px(5 + i * 4, i === 0 || i === 5 ? 6 : 7, "#DDE3EC");
+  }),
+  // A music box: the lid up, a dancer going round on top, a note drifting off it.
+  it("musicbox", "Music Box", "furniture", ["top", "stand"], "any", 200, 14, 14, (g, f) => {
+    g.stamp((l) => {
+      l.rect(2, 8, 10, 5, "#C8453B").rect(2, 8, 10, 1, "#E8695E").rect(2, 12, 10, 1, "#8E2A22");
+      l.rect(6, 10, 2, 2, "#FFD23F").px(12, 10, "#D9A441").px(13, 9 + ((f >> 2) % 2), "#D9A441");
+      l.rect(2, 3, 10, 2, "#8E2A22").rect(3, 4, 8, 1, "#FFF6DF");
+      l.rect(2, 5, 1, 3, "#8E2A22");
+    }, "#3A0E0A");
+    // The dancer: four poses to a turn, a whole pixel each.
+    const turn = (f >> 2) % 4;
+    g.stamp((l) => { l.px(7, 5, "#FFE0C4").rect(6 + (turn === 1 ? 1 : 0), 6, turn % 2 ? 1 : 3, 2, "#FF9CCB"); }, "#5A1E3A");
+    const t = (f % 36) / 36;
+    if (t < 0.8) g.stamp((l) => { const x = Math.round(9 + t * 3), y = Math.round(3 - t * 3); l.rect(x + 1, y, 1, 3, "#8E5CFF").px(x, y + 2, "#8E5CFF").px(x + 2, y, "#8E5CFF"); }, "#1A1A22");
+  }),
+  // A bubble machine: a drum with a wand through it, and bubbles going up one after another.
+  it("bubblemachine", "Bubble Machine", "furniture", ["stand", "top"], "any", 220, 16, 22, (g, f) => {
+    g.shadow(8, 7, 21);
+    g.stamp((l) => {
+      l.rect(2, 12, 12, 8, "#3FB8A8").rect(2, 12, 12, 1, "#8FE8D8").rect(2, 19, 12, 1, "#2A8A7E");
+      l.rect(4, 14, 4, 4, "#EAFBFF").px(5, 15, "#7FE0FF").px(6, 16, "#7FE0FF");
+      l.px(10, 15, (f >> 3) % 2 ? "#FFE36B" : "#D9A441").px(12, 15, "#FF6B6B");
+      l.rect(7, 9, 2, 3, "#C9D1DB");
+    }, "#0E3A36");
+    g.ring(8, 7, 2.6, "#C9D1DB");
+    // Three bubbles, a third of the way apart, each rising and drifting a little; gone before the top.
+    for (let i = 0; i < 3; i++) {
+      const t = ((f + i * 16) % 48) / 48;
+      if (t > 0.85) continue;
+      const x = Math.round(8 + Math.sin(t * 5 + i * 2) * (2 + i)), y = Math.round(6 - t * 7);
+      g.px(x, y - 1, "#D6F4FF").px(x - 1, y, "#D6F4FF").px(x + 1, y, "#D6F4FF").px(x, y + 1, "#8FD8F8");
+    }
   })
 ];
 
@@ -889,23 +933,32 @@ export const FIXTURES = [
       });
     }, c.edge);
   }),
-  it("minifridge-open", "Mini Fridge, open", "furniture", ["stand"], "bedroom", 0, 17, 20, (g, f) => {
+  // `data.bare`: nothing has been bought for it lately (Rust works that out: pip/fridge.rs), so the shelves are
+  // empty, but for the light. Without data it is stocked, as it was always drawn.
+  it("minifridge-open", "Mini Fridge, open", "furniture", ["stand"], "bedroom", 0, 17, 20, (g, f, data) => {
     const c = FRIDGE;
+    const bare = Boolean(data && data.bare);
     g.shadow(8, 8, 19);
     g.stamp((l) => {
       fridgeCabinet(l);
       // Inside, lit from the top: two glass shelves and a few things to stare at.
       l.rect(2, 3, 8, 14, "#FFF6D8").rect(2, 3, 8, 1, "#FFFFFF").rect(2, 16, 8, 1, "#F2E2B0");
       l.rect(2, 7, 8, 1, c.glass).rect(2, 12, 8, 1, c.glass);
-      // Milk and a jar of jam; cheese and an apple; carrots and a bottle of something green.
-      l.rect(3, 4, 2, 3, "#FFFFFF").rect(3, 4, 2, 1, "#5AB8FF").rect(6, 5, 2, 2, "#C8453B").rect(6, 4, 2, 1, "#FFD23F");
-      l.rect(3, 10, 3, 2, "#FFD23F").px(3, 10, "#FFF6D8").px(4, 11, "#E0A800").rect(7, 10, 2, 2, "#E0584E").px(8, 9, "#3FA35E");
-      l.rect(3, 15, 3, 1, "#FF8A2A").px(4, 14, "#3FA35E").px(5, 14, "#3FA35E").rect(8, 13, 1, 3, "#6FDCC7").px(8, 13, "#FFFFFF");
+      if (!bare) {
+        // Milk and a jar of jam; cheese and an apple; carrots and a bottle of something green.
+        l.rect(3, 4, 2, 3, "#FFFFFF").rect(3, 4, 2, 1, "#5AB8FF").rect(6, 5, 2, 2, "#C8453B").rect(6, 4, 2, 1, "#FFD23F");
+        l.rect(3, 10, 3, 2, "#FFD23F").px(3, 10, "#FFF6D8").px(4, 11, "#E0A800").rect(7, 10, 2, 2, "#E0584E").px(8, 9, "#3FA35E");
+        l.rect(3, 15, 3, 1, "#FF8A2A").px(4, 14, "#3FA35E").px(5, 14, "#3FA35E").rect(8, 13, 1, 3, "#6FDCC7").px(8, 13, "#FFFFFF");
+      } else {
+        // Bare: one crumb on the middle shelf, and where the jam jar stood.
+        l.px(4, 11, "#E0A800").px(7, 6, "#F2E2B0");
+      }
       // The door, swung wide: its pale inside, nearer (and so lower) at its free edge, with a rack and a bottle in it.
       const tops = [2, 2, 2, 3, 3];
       const ends = [17, 17, 18, 18, 18];
       for (let i = 0; i < 5; i++) l.rect(11 + i, tops[i], 1, ends[i] - tops[i] + 1, i === 4 ? c.body : i === 0 ? "#C9D6DE" : "#EAF3F8");
-      l.rect(12, 12, 3, 1, c.glass).rect(13, 9, 1, 3, "#FF9ACB").px(13, 9, "#FFFFFF");
+      l.rect(12, 12, 3, 1, c.glass);
+      if (!bare) l.rect(13, 9, 1, 3, "#FF9ACB").px(13, 9, "#FFFFFF");
     }, c.edge);
     // The bulb, with the faintest flicker.
     if (f % 48 !== 7) g.px(5, 3, "#FFE36B").px(6, 3, "#FFE36B");
@@ -1033,25 +1086,56 @@ function unlight(d) {
   }
 }
 
-/** Darken the room to night and let each light pool its glow around it. */
+const HEX = Array.from({ length: 256 }, (_, v) => v.toString(16).padStart(2, "0"));
+const byte = (v) => Math.max(0, Math.min(255, Math.round(v)));
+/** A colour by night with no light on it: the same wherever it is, so worked out once. */
+const darkOf = new Map();
+/** How many of those are kept: a room has a few hundred colours. */
+const DARK_KEPT = 8192;
+
+/** One pixel by night: `L` is the strongest light on it, `tr`, `tg`, `tb` the tint the lights add. */
+const nightColour = (c, L, tr, tg, tb) => {
+  const [r0, g0, b0, a] = rgba(c);
+  const m = 0.34 + 0.66 * Math.min(1, L * 1.25);
+  return "#" + HEX[byte(r0 * m * (0.78 + 0.22 * L) + tr)] + HEX[byte(g0 * m * (0.82 + 0.18 * L) + tg)] + HEX[byte(b0 * m + tb)] + (a < 255 ? HEX[a] : "");
+};
+
+/**
+ * Darken the room to night and let each light pool its glow around it.
+ *
+ * Every pixel of every frame goes through here from seven in the evening, and
+ * it was most of what a frame of the room cost by night (about 17 ms of 24):
+ * each pixel made three arrays and five strings. Most of a room is outside
+ * every light, where the answer depends on the colour alone, so that is kept
+ * by colour; the rest is worked out as before, without the arrays. The
+ * picture is the same to the pixel.
+ */
 function nightLight(g, glows) {
   const d = g.C.d, w = g.w;
   for (let i = 0; i < d.length; i++) {
     const c = d[i];
     if (!c) continue;
     const x = i % w, y = (i / w) | 0;
-    let L = 0, tr = 0, tg = 0, tb = 0;
+    let L = 0, tr = 0, tg = 0, tb = 0, lit = false;
     for (const [gx, gy, r, col] of glows) {
       const dist = Math.hypot(x - gx, (y - gy) * 1.1);
       if (dist >= r) continue;
+      lit = true;
       const k = (1 - dist / r) ** 1.4;
       if (k > L) L = k;
       tr += col[0] * k * 0.22; tg += col[1] * k * 0.22; tb += col[2] * k * 0.22;
     }
-    const [r0, g0, b0, a] = rgba(c);
-    const m = 0.34 + 0.66 * Math.min(1, L * 1.25);
-    const out = [r0 * m * (0.78 + 0.22 * L) + tr, g0 * m * (0.82 + 0.18 * L) + tg, b0 * m + tb].map((v) => Math.max(0, Math.min(255, Math.round(v))));
-    d[i] = "#" + out.map((v) => v.toString(16).padStart(2, "0")).join("") + (a < 255 ? a.toString(16).padStart(2, "0") : "");
+    if (lit) {
+      d[i] = nightColour(c, L, tr, tg, tb);
+      continue;
+    }
+    let dark = darkOf.get(c);
+    if (dark === undefined) {
+      if (darkOf.size >= DARK_KEPT) darkOf.clear();
+      dark = nightColour(c, 0, 0, 0, 0);
+      darkOf.set(c, dark);
+    }
+    d[i] = dark;
   }
 }
 

@@ -1,7 +1,22 @@
 /** Typed boundary for shop.js (plain JS so the catalogue generator can run it under Node). */
 import type { PipAccessory, PipRoomItem, PipRoomStyle, PipSkin, PipTreat } from "./index";
 
-export type ShopKind = "skin" | "accessory" | "room" | "style" | "treat" | "move" | "level" | "wallpaper" | "flooring" | "plant" | "plot";
+export type ShopKind =
+  | "skin"
+  | "accessory"
+  | "room"
+  | "style"
+  | "treat"
+  | "move"
+  | "level"
+  | "wallpaper"
+  | "flooring"
+  | "plant"
+  | "plot"
+  /** A sound for the radio (src/ambience), bought once. */
+  | "sound"
+  /** The streak freeze: bought each time, sold by its own button, never shown as a tile. */
+  | "freeze";
 
 export type ShopItem = {
   kind: ShopKind;
@@ -20,6 +35,8 @@ export type ShopItem = {
   requires?: string;
   /** Focus sessions done first. */
   sessions?: number;
+  /** The reader's level first (a rare thing): see RARE_LEVELS. */
+  level?: number;
   /** A plant: minutes of focus to ripen, and the seeds it gives. */
   water?: number;
   yield?: number;
@@ -56,6 +73,15 @@ export declare const PACING: { perWeek: number };
 export declare const PLANTS: Plant[];
 export declare const EXTRA_PLOTS: Array<{ id: string; name: string; price: number }>;
 export declare const FREE_PLOTS: number;
+/** The streak freeze, as the catalogue lists it (kind "freeze"). */
+export declare const STREAK_FREEZE: { id: string; name: string; price: number };
+/** The radio's sounds that are bought (kind "sound"); every other scene is free. */
+export declare const SOUNDS: Array<{ id: string; name: string; price: number }>;
+/** Rare things and the reader's level each opens at. */
+export declare const RARE_LEVELS: Array<{ kind: ShopKind; id: string; level: number }>;
+export declare function levelFor(kind: ShopKind, id: string): number | null;
+/** The seeds ever earned at which a level begins. */
+export declare function levelStart(level: number): number;
 export declare function accessoryPrice(item: PipAccessory): number;
 export declare function itemPrice(item: PipRoomItem): number;
 export declare function treatPrice(treat: PipTreat): number;

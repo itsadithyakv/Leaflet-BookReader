@@ -5,7 +5,7 @@ import { PipSprite } from "./PipSprite";
 
 /**
  * The logo, and Pip's home. There is one Pip: when it is home it sits here as
- * the logo (asleep if nothing has been read today); when it is out in the app
+ * the logo, holding still (asleep if nothing has been read today); when it is out in the app
  * this spot shows its outline. Selecting it calls Pip home or lets it out, and
  * a Pip thrown up into it goes home.
  */
@@ -35,7 +35,8 @@ export const PipHome = () => {
 
   return (
     <button type="button" className="leaflet-logo-pip pip-home" data-pip-home onClick={() => setHome(!inside)} aria-label={label} title={inside ? "Let Pip out" : "Call Pip home"}>
-      <PipSprite move={move} size={44} snap="nearest" playKey={move} />
+      {/* Held still: at home she is the logo, and a logo that fidgets beside the page being read pulls the eye. */}
+      <PipSprite move={move} size={44} snap="nearest" still />
     </button>
   );
 };

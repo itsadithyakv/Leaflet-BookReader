@@ -172,4 +172,4 @@ export type PipGameSprite = { w: number; h: number; box?: [number, number, numbe
 export type PipGamePose = PipMove & { box: [number, number, number, number] };
 export declare const GAME_SPRITES: Record<string, Record<string, unknown>>;
 export declare const GAME_POSES: PipGamePose[];
-export declare function renderGameSprite(sprite: PipGameSprite, frame?: number, opts?: { h?: number; top?: boolean; letter?: string; variant?: number }): ImageData;
+export declare function renderGameSprite(sprite: PipGameSprite, frame?: number, opts?: { h?: number; top?: boolean; letter?: string; variant?: number; rank?: number }): ImageData;

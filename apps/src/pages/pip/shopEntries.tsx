@@ -21,9 +21,11 @@ import { FEATURES } from "../../constants/features";
 import type { ShopCategory, ShopEntry } from "../../components/pip/PipShop";
 import { PixelImage } from "../../components/pip/PixelImage";
 import { tally, type Tally } from "../../components/pip/collection";
+import { RARE_GROUP, levelLock, rareLast, readerLevel as levelOf } from "../../components/pip/rare";
+import { usePipWardrobeStore } from "../../store/pipWardrobeStore";
 import { PipSprite } from "../../components/PipSprite";
 import { UiIcon, type UiIconName } from "../../components/UiIcon";
-import { STARTER_DECOR, moveName, priceOf } from "./common";
+import { moveName, onShelf, priceOf } from "./common";
 
 type ShopEntriesOptions = {
   owns: (kind: ShopKind, id: string) => boolean;
@@ -55,6 +57,12 @@ type ShopEntriesOptions = {
   placeFromShop: (itemId: string) => void;
   goToFloor: (next: HouseLevel) => void;
   give: (treat: PipTreat) => Promise<void>;
+  /**
+   * The reader's level, for the rare things that open at one. Left out, it
+   * is read from the overview in the store, which the page that calls this
+   * renders from (and 1 before that has loaded).
+   */
+  readerLevel?: number;
 };
 
 /**
@@ -87,8 +95,20 @@ export const shopEntries = ({
   startDecorating,
   placeFromShop,
   goToFloor,
-  give
+  give,
+  readerLevel = levelOf(usePipWardrobeStore.getState().overview)
 }: ShopEntriesOptions) => {
+  /**
+   * What a rare thing adds to its entry: the level it opens at, the lock
+   * until the reader is there (never on a thing already owned), and the
+   * heading it is listed under.
+   */
+  const rare = (kind: ShopKind, id: string, owned: boolean) => {
+    const gate = catalogueItem(kind, id)?.level ?? null;
+    if (!gate) return { level: null, lock: null, group: null };
+    return { level: gate, lock: owned ? null : levelLock(gate, readerLevel), group: RARE_GROUP };
+  };
+
   const pipArt = (move: string, skinId: string, worn: readonly string[]) => (size: number, hot: boolean) => (
     <PipSprite move={move} still={!hot} size={size} skin={skinId} outfit={worn} snap="nearest" />
   );
@@ -99,6 +119,7 @@ export const shopEntries = ({
   const skinEntry = (entry: PipSkin): ShopEntry => {
     const owned = owns("skin", entry.id);
     const earned = isEarnedOnly(entry);
+    const gate = rare("skin", entry.id, owned);
     return {
       kind: "skin",
       id: entry.id,
@@ -107,7 +128,10 @@ export const shopEntries = ({
       price: priceOf("skin", entry.id),
       owned,
       badge: entry.id === variant ? "Equipped" : "Owned",
-      locked: earned && !owned ? `Earned by reading: ${entry.unlock}` : null,
+      locked: earned && !owned ? `Earned by reading: ${entry.unlock}` : gate.lock?.text ?? null,
+      lockedHint: earned ? null : gate.lock?.hint ?? null,
+      level: gate.level,
+      group: gate.group,
       art: pipArt("idle", entry.id, outfit),
       preview: { variant: entry.id, move: "cheer" },
       use: owned ? (entry.id === variant ? null : { label: "Wear it", run: () => void change({ variant: entry.id }) }) : null
@@ -118,6 +142,7 @@ export const shopEntries = ({
     const owned = owns("accessory", entry.id);
     const worn = wearing(entry.id);
     const covered = slotCovered(skin, entry.slot);
+    const gate = rare("accessory", entry.id, owned);
     return {
       kind: "accessory",
       id: entry.id,
@@ -126,6 +151,10 @@ export const shopEntries = ({
       price: priceOf("accessory", entry.id),
       owned,
       badge: worn ? "Equipped" : "Owned",
+      locked: gate.lock?.text ?? null,
+      lockedHint: gate.lock?.hint ?? null,
+      level: gate.level,
+      group: gate.group,
       art: pipArt("idle", variant, withAccessory(entry.id)),
       preview: { outfit: withAccessory(entry.id), move: "cheer" },
       use: owned
@@ -233,7 +262,8 @@ export const shopEntries = ({
       kind: "treat",
       id: entry.id,
       name: entry.name,
-      blurb: food ? "A snack, bought as you give it. Cheers Pip up." : "A toy: bought once, played with forever.",
+      // (A snack also stocks her fridge: Rust works that out from the purchase, pip/fridge.rs.)
+      blurb: food ? "A snack, bought as you give it. Cheers Pip up, and stocks her fridge for a day." : "A toy: bought once, played with forever.",
       price,
       owned,
       consumable: food,
@@ -250,6 +280,7 @@ export const shopEntries = ({
 
   const moveEntry = (entry: { id: string; price: number }): ShopEntry => {
     const owned = owns("move", entry.id);
+    const gate = rare("move", entry.id, owned);
     return {
       kind: "move",
       id: entry.id,
@@ -258,6 +289,10 @@ export const shopEntries = ({
       price: entry.price === 0 ? 0 : priceOf("move", entry.id),
       owned,
       badge: entry.id === signature ? "Signature" : "Owned",
+      locked: gate.lock?.text ?? null,
+      lockedHint: gate.lock?.hint ?? null,
+      level: gate.level,
+      group: gate.group,
       art: pipArt(entry.id, variant, outfit),
       preview: { move: entry.id },
       use: owned && entry.id !== signature ? { label: "Make it my signature", run: () => void change({ signature: entry.id }) } : null
@@ -265,9 +300,11 @@ export const shopEntries = ({
   };
 
   const byPrice = (a: ShopEntry, b: ShopEntry) => Number(a.owned) - Number(b.owned) || a.price - b.price;
+  // Rare things after the rest, under their own heading, in the order they open.
+  const rareAfter = rareLast(byPrice);
   const allRoomItems = roomItems();
   const nodItems = allRoomItems.filter((item) => item.nod);
-  const decorForSale = allRoomItems.filter((item) => owns("room", item.id) || (!item.nod && (FEATURES.fullPipHouse || STARTER_DECOR.has(item.id)) && placeable(item)));
+  const decorForSale = allRoomItems.filter((item) => owns("room", item.id) || (!item.nod && (FEATURES.fullPipHouse || onShelf(item.id)) && placeable(item)));
   const paidFloors = levels.filter((entry) => !entry.garden && entry.price >= 0 && entry !== levels[0]);
   const moveList = [...FREE_SIGNATURES.map((id) => ({ id, price: 0 })), ...PREMIUM_MOVES];
   const walls = house ? wallpapers() : roomStyles();
@@ -293,8 +330,8 @@ export const shopEntries = ({
   };
 
   const shopCategories: ShopCategory[] = [
-    { id: "variants", label: "Variants", icon: "pip", tally: tallies.variants, entries: SKINS.filter((entry) => !isEarnedOnly(entry)).map(skinEntry).sort(byPrice) },
-    { id: "wardrobe", label: "Wardrobe", icon: "outfit", tally: tallies.wardrobe, entries: accessories().map(accessoryEntry).sort(byPrice) },
+    { id: "variants", label: "Variants", icon: "pip", tally: tallies.variants, entries: SKINS.filter((entry) => !isEarnedOnly(entry)).map(skinEntry).sort(rareAfter) },
+    { id: "wardrobe", label: "Wardrobe", icon: "outfit", tally: tallies.wardrobe, entries: accessories().map(accessoryEntry).sort(rareAfter) },
     {
       id: "decor",
       label: "Decor",
@@ -316,7 +353,7 @@ export const shopEntries = ({
         ]
       : []),
     { id: "treats", label: "Treats", icon: "treat", tally: tallies.treats, entries: treats().map(treatEntry).sort(byPrice) },
-    { id: "moves", label: "Moves", icon: "move", tally: tallies.moves, entries: PREMIUM_MOVES.map(moveEntry).sort(byPrice) },
+    { id: "moves", label: "Moves", icon: "move", tally: tallies.moves, entries: PREMIUM_MOVES.map(moveEntry).sort(rareAfter) },
     {
       id: "walls",
       label: house ? "Walls & flooring" : "Room styles",

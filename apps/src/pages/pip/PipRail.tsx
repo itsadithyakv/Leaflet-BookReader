@@ -1,6 +1,8 @@
 import type { RefObject } from "react";
+import { HandHeart, RotateCw, Tent } from "lucide-react";
 import type { ShopRequest } from "../../components/pip/PipShop";
 import { UiIcon } from "../../components/UiIcon";
+import { useCampWaits } from "../../components/pip/arcade/base/CampExtras";
 import type { Drawer, FinishPanel } from "./common";
 
 type PipRailProps = {
@@ -25,19 +27,21 @@ type PipRailProps = {
   stopDecorating: () => void;
   toggleFinish: (which: FinishPanel) => void;
   openArcade: () => void;
+  /** Out of the house, to Pip's camp in the woods (the Hollow). */
+  openCamp: () => void;
   /** The rail is showing the ways to play with Pip. */
   playing: boolean;
   startPlaying: () => void;
   stopPlaying: () => void;
   /** Plays with Pip as a hand would: every way has a key, so none needs a pointer. */
-  playWith: (how: "pet" | "tickle" | "ball" | "toss" | "dance" | "bed") => void;
+  playWith: (how: "pet" | "cuddle" | "tickle" | "highfive" | "spin" | "ball" | "toss" | "dance" | "bed") => void;
   /** Pip's snacks, to give her one. */
   openSnacks: () => void;
 };
 
 /**
  * The rail of tools under the house: the shop, Pip's things, the garden,
- * Play, Decorate (and the arcade, on its floor). Decorating turns it into the
+ * Play, Decorate, the way out to her camp (and the arcade, on its floor). Decorating turns it into the
  * mode's own rail: wallpaper, flooring and Done. Play does the same: a key
  * for each way of playing with Pip, which the hand can also do on Pip herself.
  */
@@ -58,13 +62,15 @@ export const PipRail = ({
   stopDecorating,
   toggleFinish,
   openArcade,
+  openCamp,
   playing,
   startPlaying,
   stopPlaying,
   playWith,
   openSnacks
-}: PipRailProps) =>
-  playing && !decorating ? (
+}: PipRailProps) => {
+  const campWaits = useCampWaits();
+  return playing && !decorating ? (
     <nav ref={railRef} className="pip-rail" aria-label="Playing with Pip">
       <div className="pip-rail-belt pip-rail-decorate pip-rail-playing">
         <p className="pip-rail-mode">
@@ -78,15 +84,27 @@ export const PipRail = ({
           <UiIcon name="heart" size={20} />
           <span className="pip-rail-label">Pet</span>
         </button>
-        <button type="button" className="pip-rail-key" onClick={() => playWith("tickle")} title="Tickle Pip">
+        <button type="button" className="pip-rail-key" onClick={() => playWith("cuddle")} title="Cuddle Pip (or press and hold her)">
+          <HandHeart size={20} aria-hidden />
+          <span className="pip-rail-label">Cuddle</span>
+        </button>
+        <button type="button" className="pip-rail-key" onClick={() => playWith("tickle")} title="Tickle Pip (rub her leaf instead and she sneezes)">
           <UiIcon name="sparkle" size={20} />
           <span className="pip-rail-label">Tickle</span>
+        </button>
+        <button type="button" className="pip-rail-key" onClick={() => playWith("highfive")} title="A high five (or tap her twice, quickly)">
+          <UiIcon name="hand" size={20} />
+          <span className="pip-rail-label">High 5</span>
+        </button>
+        <button type="button" className="pip-rail-key" onClick={() => playWith("spin")} title="Spin Pip giddy (or swing her round in your hand)">
+          <RotateCw size={20} aria-hidden />
+          <span className="pip-rail-label">Spin</span>
         </button>
         <button type="button" className="pip-rail-key" onClick={() => playWith("toss")} title="Toss Pip into the air">
           <UiIcon name="up" size={20} />
           <span className="pip-rail-label">Toss</span>
         </button>
-        <button type="button" className="pip-rail-key" onClick={() => playWith("ball")} title="Throw the ball for Pip to fetch">
+        <button type="button" className="pip-rail-key" onClick={() => playWith("ball")} title="Toss Pip the ball: she throws it back (or throw it by hand)">
           <UiIcon name="goal" size={20} />
           <span className="pip-rail-label">Ball</span>
         </button>
@@ -160,6 +178,12 @@ export const PipRail = ({
             <span className="pip-rail-label">Decorate</span>
           </button>
         )}
+        {/* The house is the burrow in the Hollow, so the way out is on every floor. */}
+        <button type="button" className="pip-rail-key" onClick={openCamp} title="Out of the burrow, to the Hollow">
+          <Tent size={22} aria-hidden />
+          <span className="pip-rail-label">Outside</span>
+          {campWaits && <span className="pip-hud-dot" aria-label="Something is waiting in the Hollow" />}
+        </button>
         {arcade && (
           <button type="button" className="pip-rail-key pip-rail-play" onClick={() => openArcade()}>
             <UiIcon name="game" size={22} />
@@ -169,3 +193,4 @@ export const PipRail = ({
       </div>
     </nav>
   );
+};
