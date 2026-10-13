@@ -1,7 +1,7 @@
 import { MongoClient } from "mongodb";
 
 /**
- * Four core collections, split by how they are read, plus four small
+ * Four core collections, split by how they are read, plus the small
  * community ones (see below).
  *
  * `accounts`  one per reader: email, password hash, optional display name.
@@ -21,6 +21,35 @@ import { MongoClient } from "mongodb";
  *             since only "this week" and "today" are ever asked of it.
  * `duels`     one per pair per week; expires after 90 days.
  * `events`    the inbox, materialised; expires after 60 days.
+ * `followRequests` one per (asker, asked) pair, while a reader who shares with
+ *             followers only has not answered. Accepted, it becomes a `follows`
+ *             row; declined or withdrawn, it is deleted.
+ * `libraries` one per reader who uploaded theirs: the books (title, author,
+ *             state, percent) as one array, since it is only ever replaced
+ *             whole and read whole.
+ * `posts`     one per "I finished this" a reader posted.
+ * `clubs`     one per book club: its members' ids in the order they joined.
+ * `gifts`     one per gift sent; a claimed one expires after 30 days.
+ * `raids`     one per raid on a friend's camp in the Hollow: who raided whom,
+ *             how many stars and when. Expires after 30 days.
+ *
+ * The public layer (optional, and moderated; see `standing.js`):
+ * `posts`     also holds reviews and quotes, some of them for everyone.
+ * `quoteTallies` how many quotes a reader has ever posted from one book.
+ * `reactions` one like or dislike per reader per post, thread or reply; the
+ *             totals are kept on the thing itself.
+ * `communities` one per book or series: its keeper and members' ids.
+ * `threads`, `replies` the discussion in a community.
+ * `reports`   one per reader per thing reported; a resolved one expires
+ *             after 180 days.
+ * `blocks`    one per (blocker, blocked) pair.
+ * `settings`  one document: whether public posting is switched on.
+ * `tallies`   one per reader, kind and UTC day: how many posts, quotes,
+ *             threads, replies, reports, communities started and members
+ *             removed that day. Expires a few days later.
+ * `suspensions` one per suspended reader's email address, as a keyed hash
+ *             (never the address), until the suspension ends: what makes a
+ *             suspension outlast deleting the account and signing up again.
  *
  *             (`accounts.passwordResets` keeps when the last year's resets were
  *             completed; three a year is the limit.)
@@ -39,28 +68,76 @@ const DAY_SECONDS = 24 * 60 * 60;
 let client = null;
 let database = null;
 
-export async function connect(uri, dbName) {
+/** A whole number from the environment within [least, most], or `fallback` when it is unset or not one. */
+function envWhole(env, name, fallback, least, most) {
+  const value = Number(env[name]);
+  return env[name] !== undefined && env[name] !== "" && Number.isInteger(value) && value >= least && value <= most ? value : fallback;
+}
+
+/**
+ * How this process talks to MongoDB: one client, one small pool.
+ *
+ * The whole server shares the one `MongoClient` made in `connect`; nothing
+ * opens another (no client per request, per route or per timer). So the
+ * connections it holds are the pool's, to the primary, plus the driver's own
+ * monitoring of each member of the cluster (two a member; an Atlas cluster
+ * has three): `MONGO_MAX_POOL` + 6 at the very most, 16 with the default,
+ * out of the few hundred a free-tier cluster allows in all.
+ *
+ * `MONGO_MAX_POOL` (10; 1 to 50) is how many operations can be at the
+ * database at once. A request makes a handful, one or two at a time, and
+ * each is a round trip to Atlas: at 50 ms a trip ten sockets carry 200
+ * operations a second, which is more than a free cluster lets through
+ * before it slows everyone down. So a larger pool buys nothing but more
+ * connections, and five (what this was) was the limit a little too early,
+ * with the cluster a slow trip away. No connection is opened until it is
+ * needed (`minPoolSize` 0), and an idle one is let go after
+ * `MONGO_MAX_IDLE_MS` (a minute), so a quiet server holds one or two.
+ *
+ * With every socket busy a request waits its turn, and for no longer than
+ * `MONGO_WAIT_QUEUE_MS` (2 s): then it is answered 503, "busy", instead of
+ * queueing without end behind a database that has stopped answering (the
+ * driver's default is to wait for ever). Two seconds, not more, because a
+ * request is several operations and waits for each: the inbox is nine. `MONGO_SERVER_SELECTION_MS` (10 s)
+ * is the same for a cluster that cannot be reached at all.
+ */
+export function clientOptions(env = process.env) {
+  return {
+    maxPoolSize: envWhole(env, "MONGO_MAX_POOL", 10, 1, 50),
+    minPoolSize: 0,
+    // Idle pooled sockets (and their TLS buffers) are released rather than
+    // held all night on a memory-capped VM.
+    maxIdleTimeMS: envWhole(env, "MONGO_MAX_IDLE_MS", 60_000, 1_000, 3_600_000),
+    waitQueueTimeoutMS: envWhole(env, "MONGO_WAIT_QUEUE_MS", 2_000, 100, 60_000),
+    // Fail a request after 10 s when Atlas is unreachable, instead of the
+    // driver's 30 s default holding the socket and the client waiting.
+    serverSelectionTimeoutMS: envWhole(env, "MONGO_SERVER_SELECTION_MS", 10_000, 1_000, 60_000),
+    appName: "leaflet-api",
+    retryWrites: true
+  };
+}
+
+export async function connect(uri, dbName, env = process.env) {
   if (database) {
     return database;
   }
-  client = new MongoClient(uri, {
-    // A free-tier cluster allows few connections; one small pool per instance
-    // keeps headroom for other clients.
-    maxPoolSize: 5,
-    // Idle pooled sockets (and their TLS buffers) are released rather than
-    // held all night on a memory-capped VM.
-    maxIdleTimeMS: 60_000,
-    // Fail a request after 10 s when Atlas is unreachable, instead of the
-    // driver's 30 s default holding the socket and the client waiting.
-    serverSelectionTimeoutMS: 10_000,
-    appName: "leaflet-api",
-    retryWrites: true
-  });
+  client = new MongoClient(uri, clientOptions(env));
   await client.connect();
   database = client.db(dbName);
   await ensureIndexes(database);
   return database;
 }
+
+/**
+ * A string to look a document up by, on a field whose index is partial:
+ * `handle` on a profile, `bookKey` on a post. Only real, string values are
+ * in such an index, and the database uses it only for a query that says the
+ * field is a string. Asked for `{ handle: "ada" }` alone it does not: it
+ * read every profile to find one (or, with a visibility beside it, walked
+ * the whole of the leaderboard's index), and every post to find a book's.
+ * `extra` is for a prefix search: `{ $regex: "^ad" }` in place of the `$eq`.
+ */
+export const asString = (value, extra = undefined) => ({ ...(extra ?? { $eq: value }), $type: "string" });
 
 async function dropIfPresent(collection, name, isCurrent) {
   const existing = await collection.indexes().catch(() => []);
@@ -125,6 +202,130 @@ async function ensureCommunityIndexes(db) {
   await events(db).createIndex({ userId: 1, createdAt: -1 }, { name: "inbox" });
   await events(db).createIndex({ actorId: 1 }, { name: "actor" });
   await events(db).createIndex({ createdAt: 1 }, { name: "expiry", expireAfterSeconds: 60 * DAY_SECONDS });
+
+  // One request per pair; the prefix also serves deleting a reader's own.
+  await followRequests(db).createIndex({ fromId: 1, toId: 1 }, { name: "pair", unique: true });
+  // "Who is asking to follow me", newest first, and deletion by the reader asked.
+  await followRequests(db).createIndex({ toId: 1, createdAt: -1 }, { name: "asked" });
+
+  // (`libraries` is only ever read by `_id`, the account's.)
+
+  // A reader's own posts, the feed (several readers' posts, newest first),
+  // today's count, and deletion by author.
+  await posts(db).createIndex({ userId: 1, createdAt: -1 }, { name: "author" });
+
+  // A join code names one club.
+  await clubs(db).createIndex({ code: 1 }, { name: "code", unique: true });
+  // "The clubs I am in".
+  await clubs(db).createIndex({ memberIds: 1 }, { name: "member" });
+
+  // The gifts waiting for a reader, oldest first, and deletion by receiver.
+  await gifts(db).createIndex({ toId: 1, claimedAt: 1, createdAt: 1 }, { name: "waiting" });
+  // "Sent today", and deletion by sender.
+  await gifts(db).createIndex({ fromId: 1, createdAt: -1 }, { name: "sent" });
+  // A claimed gift has been handed over and is never read again. (A TTL index
+  // skips documents whose field is not a date, so unclaimed ones stay.)
+  await gifts(db).createIndex({ claimedAt: 1 }, { name: "expiry", expireAfterSeconds: 30 * DAY_SECONDS });
+
+  // One raid per raider, per camp, per UTC day: the unique index is what
+  // refuses a second, however two requests race. The prefix serves "whom
+  // have I raided today" and deletion by raider.
+  await raids(db).createIndex({ fromId: 1, toId: 1, day: 1 }, { name: "once_a_day", unique: true });
+  // The raids a reader has not seen yet, oldest first, and deletion by the reader raided.
+  await raids(db).createIndex({ toId: 1, seenAt: 1, createdAt: 1 }, { name: "waiting" });
+  // Seen or not, a raid is of no use a month on.
+  await raids(db).createIndex({ createdAt: 1 }, { name: "expiry", expireAfterSeconds: 30 * DAY_SECONDS });
+
+  await ensurePublicIndexes(db);
+}
+
+/** The public layer: posts for everyone, reactions, book communities, reports, blocks. */
+async function ensurePublicIndexes(db) {
+  // Discover, newest first: "posts for everyone, not hidden".
+  await posts(db).createIndex({ audience: 1, createdAt: -1 }, { name: "discover_new" });
+  // Discover, best first: `score` is likes less dislikes, kept on the post so
+  // this order can be read from an index instead of worked out per request.
+  await posts(db).createIndex({ audience: 1, score: -1, createdAt: -1 }, { name: "discover_top" });
+  // A book's page: its posts, newest first.
+  await posts(db).createIndex({ bookKey: 1, createdAt: -1 }, { name: "book", partialFilterExpression: { bookKey: { $type: "string" } } });
+  // One review of a book per reader: a second replaces the first, and when
+  // two arrive at once this index is what makes one of them the second.
+  await posts(db).createIndex(
+    { userId: 1, bookRef: 1 },
+    { name: "one_review", unique: true, partialFilterExpression: { kind: "review" } }
+  );
+
+  // How many quotes a reader has ever posted from one book. Never counted
+  // down, so deleting quotes does not buy room for more.
+  await quoteTallies(db).createIndex({ userId: 1, bookRef: 1 }, { name: "reader_book", unique: true });
+
+  // One reaction per reader per thing; the prefix serves "my reactions to
+  // these" and deleting a thing's reactions with it.
+  await reactions(db).createIndex({ target: 1, targetId: 1, userId: 1 }, { name: "once", unique: true });
+  // Taking a reader's reactions back out when their account goes.
+  await reactions(db).createIndex({ userId: 1 }, { name: "reader" });
+
+  // One community per book or series: the unique index is what stops a
+  // second one, however two requests race.
+  await communities(db).createIndex({ kind: 1, key: 1 }, { name: "book", unique: true });
+  // "The communities I am in", and "the ones I keep".
+  await communities(db).createIndex({ memberIds: 1 }, { name: "member" });
+  await communities(db).createIndex({ keeperId: 1 }, { name: "keeper" });
+  // "The communities I am banned from": asked when an account or a profile
+  // is deleted, to take its reader off those lists. Without this that read
+  // every community there is, members and all.
+  await communities(db).createIndex({ bannedIds: 1 }, { name: "banned" });
+  // The directory: the listed communities, largest first, in the order they
+  // are shown (`_id` settles a tie), so a page of it is read straight off the
+  // index. The index before this one (`size`, on `memberCount` alone) could
+  // not give that order, so every community there is was read, members and
+  // all, and sorted, to show thirty.
+  await dropIfPresent(communities(db), "size", () => false);
+  await communities(db).createIndex(
+    { memberCount: -1, _id: 1 },
+    { name: "directory", partialFilterExpression: { listedAt: { $type: "date" } } }
+  );
+
+  // A community's threads: pinned first, then by latest activity.
+  await threads(db).createIndex({ communityId: 1, pinned: -1, lastActivityAt: -1 }, { name: "community" });
+  // "Threads I started today", and what an account leaves behind.
+  await threads(db).createIndex({ authorId: 1, createdAt: -1 }, { name: "author" });
+
+  // A thread's replies, oldest first.
+  await replies(db).createIndex({ threadId: 1, createdAt: 1 }, { name: "thread" });
+  await replies(db).createIndex({ authorId: 1, createdAt: -1 }, { name: "author" });
+  // Deleting a community takes its replies with it.
+  await replies(db).createIndex({ communityId: 1 }, { name: "community" });
+
+  // One report per reader per thing, so three reports are three readers.
+  await reports(db).createIndex({ target: 1, targetId: 1, reporterId: 1 }, { name: "once", unique: true });
+  // "Reports I made today", and deleting a reader's own.
+  await reports(db).createIndex({ reporterId: 1, createdAt: -1 }, { name: "reporter" });
+  // A report that has been dealt with is kept half a year, as a record of
+  // what was said about whom, and then goes. An open one has `null` here,
+  // which a TTL index leaves alone; the same index finds the open ones for
+  // the admin's queue.
+  await reports(db).createIndex({ resolvedAt: 1 }, { name: "expiry", expireAfterSeconds: 180 * DAY_SECONDS });
+
+  // One block per pair, each way round; the prefix serves "whom I blocked".
+  await blocks(db).createIndex({ blockerId: 1, blockedId: 1 }, { name: "pair", unique: true });
+  // "Who blocked me".
+  await blocks(db).createIndex({ blockedId: 1 }, { name: "blocked" });
+
+  // (`settings` is one document, read by `_id`.)
+
+  // One count per reader, per kind of thing, per UTC day: what the daily
+  // allowances are counted in. Counted up when something is made and never
+  // down when it is deleted, so deleting does not buy another.
+  await tallies(db).createIndex({ userId: 1, kind: 1, day: 1 }, { name: "reader_day", unique: true });
+  // A day's counts are of no use a few days on.
+  await tallies(db).createIndex({ expiresAt: 1 }, { name: "expiry", expireAfterSeconds: 0 });
+
+  // (`suspensions` is keyed by `_id`, a keyed hash of an email address.)
+  // Gone the moment the suspension it remembers is over.
+  await suspensions(db).createIndex({ suspendedUntil: 1 }, { name: "expiry", expireAfterSeconds: 0 });
+  // Lifting a suspension finds it by the account it was given to.
+  await suspensions(db).createIndex({ accountId: 1 }, { name: "account" });
 }
 
 export const accounts = (db) => db.collection("accounts");
@@ -135,6 +336,22 @@ export const follows = (db) => db.collection("follows");
 export const kudos = (db) => db.collection("kudos");
 export const duels = (db) => db.collection("duels");
 export const events = (db) => db.collection("events");
+export const followRequests = (db) => db.collection("followRequests");
+export const libraries = (db) => db.collection("libraries");
+export const posts = (db) => db.collection("posts");
+export const clubs = (db) => db.collection("clubs");
+export const gifts = (db) => db.collection("gifts");
+export const raids = (db) => db.collection("raids");
+export const quoteTallies = (db) => db.collection("quoteTallies");
+export const reactions = (db) => db.collection("reactions");
+export const communities = (db) => db.collection("communities");
+export const threads = (db) => db.collection("threads");
+export const replies = (db) => db.collection("replies");
+export const reports = (db) => db.collection("reports");
+export const blocks = (db) => db.collection("blocks");
+export const settings = (db) => db.collection("settings");
+export const tallies = (db) => db.collection("tallies");
+export const suspensions = (db) => db.collection("suspensions");
 export const resets = (db) => db.collection("resets");
 export const confirmations = (db) => db.collection("confirmations");
 

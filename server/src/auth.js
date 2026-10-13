@@ -43,6 +43,63 @@ function bearer(request) {
 }
 
 /**
+ * The sessions seen in the last minute, so that a request does not begin
+ * with a trip to the database to ask who is calling.
+ *
+ * Every request an open app makes carries the same token, and an app sends
+ * a handful every few minutes, most of them one or two queries long: asking
+ * about the session first was a third of everything the database was asked.
+ * Kept for a minute, a session is asked about once a minute at most.
+ *
+ * Ending a session ends it here in the same breath (`endSession`,
+ * `endSessionsOf`: signing out, a changed or reset password, a deleted
+ * account), so a token that was signed out never works again, not even for
+ * the minute. Like the rate limits this is one process's memory. Only a
+ * session removed from the database by hand is still let in until its minute
+ * is up.
+ */
+const SESSION_KEPT_MS = 60_000;
+const MAX_KEPT_SESSIONS = 5_000;
+const kept = new Map();
+
+/** The live session with this id as `{ userId, lastUsedAt, expiresAt }`, or null. */
+async function liveSession(db, sessionId, now) {
+  const seen = kept.get(sessionId);
+  if (seen && now - seen.at < SESSION_KEPT_MS && seen.session.expiresAt > now) {
+    return seen.session;
+  }
+  kept.delete(sessionId);
+  const session = await sessions(db).findOne({ _id: sessionId, expiresAt: { $gt: now } });
+  if (session) {
+    if (kept.size >= MAX_KEPT_SESSIONS) {
+      kept.clear();
+    }
+    kept.set(sessionId, { at: now.getTime(), session });
+  }
+  return session;
+}
+
+/** Ends one session (signing out): deleted, and forgotten here once it is. */
+export async function endSession(db, sessionId) {
+  await sessions(db).deleteOne({ _id: sessionId });
+  kept.delete(sessionId);
+}
+
+/**
+ * Ends every session of an account, but for `exceptId` when one is given
+ * (the device a password was just changed on). Resolves to how many ended.
+ */
+export async function endSessionsOf(db, userId, exceptId = null) {
+  const { deletedCount } = await sessions(db).deleteMany(exceptId ? { userId, _id: { $ne: exceptId } } : { userId });
+  for (const [sessionId, { session }] of kept) {
+    if (sessionId !== exceptId && session.userId.equals(userId)) {
+      kept.delete(sessionId);
+    }
+  }
+  return deletedCount;
+}
+
+/**
  * Rejects anything without a live session, and sets `request.account` to
  * `{ id, sessionId }`.
  *
@@ -57,15 +114,17 @@ export function requireAccount(db) {
     }
     const sessionId = hashToken(token);
     const now = new Date();
-    const session = await sessions(db).findOne({ _id: sessionId, expiresAt: { $gt: now } });
+    const session = await liveSession(db, sessionId, now);
     if (!session) {
       throw new HttpError(401, "Your session has ended. Sign in again.");
     }
     if (now - session.lastUsedAt > REFRESH_AFTER_MS) {
-      await sessions(db).updateOne(
-        { _id: sessionId },
-        { $set: { lastUsedAt: now, expiresAt: new Date(now.getTime() + SESSION_MS) } }
-      );
+      const expiresAt = new Date(now.getTime() + SESSION_MS);
+      // Noted on the kept copy first, so the requests that arrive beside
+      // this one do not each write the same thing.
+      session.lastUsedAt = now;
+      session.expiresAt = expiresAt;
+      await sessions(db).updateOne({ _id: sessionId }, { $set: { lastUsedAt: now, expiresAt } });
     }
     request.account = { id: session.userId, sessionId };
     next();
@@ -82,7 +141,7 @@ export function optionalAccount(db) {
     const token = bearer(request);
     if (TOKEN_PATTERN.test(token)) {
       const sessionId = hashToken(token);
-      const session = await sessions(db).findOne({ _id: sessionId, expiresAt: { $gt: new Date() } });
+      const session = await liveSession(db, sessionId, new Date());
       if (session) {
         request.account = { id: session.userId, sessionId };
       }

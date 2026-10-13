@@ -3,6 +3,8 @@ import { Binary } from "mongodb";
 import { requireAccount } from "../auth.js";
 import { states } from "../db.js";
 import { HttpError, asyncHandler, stateJson } from "../http.js";
+import { defaultLimits } from "../rateLimit.js";
+import { limiter } from "../readers.js";
 
 /**
  * The sync document, stored and returned verbatim.
@@ -17,14 +19,28 @@ const MAX_STATE_BYTES = 2 * 1024 * 1024;
 
 const encode = (doc) => (doc?.state ? Buffer.from(doc.state.buffer).toString("base64") : null);
 
-export function stateRoutes(db) {
+export function stateRoutes(db, limits = defaultLimits()) {
   const router = Router();
   const auth = requireAccount(db);
+  // The document is the largest thing this server is sent or sends (megabytes
+  // at its most), so how often one account may fetch it, and how often
+  // write it, is bounded: far above what an app syncing after every
+  // highlight does, and counted before a body is read.
+  const syncs = limiter(limits.state ?? defaultLimits().state);
+  const limitRead = (request, _response, next) => {
+    syncs(`read:${request.account.id}`);
+    next();
+  };
+  const limitWrite = (request, _response, next) => {
+    syncs(`write:${request.account.id}`);
+    next();
+  };
 
   // What the client holds now, and the version it must quote to write.
   router.get(
     "/state",
     auth,
+    limitRead,
     asyncHandler(async (request, response) => {
       const doc = await states(db).findOne({ _id: request.account.id });
       response.json({ version: doc?.version ?? 0, state: encode(doc) });
@@ -35,6 +51,7 @@ export function stateRoutes(db) {
   router.put(
     "/state",
     auth,
+    limitWrite,
     stateJson,
     asyncHandler(async (request, response) => {
       const { version, state } = request.body ?? {};
@@ -90,6 +107,7 @@ export function stateRoutes(db) {
   router.delete(
     "/state",
     auth,
+    limitWrite,
     asyncHandler(async (request, response) => {
       await states(db).deleteOne({ _id: request.account.id });
       response.json({ deleted: true });

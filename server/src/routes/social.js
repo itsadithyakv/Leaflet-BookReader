@@ -1,11 +1,16 @@
 import { Router } from "express";
+import { isDeepStrictEqual } from "node:util";
 import { requireAccount } from "../auth.js";
 import { accounts, profiles } from "../db.js";
 import { avatarView } from "../avatars.js";
 import { HttpError, asyncHandler, plainText, smallJson } from "../http.js";
+import { listOf, optionalText, record, requiredText, wholeNumber } from "../input.js";
 import { isPlausibleDayKey, isWeekKey, plausibleWeekKeys } from "../week.js";
-import { deleteCommunityData, recordDuelMinutes } from "../community.js";
+import { SOCIAL, acceptAllRequests, deleteCommunityData, deleteSharedData, leavePublic, recordDuelMinutes } from "../community.js";
+import { isAdmin, suspendedUntil } from "../standing.js";
 import { forgetBoards } from "../boardCache.js";
+import { defaultLimits } from "../rateLimit.js";
+import { limiter } from "../readers.js";
 
 /**
  * A reader's own profile: the numbers the board ranks on and the shelf they
@@ -14,7 +19,8 @@ import { forgetBoards } from "../boardCache.js";
  *
  * Nothing is shared unless a request says so. A profile starts `private`,
  * appears on no board and is readable by nobody, until a save carries
- * `visibility: "public"`. Since 1.2 the app sends that straight after sign-up
+ * `visibility: "public"` (everybody) or `"followers"` (the readers whose
+ * follow it accepts). Since 1.2 the app sends `public` straight after sign-up
  * unless the reader turned "Share my profile" off on the form; this server
  * never makes that choice itself, and never changes one already made, so
  * every profile that was private stays private.
@@ -37,9 +43,63 @@ const MAX_WEEK_MINUTES = 7 * 24 * 60;
 const MAX_STREAK = 36_500;
 const MAX_BOOKS_FINISHED = 100_000;
 
+const MAX_LEVEL = 999;
+const MAX_BADGES = 80;
+const BADGE_PATTERN = /^[a-z0-9][a-z0-9-]{0,39}$/;
+/** The arcade's games, and a best score no real game reaches. */
+const ARCADE_GAMES = ["dash", "catch", "flap"];
+const MAX_ARCADE_SCORE = 10_000_000;
+/**
+ * Pip's camp in the Hollow, the arcade's building game: its six buildings and
+ * the level each stops at, what a plot of the yard can hold, and counts no
+ * real camp reaches.
+ */
+const CAMP_BUILDINGS = ["burrow", "oak", "store", "fence", "tower", "hut"];
+const MAX_CAMP_LEVEL = 5;
+const CAMP_YARD_KINDS = ["workshop", "hive", "well", "stall"];
+const MAX_CAMP_YARD = 2;
+const MAX_CAMP_YARD_LEVEL = 3;
+const MAX_CAMP_COUNT = 100_000;
+/**
+ * How a camp is laid out: the seven things that stand somewhere, the clearing
+ * they stand in (the art's own pixels), the most pieces of fence and things
+ * set down a camp has, and how many kinds of thing there are.
+ */
+const CAMP_PLACED = ["burrow", "oak", "store", "tower", "hut", "yard0", "yard1"];
+const CAMP_SCENE_WIDTH = 240;
+const CAMP_SCENE_HEIGHT = 120;
+const MAX_CAMP_WALLS = 32;
+const MAX_CAMP_DECOR = 24;
+const CAMP_DECOR_KINDS = 18;
+/**
+ * What else stands about a camp: the most pieces of landscape (ponds, a
+ * knoll, trees) and defences it has, how many kinds of each there are, the
+ * posts a guardian can stand at, the rank one stops at, and the guardian
+ * with no signpost on the ground (the dragon keeps to the larder's roof).
+ */
+const MAX_CAMP_LAND = 30;
+const CAMP_LAND_KINDS = 10;
+const MAX_CAMP_WORKS = 12;
+const CAMP_WORK_KINDS = 12;
+const CAMP_GUARD_POSTS = 7;
+const MAX_CAMP_GUARD_RANK = 3;
+const CAMP_GUARD_NO_POST = 4;
+
 /** What a reader publishes about their reading, as opposed to who they are. */
-const FIGURES = ["weekKey", "weekMinutes", "streak", "booksFinished", "shelf", "readDay"];
-const NO_FIGURES = { weekKey: null, weekMinutes: 0, streak: 0, booksFinished: 0, shelf: [], readDay: null };
+const FIGURES = ["weekKey", "weekMinutes", "streak", "booksFinished", "shelf", "readDay", "reading", "level", "badges", "arcade", "camp"];
+const NO_FIGURES = {
+  weekKey: null,
+  weekMinutes: 0,
+  streak: 0,
+  booksFinished: 0,
+  shelf: [],
+  readDay: null,
+  reading: null,
+  level: null,
+  badges: [],
+  arcade: null,
+  camp: null
+};
 
 function ownView(profile) {
   return {
@@ -50,7 +110,228 @@ function ownView(profile) {
     weekMinutes: Math.round(profile?.weekMinutes ?? 0),
     streak: profile?.streak ?? 0,
     booksFinished: profile?.booksFinished ?? 0,
-    shelf: profile?.shelf ?? []
+    shelf: profile?.shelf ?? [],
+    reading: profile?.reading ?? null,
+    level: profile?.level ?? null,
+    badges: profile?.badges ?? [],
+    arcade: profile?.arcade ?? null,
+    camp: profile?.camp ?? null,
+    sharesLibrary: profile?.shareLibrary === true,
+    // Whether friends may raid the camp (`routes/raids.js`): yes, until the
+    // reader says no.
+    raidable: profile?.raidable !== false,
+    // Where the reader stands for posting in public (`standing.js`): whether
+    // they have accepted the guidelines, and until when an admin has
+    // suspended them, if one has. `isAdmin` only tells the app to show the
+    // admin's screens; every admin route checks for itself.
+    rulesAccepted: profile?.rulesAcceptedAt instanceof Date,
+    isAdmin: isAdmin(profile),
+    suspendedUntil: suspendedUntil(profile)?.toISOString() ?? null
+  };
+}
+
+/** The book a reader is in the middle of: `{ title, author, percent }`, or null for none. */
+function sanitiseReading(reading) {
+  if (reading === null) {
+    return null;
+  }
+  const book = record(reading, "reading");
+  return {
+    title: requiredText(book.title, 120, "reading.title"),
+    author: optionalText(book.author, 80, "reading.author"),
+    percent: wholeNumber(book.percent, 0, 100, "reading.percent")
+  };
+}
+
+/** Badge ids, each once, in the order sent. */
+function sanitiseBadges(badges) {
+  const seen = new Set();
+  for (const badge of listOf(badges, MAX_BADGES, "badges")) {
+    if (typeof badge !== "string" || !BADGE_PATTERN.test(badge)) {
+      throw new HttpError(400, "A badge is a short id: lower-case letters, numbers and hyphens.");
+    }
+    seen.add(badge);
+  }
+  return [...seen];
+}
+
+/** Best scores, one per game; a game left out is 0, and one not in the arcade is dropped. */
+function sanitiseArcade(arcade) {
+  const scores = record(arcade, "arcade");
+  return Object.fromEntries(
+    ARCADE_GAMES.map((game) => [
+      game,
+      scores[game] === undefined ? 0 : wholeNumber(scores[game], 0, MAX_ARCADE_SCORE, `arcade.${game}`)
+    ])
+  );
+}
+
+/** A whole number brought into [0, max], or null for anything that is not one. */
+function campWhole(value, max) {
+  return Number.isInteger(value) ? Math.min(max, Math.max(0, value)) : null;
+}
+
+/** A place in the clearing, `[x, y]`, brought inside the scene; null for what is not a pair of whole numbers. */
+function campSpot(spot) {
+  if (!Array.isArray(spot)) {
+    return null;
+  }
+  const x = campWhole(spot[0], CAMP_SCENE_WIDTH);
+  const y = campWhole(spot[1], CAMP_SCENE_HEIGHT);
+  return x === null || y === null ? null : [x, y];
+}
+
+/**
+ * One thing that stands somewhere, `{kind, x, y}`; null for what is not one,
+ * or is of a kind there is not (`kinds` of them, from 0).
+ */
+function campThing(thing, kinds) {
+  if (typeof thing !== "object" || thing === null || Array.isArray(thing)) {
+    return null;
+  }
+  const x = campWhole(thing.x, CAMP_SCENE_WIDTH);
+  const y = campWhole(thing.y, CAMP_SCENE_HEIGHT);
+  const known = Number.isInteger(thing.kind) && thing.kind >= 0 && thing.kind < kinds;
+  return known && x !== null && y !== null ? { kind: thing.kind, x, y } : null;
+}
+
+/**
+ * The rank of the guardian at each of the seven posts, 0 for a post with
+ * none: always all seven, a rank that cannot be read as 0 and one past the
+ * top as the top. Null for what is not a list, or has no guardian posted.
+ */
+function campGuards(guards) {
+  if (!Array.isArray(guards)) {
+    return null;
+  }
+  const ranks = Array.from({ length: CAMP_GUARD_POSTS }, (_, post) => campWhole(guards[post], MAX_CAMP_GUARD_RANK) ?? 0);
+  return ranks.some((rank) => rank > 0) ? ranks : null;
+}
+
+/**
+ * Where each guardian's signpost was carried to, one entry for each of the
+ * seven in their order: a place brought inside the scene, or null for a post
+ * that was never moved (the app stands it beside the guardian's building).
+ * Null as well for the dragon, who has no post, for a guardian not posted
+ * (`ranks`, as `campGuards` reads them), and for a place that cannot be
+ * read. Null for the lot if it is not a list of seven, or none of the seven
+ * is somewhere.
+ */
+function campPosts(posts, ranks) {
+  if (!Array.isArray(posts) || posts.length !== CAMP_GUARD_POSTS || ranks === null) {
+    return null;
+  }
+  const moved = Array.from({ length: CAMP_GUARD_POSTS }, (_, guard) =>
+    guard !== CAMP_GUARD_NO_POST && ranks[guard] > 0 ? campSpot(posts[guard]) : null
+  );
+  return moved.some((post) => post !== null) ? moved : null;
+}
+
+/** The first `max` entries of a list that `read` can make something of. */
+function campFirst(list, max, read) {
+  const kept = [];
+  for (const entry of list) {
+    if (kept.length >= max) {
+      break;
+    }
+    const made = read(entry);
+    if (made !== null) {
+      kept.push(made);
+    }
+  }
+  return kept;
+}
+
+/**
+ * How the camp is laid out, for a friend's card to draw it as it is: `spots`
+ * (where each building stands), `walls` (each piece of fence), `decor`
+ * (each thing set down), `land` (each piece of the landscape), `works`
+ * (each defence), `guards` (the rank of the guardian at each post) and
+ * `posts` (where each guardian's signpost was carried to).
+ *
+ * Unlike the rest of the camp this is never refused. An app from before the
+ * layout sends none of it, and a camp reads well enough without: a part that
+ * is not what it should be is left out, an entry that is not is dropped from
+ * its list, a place outside the clearing is brought to its edge, a second
+ * defence of a kind is dropped, and a list is cut to what a camp can hold.
+ * The app draws what is missing as a camp begins. `guards` is seven ranks or
+ * left out: a short list is filled out with 0, and one with no guardian
+ * posted says nothing. `posts` is seven places or nulls, or left out: a post
+ * that cannot be read is null (the app stands it beside its building), and
+ * a list that is not seven long, or with no post moved, says nothing.
+ */
+function campLayout(sent) {
+  const layout = {};
+  const { spots, walls, decor, land, works } = sent;
+  if (typeof spots === "object" && spots !== null && !Array.isArray(spots)) {
+    const placed = CAMP_PLACED.map((site) => [site, campSpot(spots[site])]).filter(([, spot]) => spot !== null);
+    if (placed.length > 0) {
+      layout.spots = Object.fromEntries(placed);
+    }
+  }
+  if (Array.isArray(walls)) {
+    layout.walls = campFirst(walls, MAX_CAMP_WALLS, campSpot);
+  }
+  if (Array.isArray(decor)) {
+    layout.decor = campFirst(decor, MAX_CAMP_DECOR, (thing) => campThing(thing, CAMP_DECOR_KINDS));
+  }
+  if (Array.isArray(land)) {
+    layout.land = campFirst(land, MAX_CAMP_LAND, (piece) => campThing(piece, CAMP_LAND_KINDS));
+  }
+  if (Array.isArray(works)) {
+    // One defence of a kind at most: a second of a kind is dropped, and the first kept.
+    const kinds = new Set();
+    layout.works = campFirst(works, MAX_CAMP_WORKS, (work) => {
+      const made = campThing(work, CAMP_WORK_KINDS);
+      if (made === null || kinds.has(made.kind)) {
+        return null;
+      }
+      kinds.add(made.kind);
+      return made;
+    });
+  }
+  const guards = campGuards(sent.guards);
+  if (guards !== null) {
+    layout.guards = guards;
+  }
+  const posts = campPosts(sent.posts, guards);
+  if (posts !== null) {
+    layout.posts = posts;
+  }
+  return layout;
+}
+
+/**
+ * Pip's camp as its reader shows it, or null for none: the level of each
+ * building, what stands on each plot of the yard, three counts (magpie
+ * camps beaten, banners, trophies), and where things stand (`campLayout`).
+ *
+ * Every part but the layout has to be there and in range, as the app sends
+ * it. What is kept is built from those parts alone, so anything else sent
+ * beside them (the books behind the trophies, say) is never stored.
+ */
+function sanitiseCamp(camp) {
+  if (camp === null) {
+    return null;
+  }
+  const sent = record(camp, "camp");
+  const levels = record(sent.levels, "camp.levels");
+  return {
+    levels: Object.fromEntries(
+      CAMP_BUILDINGS.map((name) => [name, wholeNumber(levels[name], 0, MAX_CAMP_LEVEL, `camp.levels.${name}`)])
+    ),
+    yard: listOf(sent.yard, MAX_CAMP_YARD, "camp.yard").map((plot) => {
+      const { kind, level } = record(plot, "A plot of camp.yard");
+      // An empty plot is `null`; a thing this server does not know is refused.
+      if (kind !== null && !CAMP_YARD_KINDS.includes(kind)) {
+        throw new HttpError(400, `A plot of camp.yard holds one of ${CAMP_YARD_KINDS.join(", ")}, or null.`);
+      }
+      return { kind, level: wholeNumber(level, 0, MAX_CAMP_YARD_LEVEL, "camp.yard level") };
+    }),
+    camps: wholeNumber(sent.camps, 0, MAX_CAMP_COUNT, "camp.camps"),
+    banners: wholeNumber(sent.banners, 0, MAX_CAMP_COUNT, "camp.banners"),
+    trophies: wholeNumber(sent.trophies, 0, MAX_CAMP_COUNT, "camp.trophies"),
+    ...campLayout(sent)
   };
 }
 
@@ -85,9 +366,24 @@ export function handleProblem(handle) {
   return null;
 }
 
-export function socialRoutes(db) {
+/**
+ * Whether a save says nothing the profile held does not say already: every
+ * part it names (but for when it was sent) is what is held. A part held as
+ * nothing and sent as `null` is the same.
+ */
+function saysNothingNew(held, update) {
+  return Object.entries(update).every(([name, value]) => name === "updatedAt" || isDeepStrictEqual(held[name] ?? null, value ?? null));
+}
+
+export function socialRoutes(db, limits = defaultLimits()) {
   const router = Router();
   const auth = requireAccount(db);
+  const saves = limiter(limits.profile ?? defaultLimits().profile);
+  /** Counted before the body is read, as an upload of the library is. */
+  const limitSave = (request, _response, next) => {
+    saves(`acct:${request.account.id}`);
+    next();
+  };
 
   router.get(
     "/profile/me",
@@ -106,6 +402,7 @@ export function socialRoutes(db) {
   router.put(
     "/profile/me",
     auth,
+    limitSave,
     smallJson,
     asyncHandler(async (request, response) => {
       const body = request.body ?? {};
@@ -126,7 +423,27 @@ export function socialRoutes(db) {
         update.handle = handle || null;
       }
       if (body.visibility !== undefined) {
-        update.visibility = body.visibility === "public" ? "public" : "private";
+        // Anything that is not one of the two ways of sharing is private: a
+        // value this server does not know must never share more than was meant.
+        update.visibility = SOCIAL.includes(body.visibility) ? body.visibility : "private";
+      }
+      if (body.shareLibrary !== undefined) {
+        // A switch, like visibility: whether the readers who follow this one
+        // may ask for their library (`routes/library.js`). Kept whatever the
+        // visibility, as the handle is, for when they share again.
+        if (typeof body.shareLibrary !== "boolean") {
+          throw new HttpError(400, "shareLibrary must be true or false.");
+        }
+        update.shareLibrary = body.shareLibrary;
+      }
+      if (body.raidable !== undefined) {
+        // Another switch: whether friends may raid this reader's camp in the
+        // Hollow (`routes/raids.js`). On until it is turned off, and kept
+        // whatever the visibility, as the library's is.
+        if (typeof body.raidable !== "boolean") {
+          throw new HttpError(400, "raidable must be true or false.");
+        }
+        update.raidable = body.raidable;
       }
       if (body.weekMinutes !== undefined) {
         // The client sums minutes over its own *local* ISO week, so it names
@@ -156,17 +473,47 @@ export function socialRoutes(db) {
         }
         update.readDay = body.readDay;
       }
+      // What a profile can say beyond the board's numbers: the book being
+      // read, and what the reader has earned in the app (level, badges, best
+      // arcade scores, Pip's camp). Self-reported like the rest, and bounded
+      // like it.
+      if (body.reading !== undefined) {
+        update.reading = sanitiseReading(body.reading);
+      }
+      if (body.level !== undefined) {
+        update.level = wholeNumber(body.level, 0, MAX_LEVEL, "level");
+      }
+      if (body.badges !== undefined) {
+        update.badges = sanitiseBadges(body.badges);
+      }
+      if (body.arcade !== undefined) {
+        update.arcade = sanitiseArcade(body.arcade);
+      }
+      if (body.camp !== undefined) {
+        update.camp = sanitiseCamp(body.camp);
+      }
       // The avatar belongs to the account (it is picked at signup, before any
       // profile exists); the profile keeps a copy for the board to show.
-      const account = await accounts(db).findOne({ _id: request.account.id }, { projection: { avatar: 1 } });
+      // With it, when the save does not choose who sees the profile, the
+      // profile as it is held: see "says nothing new" below.
+      const [account, held] = await Promise.all([
+        accounts(db).findOne({ _id: request.account.id }, { projection: { avatar: 1, suspendedUntil: 1 } }),
+        update.visibility === undefined ? profiles(db).findOne({ _id: request.account.id }) : null
+      ]);
       update.avatar = avatarView(account?.avatar);
+      // A suspension is kept on the account as well, so that deleting the
+      // profile and making another does not end it early.
+      if (account?.suspendedUntil instanceof Date && account.suspendedUntil > new Date()) {
+        update.suspendedUntil = account.suspendedUntil;
+      }
 
-      // The reading figures are kept for a public profile only: that is the
-      // privacy policy's promise, and the app's check (made on the device,
-      // from what it last heard) can be out of date: a profile made private
-      // on another computer, or a publish already on its way when the reader
-      // un-shared. So they are split off, and saved only where the profile is
-      // public once this request's own choice has been applied.
+      // The reading figures are kept for a shared profile only (public, or
+      // with followers): that is the privacy policy's promise, and the app's
+      // check (made on the device, from what it last heard) can be out of
+      // date: a profile made private on another computer, or a publish
+      // already on its way when the reader un-shared. So they are split off,
+      // and saved only where the profile is shared once this request's own
+      // choice has been applied.
       const figures = {};
       for (const name of FIGURES) {
         if (update[name] !== undefined) {
@@ -174,7 +521,52 @@ export function socialRoutes(db) {
           delete update[name];
         }
       }
-      if (update.visibility === "public") {
+      // An open app sends its figures every few minutes, and every minute
+      // while a book or the board is open, whether or not a page was read:
+      // most saves say what the last one said. Such a save writes nothing
+      // (it was four writes and two reads), and leaves the board and the
+      // visitors kept in memory alone, which every save used to throw away,
+      // so that with a few hundred apps open they were never kept at all.
+      // Only for a save that leaves visibility alone: one that names it is
+      // the reader's own doing, and is carried out in full every time.
+      if (held && saysNothingNew(held, { ...update, ...(SOCIAL.includes(held.visibility) ? figures : {}) })) {
+        response.json(ownView(held));
+        return;
+      }
+      // The save an app makes of its own accord, to a profile that is shared:
+      // everything it says goes in at once, and the profile comes back as it
+      // then stands, in the one operation. (It was three: the rest of the
+      // profile, then the figures if it was still shared, then a read of the
+      // result.) Still only if the profile is shared at that moment; one
+      // made private in between is no match, and is saved the long way below,
+      // without its figures.
+      if (held && SOCIAL.includes(held.visibility)) {
+        let saved;
+        try {
+          saved = await profiles(db).findOneAndUpdate(
+            { _id: request.account.id, visibility: { $in: SOCIAL } },
+            { $set: { ...update, ...figures } },
+            { returnDocument: "after" }
+          );
+        } catch (error) {
+          if (error?.code === 11000) {
+            throw new HttpError(409, "That handle is taken.");
+          }
+          throw error;
+        }
+        if (saved) {
+          forgetBoards();
+          // A duel keeps each side's minutes as the profile has them, so
+          // there is something to write there only when they have changed.
+          if (figures.weekKey !== undefined && (figures.weekKey !== held.weekKey || figures.weekMinutes !== held.weekMinutes)) {
+            await recordDuelMinutes(db, request.account.id, figures.weekKey, figures.weekMinutes);
+          }
+          response.json(ownView(saved));
+          return;
+        }
+      }
+      const shares = SOCIAL.includes(update.visibility);
+      if (shares) {
         Object.assign(update, figures);
       } else if (update.visibility === "private") {
         // Going private takes the figures off the server, not just off the board.
@@ -187,14 +579,14 @@ export function socialRoutes(db) {
       if (update.visibility === undefined) {
         operation.$setOnInsert = { visibility: "private" };
       }
-      let figuresSaved = update.visibility === "public";
+      let figuresSaved = shares;
       try {
         await profiles(db).updateOne({ _id: request.account.id }, operation, { upsert: true });
         if (update.visibility === undefined && Object.keys(figures).length > 0) {
           // No choice in this request: the figures go in only if the profile
-          // is public at the moment they are written.
+          // is shared at the moment they are written.
           const { matchedCount } = await profiles(db).updateOne(
-            { _id: request.account.id, visibility: "public" },
+            { _id: request.account.id, visibility: { $in: SOCIAL } },
             { $set: figures }
           );
           figuresSaved = matchedCount > 0;
@@ -205,6 +597,20 @@ export function socialRoutes(db) {
           throw new HttpError(409, "That handle is taken.");
         }
         throw error;
+      }
+      if (update.visibility === "private") {
+        // And with the figures go the library and the requests to follow
+        // that were waiting. Posts stay stored and hidden, like follows.
+        await deleteSharedData(db, request.account.id);
+        await leavePublic(db, request.account.id);
+      } else if (update.visibility === "followers") {
+        // No longer public: out of the book communities, which are. What
+        // they wrote there stays, unseen, for if they come back.
+        await leavePublic(db, request.account.id);
+      } else if (update.visibility === "public") {
+        // Anyone may follow a public reader, so nobody is left waiting to be
+        // let in: the requests made while it was followers-only become follows.
+        await acceptAllRequests(db, request.account.id);
       }
       // A duel keeps each side's latest minutes, so its result survives the
       // week turning over on the profile.
@@ -218,9 +624,11 @@ export function socialRoutes(db) {
   router.delete(
     "/profile/me",
     auth,
+    limitSave,
     asyncHandler(async (request, response) => {
-      // Leaving the community takes its traces too: follows both ways, kudos,
-      // duels and inbox events.
+      // Leaving the community takes its traces too: follows and requests both
+      // ways, kudos, duels, the library, posts, gifts, places in clubs and
+      // inbox events.
       await deleteCommunityData(db, request.account.id);
       await profiles(db).deleteOne({ _id: request.account.id });
       forgetBoards();

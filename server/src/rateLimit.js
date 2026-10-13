@@ -72,13 +72,30 @@ export function defaultLimits() {
     email: { limit: 10, windowMs: 15 * MINUTE },
     // New accounts from one address.
     signup: { limit: 5, windowMs: 60 * MINUTE },
-    // Community writes (follow, kudos, duels) per account.
+    // Community writes (follow, kudos, duels, posts, clubs, gifts, raids) per account.
     social: { limit: 60, windowMs: 15 * MINUTE },
+    // Likes and dislikes per account. One tap each, and a reader going down
+    // a feed taps often, so far more than other writes; still bounded, so a
+    // script cannot swing every score in sight.
+    react: { limit: 300, windowMs: 15 * MINUTE },
+    // Whole-library uploads per account. Each is up to a megabyte or two to
+    // parse and store, and the app sends one when the library changes.
+    library: { limit: 20, windowMs: 15 * MINUTE },
     // Handle searches per IP. Debounced typing is a handful per lookup.
     search: { limit: 120, windowMs: 5 * MINUTE },
     // "Which friends read today" per account. The app asks every ten minutes
     // while the Pip tab is open.
     visitors: { limit: 30, windowMs: 15 * MINUTE },
+    // Saves of a reader's own profile per account. An app sends one a minute
+    // at its most eager (a book or the board open), and one more after each
+    // sync, so this is some ten times what any app does: a ceiling on a
+    // client gone wrong, each of whose saves is a few writes.
+    profile: { limit: 300, windowMs: 15 * MINUTE },
+    // Fetches of the sync document per account, and writes of it, each
+    // counted on its own. An app syncs after a book is closed and after each
+    // highlight, a fetch and a write a time; the document is the largest
+    // thing sent either way (megabytes at its most).
+    state: { limit: 300, windowMs: 15 * MINUTE },
     // Password-reset emails: per address asking, and per email address asked
     // about. Each one is a real email from a Gmail with a daily quota.
     resetIp: { limit: 10, windowMs: 60 * MINUTE },

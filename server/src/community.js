@@ -1,15 +1,25 @@
 import { createHash } from "node:crypto";
-import { duels, events, follows, kudos, profiles } from "./db.js";
+import { blocks, clubs, duels, events, followRequests, follows, gifts, kudos, libraries, profiles, raids, reports } from "./db.js";
+import { forgetAuthor, forgetPosts, leaveCommunities } from "./discussion.js";
+import { removeReactionsBy } from "./reactions.js";
 import { isoWeekKey, weekIsOver } from "./week.js";
 import { avatarView } from "./avatars.js";
 
 /**
  * The community's data rules, shared by the routes and by account deletion.
  *
- * Everything a reader does here (follows, kudos, duels) is keyed by account id,
- * and everything shown is filtered to *public* profiles at read time. Going
- * private therefore hides a reader everywhere at once, without rewriting their
- * follows or duels; going public again brings them back.
+ * Everything a reader does here (follows, kudos, duels, posts, clubs, gifts)
+ * is keyed by account id, and everything shown is filtered at read time to
+ * the profiles the reader asking may see. Going private therefore hides a
+ * reader everywhere at once, without rewriting their follows or duels;
+ * sharing again brings them back.
+ *
+ * A profile is shared one of three ways:
+ *   `public`    with everybody: on the board, and open to anyone who asks.
+ *   `followers` with the readers whose follow it has accepted. Anyone else
+ *               can find it by handle and sees a locked card: who it is, and
+ *               nothing about their reading.
+ *   `private`   with nobody. It answers like a handle that does not exist.
  */
 
 export const DUEL_LIMIT = 3;
@@ -27,6 +37,15 @@ export const pairKey = (a, b) => [a.toHexString(), b.toHexString()].sort().join(
 export const minutesFor = (profile, weekKey) =>
   profile?.weekKey === weekKey ? Math.round(profile.weekMinutes ?? 0) : 0;
 
+/**
+ * The same as the profile holds them, unrounded: what a duel keeps of each
+ * side. A save of the reader's figures writes them to their duels exactly
+ * (`recordDuelMinutes`), so a duel made or accepted starts from them
+ * exactly too, and a save that says nothing new has nothing to write there.
+ * (They are rounded where they are shown: `duelView`.)
+ */
+export const exactMinutes = (profile, weekKey) => (profile?.weekKey === weekKey ? profile.weekMinutes ?? 0 : 0);
+
 /** The little a stranger may know about someone they cannot see in full. */
 export const personView = (profile) => ({
   handle: profile.handle,
@@ -37,8 +56,49 @@ export const personView = (profile) => ({
   avatar: avatarView(profile.avatar)
 });
 
+/**
+ * What `personView` shows of a profile, and what says it is shared: a
+ * projection for the lists that show readers by name and nothing else. A
+ * whole profile carries a shelf, badges and a camp (a few kilobytes), and a
+ * list of the readers followed is up to five hundred of them.
+ */
+export const PERSON_FIELDS = { handle: 1, displayName: 1, avatar: 1, visibility: 1 };
+
 export const isPublic = (profile) =>
   Boolean(profile && profile.visibility === "public" && typeof profile.handle === "string");
+
+/** The two ways of sharing a profile, for a query. */
+export const SOCIAL = ["public", "followers"];
+
+/**
+ * Shared with somebody: public, or with followers only. Such a reader can be
+ * found by handle and can follow, send kudos, duel, post, join a club and
+ * give, whichever of the two it is.
+ */
+export const isSocial = (profile) =>
+  Boolean(profile && SOCIAL.includes(profile.visibility) && typeof profile.handle === "string");
+
+/**
+ * Whether `viewerId` (null when signed out) may see the whole of a profile:
+ * anyone may see a public one; a followers-only one is seen by its owner and
+ * by the readers whose follow it has accepted (a row in `follows`: a request
+ * still waiting is not one); a private one by nobody.
+ */
+export async function canSee(db, viewerId, profile) {
+  if (!isSocial(profile)) {
+    return false;
+  }
+  if (profile.visibility === "public") {
+    return true;
+  }
+  if (!viewerId) {
+    return false;
+  }
+  if (profile._id.equals(viewerId)) {
+    return true;
+  }
+  return Boolean(await follows(db).findOne({ followerId: viewerId, followeeId: profile._id }, { projection: { _id: 1 } }));
+}
 
 /** How many friends a day's visitors are picked from. A handful: one visits at a time. */
 export const VISITOR_LIMIT = 5;
@@ -61,24 +121,102 @@ export function pickVisitors(rows, dayKey, readerId, limit = VISITOR_LIMIT) {
     .map((entry) => entry.row);
 }
 
-/** Public profiles by id, in one query. */
-export async function publicProfilesById(db, ids) {
+/**
+ * Shared profiles (public or followers-only) by id, in one query.
+ *
+ * For the places where the reader asking already stands in some relation to
+ * each of them that lets them be shown: a reader they follow (a follow of a
+ * followers-only reader exists only once accepted), the other side of a duel,
+ * whoever sent them kudos, a fellow member of a club.
+ *
+ * `fields`, when given, is a projection, for a caller that shows little or
+ * nothing of them (a profile carries a shelf, badges and a camp of up to
+ * 3 KB). It has to keep `handle` and `visibility`: those are what say a
+ * profile is shared.
+ */
+export async function socialProfilesById(db, ids, extra = {}, fields = undefined) {
   if (ids.length === 0) {
     return new Map();
   }
   const rows = await profiles(db)
-    .find({ _id: { $in: ids }, visibility: "public" })
+    .find({ _id: { $in: ids }, visibility: { $in: SOCIAL }, ...extra }, fields ? { projection: fields } : {})
     .toArray();
-  return new Map(rows.filter(isPublic).map((row) => [row._id.toHexString(), row]));
+  return new Map(rows.filter(isSocial).map((row) => [row._id.toHexString(), row]));
 }
 
-/** The duels either side of `userId` is in, for a range of weeks. */
-async function duelsOf(db, userId, weekFilter, extra = {}) {
-  const [asChallenger, asOpponent] = await Promise.all([
-    duels(db).find({ challengerId: userId, weekKey: weekFilter, ...extra }).toArray(),
-    duels(db).find({ opponentId: userId, weekKey: weekFilter, ...extra }).toArray()
-  ]);
-  return [...asChallenger, ...asOpponent];
+/**
+ * The ids `userId` follows (accepted follows only), at most FOLLOW_LIMIT.
+ * Read from the `pair` index alone: with no `_id` asked for, no follow is
+ * fetched.
+ */
+export async function followedIds(db, userId) {
+  const rows = await follows(db)
+    .find({ followerId: userId }, { projection: { _id: 0, followeeId: 1 }, limit: FOLLOW_LIMIT })
+    .toArray();
+  return rows.map((row) => row.followeeId);
+}
+
+/**
+ * Turns every request to follow `userId` into a follow: what making a
+ * followers-only profile public means, since anyone may follow a public one.
+ * Each asker is told, as for a request accepted by hand.
+ *
+ * An asker who already follows as many readers as they may is not added; their
+ * request is dropped with the rest, and they can follow in the usual way.
+ * Worked through a thousand at a time, so a reader with a great many waiting
+ * does not have them all held in memory at once.
+ */
+export async function acceptAllRequests(db, userId, now = new Date()) {
+  let accepted = 0;
+  for (;;) {
+    const waiting = await followRequests(db)
+      .find({ toId: userId }, { projection: { fromId: 1 }, limit: 1000 })
+      .toArray();
+    if (waiting.length === 0) {
+      return accepted;
+    }
+    const askers = waiting.map((row) => row.fromId);
+    const counts = await follows(db)
+      .aggregate([{ $match: { followerId: { $in: askers } } }, { $group: { _id: "$followerId", count: { $sum: 1 } } }])
+      .toArray();
+    const full = new Set(counts.filter((row) => row.count >= FOLLOW_LIMIT).map((row) => row._id.toHexString()));
+    const welcome = askers.filter((id) => !full.has(id.toHexString()));
+    if (welcome.length > 0) {
+      await follows(db).bulkWrite(
+        welcome.map((id) => ({
+          updateOne: {
+            filter: { followerId: id, followeeId: userId },
+            update: { $setOnInsert: { createdAt: now } },
+            upsert: true
+          }
+        })),
+        { ordered: false }
+      );
+      await events(db).bulkWrite(
+        welcome.map((id) => ({
+          updateOne: {
+            filter: { userId: id, type: "follow_accept", actorId: userId },
+            update: { $setOnInsert: { refId: null, createdAt: now } },
+            upsert: true
+          }
+        })),
+        { ordered: false }
+      );
+      accepted += welcome.length;
+    }
+    await followRequests(db).deleteMany({ _id: { $in: waiting.map((row) => row._id) } });
+  }
+}
+
+/**
+ * The duels either side of `userId` is in, for a range of weeks. One query
+ * for both sides (it was one each): each half of the `$or` is read off its
+ * own index, `challenger` and `opponent`.
+ */
+function duelsOf(db, userId, weekFilter, extra = {}) {
+  return duels(db)
+    .find({ $or: [{ challengerId: userId, weekKey: weekFilter, ...extra }, { opponentId: userId, weekKey: weekFilter, ...extra }] })
+    .toArray();
 }
 
 export async function countActiveDuels(db, userId, weekKey) {
@@ -136,7 +274,7 @@ export async function settleDuels(db, userId, now = new Date()) {
   }
 }
 
-/** A duel as one side sees it. `them` is null when the other side is not public. */
+/** A duel as one side sees it. `them` is null when the other side no longer shares a profile. */
 export function duelView(duel, meId, profilesById, now = new Date()) {
   const mine = duel.challengerId.equals(meId);
   const otherId = mine ? duel.opponentId : duel.challengerId;
@@ -156,6 +294,9 @@ export function duelView(duel, meId, profilesById, now = new Date()) {
     weekOver: weekIsOver(duel.weekKey, now),
     you: { ...(me ? personView(me) : { handle: null, displayName: null, pipSeed: null, avatar: null }), minutes: myMinutes },
     them: other ? { ...personView(other), minutes: theirMinutes } : null,
+    // What the two agreed to play for. Only a number to this server: it holds
+    // nobody's seeds, and the two apps settle it between themselves.
+    stake: duel.stake ?? 0,
     result
   };
 }
@@ -175,7 +316,10 @@ export async function visibleDuels(db, meId, now = new Date()) {
       : !weekIsOver(duel.weekKey, now)
   );
   const ids = shown.map((duel) => (duel.challengerId.equals(meId) ? duel.opponentId : duel.challengerId));
-  const byId = await publicProfilesById(db, [meId, ...ids]);
+  // A duel shows each side's name and the minutes kept on the duel itself,
+  // which both agreed to by challenging and accepting. So a followers-only
+  // reader's duels show like a public one's.
+  const byId = await socialProfilesById(db, [meId, ...ids], {}, PERSON_FIELDS);
   return shown
     .map((duel) => duelView(duel, meId, byId, now))
     .filter((view) => view.them)
@@ -183,18 +327,97 @@ export async function visibleDuels(db, meId, now = new Date()) {
 }
 
 /**
+ * Takes a reader out of clubs: the ones given, or every one they are in.
+ *
+ * The members are kept in the order they joined, so when the owner leaves the
+ * club goes to whoever has been in it longest, and a club nobody is left in is
+ * deleted. Each step is a single update, so two members leaving at the same
+ * moment cannot leave a club with an owner who is gone, or an empty one.
+ */
+export async function leaveClubs(db, userId, clubIds = null) {
+  const ids =
+    clubIds ??
+    (await clubs(db).find({ memberIds: userId }, { projection: { _id: 1 } }).toArray()).map((club) => club._id);
+  if (ids.length === 0) {
+    return 0;
+  }
+  const { modifiedCount } = await clubs(db).updateMany({ _id: { $in: ids }, memberIds: userId }, [
+    { $set: { memberIds: { $filter: { input: "$memberIds", cond: { $ne: ["$$this", userId] } } } } },
+    // Reads the list as the stage above left it: without the one leaving.
+    // (With nobody left there is no first member; that club is deleted below.)
+    { $set: { ownerId: { $cond: [{ $eq: ["$ownerId", userId] }, { $arrayElemAt: ["$memberIds", 0] }, "$ownerId"] } } }
+  ]);
+  await clubs(db).deleteMany({ _id: { $in: ids }, memberIds: { $size: 0 } });
+  return modifiedCount;
+}
+
+/**
+ * What leaves the server the moment a profile is made private, beyond the
+ * reading figures on the profile itself: the uploaded library, and the
+ * requests to follow it that were still waiting (there is nothing left to ask
+ * to see).
+ *
+ * Posts, club memberships and gifts are kept: like follows, they are hidden
+ * wherever their reader is, and come back if the reader shares again.
+ */
+export async function deleteSharedData(db, userId) {
+  await Promise.all([
+    libraries(db).deleteOne({ _id: userId }),
+    followRequests(db).deleteMany({ toId: userId })
+  ]);
+}
+
+/**
+ * What a reader gives up the moment their profile stops being public
+ * (private, or followers only): their places in book communities, the
+ * keeper's included, which is handed on. A community is a public room, and
+ * its members are counted and can post in it; a reader who is no longer
+ * public can do neither.
+ *
+ * Their threads, replies and posts for everyone are not deleted. They are
+ * left out of every answer while their author is not public (the routes
+ * check at read time) and are back if the profile is made public again.
+ */
+export async function leavePublic(db, userId) {
+  await leaveCommunities(db, userId);
+}
+
+/**
  * Removes everything the community holds about a reader, in both directions:
- * who they follow and who follows them, kudos sent and received, their duels,
- * their inbox and the events they caused in other inboxes.
+ * who they follow and who follows them, requests to follow sent and received,
+ * kudos sent and received, their duels, their library, their posts, gifts
+ * sent and received, raids made and suffered, their places in clubs, their
+ * inbox and the events they caused in other inboxes.
+ *
+ * And of the public layer: their likes and dislikes (each total counted back
+ * down), the reports they made and those about their profile, blocks in both
+ * directions, their replies, their threads and their places in communities
+ * (see `forgetAuthor` for the one thing that stays: a thread other readers
+ * replied to, with no author).
  */
 export async function deleteCommunityData(db, userId) {
   await Promise.all([
     follows(db).deleteMany({ followerId: userId }),
     follows(db).deleteMany({ followeeId: userId }),
+    followRequests(db).deleteMany({ fromId: userId }),
+    followRequests(db).deleteMany({ toId: userId }),
     kudos(db).deleteMany({ fromId: userId }),
     kudos(db).deleteMany({ toId: userId }),
     duels(db).deleteMany({ challengerId: userId }),
     duels(db).deleteMany({ opponentId: userId }),
+    libraries(db).deleteOne({ _id: userId }),
+    forgetPosts(db, userId),
+    forgetAuthor(db, userId),
+    removeReactionsBy(db, userId),
+    reports(db).deleteMany({ reporterId: userId }),
+    reports(db).deleteMany({ target: "profile", targetId: userId }),
+    blocks(db).deleteMany({ blockerId: userId }),
+    blocks(db).deleteMany({ blockedId: userId }),
+    gifts(db).deleteMany({ fromId: userId }),
+    gifts(db).deleteMany({ toId: userId }),
+    raids(db).deleteMany({ fromId: userId }),
+    raids(db).deleteMany({ toId: userId }),
+    leaveClubs(db, userId),
     events(db).deleteMany({ userId }),
     events(db).deleteMany({ actorId: userId })
   ]);

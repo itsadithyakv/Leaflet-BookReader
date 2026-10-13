@@ -15,7 +15,7 @@ Group=leaflet
 WorkingDirectory=/opt/leaflet-api
 EnvironmentFile=/etc/leaflet-api.env
 Environment=NODE_ENV=production
-Environment=NODE_OPTIONS=--max-old-space-size=160
+Environment=NODE_OPTIONS=--max-old-space-size=128
 ExecStart=/usr/bin/node src/index.js
 Restart=always
 RestartSec=5
@@ -28,7 +28,11 @@ RestartMaxDelaySec=60
 KillSignal=SIGTERM
 TimeoutStopSec=15
 
-# Memory: a hard ceiling so a leak cannot starve Caddy.
+# Memory: a hard ceiling so a leak cannot starve Caddy. The heap is held to
+# 128 MB of it (NODE_OPTIONS above; it was 160), which leaves room for what
+# is not heap: Node itself, the buffers of requests in flight, and two
+# password hashes at a time, 32 MB each. Under thirty times the load of 200
+# open apps the heap in use stayed under 80 MB (scripts/load.mjs).
 MemoryMax=256M
 MemorySwapMax=0
 

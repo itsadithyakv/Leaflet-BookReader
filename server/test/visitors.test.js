@@ -146,6 +146,20 @@ describe("visitors", () => {
     assert.deepEqual(handles(await visitors(admired)), []);
   });
 
+  test("among several readers followed, only the friends visit", async () => {
+    const me = await reader();
+    const near = await reader();
+    const dear = await reader();
+    const admired = await reader();
+    const admirer = await reader();
+    await befriend(me, near);
+    await befriend(me, dear);
+    // A follow one way, either way round, beside the friends: neither visits.
+    await follow(me, admired);
+    await follow(admirer, me);
+    assert.deepEqual(handles(await visitors(me)), [near.handle, dear.handle].sort());
+  });
+
   test("the reader asking is never their own visitor", async () => {
     const me = await reader();
     const friend = await reader();

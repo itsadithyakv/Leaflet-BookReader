@@ -69,7 +69,19 @@ try {
   console.error(error?.message ?? error);
   process.exit(1);
 }
-const app = createApp(db, { corsOrigin: process.env.CORS_ORIGIN || "", mailer });
+// How many requests are worked on at once before the next is told to come
+// back: the default unless this is a whole number from 1 to 10000.
+const atOnce = Number(process.env.MAX_REQUESTS_AT_ONCE);
+const app = createApp(db, {
+  ...(process.env.MAX_REQUESTS_AT_ONCE && Number.isInteger(atOnce) && atOnce >= 1 && atOnce <= 10_000 ? { atOnce } : {}),
+  corsOrigin: process.env.CORS_ORIGIN || "",
+  mailer,
+  // The one secret this server is given besides the database's. It keys the
+  // hash under which a suspended reader's address is remembered; no new value
+  // was added to the environment for that. Without it (no mailer set up) a
+  // constant in the source is used instead: see `standing.js`.
+  suspensionSalt: process.env.RESET_MAIL_SECRET || ""
+});
 
 const server = app.listen(port, host, () => {
   console.log(`Leaflet API on http://${host}:${port}`);

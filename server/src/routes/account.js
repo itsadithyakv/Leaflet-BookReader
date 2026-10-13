@@ -1,13 +1,14 @@
 import { Router } from "express";
 import { createHash, randomInt, timingSafeEqual } from "node:crypto";
-import { accounts, confirmations, profiles, resets, sessions, states } from "../db.js";
+import { accounts, confirmations, profiles, quoteTallies, resets, states, tallies } from "../db.js";
 import { HttpError, asyncHandler, plainText, smallJson } from "../http.js";
-import { accountView, createSession, loadAccount, requireAccount } from "../auth.js";
+import { accountView, createSession, endSession, endSessionsOf, loadAccount, requireAccount } from "../auth.js";
 import { burnPasswordCheck, hashPassword, passwordProblem, verifyPassword } from "../passwords.js";
 import { RateLimiter } from "../rateLimit.js";
 import { deleteCommunityData } from "../community.js";
 import { forgetBoards } from "../boardCache.js";
 import { isAvatar } from "../avatars.js";
+import { liveSuspension, rememberSuspension } from "../standing.js";
 
 /**
  * Email + password accounts.
@@ -123,7 +124,7 @@ function cleanAvatar(value) {
   return value;
 }
 
-export function accountRoutes(db, limits, mailer = null) {
+export function accountRoutes(db, limits, mailer = null, suspensionSalt = "") {
   const router = Router();
   const byIp = new RateLimiter(limits.ip);
   const byEmail = new RateLimiter(limits.email);
@@ -250,6 +251,12 @@ export function accountRoutes(db, limits, mailer = null) {
         passwordChangedAt: now,
         emailConfirmedAt: null
       };
+      // An address that was suspended is still suspended, new account or
+      // not (`standing.js`). The profile takes it from here when it is made.
+      const suspended = await liveSuspension(db, email, suspensionSalt);
+      if (suspended) {
+        doc.suspendedUntil = suspended;
+      }
       try {
         const { insertedId } = await accounts(db).insertOne(doc);
         doc._id = insertedId;
@@ -258,6 +265,10 @@ export function accountRoutes(db, limits, mailer = null) {
           throw new HttpError(409, "An account with that email already exists. Sign in instead.");
         }
         throw error;
+      }
+      if (suspended) {
+        // Now remembered against this account, so that lifting it finds it.
+        await rememberSuspension(db, doc._id, email, suspended, suspensionSalt);
       }
 
       const token = await createSession(db, doc._id);
@@ -412,7 +423,7 @@ export function accountRoutes(db, limits, mailer = null) {
           }
         }
       );
-      await sessions(db).deleteMany({ userId: account._id });
+      await endSessionsOf(db, account._id);
       const token = await createSession(db, account._id);
       response.json({ token, account: view(account) });
     })
@@ -422,7 +433,7 @@ export function accountRoutes(db, limits, mailer = null) {
     "/auth/logout",
     auth,
     asyncHandler(async (request, response) => {
-      await sessions(db).deleteOne({ _id: request.account.sessionId });
+      await endSession(db, request.account.sessionId);
       response.json({ ok: true });
     })
   );
@@ -457,10 +468,7 @@ export function accountRoutes(db, limits, mailer = null) {
         { _id: account._id },
         { $set: { passwordHash: await hashPassword(body.next), passwordChangedAt: new Date() } }
       );
-      const { deletedCount } = await sessions(db).deleteMany({
-        userId: account._id,
-        _id: { $ne: request.account.sessionId }
-      });
+      const deletedCount = await endSessionsOf(db, account._id, request.account.sessionId);
       response.json({ ok: true, otherSessionsRevoked: deletedCount });
     })
   );
@@ -614,6 +622,19 @@ export function accountRoutes(db, limits, mailer = null) {
         throw error;
       }
       await resets(db).deleteOne({ _id: account._id });
+      // A suspension goes with the reader to the new address, and one that
+      // was waiting at the new address comes to them: whichever ends later.
+      const now = new Date();
+      const mine = account.suspendedUntil instanceof Date && account.suspendedUntil > now ? account.suspendedUntil : null;
+      const waiting = await liveSuspension(db, email, suspensionSalt, now);
+      const until = mine && waiting ? (mine > waiting ? mine : waiting) : mine ?? waiting;
+      if (until) {
+        await Promise.all([
+          accounts(db).updateOne({ _id: account._id }, { $set: { suspendedUntil: until } }),
+          profiles(db).updateOne({ _id: account._id }, { $set: { suspendedUntil: until } }),
+          rememberSuspension(db, account._id, email, until, suspensionSalt)
+        ]);
+      }
       const code = await newConfirmation(account._id, email);
       response.json({ sent: true, minutes: CONFIRM_MINUTES, account: view({ ...account, email, emailConfirmedAt: null }) });
       mailConfirmation(email, code);
@@ -621,8 +642,10 @@ export function accountRoutes(db, limits, mailer = null) {
   );
 
   /**
-   * Deletes the account and everything keyed to it: community data (follows,
-   * kudos, duels, inbox events), profile, state blob, sessions, then the account. Sessions go before the account, so a failure
+   * Deletes the account and everything keyed to it: community data (follows
+   * and requests to follow, kudos, duels, the library, posts, gifts, places in
+   * clubs, inbox events; see `deleteCommunityData`), profile, state blob,
+   * sessions, then the account. Sessions go before the account, so a failure
    * part-way leaves an account the reader can still sign in to and delete.
    */
   router.delete(
@@ -638,7 +661,12 @@ export function accountRoutes(db, limits, mailer = null) {
       await profiles(db).deleteOne({ _id: account._id });
       forgetBoards();
       await states(db).deleteOne({ _id: account._id });
-      await sessions(db).deleteMany({ userId: account._id });
+      // The counts behind the daily and per-book allowances. Kept when only
+      // the profile is deleted (or that would refill them); the account
+      // going is the end of them.
+      await tallies(db).deleteMany({ userId: account._id });
+      await quoteTallies(db).deleteMany({ userId: account._id });
+      await endSessionsOf(db, account._id);
       await resets(db).deleteOne({ _id: account._id });
       await confirmations(db).deleteOne({ _id: account._id });
       await accounts(db).deleteOne({ _id: account._id });

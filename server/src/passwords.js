@@ -21,17 +21,52 @@ const SALT_BYTES = 16;
 export const PASSWORD_MIN = 8;
 export const PASSWORD_MAX = 200;
 
+/**
+ * How many hashes are worked out at once. Each holds its 32 MiB for as long
+ * as it takes, outside the heap, and Node would run four side by side: 128
+ * MiB on top of everything else, in a process allowed 256 (measured with
+ * `scripts/load.mjs`: two dozen sign-ins arriving together added 128 MB to
+ * the server, and add 64 now). Two at a time is 64 MiB at most. The rest wait their turn, which on a
+ * one-core machine costs nothing: it was never doing four at once anyway.
+ */
+const AT_ONCE = 2;
+let working = 0;
+const waiting = [];
+
+/** Runs `work` when fewer than `AT_ONCE` are running, in the order asked. */
+async function inTurn(work) {
+  if (working >= AT_ONCE) {
+    // Woken by the one that finishes, which hands its place straight on.
+    await new Promise((resolve) => waiting.push(resolve));
+  } else {
+    working += 1;
+  }
+  try {
+    return await work();
+  } finally {
+    const next = waiting.shift();
+    if (next) {
+      next();
+    } else {
+      working -= 1;
+    }
+  }
+}
+
 function derive(password, salt, n, r, p, keyLength) {
-  return new Promise((resolve, reject) => {
-    scrypt(
-      password.normalize("NFKC"),
-      salt,
-      keyLength,
-      // maxmem must cover 128 * N * r, with headroom.
-      { N: n, r, p, maxmem: 256 * n * r },
-      (error, key) => (error ? reject(error) : resolve(key))
-    );
-  });
+  return inTurn(
+    () =>
+      new Promise((resolve, reject) => {
+        scrypt(
+          password.normalize("NFKC"),
+          salt,
+          keyLength,
+          // maxmem must cover 128 * N * r, with headroom.
+          { N: n, r, p, maxmem: 256 * n * r },
+          (error, key) => (error ? reject(error) : resolve(key))
+        );
+      })
+  );
 }
 
 export async function hashPassword(password) {
