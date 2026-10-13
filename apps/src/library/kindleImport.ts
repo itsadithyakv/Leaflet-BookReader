@@ -12,7 +12,8 @@
  * Each clipping becomes a highlight whose id comes from its book, its place
  * and its words. The same file imported again makes the same ids, and what is
  * already there is left exactly as it is: nothing added, nothing changed (a
- * note or a colour edited since stays edited).
+ * note or a colour edited since stays edited). What the reader removed since
+ * is known by the same id, and stays removed.
  *
  * Pure but for `planKindleImport`, which is handed the way to ask what a book
  * already has.
@@ -195,46 +196,58 @@ export type KindlePlan = {
   books: number;
   /** Highlights of the file the library has already (it was imported before). */
   had: number;
+  /** Highlights of the file that were here and the reader removed: not brought back. */
+  removed: number;
   missed: KindleMiss[];
 };
 
 /**
  * What importing a file would do. `idsIn` answers which annotations a book
- * has now; what is there already is not in `fresh`.
+ * has now; what is there already is not in `fresh`. `removedIn` answers which
+ * the reader removed from it: a clipping's id is the same every time, so one
+ * that was imported and then removed is known by it, and is left out too (it
+ * would otherwise come back with every import of the same file). One that is
+ * both there and said to be removed is there. A clipping never imported is
+ * in neither, and comes in.
  */
 export const planKindleImport = async (
   file: string,
   library: Book[],
   idsIn: (bookId: string) => Promise<Iterable<string>>,
+  removedIn: (bookId: string) => Promise<Iterable<string>> = async () => [],
   now = Date.now()
 ): Promise<KindlePlan> => {
   const { matched, missed } = matchClippings(parseClippings(file), library);
   const fresh: AnnotationInput[] = [];
   let books = 0;
   let had = 0;
+  let removed = 0;
   for (const { book, clippings } of matched) {
     const all = kindleAnnotations(book.id, clippings, now);
     const there = new Set(await idsIn(book.id));
-    const added = all.filter((item) => !there.has(item.id));
+    const gone = new Set(await removedIn(book.id));
+    const added = all.filter((item) => !there.has(item.id) && !gone.has(item.id));
+    const kept = all.filter((item) => there.has(item.id)).length;
     fresh.push(...added);
     books += added.length > 0 ? 1 : 0;
-    had += all.length - added.length;
+    had += kept;
+    removed += all.length - added.length - kept;
   }
-  return { fresh, books, had, missed };
+  return { fresh, books, had, removed, missed };
 };
 
 const count = (number: number, one: string) => `${number} ${one}${number === 1 ? "" : "s"}`;
 
 /**
  * The plan's first words, for the reader to say yes or no to: "128 highlights
- * for 6 books". What is already here and what was not found are counted
- * beside it, so with nothing to add it only says so.
+ * for 6 books". What is already here, what was removed here and what was not
+ * found are counted beside it, so with nothing to add it only says so.
  */
 export const planLine = (plan: KindlePlan): string => {
   if (plan.fresh.length > 0) {
     return `${count(plan.fresh.length, "highlight")} for ${count(plan.books, "book")}`;
   }
-  if (plan.had > 0) {
+  if (plan.had > 0 || plan.removed > 0) {
     return "Nothing new";
   }
   return plan.missed.length > 0 ? "Nothing to import" : "No highlights in that file";

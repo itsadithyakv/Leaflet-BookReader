@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Book } from "@shared/models/book";
-import { authorKey, buildSeries, seriesFromTitle, seriesKey, titleKeys } from "./series";
+import { authorKey, buildSeries, seriesFromTitle, seriesKey, titleKeys, titleToLookUp } from "./series";
 import { buildShelves, findDuplicates } from "./shelves";
 
 let nextId = 1;
@@ -29,6 +29,55 @@ const HARRY_POTTER = [
 ];
 
 describe("buildSeries", () => {
+  it("stands The Hobbit with The Lord of the Rings, as the optional book before it", () => {
+    // The reported case: the three numbered in their titles, and The Hobbit beside them in the library.
+    const hobbit = book("The Hobbit", "J.R.R. Tolkien");
+    const books = [
+      book("The Lord of the Rings 2 - Dua Menara", "J.R.R. Tolkien"),
+      hobbit,
+      book("The Lord of the Rings 1 - Sembilan Pembawa Cincin", "J.R.R. Tolkien"),
+      book("The Lord of the Rings 3 - Kembalinya Sang Raja", "J.R.R. Tolkien")
+    ];
+    const { groups, byBook } = buildSeries(books);
+    expect(groups).toHaveLength(1);
+    const [rings] = groups;
+    expect(rings.name).toBe("The Lord of the Rings");
+    expect(rings.members.map((member) => [member.index, member.extra ?? null])).toEqual([
+      [0, "Prequel"],
+      [1, null],
+      [2, null],
+      [3, null]
+    ]);
+    expect(rings.members[0].book.id).toBe(hobbit.id);
+    // The count is still of the three.
+    expect(rings.ownedCount).toBe(3);
+    // A catalogue is asked by the titles it knows, not the translated ones on the files.
+    expect(rings.members.map((member) => titleToLookUp(rings, member))).toEqual([
+      "The Hobbit",
+      "The Fellowship of the Ring",
+      "The Two Towers",
+      "The Return of the King"
+    ]);
+    expect(byBook.get(hobbit.id)?.name).toBe("The Lord of the Rings");
+  });
+
+  it("joins a book that says nothing to the series its sequel names", () => {
+    // The reported case: only the second book's file says "The Bharat Trilogy".
+    const first = book("India that is Bharat: Coloniality, Civilisation, Constitution", "J Sai Deepak");
+    const second = book("India, Bharat and Pakistan: The Constitutional Journey of a Sandwiched Civilisation", "J. Sai Deepak", {
+      series: "The Bharat Trilogy",
+      seriesIndex: 2
+    });
+    const { groups, byBook } = buildSeries([second, first, book("Ambedkar: A Life", "Shashi Tharoor")]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].name).toBe("The Bharat Trilogy");
+    expect(groups[0].members.map((member) => [member.book.id, member.index])).toEqual([
+      [first.id, 1],
+      [second.id, 2]
+    ]);
+    expect(byBook.get(first.id)?.index).toBe(1);
+  });
+
   it("makes all seven Harry Potter books one series, in order, from titles alone", () => {
     // Shuffled, with the author written three ways and one UK title.
     const books = [

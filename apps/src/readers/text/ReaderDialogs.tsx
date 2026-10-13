@@ -13,7 +13,7 @@ import type { ReaderScope } from "./scope";
 export const ReaderDialogs = ({ reader }: { reader: ReaderScope }) => {
   const {
     beginReadingMode, bookRef, chapterInBook, chapterNameOfSection, chapterOfSection, closeSearch, contents,
-    innerBooksRef, layout, openSearchHit, paged, pendingReadingMode, people, picture, readingMode, requestReadingMode,
+    innerBooksRef, layout, openSearchHit, paged, pagesRtl, pendingReadingMode, people, picture, readingMode, requestReadingMode,
     searchOpen, searchSeed, setPendingReadingMode, setPicture, setReadingPaused, setShortcutsOpen, setTourOpen,
     shortcutsOpen, spotlightDotty, togglePictureInk, tourOpen
   } = reader;
@@ -25,8 +25,8 @@ export const ReaderDialogs = ({ reader }: { reader: ReaderScope }) => {
         <ShortcutsSheet
           context={`${paged ? "Pages" : "Scrolling"} · ${
             readingMode === "smart" ? "Smart Read" : readingMode === "speed" ? "SpeedRead" : "Standard reading"
-          }`}
-          sections={shortcutSections({ layout, mode: readingMode })}
+          }${paged && pagesRtl ? " · right to left" : ""}`}
+          sections={shortcutSections({ layout, mode: readingMode, rtl: pagesRtl })}
           onClose={() => setShortcutsOpen(false)}
         />
       )}

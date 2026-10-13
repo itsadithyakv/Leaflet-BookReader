@@ -29,7 +29,7 @@ import {
 import { PDF_ACTUAL_SCALE, canvasPixelRatio, scaleFor, type FitOptions } from "./pageZoom";
 import { spreadOf } from "./pageSpread";
 import { destFraction, pageLinks, type LinkAnnotation, type PageLink } from "./pdfLinks";
-import { COVER_QUALITY, coverScale, looksBlank } from "./pageCover";
+import { COVER_PAGES, COVER_QUALITY, coverScale, looksBlank } from "./pageCover";
 import { digestPage, type PageFacts } from "./pdfChapters";
 import { PDF_EMPTY, pdfOpenMessage } from "./pdfOpenError";
 import { resolveOutline, type OutlineEntry, type OutlineNode } from "./pdfOutline";
@@ -81,8 +81,9 @@ export type PdfExtras = {
   pageLabels(): Promise<string[] | null>;
   /**
    * The first page as a picture, for a book with no cover: a JPEG `data:`
-   * URL about `width` pixels wide, on white whatever the finish. Null for a
-   * first page with nothing on it (readers/pageCover.ts).
+   * URL about `width` pixels wide, on white whatever the finish. A blank
+   * first page gives way to the next, a few pages in; null when those are
+   * all blank (readers/pageCover.ts).
    */
   coverImage(width: number): Promise<string | null>;
   /** A page's text. Kept for a bounded number of pages. */
@@ -541,23 +542,28 @@ export const createPdfPageSource = async (bookId: string): Promise<PageSource> =
       }
     },
     async coverImage(width) {
-      const page = await document.getPage(1);
-      const natural = page.getViewport({ scale: 1 });
-      const viewport = page.getViewport({ scale: coverScale(natural.width, natural.height, width) });
       // A canvas of its own, out of the document: the reader's page is not touched.
       const sheet = window.document.createElement("canvas");
-      sheet.width = Math.max(1, Math.round(viewport.width));
-      sheet.height = Math.max(1, Math.round(viewport.height));
-      const context = sheet.getContext("2d", { alpha: false, willReadFrequently: true });
-      if (!context) {
-        return null;
-      }
       try {
-        context.fillStyle = "#ffffff";
-        context.fillRect(0, 0, sheet.width, sheet.height);
-        await page.render({ canvasContext: context, viewport }).promise;
-        const drawn = context.getImageData(0, 0, sheet.width, sheet.height);
-        return looksBlank(drawn.data, sheet.width, sheet.height) ? null : sheet.toDataURL("image/jpeg", COVER_QUALITY);
+        for (let pageNumber = 1; pageNumber <= Math.min(COVER_PAGES, document.numPages); pageNumber += 1) {
+          const page = await document.getPage(pageNumber);
+          const natural = page.getViewport({ scale: 1 });
+          const viewport = page.getViewport({ scale: coverScale(natural.width, natural.height, width) });
+          sheet.width = Math.max(1, Math.round(viewport.width));
+          sheet.height = Math.max(1, Math.round(viewport.height));
+          const context = sheet.getContext("2d", { alpha: false, willReadFrequently: true });
+          if (!context) {
+            return null;
+          }
+          context.fillStyle = "#ffffff";
+          context.fillRect(0, 0, sheet.width, sheet.height);
+          await page.render({ canvasContext: context, viewport }).promise;
+          const drawn = context.getImageData(0, 0, sheet.width, sheet.height);
+          if (!looksBlank(drawn.data, sheet.width, sheet.height)) {
+            return sheet.toDataURL("image/jpeg", COVER_QUALITY);
+          }
+        }
+        return null;
       } finally {
         // Let go of the pixels at once: a cover is drawn once in a book's life.
         sheet.width = 0;

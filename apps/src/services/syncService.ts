@@ -1,12 +1,13 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import { EMPTY_SYNC_STATUS, type SyncReport, type SyncStatus } from "@shared/sync/types";
+import { EMPTY_SYNC_STATUS, type LargeBook, type SyncReport, type SyncStatus } from "@shared/sync/types";
 
 const EMPTY_REPORT: SyncReport = {
   booksUploaded: 0,
   booksDownloaded: 0,
   booksRemoved: 0,
   booksPending: 0,
-  entriesUpdated: 0
+  entriesUpdated: 0,
+  booksHeld: 0
 };
 
 /**
@@ -96,6 +97,22 @@ export const syncService = {
       return EMPTY_REPORT;
     }
     return invoke<SyncReport>("sync_now");
+  },
+
+  /** The library's books over 10 MB on this device, largest first, each with the reader's answer. */
+  async largeBooks(): Promise<LargeBook[]> {
+    if (!isTauri()) {
+      return [];
+    }
+    return invoke<LargeBook[]>("large_books");
+  },
+
+  /** Records whether these large books' files are backed up; the next backup acts on it. */
+  async setLargeBookBackup(bookIds: string[], backUp: boolean): Promise<void> {
+    if (!isTauri() || bookIds.length === 0) {
+      return;
+    }
+    await invoke("set_large_book_backup", { bookIds, backUp });
   },
 
   /**

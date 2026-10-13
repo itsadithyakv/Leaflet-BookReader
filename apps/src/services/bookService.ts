@@ -22,6 +22,9 @@ export type FinishedGone = { id: string; title: string; author: string | null; f
  */
 export type ImportOutcome = { asked: number; books: Book[]; failed: Array<{ name: string; reason: string }> };
 
+/** One publisher's covers for some of a series' books (`metadata::editions` in the backend). */
+export type CoverSet = { name: string; covers: Array<{ bookId: string; coverId: number }> };
+
 export const bookService = {
   async list(): Promise<Book[]> {
     if (!isTauri()) {
@@ -121,6 +124,28 @@ export const bookService = {
     }
     return invoke<EpubSection[]>("epub_sections", { bookId });
   },
+  /**
+   * The sets of covers a series could wear: each publisher's cover for the
+   * books it published, the fullest set first (Open Library's editions).
+   */
+  async seriesCoverSets(books: Array<{ bookId: string; title: string; author: string | null }>): Promise<CoverSet[]> {
+    if (!isTauri()) {
+      return [];
+    }
+    return invoke<CoverSet[]>("series_cover_sets", { books });
+  },
+  /** One cover on offer, small, as a data URL. */
+  async coverPreview(coverId: number): Promise<string> {
+    requireDesktop();
+    return invoke<string>("cover_preview", { coverId });
+  },
+  /** Puts a chosen cover on a book, in place of the one it has. */
+  async applyCover(bookId: string, coverId: number): Promise<Book | null> {
+    if (!isTauri()) {
+      return null;
+    }
+    return invoke<Book>("apply_cover", { bookId, coverId });
+  },
   async fetchCover(bookId: string): Promise<Book | null> {
     if (!isTauri()) {
       return null;
@@ -139,6 +164,13 @@ export const bookService = {
    * Tauri delivers as an ArrayBuffer: no base64 string, no byte-by-byte copy,
    * so large PDFs no longer need several times their size in memory to open.
    */
+  /** How large a book's file is, in bytes; null when it is not on this device (or outside the desktop app). */
+  async fileSize(bookId: string): Promise<number | null> {
+    if (!isTauri()) {
+      return null;
+    }
+    return invoke<number | null>("book_file_size", { bookId });
+  },
   async readBookBytes(bookId: string): Promise<ArrayBuffer> {
     requireDesktop();
     return invoke<ArrayBuffer>("read_book_bytes", { bookId });

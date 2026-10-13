@@ -18,7 +18,7 @@ export const ReaderPage = ({ reader }: { reader: ReaderScope }) => {
     chapterDockRef, chapterInBook, clearSelection, closeNoteRef, copySelection, copyText, dockAbovePace, dockAwake,
     dockNear, fontSize, formatChapterDisplay, goBack, goForward, goNextSection, goPrevSection, goToNote,
     highlightBox, highlightSelection, highlights, jumps, lastCfiProgressRef, loadError, loading, lookUpShowing, measure,
-    note, notesFocus, notesWrite, onClose, outlook, paged, pageOf, people, renditionRef, searchBookFor, seekHoldRef,
+    note, notesFocus, notesWrite, onClose, outlook, paged, pageOf, pagesRtl, people, renditionRef, searchBookFor, seekHoldRef,
     seekTo, selection, selectionChapter, selectionDockBottom, selectionDockRef, setBookmarkPanelOpen, setDockNear,
     setLookUpCfi, setNotesFocus, setReloadKey, sidebarOpen, toggleContents, turnPage, viewerRef
   } = reader;
@@ -196,6 +196,7 @@ export const ReaderPage = ({ reader }: { reader: ReaderScope }) => {
           <ChapterDock
             ref={chapterDockRef}
             paged={paged}
+            rtl={paged && pagesRtl}
             pageOf={paged ? pageOf : null}
             label={formatChapterDisplay()}
             inBook={chapterInBook}

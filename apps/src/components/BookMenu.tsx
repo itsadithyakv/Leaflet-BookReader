@@ -6,7 +6,13 @@ import { useLibraryStore } from "../store/libraryStore";
 import { isFinished } from "../constants/books";
 import { getBookExtension, isHighlightableFormat } from "../constants/bookFormats";
 import { openHighlights, useHighlightsStore } from "./highlights/highlightsStore";
+import { sizeText } from "../library/largeBooks";
+import { FEATURES } from "../constants/features";
+import { useAccountStore } from "../store/accountStore";
+import { composePost } from "./community/postStore";
+import { syncService } from "../services/syncService";
 import { openSeriesEditor } from "./SeriesEditor";
+import { askConfirm } from "./ConfirmDialog";
 import { UiIcon } from "./UiIcon";
 
 export type BookMenuAction = { label: string; onSelect: () => void; danger?: boolean };
@@ -15,20 +21,27 @@ type Props = {
   book: Book;
   /** More actions, below the built-in ones (for example "Remove from this collection"). */
   actions?: BookMenuAction[];
+  /** Told the book's title once it has been removed, for the page to say so (this menu has no toast). */
+  onRemoved?: (title: string) => void;
   className?: string;
 };
 
 const MENU_WIDTH = 248;
 
+/** The entries the arrow keys walk: every one that can be chosen, top to bottom. */
+const menuItemsOf = (menu: HTMLElement | null) =>
+  Array.from(menu?.querySelectorAll<HTMLElement>('[role^="menuitem"]:not(:disabled)') ?? []);
+
 /**
  * A book's "⋯" menu: its collections (tick to add or take out, or make a new
- * one with it in), its series and its highlights.
+ * one with it in), its series and its highlights, and, last and set apart,
+ * taking the book out of the library.
  *
  * The menu is drawn at the top of the page rather than inside the card: cards
  * lift on hover (a transform) and sit in rows drawn one over another, either of
  * which would clip or bury a menu drawn inside them.
  */
-export const BookMenu = ({ book, actions = [], className = "" }: Props) => {
+export const BookMenu = ({ book, actions = [], onRemoved, className = "" }: Props) => {
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
@@ -41,12 +54,41 @@ export const BookMenu = ({ book, actions = [], className = "" }: Props) => {
   const toggleBook = useCollectionStore((state) => state.toggleBook);
   const create = useCollectionStore((state) => state.create);
   const setBookFinished = useLibraryStore((state) => state.setBookFinished);
+  const deleteBook = useLibraryStore((state) => state.deleteBook);
+  const onDrive = useLibraryStore((state) => state.sync.driveConnected);
+  const inFolder = useLibraryStore((state) => Boolean(state.sync.folderPath));
   const atItsEnd = isFinished(book.progress);
   // Something to take back: a place in the book, or a finished date.
   const begun = (book.progress ?? 0) > 0 || Boolean(book.finishedAt);
   // A book of words can be highlighted (a PDF too, since 1.3); a comic has none to show.
   const highlightable = isHighlightableFormat(getBookExtension(book.localPath));
   const highlightCount = useHighlightsStore((state) => state.counts[book.id] ?? 0);
+  // A finished book can be told of to the readers who follow you (components/community/Posts.tsx).
+  const canPost = useAccountStore((state) => state.status.signedIn) && FEATURES.community && (atItsEnd || Boolean(book.finishedAt));
+  // A large file the backup is not sending (not asked yet, or the reader said
+  // no): asked for when the menu opens, where a backup carries files at all.
+  const carriesFiles = useLibraryStore((state) => state.sync.driveConnected || Boolean(state.sync.folderPath));
+  const requestBackup = useLibraryStore((state) => state.requestBackup);
+  const [heldBytes, setHeldBytes] = useState<number | null>(null);
+  useEffect(() => {
+    if (!open || !carriesFiles) {
+      setHeldBytes(null);
+      return;
+    }
+    let wanted = true;
+    void syncService
+      .largeBooks()
+      .then((large) => {
+        const own = large.find((entry) => entry.id === book.id);
+        if (wanted) {
+          setHeldBytes(own && own.backUp !== true ? own.bytes : null);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      wanted = false;
+    };
+  }, [open, carriesFiles, book.id]);
 
   useLayoutEffect(() => {
     if (!open || !triggerRef.current) {
@@ -85,7 +127,54 @@ export const BookMenu = ({ book, actions = [], className = "" }: Props) => {
         event.stopImmediatePropagation();
         dismiss();
         triggerRef.current?.focus();
+        return;
       }
+      // Tab leaves the menu, and the menu closes. The keyboard is put back on
+      // the button that opened it first and the key is left to do its work,
+      // so it goes on (or back, with Shift) from there: the menu is drawn at
+      // the end of the page, and from inside it Tab went nowhere near.
+      if (event.key === "Tab" && !event.altKey && !event.ctrlKey && !event.metaKey) {
+        // In the new collection form Tab still goes between the name and "Add".
+        const form = event.target instanceof Element ? event.target.closest("form") : null;
+        if (form && menuRef.current?.contains(form)) {
+          const fields = Array.from(form.querySelectorAll<HTMLElement>("input, button"));
+          const to = fields.indexOf(event.target as HTMLElement) + (event.shiftKey ? -1 : 1);
+          if (to >= 0 && to < fields.length) {
+            return;
+          }
+        }
+        dismiss();
+        triggerRef.current?.focus();
+        return;
+      }
+      // Up, Down, Home and End walk the entries. Not while a name is being
+      // typed: the keys are the text field's own there.
+      const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
+      if ((!step && event.key !== "Home" && event.key !== "End") || event.altKey || event.ctrlKey || event.metaKey) {
+        return;
+      }
+      if (event.target instanceof HTMLInputElement) {
+        return;
+      }
+      const items = menuItemsOf(menuRef.current);
+      if (items.length === 0) {
+        return;
+      }
+      // Without this the arrow scrolls the page, and a scroll closes the menu.
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const at = items.indexOf(document.activeElement as HTMLElement);
+      const next =
+        event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? items.length - 1
+            : at < 0
+              ? step > 0
+                ? 0
+                : items.length - 1
+              : (at + step + items.length) % items.length;
+      items[next].focus();
     };
     // A scroll moves the card from under the menu.
     const onScroll = (event: Event) => {
@@ -105,9 +194,102 @@ export const BookMenu = ({ book, actions = [], className = "" }: Props) => {
     };
   }, [open, loaded, load]);
 
+  // Opening the menu puts the keyboard on its first entry. Once for each
+  // opening: the menu is drawn a moment after `open`, when its place is known.
+  const enteredRef = useRef(false);
+  useEffect(() => {
+    if (!open) {
+      enteredRef.current = false;
+      return;
+    }
+    if (enteredRef.current || !menuRef.current) {
+      return;
+    }
+    enteredRef.current = true;
+    menuItemsOf(menuRef.current)[0]?.focus();
+  }, [open, place]);
+
+  // After "Add" the new collection form goes, and the keyboard was on it:
+  // it is put back on the menu's first entry once the form is gone.
+  const backToMenuRef = useRef(false);
+  useEffect(() => {
+    if (!open) {
+      backToMenuRef.current = false;
+      return;
+    }
+    if (!backToMenuRef.current || creating) {
+      return;
+    }
+    backToMenuRef.current = false;
+    (menuItemsOf(menuRef.current)[0] ?? triggerRef.current)?.focus();
+  }, [creating, open]);
+
+  /** Closes the menu after an entry is chosen, and hands the keyboard back to the button that opened it. */
   const close = () => {
     setOpen(false);
     setCreating(false);
+    triggerRef.current?.focus();
+  };
+
+  /** Says what went wrong, in the app's own dialog (this menu has no toast), with the menu out of the way. */
+  const failed = (title: string, cause: unknown) => {
+    close();
+    return askConfirm({ title, body: cause instanceof Error ? cause.message : String(cause), confirmLabel: "OK", cancelLabel: "Close" });
+  };
+
+  const markFinished = async () => {
+    try {
+      await setBookFinished(book.id, true);
+    } catch (cause) {
+      await failed("That book could not be marked as finished", cause);
+    }
+  };
+
+  /** Back to the start with no finished date, after asking: the book's place is not kept anywhere else. */
+  const markNotStarted = async () => {
+    const ok = await askConfirm({
+      title: "Mark as not started?",
+      body: `“${book.title}” goes back to the start. Its place and finished date are cleared.`,
+      confirmLabel: "Mark as not started",
+      danger: true
+    });
+    if (!ok) {
+      return;
+    }
+    try {
+      await setBookFinished(book.id, false);
+    } catch (cause) {
+      await failed("That book could not be marked as not started", cause);
+    }
+  };
+
+  /**
+   * Takes the book out of the library, after asking. What goes is Leaflet's
+   * own copy of the file (an import copies the book in); the file it was added
+   * from is never touched. The reading done in it stays in the history.
+   *
+   * With a backup on, the copy there goes too: removing a book starts a backup
+   * run a moment later (`libraryStore.deleteBook`), and that run deletes the
+   * file of every removed book from Google Drive (`sync/drive.rs`) or the
+   * backup folder. A run that fails tries again on the next, for ninety days.
+   */
+  const removeFromLibrary = async () => {
+    const ok = await askConfirm({
+      title: `Remove “${book.title}”?`,
+      body: `Leaflet deletes its copy of the book${onDrive ? ", here and from your Google Drive backup" : inFolder ? ", here and in your backup folder" : ""}. The file you added it from stays where it is, and the reading you did in it is kept.`,
+      confirmLabel: "Remove",
+      danger: true
+    });
+    if (!ok) {
+      return;
+    }
+    try {
+      await deleteBook(book.id);
+    } catch (cause) {
+      await askConfirm({ title: "That book could not be removed", body: cause instanceof Error ? cause.message : String(cause), confirmLabel: "OK", cancelLabel: "Close" });
+      return;
+    }
+    onRemoved?.(book.title);
   };
 
   const createWithBook = async () => {
@@ -115,8 +297,16 @@ export const BookMenu = ({ book, actions = [], className = "" }: Props) => {
     if (!name) {
       return;
     }
-    await create(name, [book.id]);
+    try {
+      await create(name, [book.id]);
+    } catch (cause) {
+      // The name stays typed, for another try.
+      await failed("That collection could not be made", cause);
+      return;
+    }
     setNewName("");
+    // (Only while the menu is still up: closed meanwhile, the keyboard is wherever the reader took it.)
+    backToMenuRef.current = menuRef.current !== null;
     setCreating(false);
   };
 
@@ -162,7 +352,7 @@ export const BookMenu = ({ book, actions = [], className = "" }: Props) => {
                   role="menuitemcheckbox"
                   aria-checked={inIt}
                   className={item}
-                  onClick={() => void toggleBook(collection.id, book.id)}
+                  onClick={() => void toggleBook(collection.id, book.id).catch((cause) => failed("That collection could not be changed", cause))}
                 >
                   <span
                     className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
@@ -187,6 +377,7 @@ export const BookMenu = ({ book, actions = [], className = "" }: Props) => {
                   autoFocus
                   className="inset-field min-w-0 flex-1 px-2 py-1.5 text-sm text-on-surface"
                   placeholder="Collection name"
+                  aria-label="Collection name"
                   maxLength={80}
                   value={newName}
                   onChange={(event) => setNewName(event.target.value)}
@@ -233,6 +424,39 @@ export const BookMenu = ({ book, actions = [], className = "" }: Props) => {
                 )}
               </button>
             )}
+            {heldBytes !== null && (
+              <button
+                type="button"
+                role="menuitem"
+                className={item}
+                title="A file over 10 MB is backed up only when you say so"
+                onClick={() => {
+                  close();
+                  void syncService
+                    .setLargeBookBackup([book.id], true)
+                    .then(requestBackup)
+                    .catch((cause) => failed("This file could not be backed up", cause));
+                }}
+              >
+                <UiIcon name="cloud" size={16} className="text-on-surface-variant" />
+                Back up this file
+                <span className="ml-auto text-xs tabular-nums text-on-surface-variant">{sizeText(heldBytes)}</span>
+              </button>
+            )}
+            {canPost && (
+              <button
+                type="button"
+                role="menuitem"
+                className={item}
+                onClick={() => {
+                  close();
+                  composePost({ title: book.title, author: book.author ?? null });
+                }}
+              >
+                <UiIcon name="people" size={16} className="text-on-surface-variant" />
+                Tell your followers…
+              </button>
+            )}
             {!atItsEnd && (
               <button
                 type="button"
@@ -240,7 +464,7 @@ export const BookMenu = ({ book, actions = [], className = "" }: Props) => {
                 className={item}
                 onClick={() => {
                   close();
-                  void setBookFinished(book.id, true);
+                  void markFinished();
                 }}
               >
                 <UiIcon name="check" size={16} className="text-on-surface-variant" />
@@ -255,11 +479,11 @@ export const BookMenu = ({ book, actions = [], className = "" }: Props) => {
                 title="Back to the start, with no finished date"
                 onClick={() => {
                   close();
-                  void setBookFinished(book.id, false);
+                  void markNotStarted();
                 }}
               >
                 <UiIcon name="undo" size={16} className="text-on-surface-variant" />
-                Mark as not started
+                Mark as not started…
               </button>
             )}
             {actions.map((action) => (
@@ -276,6 +500,19 @@ export const BookMenu = ({ book, actions = [], className = "" }: Props) => {
                 {action.label}
               </button>
             ))}
+            <div className="my-1 border-t border-outline-variant/30" />
+            <button
+              type="button"
+              role="menuitem"
+              className={`${item} text-error`}
+              onClick={() => {
+                close();
+                void removeFromLibrary();
+              }}
+            >
+              <UiIcon name="trash" size={16} />
+              Remove from library…
+            </button>
           </div>,
           document.body
         )}

@@ -1,4 +1,4 @@
-import { memo, useState } from "react";
+import { memo } from "react";
 import type { Book } from "@shared/models/book";
 import { useCoverSrc } from "../hooks/useCoverSrc";
 import { useSeriesInfo } from "../library/useSeries";
@@ -8,12 +8,12 @@ type Props = {
   book: Book;
   onRefresh: (id: string) => void;
   onOpen: (book: Book) => void;
-  onRemove: (book: Book) => void;
+  /** Told the book's title once its menu has removed it. */
+  onRemoved?: (title: string) => void;
 };
 
-const BookRowComponent = ({ book, onRefresh, onOpen, onRemove }: Props) => {
-  // Removing a book removes it from every device, so it asks once first.
-  const [confirmRemove, setConfirmRemove] = useState(false);
+// Removing the book is in its ⋯ menu ("Remove from library…"), which asks first.
+const BookRowComponent = ({ book, onRefresh, onOpen, onRemoved }: Props) => {
   const { src: resolvedCover, onError: handleCoverError } = useCoverSrc(book, { thumb: true });
   const series = useSeriesInfo(book.id);
   const progressPercent = Math.round(Math.min(1, Math.max(0, book.progress)) * 100);
@@ -71,7 +71,7 @@ const BookRowComponent = ({ book, onRefresh, onOpen, onRemove }: Props) => {
           {progressPercent}%
         </p>
       </div>
-      <BookMenu book={book} className="ml-auto shrink-0" />
+      <BookMenu book={book} onRemoved={onRemoved} className="ml-auto shrink-0" />
       <button
         className="tactile-button shrink-0 px-3 py-2 text-xs"
         type="button"
@@ -81,27 +81,6 @@ const BookRowComponent = ({ book, onRefresh, onOpen, onRemove }: Props) => {
         }}
       >
         Refresh
-      </button>
-      <button
-        className="tactile-button shrink-0 px-3 py-2 text-xs"
-        type="button"
-        title={
-          confirmRemove
-            ? "Removes this book from every synced device"
-            : "Remove from library"
-        }
-        onClick={(e) => {
-          e.stopPropagation();
-          if (!confirmRemove) {
-            setConfirmRemove(true);
-            return;
-          }
-          setConfirmRemove(false);
-          onRemove(book);
-        }}
-        onBlur={() => setConfirmRemove(false)}
-      >
-        {confirmRemove ? "Confirm" : "Remove"}
       </button>
     </div>
   );

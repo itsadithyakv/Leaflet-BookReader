@@ -149,6 +149,8 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
   // Readers of a release build sign in with the client it ships. Pasting one's
   // own is a developer affordance, offered only when the build has none.
   const showClientSetup = sync.driveCredentialSource !== "built-in";
+  /** Why "Connect Drive" cannot be pressed: on the heading's tooltip and on the button's own. */
+  const driveNotSetUp = "Drive backup isn't set up in this copy of Leaflet. \"Set Up Drive\" lets you connect a Google sign-in of your own.";
 
   const handleChooseFolder = async () => {
     let picked: string | null = null;
@@ -439,12 +441,11 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
           <div className={column}>
               <div className="paper-surface rounded-xl p-5">
                 <p className="text-xs uppercase tracking-widest text-on-surface-variant">Daily goal and focus</p>
-                <p className="mt-2 text-xs text-on-surface-variant">
-                  Read this much in a day to keep your streak alive. Time counts whenever a book is
-                  open, whether or not a focus session is running.
-                </p>
                 <div className="mt-3 space-y-2">
-                  <div className="inset-field flex w-full items-center justify-between gap-4 px-4 py-3">
+                  <div
+                    className="inset-field flex w-full items-center justify-between gap-4 px-4 py-3"
+                    title="Read this much in a day to keep your streak alive. Time counts whenever a book is open, whether or not a focus session is running."
+                  >
                     <span className="text-xs text-on-surface-variant">Daily reading goal</span>
                     <div className="flex items-center gap-2">
                       <button
@@ -470,6 +471,8 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                   </div>
                   <button
                     type="button"
+                    role="switch"
+                    aria-checked={focusSettings.goalBinding}
                     className="inset-field flex w-full items-center justify-between px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
                     onClick={() => setFocusSettings({ goalBinding: !focusSettings.goalBinding })}
                   >
@@ -478,6 +481,8 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                   </button>
                   <button
                     type="button"
+                    role="switch"
+                    aria-checked={focusSettings.kioskMode}
                     className="inset-field flex w-full items-center justify-between px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
                     onClick={() => void toggleFullScreen()}
                   >
@@ -492,6 +497,8 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                   </button>
                   <button
                     type="button"
+                    role="switch"
+                    aria-checked={focusSettings.checkpointPrompts}
                     className="inset-field flex w-full items-center justify-between px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
                     onClick={() => setFocusSettings({ checkpointPrompts: !focusSettings.checkpointPrompts })}
                   >
@@ -500,6 +507,8 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                   </button>
                   <button
                     type="button"
+                    role="switch"
+                    aria-checked={focusSettings.sessionNotes}
                     className="inset-field flex w-full items-center justify-between px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
                     onClick={() => setFocusSettings({ sessionNotes: !focusSettings.sessionNotes })}
                   >
@@ -539,10 +548,11 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
 
               {showFolderSync && (
               <div className="mt-5 border-t border-outline-variant/40 pt-4">
-                <p className="text-xs font-semibold text-on-surface">Sync folder</p>
-                <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">
-                  Point Leaflet at a folder your Google Drive, Dropbox, OneDrive or iCloud app
-                  already keeps in step. No account, no setup.
+                <p
+                  className="text-xs font-semibold text-on-surface"
+                  title="Point Leaflet at a folder your Google Drive, Dropbox, OneDrive or iCloud app already keeps in step. No account, no setup."
+                >
+                  Sync folder
                 </p>
                 {sync.folderPath && (
                   <p className="mt-2 break-all text-xs text-on-surface-variant">{sync.folderPath}</p>
@@ -569,11 +579,15 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
               )}
 
               <div className="mt-5 border-t border-outline-variant/40 pt-4">
-                <p className="text-xs font-semibold text-on-surface">Google Drive</p>
-                <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">
-                  {sync.driveAvailable
-                    ? "Your books, reading progress and streak are copied to a Leaflet folder in your own Drive. Connect the same account on a new computer to restore them. Leaflet only ever sees the files it creates."
-                    : "Drive backup isn't set up in this copy of Leaflet. \"Set Up Drive\" lets you connect a Google sign-in of your own."}
+                <p
+                  className="text-xs font-semibold text-on-surface"
+                  title={
+                    sync.driveAvailable
+                      ? "Your books, reading progress and streak are copied to a Leaflet folder in your own Drive. Connect the same account on a new computer to restore them. Leaflet only ever sees the files it creates."
+                      : driveNotSetUp
+                  }
+                >
+                  Google Drive
                 </p>
 
                 <div className="mt-3 flex flex-wrap gap-3">
@@ -582,6 +596,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                     className="tactile-button px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
                     onClick={handleDriveAuth}
                     disabled={!sync.driveAvailable}
+                    title={sync.driveAvailable ? undefined : driveNotSetUp}
                   >
                     {sync.driveConnected ? "Reconnect Drive" : "Connect Drive"}
                   </button>
@@ -626,10 +641,11 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                       it below. Leaflet requests only the <code>drive.file</code> scope, which lets it
                       see the files it creates and nothing else in your Drive.
                     </p>
-                    <label className="mt-3 block text-[10px] uppercase tracking-[0.2em] text-on-surface-variant">
+                    <label htmlFor="drive-client-id" className="mt-3 block text-[10px] uppercase tracking-[0.2em] text-on-surface-variant">
                       Client ID
                     </label>
                     <input
+                      id="drive-client-id"
                       value={clientId}
                       onChange={(event) => setClientId(event.target.value)}
                       placeholder="…apps.googleusercontent.com"
@@ -637,10 +653,11 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                       autoComplete="off"
                       className="inset-field mt-1 w-full px-3 py-2 text-xs text-on-surface"
                     />
-                    <label className="mt-3 block text-[10px] uppercase tracking-[0.2em] text-on-surface-variant">
+                    <label htmlFor="drive-client-secret" className="mt-3 block text-[10px] uppercase tracking-[0.2em] text-on-surface-variant">
                       Client secret
                     </label>
                     <input
+                      id="drive-client-secret"
                       value={clientSecret}
                       onChange={(event) => setClientSecret(event.target.value)}
                       placeholder="Optional for desktop clients"
@@ -866,7 +883,7 @@ const AccountCard = ({ showToast }: { showToast: (message: string) => void }) =>
           <div className="min-w-0">
             <p className="truncate font-headline text-2xl font-bold text-on-surface">{account?.email || "Signed in"}</p>
             {FEATURES.community && (
-              <p className="mt-1 text-xs text-on-surface-variant">Your name, handle and Pip are on Social → Community.</p>
+              <p className="mt-1 text-xs text-on-surface-variant">Your name, handle and Pip are on Social → Board → You.</p>
             )}
           </div>
         </div>
@@ -877,16 +894,18 @@ const AccountCard = ({ showToast }: { showToast: (message: string) => void }) =>
 
         {panel === "password" && (
           <div className="mt-1">
-            <label className={labelClass}>Current password</label>
+            <label htmlFor="account-current-password" className={labelClass}>Current password</label>
             <input
+              id="account-current-password"
               type="password"
               autoComplete="current-password"
               value={current}
               onChange={(event) => setCurrent(event.target.value)}
               className={fieldClass}
             />
-            <label className={labelClass}>New password</label>
+            <label htmlFor="account-new-password" className={labelClass}>New password</label>
             <input
+              id="account-new-password"
               type="password"
               autoComplete="new-password"
               value={next}
@@ -905,8 +924,9 @@ const AccountCard = ({ showToast }: { showToast: (message: string) => void }) =>
               This deletes your account, profile and synced data from the server. Books and reading
               history on this device stay.
             </p>
-            <label className={labelClass}>Password to confirm</label>
+            <label htmlFor="account-delete-password" className={labelClass}>Password to confirm</label>
             <input
+              id="account-delete-password"
               type="password"
               autoComplete="current-password"
               value={current}

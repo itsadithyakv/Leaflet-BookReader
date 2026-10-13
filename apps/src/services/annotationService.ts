@@ -98,11 +98,25 @@ export const annotationService = {
     return invoke<Annotation>("annotation_save", { input });
   },
 
+  /** Removed, it is kept as a tombstone (`deletedAt`), in the preview as in the app; saved again under its id, it is back. */
   async remove(id: string): Promise<void> {
     if (!isTauri()) {
-      previewWrite(previewAll().filter((item) => item.id !== id));
+      const now = new Date().toISOString();
+      previewWrite(previewAll().map((item) => (item.id === id && !item.deletedAt ? { ...item, updatedAt: now, deletedAt: now } : item)));
       return;
     }
     await invoke("annotation_delete", { id });
+  },
+
+  /**
+   * The ids of the bookmarks and highlights removed from a book, for as long
+   * as their tombstones are kept. An import asks, so that what the reader
+   * removed here is not brought back by the file it came from.
+   */
+  async removedIds(bookId: string): Promise<string[]> {
+    if (!isTauri()) {
+      return (previewAll() as AnnotationRow[]).filter((item) => item.bookId === bookId && Boolean(item.deletedAt) && isAnnotation(item)).map((item) => item.id);
+    }
+    return invoke<string[]>("annotations_removed", { bookId });
   }
 };

@@ -32,8 +32,9 @@ export const ReaderToolbar = ({ reader }: { reader: ReaderScope }) => {
           onClick={() => void exitGuard.requestClose()}
           onMouseEnter={() => exitGuard.guard()}
           title={exitGuard.locked ? "Focus lock is on: leaving ends the session" : undefined}
+          aria-label="Back to Library"
         >
-          <span className="material-symbols-outlined transition-transform group-hover:-translate-x-1 reader-accent">
+          <span className="material-symbols-outlined transition-transform group-hover:-translate-x-1 reader-accent" aria-hidden="true">
             arrow_back
           </span>
           {/* The label is the first thing to drop on a narrow toolbar; the

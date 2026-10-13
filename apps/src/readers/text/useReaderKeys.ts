@@ -92,8 +92,14 @@ export const useReaderKeys = (reader: WithSession & Later<"people">) => {
       // (A key is never held up by a scrollbar that was not seen let go.)
       scrollbarLetGoRef.current();
       // What the key does here comes from the one table the shortcuts sheet
-      // is drawn from (readers/readerKeys.ts).
-      const action = actionFor(event, { layout: layoutRef.current, mode: readingModeRef.current });
+      // is drawn from (readers/readerKeys.ts). In a right-to-left book the
+      // arrows follow the pages, as a click at the side does: Left goes on.
+      // Space and Page Down always do.
+      const action = actionFor(event, {
+        layout: layoutRef.current,
+        mode: readingModeRef.current,
+        rtl: (renditionRef.current?.manager as any)?.settings?.direction === "rtl"
+      });
       if (action === null) {
         return;
       }
@@ -137,13 +143,7 @@ export const useReaderKeys = (reader: WithSession & Later<"people">) => {
             return;
           }
           lastKeyTurnAtRef.current = pressedAt;
-          // In a right-to-left book the arrows follow the pages, as a click
-          // at the side does: Left goes on. Space and Page Down always do.
-          const on = action === "pagePrev" ? -1 : 1;
-          const mirrored =
-            (event.key === "ArrowLeft" || event.key === "ArrowRight") &&
-            (renditionRef.current?.manager as any)?.settings?.direction === "rtl";
-          turnPageRef.current(mirrored ? (on === 1 ? -1 : 1) : on, event.repeat);
+          turnPageRef.current(action === "pagePrev" ? -1 : 1, event.repeat);
           return;
         }
         case "chapterNext":

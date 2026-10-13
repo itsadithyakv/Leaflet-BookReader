@@ -17,6 +17,42 @@ describe("the reader's keys", () => {
     expect(actionFor(key(" ", { shiftKey: true }), pages)).toBe("pagePrev");
   });
 
+  it("lets the arrows follow the pages of a right-to-left book: Left goes on", () => {
+    const rtlPages: ReaderKeyContext = { ...pages, rtl: true };
+    expect(actionFor(key("ArrowLeft"), rtlPages)).toBe("pageNext");
+    expect(actionFor(key("ArrowRight"), rtlPages)).toBe("pagePrev");
+    // Space and the Page keys go the way they always do.
+    expect(actionFor(key(" "), rtlPages)).toBe("pageNext");
+    expect(actionFor(key("PageDown"), rtlPages)).toBe("pageNext");
+    expect(actionFor(key("PageUp"), rtlPages)).toBe("pagePrev");
+    expect(actionFor(key(" ", { shiftKey: true }), rtlPages)).toBe("pagePrev");
+    // Ctrl and Alt with an arrow are not mirrored.
+    expect(actionFor(key("ArrowRight", { ctrlKey: true }), rtlPages)).toBe("chapterNext");
+    expect(actionFor(key("ArrowLeft", { ctrlKey: true }), rtlPages)).toBe("chapterPrev");
+    expect(actionFor(key("ArrowLeft", { altKey: true }), rtlPages)).toBe("back");
+    // Scrolling, nothing turns sideways: the arrows are chapters as ever.
+    const rtlScroll: ReaderKeyContext = { ...scroll, rtl: true };
+    expect(actionFor(key("ArrowRight"), rtlScroll)).toBe("chapterNext");
+    expect(actionFor(key("ArrowLeft"), rtlScroll)).toBe("chapterPrev");
+  });
+
+  it("names on the sheet the arrows that turn a right-to-left book's pages", () => {
+    const keysFor = (context: ReaderKeyContext, label: string) =>
+      shortcutSections(context)
+        .flatMap((section) => section.rows)
+        .find((row) => row.label === label)?.keys;
+    const rtlPages: ReaderKeyContext = { ...pages, rtl: true };
+    expect(keysFor(pages, "Next page")).toEqual(["→", "Page Down", "Space"]);
+    expect(keysFor(pages, "Previous page")).toEqual(["←", "Page Up", "Shift+Space"]);
+    expect(keysFor(rtlPages, "Next page")).toEqual(["←", "Page Down", "Space"]);
+    expect(keysFor(rtlPages, "Previous page")).toEqual(["→", "Page Up", "Shift+Space"]);
+    // What the sheet names is what the key does.
+    expect(actionFor(key("ArrowLeft"), rtlPages)).toBe("pageNext");
+    // The chapters' keys, and every key when scrolling, read the same.
+    expect(keysFor(rtlPages, "Next chapter")).toEqual(["Ctrl+→"]);
+    expect(shortcutSections({ ...scroll, rtl: true })).toEqual(shortcutSections(scroll));
+  });
+
   it("changes chapter, scrolls and plays in the scrolling layout", () => {
     expect(actionFor(key("ArrowRight"), scroll)).toBe("chapterNext");
     expect(actionFor(key("ArrowLeft"), scroll)).toBe("chapterPrev");

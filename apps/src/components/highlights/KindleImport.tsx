@@ -12,18 +12,19 @@ const MAX_BYTES = 32 * 1024 * 1024;
 const ABOUT =
   "Pick the My Clippings.txt from a Kindle (in its documents folder) and its highlights and notes join the books you have here. Nothing leaves this device.";
 
-/** What the line at the foot says: what would be added (or was), then what was here already and what was left out. */
-type Notice = { text: string; had?: number; missed?: KindleMiss[] };
+/** What the line at the foot says: what would be added (or was), then what was here already, what was removed here and what was left out. */
+type Notice = { text: string; had?: number; removed?: number; missed?: KindleMiss[] };
 
 /**
- * "128 highlights for 6 books · 12 already here · 3 books not found". The
- * books not found are named when that is pointed at: a list of them would be
- * a wall of text.
+ * "128 highlights for 6 books · 12 already here · 2 you removed · 3 books not
+ * found". The books not found are named when that is pointed at: a list of
+ * them would be a wall of text.
  */
-const Line = ({ text, had = 0, missed = [] }: Notice) => (
+const Line = ({ text, had = 0, removed = 0, missed = [] }: Notice) => (
   <>
     {text}
     {had > 0 && ` · ${had} already here`}
+    {removed > 0 && ` · ${removed} you removed`}
     {missed.length > 0 && (
       <>
         {" · "}
@@ -81,8 +82,12 @@ export const KindleImport = () => {
     }
     setBusy("reading");
     try {
-      const made = await planKindleImport(await file.text(), useLibraryStore.getState().books, async (bookId) =>
-        (await annotationService.list(bookId)).map((item) => item.id)
+      const made = await planKindleImport(
+        await file.text(),
+        useLibraryStore.getState().books,
+        async (bookId) => (await annotationService.list(bookId)).map((item) => item.id),
+        // What was removed here stays removed: the same file does not bring it back.
+        (bookId) => annotationService.removedIds(bookId)
       );
       if (!here.current) {
         return;
@@ -90,7 +95,7 @@ export const KindleImport = () => {
       if (made.fresh.length > 0) {
         setPlan(made);
       } else {
-        setNotice({ text: planLine(made), had: made.had, missed: made.missed });
+        setNotice({ text: planLine(made), had: made.had, removed: made.removed, missed: made.missed });
       }
     } catch {
       if (here.current) {
@@ -161,7 +166,7 @@ export const KindleImport = () => {
         ) : busy === "importing" ? (
           "Importing…"
         ) : plan ? (
-          <Line text={planLine(plan)} had={plan.had} missed={plan.missed} />
+          <Line text={planLine(plan)} had={plan.had} removed={plan.removed} missed={plan.missed} />
         ) : notice ? (
           <Line {...notice} />
         ) : null}

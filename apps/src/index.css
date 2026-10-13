@@ -4065,6 +4065,49 @@ body::before {
   color: rgb(var(--color-on-primary-container));
 }
 
+/* The bar made small (the reader's choice): the cover, which opens it out
+   again, and the button to read on. */
+.now-reading-bar.is-small {
+  grid-template-columns: auto auto;
+  gap: 8px;
+  min-height: 0;
+  border-radius: 16px;
+  padding: 6px 7px 6px 6px;
+}
+
+.now-reading-bar.is-small::after {
+  content: none;
+}
+
+.now-reading-bar.is-small .now-reading-cover {
+  width: 28px;
+  height: 36px;
+  border-radius: 4px 7px 7px 4px;
+  cursor: pointer;
+}
+
+.now-reading-bar.is-small .now-reading-action {
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+}
+
+.now-reading-shrink {
+  display: grid;
+  width: 22px;
+  height: 42px;
+  place-items: center;
+  border-radius: 8px;
+  color: rgb(var(--color-on-surface-variant));
+  transition: color 150ms ease, background-color 150ms ease;
+}
+
+.now-reading-shrink:hover,
+.now-reading-shrink:focus-visible {
+  background: rgb(var(--color-surface-dim) / 0.6);
+  color: rgb(var(--color-on-surface));
+}
+
 .book-cover-frame {
   border: 1px solid rgb(var(--color-outline-variant) / 0.58);
   border-radius: 12px 17px 17px 12px;
@@ -4286,6 +4329,11 @@ textarea:focus-visible,
 .app-shell:has(.now-reading-dock) .dock-clear {
   /* The bar's 108 px, less the page's own 32 px foot, and 8 px of air. */
   padding-bottom: 84px;
+}
+
+/* Made small it is 50 px tall. */
+.app-shell:has(.now-reading-dock.is-small) .dock-clear {
+  padding-bottom: 40px;
 }
 
 /* --- toast -------------------------------------------------------------- */
@@ -5364,6 +5412,55 @@ button.pip-shop-tile:hover,
 @media (max-width: 560px) and (max-height: 560px) {
   .pip-rail-playing .pip-rail-mode {
     display: none;
+  }
+}
+
+/* Playing has eleven keys now (a cuddle, a high five and a spin joined the
+   eight above), and the row is that much tighter. The hint goes sooner (three
+   lines of it made the belt 16 px taller at 1280). Under about 1,000 px of
+   rail the title goes too, as it already did on the smallest window, and the
+   keys share the row: with the title kept they wrapped to two rows under it,
+   which took 100 px from the room at 1000 x 700. Eleven keys of 44 px fit one
+   row down to a rail of 600 px; the smallest window has them in two. */
+@container (max-width: 1280px) {
+  .pip-rail-playing .pip-rail-mode-hint {
+    display: none;
+  }
+}
+
+@container (max-width: 1010px) {
+  .pip-rail-belt.pip-rail-playing {
+    gap: 8px;
+  }
+
+  .pip-rail-playing .pip-rail-mode {
+    display: none;
+  }
+
+  .pip-rail-playing .pip-rail-key {
+    min-width: 44px;
+    flex: 1 1 44px;
+    padding-inline: 2px;
+  }
+}
+
+/* (A rail of 582 px has room for the eleven only with the belt's narrow padding, which otherwise starts at 560.) */
+@container (max-width: 640px) {
+  .pip-rail-belt.pip-rail-playing {
+    padding-inline: 9px;
+  }
+}
+
+@container (max-width: 320px) {
+  .pip-rail-playing .pip-rail-key {
+    min-width: 38px;
+    flex-basis: 38px;
+    padding-inline: 0;
+  }
+
+  .pip-rail-playing .pip-rail-label {
+    font-size: 10px;
+    letter-spacing: 0;
   }
 }
 
@@ -7003,29 +7100,2282 @@ button.pip-shop-tile:hover,
 
 /* ---- The Attic Arcade ------------------------------------------------------------- */
 
+/* The arcade is a place, not a notice: it fills the window, and what is in
+   it keeps to a column that is comfortable to read across. */
 .pip-arcade {
-  width: min(760px, 100%);
-  max-height: 92vh;
+  position: relative;
+  width: 100%;
+  height: 100%;
   overflow-y: auto;
-  padding: 20px;
-  border-radius: 20px;
+  padding: 0 24px 32px;
   outline: none;
 }
 
-.pip-arcade-pick {
-  display: flex;
-  min-height: 8rem;
-  flex-direction: column;
-  gap: 4px;
-  padding: 14px;
-  border: 1px solid rgb(var(--color-outline-variant) / 0.4);
-  border-radius: 16px;
-  background: rgb(var(--color-surface-high) / 0.6);
-  text-align: left;
+.pip-arcade-page {
+  width: min(1240px, 100%);
+  margin: 0 auto;
 }
 
-.pip-arcade-pick:hover {
+/* Its name and its way out stay at the top however far it is scrolled. */
+.pip-arcade-head {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  margin: 0 -24px;
+  padding: 18px 24px 10px;
+  background: var(--hud-face);
+  border-bottom: 2px dashed var(--hud-track);
+}
+
+/* ---- Collections: the wall of genres ---------------------------------------------- */
+
+.genre-wall {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 14px;
+}
+
+/* A block of the genre's own colour, its name at the top and one of its
+   covers leaning out of the lower corner. */
+.genre-tile {
+  position: relative;
+  display: flex;
+  aspect-ratio: 16 / 10;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+  border-radius: 14px;
+  padding: 14px 14px 12px;
+  background:
+    linear-gradient(135deg, rgb(255 255 255 / 0.14), transparent 55%),
+    var(--genre);
+  color: var(--genre-ink);
+  text-align: left;
+  box-shadow: var(--shadow-raised-small);
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+
+.genre-tile:hover,
+.genre-tile:focus-visible {
+  transform: translateY(-3px);
+}
+
+.genre-tile:focus-visible {
+  outline: 2px solid rgb(var(--color-primary));
+  outline-offset: 3px;
+}
+
+.genre-tile-name {
+  position: relative;
+  z-index: 1;
+  display: -webkit-box;
+  max-width: 68%;
+  overflow: hidden;
+  font-size: 1.15rem;
+  font-weight: 800;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.genre-tile-count {
+  position: relative;
+  z-index: 1;
+  font-size: 0.72rem;
+  font-weight: 600;
+  opacity: 0.82;
+}
+
+.genre-tile-cover {
+  position: absolute;
+  right: -6%;
+  bottom: -14%;
+  width: 38%;
+  aspect-ratio: 2 / 3;
+  overflow: hidden;
+  border-radius: 4px 7px 7px 4px;
+  background: rgb(0 0 0 / 0.22);
+  box-shadow: -3px 4px 10px rgb(0 0 0 / 0.35);
+  transform: rotate(22deg);
+  transition: transform 180ms ease;
+}
+
+.genre-tile:hover .genre-tile-cover {
+  transform: rotate(18deg) translateY(-3%);
+}
+
+.genre-tile-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.genre-tile-untitled {
+  display: -webkit-box;
+  overflow: hidden;
+  padding: 6px 5px;
+  font-size: 0.55rem;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .genre-tile,
+  .genre-tile-cover {
+    transition: none;
+  }
+
+  .genre-tile:hover,
+  .genre-tile:focus-visible,
+  .genre-tile:hover .genre-tile-cover {
+    transform: none;
+  }
+
+  .genre-tile-cover,
+  .genre-tile:hover .genre-tile-cover {
+    transform: rotate(22deg);
+  }
+}
+
+/* The big screen: as wide as the window has room for. */
+/* The set the game is played on: a dark frame, and glass with the lines of
+   an old tube over the picture (one to a game pixel), darker at the corners.
+   Nothing moves: no flicker, no roll. */
+.pip-crt {
+  padding: 12px 16px 18px;
+  border-radius: 26px;
+  background: linear-gradient(160deg, #474a55, #1b1c22 62%);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.14),
+    inset 0 -4px 0 rgba(0, 0, 0, 0.5),
+    0 12px 26px rgba(0, 0, 0, 0.35);
+}
+
+.pip-crt-glass {
+  position: relative;
+  overflow: hidden;
+  border-radius: 18px / 22px;
+  background: #05060a;
+  box-shadow: 0 0 0 3px #05060a, 0 0 0 4px rgba(255, 255, 255, 0.08);
+  line-height: 0;
+}
+
+.pip-crt-glass::before,
+.pip-crt-glass::after {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  content: "";
+}
+
+.pip-crt-glass::before {
+  background: linear-gradient(to bottom, transparent 0 64%, rgba(0, 0, 0, 0.2) 64% 100%);
+  background-size: 100% var(--crt-line, 3px);
+}
+
+.pip-crt-glass::after {
+  background:
+    radial-gradient(ellipse at center, transparent 58%, rgba(0, 0, 0, 0.34) 100%),
+    linear-gradient(118deg, rgba(255, 255, 255, 0.1), transparent 26%);
+}
+
+.pip-crt-glass .pip-arcade-canvas {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.pip-crt-glass .pip-arcade-status {
+  z-index: 3;
+  line-height: 1.4;
+}
+
+/* A game that has ended: the picture dims, and the score is said. */
+.pip-arcade-status.is-over {
+  background: rgba(6, 8, 14, 0.58);
+  animation: pip-arcade-over 420ms ease-out both;
+}
+
+.pip-arcade-final {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 1.35rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.pip-arcade-final span {
+  font-size: 0.75rem;
+  font-weight: 600;
+  opacity: 0.8;
+}
+
+/* Said only once a press would start the next game. */
+.pip-arcade-again {
+  margin-top: 6px;
+  font-size: 0.75rem;
+  opacity: 0;
+  transition: opacity 240ms ease;
+}
+
+.pip-arcade-again.is-on {
+  opacity: 1;
+}
+
+@keyframes pip-arcade-over {
+  from {
+    background: rgba(6, 8, 14, 0);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pip-arcade-status.is-over {
+    animation: none;
+  }
+
+  .pip-arcade-again {
+    transition: none;
+  }
+}
+
+/* What a finished game came to in acorns, after the line about Pip. */
+.pip-arcade-acorns {
+  display: block;
+  margin-top: 2px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- The Hollow: Pip's camp, the arcade's building game ---------------------------- */
+
+.pip-base-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 18px;
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+  color: rgb(var(--color-on-surface));
+}
+
+.pip-base-stats > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.pip-base-card {
+  padding: 12px 14px;
+  border: 1px solid rgb(var(--color-outline-variant) / 0.4);
+  border-radius: 14px;
+  background: rgb(var(--color-surface-high) / 0.6);
+}
+
+.pip-base-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: rgb(var(--color-on-surface));
+}
+
+/* What a sort of people is for, beside its name: a word or two, quieter than the name. */
+.pip-base-role {
+  margin-left: 0.4rem;
+  font-weight: 500;
+  font-size: 0.72em;
+  letter-spacing: 0;
+  text-transform: none;
+  opacity: 0.62;
+}
+
+/* While something is carried off a shelf, the shelf stays put (so nothing on the page moves) but is out of the way:
+   faint, and not in the pointer's path, so the thing can be set down on the picture beneath it. */
+.pip-base-side.is-carried {
+  pointer-events: none;
+  opacity: 0.35;
+  transition: opacity 120ms ease-out;
+}
+
+/* One of Pip's tips, at the head of what she says: set a little apart, and with a way to have no more of them. */
+.pip-camp-say-line.pip-camp-tip {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  white-space: normal;
+  line-height: 1.35;
+}
+/* Its two keys go under the words, so the words have the bubble's whole width however narrow it is. */
+.pip-camp-tip-keys {
+  display: flex;
+  flex-basis: 100%;
+  flex-direction: row-reverse;
+  align-items: center;
+  gap: 12px;
+}
+.pip-camp-tip-off {
+  font-size: 0.68rem;
+  line-height: 1.2;
+  opacity: 0.6;
+  text-decoration: underline dotted;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+}
+.pip-camp-tip-off:hover,
+.pip-camp-tip-off:focus-visible {
+  opacity: 1;
+}
+
+.pip-base-job {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.pip-base-job progress {
+  width: 160px;
+  height: 8px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: rgb(var(--color-outline-variant) / 0.4);
+  accent-color: rgb(var(--color-primary));
+}
+
+.pip-base-job progress::-webkit-progress-bar {
+  background: transparent;
+}
+
+.pip-base-job progress::-webkit-progress-value {
+  border-radius: 999px;
+  background: rgb(var(--color-primary));
+}
+
+/* Stars won on a raid: outlines until they are won. */
+.pip-base-stars {
+  display: inline-flex;
+  gap: 1px;
+  color: rgb(var(--color-on-surface-variant) / 0.6);
+}
+
+.pip-base-stars .is-won {
+  color: #e0a800;
+}
+
+/* Pip's wish and the next thing on her list: a line each, with what it is worth. */
+.pip-base-todo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8125rem;
+  color: rgb(var(--color-on-surface));
+}
+
+/* The clearing while something is being set down, and the field of a raid. */
+.pip-arcade-canvas.is-placing,
+.pip-base-field {
+  cursor: crosshair;
+}
+
+/* An amount of acorns: the acorn and the number, kept together. */
+.pip-base-acorns {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A picture to press: a building, a hero, a thing for the clearing. */
+.pip-base-tile {
+  position: relative;
+  display: flex;
+  min-width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 6px;
+  border: 1px solid rgb(var(--color-outline-variant) / 0.5);
+  border-radius: 12px;
+  background: rgb(var(--color-surface-high) / 0.6);
+  color: rgb(var(--color-on-surface));
+}
+
+.pip-base-tile.is-wide {
+  height: auto;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.6875rem;
+}
+
+.pip-base-tile:hover:not(:disabled) {
   border-color: rgb(var(--color-primary) / 0.6);
+}
+
+.pip-base-tile.is-chosen {
+  border-color: rgb(var(--color-primary));
+  box-shadow: 0 0 0 2px rgb(var(--color-primary) / 0.35);
+  background: rgb(var(--color-primary) / 0.12);
+}
+
+.pip-base-tile:focus-visible {
+  outline: 2px solid rgb(var(--color-primary));
+  outline-offset: 2px;
+}
+
+.pip-base-tile-level {
+  position: absolute;
+  right: 3px;
+  bottom: 1px;
+  font-size: 0.625rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: rgb(var(--color-on-surface));
+  text-shadow: 0 0 2px rgb(var(--color-surface)), 0 0 2px rgb(var(--color-surface));
+}
+
+.pip-base-tile-mark {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+}
+
+/* Not here yet: a picture with the colour gone out of it. */
+.pip-base .is-locked {
+  filter: grayscale(1);
+  opacity: 0.45;
+}
+
+/* A raid's picture: the camp, and whoever holds it standing in front. */
+.pip-base-portrait {
+  position: relative;
+  display: flex;
+  width: 56px;
+  height: 52px;
+  flex: none;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.pip-base-portrait-foe {
+  position: absolute;
+  right: -6px;
+  bottom: -2px;
+}
+
+/* What to do, over a raid's field until the first scout is down. */
+.pip-base-hint {
+  position: absolute;
+  inset: auto 0 10px 0;
+  text-align: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #fff;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.7);
+  pointer-events: none;
+}
+
+/* Under a game between runs: paid runs in hand, and a wager. */
+.pip-arcade-wager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  margin-top: 8px;
+  font-size: 0.75rem;
+  color: rgb(var(--color-on-surface-variant));
+}
+
+/* ---- The arcade and the camp, in Pip's own hand -------------------------------------
+   The rest of the app is soft raised paper. Pip's world is not: it is drawn,
+   with a hard ink line, notched corners and keys that sink into a lip, as her
+   house's own controls are. The arcade is hers, so it is drawn her way too:
+   a sheet of dotted paper, a picture in a wooden frame, tiles and keys to
+   press, and Pip saying what there is to do in a speech bubble. Things hop,
+   wiggle and pop a little when touched; none of it moves for a reader who
+   has asked for less motion. */
+
+.pip-arcade {
+  --whim-butter: #ffd86b;
+  --whim-good: #d3efbf;
+  --whim-good-ink: #2e5a1c;
+  --whim-bad: #ffd6c9;
+  --whim-bad-ink: #9a3412;
+  --whim-berry: #e2557a;
+  --whim-wood: #b98a52;
+  --whim-wood-dark: #8a6238;
+  --whim-leaf: #6aa841;
+  --whim-bubble: #ffffff;
+}
+
+:root[data-theme="dark"] .pip-arcade {
+  --whim-butter: #7a651c;
+  --whim-good: #27452c;
+  --whim-good-ink: #a9e08a;
+  --whim-bad: #57302a;
+  --whim-bad-ink: #ffb199;
+  --whim-berry: #ff7f9f;
+  --whim-wood: #6e5332;
+  --whim-wood-dark: #4a371f;
+  --whim-leaf: #7cba52;
+  --whim-bubble: #3d424c;
+}
+
+.pip-arcade.modal-surface {
+  border: 0;
+  border-radius: 0;
+  background:
+    radial-gradient(var(--hud-track) 1px, transparent 1.5px) 0 0 / 14px 14px,
+    var(--hud-face);
+  color: var(--hud-ink);
+  box-shadow: none;
+}
+
+.pip-arcade-backdrop:has(> .pip-arcade) {
+  padding: 0;
+  background: var(--hud-face);
+}
+
+/* The Hollow as the place Pip's tab opens on: the whole of the page, on the
+   same paper as the arcade. Her house is behind it, through the burrow's
+   door: kept as it was left, and not shown. */
+.pip-house-page {
+  position: relative;
+}
+
+.pip-arcade.pip-hollow-place {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  height: auto;
+  padding: 0;
+  overflow-x: hidden;
+  background:
+    radial-gradient(var(--hud-track) 1px, transparent 1.5px) 0 0 / 14px 14px,
+    var(--hud-face);
+  color: var(--hud-ink);
+}
+
+.pip-house-page[data-place="hollow"] > .pip-house {
+  visibility: hidden;
+}
+
+.pip-hollow-place > .pip-arcade-page {
+  width: 100%;
+  height: 100%;
+}
+
+/* A raid, a night watched, a camp still being read: pages of their own, with room about them. */
+.pip-hollow-place > .pip-arcade-page > .pip-base:not(.is-stage) {
+  width: min(1240px, 100%);
+  margin: 0 auto;
+  padding: 14px 24px 28px;
+}
+
+/* ---- The picture is the page ---------------------------------------------------------
+   Where there is room, the clearing fills Pip's tab and everything else is laid over
+   it: what the camp has along the top, Pip's word under that, the ways out in the
+   corner, the row of keys at the foot, and whatever is opened in a panel at the side.
+   In a small window the picture is hung first and the rest follows under it. */
+.pip-base.is-stage {
+  position: relative;
+}
+
+.pip-base-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.pip-base-head-left {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.pip-base-head-left > .pip-camp-say {
+  max-width: min(430px, 100%);
+}
+
+.pip-base-head-right {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.pip-base-side {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pip-base-side-close {
+  align-self: flex-end;
+}
+
+.pip-base-side .pip-base-shelf {
+  margin-top: 0;
+}
+
+.pip-base-sheet-close {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  float: right;
+  margin-left: 8px;
+}
+
+/* Hung at the top, in a small window. */
+.pip-base.is-stage[data-mode="stack"] {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 14px 28px;
+}
+
+.pip-base.is-stage[data-mode="stack"]:not([data-tab="camp"]) > .pip-base-scene {
+  display: none;
+}
+
+/* The page itself. */
+.pip-base.is-stage[data-mode="stage"] {
+  margin: 0 auto;
+  overflow: hidden;
+}
+
+.pip-base.is-stage[data-mode="stage"] > .pip-base-scene {
+  position: absolute;
+  inset: 0;
+  display: block;
+  padding: 0;
+}
+
+.pip-base.is-stage[data-mode="stage"] > .pip-base-scene .pip-arcade-canvas {
+  display: block;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.pip-base.is-stage[data-mode="stage"] > .pip-base-head {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  left: 12px;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.pip-base.is-stage[data-mode="stage"] .pip-base-head-left > *,
+.pip-base.is-stage[data-mode="stage"] .pip-base-head-right > * {
+  pointer-events: auto;
+}
+
+/* The row of keys: a board at the foot of the picture. */
+.pip-base.is-stage[data-mode="stage"] > .pip-base-under {
+  position: absolute;
+  right: 12px;
+  bottom: 14px;
+  left: 12px;
+  z-index: 4;
+  width: fit-content;
+  max-width: calc(100% - 24px);
+  margin: 0 auto;
+  padding: 8px 10px 9px;
+  background: var(--hud-face);
+  box-shadow:
+    0 0 0 2px var(--hud-line),
+    0 6px 0 2px var(--hud-drop);
+}
+
+.pip-base.is-stage[data-mode="stage"] > .pip-base-under .pip-base-dock > .ml-auto {
+  margin-left: 6px;
+}
+
+/* What is opened: a panel down the side of the picture, shut from its corner. */
+.pip-base.is-stage[data-mode="stage"] > .pip-base-side {
+  position: absolute;
+  top: 56px;
+  right: 12px;
+  bottom: 96px;
+  z-index: 5;
+  width: min(372px, 46%);
+  gap: 0;
+  pointer-events: none;
+}
+
+.pip-base.is-stage[data-mode="stage"] > .pip-base-side > .pip-base-side-scroll {
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 3px 4px 10px 3px;
+  pointer-events: auto;
+}
+
+.pip-base.is-stage[data-mode="stage"] > .pip-base-side > .pip-base-side-close {
+  position: absolute;
+  top: 3px;
+  left: -40px;
+  pointer-events: auto;
+}
+
+/* The way to the other clearing: a tab at the edge of the picture. */
+.pip-base-edge {
+  display: none;
+}
+
+.pip-base.is-stage[data-mode="stage"] > .pip-base-edge {
+  position: absolute;
+  top: 46%;
+  z-index: 4;
+  display: flex;
+  width: 34px;
+  height: 56px;
+  align-items: center;
+  justify-content: center;
+  background: var(--hud-face);
+  color: var(--hud-ink);
+  box-shadow:
+    0 0 0 2px var(--hud-line),
+    0 5px 0 2px var(--hud-drop);
+}
+
+.pip-base.is-stage[data-mode="stage"] > .pip-base-edge.is-right {
+  right: 10px;
+}
+
+.pip-base.is-stage[data-mode="stage"] > .pip-base-edge.is-left {
+  left: 10px;
+}
+
+.pip-base.is-stage[data-mode="stage"] > .pip-base-edge:hover {
+  background: var(--whim-butter);
+}
+
+/* Raids and the journal: a sheet over the picture. */
+.pip-base.is-stage[data-mode="stage"] > .pip-base-sheet {
+  position: absolute;
+  top: 56px;
+  right: 12px;
+  bottom: 96px;
+  left: 12px;
+  z-index: 6;
+  max-width: 1100px;
+  margin: 0 auto;
+  overflow-y: auto;
+  padding: 12px 16px 18px;
+  background:
+    radial-gradient(var(--hud-track) 1px, transparent 1.5px) 0 0 / 14px 14px,
+    var(--hud-face);
+  box-shadow:
+    0 0 0 2px var(--hud-line),
+    0 6px 0 2px var(--hud-drop);
+}
+
+.pip-base.is-stage[data-mode="stage"] > .pip-base-how {
+  position: absolute;
+  top: 56px;
+  right: 12px;
+  z-index: 7;
+  width: min(520px, calc(100% - 24px));
+  margin: 0;
+}
+
+/* The camp page: one column in a narrow window; in a wide one the picture
+   takes the left and what is said and chosen sits beside it. */
+.pip-base-camp {
+  display: grid;
+  gap: 12px 22px;
+  grid-template-areas:
+    "say"
+    "scene"
+    "dock"
+    "card";
+  margin-top: 14px;
+}
+
+.pip-base-camp > .pip-camp-say {
+  grid-area: say;
+}
+
+.pip-base-camp > .pip-base-scene {
+  grid-area: scene;
+}
+
+.pip-base-camp > .pip-base-under {
+  grid-area: dock;
+  min-width: 0;
+}
+
+.pip-base-camp > .pip-base-side {
+  grid-area: card;
+  min-width: 0;
+}
+
+.pip-base-camp > .pip-camp-say,
+.pip-base-camp > .pip-base-scene,
+.pip-base-side > .pip-base-card,
+.pip-base-under > :first-child {
+  margin-top: 0;
+}
+
+@media (min-width: 1040px) {
+  .pip-base-camp {
+    grid-template-columns: minmax(0, 1.75fr) minmax(300px, 1fr);
+    grid-template-rows: auto auto 1fr;
+    grid-template-areas:
+      "scene say"
+      "scene card"
+      "dock card";
+    align-items: start;
+  }
+}
+
+.pip-arcade .text-on-surface {
+  color: var(--hud-ink);
+}
+
+.pip-arcade .text-on-surface-variant {
+  color: var(--hud-ink-soft);
+}
+
+/* The arcade's name: set a touch askew, over a squiggle. */
+.pip-arcade .page-title {
+  display: inline-block;
+  padding-bottom: 7px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='6' viewBox='0 0 24 6'%3E%3Cpath d='M0 3 Q3 0 6 3 T12 3 T18 3 T24 3' fill='none' stroke='%236aa841' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E")
+    left bottom / 24px 6px repeat-x;
+  transform: rotate(-1.2deg);
+  transform-origin: left center;
+}
+
+/* Keys: every button in the arcade. A face with an ink line and a lip it sinks into. */
+.pip-arcade .tactile-button {
+  border: 0;
+  border-radius: 0;
+  background: var(--hud-face-hover);
+  color: var(--hud-ink);
+  font-weight: 700;
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 5px 0 0 var(--hud-lip);
+  transition: transform 110ms cubic-bezier(0.3, 1.4, 0.5, 1), box-shadow 140ms ease, background-color 160ms ease;
+}
+
+/* Nothing about a key moves when the pointer comes to it: a thing that moves
+   out from under the pointer is no longer under it, and moves back, and that
+   is a shiver. It warms and its lip deepens; it moves when it is pressed. */
+.pip-arcade .tactile-button:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--whim-butter);
+  color: var(--hud-ink);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 7px 0 0 var(--hud-lip);
+  transform: none;
+}
+
+.pip-arcade .tactile-button:active:not(:disabled),
+.pip-arcade .tactile-button[aria-pressed="true"] {
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-lip);
+  /* Pressed: down into its lip, and a little flat, as a soft key is. */
+  transform: translateY(3px) scale(1.03, 0.94);
+}
+
+.pip-arcade .tactile-button-primary {
+  --hud-lip: #2e5a1c;
+  background: linear-gradient(#8cc85c, #5f9a38);
+  color: #0f2410;
+  filter: none;
+}
+
+.pip-arcade .tactile-button-primary:hover:not(:disabled) {
+  background: linear-gradient(#9ad668, #6aa841);
+  color: #0f2410;
+}
+
+.pip-arcade .tactile-button:disabled {
+  cursor: not-allowed;
+}
+
+/* Something to collect: it jumps for attention, then waits to be noticed. */
+.pip-arcade .tactile-button.is-ready {
+  animation: pip-whim-jump 3200ms cubic-bezier(0.3, 0, 0.3, 1) infinite;
+}
+
+/* The games to pick from: a card each, with the game itself playing on it.
+   Dealt a little crooked; under the pointer a card straightens and lifts.
+   The lift is the card's, but the pointer's hold on it is not: an unseen
+   skirt under the card keeps it under the pointer while it is up. */
+.pip-arcade-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr));
+  gap: 26px 22px;
+  margin-top: 20px;
+}
+
+.pip-arcade-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 10px 13px;
+  background: var(--hud-face-low);
+  color: var(--hud-ink);
+  text-align: left;
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 7px 0 0 var(--hud-lip);
+  transition:
+    transform 260ms cubic-bezier(0.2, 0.9, 0.3, 1.25),
+    box-shadow 260ms ease,
+    background-color 180ms ease;
+}
+
+.pip-arcade-card::after {
+  position: absolute;
+  inset: -4px -4px -14px;
+  content: "";
+}
+
+.pip-arcade-card:nth-child(3n + 1) {
+  transform: rotate(-0.55deg);
+}
+
+.pip-arcade-card:nth-child(3n + 2) {
+  transform: rotate(0.45deg);
+}
+
+.pip-arcade-card:nth-child(3n) {
+  transform: rotate(-0.25deg);
+}
+
+.pip-arcade-card:hover,
+.pip-arcade-card:focus-visible {
+  background: var(--hud-face-hover);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 13px 0 0 var(--hud-drop);
+  transform: translateY(-6px) rotate(0deg);
+}
+
+.pip-arcade-card:active {
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 3px 0 0 var(--hud-lip);
+  transform: translateY(2px) rotate(0deg);
+  transition-duration: 80ms;
+}
+
+.pip-arcade-card:focus-visible {
+  outline: 3px solid rgb(var(--color-primary));
+  outline-offset: 4px;
+}
+
+/* The set the card's game plays on: a small dark bezel, and the picture. */
+.pip-arcade-card-screen {
+  display: block;
+  padding: 5px;
+  border-radius: 7px;
+  background: linear-gradient(160deg, #474a55, #1b1c22 70%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.16), inset 0 -2px 0 rgb(0 0 0 / 0.45);
+}
+
+.pip-arcade-card-picture {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 2 / 1;
+  border-radius: 3px;
+}
+
+.pip-arcade-card-name {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 4px;
+  font-family: "ZT Nature", "Segoe UI", system-ui, sans-serif;
+  font-size: 1.25rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.pip-arcade-card-icon {
+  display: flex;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--whim-butter);
+  box-shadow: 0 0 0 2px var(--hud-line);
+  transform: rotate(-8deg);
+  transition: transform 320ms cubic-bezier(0.3, 1.8, 0.5, 1);
+}
+
+.pip-arcade-card:hover .pip-arcade-card-icon,
+.pip-arcade-card:focus-visible .pip-arcade-card-icon {
+  transform: rotate(10deg) scale(1.15);
+}
+
+.pip-arcade-card-about {
+  min-height: 4.2em;
+  color: var(--hud-ink-soft);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+.pip-arcade-card-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 2px;
+}
+
+.pip-arcade-fact {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px 3px;
+  border-radius: 999px;
+  background: var(--hud-well);
+  box-shadow: inset 0 -2px 0 0 var(--hud-track);
+  color: var(--hud-ink);
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.pip-arcade-fact.is-best {
+  background: var(--whim-butter);
+  box-shadow: none;
+}
+
+/* A key to press, as a key. */
+.pip-arcade-fact kbd {
+  padding: 0 5px 1px;
+  background: var(--hud-face);
+  font: inherit;
+  font-weight: 800;
+  box-shadow:
+    0 0 0 1.5px var(--hud-line),
+    0 2.5px 0 0 var(--hud-lip);
+}
+
+/* ---- the camp's own parts ---- */
+
+.pip-arcade .pip-base-stats {
+  gap: 6px;
+  color: var(--hud-ink);
+}
+
+/* A fact in a few characters: a little label, with what it means behind it. */
+.pip-base-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px 3px;
+  border-radius: 999px;
+  background: var(--hud-well, rgb(var(--color-surface-high)));
+  box-shadow: inset 0 -2px 0 0 var(--hud-track, transparent);
+  color: var(--hud-ink, inherit);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.35;
+}
+
+.pip-base-chip[title] {
+  cursor: help;
+}
+
+.pip-base-chip.is-good {
+  background: var(--whim-good);
+  box-shadow: none;
+  color: var(--whim-good-ink);
+}
+
+.pip-base-chip.is-bad {
+  background: var(--whim-bad);
+  box-shadow: none;
+  color: var(--whim-bad-ink);
+  font-weight: 700;
+}
+
+.pip-base-chip.is-lit {
+  background: var(--whim-butter);
+  box-shadow: 0 0 0 3px rgb(255 216 107 / 0.35);
+}
+
+.pip-base-chip.is-dim > * {
+  filter: grayscale(1);
+  opacity: 0.45;
+}
+
+.pip-base-of {
+  color: var(--hud-ink-soft);
+  font-size: 0.75rem;
+}
+
+/* A number that has just changed gives a little jump. */
+.pip-base-pop {
+  display: inline-block;
+  animation: pip-whim-pop 340ms cubic-bezier(0.3, 1.7, 0.5, 1);
+}
+
+/* The small round keys at the top: sounds, and how it all works. */
+.pip-base-round {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--hud-well);
+  color: var(--hud-ink-soft);
+  box-shadow: inset 0 -2px 0 0 var(--hud-track);
+  transition: background-color 160ms ease;
+}
+
+.pip-base-round:hover {
+  background: var(--whim-butter);
+  color: var(--hud-ink);
+}
+
+.pip-base-round > svg {
+  transition: transform 320ms cubic-bezier(0.3, 1.8, 0.5, 1);
+}
+
+.pip-base-round:hover > svg {
+  transform: rotate(-12deg) scale(1.15);
+}
+
+.pip-base-round[aria-pressed="true"],
+.pip-base-round[aria-expanded="true"] {
+  background: var(--whim-butter);
+  color: var(--hud-ink);
+}
+
+.pip-base-round:focus-visible,
+.pip-base-tab:focus-visible,
+.pip-camp-say-go:focus-visible {
+  outline: 2px solid rgb(var(--color-primary));
+  outline-offset: 2px;
+}
+
+/* The camp's three pages: the tabs of a ring binder, the chosen one joined to its page. */
+.pip-base-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 0 8px;
+  border-bottom: 2px solid var(--hud-line);
+}
+
+.pip-base-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px 4px;
+  border-radius: 8px 8px 0 0;
+  background: var(--hud-face-low);
+  color: var(--hud-ink-soft);
+  font-size: 0.8125rem;
+  font-weight: 800;
+  box-shadow:
+    inset 2px 0 0 0 var(--hud-line),
+    inset -2px 0 0 0 var(--hud-line),
+    inset 0 2px 0 0 var(--hud-line);
+  transition: background-color 160ms ease, color 160ms ease;
+}
+
+.pip-base-tab:hover {
+  background: var(--hud-face-hover);
+  color: var(--hud-ink);
+}
+
+.pip-base-tab.is-chosen {
+  margin-bottom: -2px;
+  padding: 8px 14px 6px;
+  background: var(--whim-butter);
+  color: var(--hud-ink);
+}
+
+/* How many of a thing are waiting: a berry with a number on it. */
+.pip-base-count {
+  display: inline-flex;
+  min-width: 17px;
+  height: 17px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--whim-berry);
+  color: #fff;
+  font-size: 0.6875rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+/* Where the next thing on Pip's list is done: a mark that will not sit still. */
+.pip-base-nudge {
+  position: absolute;
+  top: -9px;
+  right: -7px;
+  z-index: 1;
+  display: block;
+  width: 16px;
+  height: 16px;
+  background: var(--whim-butter);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line);
+  animation: pip-whim-jump 1700ms cubic-bezier(0.3, 0, 0.3, 1) infinite;
+  pointer-events: none;
+}
+
+.pip-base-nudge::before {
+  position: absolute;
+  inset: 0;
+  color: var(--hud-ink);
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 16px;
+  text-align: center;
+  content: "!";
+}
+
+/* Pip, and what she has to say: her face, and a bubble with a tail toward her. */
+.pip-camp-say {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.pip-camp-say-face {
+  flex: none;
+}
+
+.pip-camp-say-bubble {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  padding: 3px 12px;
+  background: var(--whim-bubble);
+  color: var(--hud-ink);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 5px 0 0 var(--hud-drop);
+}
+
+/* The tail: two steps of pixels, toward her. */
+.pip-camp-say-bubble::before,
+.pip-camp-say-bubble::after {
+  position: absolute;
+  bottom: 8px;
+  background: var(--whim-bubble);
+  content: "";
+}
+
+.pip-camp-say-bubble::before {
+  left: -6px;
+  width: 4px;
+  height: 8px;
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line);
+}
+
+.pip-camp-say-bubble::after {
+  left: -10px;
+  bottom: 10px;
+  width: 4px;
+  height: 4px;
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line);
+}
+
+.pip-camp-say-line {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0 7px;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+}
+
+.pip-camp-say-line + .pip-camp-say-line {
+  border-top: 2px dashed var(--hud-track);
+}
+
+.pip-camp-say-go {
+  font-weight: 700;
+  text-align: left;
+  text-decoration: underline dotted var(--hud-ink-soft);
+  text-underline-offset: 3px;
+}
+
+.pip-camp-say-go:hover {
+  text-decoration: underline wavy var(--whim-leaf);
+}
+
+/* The picture of the camp: in a wooden frame, hung on the page. */
+.pip-arcade .pip-base-scene {
+  padding: 8px 8px 14px;
+}
+
+.pip-arcade .pip-base-scene .pip-arcade-canvas {
+  border-radius: 0;
+  box-shadow:
+    0 0 0 2px var(--hud-line),
+    0 0 0 6px var(--whim-wood),
+    0 0 0 8px var(--hud-line),
+    0 8px 0 8px var(--hud-drop);
+}
+
+/* The row under the picture: everything there is to choose. */
+.pip-base-dock {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 7px;
+}
+
+.pip-base-dock-gap {
+  align-self: stretch;
+  margin: 0 3px;
+  border-left: 2px dashed var(--hud-track);
+}
+
+.pip-arcade .pip-base-tile {
+  border: 0;
+  border-radius: 0;
+  background: var(--hud-face-hover);
+  color: var(--hud-ink);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 4px 0 0 var(--hud-lip);
+  transition: transform 90ms ease, box-shadow 90ms ease, background-color 120ms ease;
+}
+
+.pip-arcade .pip-base-tile:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--whim-butter);
+}
+
+.pip-arcade .pip-base-tile > :first-child {
+  transform-origin: 50% 100%;
+}
+
+.pip-arcade .pip-base-tile:hover:not(:disabled) > :first-child {
+  animation: pip-whim-jelly 520ms cubic-bezier(0.3, 0, 0.3, 1);
+}
+
+.pip-arcade .pip-base-tile:active:not(:disabled) {
+  transform: translateY(3px);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 1px 0 0 var(--hud-lip);
+}
+
+.pip-arcade .pip-base-tile.is-chosen {
+  border-color: transparent;
+  background: var(--whim-butter);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 6px 0 0 var(--hud-lip);
+  transform: translateY(-2px);
+}
+
+.pip-arcade .pip-base-tile:disabled {
+  cursor: not-allowed;
+}
+
+/* A shelf's key: a tile with its name on it. */
+.pip-arcade .pip-base-tile.is-key {
+  gap: 6px;
+  padding: 4px 11px 4px 9px;
+  font-family: "ZT Nature", "Segoe UI", system-ui, sans-serif;
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.pip-base-tile.is-key > .pip-base-count {
+  margin-left: 1px;
+}
+
+/* A shelf: what there is, by what it is for. */
+.pip-base-side > .pip-base-enter > .pip-base-shelf {
+  margin-top: 0;
+}
+
+.pip-base-shelf-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px 7px;
+  margin-top: 9px;
+}
+
+.pip-base-shelf .pip-base-heading + .pip-base-shelf-row {
+  margin-top: 5px;
+}
+
+/* Not come yet: the picture greyed, and the level that brings it on a tag. */
+.pip-arcade .pip-base-tile.is-shut {
+  background: var(--hud-face);
+}
+
+.pip-base-tile.is-shut > :first-child {
+  filter: grayscale(1);
+  opacity: 0.4;
+}
+
+.pip-base-tile-lock {
+  position: absolute;
+  right: 2px;
+  bottom: 1px;
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  font-size: 0.625rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--hud-ink);
+  text-shadow: 0 0 2px var(--hud-face), 0 0 2px var(--hud-face);
+}
+
+/* What the next level brings: a row of small pictures, each saying what it is when rested on. */
+.pip-base-opens {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 6px;
+  margin-top: 7px;
+  font-size: 0.75rem;
+  color: var(--hud-ink);
+}
+
+.pip-base-opens-at {
+  margin-right: 2px;
+  font-weight: 600;
+}
+
+.pip-base-open {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  background: var(--hud-face-hover);
+  box-shadow:
+    0 -2px 0 0 var(--hud-track),
+    0 2px 0 0 var(--hud-track),
+    -2px 0 0 0 var(--hud-track),
+    2px 0 0 0 var(--hud-track);
+  cursor: help;
+}
+
+.pip-base-open.is-foe {
+  background: var(--hud-face);
+}
+
+/* A guardian on a card of their own: no rule above them. */
+.pip-base-guard.is-alone {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.pip-arcade .pip-base-tile-level {
+  color: var(--hud-ink);
+  text-shadow: 0 0 2px var(--hud-face), 0 0 2px var(--hud-face);
+}
+
+/* A building going up: the hammer comes down now and then, not without rest. */
+.pip-base-tile-mark.is-working {
+  animation: pip-whim-knock 2400ms ease-in-out infinite;
+  transform-origin: 80% 80%;
+}
+
+.pip-base-tile-mark.is-waiting {
+  left: 3px;
+  right: auto;
+  color: var(--whim-wood-dark);
+  animation: pip-whim-jump 2100ms cubic-bezier(0.3, 0, 0.3, 1) infinite;
+}
+
+.pip-base-tile-mark.is-good {
+  color: var(--whim-good-ink);
+}
+
+.pip-base-tile-mark.is-bad {
+  color: var(--whim-bad-ink);
+}
+
+.pip-base-tile-dot {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--whim-berry);
+  box-shadow: 0 0 0 2px var(--hud-line);
+}
+
+/* A card: what the chosen thing is, and what can be done about it. */
+.pip-arcade .pip-base-card {
+  border: 0;
+  border-radius: 0;
+  background: var(--hud-face-low);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 6px 0 0 var(--hud-drop);
+}
+
+.pip-base-title {
+  font-family: "ZT Nature", "Segoe UI", system-ui, sans-serif;
+  font-size: 1.125rem;
+  font-weight: 800;
+  line-height: 1.25;
+  color: var(--hud-ink, rgb(var(--color-on-surface)));
+}
+
+.pip-base-title[title] {
+  cursor: help;
+}
+
+.pip-arcade .pip-base-heading {
+  font-family: "ZT Nature", "Segoe UI", system-ui, sans-serif;
+  font-size: 0.9375rem;
+  color: var(--hud-ink);
+}
+
+/* A level: a price tag stuck on a little crooked. */
+.pip-base-level {
+  padding: 1px 8px 2px;
+  background: var(--whim-butter);
+  color: var(--hud-ink);
+  font-size: 0.6875rem;
+  font-weight: 800;
+  box-shadow: 0 0 0 2px var(--hud-line);
+  transform: rotate(2deg);
+}
+
+/* The chosen thing's picture, standing on a tuft of grass. */
+.pip-base-portrait.is-site {
+  width: 60px;
+  height: 56px;
+  padding-bottom: 4px;
+  background: radial-gradient(ellipse 28px 7px at 50% calc(100% - 5px), var(--whim-leaf) 0 97%, transparent 100%);
+}
+
+.pip-base-how {
+  display: flex;
+  list-style: none;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--hud-ink);
+}
+
+.pip-base-how li {
+  display: flex;
+  gap: 9px;
+}
+
+.pip-base-how svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--whim-leaf);
+}
+
+/* A building going up: a chunky bar that fills with stripes. */
+.pip-arcade .pip-base-job progress {
+  height: 12px;
+  border-radius: 0;
+  background: var(--hud-track);
+  box-shadow: 0 0 0 2px var(--hud-line);
+}
+
+.pip-arcade .pip-base-job progress::-webkit-progress-value {
+  border-radius: 0;
+  background: repeating-linear-gradient(-45deg, #8cc85c 0 6px, #6aa841 6px 12px);
+}
+
+.pip-arcade .pip-base-stars .is-won {
+  filter: drop-shadow(0 1px 0 var(--hud-line));
+}
+
+.pip-arcade .pip-base-stars {
+  color: var(--hud-ink-soft);
+}
+
+/* What a thing means, where nothing can hover: a small dark bubble over it. */
+.pip-tip {
+  position: absolute;
+  z-index: 6;
+  display: flex;
+  justify-content: center;
+  transform: translate(-50%, calc(-100% - 9px));
+  pointer-events: none;
+}
+
+.pip-tip.is-under {
+  transform: translate(-50%, 9px);
+}
+
+.pip-tip span {
+  padding: 6px 10px 7px;
+  background: var(--hud-ink, #1c261f);
+  color: var(--hud-face, #fffbf0);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.35;
+  box-shadow:
+    0 -2px 0 0 var(--hud-ink, #1c261f),
+    0 2px 0 0 var(--hud-ink, #1c261f),
+    0 6px 0 0 var(--hud-drop, rgb(0 0 0 / 0.2));
+  animation: pip-whim-pop 220ms cubic-bezier(0.3, 1.5, 0.5, 1);
+}
+
+/* A jump, as a small thing jumps: a crouch, up, a landing that squashes, and
+   then a good while standing still. The stillness is most of it. */
+@keyframes pip-whim-jump {
+  0%,
+  34%,
+  100% {
+    transform: translateY(0) scale(1, 1);
+  }
+  5% {
+    transform: translateY(0) scale(1.08, 0.9);
+  }
+  14% {
+    transform: translateY(-5px) scale(0.95, 1.07);
+  }
+  22% {
+    transform: translateY(0) scale(1.1, 0.88);
+  }
+  28% {
+    transform: translateY(-1.5px) scale(0.98, 1.03);
+  }
+}
+
+/* Jelly: squashed, stretched, and settling. */
+@keyframes pip-whim-jelly {
+  0%,
+  100% {
+    transform: scale(1, 1);
+  }
+  22% {
+    transform: scale(1.16, 0.84);
+  }
+  45% {
+    transform: scale(0.9, 1.12);
+  }
+  68% {
+    transform: scale(1.05, 0.96);
+  }
+  85% {
+    transform: scale(0.98, 1.02);
+  }
+}
+
+@keyframes pip-whim-pop {
+  0% {
+    scale: 0.6;
+  }
+  60% {
+    scale: 1.25;
+  }
+  100% {
+    scale: 1;
+  }
+}
+
+@keyframes pip-whim-knock {
+  0%,
+  22%,
+  100% {
+    rotate: 0deg;
+  }
+  9% {
+    rotate: -28deg;
+  }
+  15% {
+    rotate: 8deg;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pip-arcade .tactile-button,
+  .pip-arcade .tactile-button.is-ready,
+  .pip-arcade-card,
+  .pip-arcade-card-icon,
+  .pip-arcade .pip-base-tile,
+  .pip-arcade .pip-base-tile:hover:not(:disabled) > :first-child,
+  .pip-base-round > svg,
+  .pip-base-pop,
+  .pip-base-nudge,
+  .pip-base-tile-mark,
+  .pip-base-tile-dot,
+  .pip-base-round,
+  .pip-base-tab,
+  .pip-tip span {
+    animation: none;
+    transition: none;
+  }
+
+  .pip-arcade-card,
+  .pip-arcade-card:hover,
+  .pip-arcade-card:focus-visible,
+  .pip-arcade-card:hover .pip-arcade-card-icon,
+  .pip-base-round:hover > svg {
+    transform: none;
+  }
+}
+
+/* ---- the camp, moving -------------------------------------------------------------
+   Everything that arrives, arrives: a card rises into place, the tiles and
+   the raids are dealt out one after another, a star turns up with a twinkle.
+   What is under way shows it (a building's bar crawls). And how a raid came
+   out is said with some ceremony. All of it is still for a reader who has
+   asked for less motion. */
+
+.pip-base-enter {
+  animation: pip-whim-rise 280ms cubic-bezier(0.2, 0.9, 0.3, 1.15) both;
+}
+
+/* Dealt out: each a beat after the one before. */
+.pip-base-dock > .pip-base-tile,
+.pip-base-enter .grid > .pip-base-card,
+.pip-base-people > li,
+.pip-base-tales > li {
+  animation: pip-whim-deal 340ms cubic-bezier(0.2, 0.9, 0.3, 1.2) backwards;
+}
+
+.pip-base-dock > :nth-child(2),
+.pip-base-enter .grid > :nth-child(2),
+.pip-base-people > :nth-child(2),
+.pip-base-tales > :nth-child(2) {
+  animation-delay: 45ms;
+}
+
+.pip-base-dock > :nth-child(3),
+.pip-base-enter .grid > :nth-child(3),
+.pip-base-people > :nth-child(3),
+.pip-base-tales > :nth-child(3) {
+  animation-delay: 90ms;
+}
+
+.pip-base-dock > :nth-child(4),
+.pip-base-people > :nth-child(4),
+.pip-base-tales > :nth-child(4) {
+  animation-delay: 135ms;
+}
+
+.pip-base-dock > :nth-child(5),
+.pip-base-people > :nth-child(5),
+.pip-base-tales > :nth-child(5) {
+  animation-delay: 180ms;
+}
+
+.pip-base-dock > :nth-child(6),
+.pip-base-people > :nth-child(6) {
+  animation-delay: 225ms;
+}
+
+.pip-base-dock > :nth-child(7) {
+  animation-delay: 270ms;
+}
+
+.pip-base-dock > :nth-child(8) {
+  animation-delay: 315ms;
+}
+
+.pip-base-dock > :nth-child(n + 9) {
+  animation-delay: 360ms;
+}
+
+/* The front page's cards arrive the same way, but by fading up only: each has a lean of its own to keep. */
+.pip-arcade-cards > .pip-arcade-card {
+  animation: pip-whim-fade 380ms ease-out backwards;
+}
+
+.pip-arcade-cards > :nth-child(2) {
+  animation-delay: 70ms;
+}
+
+.pip-arcade-cards > :nth-child(3) {
+  animation-delay: 140ms;
+}
+
+.pip-arcade-cards > :nth-child(4) {
+  animation-delay: 210ms;
+}
+
+.pip-arcade-cards > :nth-child(5) {
+  animation-delay: 280ms;
+}
+
+/* Pip's lines come in from her side, one after another. */
+.pip-camp-say-line {
+  animation: pip-whim-slide 300ms cubic-bezier(0.2, 0.9, 0.3, 1.1) backwards;
+}
+
+.pip-camp-say-line:nth-child(2) {
+  animation-delay: 70ms;
+}
+
+.pip-camp-say-line:nth-child(3) {
+  animation-delay: 140ms;
+}
+
+.pip-camp-say-line:nth-child(n + 4) {
+  animation-delay: 210ms;
+}
+
+/* The stars the scouts promise: each turns up a beat after the last. */
+.pip-base-stars .is-won {
+  animation: pip-whim-star 520ms cubic-bezier(0.3, 1.7, 0.5, 1) backwards;
+}
+
+.pip-base-stars .is-won:nth-child(2) {
+  animation-delay: 130ms;
+}
+
+.pip-base-stars .is-won:nth-child(3) {
+  animation-delay: 260ms;
+}
+
+/* A building going up: the stripes crawl along its bar while there is reading still to do. */
+.pip-arcade .pip-base-job progress::-webkit-progress-value {
+  background-size: 17px 17px;
+  animation: pip-whim-crawl 900ms linear infinite;
+}
+
+/* The chosen thing's picture breathes a little: it is alive, or lived in. */
+.pip-base-portrait.is-site > .pip-sprite {
+  transform-origin: 50% 100%;
+  animation: pip-whim-breathe 2600ms ease-in-out infinite;
+}
+
+.pip-base-happy {
+  color: var(--whim-berry);
+  animation: pip-whim-beat 1400ms ease-in-out infinite;
+}
+
+/* Hearts: how happy Pip is, how well a hero knows the camp. */
+.pip-base-hearts {
+  display: inline-flex;
+  gap: 1px;
+  margin-left: 8px;
+  color: var(--hud-track);
+  vertical-align: -1px;
+  cursor: help;
+}
+
+.pip-base-hearts .is-full {
+  color: var(--whim-berry);
+  animation: pip-whim-star 420ms cubic-bezier(0.3, 1.7, 0.5, 1) backwards;
+}
+
+.pip-base-hearts .is-full:nth-child(2) {
+  animation-delay: 60ms;
+}
+
+.pip-base-hearts .is-full:nth-child(3) {
+  animation-delay: 120ms;
+}
+
+.pip-base-hearts .is-full:nth-child(4) {
+  animation-delay: 180ms;
+}
+
+.pip-base-hearts .is-full:nth-child(5) {
+  animation-delay: 240ms;
+}
+
+/* Who lives here: a row each, a face and what they have to say. */
+.pip-base-people {
+  display: flex;
+  flex-direction: column;
+  margin-top: 6px;
+}
+
+.pip-base-people > li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.pip-base-people > li + li {
+  border-top: 2px dashed var(--hud-track);
+}
+
+.pip-base-people > li > .pip-sprite {
+  flex: none;
+}
+
+.pip-base-person {
+  font-family: "ZT Nature", "Segoe UI", system-ui, sans-serif;
+  font-size: 0.9375rem;
+  font-weight: 800;
+  color: var(--hud-ink);
+}
+
+/* What she saw on her walks: a list of small pages. */
+.pip-base-tales {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  color: var(--hud-ink);
+}
+
+.pip-base-tales > li {
+  padding-left: 12px;
+  border-left: 3px solid var(--whim-leaf);
+}
+
+/* How a raid came out: under the field, so the field can still be seen. */
+.pip-base-result {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin: 14px auto 0;
+  padding: 14px 22px 16px;
+  width: min(420px, 100%);
+  background: var(--whim-bubble);
+  color: var(--hud-ink);
+  text-align: center;
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 7px 0 0 var(--hud-drop);
+  animation: pip-whim-slam 420ms cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+
+.pip-base-result-word {
+  font-family: "ZT Nature", "Segoe UI", system-ui, sans-serif;
+  font-size: 1.6rem;
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.pip-base-result.is-won .pip-base-result-word {
+  animation: pip-whim-cheer 900ms ease-in-out 420ms 2;
+}
+
+.pip-base-result.is-lost .pip-base-result-word {
+  font-size: 1.15rem;
+  color: var(--hud-ink-soft);
+}
+
+.pip-base-result-stars {
+  display: flex;
+  gap: 10px;
+}
+
+.pip-base-result-star {
+  display: inline-flex;
+  color: var(--hud-track);
+}
+
+/* A star lands: from far too big, down past its size, and back. */
+.pip-base-result-star.is-won {
+  color: #e0a800;
+  filter: drop-shadow(0 2px 0 var(--hud-line));
+  animation: pip-whim-land 460ms cubic-bezier(0.2, 1.5, 0.4, 1) both;
+}
+
+.pip-base-result-loot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 1.15rem;
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes pip-whim-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+@keyframes pip-whim-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes pip-whim-deal {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.94) rotate(-2deg);
+  }
+}
+
+@keyframes pip-whim-slide {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+}
+
+@keyframes pip-whim-star {
+  0% {
+    opacity: 0;
+    transform: scale(0.2) rotate(-40deg);
+  }
+  65% {
+    opacity: 1;
+    transform: scale(1.35) rotate(8deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+@keyframes pip-whim-land {
+  0% {
+    opacity: 0;
+    transform: scale(3.2) rotate(-30deg);
+  }
+  55% {
+    opacity: 1;
+    transform: scale(0.82) rotate(6deg);
+  }
+  78% {
+    transform: scale(1.12) rotate(-3deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+@keyframes pip-whim-slam {
+  0% {
+    opacity: 0;
+    transform: translateY(-18px) scale(0.9);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes pip-whim-cheer {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  25% {
+    transform: translateY(-4px) rotate(-2deg);
+  }
+  75% {
+    transform: translateY(-4px) rotate(2deg);
+  }
+}
+
+@keyframes pip-whim-crawl {
+  to {
+    background-position: 17px 0;
+  }
+}
+
+@keyframes pip-whim-breathe {
+  0%,
+  100% {
+    transform: scale(1, 1);
+  }
+  50% {
+    transform: scale(1.03, 0.97);
+  }
+}
+
+@keyframes pip-whim-beat {
+  0%,
+  30%,
+  100% {
+    transform: scale(1);
+  }
+  12% {
+    transform: scale(1.35);
+  }
+  22% {
+    transform: scale(1.1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pip-base-enter,
+  .pip-base-dock > .pip-base-tile,
+  .pip-base-enter .grid > .pip-base-card,
+  .pip-arcade-cards > .pip-arcade-card,
+  .pip-base-people > li,
+  .pip-base-tales > li,
+  .pip-camp-say-line,
+  .pip-base-stars .is-won,
+  .pip-base-hearts .is-full,
+  .pip-arcade .pip-base-job progress::-webkit-progress-value,
+  .pip-base-portrait.is-site > .pip-sprite,
+  .pip-base-happy,
+  .pip-base-result,
+  .pip-base-result .pip-base-result-word,
+  .pip-base-result-star.is-won {
+    animation: none;
+  }
+}
+
+/* A building's guardian, on that building's card: a face, a rank, and what it takes to train them. */
+.pip-base-guard {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 2px dashed var(--hud-track);
+}
+
+.pip-base-guard > .pip-sprite {
+  flex: none;
+}
+
+.pip-base-hearts .is-rank {
+  color: var(--whim-leaf);
+  animation: pip-whim-star 420ms cubic-bezier(0.3, 1.7, 0.5, 1) backwards;
+}
+
+/* What was just collected: the number, going up from the count it went into. */
+.pip-base-gain {
+  position: absolute;
+  top: -4px;
+  left: 50%;
+  color: var(--whim-good-ink);
+  font-size: 0.8125rem;
+  font-weight: 800;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: pip-whim-gain 1400ms cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+
+.pip-base-stats > .pip-base-chip {
+  position: relative;
+}
+
+@keyframes pip-whim-gain {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 4px) scale(0.7);
+  }
+  18% {
+    opacity: 1;
+    transform: translate(-50%, -12px) scale(1.25);
+  }
+  70% {
+    opacity: 1;
+    transform: translate(-50%, -20px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -30px) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pip-base-hearts .is-rank {
+    animation: none;
+  }
+
+  .pip-base-gain {
+    animation: pip-whim-fade 1400ms reverse both;
+  }
+}
+
+/* A friend's camp on their card. */
+.pip-base-visit {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.pip-base-visit canvas {
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px rgb(var(--color-outline-variant) / 0.5);
 }
 
 .pip-arcade-screen {
@@ -7101,31 +9451,25 @@ button.pip-shop-tile:hover,
    tiles at 380 x 480, a quiz question with long answers on a phone): there
    its title and its way out stay at the top of it. */
 @media (max-height: 620px), (max-width: 560px) {
-  .pip-arcade > :first-child {
-    position: sticky;
-    top: 0;
-    z-index: 2;
-    margin: -20px -20px 0;
-    padding: 20px 20px 8px;
-    border-radius: 20px 20px 0 0;
-    background: rgb(var(--color-surface-high));
+  .pip-arcade {
+    padding: 0 12px 20px;
+  }
+
+  .pip-arcade-head {
+    margin: 0 -12px;
+    padding: 10px 12px 8px;
   }
 }
 
 /* A short window: the shop (and the album, which shares its backdrop) nearly
    as tall as the window, and the heading without its second line. */
 @media (max-height: 620px) {
-  .pip-shop-backdrop,
-  .pip-arcade-backdrop {
+  .pip-shop-backdrop {
     padding: 8px;
   }
 
   .pip-shop {
     height: calc(100dvh - 16px);
-  }
-
-  .pip-arcade {
-    max-height: calc(100dvh - 16px);
   }
 
   .pip-shop-head {

@@ -12,9 +12,11 @@ type Props = {
   onOpen: (book: Book) => void;
   /** More entries for the card's menu. */
   menuActions?: BookMenuAction[];
+  /** Told the book's title once its menu has removed it. */
+  onRemoved?: (title: string) => void;
 };
 
-const BookCardComponent = ({ book, onRefresh, onOpen, menuActions }: Props) => {
+const BookCardComponent = ({ book, onRefresh, onOpen, menuActions, onRemoved }: Props) => {
   const { src: resolvedCover, onError: handleCoverError } = useCoverSrc(book, { thumb: true });
   const series = useSeriesInfo(book.id);
   const progressPercent = Math.round(Math.min(1, Math.max(0, book.progress)) * 100);
@@ -91,7 +93,7 @@ const BookCardComponent = ({ book, onRefresh, onOpen, menuActions }: Props) => {
             </p>
           )}
         </div>
-        <BookMenu book={book} actions={menuActions} className="-mr-1 -mt-1 shrink-0" />
+        <BookMenu book={book} actions={menuActions} onRemoved={onRemoved} className="-mr-1 -mt-1 shrink-0" />
       </div>
       <div>
         <div className="h-1.5 w-full rounded-full bg-surface-container-highest">

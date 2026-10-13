@@ -6,7 +6,7 @@ import { BookGrid } from "../components/BookGrid";
 import { BookList } from "../components/BookList";
 import { isMetadataRetryDue, useLibraryStore } from "../store/libraryStore";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
-import { isFinished } from "../constants/books";
+import { hasFinished } from "../constants/books";
 import type { Book, BookFilter } from "@shared/models/book";
 import {
   dependencyFreeSummary,
@@ -15,7 +15,7 @@ import {
   getBookExtension,
   isImportableExtension
 } from "../constants/bookFormats";
-import { flowerGrowing, getSessionProgress, sessionElapsedMs, useHabitStore } from "../store/habitStore";
+import { flowerGrowing, getSessionProgress, sessionElapsedMs, useHabitStore, type ActiveSession } from "../store/habitStore";
 import { UiIcon } from "../components/UiIcon";
 import { FocusFlower, flowerCaption, flowerLook } from "../components/FocusFlower";
 import { askConfirm } from "../components/ConfirmDialog";
@@ -27,6 +27,7 @@ import { openLibrarySearch } from "../components/search/librarySearchStore";
 import { searchable } from "../components/search/librarySearch";
 import { librarySeries, type LibrarySeries } from "../library/series";
 import { describeImport } from "../library/importSummary";
+import { genreChoices, genreKey, inGenre } from "../library/genres";
 
 const byTitle = (a: Book, b: Book) => a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: "base" });
 
@@ -96,19 +97,118 @@ const resolveErrorMessage = (error: unknown, fallback: string) => {
   return fallback;
 };
 
+/**
+ * Takes a layer that is drawn but hidden out of the tab order and away from
+ * screen readers. Spread on, and as a string: React 18 does not know `inert`,
+ * and drops an attribute it does not know when its value is `true`.
+ */
+const inertWhen = (hidden: boolean) => (hidden ? { inert: "" } : {});
+
+/**
+ * The running session's ring: the time left, how far through it is, and its
+ * flower. The second's tick is kept in here, so the page and every book on it
+ * are not drawn again each second. It also ends a session that has run out.
+ */
+const SessionRing = ({ session, sessionDuration }: { session: ActiveSession | null; sessionDuration: number }) => {
+  const stopSession = useHabitStore((state) => state.stopSession);
+  const [sessionTick, setSessionTick] = useState(0);
+  const [sessionRemaining, setSessionRemaining] = useState<number | null>(null);
+  const focusProgress = session ? getSessionProgress(session) : 0;
+  const focusPercent = Math.min(100, Math.round(focusProgress * 100));
+
+  useEffect(() => {
+    if (!session) {
+      setSessionRemaining(null);
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setSessionTick((value) => value + 1);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [session]);
+
+  useEffect(() => {
+    if (!session) {
+      setSessionRemaining(null);
+      return;
+    }
+    const totalSeconds = session.durationMinutes * 60;
+    const elapsedSeconds = Math.round(sessionElapsedMs(session) / 1000);
+    const remaining = Math.max(0, totalSeconds - elapsedSeconds);
+    const minutesLeft = Math.ceil(remaining / 60);
+    setSessionRemaining(minutesLeft);
+    if (remaining <= 0) {
+      void stopSession({ reason: "completed", cleanSession: true });
+    }
+  }, [session, sessionTick]);
+
+  return (
+    <div className="paper-surface-raised flex flex-col items-center gap-4 border-primary/40 bg-primary/10 px-6 py-6 text-center">
+      <div className="relative flex h-32 w-32 items-center justify-center">
+        <svg className="h-32 w-32 -rotate-90" viewBox="0 0 120 120">
+          <circle
+            cx="60"
+            cy="60"
+            r="46"
+            stroke="currentColor"
+            strokeWidth="8"
+            className="text-outline-variant/30"
+            fill="transparent"
+          />
+          <circle
+            cx="60"
+            cy="60"
+            r="46"
+            stroke="currentColor"
+            strokeWidth="8"
+            className="text-primary"
+            fill="transparent"
+            strokeDasharray={`${(focusPercent / 100) * 289} 289`}
+            strokeLinecap="round"
+          />
+        </svg>
+        {session?.flower ? (
+          // A session in full screen grows its flower inside the ring.
+          <div className="absolute inset-0 flex items-center justify-center pb-1">
+            <FocusFlower
+              kind={session.flower.kind}
+              {...flowerLook(session.flower, focusProgress)}
+              box={72}
+            />
+          </div>
+        ) : (
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-sm uppercase tracking-widest text-on-surface-variant">
+            <span className="text-2xl font-semibold text-primary">
+              {sessionRemaining ?? sessionDuration}m
+            </span>
+            <span className="text-[11px] text-on-surface-variant/70">remaining</span>
+          </div>
+        )}
+      </div>
+      <div className="text-[11px] uppercase tracking-widest text-on-surface-variant">
+        {session?.flower ? `${sessionRemaining ?? sessionDuration}m left · ` : ""}
+        {focusPercent}% complete
+      </div>
+      {session?.flower && (
+        <p className="max-w-[13rem] text-[11px] leading-snug text-on-surface-variant">
+          {flowerCaption(session.flower, focusProgress)}
+        </p>
+      )}
+    </div>
+  );
+};
+
 export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPageProps) => {
-  const { books, filters, loading, importing, stats, importBooks, importFiles, refreshMetadata, fetchCover, deleteBook, setFilter } =
+  const { books, filters, loading, importing, importBooks, importFiles, refreshMetadata, fetchCover, setFilter } =
     useLibraryStore(
       useShallow((state) => ({
         books: state.books,
         filters: state.filters,
         loading: state.loading,
         importing: state.importing,
-        stats: state.stats,
         importBooks: state.importBooks,
         importFiles: state.importFiles,
         refreshMetadata: state.refreshMetadata,
-        deleteBook: state.deleteBook,
         fetchCover: state.fetchCover,
         setFilter: state.setFilter
       }))
@@ -135,22 +235,16 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
     snapshot.goalMinutes > 0
       ? Math.min(100, Math.round((todayMinutes / snapshot.goalMinutes) * 100))
       : 0;
-  const [sessionTick, setSessionTick] = useState(0);
-  const [sessionRemaining, setSessionRemaining] = useState<number | null>(null);
   const [dropActive, setDropActive] = useState(false);
   const importDropRef = useRef<HTMLButtonElement>(null);
-  const focusProgress = activeSession ? getSessionProgress(activeSession) : 0;
-  const focusPercent = Math.min(100, Math.round(focusProgress * 100));
   const debouncedQuery = useDebouncedValue(filters.query, 250);
 
   const authors = useMemo(() => {
     return Array.from(new Set(books.map((book) => book.author).filter(Boolean))) as string[];
   }, [books]);
 
-  const genres = useMemo(() => {
-    const all = books.flatMap((book) => book.genres ?? []);
-    return Array.from(new Set(all));
-  }, [books]);
+  // One for each genre, however its books spell it ("Sci-fi", "Science Fiction"), as on the Collections page's tiles.
+  const genres = useMemo(() => genreChoices(books), [books]);
 
   const series = librarySeries(books);
   const filteredBooks = useMemo(() => {
@@ -159,7 +253,8 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
       result = result.filter((book) => book.author === filters.author);
     }
     if (filters.genre !== "all") {
-      result = result.filter((book) => book.genres?.includes(filters.genre));
+      const genre = genreKey(filters.genre);
+      result = result.filter((book) => inGenre(book, genre));
     }
     if (debouncedQuery.trim().length > 0) {
       const query = debouncedQuery.toLowerCase();
@@ -185,7 +280,8 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
   );
 
   const totalBooks = books.length;
-  const finishedBooks = books.filter((book) => isFinished(book.progress)).length;
+  // A count goes by `hasFinished`, as Social's does: a book read once and begun again still counts.
+  const finishedBooks = books.filter(hasFinished).length;
   /** No books at all (not merely none matching): the page leads with importing. */
   const libraryEmpty = !loading && totalBooks === 0;
   /** The words in the search box, when there are enough of them to look for inside the books (the app only). */
@@ -213,16 +309,8 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
       });
   };
 
-  /**
-   * Removes a book everywhere. The row is tombstoned rather than dropped, so
-   * the removal reaches the reader's other devices instead of being undone by
-   * them on the next sync.
-   */
-  const handleRemoveBook = (book: Book) => {
-    deleteBook(book.id)
-      .then(() => showToast(`Removed ${book.title}.`))
-      .catch((error) => showToast(resolveErrorMessage(error, "Could not remove that book.")));
-  };
+  /** A book's ⋯ menu removed it (the menu asks first, and has no toast of its own). */
+  const sayRemoved = useCallback((title: string) => showToast(`Removed ${title}.`), [showToast]);
 
   const isOverImportArea = useCallback((x: number, y: number) => {
     const dropArea = importDropRef.current;
@@ -355,32 +443,6 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
     });
   }, [books, fetchCover]);
 
-  useEffect(() => {
-    if (!activeSession) {
-      setSessionRemaining(null);
-      return;
-    }
-    const timer = window.setInterval(() => {
-      setSessionTick((value) => value + 1);
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [activeSession]);
-
-  useEffect(() => {
-    if (!activeSession) {
-      setSessionRemaining(null);
-      return;
-    }
-    const totalSeconds = activeSession.durationMinutes * 60;
-    const elapsedSeconds = Math.round(sessionElapsedMs(activeSession) / 1000);
-    const remaining = Math.max(0, totalSeconds - elapsedSeconds);
-    const minutesLeft = Math.ceil(remaining / 60);
-    setSessionRemaining(minutesLeft);
-    if (remaining <= 0) {
-      void stopSession({ reason: "completed", cleanSession: true });
-    }
-  }, [activeSession, sessionTick]);
-
   return (
     <div className="library-page dock-clear mx-auto flex min-h-full w-full max-w-[2240px] flex-col gap-10">
       <div className="md:hidden">
@@ -393,6 +455,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
           <input
             className="inset-field w-full py-2.5 pl-12 pr-4 text-sm text-on-surface focus:border-primary/40 focus:outline-none"
             placeholder="Search your library…"
+            aria-label="Search your library"
             type="text"
             value={filters.query}
             onChange={(event) => setFilter({ query: event.target.value })}
@@ -415,6 +478,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
           <div className="relative z-10">
             <div className="relative">
               <div
+                {...inertWhen(Boolean(activeSession))}
                 className={`transition-all duration-500 ease-out will-change-transform will-change-opacity ${
                   activeSession
                     ? "opacity-0 -translate-y-3 pointer-events-none absolute inset-0"
@@ -432,6 +496,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
                     <div className="ml-auto flex flex-wrap items-center gap-3">
                       <select
                         className="inset-field px-3 py-2 text-xs text-on-surface-variant"
+                        aria-label="Session length"
                         value={sessionDuration}
                         onChange={(event) => setSessionDuration(Number(event.target.value))}
                         disabled={Boolean(activeSession)}
@@ -465,6 +530,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
               </div>
 
               <div
+                {...inertWhen(!activeSession)}
                 className={`transition-all duration-500 ease-out will-change-transform will-change-opacity ${
                   activeSession
                     ? "opacity-100 translate-y-0"
@@ -496,58 +562,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
                     </div>
                   </div>
                   <div className="flex items-center justify-start [@media(min-width:960px)]:justify-end">
-                    <div className="paper-surface-raised flex flex-col items-center gap-4 border-primary/40 bg-primary/10 px-6 py-6 text-center">
-                      <div className="relative flex h-32 w-32 items-center justify-center">
-                        <svg className="h-32 w-32 -rotate-90" viewBox="0 0 120 120">
-                          <circle
-                            cx="60"
-                            cy="60"
-                            r="46"
-                            stroke="currentColor"
-                            strokeWidth="8"
-                            className="text-outline-variant/30"
-                            fill="transparent"
-                          />
-                          <circle
-                            cx="60"
-                            cy="60"
-                            r="46"
-                            stroke="currentColor"
-                            strokeWidth="8"
-                            className="text-primary"
-                            fill="transparent"
-                            strokeDasharray={`${(focusPercent / 100) * 289} 289`}
-                            strokeLinecap="round"
-                          />
-                        </svg>
-                        {activeSession?.flower ? (
-                          // A session in full screen grows its flower inside the ring.
-                          <div className="absolute inset-0 flex items-center justify-center pb-1">
-                            <FocusFlower
-                              kind={activeSession.flower.kind}
-                              {...flowerLook(activeSession.flower, focusProgress)}
-                              box={72}
-                            />
-                          </div>
-                        ) : (
-                          <div className="absolute inset-0 flex flex-col items-center justify-center text-sm uppercase tracking-widest text-on-surface-variant">
-                            <span className="text-2xl font-semibold text-primary">
-                              {sessionRemaining ?? sessionDuration}m
-                            </span>
-                            <span className="text-[11px] text-on-surface-variant/70">remaining</span>
-                          </div>
-                        )}
-                      </div>
-                      <div className="text-[11px] uppercase tracking-widest text-on-surface-variant">
-                        {activeSession?.flower ? `${sessionRemaining ?? sessionDuration}m left · ` : ""}
-                        {focusPercent}% complete
-                      </div>
-                      {activeSession?.flower && (
-                        <p className="max-w-[13rem] text-[11px] leading-snug text-on-surface-variant">
-                          {flowerCaption(activeSession.flower, focusProgress)}
-                        </p>
-                      )}
-                    </div>
+                    <SessionRing session={activeSession} sessionDuration={sessionDuration} />
                   </div>
                 </div>
               </div>
@@ -666,13 +681,13 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
             <select
               className="inset-field max-w-[9rem] truncate px-3 py-2 text-xs text-on-surface-variant"
               aria-label="Genre"
-              value={filters.genre}
+              value={filters.genre === "all" ? "all" : genreKey(filters.genre)}
               onChange={(event) => setFilter({ genre: event.target.value })}
             >
               <option value="all">All genres</option>
               {genres.map((genre) => (
-                <option key={genre} value={genre}>
-                  {genre}
+                <option key={genre.key} value={genre.key}>
+                  {genre.name}
                 </option>
               ))}
             </select>
@@ -736,14 +751,9 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
               </button>
             </div>
           ) : filters.view === "grid" ? (
-            <BookGrid books={filteredBooks} onRefresh={refreshMetadata} onOpen={onOpenBook} />
+            <BookGrid books={filteredBooks} onRefresh={refreshMetadata} onOpen={onOpenBook} onRemoved={sayRemoved} />
           ) : (
-            <BookList
-              books={filteredBooks}
-              onRefresh={refreshMetadata}
-              onOpen={onOpenBook}
-              onRemove={handleRemoveBook}
-            />
+            <BookList books={filteredBooks} onRefresh={refreshMetadata} onOpen={onOpenBook} onRemoved={sayRemoved} />
           )}
         </div>
       </section>

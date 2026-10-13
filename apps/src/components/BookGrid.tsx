@@ -15,6 +15,8 @@ type Props = {
   onOpen: (book: Book) => void;
   /** More entries for each card's menu. */
   menuActions?: (book: Book) => BookMenuAction[];
+  /** Told a book's title once its menu has removed it. */
+  onRemoved?: (title: string) => void;
 };
 
 /**
@@ -44,7 +46,7 @@ const useColumns = (gap: number) => {
   return [ref, columns] as const;
 };
 
-export const BookGrid = ({ books, onRefresh, onOpen, menuActions }: Props) => {
+export const BookGrid = ({ books, onRefresh, onOpen, menuActions, onRemoved }: Props) => {
   const gap = getPlatform() === "mobile" ? 24 : 32;
   const [ref, columns] = useColumns(gap);
   const columnStyle = { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` };
@@ -53,7 +55,7 @@ export const BookGrid = ({ books, onRefresh, onOpen, menuActions }: Props) => {
     return (
       <div ref={ref} className="grid" style={{ ...columnStyle, gap }}>
         {books.map((book) => (
-          <BookCard key={book.id} book={book} onRefresh={onRefresh} onOpen={onOpen} menuActions={menuActions?.(book)} />
+          <BookCard key={book.id} book={book} onRefresh={onRefresh} onOpen={onOpen} menuActions={menuActions?.(book)} onRemoved={onRemoved} />
         ))}
       </div>
     );
@@ -68,7 +70,7 @@ export const BookGrid = ({ books, onRefresh, onOpen, menuActions }: Props) => {
         renderRow={(row) => (
           <div className="grid" style={{ ...columnStyle, columnGap: gap }}>
             {books.slice(row * columns, row * columns + columns).map((book) => (
-              <BookCard key={book.id} book={book} onRefresh={onRefresh} onOpen={onOpen} menuActions={menuActions?.(book)} />
+              <BookCard key={book.id} book={book} onRefresh={onRefresh} onOpen={onOpen} menuActions={menuActions?.(book)} onRemoved={onRemoved} />
             ))}
           </div>
         )}

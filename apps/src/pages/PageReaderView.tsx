@@ -1846,8 +1846,10 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
             onClick={() => void exitGuard.requestClose()}
             onMouseEnter={() => exitGuard.guard()}
             title={exitGuard.locked ? "Focus lock is on: leaving ends the session" : undefined}
+            aria-label="Back to Library"
           >
-            <span className="material-symbols-outlined transition-transform group-hover:-translate-x-1 reader-accent">
+            {/* The icon is a word in a font ("arrow_back"): kept from screen readers, here and on the buttons beside it. */}
+            <span className="material-symbols-outlined transition-transform group-hover:-translate-x-1 reader-accent" aria-hidden="true">
               arrow_back
             </span>
             <span className="hidden text-xs uppercase tracking-widest reader-accent sm:inline">
@@ -1872,7 +1874,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
                   : "Show pages"
             }
           >
-            <span className="material-symbols-outlined">list</span>
+            <span className="material-symbols-outlined" aria-hidden="true">list</span>
           </button>
         </div>
 
@@ -1909,7 +1911,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
               aria-label="Page size"
               aria-expanded={zoomPanelOpen}
             >
-              <span className="material-symbols-outlined">text_fields</span>
+              <span className="material-symbols-outlined" aria-hidden="true">text_fields</span>
             </button>
             {zoomPanelOpen && (
               <div
@@ -1975,7 +1977,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
               aria-label={pageBookmarked ? "Bookmarks: this page is bookmarked" : kind === "pdf" ? "Notes: highlights and bookmarks" : "Bookmarks"}
               aria-expanded={bookmarkPanelOpen}
             >
-              <span className="material-symbols-outlined">bookmark</span>
+              <span className="material-symbols-outlined" aria-hidden="true">bookmark</span>
             </button>
             {bookmarkPanelOpen && kind === "pdf" && (
               <AnnotationsPanel
@@ -2099,7 +2101,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
               aria-label="Reader settings"
               aria-expanded={morePanelOpen}
             >
-              <span className="material-symbols-outlined">more_horiz</span>
+              <span className="material-symbols-outlined" aria-hidden="true">more_horiz</span>
             </button>
             {morePanelOpen && (
               <div className="reader-menu absolute right-0 mt-3 w-72 rounded-xl border p-4 text-xs shadow-2xl reader-panel reader-border">
@@ -2248,7 +2250,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
               </div>
             ) : (
               <div className="pdf-reader-cover-placeholder book-cover-frame mb-4 flex h-44 w-32 items-center justify-center border reader-border">
-                <span className="material-symbols-outlined">
+                <span className="material-symbols-outlined" aria-hidden="true">
                   {kind === "comic" ? "auto_stories" : "picture_as_pdf"}
                 </span>
               </div>
@@ -2493,7 +2495,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
                       title={stepTitle(leftStep)}
                       aria-label={stepTitle(leftStep)}
                     >
-                      <span className="material-symbols-outlined text-base">chevron_left</span>
+                      <span className="material-symbols-outlined text-base" aria-hidden="true">chevron_left</span>
                     </button>
                     {goToOpen ? (
                       <form
@@ -2545,7 +2547,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
                       title={stepTitle(rightStep)}
                       aria-label={stepTitle(rightStep)}
                     >
-                      <span className="material-symbols-outlined text-base">chevron_right</span>
+                      <span className="material-symbols-outlined text-base" aria-hidden="true">chevron_right</span>
                     </button>
                   </div>
                 </div>

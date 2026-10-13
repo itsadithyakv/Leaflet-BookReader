@@ -56,6 +56,21 @@ describe("free reading on the session shelf", () => {
     expect(week.spines[0].label).toBe("Free read, 95 min, Fri 2 Oct, read outside a focus session");
   });
 
+  it("names a day's free reading after its book, and a session started on no book too", () => {
+    // As the snapshot gives them: the book opened that day, title and id.
+    const named = { dateKey: "2026-10-02", minutes: 95, bookId: "book-9", title: "Dune (as it was imported)" };
+    const noBook = { ...session("s-timer-first", "2026-10-02", 20, 25), bookId: "book-9", title: "Dune (as it was imported)" };
+    const [week] = weeksOf(buildRows([noBook], [day("2026-10-02", 120)], new Map([["book-9", "Dune"]]), TODAY, [named]));
+    const [spine, loose] = week.spines;
+    // The title the book has now.
+    expect(spine).toMatchObject({ title: "Dune", freeRead: false, loose: false });
+    expect(loose).toMatchObject({ title: "Dune", freeRead: false, loose: true });
+    expect(loose.label).toBe("Dune, 95 min, Fri 2 Oct, read outside a focus session");
+    // A book since removed keeps the name it was read under.
+    const [gone] = weeksOf(buildRows([], [day("2026-10-02", 95)], new Map(), TODAY, [named]));
+    expect(gone.spines[0].title).toBe("Dune (as it was imported)");
+  });
+
   it("stands a day's free reading after that day's sessions, and apart from them", () => {
     const sessions = [session("s-evening", "2026-10-02", 20, 25), session("s-next", "2026-10-03", 9, 20)];
     const days = [day("2026-10-02", 65), day("2026-10-03", 20)];

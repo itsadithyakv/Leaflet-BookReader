@@ -4,9 +4,9 @@ import { EMPTY_SYNC_STATUS, type DriveSyncStatus, type SyncStatus } from "@share
 import { bookService, type FinishedGone, type ImportOutcome } from "../services/bookService";
 import { syncService } from "../services/syncService";
 import { socialService } from "../services/socialService";
-import { statsService, type ReadingStats } from "../services/statsService";
 import { finishedOn, hasFinished, isFinished } from "../constants/books";
 import { isStandInCover } from "../readers/pageCover";
+import { storyMoved } from "../pip/base/storyFeed";
 
 const defaultFilters: BookFilter = {
   query: "",
@@ -32,18 +32,21 @@ type LibraryState = {
    * (PageReaderView), and a lookup that got no answer leaves no stamp.
    */
   lookupTried: Record<string, true>;
+  /**
+   * Large files the last backup held back for want of the reader's word
+   * (hooks/useLargeBookPrompt.ts asks, and sets this back to none).
+   */
+  largeHeld: number;
   metadataTotal: number;
   metadataDone: number;
   syncStatus: DriveSyncStatus;
   /** The last error a sync run produced, so the UI can say what went wrong. */
   syncError: string | null;
   sync: SyncStatus;
-  stats: ReadingStats;
   importing: boolean;
   /** Books currently being fetched from the shared store, by id. */
   downloading: string[];
   loadBooks: () => Promise<void>;
-  loadStats: () => Promise<void>;
   loadSyncStatus: () => Promise<void>;
   /** Through the file dialog. What happened, for the library to say; `null` when nothing was chosen. */
   importBooks: () => Promise<ImportOutcome | null>;
@@ -115,17 +118,12 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   loading: false,
   metadataRefreshing: false,
   lookupTried: {},
+  largeHeld: 0,
   metadataTotal: 0,
   metadataDone: 0,
   syncStatus: "idle",
   syncError: null,
   sync: EMPTY_SYNC_STATUS,
-  stats: {
-    streakDays: 0,
-    totalDays: 0,
-    lastReadAt: null,
-    daysLast7: 0
-  },
   importing: false,
   downloading: [],
   async loadBooks() {
@@ -170,21 +168,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     if (next) {
       set({ books: replaceBook(get().books, next) });
       scheduleSync(set, get);
-    }
-  },
-  async loadStats() {
-    try {
-      const stats = await statsService.getReadingStats();
-      set({ stats });
-    } catch {
-      set({
-        stats: {
-          streakDays: 0,
-          totalDays: 0,
-          lastReadAt: null,
-          daysLast7: 0
-        }
-      });
     }
   },
   async loadSyncStatus() {
@@ -294,7 +277,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         existing.id === book.id ? { ...existing, lastOpened: now } : existing
       )
     });
-    void get().loadStats();
   },
   setFilter(partial) {
     set({ filters: { ...get().filters, ...partial } });
@@ -341,12 +323,12 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   async syncNow() {
     set({ syncStatus: "syncing", syncError: null });
     try {
-      await syncService.syncNow();
+      const report = await syncService.syncNow();
       // Sync can add, remove and re-position books, so the library is re-read
       // rather than patched: guessing which rows changed is how the two views
       // drift apart.
       const [books, status, finishedGone] = await Promise.all([bookService.list(), syncService.status(), bookService.finishedRemoved().catch(() => get().finishedGone)]);
-      set({ books, finishedGone, sync: status, syncStatus: "success" });
+      set({ books, finishedGone, sync: status, syncStatus: "success", largeHeld: report.booksHeld ?? 0 });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       set({ syncStatus: "error", syncError: message });
@@ -419,6 +401,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const moved = (book: Book) => Math.abs((book.progress ?? 0) - progress) > 1e-6 || (position != null && position !== book.position);
     // Reaching the end from short of it is finishing the book, and is dated.
     const finishes = (book: Book) => isFinished(progress) && !isFinished(book.progress);
+    // The camp is told how far the reading has got (it only listens for a chapter finished: see storyFeed).
+    const reading = get().books.find((book) => book.id === id);
+    if (reading && progress > (reading.progress ?? 0)) storyMoved(id, reading.title, progress);
     set({
       books: get().books.map((book) =>
         book.id === id
@@ -441,17 +426,12 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       loading: false,
       metadataRefreshing: false,
       lookupTried: {},
+      largeHeld: 0,
       metadataTotal: 0,
       metadataDone: 0,
       syncStatus: "idle",
       syncError: null,
       sync: EMPTY_SYNC_STATUS,
-      stats: {
-        streakDays: 0,
-        totalDays: 0,
-        lastReadAt: null,
-        daysLast7: 0
-      },
       importing: false,
       downloading: []
     });

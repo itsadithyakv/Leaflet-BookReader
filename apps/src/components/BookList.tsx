@@ -7,13 +7,12 @@ type Props = {
   books: Book[];
   onRefresh: (id: string) => void;
   onOpen: (book: Book) => void;
-  onRemove: (book: Book) => void;
+  /** Told a book's title once its menu has removed it. */
+  onRemoved?: (title: string) => void;
 };
 
-export const BookList = ({ books, onRefresh, onOpen, onRemove }: Props) => {
-  const row = (book: Book) => (
-    <BookRow key={book.id} book={book} onRefresh={onRefresh} onOpen={onOpen} onRemove={onRemove} />
-  );
+export const BookList = ({ books, onRefresh, onOpen, onRemoved }: Props) => {
+  const row = (book: Book) => <BookRow key={book.id} book={book} onRefresh={onRefresh} onOpen={onOpen} onRemoved={onRemoved} />;
 
   if (books.length <= VIRTUALIZE_FROM) {
     return <div className="flex flex-col gap-3">{books.map(row)}</div>;

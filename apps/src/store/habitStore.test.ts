@@ -111,6 +111,19 @@ describe("the focus flower", () => {
     expect(flower()).toBeUndefined();
   });
 
+  it("takes the first book opened as its own, when it was started on none", () => {
+    start(false);
+    useHabitStore.getState().nameSession({ id: "dune", title: "Dune" });
+    expect(useHabitStore.getState().activeSession).toMatchObject({ bookId: "dune", title: "Dune" });
+    // A second book opened does not rename it, and a session started on a book keeps that book.
+    useHabitStore.getState().nameSession({ id: "emma", title: "Emma" });
+    expect(useHabitStore.getState().activeSession?.bookId).toBe("dune");
+    // With no session running there is nothing to name.
+    useHabitStore.setState({ activeSession: null });
+    useHabitStore.getState().nameSession({ id: "emma", title: "Emma" });
+    expect(useHabitStore.getState().activeSession).toBeNull();
+  });
+
   it("starts a session's clock at nothing read", () => {
     expect(start(false).readMs).toBe(0);
   });

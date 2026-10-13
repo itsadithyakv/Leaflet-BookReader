@@ -5,8 +5,10 @@
  * has a cover only if a catalogue knows the book, and a report, a paper or a
  * scan of something out of print never has one. For those the first page is
  * the cover: for a scanned book it is the scan of the cover itself, for a
- * typeset one its title page. It is drawn once, the first time the book is
- * opened after a lookup has had its turn, and kept the way every cover is.
+ * typeset one its title page (the next page, or the one after, when the
+ * first is blank). It is drawn once, after a lookup has had its turn: by the
+ * library, a while after the book was added (library/pageCoverQueue.ts), or
+ * by the reader if the book is opened first. Kept the way every cover is.
  *
  * The arithmetic and the one judgement (is there anything on the page?) are
  * here, pure; the drawing is `coverImage` in readers/pageSources.ts.
@@ -19,6 +21,13 @@
  * library still counts the book as one to look up.
  */
 export const isStandInCover = (coverUrl: string | null | undefined) => typeof coverUrl === "string" && /-page\.jpg$/i.test(coverUrl);
+
+/**
+ * How many pages from the front are tried for a cover: the first with
+ * something on it. A scan often opens on a blank sheet, or the inside of the
+ * board, with the cover or the title page straight after.
+ */
+export const COVER_PAGES = 3;
 
 /** How wide the picture is drawn: the library's thumbnail is 360, and a 2x screen shows that at 180. */
 export const COVER_WIDTH = 600;

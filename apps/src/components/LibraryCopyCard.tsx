@@ -172,14 +172,11 @@ export const LibraryCopyCard = ({ showToast, renderToggle }: LibraryCopyCardProp
   return (
     <div className="paper-surface rounded-xl p-5">
       <p className="text-xs uppercase tracking-widest text-on-surface-variant">Book Copies</p>
-      <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
-        Leaflet keeps every book you add in its own library, so deleting the file you opened never stops you
-        reading it. Turn this on to also save each one, named by title and author, in a folder you choose.
-      </p>
       <button
         type="button"
         role="switch"
         aria-checked={enabled}
+        title="Leaflet keeps every book you add in its own library, so deleting the file you opened never stops you reading it. Turn this on to also save each one, named by title and author, in a folder you choose."
         className="inset-field mt-4 flex w-full items-center justify-between gap-4 px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:text-on-surface-variant"
         onClick={() => void toggle()}
         disabled={!desktopApp || status === null || busy || copying}

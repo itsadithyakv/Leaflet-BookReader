@@ -1,10 +1,11 @@
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 import type { Book } from "@shared/models/book";
 import { isFinished } from "../../constants/books";
 import { useCoverSrc } from "../../hooks/useCoverSrc";
 import { seriesNumberLabel, type SeriesGroup, type SeriesMember } from "../../library/series";
 import { BookMenu } from "../BookMenu";
 import { EYEBROW } from "../ui/SectionHeader";
+import { SeriesCovers } from "./SeriesCovers";
 
 const status = (book: Book) => {
   if (isFinished(book.progress)) {
@@ -20,7 +21,17 @@ const status = (book: Book) => {
 const OPTIONAL_CHIP = "hidden rounded-full border border-outline-variant/60 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant sm:inline";
 const optionalHint = (kind: string) => `${kind}: beside the main series, and can be skipped`;
 
-const MemberRow = ({ member, isNext, onOpen }: { member: SeriesMember; isNext: boolean; onOpen: (book: Book) => void }) => {
+const MemberRow = ({
+  member,
+  isNext,
+  onOpen,
+  onRemoved
+}: {
+  member: SeriesMember;
+  isNext: boolean;
+  onOpen: (book: Book) => void;
+  onRemoved: (title: string) => void;
+}) => {
   const { book, index } = member;
   const { src, onError } = useCoverSrc(book, { thumb: true });
   const state = status(book);
@@ -56,7 +67,7 @@ const MemberRow = ({ member, isNext, onOpen }: { member: SeriesMember; isNext: b
       {isNext && <span className="hidden rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary sm:inline">Next</span>}
       <span className={`w-20 shrink-0 text-right text-[11px] font-bold uppercase tracking-tight ${state.tone}`}>{state.label}</span>
       <div onClick={(event) => event.stopPropagation()}>
-        <BookMenu book={book} />
+        <BookMenu book={book} onRemoved={onRemoved} />
       </div>
     </li>
   );
@@ -65,10 +76,12 @@ const MemberRow = ({ member, isNext, onOpen }: { member: SeriesMember; isNext: b
 type Props = {
   group: SeriesGroup;
   onOpen: (book: Book) => void;
+  showToast: (message: string) => void;
 };
 
 /** One series in order: the books there are, the ones that are not, and what is next. */
-export const SeriesDetail = ({ group, onOpen }: Props) => {
+export const SeriesDetail = ({ group, onOpen, showToast }: Props) => {
+  const [choosingCovers, setChoosingCovers] = useState(false);
   const total = group.total ?? group.ownedCount + group.missing.length;
   const percent = total > 0 ? Math.round((group.finishedCount / total) * 100) : 0;
   const nextMember = group.members.find((member) => member.book.id === group.next?.id) ?? null;
@@ -106,6 +119,14 @@ export const SeriesDetail = ({ group, onOpen }: Props) => {
             <div className="h-1.5 rounded-full bg-tertiary" style={{ width: `${percent}%` }} />
           </div>
         </div>
+        <button
+          type="button"
+          className="tactile-button px-4 py-2.5 text-sm"
+          onClick={() => setChoosingCovers(true)}
+          title="Choose which edition's covers this series wears"
+        >
+          Covers
+        </button>
         {group.next ? (
           <button
             type="button"
@@ -119,6 +140,8 @@ export const SeriesDetail = ({ group, onOpen }: Props) => {
           <p className="text-sm font-semibold text-tertiary">Every book here is finished.</p>
         )}
       </div>
+
+      {choosingCovers && <SeriesCovers group={group} onClose={() => setChoosingCovers(false)} showToast={showToast} />}
 
       <ol className="flex flex-col gap-3">
         {rows.map((row, at) => {
@@ -134,7 +157,12 @@ export const SeriesDetail = ({ group, onOpen }: Props) => {
                 </li>
               )}
               {row.kind === "book" ? (
-                <MemberRow member={row.member} isNext={row.member.book.id === group.next?.id} onOpen={onOpen} />
+                <MemberRow
+                  member={row.member}
+                  isNext={row.member.book.id === group.next?.id}
+                  onOpen={onOpen}
+                  onRemoved={(title) => showToast(`Removed ${title}.`)}
+                />
               ) : (
                 <li
                   className={`flex items-center gap-4 rounded-xl border border-dashed border-outline-variant/50 p-3 text-on-surface-variant ${row.extra ? "opacity-70" : ""}`}

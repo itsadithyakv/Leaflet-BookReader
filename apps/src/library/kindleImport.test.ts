@@ -304,8 +304,99 @@ describe("planning an import", () => {
     expect(none.missed).toHaveLength(4);
     expect(planLine(none)).toBe("Nothing to import");
     const empty = await planKindleImport("", library, shelf().idsIn);
-    expect(empty).toEqual({ fresh: [], books: 0, had: 0, missed: [] });
+    expect(empty).toEqual({ fresh: [], books: 0, had: 0, removed: 0, missed: [] });
     expect(planLine(empty)).toBe("No highlights in that file");
+  });
+
+  it("does not bring back what the reader removed, and still brings what is new", async () => {
+    const kept = shelf();
+    const first = await planKindleImport(FILE, library, kept.idsIn);
+    kept.add(first.fresh);
+    // "Nobody asked the gulls." is removed in Leaflet: gone from the book, its id remembered.
+    const gulls = first.fresh.find((item) => item.text === "Nobody asked the gulls.")!;
+    kept.ids.set("salt", kept.ids.get("salt")!.filter((id) => id !== gulls.id));
+    const removedIn = async (bookId: string) => (bookId === "salt" ? [gulls.id] : []);
+
+    // Without being told, the same file would bring it back: the limit this closes.
+    expect((await planKindleImport(FILE, library, kept.idsIn)).fresh.map((item) => item.text)).toEqual(["Nobody asked the gulls."]);
+
+    const again = await planKindleImport(FILE, library, kept.idsIn, removedIn);
+    expect(again.fresh).toEqual([]);
+    expect([again.books, again.had, again.removed]).toEqual([0, 2, 1]);
+    expect(planLine(again)).toBe("Nothing new");
+
+    // The Kindle has been read on since: the new clipping comes in, the removed one does not.
+    const more = `${FILE}${entry("The Salt Road (Voss, Maren)", at("Location 410-411"), "Salt keeps what the sea forgets.")}\n`;
+    const plan = await planKindleImport(more, library, kept.idsIn, removedIn);
+    expect(plan.fresh.map((item) => [item.bookId, item.text])).toEqual([["salt", "Salt keeps what the sea forgets."]]);
+    expect([plan.books, plan.had, plan.removed]).toEqual([1, 2, 1]);
+    expect(planLine(plan)).toBe("1 highlight for 1 book");
+
+    // The same words at another place are another clipping, and come in.
+    const moved = `${FILE}${entry("The Salt Road (Voss, Maren)", at("Location 900-901"), "Nobody asked the gulls.")}\n`;
+    expect((await planKindleImport(moved, library, kept.idsIn, removedIn)).fresh.map((item) => item.cfi)).toEqual(["kindle:900"]);
+
+    // Everything of the file removed: nothing new, and not "no highlights in that file".
+    const all = new Set(first.fresh.map((item) => item.id));
+    const none = await planKindleImport(FILE, library, shelf().idsIn, async () => all);
+    expect([none.fresh.length, none.had, none.removed]).toEqual([0, 0, 3]);
+    expect(planLine(none)).toBe("Nothing new");
+
+    // One that is there is there, whatever is said of it (put back on another device, say).
+    const both = await planKindleImport(FILE, library, kept.idsIn, async () => all);
+    expect([both.fresh.length, both.had, both.removed]).toEqual([0, 2, 1]);
+  });
+
+  it("keeps a removed highlight out through the service, until it is put back on purpose", async () => {
+    const stored = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: (key: string, value: string) => void stored.set(key, value),
+      removeItem: (key: string) => void stored.delete(key)
+    });
+    try {
+      const idsIn = async (bookId: string) => (await annotationService.list(bookId)).map((item) => item.id);
+      const removedIn = (bookId: string) => annotationService.removedIds(bookId);
+      const bring = async (file: string) => {
+        const plan = await planKindleImport(file, library, idsIn, removedIn);
+        for (const item of plan.fresh) {
+          await annotationService.save(item);
+        }
+        return plan;
+      };
+      await bring(FILE);
+      const [ledger, gulls] = await annotationService.list("salt");
+      expect(await annotationService.removedIds("salt")).toEqual([]);
+
+      await annotationService.remove(gulls.id);
+      expect((await annotationService.list("salt")).map((item) => item.id)).toEqual([ledger.id]);
+      expect(await annotationService.removedIds("salt")).toEqual([gulls.id]);
+      expect(await annotationService.removedIds("ember")).toEqual([]);
+      expect(await annotationService.highlightCounts()).toEqual([
+        { bookId: "salt", count: 1 },
+        { bookId: "ember", count: 1 }
+      ]);
+
+      // The same file again, and again: it stays removed.
+      for (let time = 0; time < 2; time += 1) {
+        const again = await bring(FILE);
+        expect([again.fresh.length, again.had, again.removed]).toEqual([0, 2, 1]);
+        expect((await annotationService.list("salt")).map((item) => item.id)).toEqual([ledger.id]);
+      }
+
+      // Undo saves it again under its id: it is back as it was, and an import has it already.
+      const { createdAt: _c, updatedAt: _u, deletedAt: _d, ...back } = gulls;
+      await annotationService.save(back);
+      expect((await annotationService.list("salt")).map((item) => [item.id, item.createdAt])).toEqual([
+        [ledger.id, ledger.createdAt],
+        [gulls.id, gulls.createdAt]
+      ]);
+      expect(await annotationService.removedIds("salt")).toEqual([]);
+      const after = await bring(FILE);
+      expect([after.fresh.length, after.had, after.removed]).toEqual([0, 3, 0]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("goes in through the service once, with the Kindle's date, and changes nothing after", async () => {

@@ -13,6 +13,7 @@ import { FOCUS_FLOWERS } from "../pip/focusFlower.js";
 import { buildAlbum, type Found } from "../pip/expedition";
 import { NOTHING_FOUND, broughtBackText } from "./pip/album/words";
 import { coldAfterSession } from "../pip/cold";
+import { CampLine } from "./pip/arcade/base/CampExtras";
 import "./pip/album/album.css";
 
 // The find's picture is drawn with the house's art, which loads with the Pip
@@ -252,12 +253,14 @@ export const SessionWrapUp = () => {
       event.stopPropagation();
       if (event.key === "Escape") {
         event.preventDefault();
-        dismissWrapUp();
+        // As Done does: a note typed is saved, not thrown away.
+        close(true);
       }
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [wrapUp, dismissWrapUp]);
+    // `close` is made anew each render; it reads these.
+  }, [wrapUp, dismissWrapUp, note, addSessionNote]);
 
   if (!wrapUp) {
     return null;
@@ -314,6 +317,7 @@ export const SessionWrapUp = () => {
 
           {wrapUp.flower && <FlowerResult flower={wrapUp.flower} blooms={wrapUp.blooms} />}
           {brought && <FindResult found={brought.found} count={brought.count} showPip={showPip} />}
+          <CampLine />
 
           <div className="mt-5 grid grid-cols-2 gap-3">
             <div className="inset-field p-3">

@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Book } from "@shared/models/book";
 import { useLibraryStore } from "../store/libraryStore";
 import { useCollectionStore } from "../store/collectionStore";
 import { useLibrarySeries } from "../library/useSeries";
 import { buildShelves, type Shelf, type ShelfId } from "../library/shelves";
+import { faceOf, genreColours, genreShelves } from "../library/genres";
 import type { SeriesGroup } from "../library/series";
 import { BookGrid } from "../components/BookGrid";
 import type { BookMenuAction } from "../components/BookMenu";
 import { CoverStack } from "../components/collections/CoverStack";
+import { GenreTile } from "../components/collections/GenreTile";
 import { SeriesDetail } from "../components/collections/SeriesDetail";
 import { BookPicker } from "../components/collections/BookPicker";
 import { askConfirm } from "../components/ConfirmDialog";
@@ -20,10 +22,16 @@ export type CollectionsPageProps = {
   showToast: (message: string) => void;
 };
 
-type View = { kind: "series"; key: string } | { kind: "shelf"; id: ShelfId } | { kind: "collection"; id: string };
+type View =
+  | { kind: "series"; key: string }
+  | { kind: "shelf"; id: ShelfId }
+  | { kind: "collection"; id: string }
+  | { kind: "genre"; key: string };
 
-/** How many authors and genres show before "Show all". */
+/** How many authors show before "Show all". */
 const BROWSE_PREVIEW = 12;
+/** How many genre tiles show before "Show all": three rows of four. */
+const GENRE_PREVIEW = 12;
 
 /**
  * The cards of a section. Four to a row in a desktop window; more past it, so
@@ -33,6 +41,10 @@ const CARD_GRID =
   "grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 [@media(min-width:1900px)]:grid-cols-5 [@media(min-width:2300px)]:grid-cols-6";
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
+
+/** What a failed save said (the app answers with plain text), or the fallback. */
+const messageOf = (error: unknown, fallback: string) =>
+  error instanceof Error && error.message ? error.message : typeof error === "string" && error.trim() ? error : fallback;
 
 const Tile = ({
   books,
@@ -89,7 +101,6 @@ const seriesLines = (group: SeriesGroup) => {
 export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: CollectionsPageProps) => {
   const books = useLibraryStore((state) => state.books);
   const setFilter = useLibraryStore((state) => state.setFilter);
-  const deleteBook = useLibraryStore((state) => state.deleteBook);
   const refreshMetadata = useLibraryStore((state) => state.refreshMetadata);
   const series = useLibrarySeries();
   const shelves = useMemo(() => buildShelves(books, series), [books, series]);
@@ -99,7 +110,10 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
   const [newName, setNewName] = useState("");
   const [renaming, setRenaming] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
+  /** A book removed from the library through its ⋯ menu (the menu asks first, and has no toast of its own). */
+  const sayRemoved = useCallback((title: string) => showToast(`Removed ${title}.`), [showToast]);
   const [showAllBrowse, setShowAllBrowse] = useState(false);
+  const [showAllGenres, setShowAllGenres] = useState(false);
 
   useEffect(() => {
     if (!loaded) {
@@ -111,7 +125,8 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
   const booksOf = (ids: string[]) => ids.map((id) => byId.get(id)).filter((book): book is Book => Boolean(book));
 
   const authors = useMemo(() => countBy(books.map((book) => (book.author ? [book.author] : []))), [books]);
-  const genres = useMemo(() => countBy(books.map((book) => book.genres ?? [])), [books]);
+  const genres = useMemo(() => genreShelves(books), [books]);
+  const genreColour = useMemo(() => genreColours(genres), [genres]);
 
   const createCollection = async () => {
     const name = newName.trim();
@@ -125,20 +140,7 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
       setView({ kind: "collection", id: made.id });
       setPicking(true);
     } catch (error) {
-      showToast(error instanceof Error ? error.message : "Could not make that collection.");
-    }
-  };
-
-  const removeFromLibrary = async (book: Book) => {
-    const ok = await askConfirm({
-      title: `Remove “${book.title}”?`,
-      body: "It leaves your library on every synced device. The other copy stays.",
-      confirmLabel: "Remove",
-      danger: true
-    });
-    if (ok) {
-      await deleteBook(book.id);
-      showToast(`Removed ${book.title}.`);
+      showToast(messageOf(error, "Could not make that collection."));
     }
   };
 
@@ -147,8 +149,9 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
     const group = view.kind === "series" ? series.groups.find((item) => item.key === view.key) : undefined;
     const shelf = view.kind === "shelf" ? shelves.find((item) => item.id === view.id) : undefined;
     const collection = view.kind === "collection" ? collections.find((item) => item.id === view.id) : undefined;
+    const genre = view.kind === "genre" ? genres.find((item) => item.key === view.key) : undefined;
     // Gone (a shelf emptied, a series split, a collection deleted elsewhere): back to the overview.
-    if (!group && !shelf && !collection) {
+    if (!group && !shelf && !collection && !genre) {
       return (
         <div className="mx-auto flex min-h-full w-full max-w-[2240px] flex-col items-start gap-4">
           <BackButton onClick={() => setView(null)} />
@@ -156,7 +159,7 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
         </div>
       );
     }
-    const title = group?.name ?? shelf?.name ?? collection?.name ?? "";
+    const title = group?.name ?? shelf?.name ?? collection?.name ?? genre?.name ?? "";
     const collectionBooks = collection ? booksOf(collection.bookIds) : [];
 
     return (
@@ -171,13 +174,14 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
                   event.preventDefault();
                   const value = (new FormData(event.currentTarget).get("name") as string).trim();
                   if (value) {
-                    void rename(collection.id, value);
+                    void rename(collection.id, value).catch((error) => showToast(messageOf(error, "Could not rename that collection.")));
                   }
                   setRenaming(null);
                 }}
               >
                 <input
                   name="name"
+                  aria-label="Collection name"
                   autoFocus
                   defaultValue={collection.name}
                   maxLength={80}
@@ -210,11 +214,17 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
                       confirmLabel: "Delete",
                       danger: true
                     });
-                    if (ok) {
-                      await remove(collection.id);
-                      setView(null);
-                      showToast(`Deleted ${collection.name}.`);
+                    if (!ok) {
+                      return;
                     }
+                    try {
+                      await remove(collection.id);
+                    } catch (error) {
+                      showToast(messageOf(error, "Could not delete that collection."));
+                      return;
+                    }
+                    setView(null);
+                    showToast(`Deleted ${collection.name}.`);
                   }}
                 >
                   <span className="flex items-center gap-1.5">
@@ -226,19 +236,17 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
           </div>
           {shelf && <p className="text-sm text-on-surface-variant">{shelf.description}</p>}
           {collection && <p className="text-sm text-on-surface-variant">{plural(collectionBooks.length, "book")}</p>}
+          {genre && <p className="text-sm text-on-surface-variant">{plural(genre.books.length, "book")}</p>}
         </div>
 
-        {group && <SeriesDetail group={group} onOpen={onOpenBook} />}
+        {group && <SeriesDetail group={group} onOpen={onOpenBook} showToast={showToast} />}
+        {genre && <BookGrid books={genre.books} onRefresh={refreshMetadata} onOpen={onOpenBook} onRemoved={sayRemoved} />}
         {shelf && (
           <BookGrid
             books={shelf.books}
             onRefresh={refreshMetadata}
             onOpen={onOpenBook}
-            menuActions={
-              shelf.id === "duplicates"
-                ? (book) => [{ label: "Remove from library", danger: true, onSelect: () => void removeFromLibrary(book) }]
-                : undefined
-            }
+            onRemoved={sayRemoved}
           />
         )}
         {collection &&
@@ -257,8 +265,13 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
               books={collectionBooks}
               onRefresh={refreshMetadata}
               onOpen={onOpenBook}
+              onRemoved={sayRemoved}
               menuActions={(book): BookMenuAction[] => [
-                { label: "Remove from this collection", onSelect: () => void removeBook(collection.id, book.id) }
+                {
+                  label: "Remove from this collection",
+                  onSelect: () =>
+                    void removeBook(collection.id, book.id).catch((error) => showToast(messageOf(error, "Could not take that book out.")))
+                }
               ]}
             />
           ))}
@@ -269,7 +282,9 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
             onCancel={() => setPicking(false)}
             onDone={(ids) => {
               setPicking(false);
-              void addBooks(collection.id, ids).then(() => showToast(`${plural(ids.length, "book")} added.`));
+              void addBooks(collection.id, ids)
+                .then(() => showToast(`${plural(ids.length, "book")} added.`))
+                .catch((error) => showToast(messageOf(error, "Could not add those books.")));
             }}
           />
         )}
@@ -303,12 +318,9 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
   return (
     <div className="dock-clear mx-auto flex min-h-full w-full max-w-[2240px] flex-col gap-10">
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h2 className="page-title text-4xl">Collections</h2>
-          <p className="mt-2 text-sm text-on-surface-variant">
-            Series and shelves that sort themselves, and collections of your own.
-          </p>
-        </div>
+        <h2 className="page-title text-4xl" title="Series and shelves that sort themselves, and collections of your own.">
+          Collections
+        </h2>
         {creating ? (
           <form
             className="flex items-center gap-2"
@@ -321,6 +333,7 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
               autoFocus
               className="inset-field px-3 py-2 text-sm text-on-surface"
               placeholder="Name, e.g. Book club"
+              aria-label="New collection name"
               maxLength={80}
               value={newName}
               onChange={(event) => setNewName(event.target.value)}
@@ -409,13 +422,42 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
         )}
       </section>
 
+      {genres.length > 0 && (
+        <section aria-labelledby="genres-title" className="flex flex-col gap-4">
+          <SectionHeader
+            eyebrow="Your library by kind"
+            title="Genres"
+            id="genres-title"
+            actions={
+              genres.length > GENRE_PREVIEW ? (
+                <button type="button" className="text-xs font-semibold text-primary hover:underline" onClick={() => setShowAllGenres((value) => !value)}>
+                  {showAllGenres ? "Show fewer" : `Show all ${genres.length}`}
+                </button>
+              ) : undefined
+            }
+          />
+          <div className="genre-wall">
+            {(showAllGenres ? genres : genres.slice(0, GENRE_PREVIEW)).map((genre) => (
+              <GenreTile
+                key={genre.key}
+                name={genre.name}
+                count={genre.books.length}
+                face={faceOf(genre)}
+                colour={genreColour.get(genre.key) ?? "#4d5868"}
+                onClick={() => setView({ kind: "genre", key: genre.key })}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
       <section aria-labelledby="browse-title" className="paper-surface flex flex-col gap-6 rounded-xl p-5">
         <SectionHeader
           eyebrow="Opens the library, filtered"
           title="Browse by"
           id="browse-title"
           actions={
-            authors.length > BROWSE_PREVIEW || genres.length > BROWSE_PREVIEW ? (
+            authors.length > BROWSE_PREVIEW ? (
               <button type="button" className="text-xs font-semibold text-primary hover:underline" onClick={() => setShowAllBrowse((value) => !value)}>
                 {showAllBrowse ? "Show fewer" : "Show all"}
               </button>
@@ -423,7 +465,6 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
           }
         />
         {browse("Authors", authors, (author) => setFilter({ author, genre: "all", query: "", view: "grid" }))}
-        {browse("Genres", genres, (genre) => setFilter({ genre, author: "all", query: "", view: "grid" }))}
       </section>
     </div>
   );

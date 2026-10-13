@@ -15,6 +15,8 @@ export const usePageTurning = (reader: WithContentsList & Later<"markReadingActi
   } = reader;
   /** With pages, the page showing and how many its chapter has, for the dock. */
   const [pageOf, setPageOf] = useState<{ page: number; total: number } | null>(null);
+  /** With pages, whether they run right to left: the dock's arrows and the shortcuts sheet follow them. */
+  const [pagesRtl, setPagesRtl] = useState(false);
 
   // Called from epub.js's relocation handler, which is bound once per book.
   const notePageShownRef = useRef<(location: any) => void>(() => undefined);
@@ -56,6 +58,7 @@ export const usePageTurning = (reader: WithContentsList & Later<"markReadingActi
     const total = Number(location?.start?.displayed?.total) || 0;
     const previous = pageShownRef.current;
     pageShownRef.current = { href, page, total };
+    setPagesRtl((renditionRef.current?.manager as any)?.settings?.direction === "rtl");
     // A chapter asked for by name keeps its page until another page comes up
     // (the jump itself may pass through a page or two on its way).
     const asked = askedEntryRef.current;
@@ -387,7 +390,7 @@ export const usePageTurning = (reader: WithContentsList & Later<"markReadingActi
   };
 
   return {
-    pageOf, setPageOf, notePageShownRef, pageSlideRef, chapterTurnUntilRef, queuedTurnRef, turnPage, turnPageRef,
+    pageOf, setPageOf, pagesRtl, notePageShownRef, pageSlideRef, chapterTurnUntilRef, queuedTurnRef, turnPage, turnPageRef,
     goToPageEdge
   };
 };

@@ -253,6 +253,26 @@ const keysOfKnown = (known: KnownSeries) => {
   return keys;
 };
 
+/**
+ * The title to look a member of a series up by in a catalogue: the series
+ * list's own, for a well-known series, since the file's may be a translation
+ * or carry the series' name and a number ("The Lord of the Rings 1 -
+ * Sembilan Pembawa Cincin"); otherwise the book's.
+ */
+export const titleToLookUp = (group: Pick<SeriesGroup, "key">, member: SeriesMember): string => {
+  const known = KNOWN_BY_KEY.get(group.key);
+  const first = (title: string | string[]) => (Array.isArray(title) ? title[0] : title);
+  if (!known || member.index === null) {
+    return member.book.title;
+  }
+  if (member.extra) {
+    const extra = known.extras?.find((entry) => entry.index === member.index);
+    return extra ? first(extra.title) : member.book.title;
+  }
+  const listed = Number.isInteger(member.index) ? known.books[member.index - 1] : undefined;
+  return listed ? first(listed) : member.book.title;
+};
+
 /** A title's number in a known series (1-based), or `null`. */
 const knownPosition = (known: KnownSeries, keys: string[]): number | null => {
   const books = keysOfKnown(known);

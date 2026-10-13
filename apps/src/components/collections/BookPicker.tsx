@@ -58,6 +58,7 @@ export const BookPicker = ({ title, books, onDone, onCancel }: Props) => {
             autoFocus
             className="inset-field w-full py-2 pl-9 pr-3 text-sm text-on-surface"
             placeholder="Search by title or author"
+            aria-label="Search by title or author"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />

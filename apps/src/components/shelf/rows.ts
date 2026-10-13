@@ -43,7 +43,7 @@ export type Spine = {
   session: FocusSessionRecord | null;
   minutes: number;
   title: string;
-  /** No book to name: a session started without one, or free reading. */
+  /** No book to name: reading the library cannot say the book of. */
   freeRead: boolean;
   /** A day's reading outside any focus session: loose pages, not a bound book. */
   loose: boolean;
@@ -140,14 +140,16 @@ const assignColours = (sessions: FocusSessionRecord[]) => {
 };
 
 /** A day's free reading as it stands on the shelf: after that day's sessions. */
-const looseSpine = (free: FreeReadRecord): { at: number; spine: Spine } => {
+const looseSpine = (free: FreeReadRecord, bookTitles: Map<string, string>): { at: number; spine: Spine } => {
   const start = parseDateKey(free.dateKey);
+  // Named after its book where that is known: still loose pages, not a spine.
+  const title = (free.bookId && bookTitles.get(free.bookId)) || free.title || "Free read";
   const spine: Spine = {
     id: `free-${free.dateKey}`,
     session: null,
     minutes: free.minutes,
-    title: "Free read",
-    freeRead: true,
+    title,
+    freeRead: title === "Free read",
     loose: true,
     cloth: PARCHMENT,
     ink: inkFor(PARCHMENT),
@@ -158,7 +160,7 @@ const looseSpine = (free: FreeReadRecord): { at: number; spine: Spine } => {
     start,
     bloomed: null,
     label: [
-      "Free read",
+      title,
       minutesText(free.minutes),
       `${WEEKDAYS[start.getDay()]} ${shortDate(start)}`,
       "read outside a focus session"
@@ -239,7 +241,7 @@ export const buildRows = (
     if (!(free.minutes > 0)) {
       continue;
     }
-    shelve(free.dateKey, looseSpine(free));
+    shelve(free.dateKey, looseSpine(free, bookTitles));
     const weekKey = getDateKey(mondayOf(parseDateKey(free.dateKey)));
     weekFree.set(weekKey, (weekFree.get(weekKey) ?? 0) + free.minutes);
   }

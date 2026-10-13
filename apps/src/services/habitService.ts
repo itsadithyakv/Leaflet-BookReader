@@ -41,6 +41,9 @@ export type FocusSessionRecord = {
 export type FreeReadRecord = {
   dateKey: string;
   minutes: number;
+  /** The book it was of, where the library can say: the one opened last that day. */
+  bookId?: string | null;
+  title?: string | null;
 };
 
 /**

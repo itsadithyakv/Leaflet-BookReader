@@ -30,11 +30,15 @@ import { FEATURES } from "./constants/features";
 import { ALIVE_EVERY_MS, AWAY_FREE_MS, flowerGrowing, useHabitStore } from "./store/habitStore";
 import { setAppFullscreen, watchForeground } from "./services/windowService";
 import { ConfirmDialog } from "./components/ConfirmDialog";
+import { PostDialog } from "./components/community/Posts";
+import { DiscussDialogs } from "./components/discuss/DiscussDialogs";
 import { SeriesEditorDialog } from "./components/SeriesEditor";
 import { useHighlightsStore } from "./components/highlights/highlightsStore";
 import { useLibrarySearchStore } from "./components/search/librarySearchStore";
 import { RatePrompt, openStoreReview } from "./components/RatePrompt";
 import { ReminderOptIn } from "./components/ReminderOptIn";
+import { useLargeBookPrompt } from "./hooks/useLargeBookPrompt";
+import { usePageCovers } from "./hooks/usePageCovers";
 import { useReminders } from "./hooks/useReminders";
 import { useAppearanceStore, watchSystemTheme } from "./store/appearanceStore";
 import { bookService } from "./services/bookService";
@@ -92,6 +96,8 @@ const NODS_SEEN_KEY = "leaflet.pip.nodsSeen";
 
 /** Marks the first-run choice as made, so it is never asked twice. */
 const WELCOME_KEY = "leaflet.welcomed";
+/** Whether the bar at the foot of the page (the book being read) is made small. */
+const DOCK_SMALL_KEY = "leaflet.nowReading.small";
 
 const tabLabels: Record<Tab, string> = {
   library: "Library",
@@ -112,7 +118,6 @@ const App = () => {
     metadataTotal,
     metadataDone,
     loadBooks,
-    loadStats,
     loadSyncStatus,
     importPaths,
     openBook,
@@ -134,7 +139,6 @@ const App = () => {
       metadataTotal: state.metadataTotal,
       metadataDone: state.metadataDone,
       loadBooks: state.loadBooks,
-      loadStats: state.loadStats,
       loadSyncStatus: state.loadSyncStatus,
       importPaths: state.importPaths,
       openBook: state.openBook,
@@ -227,7 +231,6 @@ const App = () => {
 
   useEffect(() => {
     loadBooks();
-    loadStats();
     loadSyncStatus();
     // Lazy streak evaluation: the app may have been closed for days, so a break
     // is discovered on open rather than by a timer that was never running.
@@ -236,7 +239,7 @@ const App = () => {
     void loadHabit().then(() => useHabitStore.getState().resumeSession());
     // What Pip wears everywhere (the roaming Pip, the reader peek, the wrap-up).
     void loadWardrobe();
-  }, [loadBooks, loadStats, loadSyncStatus, loadHabit, loadWardrobe]);
+  }, [loadBooks, loadSyncStatus, loadHabit, loadWardrobe]);
 
   // Left open past midnight, today's minutes and "goal met" on screen would
   // be yesterday's until something was read: the ledger is asked again.
@@ -248,6 +251,8 @@ const App = () => {
   useEffect(() => watchSystemTheme(), []);
 
   usePipReactions(selected !== null);
+  usePageCovers(selected?.id ?? null);
+  useLargeBookPrompt(selected !== null);
   // Community news (kudos, followers, duels): polled while signed in; the
   // count becomes a dot on the Social nav item.
   const communityUnread = useCommunityPulse();
@@ -377,6 +382,8 @@ const App = () => {
     }
     setSelected(book);
     setOpenAt(at);
+    // A session started on no book is of the one now opened.
+    useHabitStore.getState().nameSession(book);
     // Read from the store, not this render: a caller may have started a
     // session a moment ago (the board's "keep reading" does), and starting a
     // second one here would replace its length with the daily goal.
@@ -834,6 +841,22 @@ const App = () => {
     );
   }, [nowReading?.id, nowReading?.title, nowReading?.author, nowReading?.genres?.join("|")]);
   const [nowReadingFallback, setNowReadingFallback] = useState<string | null>(null);
+  // The bar at the foot of the page, made small: the reader's choice, kept.
+  const [dockSmall, setDockSmall] = useState(() => {
+    try {
+      return localStorage.getItem(DOCK_SMALL_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const shrinkDock = (small: boolean) => {
+    setDockSmall(small);
+    try {
+      localStorage.setItem(DOCK_SMALL_KEY, small ? "1" : "0");
+    } catch {
+      // It is small until the app is closed.
+    }
+  };
   const nowReadingCover =
     nowReading?.coverUrl && nowReading.coverUrl.startsWith("http") ? nowReading.coverUrl : null;
   const nowBookmarked = nowReading ? bookmarks.includes(nowReading.id) : false;
@@ -1045,7 +1068,38 @@ const App = () => {
         </main>
       </div>
 
-      {nowReading && (
+      {/* Not on Pip's page: it sat over her own row of buttons, and "Continue" is among those. */}
+      {nowReading && activeTab !== "pip" && dockSmall && (
+        <div className="now-reading-dock is-small pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2 px-4">
+          <div className="now-reading-bar is-small pointer-events-auto">
+            <button
+              type="button"
+              className="now-reading-cover"
+              onClick={() => shrinkDock(false)}
+              aria-label={`Show ${nowReading.title}`}
+              title={`${nowReading.title} · ${nowReadingProgress}%`}
+            >
+              {resolvedNowReadingCover ? (
+                <img src={resolvedNowReadingCover} alt="" className="h-full w-full object-cover" onError={handleNowReadingError} />
+              ) : (
+                <span className="flex h-full w-full items-center justify-center bg-surface-container-high text-on-surface-variant">
+                  <UiIcon name="book-open" size={15} strokeWidth={1.7} />
+                </span>
+              )}
+            </button>
+            <button
+              className="now-reading-action now-reading-action-primary"
+              type="button"
+              onClick={() => handleOpenBook(nowReading)}
+              aria-label={`Continue reading ${nowReading.title}`}
+              title={`Continue ${nowReading.title}`}
+            >
+              <UiIcon name="play" size={15} fill="currentColor" />
+            </button>
+          </div>
+        </div>
+      )}
+      {nowReading && activeTab !== "pip" && !dockSmall && (
         <div className="now-reading-dock pointer-events-none fixed bottom-6 left-1/2 z-50 w-full max-w-xl -translate-x-1/2 px-4">
           <div className="now-reading-bar pointer-events-auto">
             <div className="now-reading-cover">
@@ -1099,6 +1153,15 @@ const App = () => {
                 aria-label={`Continue reading ${nowReading.title}`}
               >
                 <UiIcon name="play" size={17} fill="currentColor" />
+              </button>
+              <button
+                className="now-reading-shrink"
+                type="button"
+                onClick={() => shrinkDock(true)}
+                aria-label="Make this bar small"
+                title="Make this bar small"
+              >
+                <UiIcon name="down" size={14} />
               </button>
             </div>
           </div>
@@ -1243,6 +1306,8 @@ const App = () => {
 
       {/* After the reader, so a session that ends mid-book wraps up on top. */}
       <SessionWrapUp />
+      <PostDialog showToast={showToast} />
+      <DiscussDialogs showToast={showToast} />
       <ConfirmDialog />
       <SeriesEditorDialog />
       {highlightsOpen && (

@@ -175,6 +175,12 @@ type HabitState = {
   setGoalMinutes: (minutes: number) => Promise<void>;
   setFocusSettings: (next: Partial<FocusSettings>) => void;
   startSession: (session: ActiveSession) => void;
+  /**
+   * A book was opened: a running session that was started on none (from the
+   * library, or by Pip) is of this book from here on, and is shelved under
+   * its name. One that has a book keeps it.
+   */
+  nameSession: (book: { id: string; title: string }) => void;
   extendSession: (extraMinutes: number) => void;
   /** Leaflet lost (false) or regained (true) the foreground. Returns the stint length on return. */
   setForeground: (inFront: boolean) => number;
@@ -462,6 +468,16 @@ export const useHabitStore = create<HabitState>((set, get) => ({
       next = { ...next, flower: { kind: FLOWER_KINDS[Math.floor(Math.random() * FLOWER_KINDS.length)] } };
       writeJson(ALIVE_KEY, Date.now());
     }
+    set({ activeSession: next });
+    writeJson(ACTIVE_KEY, next);
+  },
+
+  nameSession(book) {
+    const active = get().activeSession;
+    if (!active || active.bookId || active.title) {
+      return;
+    }
+    const next = { ...active, bookId: book.id, title: book.title };
     set({ activeSession: next });
     writeJson(ACTIVE_KEY, next);
   },

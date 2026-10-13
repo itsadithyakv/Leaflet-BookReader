@@ -31,6 +31,7 @@ import { placeToSave } from "../readingPlace";
 import { findInBook } from "../findPlace";
 import { isLook } from "../openAt";
 import type { WithCover } from "./scope";
+import { noteChapter } from "../../pip/base/storyFeed";
 
 /**
  * Opens the book: reads the file, builds the contents, makes the rendition,
@@ -1014,6 +1015,8 @@ export const useBookOpening = (reader: WithCover) => {
               if (typeof spineIndex === "number" && typeof lastChapterSpine === "number" && spineIndex > lastChapterSpine) {
                 return outside("back");
               }
+              // The camp goes by chapters where a book has them (see pip/base/storyFeed).
+              noteChapter(book.id, chapterIndex, chapterTotal);
               const within = sectionProgress();
               if (chapterIndex >= chapterTotal - 1 && within >= 0.98) {
                 return 1;

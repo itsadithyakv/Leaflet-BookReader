@@ -63,7 +63,12 @@ export const KNOWN_SERIES: KnownSeries[] = [
   {
     name: "The Lord of the Rings",
     authors: ["tolkien"],
-    books: ["The Fellowship of the Ring", "The Two Towers", "The Return of the King"]
+    books: ["The Fellowship of the Ring", "The Two Towers", "The Return of the King"],
+    // Not of the three, but where most readers start, and where some go after.
+    extras: [
+      { index: 0, title: ["The Hobbit", "The Hobbit, or There and Back Again", "There and Back Again"], kind: "Prequel" },
+      { index: 3.5, title: "The Silmarillion", kind: "Companion" }
+    ]
   },
   {
     name: "The Hunger Games",
@@ -290,6 +295,14 @@ export const KNOWN_SERIES: KnownSeries[] = [
     authors: ["rothfuss"],
     books: ["The Name of the Wind", "The Wise Man's Fear"],
     extras: [{ index: 2.5, title: "The Slow Regard of Silent Things", kind: "Novella" }]
+  },
+  {
+    // The second book's file names the trilogy; the first's says nothing, so
+    // the two never met (one book is not a series).
+    name: "The Bharat Trilogy",
+    authors: ["deepak"],
+    aliases: ["Bharat Trilogy"],
+    books: ["India that is Bharat", "India, Bharat and Pakistan"]
   },
   {
     name: "Millennium",

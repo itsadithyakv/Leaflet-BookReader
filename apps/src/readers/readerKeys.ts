@@ -5,12 +5,18 @@
  *
  * What a key does depends on the layout (scrolling or pages) and the reading
  * mode (standard, Smart Read, SpeedRead); each row says when it applies and
- * how it reads there.
+ * how it reads there. In a right-to-left book's pages the plain arrows follow
+ * the pages: Left goes on.
  */
 
 import type { ReaderLayout, ReadingMode } from "./readerTypes";
 
-export type ReaderKeyContext = { layout: ReaderLayout; mode: ReadingMode };
+export type ReaderKeyContext = {
+  layout: ReaderLayout;
+  mode: ReadingMode;
+  /** The book's pages run right to left (it matters in the pages layout only). */
+  rtl?: boolean;
+};
 
 export type ReaderAction =
   | "search"
@@ -52,7 +58,9 @@ type Binding = {
   action: ReaderAction;
   /** The keys as shown on the sheet. */
   keys: string[];
-  matches: (press: KeyPress) => boolean;
+  /** The keys as shown where the pages run right to left, when they differ. */
+  rtlKeys?: string[];
+  matches: (press: KeyPress, context: ReaderKeyContext) => boolean;
   /** Where it applies; everywhere when left out. */
   when?: (context: ReaderKeyContext) => boolean;
   /** What it does there, in the reader's words. */
@@ -66,6 +74,9 @@ const plain = (press: KeyPress) => !command(press) && !press.altKey;
 const isSpace = (press: KeyPress) => press.code === "Space" || press.key === " ";
 const scrolling = (context: ReaderKeyContext) => context.layout === "scroll";
 const paged = (context: ReaderKeyContext) => context.layout === "pages";
+/** The arrow that goes on a page, and the one that goes back: the other way round in a right-to-left book. */
+const arrowOn = (context: ReaderKeyContext) => (context.rtl ? "ArrowLeft" : "ArrowRight");
+const arrowBack = (context: ReaderKeyContext) => (context.rtl ? "ArrowRight" : "ArrowLeft");
 
 /** In order: the first row that matches a key press, where it applies, is what the press does. */
 export const READER_BINDINGS: Binding[] = [
@@ -122,7 +133,9 @@ export const READER_BINDINGS: Binding[] = [
   {
     action: "pagePrev",
     keys: ["←", "Page Up", "Shift+Space"],
-    matches: (press) => plain(press) && (press.key === "ArrowLeft" || press.key === "PageUp" || (isSpace(press) && Boolean(press.shiftKey))),
+    rtlKeys: ["→", "Page Up", "Shift+Space"],
+    matches: (press, context) =>
+      plain(press) && (press.key === arrowBack(context) || press.key === "PageUp" || (isSpace(press) && Boolean(press.shiftKey))),
     when: paged,
     label: () => "Previous page",
     group: "Moving about"
@@ -130,7 +143,8 @@ export const READER_BINDINGS: Binding[] = [
   {
     action: "pageNext",
     keys: ["→", "Page Down", "Space"],
-    matches: (press) => plain(press) && (press.key === "ArrowRight" || press.key === "PageDown" || isSpace(press)),
+    rtlKeys: ["←", "Page Down", "Space"],
+    matches: (press, context) => plain(press) && (press.key === arrowOn(context) || press.key === "PageDown" || isSpace(press)),
     when: paged,
     label: () => "Next page",
     group: "Moving about"
@@ -265,7 +279,7 @@ export const READER_BINDINGS: Binding[] = [
 
 /** What a key press does here, or null for a key the reader leaves alone. */
 export const actionFor = (press: KeyPress, context: ReaderKeyContext): ReaderAction | null =>
-  READER_BINDINGS.find((binding) => binding.matches(press) && (binding.when?.(context) ?? true))?.action ?? null;
+  READER_BINDINGS.find((binding) => binding.matches(press, context) && (binding.when?.(context) ?? true))?.action ?? null;
 
 export type ShortcutRow = { keys: string[]; label: string };
 export type ShortcutSection = { title: string; rows: ShortcutRow[] };
@@ -294,7 +308,9 @@ export const shortcutSections = (context: ReaderKeyContext): ShortcutSection[] =
     rows:
       title === "Elsewhere"
         ? ELSEWHERE.filter((row) => row.when?.(context) ?? true).map(({ keys, label }) => ({ keys, label }))
-        : bound.filter((binding) => binding.group === title).map((binding) => ({ keys: binding.keys, label: binding.label(context) }))
+        : bound
+            .filter((binding) => binding.group === title)
+            .map((binding) => ({ keys: (paged(context) && context.rtl && binding.rtlKeys) || binding.keys, label: binding.label(context) }))
   })).filter((section) => section.rows.length > 0);
 };
 

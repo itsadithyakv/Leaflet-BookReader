@@ -198,6 +198,8 @@ export const ReadingPaceCard = ({ showToast, renderToggle }: ReadingPaceCardProp
       <div className="mt-3 space-y-3">
         <button
           type="button"
+          role="switch"
+          aria-checked={startMode === "smart"}
           className="inset-field flex w-full items-center justify-between px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
           onClick={chooseStartMode}
         >
