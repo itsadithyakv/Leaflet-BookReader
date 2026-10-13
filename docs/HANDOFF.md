@@ -299,7 +299,7 @@ holds:**
     always-dark floors (the arcade, where she is now dim away from
     its lights), a lamp of the shop's beside it, daytime (nothing
     should change by day). Tests: 3,046 app.
-    **After the 1.4.0 package was built, and so not in it** (the owner
+    **Then, and in the package (it was built again for it)** (the owner
     asked whether the disco ball's lights fall on Pip in the arcade;
     they did not): she takes the colour of the light on her as well as
     its strength (an SVG colour filter each for her and her ball,
@@ -308,8 +308,7 @@ holds:**
     through the new filter; the arcade with a disco ball painted at
     each of its four colours, with a green stand-in under each
     matrix, not Pip herself in the arcade (the preview cannot buy the
-    floor or the ball). Tests: 3,048 app. **The package must be built
-    again to have it.**
+    floor or the ball). Tests: 3,048 app.
   - Not checked: any of it in the installed app; the Hollow played by a
     person over days (its numbers are from two simulations kept beside it);
     the arcade's games and the raids by hand (the preview's pane was in the
@@ -369,11 +368,12 @@ holds:**
   or 1.3.4, so what the two hold (the next entry, and "1.3.3" further
   down) goes out together as 1.4.0, the first release after `v1.3.2`.
   Committed and pushed on `release/1.3`, which keeps its name. **Built on
-  2026-10-13 at the owner's word, from `9132b61`, with everything below
-  that was "not committed" now committed and pushed (eight commits,
-  `0a8bb9d` to `9132b61`):** `target\msix\Leaflet_1.4.0.0_x64.msix`,
-  13,113,817 bytes, unsigned, with all five values taken from `build.env`
-  and no warning of a missing one (release compile 9 m 59 s). It has not
+  2026-10-13 at the owner's word, from `adda2b0`, with everything below
+  that was "not committed" now committed and pushed (ten commits,
+  `0a8bb9d` to `adda2b0`; built twice that day, the second time for the
+  colour of the light on Pip):** `target\msix\Leaflet_1.4.0.0_x64.msix`,
+  13,114,313 bytes, unsigned, with all five values taken from `build.env`
+  and no warning of a missing one (release compile 12 m 42 s). It has not
   been installed or opened. `Leaflet_1.4.0.0_x64.2026-10-10-old.msix`
   beside it is an earlier build from `1a47453`, never uploaded, kept only
   so that nothing was deleted: it is not for upload, and nor is
