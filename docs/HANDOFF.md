@@ -357,10 +357,19 @@ holds:**
 - **The next release is 1.4.0** (2026-10-10). The owner did not ship 1.3.3
   or 1.3.4, so what the two hold (the next entry, and "1.3.3" further
   down) goes out together as 1.4.0, the first release after `v1.3.2`.
-  Committed and pushed on `release/1.3`, which keeps its name. No package
-  of 1.4.0 has been built: a 1.3.4 build was stopped part-way when the
-  number changed, and `Leaflet_1.3.3.0_x64.msix` in `target\msix` is not
-  for upload (Pip's face, and Space still presses the last button).
+  Committed and pushed on `release/1.3`, which keeps its name. **Built on
+  2026-10-13 at the owner's word, from `9132b61`, with everything below
+  that was "not committed" now committed and pushed (eight commits,
+  `0a8bb9d` to `9132b61`):** `target\msix\Leaflet_1.4.0.0_x64.msix`,
+  13,113,817 bytes, unsigned, with all five values taken from `build.env`
+  and no warning of a missing one (release compile 9 m 59 s). It has not
+  been installed or opened. `Leaflet_1.4.0.0_x64.2026-10-10-old.msix`
+  beside it is an earlier build from `1a47453`, never uploaded, kept only
+  so that nothing was deleted: it is not for upload, and nor is
+  `Leaflet_1.3.3.0_x64.msix` (Pip's face, and Space still presses the last
+  button). **Still the owner's, in this order:** deploy the server (no
+  migration, no new values), try the package installed, fast-forward
+  `main` and tag `v1.4.0`, upload (deploy.md, "Releasing an update").
 - **1.3.4, never released: the app icon is now a green book** (2026-10-10;
   committed and pushed): the owner thought the face was not getting clicks in the Store
   and asked for "a green book in a grid style". Drawn on Pip's pixel grid in
