@@ -1,7 +1,7 @@
 /**
  * The radio's raw material, made as plain samples: loops of noise in three
- * colours, the short sounds (a raindrop, a crackle, a pop, a cup's clink) and
- * the echo of a room. No files: each is worked out from a seeded source of
+ * colours, the short sounds (a raindrop, a crackle, a pop, a cup's clink, a
+ * cricket's chirp, a bubble) and the echo of a room. No files: each is worked out from a seeded source of
  * chance (random.ts) when a scene first needs it, and handed to Web Audio as
  * a buffer (engine.ts).
  *
@@ -130,7 +130,7 @@ export const noisePair = (kind: NoiseColour, sampleRate: number, random: Random)
 // ---- the short sounds ---------------------------------------------------------------
 
 /** How long each short sound is, in seconds. */
-export const GRAIN_SECONDS: Record<GrainKind, number> = { drop: 0.09, crackle: 0.035, pop: 0.16, clink: 0.34 };
+export const GRAIN_SECONDS: Record<GrainKind, number> = { drop: 0.09, crackle: 0.035, pop: 0.16, clink: 0.34, chirp: 0.09, bubble: 0.12 };
 
 /** A resonance: what a ringing thing does to a knock (a band-pass filter, in place). */
 const ring = (samples: Float32Array, sampleRate: number, freq: number, q: number) => {
@@ -222,6 +222,26 @@ export const renderGrain = (kind: GrainKind, sampleRate: number, random: Random)
     ring(samples, sampleRate, pitch * 3, 1.2);
     note(samples, sampleRate, pitch, pitch * 0.7, between(random, [0.015, 0.035]), 1, 0.0008);
     burst(samples, sampleRate, random, 0, 0.001, 0.35);
+  } else if (kind === "chirp") {
+    // A cricket's chirp: three or four strokes of the wing, each a short
+    // tone that swells and dies (no edge to it), the later ones a little
+    // stronger. Lower than a field cricket really sings, to stay soft.
+    const pitch = betweenRatio(random, [2900, 4300]);
+    const strokes = 3 + Math.floor(random() * 2);
+    const every = between(random, [0.017, 0.02]);
+    const length = Math.round(every * 0.82 * sampleRate);
+    for (let stroke = 0; stroke < strokes; stroke += 1) {
+      const from = Math.round(stroke * every * sampleRate);
+      const level = 0.65 + (0.35 * stroke) / (strokes - 1);
+      for (let index = 0; index < length && from + index < samples.length; index += 1) {
+        const swell = Math.sin((Math.PI * index) / length);
+        samples[from + index] += Math.sin((2 * Math.PI * pitch * (from + index)) / sampleRate) * swell * swell * level;
+      }
+    }
+  } else if (kind === "bubble") {
+    // A bubble under running water: a soft note whose pitch climbs as it closes.
+    const pitch = betweenRatio(random, [380, 1100]);
+    note(samples, sampleRate, pitch, pitch * between(random, [1.35, 1.9]), between(random, [0.012, 0.026]), 1, 0.004);
   } else {
     // A spoon on a cup: a few partials that are not in tune with each other, the high ones dying first.
     const pitch = betweenRatio(random, [2300, 4200]);

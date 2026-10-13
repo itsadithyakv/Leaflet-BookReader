@@ -141,6 +141,51 @@ describe("the radio's scenes", () => {
     expect(sceneGrains(SCENES.fire).sort()).toEqual(["crackle", "pop"]);
     expect(sceneGrains(SCENES.cafe)).toContain("clink");
     expect(sceneGrains(SCENES.brown)).toEqual([]);
+    expect(sceneGrains(SCENES.crickets)).toEqual(["chirp"]);
+    expect(sceneGrains(SCENES.stream).sort()).toEqual(["bubble", "drop"]);
+    expect(sceneGrains(SCENES.train)).toEqual([]);
+  });
+
+  it("makes the summer night of crickets that each keep their own time, over a thin hiss", () => {
+    const night = SCENES.crickets;
+    const crickets = night.streams.filter((stream) => stream.kind === "grains");
+    expect(crickets.length).toBeGreaterThanOrEqual(2);
+    for (const stream of crickets) {
+      if (stream.kind !== "grains") continue;
+      expect(stream.grain).toBe("chirp");
+      expect(stream.cluster?.steady).toBe(true);
+      // A run of chirps, a few a second at most, and never loud.
+      expect(stream.cluster?.gap[0] ?? 0).toBeGreaterThanOrEqual(0.3);
+      expect(stream.gain[1]).toBeLessThanOrEqual(0.2);
+    }
+    expect(night.layers.some((layer) => layer.filters.some((filter) => filter.type === "bandpass" && filter.freq > 3000))).toBe(true);
+  });
+
+  it("makes the stream mostly of bubbles, far more of them than drops", () => {
+    const rate = (grain: string) => SCENES.stream.streams.reduce((sum, stream) => sum + (stream.kind === "grains" && stream.grain === grain ? stream.perSecond : 0), 0);
+    expect(rate("bubble")).toBeGreaterThan(rate("drop") * 3);
+  });
+
+  it("runs the train's wheels at a pace that holds: two knocks and a wait, the same each time", () => {
+    const wheels = SCENES.train.streams.find((stream) => stream.kind === "swell" && stream.parts.some((part) => part.param === "train.wheel.gain"));
+    expect(wheels?.kind).toBe("swell");
+    if (wheels?.kind !== "swell") return;
+    // The pace barely varies, and one beat is over before the next.
+    expect(wheels.every[1] - wheels.every[0]).toBeLessThan(0.03);
+    expect(wheels.rise[1] + wheels.hold[1] + wheels.fall[1] + 0.5).toBeLessThan(wheels.every[0]);
+    const second = wheels.parts.find((part) => part.param === "train.wheel2.gain");
+    expect(second?.late ?? 0).toBeGreaterThan(0.1);
+    expect(second?.late ?? 1).toBeLessThan(0.3);
+    // Knocks, not clicks: each takes a hundredth of a second to arrive, and rests at nothing.
+    expect(wheels.rise[0]).toBeGreaterThanOrEqual(0.01);
+    for (const part of wheels.parts) expect(part.rest).toBe(0);
+  });
+
+  it("keeps the new scenes as level as the old: no scene's own level is far from the others", () => {
+    for (const scene of scenes) {
+      expect(scene.level, scene.id).toBeGreaterThanOrEqual(0.5);
+      expect(scene.level, scene.id).toBeLessThanOrEqual(2);
+    }
   });
 
   it("gives the rain a thunder that can be switched off, and nothing else a switch", () => {

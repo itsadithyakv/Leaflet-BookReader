@@ -1,7 +1,8 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { AudioLines } from "lucide-react";
 import { ambience, useAmbienceState } from "./ambience";
-import { AmbienceSwitch, SceneChoices, VolumeSlider } from "./AmbienceParts";
+import { AmbienceSwitch, SceneChoices, SceneOfferRow, VolumeSlider } from "./AmbienceParts";
+import { useSceneShop } from "./useSceneShop";
 import "./ambience.css";
 
 /**
@@ -55,6 +56,8 @@ const STATUS = {
 export const ReaderAmbience = () => {
   const view = useAmbienceState();
   const open = useAmbiencePopoverOpen();
+  // A sound bought here is turned on with it, as choosing one here does.
+  const shop = useSceneShop(view.scene, () => ambience.setOn(true));
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const markRef = useRef<HTMLButtonElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
@@ -129,7 +132,19 @@ export const ReaderAmbience = () => {
           }}
         >
           <AmbienceSwitch on={view.on} onChange={ambience.setOn} title="Sound while you read" />
-          <SceneChoices scene={view.scene} lit={view.on} onChoose={(scene) => ambience.chooseScene(scene, true)} label="Sound" />
+          <SceneChoices
+            scene={view.scene}
+            lit={view.on}
+            label="Sound"
+            locked={shop.locked}
+            looking={shop.offer?.scene ?? null}
+            onLocked={shop.look}
+            onChoose={(scene) => {
+              shop.look(null);
+              ambience.chooseScene(scene, true);
+            }}
+          />
+          {shop.offer && <SceneOfferRow offer={shop.offer} onBuy={() => void shop.buy()} onCancel={() => shop.look(null)} />}
           <VolumeSlider volume={view.volume} onChange={ambience.setVolume} />
           {view.scene === "rain" && <AmbienceSwitch on={view.thunder} onChange={ambience.setThunder} title="Thunder, far off" />}
           <p className="ambience-note" aria-live="polite">

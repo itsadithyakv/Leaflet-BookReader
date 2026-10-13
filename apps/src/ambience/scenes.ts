@@ -10,13 +10,13 @@
  */
 import type { Span } from "./random";
 
-export type SceneId = "rain" | "fire" | "cafe" | "wind" | "waves" | "brown";
+export type SceneId = "rain" | "fire" | "cafe" | "wind" | "waves" | "brown" | "crickets" | "stream" | "train";
 
 /** White is hiss, pink is softer (rain, a crowd), brown is a low rumble. */
 export type NoiseColour = "white" | "pink" | "brown";
 
 /** The short sounds, made once as samples (grains.ts) and played at a pitch. */
-export type GrainKind = "drop" | "crackle" | "pop" | "clink";
+export type GrainKind = "drop" | "crackle" | "pop" | "clink" | "chirp" | "bubble";
 
 export type FilterDef = {
   type: "lowpass" | "highpass" | "bandpass" | "peaking";
@@ -69,8 +69,12 @@ export type GrainsDef = {
   speed: Span;
   /** The rate itself comes and goes: every so often, a new multiple of it. */
   flurry?: { every: Span; times: Span };
-  /** Each time, a few in a row (a spoon in a cup). */
-  cluster?: { count: Span; gap: Span };
+  /**
+   * Each time, a few in a row (a spoon in a cup). `steady`: one creature
+   * keeping its own time (a cricket), so the whole run has one loudness and
+   * one gap, not a new one for each.
+   */
+  cluster?: { count: Span; gap: Span; steady?: boolean };
 };
 
 /** A layer that rises and falls back: thunder, a wave, a gust, the coffee machine. */
@@ -387,11 +391,157 @@ export const SCENES: Record<SceneId, SceneDef> = {
     layers: [{ id: "brown.bed", source: { noise: "brown" }, filters: [{ type: "lowpass", freq: 900, q: 0.5 }], gain: 0.9 }],
     streams: [{ kind: "wander", param: "brown.bed.gain", range: [0.85, 0.95], every: [8, 20] }],
     level: 0.62
+  },
+
+  // A summer night out of doors. The night's own low air; the far fields as
+  // two thin bands of hiss that come and go; a breath of wind in the grass
+  // now and then; and crickets, each keeping its own time for a while and
+  // then falling quiet: a few near, more a long way off.
+  crickets: {
+    id: "crickets",
+    name: "Summer night",
+    hint: "Crickets near and far in the night air",
+    layers: [
+      { id: "crickets.air", source: { noise: "brown" }, filters: [{ type: "lowpass", freq: 320, q: 0.5 }], gain: 0.1 },
+      { id: "crickets.field", source: { noise: "white" }, filters: [{ type: "bandpass", freq: 5200, q: 7 }], gain: 0.2 },
+      { id: "crickets.grass", source: { noise: "pink", speed: 0.93 }, filters: [{ type: "bandpass", freq: 3300, q: 5 }], gain: 0.22 },
+      { id: "crickets.breeze", source: { noise: "pink", speed: 1.07 }, filters: [{ type: "bandpass", freq: 700, q: 0.6 }], gain: 0.05 }
+    ],
+    streams: [
+      { kind: "wander", param: "crickets.air.gain", range: [0.07, 0.13], every: [5, 12] },
+      { kind: "wander", param: "crickets.field.gain", range: [0.14, 0.25], every: [3, 9] },
+      { kind: "wander", param: "crickets.field.f0", range: [4700, 5600], ratio: true, every: [6, 15] },
+      { kind: "wander", param: "crickets.grass.gain", range: [0.15, 0.3], every: [3, 8] },
+      {
+        kind: "swell",
+        every: [14, 40],
+        first: [6, 20],
+        rise: [2, 5],
+        hold: [1, 4],
+        fall: [3, 7],
+        parts: [
+          { param: "crickets.breeze.gain", peak: [0.12, 0.22], rest: 0.05 },
+          { param: "crickets.breeze.f0", peak: [900, 1400], rest: 700, ratio: true }
+        ]
+      },
+      {
+        kind: "grains",
+        grain: "chirp",
+        perSecond: 0.3,
+        gain: [0.07, 0.18],
+        skew: 1.6,
+        pan: [-0.8, 0.8],
+        speed: [0.85, 1.05],
+        cluster: { count: [5, 18], gap: [0.5, 0.64], steady: true }
+      },
+      {
+        kind: "grains",
+        grain: "chirp",
+        perSecond: 0.6,
+        gain: [0.02, 0.07],
+        skew: 2,
+        pan: [-0.9, 0.9],
+        speed: [0.95, 1.25],
+        cluster: { count: [6, 24], gap: [0.36, 0.48], steady: true }
+      }
+    ],
+    level: 1.8
+  },
+
+  // A brook over stones, heard from its bank. The weight of the water, the
+  // run of it, a ripple that never holds still, a little spray; and bubbles,
+  // which are most of what a stream says, with a drop or two off the stones.
+  stream: {
+    id: "stream",
+    name: "Stream",
+    hint: "A brook running over stones",
+    layers: [
+      { id: "stream.bed", source: { noise: "brown" }, filters: [{ type: "lowpass", freq: 420, q: 0.6 }], gain: 0.22 },
+      { id: "stream.run", source: { noise: "pink" }, filters: [{ type: "bandpass", freq: 1300, q: 0.55 }], gain: 0.34 },
+      { id: "stream.ripple", source: { noise: "pink", speed: 0.89 }, filters: [{ type: "bandpass", freq: 2600, q: 1.4 }], gain: 0.1 },
+      { id: "stream.spray", source: { noise: "white", speed: 1.1 }, filters: [{ type: "highpass", freq: 5000, q: 0.5 }], gain: 0.02 }
+    ],
+    streams: [
+      { kind: "wander", param: "stream.bed.gain", range: [0.16, 0.3], every: [4, 10] },
+      { kind: "wander", param: "stream.run.gain", range: [0.26, 0.42], every: [2, 6] },
+      { kind: "wander", param: "stream.run.f0", range: [1000, 1700], ratio: true, every: [2, 6] },
+      { kind: "wander", param: "stream.ripple.gain", range: [0.05, 0.16], every: [0.6, 2.2] },
+      { kind: "wander", param: "stream.ripple.f0", range: [1900, 3400], ratio: true, every: [0.8, 2.5] },
+      { kind: "wander", param: "stream.spray.gain", range: [0.01, 0.03], every: [2, 6] },
+      {
+        kind: "grains",
+        grain: "bubble",
+        perSecond: 11,
+        gain: [0.02, 0.2],
+        skew: 2.6,
+        pan: [-0.8, 0.8],
+        speed: [0.7, 1.6],
+        flurry: { every: [1.5, 5], times: [0.5, 1.8] }
+      },
+      { kind: "grains", grain: "drop", perSecond: 2.5, gain: [0.02, 0.14], skew: 2.4, pan: [-0.8, 0.8], speed: [0.6, 1.1] }
+    ],
+    level: 1.1
+  },
+
+  // A carriage at night. The low drone under the floor, the roar of the
+  // air outside, a thread of rattle from the fittings; and the wheels over
+  // the joints in the rail, two soft knocks and a wait, at a pace that
+  // holds. Now and then the train runs over points or through a cutting,
+  // and for a moment everything is nearer.
+  train: {
+    id: "train",
+    name: "Night train",
+    hint: "A carriage at night, wheels over the joints",
+    layers: [
+      { id: "train.rumble", source: { noise: "brown" }, filters: [{ type: "lowpass", freq: 170, q: 0.7 }], gain: 0.32 },
+      { id: "train.roar", source: { noise: "pink" }, filters: [{ type: "lowpass", freq: 700, q: 0.6 }], gain: 0.42 },
+      { id: "train.air", source: { noise: "pink", speed: 0.9 }, filters: [{ type: "bandpass", freq: 1700, q: 0.7 }], gain: 0.08 },
+      { id: "train.rattle", source: { noise: "white" }, filters: [{ type: "bandpass", freq: 3100, q: 3 }], gain: 0.004 },
+      // The knocks: noise in a low band, let through for a moment. One axle a little to the left, the next to the right.
+      { id: "train.wheel", source: { noise: "pink", speed: 1.2 }, filters: [{ type: "bandpass", freq: 240, q: 2 }], gain: 0, pan: -0.25 },
+      { id: "train.wheel2", source: { noise: "pink", speed: 0.85 }, filters: [{ type: "bandpass", freq: 190, q: 2 }], gain: 0, pan: 0.25 },
+      { id: "train.tick", source: { noise: "pink", speed: 1.15 }, filters: [{ type: "bandpass", freq: 1100, q: 2.5 }], gain: 0, pan: 0 }
+    ],
+    streams: [
+      { kind: "wander", param: "train.rumble.gain", range: [0.26, 0.38], every: [3, 9] },
+      { kind: "wander", param: "train.rumble.f0", range: [140, 210], ratio: true, every: [4, 10] },
+      { kind: "wander", param: "train.roar.gain", range: [0.33, 0.5], every: [3, 8] },
+      { kind: "wander", param: "train.roar.f0", range: [560, 880], ratio: true, every: [3, 9] },
+      {
+        kind: "swell",
+        every: [0.87, 0.885],
+        first: [0.6, 1.2],
+        rise: [0.01, 0.014],
+        hold: [0.02, 0.03],
+        fall: [0.12, 0.16],
+        parts: [
+          { param: "train.wheel.gain", peak: [1, 1.4], rest: 0 },
+          { param: "train.tick.gain", peak: [0.12, 0.18], rest: 0 },
+          { param: "train.wheel2.gain", peak: [0.8, 1.1], rest: 0, late: 0.19 }
+        ]
+      },
+      {
+        kind: "swell",
+        every: [35, 90],
+        first: [12, 40],
+        rise: [1, 2.5],
+        hold: [2, 6],
+        fall: [2, 5],
+        parts: [
+          { param: "train.rattle.gain", peak: [0.012, 0.022], rest: 0.004 },
+          { param: "train.air.gain", peak: [0.12, 0.17], rest: 0.08 }
+        ]
+      }
+    ],
+    level: 1.15
   }
 };
 
-/** In the order the control shows them: the three asked for, then the plainer ones. */
-export const SCENE_ORDER: SceneId[] = ["rain", "fire", "cafe", "wind", "waves", "brown"];
+/**
+ * In the order the control shows them: the three asked for, then the plainer
+ * ones, then the three that seeds buy (pip/shop.js SOUNDS; unlock.ts).
+ */
+export const SCENE_ORDER: SceneId[] = ["rain", "fire", "cafe", "wind", "waves", "brown", "crickets", "stream", "train"];
 
 export const isSceneId = (value: unknown): value is SceneId => typeof value === "string" && Object.prototype.hasOwnProperty.call(SCENES, value);
 

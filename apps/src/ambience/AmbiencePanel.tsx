@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { Pause, Play } from "lucide-react";
 import { ambience, useAmbienceState } from "./ambience";
-import { AmbienceSwitch, SceneChoices, VolumeSlider } from "./AmbienceParts";
+import { AmbienceSwitch, SceneChoices, SceneOfferRow, VolumeSlider } from "./AmbienceParts";
 import { SCENES } from "./scenes";
+import { useSceneShop } from "./useSceneShop";
 import "./ambience.css";
 
 type AmbiencePanelProps = {
@@ -20,11 +21,15 @@ type AmbiencePanelProps = {
  * the radio is already on for reading (opening a radio that is on lets you
  * hear it); otherwise the room stays quiet until a scene is picked or Listen
  * is pressed. Closing the card stops it.
+ *
+ * A sound that seeds buy shows its price; selecting it asks, in a row of
+ * its own, and once bought it plays.
  */
 export const AmbiencePanel = (_props: AmbiencePanelProps) => {
   const view = useAmbienceState();
   // Asked once, as the panel opens: turning the switch later does not start or stop the listening.
   const [listening, setListening] = useState(() => ambience.prefs().on);
+  const shop = useSceneShop(view.scene, () => setListening(true));
 
   useEffect(() => {
     if (!listening) {
@@ -40,11 +45,17 @@ export const AmbiencePanel = (_props: AmbiencePanelProps) => {
         scene={view.scene}
         lit={listening}
         label="What the radio plays"
+        locked={shop.locked}
+        looking={shop.offer?.scene ?? null}
+        onLocked={shop.look}
         onChoose={(scene) => {
+          shop.look(null);
           ambience.chooseScene(scene);
           setListening(true);
         }}
       />
+
+      {shop.offer && <SceneOfferRow offer={shop.offer} onBuy={() => void shop.buy()} onCancel={() => shop.look(null)} />}
 
       <div className="ambience-row">
         <button

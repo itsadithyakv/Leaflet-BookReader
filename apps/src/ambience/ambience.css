@@ -120,6 +120,82 @@
   transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
 }
 
+/* The choices are one group for the keyboard; for the eye their keys sit in
+   the same grid as the ones still to be bought. */
+.ambience-scenes-open {
+  display: contents;
+}
+
+/* A sound that seeds buy: quieter until it is the reader's, its price under its name. */
+.ambience-scene[data-locked="true"] {
+  border-style: dashed;
+}
+
+.ambience-scene[data-locked="true"] > svg:first-child,
+.ambience-scene[data-locked="true"] > span:not(.ambience-price) {
+  opacity: 0.7;
+}
+
+.ambience-scene[data-locked="true"][aria-pressed="true"] {
+  border-color: var(--amb-accent);
+  border-style: solid;
+  color: var(--amb-text);
+}
+
+.ambience-price {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--amb-accent);
+}
+
+/* The question before buying one: its name and price, Buy, not now. */
+.ambience-offer {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--amb-border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--amb-fill);
+}
+
+.ambience-offer-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--amb-text);
+}
+
+.ambience-listen[data-kind="buy"] {
+  padding: 6px 14px;
+}
+
+.ambience-listen:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.ambience-offer-close {
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  place-items: center;
+  border-radius: 9999px;
+  color: var(--amb-muted);
+}
+
+.ambience-offer-close:hover {
+  background: var(--amb-hover);
+  color: var(--amb-text);
+}
+
 .ambience-scene:hover {
   background: var(--amb-hover);
   color: var(--amb-text);

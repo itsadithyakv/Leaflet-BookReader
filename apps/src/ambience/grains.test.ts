@@ -6,7 +6,7 @@ import type { GrainKind, NoiseColour } from "./scenes";
 
 const RATE = 44100;
 const COLOURS: NoiseColour[] = ["white", "pink", "brown"];
-const KINDS: GrainKind[] = ["drop", "crackle", "pop", "clink"];
+const KINDS: GrainKind[] = ["drop", "crackle", "pop", "clink", "chirp", "bubble"];
 
 describe("the loops of noise", () => {
   it("are all as loud as each other, and centred on zero", () => {
@@ -117,6 +117,41 @@ describe("the short sounds", () => {
     expect(centre("pop")).toBeLessThan(1500);
     expect(centre("clink")).toBeGreaterThan(2500);
     expect(centre("crackle")).toBeGreaterThan(centre("pop"));
+  });
+
+  it("makes a cricket's chirp of a few strokes with silence between, high and narrow", () => {
+    const random = seeded(15);
+    for (let make = 0; make < 8; make += 1) {
+      const chirp = renderGrain("chirp", RATE, random);
+      // Its level in 2 ms stretches: up for a stroke, down to nearly nothing before the next.
+      const size = Math.round(0.002 * RATE);
+      const steps: number[] = [];
+      for (let from = 0; from + size <= chirp.length; from += size) steps.push(rms(chirp.subarray(from, from + size)));
+      let strokes = 0;
+      for (let index = 1; index < steps.length; index += 1) {
+        if (steps[index] > 0.25 && steps[index - 1] <= 0.25) strokes += 1;
+      }
+      expect(strokes).toBeGreaterThanOrEqual(3);
+      expect(strokes).toBeLessThanOrEqual(4);
+      const padded = new Float32Array(8192);
+      padded.set(chirp);
+      const { shares, centre } = balance(padded, RATE);
+      expect(centre).toBeGreaterThan(2500);
+      expect(centre).toBeLessThan(4800);
+      expect(shares.low + shares.lowMid).toBeLessThan(0.02);
+    }
+  });
+
+  it("makes a bubble soft: no edge at its start, and low beside a raindrop", () => {
+    const random = seeded(16);
+    for (let make = 0; make < 8; make += 1) {
+      const bubble = renderGrain("bubble", RATE, random);
+      // It swells over a few milliseconds: nothing like full scale in its first one.
+      expect(peak(bubble.subarray(0, Math.round(0.001 * RATE)))).toBeLessThan(0.45);
+      const padded = new Float32Array(8192);
+      padded.set(bubble);
+      expect(balance(padded, RATE).centre).toBeLessThan(2400);
+    }
   });
 
   it("are never made the same twice from one source, and always the same from one seed", () => {

@@ -267,6 +267,80 @@ describe("waves", () => {
   });
 });
 
+describe("a summer night", () => {
+  const crickets = (seed: number, seconds: number) => createSchedule(SCENES.crickets, seed).until(seconds).filter((event) => event.kind === "grain");
+
+  it("has each cricket keep one loudness and one pace through a run of chirps", () => {
+    const chirps = crickets(31, 600);
+    expect(chirps.length).toBeGreaterThan(400);
+    // A run is the chirps of one make, in one place: they share a gain exactly.
+    const runs = new Map<string, number[]>();
+    for (const chirp of chirps) {
+      if (chirp.kind !== "grain") continue;
+      const key = `${chirp.variant}|${chirp.pan}|${chirp.gain}`;
+      runs.set(key, [...(runs.get(key) ?? []), chirp.at]);
+    }
+    const long = [...runs.values()].filter((times) => times.length >= 5);
+    expect(long.length).toBeGreaterThan(20);
+    for (const times of long) {
+      const gaps = times.slice(1).map((at, index) => at - times[index]);
+      const mean = gaps.reduce((sum, gap) => sum + gap, 0) / gaps.length;
+      // Kept to within a few hundredths: a pulse, not chance.
+      for (const gap of gaps) expect(Math.abs(gap - mean)).toBeLessThan(mean * 0.04);
+      expect(mean).toBeGreaterThan(0.3);
+      expect(mean).toBeLessThan(0.7);
+    }
+  });
+
+  it("has no two crickets in step: their paces differ", () => {
+    const paces = new Set<string>();
+    const chirps = crickets(32, 300);
+    const seen = new Map<string, number>();
+    for (const chirp of chirps) {
+      if (chirp.kind !== "grain") continue;
+      const key = `${chirp.variant}|${chirp.pan}|${chirp.gain}`;
+      const before = seen.get(key);
+      if (before !== undefined) paces.add((chirp.at - before).toFixed(2));
+      seen.set(key, chirp.at);
+    }
+    expect(paces.size).toBeGreaterThan(8);
+  });
+});
+
+describe("the night train", () => {
+  it("knocks twice for every joint, at a pace that holds for minutes", () => {
+    const events = createSchedule(SCENES.train, 33).until(120);
+    const peaks = (param: string) => events.filter((event) => event.kind === "ramp" && event.param === param && event.to > 0).map((event) => event.at);
+    const first = peaks("train.wheel.gain");
+    const second = peaks("train.wheel2.gain");
+    expect(first.length).toBeGreaterThan(120);
+    expect(Math.abs(first.length - second.length)).toBeLessThanOrEqual(1);
+    const gaps = first.slice(1).map((at, index) => at - first[index]);
+    expect(Math.min(...gaps)).toBeGreaterThan(0.85);
+    expect(Math.max(...gaps)).toBeLessThan(0.9);
+    // The second knock follows its first, well before the next joint.
+    for (let index = 0; index < Math.min(first.length, second.length); index += 1) {
+      expect(second[index] - first[index]).toBeGreaterThan(0.15);
+      expect(second[index] - first[index]).toBeLessThan(0.25);
+    }
+  });
+
+  it("always lets a knock die away again", () => {
+    const events = createSchedule(SCENES.train, 34).until(60);
+    for (const param of ["train.wheel.gain", "train.wheel2.gain", "train.tick.gain"]) {
+      const ramps = events.filter((event) => event.kind === "ramp" && event.param === param);
+      expect(ramps.length % 2).toBe(0);
+      ramps.forEach((ramp, index) => {
+        if (ramp.kind !== "ramp") return;
+        if (index % 2 === 0) expect(ramp.to).toBeGreaterThan(0);
+        else expect(ramp.to).toBe(0);
+        // No step in level: every change is reached over a few thousandths of a second or more.
+        expect(ramp.tau).toBeGreaterThanOrEqual(0.003);
+      });
+    }
+  });
+});
+
 describe("brown noise", () => {
   it("has no events to speak of: a level that barely moves", () => {
     const events = createSchedule(SCENES.brown, 1).until(600);

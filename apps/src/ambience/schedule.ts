@@ -62,6 +62,8 @@ const grains = (def: GrainsDef, random: Random): Stream => {
       }
       const events: SceneEvent[] = [];
       const count = def.cluster ? wholeBetween(random, def.cluster.count) : 1;
+      // One creature keeping time: a loudness and a gap for the whole run, chosen once.
+      const steady = def.cluster?.steady ? { gain: mostlyLow(random, def.gain, def.skew), gap: between(random, def.cluster.gap) } : null;
       // A cluster is one thing struck a few times: the same make, the same place.
       const variant = Math.floor(random() * GRAIN_VARIANTS);
       const pan = between(random, def.pan);
@@ -73,12 +75,13 @@ const grains = (def: GrainsDef, random: Random): Stream => {
           at,
           grain: def.grain,
           variant,
-          gain: mostlyLow(random, def.gain, def.skew),
+          gain: steady ? steady.gain : mostlyLow(random, def.gain, def.skew),
           pan,
           speed: index === 0 ? speed : speed * between(random, [0.97, 1.03])
         });
         if (def.cluster) {
-          at += between(random, def.cluster.gap);
+          // Kept, but not to the millisecond: nothing alive is a metronome.
+          at += steady ? steady.gap * between(random, [0.985, 1.015]) : between(random, def.cluster.gap);
         }
       }
       stream.at += waitFor(random, def.perSecond * times);
