@@ -151,6 +151,8 @@ Authenticated routes take `Authorization: Bearer <token>`. Errors are
 | `POST /v1/admin/resolve` | admin | `{target, id, action: "remove" \| "restore" \| "dismiss"}` → `{resolved: <reports closed>, action}`. See Moderation. For a profile, `id` may be the handle. |
 | `POST /v1/admin/suspend` | admin | `{handle, days (whole, 0–3650)}` → `{handle, suspendedUntil}`. `0` lifts it. Remembered against the reader's email address, as a keyed hash, until it ends (see Moderation). |
 | `POST /v1/admin/community` | admin | `{id, title? (1–120), author? (≤80 or null), keeper? (handle of a current member), unban? (handle), relist? (boolean)}` → `{community}` (the same view as everywhere). Only what is sent changes. `relist: true` clears what reports or the admin unlisted (it does not list a community that never had its 3 established members); `relist: false` unlists it. `404` unknown community or handle; `409` if `keeper` is not a member; `400` for a malformed value. |
+| `GET /v1/notice` | — | `{version, note, at}`: the newest Leaflet as the owner has said (all `null` when nothing is said). No account needed: most readers have none. Kept in memory for a minute, so hundreds of apps asking cost at most one read a minute. Apps from 1.4.2 ask 20 s after opening and every 6 hours, and show a reader who is behind a card with Update (the Store's page). |
+| `PUT /v1/admin/notice` | admin | `{version (two to four whole numbers with dots, or null), note? (≤160, spaces folded)}` → `{version, note, at}`. `version: null` takes the notice down. `400` for a malformed version or a note that is not text. Seen by every app at once (the kept copy is dropped). Stored as the `notice` document in `settings`. |
 | `GET /v1/admin/settings` · `PUT /v1/admin/settings` | admin | `{publicPosting: boolean}` → `{publicPosting}`. |
 
 A profile is shared one of three ways, and every route filters by it when it
@@ -798,6 +800,14 @@ terminates HTTPS on a subdomain and proxies to it. Files are in `deploy/`.
    Settings → Leaderboards & Shared Shelves → Server address.
 
 Logs: `journalctl -u leaflet-api -f`. Update: re-run `deploy.ps1`.
+
+### Deploying 1.4.2's server (after 1.4.0's)
+
+One more thing to deploy, the same way (`deploy.ps1`, nothing else): the
+update notice (`GET /v1/notice`, `PUT /v1/admin/notice`). No new collection
+(it is one more document in `settings`), no index, no migration, no new
+values. Older apps never ask for it. Until it is deployed, a 1.4.2 app finds
+no notice and shows nothing.
 
 ### Deploying this version
 

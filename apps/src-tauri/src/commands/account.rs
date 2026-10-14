@@ -143,6 +143,19 @@ pub async fn account_delete(
 /// Leaflet's own listing in the Microsoft Store.
 pub(crate) const STORE_REVIEW_URL: &str = "ms-windows-store://review/?ProductId=9PH0NLGJFF9W";
 
+/// Leaflet's own page in the Microsoft Store, where an update is one press.
+pub(crate) const STORE_PAGE_URL: &str = "ms-windows-store://pdp/?ProductId=9PH0NLGJFF9W";
+
+/// Opens Leaflet's page in the Microsoft Store, for an update the owner has
+/// said is out (the update notice). Fixed here, like the review, so this
+/// command can open nothing else.
+#[tauri::command]
+pub fn open_store_page(app: tauri::AppHandle) -> Result<(), String> {
+  tauri_plugin_opener::OpenerExt::opener(&app)
+    .open_url(STORE_PAGE_URL, None::<&str>)
+    .map_err(|error| format!("Could not open the Microsoft Store: {error}"))
+}
+
 /// Opens the Microsoft Store's "rate and review" dialog for Leaflet. The
 /// address is fixed here rather than taken from the page, so this command can
 /// open nothing but Leaflet's own review.

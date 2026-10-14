@@ -175,6 +175,14 @@ pub async fn community_search(query: String, state: State<'_, AppState>) -> Resu
   .await
 }
 
+/// Whether a newer Leaflet is out, as the owner has said on the server (the
+/// admin panel): `{version, note, at}`, all null when nothing is said. Asked
+/// for with or without an account: most readers have none.
+#[tauri::command]
+pub async fn update_notice(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+  community(&state, Method::GET, "/v1/notice".into(), Vec::new(), None, CommunityAuth::Optional).await
+}
+
 // ---- raids -----------------------------------------------------------------
 //
 // One reader's Pip going at a friend's camp in the Hollow. The fight is the

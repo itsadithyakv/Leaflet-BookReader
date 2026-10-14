@@ -36,6 +36,7 @@ import { SeriesEditorDialog } from "./components/SeriesEditor";
 import { useHighlightsStore } from "./components/highlights/highlightsStore";
 import { useLibrarySearchStore } from "./components/search/librarySearchStore";
 import { RatePrompt, openStoreReview } from "./components/RatePrompt";
+import { UpdateBanner } from "./components/UpdateBanner";
 import { ReminderOptIn } from "./components/ReminderOptIn";
 import { useLargeBookPrompt } from "./hooks/useLargeBookPrompt";
 import { usePageCovers } from "./hooks/usePageCovers";
@@ -1331,6 +1332,7 @@ const App = () => {
         </Suspense>
       )}
       <RatePrompt />
+      <UpdateBanner />
       <ReminderOptIn />
 
       <MobileNav

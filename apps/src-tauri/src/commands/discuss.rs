@@ -252,6 +252,8 @@ pub(crate) fn ask_for(route: &str, args: &serde_json::Value) -> Result<Ask, Stri
     }
     "admin_settings" => Ask::get("/v1/admin/settings"),
     "admin_set_settings" => Ask::send(Method::PUT, "/v1/admin/settings", Some(serde_json::json!({ "publicPosting": flag("publicPosting").unwrap_or(true) }))),
+    // The update notice: the newest version and a line about it; no version takes it down.
+    "admin_set_notice" => Ask::send(Method::PUT, "/v1/admin/notice", Some(serde_json::json!({ "version": text(args, "version"), "note": text(args, "note") }))),
 
     _ => return Err("No such request.".to_string())
   })
@@ -394,6 +396,11 @@ mod tests {
       Some(json!({ "handle": "maya", "days": 3650 }))
     );
     assert_eq!(ask("admin_set_settings", json!({ "publicPosting": false })).body, Some(json!({ "publicPosting": false })));
+    let notice = ask("admin_set_notice", json!({ "version": "1.4.2", "note": "Fixes." }));
+    assert_eq!((notice.method, notice.path.as_str()), (Method::PUT, "/v1/admin/notice"));
+    assert_eq!(notice.body, Some(json!({ "version": "1.4.2", "note": "Fixes." })));
+    // Nothing given: the notice comes down.
+    assert_eq!(ask("admin_set_notice", json!({})).body, Some(json!({ "version": null, "note": null })));
   }
 
   /// The server changes whatever is in the body, so nothing goes that was not given.

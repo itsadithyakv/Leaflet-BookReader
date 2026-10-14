@@ -9,8 +9,15 @@ import { PipSprite } from "./PipSprite";
  * Asking for a Store rating, politely.
  *
  * Pip asks once, at a good moment: right after a session wrap-up in which the
- * day's goal was met, and only once Leaflet has been used on a few different
- * days (a rating from someone who opened it yesterday says little). "Maybe
+ * day's goal was met, or that was a proper sit-down (`GOOD_SESSION_MINUTES`),
+ * and only once Leaflet has been used on a few different days (a rating from
+ * someone who opened it yesterday says little).
+ *
+ * A day used is counted when Leaflet opens, when its window comes back to the
+ * front, and when a session ends. It used to be counted only when Leaflet
+ * opened, and a desktop app is left open for days, so the days never added
+ * up and the prompt never came (the owner, 2026-10-14). Nor did one come for
+ * a long session on a day the goal had been met already, or not set. "Maybe
  * later" waits two weeks; "Don't ask again" means it. Never mid-book, never
  * on launch. The same link lives in Settings and Pip's menu for anyone who
  * wants to rate without being asked.
@@ -18,6 +25,8 @@ import { PipSprite } from "./PipSprite";
 
 const STATE_KEY = "leaflet.rate";
 const MIN_DAYS_USED = 3;
+/** A session this long is a good moment to ask, whether or not it met the day's goal. */
+export const GOOD_SESSION_MINUTES = 15;
 const SNOOZE_MS = 14 * 24 * 60 * 60_000;
 
 type RateState = {
@@ -82,13 +91,26 @@ export const RatePrompt = () => {
   const wrapUp = useHabitStore((state) => state.wrapUp);
   const lastWrapUp = useRef(wrapUp);
 
-  useEffect(noteDayUsed, []);
+  // Counted when it opens, and whenever it comes back to the front (it may have been left open since yesterday).
+  useEffect(() => {
+    noteDayUsed();
+    const again = () => {
+      if (document.visibilityState === "visible") noteDayUsed();
+    };
+    window.addEventListener("focus", again);
+    document.addEventListener("visibilitychange", again);
+    return () => {
+      window.removeEventListener("focus", again);
+      document.removeEventListener("visibilitychange", again);
+    };
+  }, []);
 
   // The moment: a wrap-up that met the day's goal has just been closed.
   useEffect(() => {
     const previous = lastWrapUp.current;
     lastWrapUp.current = wrapUp;
-    if (previous && !wrapUp && previous.todayMet && mayAsk()) {
+    if (previous && !wrapUp) noteDayUsed();
+    if (previous && !wrapUp && (previous.todayMet || previous.minutes >= GOOD_SESSION_MINUTES) && mayAsk()) {
       const timer = window.setTimeout(() => setOpen(true), 700);
       return () => window.clearTimeout(timer);
     }

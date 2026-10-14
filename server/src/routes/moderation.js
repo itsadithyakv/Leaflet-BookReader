@@ -428,5 +428,59 @@ export function moderationRoutes(db, limits = defaultLimits(), suspensionSalt = 
     })
   );
 
+  // ---- the update notice ------------------------------------------------------
+  //
+  // The owner says a newer Leaflet is out, from the admin panel, and every app
+  // newer than this server's first notice asks for it now and then and offers
+  // the update to a reader who is behind. The Store updates most installs by
+  // itself, but not all, and not soon. Asked for without an account (most
+  // readers have none), so the answer is kept a minute in memory: hundreds of
+  // apps asking cost one read a minute at most.
+  let noticeKept = null;
+  const readNotice = async () => {
+    if (noticeKept && Date.now() - noticeKept.at < NOTICE_KEPT_MS) return noticeKept.value;
+    const doc = await settings(db).findOne({ _id: "notice" }, { projection: { version: 1, note: 1, updatedAt: 1 } });
+    const value = { version: doc?.version ?? null, note: doc?.note ?? null, at: doc?.updatedAt ? doc.updatedAt.toISOString() : null };
+    noticeKept = { at: Date.now(), value };
+    return value;
+  };
+
+  router.get(
+    "/notice",
+    asyncHandler(async (_request, response) => {
+      response.json(await readNotice());
+    })
+  );
+
+  /**
+   * The newest version, and a line about it (optional). `version: null` takes
+   * the notice down. A version is two to four whole numbers with dots ("1.4.2").
+   */
+  router.put(
+    "/admin/notice",
+    auth,
+    admin,
+    smallJson,
+    asyncHandler(async (request, response) => {
+      const version = request.body?.version ?? null;
+      const rawNote = request.body?.note ?? null;
+      if (version !== null && (typeof version !== "string" || !/^\d{1,4}(\.\d{1,4}){1,3}$/.test(version))) {
+        throw new HttpError(400, "A version is numbers with dots, like 1.4.2.");
+      }
+      if (rawNote !== null && typeof rawNote !== "string") {
+        throw new HttpError(400, "The note must be text.");
+      }
+      const note = rawNote === null ? null : rawNote.trim().replace(/\s+/g, " ").slice(0, NOTICE_NOTE_MAX) || null;
+      const updatedAt = new Date();
+      await settings(db).updateOne({ _id: "notice" }, { $set: { version, note: version === null ? null : note, updatedAt } }, { upsert: true });
+      noticeKept = null;
+      response.json({ version, note: version === null ? null : note, at: updatedAt.toISOString() });
+    })
+  );
+
   return router;
 }
+
+/** How long the notice is kept in memory between reads, and the longest note. */
+const NOTICE_KEPT_MS = 60_000;
+export const NOTICE_NOTE_MAX = 160;
