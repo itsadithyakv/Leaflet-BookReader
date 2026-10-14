@@ -369,8 +369,8 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
   const [, setSettled] = useState(0);
   // The thing whose card is open over the room (its key), if one is.
   const [card, setCard] = useState<string | null>(null);
-  const latest = useRef({ things, night, scale, views });
-  latest.current = { things, night, scale, views };
+  const latest = useRef({ things, night, scale, views, room: { w: level.w, h: level.h } });
+  latest.current = { things, night, scale, views, room: { w: level.w, h: level.h } };
   const frame = useRef(0);
 
   /** Whether this layer, not the room's picture, is drawing a thing just now. */
@@ -457,7 +457,9 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
     const node = shadeRef.current;
     if (!node) return;
     const drawn = latest.current.things.filter((thing) => thing.kind === "curtains").map((thing) => liveOf(thing).closed);
-    node.style.opacity = String(roomShade(drawn, latest.current.night));
+    // (With a light on, drawn curtains do not make a dark room: the light where the middle of the room is.)
+    const room = latest.current.room;
+    node.style.opacity = String(roomShade(drawn, latest.current.night, pip.current.light(room.w / 2, room.h / 2)[0]));
   };
 
   // A new floor, new decor, a new scale, night falling, a new minute on the clock: everything drawn as it is.
@@ -718,8 +720,10 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
     save(thing, { off: state.off });
     playSound("click", { pitch: state.off ? 0.85 : 1.1 });
     pip.current.redraw();
-    // What this layer draws itself (the clock, a picture off its nail, drawn curtains) is in the new light too.
+    // What this layer draws itself (the clock, a picture off its nail, drawn curtains) is in the new light too, and
+    // the shade the curtains cast is lifted or let fall.
     for (const each of latest.current.things) draw(each);
+    shade();
     const reaction = lampReaction(state.off, new Date().getHours());
     if (reaction) pip.current.react(reaction, middle(thing, state), state.off ? "light-off" : "light-on");
     // Switched again within a few seconds of the last time: that is flicking the light at her, and it wears on her.
@@ -1069,6 +1073,7 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
   /** The room's light has changed: what this layer draws itself is drawn again, in it. */
   const relight = () => {
     for (const thing of latest.current.things) draw(thing);
+    shade();
   };
   return { layer, step, state, lifted, unlit, fixtures, fridge, spots, pipUse, use, offsetOf, relight };
 };

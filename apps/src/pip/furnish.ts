@@ -560,11 +560,20 @@ export const curtainStep = (closed: number, target: number, dt: number, still = 
  * How much the room dims for its drawn curtains, 0 to 1 (the scene lays a
  * shade of that strength over it). More by day, when there is light to shut
  * out; a little at night, for the moon. `closed` is each window's, 0 to 1.
+ *
+ * `lit` is how much of the room's own light (its lamps, the ceiling light)
+ * reaches the middle of the room, 0 to 1: drawn curtains with a light on are
+ * a lit room, not a dark one. The shade used to take no notice of the lamps,
+ * so with the curtains drawn, switching the light on did nothing to be seen
+ * (the owner, 2026-10-14). A light reaching the middle at half strength or
+ * more takes nine tenths of the shade away.
  */
-export const roomShade = (closed: readonly number[], night: boolean) => {
+export const LIGHT_LIFTS_SHADE = 0.9;
+export const roomShade = (closed: readonly number[], night: boolean, lit = 0) => {
   if (closed.length === 0) return 0;
   const drawn = closed.reduce((sum, value) => sum + clamp01(value), 0) / closed.length;
-  return Number((drawn * (night ? 0.12 : 0.26)).toFixed(3));
+  const lifted = 1 - LIGHT_LIFTS_SHADE * Math.min(1, clamp01(lit) * 2);
+  return Number((drawn * (night ? 0.12 : 0.26) * lifted).toFixed(3));
 };
 
 /** What Pip makes of the curtains being drawn, or opened, at this hour. */

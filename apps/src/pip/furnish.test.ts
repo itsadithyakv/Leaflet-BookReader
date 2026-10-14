@@ -132,6 +132,18 @@ describe("curtains", () => {
     expect(roomShade([1], false)).toBeLessThan(0.4);
   });
 
+  it("are no shade at all to speak of with a light on: drawn curtains and a lamp lit are a lit room", () => {
+    // The ceiling light reaches the middle of the bedroom at about two thirds: nine tenths of the shade goes.
+    expect(roomShade([1], false, 0.65)).toBeCloseTo(roomShade([1], false) * 0.1, 3);
+    expect(roomShade([1], true, 0.65)).toBeCloseTo(roomShade([1], true) * 0.1, 3);
+    // A lamp in a corner, that hardly reaches the middle, lifts a little of it.
+    expect(roomShade([1], false, 0.1)).toBeLessThan(roomShade([1], false));
+    expect(roomShade([1], false, 0.1)).toBeGreaterThan(roomShade([1], false, 0.65));
+    // No light, or curtains open: as before.
+    expect(roomShade([1], false, 0)).toBe(roomShade([1], false));
+    expect(roomShade([0], false, 1)).toBe(0);
+  });
+
   it("make Pip yawn at night and protest by day, then accept it", () => {
     const night = curtainReaction(true, 23);
     expect(night).toMatchObject({ move: "yawn", sleepy: true });

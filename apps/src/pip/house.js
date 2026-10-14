@@ -1080,6 +1080,7 @@ export function renderLevel(levelId, f = 0, opts = {}) {
   }
   if (L.glow) for (const [x, y, r, c] of L.glow) glows.push([x, y, r, rgba(c)]);
   if (opts.night ?? L.night) nightLight(g, glows);
+  else if (glows.length) dayLight(g, glows);
   return g.toImageData();
 }
 
@@ -1188,6 +1189,46 @@ function nightLight(g, glows) {
       darkOf.set(c, dark);
     }
     d[i] = dark;
+  }
+}
+
+/** By day a light that is on still shows: this much of its colour is added near it, and the room is this much brighter under it. */
+export const DAY_GLOW = 0.45;
+export const DAY_BRIGHTEN = 0.08;
+
+/**
+ * Lights that are on, by day: a soft warm glow round each, where by night
+ * they pool in the dark (`nightLight`). The room is not darkened first, so
+ * it is much fainter than by night; but a lamp switched on in daylight is
+ * seen to be on, which it was not (the owner, 2026-10-14: "The light does
+ * not glow in the pip house", in the morning). Only the pixels a light
+ * reaches are worked on, each light over its own box.
+ */
+function dayLight(g, glows) {
+  const d = g.C.d, w = g.w, h = g.h;
+  const most = new Float32Array(w * h), tr = new Float32Array(w * h), tg = new Float32Array(w * h), tb = new Float32Array(w * h);
+  const reached = new Uint8Array(w * h);
+  for (const [gx, gy, r, col] of glows) {
+    const x0 = Math.max(0, Math.floor(gx - r)), x1 = Math.min(w - 1, Math.ceil(gx + r));
+    const y0 = Math.max(0, Math.floor(gy - r / 1.1)), y1 = Math.min(h - 1, Math.ceil(gy + r / 1.1));
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const dist = Math.hypot(x - gx, (y - gy) * 1.1);
+        if (dist >= r) continue;
+        const i = y * w + x;
+        const k = (1 - dist / r) ** 1.4;
+        reached[i] = 1;
+        if (k > most[i]) most[i] = k;
+        tr[i] += col[0] * k * 0.22; tg[i] += col[1] * k * 0.22; tb[i] += col[2] * k * 0.22;
+      }
+    }
+  }
+  for (let i = 0; i < d.length; i++) {
+    const c = d[i];
+    if (!c || !reached[i]) continue;
+    const [r0, g0, b0, a] = rgba(c);
+    const m = 1 + DAY_BRIGHTEN * most[i];
+    d[i] = "#" + HEX[byte(r0 * m + tr[i] * DAY_GLOW)] + HEX[byte(g0 * m + tg[i] * DAY_GLOW)] + HEX[byte(b0 * m + tb[i] * DAY_GLOW)] + (a < 255 ? HEX[a] : "");
   }
 }
 

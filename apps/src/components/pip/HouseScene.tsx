@@ -1262,7 +1262,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
   const redraw = useRef<(() => void) | null>(null);
   // By night: the lights the room is drawn by just now (and the room and moment they are of), and how bright Pip and
   // her ball were last told to be (`lightThings`).
-  const roomLights = useRef<{ key: string; glows: Glow[] | null }>({ key: "", glows: null });
+  const roomLights = useRef<{ key: string; glows: Glow[] | null; dark: boolean }>({ key: "", glows: null, dark: false });
   const litSeen = useRef({ pip: { lit: "" }, ball: { lit: "" } });
   // The two colour filters that light is put on them by (an SVG filter each, in the room), and the button that is Pip.
   const litId = `pip-lit-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
@@ -1415,20 +1415,19 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       // By night, the lights the room is drawn by, for what is laid over its picture and is not part of it (Pip, her
       // ball): they are as bright as the light on them (`lightThings`). Asked for again when the room changes, and a
       // few times a second besides, for the lights that flicker.
+      // (By day too: a light on behind drawn curtains is what lifts their shade.)
       const dark = level.night || isEvening(Math.floor(hour));
-      const lightsKey = dark ? `${stands}|${next >> 2}` : "";
+      const lightsKey = `${stands}|${dark ? 1 : 0}|${next >> 2}`;
       if (lightsKey !== roomLights.current.key) {
         let glows: Glow[] | null = null;
-        if (dark) {
-          try {
-            glows = houseGlows(level, next, shown, hour);
-          } catch {
-            // Art mid-edit can throw: the lights as they were.
-            glows = roomLights.current.glows;
-          }
+        try {
+          glows = houseGlows(level, next, shown, hour);
+        } catch {
+          // Art mid-edit can throw: the lights as they were.
+          glows = roomLights.current.glows;
         }
         const changed = JSON.stringify(glows) !== JSON.stringify(roomLights.current.glows);
-        roomLights.current = { key: lightsKey, glows };
+        roomLights.current = { key: lightsKey, glows, dark };
         // What the furnishings draw themselves (the clock, drawn curtains) is in the room's light too.
         if (changed) furnishRef.current?.relight();
       }
@@ -1566,7 +1565,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
    * are set here when they change; by day there is none.
    */
   const lightThings = () => {
-    const glows = roomLights.current.glows;
+    // (By day nothing laid over the room is dimmed or tinted.)
+    const glows = roomLights.current.dark ? roomLights.current.glows : null;
     const s = st.current;
     const set = (node: HTMLElement | null, filter: SVGFEColorMatrixElement | null, which: "pip" | "ball", seen: { lit: string }, x: number, y: number) => {
       if (!node || !filter) return;
