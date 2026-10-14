@@ -74,22 +74,21 @@ export const RemindersCard = ({ showToast }: { showToast: (message: string) => v
 
   return (
     <div className="paper-surface rounded-xl p-5">
-      <p className="text-xs uppercase tracking-widest text-on-surface-variant">Reminders</p>
-      <p className="mt-2 text-xs text-on-surface-variant">
-        {pipOff ? "A gentle nudge" : "A gentle nudge from Pip"} when today's reading is still to do. Never at
-        night, never while you're reading, at most once a day each, and never once the goal is met.
+      <p
+        className="text-xs uppercase tracking-widest text-on-surface-variant"
+        title={`${pipOff ? "A gentle nudge" : "A gentle nudge from Pip"} when today's reading is still to do. Never at night, never while you're reading, at most once a day each, and never once the goal is met.`}
+      >
+        Reminders
       </p>
-      <div className="mt-4 space-y-3">
+      <div className="mt-3 space-y-2">
         <div className="inset-field w-full px-4 py-3 text-xs text-on-surface-variant">
           <button
             type="button"
             className="flex w-full items-center justify-between gap-4 text-left transition hover:text-primary"
             onClick={() => update({ daily: !settings.daily })}
+            title={`"Time to read?" if today's goal isn't met yet.`}
           >
-            <span>
-              <span className="block">Daily reminder</span>
-              <span className="mt-0.5 block text-[11px] opacity-75">"Time to read?" if today's goal isn't met yet.</span>
-            </span>
+            <span>Daily reminder</span>
             <Toggle on={settings.daily} />
           </button>
           {settings.daily && (
@@ -112,36 +111,39 @@ export const RemindersCard = ({ showToast }: { showToast: (message: string) => v
             </label>
           )}
         </div>
-        <button type="button" className={row} onClick={() => update({ streakRisk: !settings.streakRisk })}>
-          <span>
-            <span className="block">Streak at risk</span>
-            <span className="mt-0.5 block text-[11px] opacity-75">At 10 pm, only when a streak is running and today isn't done.</span>
-          </span>
+        <button
+          type="button"
+          className={row}
+          onClick={() => update({ streakRisk: !settings.streakRisk })}
+          title="At 10 pm, only when a streak is running and today isn't done."
+        >
+          <span>Streak at risk</span>
           <Toggle on={settings.streakRisk} />
         </button>
-        <button type="button" className={row} onClick={() => update({ closeNudge: !settings.closeNudge })}>
-          <span>
-            <span className="block">"You're close"</span>
-            <span className="mt-0.5 block text-[11px] opacity-75">
-              A little after a session that left you five minutes or less short.
-            </span>
-          </span>
+        <button
+          type="button"
+          className={row}
+          onClick={() => update({ closeNudge: !settings.closeNudge })}
+          title="A little after a session that left you five minutes or less short."
+        >
+          <span>"You're close"</span>
           <Toggle on={settings.closeNudge} />
         </button>
       </div>
-      <div className="section-rule mt-5 flex flex-wrap items-center justify-between gap-3 pt-4">
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
         <span className="min-w-0 flex-1 text-[11px] leading-relaxed text-on-surface-variant">
-          {status.blocked
-            ? "Windows has notifications for Leaflet turned off. Turn them on in Windows Settings › System › Notifications."
-            : status.whileClosed
-              ? "Reminders arrive even when Leaflet is closed. Select one to pick up where you left off."
-              : "This copy of Leaflet can only remind you while it's open, even minimised."}
+          {status.blocked && "Windows has notifications for Leaflet turned off. Turn them on in Windows Settings › System › Notifications."}
         </span>
         <button
           type="button"
           className="tactile-button px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-45"
           onClick={preview}
           disabled={!anyOn}
+          title={
+            status.whileClosed
+              ? "Reminders arrive even when Leaflet is closed. Select one to pick up where you left off."
+              : "This copy of Leaflet can only remind you while it's open, even minimised."
+          }
         >
           Send a Test
         </button>

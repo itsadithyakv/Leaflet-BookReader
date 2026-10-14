@@ -292,10 +292,8 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
   const sections: SegmentedTab<SettingsSection>[] = [
     { id: "general", label: "General" },
     { id: "reading", label: "Reading" },
-    { id: "habit", label: "Habit" },
     { id: "library", label: "Library" },
-    ...(showAccount ? [{ id: "account" as const, label: "Account" }] : []),
-    { id: "about", label: "About" }
+    ...(showAccount ? [{ id: "account" as const, label: "Account" }] : [])
   ];
   const offered = sections.map((item) => item.id);
   const [chosen, setChosen] = useState<SettingsSection>(() => readSettingsSection(offered));
@@ -321,15 +319,16 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
     </span>
   );
 
-  const panel = (id: SettingsSection) => ({
+  const panel = (id: SettingsSection, wide = false) => ({
     role: "tabpanel" as const,
     id: panelId("settings", id),
     "aria-labelledby": tabId("settings", id),
-    // Two columns from `lg` up, one below it. Each card is as tall as what is
-    // in it, and each column stacks its own, so opening something in one never
-    // moves a card in the other. `min-w-0` lets a column shrink below a long
-    // unbroken line (a path, a truncated email) instead of pushing the page wide.
-    className: "grid items-start gap-4 [&>*]:min-w-0 lg:grid-cols-2"
+    // Two columns from `lg` up, one below it (three from `xl` for a section
+    // with more to it). Each card is as tall as what is in it, and each column
+    // stacks its own, so opening something in one never moves a card in
+    // another. `min-w-0` lets a column shrink below a long unbroken line (a
+    // path, a truncated email) instead of pushing the page wide.
+    className: `grid items-start gap-4 [&>*]:min-w-0 lg:grid-cols-2${wide ? " xl:grid-cols-3" : ""}`
   });
   const column = "flex flex-col gap-4 [&>*]:min-w-0";
 
@@ -347,179 +346,245 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
 
       {section === "general" && (
         <div {...panel("general")}>
-          <section className="paper-surface rounded-xl p-5">
-            <p className="text-xs uppercase tracking-widest text-on-surface-variant">Appearance</p>
-            <div className="mt-3 flex gap-3">
-              {(["light", "dark"] as ThemeMode[]).map((mode) => (
+          <div className={column}>
+            <section className="paper-surface rounded-xl p-5">
+              <p className="text-xs uppercase tracking-widest text-on-surface-variant">Appearance</p>
+              <div className="mt-3 flex gap-3">
+                {(["light", "dark"] as ThemeMode[]).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    className={`theme-choice !min-h-0 !flex-row items-center !justify-start gap-3 !py-3 ${
+                      mode === "light"
+                        ? "bg-[#eee5d3] text-[#302a21]"
+                        : "bg-[#1b1a17] text-[#eee6d8]"
+                    }`}
+                    aria-pressed={theme === mode}
+                    onClick={() => setTheme(mode)}
+                  >
+                    <UiIcon name={mode === "light" ? "sun" : "moon"} size={20} />
+                    <span className="text-sm font-semibold capitalize">{mode} mode</span>
+                  </button>
+                ))}
+              </div>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                <span className="text-xs text-on-surface-variant">
+                  {followSystem
+                    ? "Following the Windows appearance setting."
+                    : "For the library and the reader, on this device."}
+                </span>
                 <button
-                  key={mode}
                   type="button"
-                  className={`theme-choice !min-h-0 !flex-row items-center !justify-start gap-3 !py-3 ${
-                    mode === "light"
-                      ? "bg-[#eee5d3] text-[#302a21]"
-                      : "bg-[#1b1a17] text-[#eee6d8]"
-                  }`}
-                  aria-pressed={theme === mode}
-                  onClick={() => setTheme(mode)}
+                  className="tactile-button px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-45"
+                  onClick={followSystemTheme}
+                  disabled={followSystem}
                 >
-                  <UiIcon name={mode === "light" ? "sun" : "moon"} size={20} />
-                  <span className="text-sm font-semibold capitalize">{mode} mode</span>
+                  Use Windows Theme
                 </button>
-              ))}
-            </div>
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-              <span className="text-xs text-on-surface-variant">
-                {followSystem
-                  ? "Following the Windows appearance setting."
-                  : "For the library and the reader, on this device."}
-              </span>
+              </div>
+            </section>
+
+            <section className="paper-surface rounded-xl p-5">
+              <p className="text-xs uppercase tracking-widest text-on-surface-variant">Pip, your reading companion</p>
+              <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="How much Pip moves">
+                {PIP_MODES.map((item) => (
+                  <button
+                    key={item.mode}
+                    type="button"
+                    className={`tactile-button px-4 py-2 text-xs ${pipMode === item.mode ? "tactile-button-primary" : ""}`}
+                    aria-pressed={pipMode === item.mode}
+                    onClick={() => setPipMode(item.mode)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+                {pipMode !== "off" && (
+                  <button type="button" className="tactile-button px-4 py-2 text-xs" onClick={startPipTour}>
+                    Show Me Around
+                  </button>
+                )}
+              </div>
+              <p className="mt-2 text-xs text-on-surface-variant">{pipChoice.detail}</p>
               <button
                 type="button"
-                className="tactile-button px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-45"
-                onClick={followSystemTheme}
-                disabled={followSystem}
+                role="switch"
+                aria-checked={pipSounds}
+                className="inset-field mt-3 flex w-full items-center justify-between gap-3 px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
+                onClick={togglePipSounds}
+                title="Soft little sounds when you pick, plant, buy and place things. They follow your computer's volume."
               >
-                Use Windows Theme
+                <span>Sounds in Pip's house</span>
+                {renderToggle(pipSounds)}
               </button>
-            </div>
-          </section>
-
-          <section className="paper-surface rounded-xl p-5">
-            <p className="text-xs uppercase tracking-widest text-on-surface-variant">Pip, your reading companion</p>
-            <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="How much Pip moves">
-              {PIP_MODES.map((item) => (
+              <DesktopPipSetting renderToggle={renderToggle} />
+            </section>
+          </div>
+          <div className={column}>
+            <section className="paper-surface rounded-xl p-5" aria-labelledby="about-title">
+              <p className="text-xs uppercase tracking-widest text-on-surface-variant">About</p>
+              <h3 id="about-title" className="mt-2 font-headline text-lg font-bold text-on-surface">
+                Enjoying Leaflet?
+              </h3>
+              <p className="mt-1 text-xs text-on-surface-variant">
+                A rating on the Microsoft Store helps other readers find it. Questions, bugs or ideas:{" "}
+                <span className="selectable font-semibold text-on-surface">{SUPPORT_EMAIL}</span>
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
                 <button
-                  key={item.mode}
                   type="button"
-                  className={`tactile-button px-4 py-2 text-xs ${pipMode === item.mode ? "tactile-button-primary" : ""}`}
-                  aria-pressed={pipMode === item.mode}
-                  onClick={() => setPipMode(item.mode)}
+                  className="tactile-button tactile-button-primary px-4 py-2 text-xs"
+                  onClick={() => void openStoreReview()}
                 >
-                  {item.label}
+                  Rate Leaflet ★
                 </button>
-              ))}
-              {pipMode !== "off" && (
-                <button type="button" className="tactile-button px-4 py-2 text-xs" onClick={startPipTour}>
-                  Show Me Around
+                {PRIVACY_URL && (
+                  <button type="button" className="tactile-button px-4 py-2 text-xs" onClick={() => void accountService.openLink(PRIVACY_URL)}>
+                    Privacy policy
+                  </button>
+                )}
+                {TERMS_URL && (
+                  <button type="button" className="tactile-button px-4 py-2 text-xs" onClick={() => void accountService.openLink(TERMS_URL)}>
+                    Terms of use
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="tactile-button px-4 py-2 text-xs"
+                  title="Copies versions, settings and the recent log (no passwords or book contents) to paste into an email"
+                  onClick={() =>
+                    void diagnosticsService
+                      .report()
+                      .then((report) => navigator.clipboard.writeText(report))
+                      .then(() => showToast(`Diagnostics copied. Paste them into an email to ${SUPPORT_EMAIL}.`))
+                      .catch(() => showToast("Couldn't copy diagnostics."))
+                  }
+                >
+                  Copy diagnostics
                 </button>
-              )}
+              </div>
+            </section>
+
+            <div className="paper-surface flex flex-wrap items-center justify-between gap-4 rounded-xl p-5">
+              <div className="min-w-0 flex-1 basis-64">
+                <p className="text-xs uppercase tracking-widest text-on-surface-variant">Danger Zone</p>
+                <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
+                  Removes your library, covers, reading history, places and settings from this computer, and signs
+                  it out. Left as they are: a Drive backup, a sync folder's contents, any folder of book copies, your
+                  Leaflet account on the server, and Calibre.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  className="tactile-button border-error/50 bg-error/10 px-4 py-2 text-xs text-error hover:bg-error/20"
+                  onClick={handleDeleteAll}
+                  disabled={deleteBusy}
+                >
+                  {confirmDelete ? "Confirm Delete" : "Delete All Data"}
+                </button>
+                {confirmDelete && !deleteBusy && (
+                  <button
+                    type="button"
+                    className="tactile-button px-4 py-2 text-xs"
+                    onClick={() => setConfirmDelete(false)}
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
             </div>
-            <p className="mt-2 text-xs text-on-surface-variant">{pipChoice.detail}</p>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={pipSounds}
-              className="inset-field mt-3 flex w-full items-center justify-between gap-3 px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
-              onClick={togglePipSounds}
-              title="Soft little sounds when you pick, plant, buy and place things. They follow your computer's volume."
-            >
-              <span>Sounds in Pip's house</span>
-              {renderToggle(pipSounds)}
-            </button>
-            <DesktopPipSetting renderToggle={renderToggle} />
-          </section>
+          </div>
         </div>
       )}
 
       {section === "reading" && (
-        // How the text is read. The daily goal and the reminders were here too:
-        // five cards, which no arrangement fitted into a 1366x768 window (the
-        // pace card alone is 453 px), so they have a section of their own.
-        <div {...panel("reading")}>
+        // Everything about reading in one place: the daily goal and its
+        // reminders, the pace, and the helps in the book. Three columns where
+        // the window is wide enough (a 1366 px one is); the goal and the
+        // reminders, the most changed, first.
+        <div {...panel("reading", true)}>
+          <div className={column}>
+            <div className="paper-surface rounded-xl p-5">
+              <p className="text-xs uppercase tracking-widest text-on-surface-variant">Daily goal and focus</p>
+              <div className="mt-3 space-y-2">
+                <div
+                  className="inset-field flex w-full items-center justify-between gap-4 px-4 py-3"
+                  title="Read this much in a day to keep your streak alive. Time counts whenever a book is open, whether or not a focus session is running."
+                >
+                  <span className="text-xs text-on-surface-variant">Daily reading goal</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="tactile-button h-8 w-8 text-sm"
+                      onClick={() => void setGoalMinutes(Math.max(5, goalMinutes - 5))}
+                      aria-label="Decrease daily goal"
+                    >
+                      -
+                    </button>
+                    <span className="min-w-20 text-center text-sm font-semibold text-on-surface tabular-nums">
+                      {goalMinutes} min
+                    </span>
+                    <button
+                      type="button"
+                      className="tactile-button h-8 w-8 text-sm"
+                      onClick={() => void setGoalMinutes(Math.min(240, goalMinutes + 5))}
+                      aria-label="Increase daily goal"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={focusSettings.goalBinding}
+                  className="inset-field flex w-full items-center justify-between px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
+                  onClick={() => setFocusSettings({ goalBinding: !focusSettings.goalBinding })}
+                >
+                  <span>Auto-start focus when opening a book</span>
+                  {renderToggle(focusSettings.goalBinding)}
+                </button>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={focusSettings.kioskMode}
+                  className="inset-field flex w-full items-center justify-between px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
+                  onClick={() => void toggleFullScreen()}
+                  title="Sessions run full screen and grow a focus flower, which blooms if you stay to the end. Pip guards the way out; hold Esc to leave."
+                >
+                  <span className="text-left">Full screen (focus lock)</span>
+                  {renderToggle(focusSettings.kioskMode)}
+                </button>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={focusSettings.checkpointPrompts}
+                  className="inset-field flex w-full items-center justify-between px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
+                  onClick={() => setFocusSettings({ checkpointPrompts: !focusSettings.checkpointPrompts })}
+                >
+                  <span>Check in halfway, near the end and at the end of a session</span>
+                  {renderToggle(focusSettings.checkpointPrompts)}
+                </button>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={focusSettings.sessionNotes}
+                  className="inset-field flex w-full items-center justify-between px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
+                  onClick={() => setFocusSettings({ sessionNotes: !focusSettings.sessionNotes })}
+                >
+                  <span>Prompt for session notes on finish</span>
+                  {renderToggle(focusSettings.sessionNotes)}
+                </button>
+              </div>
+            </div>
+            <RemindersCard key={`reminders-${wiped}`} showToast={showToast} />
+          </div>
           <div className={column}>
             <ReadingPaceCard key={wiped} showToast={showToast} renderToggle={renderToggle} />
           </div>
           <div className={column}>
             <CharactersSetting key={`characters-${wiped}`} renderToggle={renderToggle} />
             <WordsSetting key={`words-${wiped}`} renderToggle={renderToggle} />
-          </div>
-        </div>
-      )}
-
-      {section === "habit" && (
-        <div {...panel("habit")}>
-          <div className={column}>
-              <div className="paper-surface rounded-xl p-5">
-                <p className="text-xs uppercase tracking-widest text-on-surface-variant">Daily goal and focus</p>
-                <div className="mt-3 space-y-2">
-                  <div
-                    className="inset-field flex w-full items-center justify-between gap-4 px-4 py-3"
-                    title="Read this much in a day to keep your streak alive. Time counts whenever a book is open, whether or not a focus session is running."
-                  >
-                    <span className="text-xs text-on-surface-variant">Daily reading goal</span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        className="tactile-button h-8 w-8 text-sm"
-                        onClick={() => void setGoalMinutes(Math.max(5, goalMinutes - 5))}
-                        aria-label="Decrease daily goal"
-                      >
-                        -
-                      </button>
-                      <span className="min-w-20 text-center text-sm font-semibold text-on-surface tabular-nums">
-                        {goalMinutes} min
-                      </span>
-                      <button
-                        type="button"
-                        className="tactile-button h-8 w-8 text-sm"
-                        onClick={() => void setGoalMinutes(Math.min(240, goalMinutes + 5))}
-                        aria-label="Increase daily goal"
-                      >
-                        +
-                      </button>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={focusSettings.goalBinding}
-                    className="inset-field flex w-full items-center justify-between px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
-                    onClick={() => setFocusSettings({ goalBinding: !focusSettings.goalBinding })}
-                  >
-                    <span>Auto-start focus when opening a book</span>
-                    {renderToggle(focusSettings.goalBinding)}
-                  </button>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={focusSettings.kioskMode}
-                    className="inset-field flex w-full items-center justify-between px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
-                    onClick={() => void toggleFullScreen()}
-                  >
-                    <span className="text-left">
-                      <span className="block">Full screen (focus lock)</span>
-                      <span className="mt-0.5 block text-[11px] opacity-75">
-                        Sessions run full screen and grow a focus flower, which blooms if you stay to the end. Pip guards
-                        the way out; hold Esc to leave.
-                      </span>
-                    </span>
-                    {renderToggle(focusSettings.kioskMode)}
-                  </button>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={focusSettings.checkpointPrompts}
-                    className="inset-field flex w-full items-center justify-between px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
-                    onClick={() => setFocusSettings({ checkpointPrompts: !focusSettings.checkpointPrompts })}
-                  >
-                    <span>Check in halfway, near the end and at the end of a session</span>
-                    {renderToggle(focusSettings.checkpointPrompts)}
-                  </button>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={focusSettings.sessionNotes}
-                    className="inset-field flex w-full items-center justify-between px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
-                    onClick={() => setFocusSettings({ sessionNotes: !focusSettings.sessionNotes })}
-                  >
-                    <span>Prompt for session notes on finish</span>
-                    {renderToggle(focusSettings.sessionNotes)}
-                  </button>
-                </div>
-              </div>
-          </div>
-          <div className={column}>
-            <RemindersCard key={wiped} showToast={showToast} />
           </div>
         </div>
       )}
@@ -729,84 +794,6 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
           {FEATURES.accounts && sync.apiBase && <AccountCard key={sync.apiBase} showToast={showToast} />}
 
           {FEATURES.community && <LeaderboardsCard showToast={showToast} />}
-        </div>
-      )}
-
-      {section === "about" && (
-        <div {...panel("about")}>
-          <section className="paper-surface rounded-xl p-5" aria-labelledby="about-title">
-            <p className="text-xs uppercase tracking-widest text-on-surface-variant">About</p>
-            <h3 id="about-title" className="mt-2 font-headline text-lg font-bold text-on-surface">
-              Enjoying Leaflet?
-            </h3>
-            <p className="mt-1 text-xs text-on-surface-variant">
-              A rating on the Microsoft Store helps other readers find it. Questions, bugs or ideas:{" "}
-              <span className="selectable font-semibold text-on-surface">{SUPPORT_EMAIL}</span>
-            </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                type="button"
-                className="tactile-button tactile-button-primary px-4 py-2 text-xs"
-                onClick={() => void openStoreReview()}
-              >
-                Rate Leaflet ★
-              </button>
-              {PRIVACY_URL && (
-                <button type="button" className="tactile-button px-4 py-2 text-xs" onClick={() => void accountService.openLink(PRIVACY_URL)}>
-                  Privacy policy
-                </button>
-              )}
-              {TERMS_URL && (
-                <button type="button" className="tactile-button px-4 py-2 text-xs" onClick={() => void accountService.openLink(TERMS_URL)}>
-                  Terms of use
-                </button>
-              )}
-              <button
-                type="button"
-                className="tactile-button px-4 py-2 text-xs"
-                title="Copies versions, settings and the recent log (no passwords or book contents) to paste into an email"
-                onClick={() =>
-                  void diagnosticsService
-                    .report()
-                    .then((report) => navigator.clipboard.writeText(report))
-                    .then(() => showToast(`Diagnostics copied. Paste them into an email to ${SUPPORT_EMAIL}.`))
-                    .catch(() => showToast("Couldn't copy diagnostics."))
-                }
-              >
-                Copy diagnostics
-              </button>
-            </div>
-          </section>
-
-            <div className="paper-surface flex flex-wrap items-center justify-between gap-4 rounded-xl p-5">
-              <div className="min-w-0 flex-1 basis-64">
-                <p className="text-xs uppercase tracking-widest text-on-surface-variant">Danger Zone</p>
-                <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
-                  Removes your library, covers, reading history, places and settings from this computer, and signs
-                  it out. Left as they are: a Drive backup, a sync folder's contents, any folder of book copies, your
-                  Leaflet account on the server, and Calibre.
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  className="tactile-button border-error/50 bg-error/10 px-4 py-2 text-xs text-error hover:bg-error/20"
-                  onClick={handleDeleteAll}
-                  disabled={deleteBusy}
-                >
-                  {confirmDelete ? "Confirm Delete" : "Delete All Data"}
-                </button>
-                {confirmDelete && !deleteBusy && (
-                  <button
-                    type="button"
-                    className="tactile-button px-4 py-2 text-xs"
-                    onClick={() => setConfirmDelete(false)}
-                  >
-                    Cancel
-                  </button>
-                )}
-              </div>
-            </div>
         </div>
       )}
     </div>

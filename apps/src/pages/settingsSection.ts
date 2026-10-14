@@ -6,15 +6,18 @@
  * section does not load it.
  */
 
-export type SettingsSection = "general" | "reading" | "habit" | "library" | "account" | "about";
+export type SettingsSection = "general" | "reading" | "library" | "account";
 
 const SECTION_KEY = "leaflet.settings.section";
-const SECTIONS: SettingsSection[] = ["general", "reading", "habit", "library", "account", "about"];
+const SECTIONS: SettingsSection[] = ["general", "reading", "library", "account"];
+/** Tabs there used to be (six, most holding a card or two), and where what was on them is now. */
+const MOVED: Record<string, SettingsSection> = { habit: "reading", about: "general" };
 
 /** The section to open on, falling back to the first when it is unknown or not offered in this build. */
 export const readSettingsSection = (offered: SettingsSection[]): SettingsSection => {
   try {
-    const stored = sessionStorage.getItem(SECTION_KEY) as SettingsSection | null;
+    const kept = sessionStorage.getItem(SECTION_KEY);
+    const stored = kept ? (MOVED[kept] ?? kept) as SettingsSection : null;
     if (stored && SECTIONS.includes(stored) && offered.includes(stored)) {
       return stored;
     }
@@ -23,7 +26,6 @@ export const readSettingsSection = (offered: SettingsSection[]): SettingsSection
   }
   return offered[0] ?? "general";
 };
-
 export const rememberSettingsSection = (section: SettingsSection) => {
   try {
     sessionStorage.setItem(SECTION_KEY, section);
