@@ -101,7 +101,13 @@ Pip side.
   lamp only warms her and she is not washed out. The Disco Ball now throws a
   fainter wash of its colour down to the floor (reach 140 beside its old
   44), so in the arcade the room and Pip turn pink, blue, yellow and green
-  with it, a second each. The clock, a
+  with it, a second each. By day a light that is on glows softly round
+  itself (`dayLight` in `house.js`: a little of its colour added, and up to
+  8 in 100 brighter; it used to show only after dark, 2026-10-14). And drawn
+  curtains no longer darken a room whose light is on: their shade loses nine
+  tenths of itself when the room's lights reach its middle at half strength
+  (`roomShade`, `LIGHT_LIFTS_SHADE`); before, with the curtains drawn,
+  switching the light on did nothing to be seen. The clock, a
   picture off its nail and drawn curtains, which the furnishings layer draws
   itself, are darkened by the same rule as the wall behind them
   (`dimForNight` with the light on them) and drawn again when a light is

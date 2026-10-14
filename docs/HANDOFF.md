@@ -304,7 +304,35 @@ holds:**
     they did not): she takes the colour of the light on her as well as
     its strength (an SVG colour filter each for her and her ball,
     `litMatrix` in `pip/home.js`), and the Disco Ball's colour reaches
-    the floor. Seen in the preview: Pip under the bedroom's light
+    the floor. On 2026-10-14, not committed and not in the package: a
+    light that is on glows softly by day, and drawn curtains no longer
+    darken a room whose light is on (the owner found that with the
+    curtains drawn the light did nothing). Seen in the preview by day:
+    shade 0.26 with the light off, 0.026 with it on. Tests: 3,049 app.
+    Also on 2026-10-14, from the owner trying the installed 1.4.0:
+    opening anybody's profile crashed the Social page (React error 310:
+    a hook in `ReaderCard.tsx` came after its early return, so the card
+    had one hook more once a handle was open). Fixed, and opening a
+    card was tried in the preview. Finding readers and the requests to
+    follow you are now at the top of the Friends tab as well as under
+    Board (the owner could not find how to send a request). And every
+    "Not found." on the Friends tab was the live server, which is still
+    the old one: `/v1/feed`, `/v1/clubs` and `/v1/communities` answer
+    404 there, while the old routes answer as before. Deploying the
+    server is what mends those.
+    Then, at the owner's asking, made easier and calmer: the search is
+    now "Add friends" (`ReaderSearch.tsx`), with your own handle and a
+    Copy button to send it, and Follow (or Ask, for a profile kept to
+    followers) beside each reader found, where before the card had to be
+    opened. A private profile on the Friends tab has a "Share with
+    friends" button, which shares it with followers only. And the red
+    slab an error was drawn in is a quiet line with a small mark;
+    "Not found." (the server's answer for a path it has not got, so the
+    app is newer than the server) is now "Coming soon." with nothing to
+    try again (`format.ts`, `gentleError`; `ErrorLine.tsx`). Not seen
+    signed in: the preview has the community switched off, so these
+    were checked by tests and type only. Tests: 3,053 app.
+    Seen in the preview: Pip under the bedroom's light
     through the new filter; the arcade with a disco ball painted at
     each of its four colours, with a green stand-in under each
     matrix, not Pip herself in the arcade (the preview cannot buy the

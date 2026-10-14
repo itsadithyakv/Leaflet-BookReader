@@ -54,39 +54,37 @@ name must match the reserved name exactly ("Leaflet Book Reader", as in
 ## What's new in this version
 
 For 1.4.0 (the first release after 1.3.2; the Store's field takes 1,500
-characters, this is about 1,450):
+characters, this is 1462, or 1472 if it counts a line break as two; written
+again on 2026-10-13 for what was added after the first draft: Pip's moods,
+the game of catch, the room's light, look-up by double-click):
 
 > Friends and a place to talk about books, all optional. Follow readers, see
 > what they are reading, and open the library of anyone who shares theirs.
-> Post a finished book, a proper review or a quote from your highlights, to
-> your followers or to everyone, and like or dislike what others post.
-> Discover is a feed of reviews and quotes from readers everywhere. Every
-> book and series can have its own community with threads for theories;
-> spoilers stay covered until you have read that far. Report and block are
-> on everything.
+> Post a finished book, a review or a quote to your followers or to everyone.
+> Discover is a feed from readers everywhere. Every book and series can have
+> its own community with threads; spoilers stay covered until you have read
+> that far. Report and block are on everything.
 >
-> Book clubs with a shared weekly goal, badges for hard milestones, levels,
-> duels with seeds staked on them, and presents for a friend's Pip.
->
-> More to do with seeds: a streak freeze, a stake on your own reading goal,
-> rarer things in Pip's shop that open at higher levels, and three new
+> Book clubs with a weekly goal, badges, levels, duels with seeds staked on
+> them, and presents for a friend's Pip. Seeds also buy a streak freeze, a
+> stake on your own goal, rarer things in Pip's shop, and new scenes and
 > sounds for the reading room.
 >
-> Your library: PDFs get their cover without being opened, genres are a wall
-> of tiles in Collections, a series can change which set of covers it wears,
-> The Hobbit sits with The Lord of the Rings, and a file over 10 MB asks
-> before it is backed up. Every session on your shelf is named after the book
-> you were reading.
->
 > New in Pip's arcade: the Hollow, a camp your reading builds. Lay it out,
-> hold it against the magpies at night, raid their camps with Pip's scouts,
-> and bring along heroes who turn up as you finish books. They live in the
-> camp, and Pip goes for walks while you read and comes back with tales.
+> fence it, hold it against prowlers by day and night, send Pip's scouts on
+> raids, and bring along heroes who turn up as you finish books.
 >
-> Pip's arcade now fills the window, and each game plays on its own card
-> before you pick it. A game that ends stays on screen so you can see how it
-> went.
-> You can remove a book from any card's menu.
+> Pip's house: cuddle her, high-five her, and play catch with a ball she
+> throws back. She has moods now: tantrums, sulks and making up, and she minds
+> an empty fridge. More decorations and toys, a ceiling light with a switch,
+> and after dark she is lit by the lamps in the room.
+>
+> Your library: PDFs get their cover without being opened, genres are a wall
+> of tiles, a series can change its covers, a file over 10 MB asks before it
+> is backed up, and any book can be removed from its menu.
+>
+> Reading: double-click a word to look it up, with the book's own answer for
+> words no dictionary has.
 
 Before 1.4.0 is submitted: the age-rating questionnaire has to be answered
 again, because readers can now write things other readers see (reviews,
