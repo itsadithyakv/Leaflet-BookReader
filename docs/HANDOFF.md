@@ -332,6 +332,61 @@ holds:**
     try again (`format.ts`, `gentleError`; `ErrorLine.tsx`). Not seen
     signed in: the preview has the community switched off, so these
     were checked by tests and type only. Tests: 3,053 app.
+- **1.4.2 (2026-10-14/15, at the owner's word; 1.4.0 was never uploaded,
+  and 1.4.1 was skipped by the owner).** Version in the five places.
+  What it adds over the 1.4.0 package:
+  - **Update reminders.** The owner sets the newest version and a line
+    under Social → Discover (admin panel, "Update notice"); every app from
+    1.4.2 on asks the server 20 s after opening and every 6 hours and, when
+    it is behind, shows a card with Update (the Store's page for Leaflet)
+    and Later (that version is not offered again). New server routes
+    `GET /v1/notice` and `PUT /v1/admin/notice` (server/README.md): **the
+    server must be deployed again for it**, the same `deploy.ps1`. Apps
+    before 1.4.2 never ask, so readers on 1.3.2 are not reached by it.
+  - **The Store review prompt** could never come: it counted a day used
+    only when Leaflet was opened, and a desktop app is left open for days.
+    It now counts on opening, on coming back to the front and after each
+    session, and asks after a session that met the goal or ran 15 minutes,
+    once Leaflet has been used on 3 days (`RatePrompt.tsx`).
+  - **Posting is one form** ("Share a book": stars, what you thought). A
+    line or less posts as finished, more as a review (which wants stars);
+    a quote only from a highlight. The book is found by typing
+    (`BookChooser.tsx`, `bookChoices.ts`), most lately read first.
+  - **Presents** are tiles with each thing's picture and tabs (To wear,
+    For the house, Looks & moves).
+  - **The confirm-your-email and reset steps** say plainly to look in Spam
+    or Junk.
+  - **A tap on the oak** takes its acorns in.
+  - **The Hollow, simplified** (by a helper, reviewed; the owner: "I have no
+    clue what to play and what to do and why"). One next thing, always
+    there and said as reading (`nextStep`; the list ticks itself off,
+    `advanceList`, 19 steps in the order the camp opens). Pip's bubble has
+    three lines at most. Parcels are the one inbox (chapters, the day's
+    goal, the hen, honey). Put away, their fields kept (save still `v: 2`,
+    `camp_summary` unchanged): the calendar night, the hedgehog, wishes and
+    wants, walks, dew, paths, road camps, wagers, quiz tips. Rules changed:
+    fence from level 2, the King from 10 strongholds, no wear from a knock,
+    a friend's raid blocks only the fence, heroes no longer fight
+    prowlers, a richer oak. Friendship now grows by a step with each day's
+    goal parcel, so heroes' own blades can still be won. Sim: 30 min a day
+    finishes the buildings on day 79 (was 72), 10 min a day on day 242
+    (was 158), slower on purpose. Restoring each hidden part:
+    features.md, "The Hollow, simplified (1.4)". Seen in the preview by
+    the helper at levels 1 to 3; prowler knocks, the fence block and
+    battles by tests only.
+  - **Settings has four tabs, not six** ("divided a lot", the owner):
+    Habit's daily goal, focus and reminders joined Reading (three columns
+    from `xl`), About and the danger zone joined General. A tab kept from
+    before (`habit`, `about`) opens where its cards went. The reminders
+    card's and full screen's standing notes became tooltips; the notice
+    that Windows has notifications off stays. At 1366x768 General and
+    Library fit; Reading scrolls about 70 px. The reminders card itself
+    was not seen (it draws nothing in the browser preview).
+  - React error 300, reported once more by the owner, has no cause left in
+    the code that three scans (by the TypeScript parser) could find: a
+    hook after a return, in a plain function, or under a condition. It is
+    what closing a reader's card did before `e025932`; likely the owner
+    was on an older package.
     Seen in the preview: Pip under the bedroom's light
     through the new filter; the arcade with a disco ball painted at
     each of its four colours, with a green stand-in under each
