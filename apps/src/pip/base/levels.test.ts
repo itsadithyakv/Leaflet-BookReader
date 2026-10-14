@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { FOES, WORKS } from "./guards";
 import {
   DECOR_FROM,
+  FENCE_FROM,
+  POSTCARD_FROM,
+  PROWLERS_FROM,
   GUARDS_FROM,
   MAX_LEVEL,
   MEADOW_FROM,
@@ -104,7 +107,14 @@ describe("the camp's level", () => {
           expect(workBlocked(before, entry.which!), said).toBe("burrow");
           expect(workBlocked(now, entry.which!), said).toBeNull();
         } else if (entry.kind === "foe") {
-          expect(FOES[entry.which!].from, said).toBe(level);
+          // Who comes out of the wood: most kinds from the level prowlers come at all, the mole from 3, Fizzwick from 4.
+          expect([PROWLERS_FROM, 3, 4], said).toContain(level);
+        } else if (entry.kind === "fence") {
+          expect(blocked({ ...before, acorns: 999 }, "fence"), said).toBe("burrow");
+          expect(blocked({ ...now, acorns: 999 }, "fence"), said).toBeNull();
+          expect(level).toBe(FENCE_FROM);
+        } else if (entry.kind === "postcard") {
+          expect(level, said).toBe(POSTCARD_FROM);
         }
       }
     }
@@ -116,7 +126,8 @@ describe("the camp's level", () => {
         .map((entry) => entry.which ?? 0)
         .sort((a, b) => a - b)
     ).toEqual(WORKS.map((_, which) => which));
-    expect(all.filter((entry) => entry.kind === "foe").map((entry) => entry.which).sort()).toEqual(FOES.map((foe) => foe.id));
+    expect(all.filter((entry) => entry.kind === "foe").map((entry) => entry.name)).toEqual(["Prowlers", "The Rootgnaw", "Fizzwick"]);
+    expect(all.filter((entry) => entry.kind === "paths")).toEqual([]);
     expect(all.filter((entry) => entry.kind === "plot")).toHaveLength(2);
     expect(campOpens(1)).toEqual([]);
     // The first raiders come with the same level the list says they do.

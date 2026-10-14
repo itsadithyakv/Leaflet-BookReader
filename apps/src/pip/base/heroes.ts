@@ -158,7 +158,7 @@ export const heroOpen = (shelf: Shelf, trophies: number, id: number): boolean =>
 /** What still has to be finished to bring a hero, in a few words. */
 export const heroWants = (hero: Hero, kindNames: readonly string[]): string => {
   const kinds = hero.kinds.map((kind) => kindNames[kind]?.toLowerCase() ?? "any");
-  const own = hero.kinds[0] === 0 ? "any book" : `${hero.need === 1 ? "a" : hero.need} ${kinds.join(" or ")} ${hero.need === 1 ? "book" : "books"}`;
+  const own = hero.kinds[0] === 0 ? "any book" : `${hero.need === 1 ? (/^[aeiou]/.test(kinds[0] ?? "") ? "an" : "a") : hero.need} ${kinds.join(" or ")} ${hero.need === 1 ? "book" : "books"}`;
   return hero.total > 1 ? `Finish ${own}, or ${hero.total} books in all` : `Finish ${own}`;
 };
 

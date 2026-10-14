@@ -1,13 +1,11 @@
 import { create } from "zustand";
 import {
   adopt,
+  advanceList,
   afterGame,
-  afterQuiz,
   build,
   chooseHero,
-  choosePath,
   claimClub,
-  claimQuest,
   clearPlot,
   finishRaid,
   finishFriendRaid,
@@ -26,27 +24,20 @@ import {
   type FriendRaid,
   type SharedCamp,
   gather,
-  grantWish,
   moveDecor,
   moveSite,
   newBase,
   placeDecor,
-  placeWager,
   placeWall,
   raise,
   removeDecor,
   removeWall,
-  seenReport,
   sendRaid,
   settle,
   startRaid,
-  takeOffer,
   type BaseState,
-  type ForkId,
-  type Forked,
   type GameEnd,
   type Now,
-  type OfferId,
   type PayingGame,
   type Placed,
   type Raid,
@@ -54,10 +45,6 @@ import {
   type RaidKind,
   type Site,
   type YardKind,
-  grantWant,
-  sendOut,
-  tripBrings,
-  welcomeBack,
   trainGuard,
   placeLand,
   moveLand,
@@ -123,22 +110,11 @@ type BaseStore = {
   /** Pip's mood at home, 0 to 100, for the camp to know: told by the page her house is on. */
   mood: number | undefined;
   setMood: (mood: number | undefined) => void;
-  /** Sees to a hero's want that has come true. */
-  grantWant: (hero: number) => void;
-  /** Sends Pip out for a walk of so many minutes of reading. */
-  sendOut: (needs: number) => void;
-  /** Welcomes her back: what she brought, or null if she is not back. */
-  welcomeBack: () => { acorns: number; tale: number | null } | null;
   /** Brings the camp up to now: after reading, or a day turning with the arcade open. */
   refresh: () => void;
   build: (site: Site, kind?: YardKind) => void;
   clearPlot: (site: Site) => void;
-  choosePath: (building: Forked, path: ForkId) => void;
   gather: () => void;
-  takeOffer: (id: OfferId) => void;
-  claimQuest: () => void;
-  grantWish: () => void;
-  seenReport: () => void;
   /** Things set down, in the camp or in the meadow. */
   placeDecor: (kind: number, x: number, y: number, place?: Place) => void;
   moveDecor: (index: number, x: number, y: number, place?: Place) => void;
@@ -160,7 +136,6 @@ type BaseStore = {
   /** Raises a finished book's trophy: of the kind its genres make it. */
   raise: (bookId: string, title: string, genres?: readonly unknown[] | null) => void;
   claimClub: (clubId: string, week: string, reward: number) => void;
-  placeWager: (game: PayingGame, stake: number) => void;
   /** Sets out on a raid the reader will fight; null when it cannot set out. */
   startRaid: (kind: RaidKind, slot: number, tip: boolean) => Raid | null;
   /** The raid is over: what came of it. */
@@ -193,10 +168,8 @@ type BaseStore = {
   sufferRaids: (raids: ReadonlyArray<{ name: string; stars: number }>) => void;
   /** Sends the scouts without the reader; null when they cannot go. */
   sendRaid: (kind: RaidKind, slot: number) => RaidEnd | null;
-  /** A finished arcade game: what it paid and how a wager on it went; null before there is a camp. */
+  /** A finished arcade game: what it paid (and how a wager placed before wagers were put away went); null before there is a camp. */
   played: (game: PayingGame, score: number) => Pick<GameEnd, "paid" | "wager"> | null;
-  /** A finished round of the word quiz. */
-  quizDone: (right: number, of: number) => void;
 };
 
 let opening: Promise<void> | null = null;
@@ -207,7 +180,8 @@ export const useBaseStore = create<BaseStore>((set, get) => {
     const current = get().base;
     if (!current) return null;
     const now = campNow();
-    const next = act(settle(current, now), now);
+    // Brought up to now first; and after, the list ticks off whatever the change has done (`advanceList`).
+    const next = advanceList(act(settle(current, now), now), now.day);
     if (next !== current) {
       set({ base: next });
       void baseService.save(next).catch(() => undefined);
@@ -249,44 +223,14 @@ export const useBaseStore = create<BaseStore>((set, get) => {
       moodAtHome = mood;
       if (get().mood !== mood) set({ mood });
     },
-    grantWant(hero) {
-      change((base, now) => grantWant(base, hero, now));
-    },
-    sendOut(needs) {
-      change((base, now) => sendOut(base, now.minutes, needs));
-    },
-    welcomeBack() {
-      let brought: { acorns: number; tale: number | null } | null = null;
-      change((base, now) => {
-        const back = welcomeBack(base, now.minutes, now.day);
-        if (back !== base) brought = tripBrings(base);
-        return back;
-      });
-      return brought;
-    },
     build(site, kind) {
       change((base, now) => build(base, site, now.minutes, kind, now.mood));
     },
     clearPlot(site) {
       change((base) => clearPlot(base, site));
     },
-    choosePath(building, path) {
-      change((base) => choosePath(base, building, path));
-    },
     gather() {
       change((base, now) => gather(base, now.minutes, now.streak ?? 0, now.day));
-    },
-    takeOffer(id) {
-      change((base, now) => takeOffer(base, id, now));
-    },
-    claimQuest() {
-      change((base, now) => claimQuest(base, now.day));
-    },
-    grantWish() {
-      change((base, now) => grantWish(base, now));
-    },
-    seenReport() {
-      change((base) => seenReport(base));
     },
     placeDecor(kind, x, y, place = "camp") {
       change((base) => placeDecor(base, kind, x, y, place));
@@ -332,9 +276,6 @@ export const useBaseStore = create<BaseStore>((set, get) => {
     },
     claimClub(clubId, week, reward) {
       change((base, now) => claimClub(base, clubId, week, reward, now.day));
-    },
-    placeWager(game, stake) {
-      change((base, now) => placeWager(base, game, stake, now.day));
     },
     startRaid(kind, slot, tip) {
       let raid: Raid | null = null;
@@ -434,9 +375,6 @@ export const useBaseStore = create<BaseStore>((set, get) => {
         return ended.state;
       });
       return came;
-    },
-    quizDone(right, of) {
-      change((base, now) => afterQuiz(base, right, of, now.day));
     }
   };
 });

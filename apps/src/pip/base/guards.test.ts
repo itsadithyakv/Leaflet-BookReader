@@ -15,6 +15,7 @@ import {
   does,
   drillLeft,
   fencePieces,
+  fixCost,
   guardAt,
   guardBlocked,
   guardOf,
@@ -214,17 +215,20 @@ describe("the animals", () => {
   it("each bring one small good thing", () => {
     const base = camp({ acorns: 100, camps: 10 }, { burrow: 3, store: 2, fence: 1, hut: 2 });
     const has = (animal: number): BaseState => ({ ...base, animals: [animal] });
-    // The hen lays once a day (in a camp too small for magpies, so nothing else moves the count).
+    // The hen lays once a day, and the egg comes as a parcel.
     const quiet = camp({ acorns: 100, animals: [0] }, { burrow: 1, store: 2 });
     const egg = settle(quiet, at(1000));
-    expect(egg.acorns).toBe(quiet.acorns + 3);
-    expect(settle(egg, at(1000)).acorns).toBe(egg.acorns);
-    expect(settle(egg, at(1000, "2026-10-13")).acorns).toBe(egg.acorns + 3);
+    expect(egg.parcels).toBe(quiet.parcels + 1);
+    expect(settle(egg, at(1000)).parcels).toBe(egg.parcels);
+    expect(settle(egg, at(1000, "2026-10-13")).parcels).toBe(egg.parcels + 1);
     expect(nightRaiders(has(1)).capacity).toBe(nightRaiders(base).capacity - 1);
     expect(fencePieces(has(2))).toBe(fencePieces(base) + 2);
     expect(fencePieces({ ...has(2), levels: { ...base.levels, fence: 0 } })).toBe(0);
     expect(sideKnown(base)).toBe(false);
     expect(sideKnown(has(3))).toBe(true);
+    // The owl keeps watch: mending is a quarter cheaper.
+    const knocked: BaseState = { ...base, harm: { store: 2 } };
+    expect(fixCost({ ...knocked, animals: [3] }, "store")).toBe(Math.ceil(fixCost(knocked, "store") * 0.75));
     expect(nextCamp(has(4)).loot).toBe(Math.round(nextCamp(base).loot * 1.1));
     expect(holds(has(5))).toBe(Math.round(holds(base) * 1.1));
   });

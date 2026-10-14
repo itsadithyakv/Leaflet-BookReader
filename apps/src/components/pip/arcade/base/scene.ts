@@ -1,4 +1,4 @@
-import { BUILDINGS, DEFAULT_SPOTS, MAX_LEVEL, PLACED, YARD_MAX, plotOpenAt, postSpotOf, woodAt, lodgers as campLodgers, gateOf, seasonOf, type BaseState, type BuildingId, type Decor, type Placed, type Site, type Spot, type Yard } from "../../../../pip/base/rules";
+import { BUILDINGS, DEFAULT_SPOTS, MAX_LEVEL, PLACED, PROWLERS_FROM, YARD_MAX, plotOpenAt, postSpotOf, woodAt, lodgers as campLodgers, gateOf, seasonOf, type BaseState, type BuildingId, type Decor, type Placed, type Site, type Spot, type Yard } from "../../../../pip/base/rules";
 import { GUARDIANS, SCENERY } from "../../../../pip/base/guards";
 import { findWay, onWalk, planWalk, shuffled, type Block, type Plan, type Stop } from "./walks";
 import type { GameArt } from "../gameArt";
@@ -1475,13 +1475,10 @@ export const postAtPoint = (look: CampLook, x: number, y: number): number | null
 };
 
 /**
- * Who in the camp fights whoever comes near, and the two are not alike. A
- * guardian holds a post: whatever comes within the ground about their
- * signpost is theirs, a blow more for each rank, and they do not leave it
- * for anything. The camp's people (the heroes with a bed in the hut) go to
- * the trouble: when a prowler gets to a building, one of them hears it and
- * comes, turn and turn about. So where the signposts are put matters, and
- * so does how many beds the hut has.
+ * Who in the camp fights whoever comes near: the guardians. A guardian
+ * holds a post: whatever comes within the ground about their signpost is
+ * theirs, a blow more for each rank, and they do not leave it for
+ * anything. So where the signposts are put matters.
  */
 const fightersOf = (look: CampLook): Post[] => {
   const posts: Post[] = [];
@@ -1492,11 +1489,8 @@ const fightersOf = (look: CampLook): Post[] => {
     // The ranger has a bow: further off, and from where he stands. The rest go out with a blade.
     if (at) posts.push(guard === 0 ? { who: guard, x: at[0], y: at[1], r: 34, blows: 1 + rank, ranged: true } : { who: guard, x: at[0], y: at[1], r: 20, blows: 1 + rank });
   });
-  // And the camp's people, from the hut: every one of them with a bed in it who is awake. A bigger hut is more of them.
-  if (look.levels.hut > 0)
-    (look.residents ?? [])
-      .filter((id) => !asleep.includes(100 + id))
-      .forEach((hero, index) => posts.push({ who: 100 + hero, x: look.spots.hut[0] + 12 + (index % 3) * 4, y: Math.min(GAME_H - 4, look.spots.hut[1] + 4 + Math.floor(index / 3) * 3), r: 22, blows: 3, roams: true }));
+  // (The heroes with a bed in the hut used to run out to prowlers too. Since 2026-10-15 they do not: heroes lead
+  // raids and are shown off, guardians hold the camp, and the two are not to be confused.)
   return posts;
 };
 
@@ -1533,7 +1527,9 @@ const PROWLS = new WeakMap<CampLook, Map<number, ProwlPlan & { site: Placed }>>(
 /** The prowler who sets out in a slot of the camp's clock, his whole walk worked out; null when nobody does. */
 export const prowlPlanOf = (look: CampLook, watch: readonly Ring[], slot: number): (ProwlPlan & { site: Placed }) | null => {
   // In winter the nights are long and the wood is hungry: more of them come.
-  if (look.levels.burrow < 2 || slot < 0 || !prowlSets(slot, look.season % 4 === 2)) return null;
+  if (look.levels.burrow < PROWLERS_FROM || slot < 0 || !prowlSets(slot, look.season % 4 === 2)) return null;
+  // The cat: one in ten thinks better of it and stays in the wood.
+  if ((look.animals ?? []).includes(1) && scatter(slot * 3.31 + 9.1) < 0.1) return null;
   let plans = PROWLS.get(look);
   if (!plans) PROWLS.set(look, (plans = new Map()));
   const kept = plans.get(slot);

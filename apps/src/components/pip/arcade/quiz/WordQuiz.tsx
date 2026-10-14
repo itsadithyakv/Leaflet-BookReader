@@ -8,7 +8,6 @@ import { wordsSwitchOn } from "../../../../readers/words/wordPrefs";
 import { getDateKey } from "../../../../services/habitService";
 import { peopleService } from "../../../../services/peopleService";
 import { wordService } from "../../../../services/wordService";
-import { useBaseStore } from "../../../../store/baseStore";
 import { useLibraryStore } from "../../../../store/libraryStore";
 import { answered, dueCount } from "./boxes";
 import { buildWhoRound, knownPeople, type KnownPerson } from "./whoQuiz";
@@ -135,10 +134,7 @@ export const WordQuiz = ({ words, onChanged, onMyWords, skin, outfit }: WordQuiz
     if (round.mode === "words") {
       onChanged();
       useLibraryStore.getState().requestBackup();
-      // Seven right of ten is a tip for the camp's scouts, once a day (pip/base/rules.ts).
-      const { right } = round;
-      const of = round.questions.length;
-      void useBaseStore.getState().open().then(() => useBaseStore.getState().quizDone(right, of));
+      // (Seven right of ten used to be a tip for the camp's scouts. The Hollow took no quiz tips after 2026-10-15.)
     }
   };
 

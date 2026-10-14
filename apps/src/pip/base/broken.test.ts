@@ -77,10 +77,9 @@ describe("a building the prowlers have broken", () => {
   it("throws at nobody until it is put right", () => {
     const base = mine();
     expect(lookout(base).range).toBeGreaterThan(0);
-    // Knocked about, it still throws as far, and a tenth less hard for each knock.
+    // Knocked about short of broken, it throws as far and as hard as ever (the tenth a knock it used to lose went on 2026-10-15).
     expect(lookout(knocked(base, "tower", HARM_MOST - 1)).range).toBe(lookout(base).range);
-    expect(lookout(knocked(base, "tower", 1)).hit).toBeCloseTo(lookout(base).hit * 0.9, 6);
-    expect(lookout(knocked(base, "tower", HARM_MOST - 1)).hit).toBeCloseTo(lookout(base).hit * 0.7, 6);
+    expect(lookout(knocked(base, "tower", HARM_MOST - 1)).hit).toBeCloseTo(lookout(base).hit, 6);
     const broken = knocked(base, "tower", HARM_MOST);
     expect([lookout(broken).range, lookout(broken).hit]).toEqual([0, 0]);
     const mended = fixSite(broken, "tower");
@@ -91,9 +90,8 @@ describe("a building the prowlers have broken", () => {
   it("hides nothing, when it is the larder", () => {
     const base = mine();
     expect(hides(base)).toBeGreaterThan(0);
-    // A tenth less for each knock, and then nothing.
-    expect(hides(knocked(base, "store", 1))).toBe(Math.round(hides(base) * 0.9));
-    expect(hides(knocked(base, "store", HARM_MOST - 1))).toBe(Math.round(hides(base) * 0.7));
+    // As much as ever until it is broken, and then nothing.
+    expect(hides(knocked(base, "store", HARM_MOST - 1))).toBe(hides(base));
     expect(hides(knocked(base, "store", HARM_MOST))).toBe(0);
   });
 });
@@ -135,9 +133,8 @@ describe("room for a wall", () => {
 describe("the oak and the larder, which are what a prowler is after", () => {
   it("drops half as much, when the oak is broken, and never nothing", () => {
     const base = mine();
-    // A tenth fewer for each knock left unmended; broken, half.
-    expect(oakDrops(knocked(base, "oak", 1))).toBeCloseTo(oakDrops(base) * 0.9, 6);
-    expect(oakDrops(knocked(base, "oak", HARM_MOST - 1))).toBeCloseTo(oakDrops(base) * 0.7, 6);
+    // Knocked about, as many as ever; broken, half.
+    expect(oakDrops(knocked(base, "oak", HARM_MOST - 1))).toBeCloseTo(oakDrops(base), 6);
     expect(oakDrops(knocked(base, "oak", HARM_MOST))).toBe(oakDrops(base) * BROKEN_OAK);
     // Mended, it is as it was.
     expect(oakDrops(fixSite(knocked(base, "oak", 2), "oak"))).toBe(oakDrops(base));

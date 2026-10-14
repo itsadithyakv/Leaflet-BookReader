@@ -3021,6 +3021,9 @@ read through, not run: the owner's Drive was not touched.
 
 ### The Hollow: Pip's camp, the arcade's building game
 
+*Since 2026-10-15 the game is as "The Hollow, simplified (1.4)" below says;
+this section and the ones after it are its history.*
+
 *It is no longer in the arcade: since 2026-10-12 Pip's tab opens on it. See
 "The Hollow grows up: one level, four shelves, and Pip's tab opens on it"
 for that and for everything added after this section was written.*
@@ -3669,347 +3672,162 @@ the rules; the screen was not opened against a server); the installed
 app; anything played by a person over days.
 
 
-### The Hollow defended: what there is to defend with, and against (1.4)
+### The Hollow, simplified (1.4)
 
-Written 2026-10-13, not committed. The rules are in
-`apps/src/pip/base/rules.ts` and `guards.ts`, the picture in
-`apps/src/components/pip/arcade/base/scene.ts`, the screen in
-`BaseScreen.tsx`.
+Written 2026-10-15, not committed. This replaces the long account of the
+defences that was here ("The Hollow defended"), and is what the game is
+now; the sections above are its history.
 
-**Room.** Things stand at 0.64 of their pictures' size (`THINGS`, and
-`FOOT` in the rules, which must agree). A camp does not shrink to make
-room as it grows: the wood is cleared, further for every level of the
-burrow (`WOOD`, `woodAt`), so a first camp is a small clearing and a fifth
-level one is the whole picture.
+**Why.** The owner, who designed it over many sessions: "The game is a bit
+confusing to understand, despite helping build it i have no clue what to
+play and what to do and why etc. Simplify the game, critisize it and work
+it out." A review played it fresh and found eight separate things telling
+a reader what to do (an introduction, tips, a list, a daily wish, each
+hero's daily want, a hedgehog with daily offers, "N things are ready", and
+badges on five buttons); five clocks (minutes read, the calendar day, the
+picture's four-minute day, wall-clock hours, the month); two kinds of attack,
+one of them fought out of sight; locked tiles on every shelf; and a first
+tip that asked for something a new camp could not do. The fixes below were
+chosen against the owner's steer: show off that you read, never a daily
+chore, reading pays for everything, losses small and seen.
 
-**Limits, each tied to a building.**
+**The game in one paragraph.** Reading drops acorns on the oak (every ten
+minutes) and sends parcels up the path (a chapter read, a day's goal met).
+Acorns build the camp; a building is finished by reading, not by waiting.
+The burrow is the camp's level, and each level clears more of the wood and
+brings something new. From level 2 prowlers come out of the wood while the
+camp is on screen: what throws, the fence, the constructs and the guardians
+see them off, and one who gets through knocks a building about or takes a
+few acorns (two knocks and one theft a day at most). The scouts raid the
+magpies' strongholds, led by a hero; heroes come for books finished. The
+camp is on the reader's profile for friends to see, and the camera makes a
+postcard of it.
 
-| What | How many | By |
+**One next thing, always** (`nextStep`). Pip's bubble has three lines at
+most: a tip when one is due, the next thing, and the parcels. The next
+thing is the list (`QUESTS`, rewritten: nineteen steps in the order the camp
+opens), said as reading while what it asks for goes up ("Read 3 more
+minutes: the larder is finished"); after the list, whatever is building,
+the cheapest thing that can be built, or reading. A finished book whose
+trophy can be raised takes its place until it is. A tap on it goes to where
+it is done, and the key where it is done is marked. The list ticks itself
+off (`advanceList`, run after every change in `baseStore`); its acorns go in
+whole or wait, and the line says "the larder is full" while they wait. A
+camp from before the rewrite is put on the new list once (`LIST_MARK` in
+`taught`), passing over what it has already done without being paid for it.
+
+**A first session.** Level 1 shows the clearing, the burrow, the oak and Pip;
+two chips (level, acorns); three keys (Camp, Defence, People). Pip says:
+read ten minutes, then tap the oak. Then the larder, the scouts' hut and the
+lookout, each finished by a few minutes' reading, and the burrow's level 2,
+which brings the prowlers, the fence and the postcard, a tip each. The
+three-bubble introduction is gone (it spoke of a larder, magpies and scouts
+a new camp does not have); the twenty acorns a camp starts with build
+nothing, so the first thing is always to read.
+
+**Nothing locked on show.** A shelf shows what is open and the next one
+only: one plot to come, one construct to come, the fence (from level 2) on
+the Defence shelf. Guardians appear on the People shelf and their buildings'
+cards from level 3. Decorate, Raids (once there is a hut), Arrange and the
+camera appear when they mean something.
+
+**A quieter screen.** The top has the level and the acorns (charm too, from
+level 3). The season, the streak, the oak's rate and the book being read
+are in those chips' tooltips. The (i) has five lines on how the camp works,
+then what has happened (the old Journal: strongholds, banners, trophies,
+the clubs' bosses, Pip's tales, the last few events).
+
+**Parcels are the one inbox.** A chapter read (eight minutes behind it), a
+day's goal met (once a day), the hen's egg, the bees' honey (a parcel a day
+for each level of the hives) and a walk Pip was on before walks went: all
+arrive as parcels by the burrow's door, six at most. A parcel holds
+4 + 2 × the burrow's level acorns, and one more for every 30 of charm; every
+other one or so has one of Pip's tales in it. It is opened whole or not at
+all: a full larder leaves it waiting, and the button says "Larder full".
+"Open all" opens as many as fit.
+
+**Nothing promised that does not arrive.** The Gather button says what the
+tap brings, the streak and the season counted and as far as the larder has
+room (`gatherBrings`), and the figure over the tree is what came in. A
+trophy's acorns are shown as what fits. The list's reward waits whole.
+
+**Defence, briefly.** As before, with three changes. The calendar night is
+no longer fought: prowlers in the picture are the only thing that comes at
+the camp (the day turning still marks `night` as through). Heroes no longer
+run out to prowlers: guardians hold the camp at their signposts, heroes lead
+raids and are shown off, and nobody has to tell the two apart. A knock no
+longer wears a building down by a tenth (`WEAR_A_KNOCK` is 0): a knocked
+building works until it is broken, at four knocks, and is fixed for acorns.
+A friend's raid now stops only the fence from being built on until it is
+mended (it stopped all building). The fence comes with level 2
+(`FENCE_FROM`). Twelve constructs, seven guardians, the gate, landscape that
+turns prowlers, the red and blue rings, the caps on what prowlers cost: all
+as they were.
+
+**Animals.** The cat: one prowler in ten thinks better of it and stays in
+the wood. The owl: mending is a quarter cheaper. (Both did something to the
+night.) The hen's egg is a parcel.
+
+**One name.** What comes at the camp is a prowler, everywhere; the magpies
+are the ones whose strongholds the scouts raid.
+
+**Hidden, and how to bring each back.** Every field stays in `BaseState`,
+is read by `readBase` and written back as it was read; the save is still
+`v: 2` (a `v: 3` would make an older build start a new camp, and newest
+wins in the backup). The rules of most of them are still in `rules.ts`,
+unused.
+
+| Hidden | Fields kept | To bring it back |
 |---|---|---|
-| Pieces of fence | 6 a level, 30 at the fifth (+2 with the goat) | the fence |
-| Heroes about the camp | 1, 2, 3, 5, 7, 10 beds (`HUT_BEDS`) | the hut |
-| Scouts on a raid | as before | the hut |
-| Constructs | twelve kinds, one of each, each from a level of the burrow | the burrow |
-| Guardians | seven, each at a building that has to be built | their building |
-| Acorns held, and hidden | as before | the larder |
+| The calendar night (`nightOutcome`), its report, the lantern oil, a thing carried off | `night`, `nightAt`, `report`, `oil`, `stolen` | the block in `settle` (see its comment); the Tonight tile and card and the Watch button in `BaseScreen` (in git history). A thing already carried off comes home with the next raid won |
+| The hedgehog's daily offers, the quiz's tips | `visitor`, `intel`, `pack`, `quizDay` | `offers`, `takeOffer`, `afterQuiz` are still there; the dock key, card and `WordQuiz`'s call |
+| Pip's wish, the heroes' wants | `wishDay` (now the day the goal parcel came), `wants`, `bonds` | `wishToday`, `wantOf`, `grantWant`; the daily reset in `settle` |
+| Pip's walks | `trip`, `tales` (tales now come in parcels) | `sendOut`, `welcomeBack` |
+| The dew on the first gathering | `dewDay` | the end of `gather` |
+| Paths at level 3 | `forks` (a path taken keeps its effect) | the Path row on the site card |
+| The road's three camps a day | `wild` | the "On the road today" cards on the raids page |
+| The Magpie King before ten strongholds | `kingDay`, `banners` | `KING_FROM_CAMPS` (was 3) |
+| Wagers | `wager`, `purse`, `scores`, `stats.wagers` | `WagerBar` (a wager placed before still settles) |
+| Wear | `harm` | `WEAR_A_KNOCK` back to 0.1 |
+| The market stall | `yard` | the filter on the empty plot's buttons |
 
-A hero comes for books finished and is never taken back; a bed decides
-who is *about the camp* (seen in it, and out to prowlers). Whoever leads
-the raids has the first bed, so nobody loses the hero they raid with;
-the rest are by friendship, then as listed (`lodgers`, `hasBed`).
+Friends' cards are untouched: Rust's `camp_summary` and the server read
+`levels`, `yard`, `camps`, `banners`, `raised`, `spots`, `walls`, `decor`,
+`land`, `works`, `guards` and `posts`, all as they were (a test settles a
+camp with every field set and checks these, and the hidden ones, do not
+move).
 
-**Twelve constructs.** The eight there were, and: caltrops (cheap, hurt
-once), a stone thrower (far, hard, slow), an archer's nest (near, light,
-quick: a second thing that throws, to put where the lookout does not
-reach) and a dread totem (half the harm in the night's fight; one prowler
-in three turns back). Kinds 9 and 10 are the stone thrower and the nest,
-in that order, in the rules, the art and the card.
+**Measured** (`full-sim.ts`, a copy run against these rules: no walks,
+wishes, hedgehog, road or nights; the list ticked as it goes). The oak drops
+more to make up for what went (`OAK_DROPS` 8, 13, 20, 28, 40; it holds 50,
+80, 130, 200, 300), and a parcel is worth more.
 
-**The fence is a wall.** Six pieces a level, laid by dragging across the
-ground in fence mode (a piece for every square the pointer crosses; a tap
-on a piece takes it up). A prowler on foot who comes to a piece is held
-there 1.4 seconds and 0.6 more for every level of the fence, with
-whatever throws having him standing still. That is what a fence is for:
-it does not stop anybody, it buys time under the throwers.
+| Reading a day | Six buildings at 5 (was) | All guardians at 3 (was) | Acorns a day (was) | Careless, lost a day |
+|---|---|---|---|---|
+| 10 minutes | day 242 (158) | day 298 (212) | 56 (65) | 21% |
+| 30 minutes | day 79 (72) | day 99 (92) | 168 (166) | 8% |
+| 60 minutes | day 49 (46) | day 62 (60) | 266 (260) | 6% |
 
-**Space in red, reach in blue.** Whatever is chosen, in hand, or being
-placed shows the ground it takes as a red patch and how far it reaches
-as a blue one; arranging shows them all. Both are ovals, wider than they
-are deep, because the camp is seen from a slant and not from above; and
-reach against prowlers is *measured* as that oval (`SQUAT`, `offBy`), so
-what the blue covers is what is reached. The night's fight
-(`battle.ts`) still measures round, which is never less than what is
-drawn.
+The reader of ten minutes a day is slower than before: the dew doubled
+their oak, and the road and the nights were a third of their acorns. The
+oak is two thirds of what comes in at half an hour, parcels a third, raids
+very little (strongholds only).
 
-**Who comes out of the wood** (`prowlStart`, `planProwl`, eight kinds):
+Tests: `rules.test.ts` ("a camp kept before the simplifying", "nothing
+promised that would not arrive", "the one next thing", "Pip's list"),
+`life.test.ts` (parcels, the goal, walks, the dot on the way in), and the
+older tests changed where they encoded what went.
 
-| Kind | After | His way |
-|---|---|---|
-| Mudtusk rabble | the larder | on foot, with a club |
-| The Gilded | the lookout, or the burrow | on foot |
-| The Stumbling | whatever is nearest | on foot |
-| Frostwights | the oak | on foot |
-| A magpie | the larder | on the wing: over fence, hedge, tanglefoot, pitfall and caltrops, and past anyone with a blade. A ward stone brings it down; hornets sting it; a bow reaches it |
-| Rattlenut, the great squirrel | the oak | the quickest thing there is, half as sturdy, over a fence in a bound |
-| The Rootgnaw, a mole (burrow 3) | the larder | under the ground, under the fence and under what throws, and up only 24 pixels from what he came for; a thumper brings him up where it is |
-| Fizzwick (burrow 4) | whatever is nearest | slow; hisses for 1.8 seconds and goes off with a pop, which is two knocks and the end of him |
+Friendship, which grew from the heroes' wants, now grows from reading: each
+day's goal parcel makes every hero in the camp a step fonder (to
+`BOND_MOST`), so a hero's own blade (`BLADE_AT_BOND`, 3) comes after three
+goal days with them, with a line in the journal (`life.test.ts`, "grow
+fonder of the camp").
 
-Rattlenut tips a hat to the squirrel who runs up and down the world's
-tree in the old northern stories, and Fizzwick to a certain green fellow
-who goes off; neither is anybody else's design or name. Three in ten of
-any kind still go for whatever the fewest things reach.
-
-**What getting through costs.** A prowler who is at a building for his
-whole time (4.4 seconds) knocks it about, once. From the larder or the
-oak he also makes off with a few acorns (`robSite`: 2 and 2 more for
-every level of the burrow; never what the larder hides, and off the oak
-only what was hanging ready). Prowlers only come while the camp is on
-screen: nothing is lost while the app is shut.
-
-**Broken** is four knocks (`isBroken`, `BROKEN_DOES`): the lookout, hut
-and burrow throw at nobody; the larder hides nothing; the oak drops half
-(never none, so a camp with nothing can still earn its mending); the hut
-has one bed; a yard building does nothing. Mending is acorns, as before.
-Constructs are not knocked about by prowlers.
-
-**Who fights.** Everything that throws, each guardian at their signpost,
-and every hero with a bed who is awake, from the hut. Whoever throws
-from a building is seen to: a scout with a sling is up on the roof for
-the throw, and the stone is a grey pebble (it used to be a pale dot from
-nowhere, which read as snowballs). The nest looses arrows; the stone
-thrower's stone is bigger and counts twice. Running to a fight is at 38
-pixels a second, there and back, a stride for every two and a half
-pixels of ground, with dust; it used to be home in half a second from
-however far. Nobody swings a blade or looses an arrow at nothing while
-standing about: a blade is leant on, or has an edge put on it.
-
-**Guardians look their rank** (`guardian` sprite, `rank` 1 to 3, six
-frames of which 2 to 5 are a step). Dame Berit begins in a padded tunic
-with no shield, has a breastplate and her tall shield at the second
-rank, and a plumed helm and gilded plate at the third; the other six
-change in their own ways. The sprite cache is keyed by rank
-(`gameArt.ts`).
-
-**The worn out and the fire.** Three knocks and a fighter sleeps three
-hours; with a campfire in the camp they are laid by it and are up in
-half the time (a third, in winter).
-
-**The sky.** The sun crosses by day and the moon by night, in the
-camp's own four-minute day, up into whatever more sky the page has.
-
-**Seasons** follow the calendar (the northern year; nothing is stored)
-and each does one thing (`SEASONS`): summer, raids bring a tenth more;
-autumn, a fifth more from every gathering; winter, more prowlers and a
-warmer fire; spring, mending costs a quarter less. A chip at the top
-says which, with what it does behind it.
-
-**Pip settles.** A nap, a read, tea: four times as long as they were,
-and everything else two and a half.
-
-**Three sorts of people, each for one thing.** The shelf is called
-People, and says so in a word or two beside each name.
-
-| | Scouts | Heroes | Guardians |
-|---|---|---|---|
-| Who | nameless, and many | ten, out of the stories | seven, the camp's own |
-| Got by | building up the hut | books finished, with the reading behind them; never bought | acorns to hire, reading to train |
-| For | the army: every raid, and the throwing from the roofs at home | leading a raid (a trait, a blade); at home, answering the alarm | holding a post |
-| Where | the hut | a bed in the hut | a signpost the reader places |
-| Against a prowler | throw from roofs | one of them runs to whichever building he gets to, turn and turn about | fight on the ground about their post, and for the building that stands on it; never leave it |
-| Go raiding | always | one, as leader | never |
-| Grow by | the hut's level | friendship | rank, and look it |
-
-So a guardian across the camp does not come running (`roams` in
-`scene.ts`): where the signposts are put matters, and so does how many
-beds the hut has.
-
-**A trophy stands on reading** (`TROPHY_MINUTES`, `trophyWaits`,
-`claimed` in the camp's state). Heroes come for trophies, and a trophy
-used to take nothing but a book marked as finished, which anyone can do
-to a shelf of downloads. Each trophy now wants ninety minutes of reading
-behind it that no other trophy has, by the same ledger the oak drops by.
-A finished book whose reading is not there yet waits ("Read 40 min" on
-the button) and is raised when it is. Books finished before the camp was
-made are given trophies only as far as has been read. A camp kept before
-this keeps every trophy and hero it has, and is given room for one more
-(whoever is half way through a book), not for a hundred hours' worth.
-It does not ask which book the minutes were read in: Leaflet keeps the
-days a book was opened, not the minutes in each. What it settles is that
-a hero costs reading. Nothing changed on the server or in Rust: the
-number rides in the camp's own document.
-
-**By night a tap no longer flashes daylight**: the picture's first
-drawing after any change was made without the camp's clock, and so as
-day, for one frame.
-
-**The book itself comes into the camp** (`pip/base/storyFeed.ts`,
-`storyRead` in the rules). Until this the camp answered to how much was
-read and never to where in a book the reader was. Now, when the reading
-passes out of one stretch of a book into the next (a chapter, where the
-book has chapters: the EPUB reader says which is on screen; a twentieth
-of the book otherwise), a parcel comes up the path and waits by the
-burrow's door, six at most, to be tapped open for a few acorns (3, and
-one more for every level of the burrow). It stands on reading like
-everything else: a parcel wants eight minutes read since the last one,
-so twenty chapters turned in a minute bring one parcel or none. The
-library tells the feed at every saved place; the feed tells the camp
-only when a stretch is finished, and fetches the camp's store (which is
-not loaded until Pip's tab is opened) only then. Another book taken up
-starts from where it is opened.
-
-**The book being read has a say in who comes** (`GENRE_FOE`): three in
-ten of the prowlers are of the kind its sort of book brings (the Gilded
-for fantasy and the classics, Fizzwick for science fiction, the mole for
-a mystery, magpies for a romance, the Stumbling for horror, the rabble
-for history, the Frostwights for science, the squirrel for adventures
-and young readers' books). A chip at the top says so, in its tooltip.
-
-**The lie of the land matters** (`prowlBlocks`, `findWay`). Whoever
-comes on foot goes round water, a knoll, boulders, a trunk and every
-building but the one he is after, by the same way-finding Pip walks by.
-So a pond or a knoll is a wall that cannot be climbed, and turns him the
-way the reader chose. What is set down to be walked into (hedge,
-tanglefoot, pitfall, caltrops) is not gone round. One on the wing goes
-over; the mole goes under.
-
-**A fence is gone round where it can be, and there is a gate**
-(`gateOf`, `setGate`, `DETOUR`). A lone piece of fence is walked round:
-a wall has to be a wall. Where the fence is in the way and there is a
-way round it (an open end, or the gate) that is no more than 2.2 times
-the straight way, he takes it; otherwise he comes straight on and
-climbs, held at each piece as before. The gate is one piece of the
-fence made the way in (from the fence's second level; "Gate" beside the
-fence button while arranging, then a tap on a piece): he is twice as
-long getting through it as over a piece, and the camp's own people walk
-through it. So the reader says where the fight is, and stands what
-throws over it. The squirrel does not go round a fence: he is over it.
-
-**A fence joins itself up the picture and on the slant** (`fenceLinks`).
-Pieces are laid on a grid ten apart and each is drawn facing the reader:
-side by side they met, but one behind another they stood apart like the
-rungs of a ladder, and two on the diagonal did not meet at all. Each
-piece is now joined to the one behind it (straight behind, or behind and
-to one side where the two are not joined round a corner already), drawn
-as the fence seen from its end in the fence's own colours (taken from
-its picture, so a paling is joined in wood and a wall in stone); a piece
-with nothing beside it is drawn as a post. The joins are fence to
-everybody: Pip walks round them, a prowler cannot slip between two
-pieces on the slant, and one who climbs there is held as at a piece.
-
-**Depth.** The picture is a clearing seen from a slant, and read as a
-map seen from above. Three things say otherwise without changing the
-size of anything (a sprite this small cannot be scaled by a little
-without shimmering as it walks): shadows lie on the ground away from the
-sun or the moon, longer the lower it is (`leanAt`); the far end of the
-clearing is a little paler than the near, in bands (`haze`); and a
-fence that runs away from the reader shows its side and its lit top.
-
-**What happens is seen to happen** (`floats` in `CampExtras`,
-`floatsOf`). A parcel opened, the oak gathered, acorns made off with: a
-burst of bits at the place and the figure going up from it ("+7"; a loss
-in red, "-10"). A building, a signpost or a construct set down lands
-with dust and settles; one mended does the same. A building being
-knocked at jolts with each blow. Whoever of the camp sees a prowler has
-a "!" over their head for half a second before they go; whoever sees
-him off stands over it a moment with the blade up before going home. A
-stone or a blade that lands shows as a star of light; Fizzwick goes off
-with a flash. The trees a prowler comes out between shake their leaves
-loose.
-
-**Life when nothing is happening.** Birds cross the sky by day, a pair
-or three, one way and then the other. By night there are fireflies over
-the grass, and by day or night a glint now and then on any water. (The
-moon is the one painted in the night's own picture: a second one that
-crossed the sky was taken out again, and night shadows lie away from the
-painted one.)
-
-**How long it lasts, measured** (`node_modules/.leaflet-test/full-sim.ts`,
-the real rules played for a reader who builds, hires and buys as acorns
-allow). A level of a building takes 5, 20, 40, 70 and 100 minutes of
-reading; of a yard building 15, 35 and 60; a guardian's rank 20, 45 and
-80.
-
-| Reading a day | Six buildings at 5 | All seven guardians at 3 | Acorns in, a day |
-|---|---|---|---|
-| 10 minutes | day 158 | day 212 | 65 |
-| 30 minutes | day 72 | day 92 | 166 |
-| 60 minutes | day 46 | day 60 | 260 |
-
-The oak is about half of what comes in, raids a sixth, parcels a
-twelfth.
-
-**What prowlers can cost is small, and capped** (`KNOCKS_A_DAY`,
-`THEFTS_A_DAY`). They come only while the camp is on screen, so the loss
-went by how long it was looked at: measured, a camp that stopped nothing
-and was watched lost as much to knocks, mending and theft as it earned.
-Now two knocks and one theft are the most a day can bring, whatever gets
-through; a knock is put right for 2 acorns and one more for every level
-of the building (it was 3 and two), and a theft is 2 and one for every
-level of the burrow (it was two). Measured again at half an hour a day,
-the most careless camp loses about 13 acorns a day of the 169 it earns
-(8%), and is five to eight days later to everything: a nudge to stand
-something by the larder, not a tax on looking. (Not re-measured at ten
-minutes a day with the final caps; with the first caps tried it was a
-quarter of that reader's income, which is why they were lowered.)
-
-**A fence does not get in the way of the hand**: fence under the
-pointer, or standing in front of the building pointed at or chosen, is
-drawn thin (`through`, `peek`), so that what is behind it can be seen.
-A tap goes to what is behind it in any case: fence is only taken hold
-of while arranging.
-
-**Pip's tips: how the camp is learnt** (`pip/base/tips.ts`, `taught` in
-the camp's state). The list of things to do says what next and never
-how, and a good deal of the camp cannot be found by looking (that
-anything is dragged, that fence is drawn across the grass, that a
-signpost is where a guardian stands). A tip is Pip saying one of those
-in her bubble, once, when the thing it is about has just become
-possible: thirteen of them, one at a time. A tip is done with when the
-reader does the thing (most can be told from the camp, so a reader who
-found it out is never told, and a camp kept from before gets only the
-three it cannot show it knows), or presses "Got it", or "No tips", which
-ends them for good. The first three on a new camp (the oak, a building,
-moving it) are the whole of a first visit; there is no tour to sit
-through. The (i) at the top was rewritten to the camp as it now is:
-eight lines.
-
-**Everything is dragged and dropped.** With nothing chosen first, any
-building, decoration, construct, signpost, piece of landscape or piece of
-fence is taken hold of, carried and set down where it is let go
-(`moveWall` for fence: the gate goes with its piece, and a piece is moved
-even when every piece the fence allows is down). While arranging it is
-the same: a building is dragged in "Move", and in the fence's mode a
-piece is dragged to move it, tapped to take it up, and the grass is
-dragged across to lay more. New things are dragged off a shelf onto the
-grass (`offShelf`): with a mouse or pen, moving is carrying; under a
-finger a drag on a shelf scrolls it, so there the thing is held for a
-third of a second first, and is then in hand (and the page is kept from
-scrolling under it). While something is carried off a shelf the shelf
-stays where it is, faint and out of the pointer's way: taken away at
-once, the page closed up and the picture moved under the hand. The older
-"tap it, then tap where it goes" still works everywhere.
-
-**A wall that runs away from the reader** is drawn as its top, lit, all
-the way along, with a face only at its near end; on the slant, its top
-and the side turned this way. It was its side all the way up, a dark bar
-with posts through it. At a corner the length of fence along the front
-is drawn only from the outer edge of the wall running back, so the two
-meet flush. A piece with nothing to either side of it is a post, in a
-run going back and standing alone alike: a wall has no direction of its
-own and nothing to turn, it goes the way its pieces are laid, and a lone
-piece drawn as a length facing the reader looked as if it wanted
-turning. The square shown while one is being put down is drawn the way
-it would stand there.
-
-**Fewer prowlers, a cost to every knock, and heroes who go out.**
-Prowlers come one in eight of the camp's eight-second slots by day and
-one in three by night (it was one in four and three in four): five or so
-in each four-minute day, twice that in winter. A knock left unmended
-costs a tenth of what the building does (`WEAR_A_KNOCK`: the oak drops a
-tenth fewer, the larder hides a tenth less, what throws throws a tenth
-less hard), for each knock, where a knocked building used to be as good
-as new until the fourth broke it. Broken, it looks it: the top of it
-down, what is left dark, rubble at its foot, and a red mark over it for
-as long as it is. And the camp's people do their job: whoever's turn it
-is sees a prowler as soon as he is within sight of the hut and runs out
-to meet him where he has got to (they used to stir only once he was
-knocking at something); three blows each, so one of them alone sees off
-what comes to a small camp and needs what throws behind them in a big
-one. One of them is the worse for it only if he got through in the end.
-
-**A trophy says its book**: a tap on one names the book, its author and
-the day it was finished. **A postcard** of the camp can be saved or
-copied (`HollowPostcard.tsx`): the clearing, and under it whose it is,
-its level, books, hours and streak, and the books lately finished.
-
-Not done: more than one of a construct; a broken construct; the night
-watch's picture still draws guardians at their top rank and things at
-full size; the meadow has no sun or moon; minutes are not kept per book,
-so a trophy cannot ask that its own book was the one read. The gate and
-the lie of the land tell against prowlers only: the night's fight
-(`battle.ts`) does not know of either, and a friend's card does not
-carry the gate. A finished series raises nothing yet, and a new kind of
-book opens no new ground.
+Left as it is, on purpose: the light reader's pace (above). A ten-minute
+reader is slower than before, and slower than a long reader, which is what
+the Hollow is for (showing that you read); nothing in it asks for a visit a
+day. `BattleScreen` still has the night-watch mode, unused.
 
 ### The rest of the app, looked at with fresh eyes
 

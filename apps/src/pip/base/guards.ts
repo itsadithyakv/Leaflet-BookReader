@@ -43,10 +43,10 @@ export type Guardian = {
 export const GUARDIANS: readonly Guardian[] = [
   { id: 0, name: "Halvar Longstride", short: "Halvar", title: "a ranger out of the north, and there is a rumour about a crown", does: "The lookout sees, and throws, further", post: "tower" },
   { id: 1, name: "Corwin Blackcloak", short: "Corwin", title: "who took an oath on a far colder wall than this", does: "Every piece of fence stands longer", post: "fence" },
-  { id: 2, name: "Mossgather", short: "Mossgather", title: "a shepherd of trees, and in no hurry about it", does: "Roots catch at their feet: the magpies on foot come slower", post: "oak" },
+  { id: 2, name: "Mossgather", short: "Mossgather", title: "a shepherd of trees, and in no hurry about it", does: "Roots catch at their feet: raiders on foot come slower", post: "oak" },
   { id: 3, name: "Dame Berit Tallshield", short: "Dame Berit", title: "who has never once broken a promise", does: "Stands before the larder: it takes far more getting into", post: "burrow" },
-  { id: 4, name: "Emberling", short: "Emberling", title: "a very small dragon who is sure she is a large one", does: "Scorches the magpies on the wing before anything else", post: "store" },
-  { id: 5, name: "Pim Greenhand", short: "Pim", title: "a gardener of uncommon nerve", does: "The larder hides more from the magpies", post: "yard" },
+  { id: 4, name: "Emberling", short: "Emberling", title: "a very small dragon who is sure she is a large one", does: "Scorches whoever is on the wing before anything else", post: "store" },
+  { id: 5, name: "Pim Greenhand", short: "Pim", title: "a gardener of uncommon nerve", does: "The larder hides more from prowlers", post: "yard" },
   { id: 6, name: "Ilsa Reedwhistle", short: "Ilsa", title: "an archer of the old wood, who says she does not miss", does: "Drills the camp: everything that throws, throws faster", post: "hut" }
 ];
 
@@ -82,10 +82,10 @@ export type Animal = {
 };
 
 export const ANIMALS: readonly Animal[] = [
-  { id: 0, name: "Hen", charm: 8, does: "An egg most mornings: three acorns a day" },
-  { id: 1, name: "Cat", charm: 20, does: "One magpie fewer dares come at night" },
+  { id: 0, name: "Hen", charm: 8, does: "An egg most mornings: a parcel a day" },
+  { id: 1, name: "Cat", charm: 20, does: "One prowler in ten thinks better of it and stays in the wood" },
   { id: 2, name: "Goat", charm: 35, does: "Two more pieces of fence to put down" },
-  { id: 3, name: "Owl", charm: 55, does: "Says which way the magpies will come, lookout or no" },
+  { id: 3, name: "Owl", charm: 55, does: "Keeps watch: mending what prowlers did costs a quarter less" },
   { id: 4, name: "Fox", charm: 80, does: "A tenth more from every raid" },
   { id: 5, name: "Tortoise", charm: 110, does: "The larder holds a tenth more" }
 ];
@@ -133,7 +133,7 @@ export type Work = {
   does: string;
 };
 export const WORKS: readonly Work[] = [
-  { name: "Ward stone", cost: 180, burrow: 3, hp: 150, reach: 34, does: "No magpie flies past it: inside its ring the ones on the wing have to walk" },
+  { name: "Ward stone", cost: 180, burrow: 3, hp: 150, reach: 34, does: "Nothing flies past it: inside its ring, whoever is on the wing has to walk" },
   { name: "Whip-thorn hedge", cost: 140, burrow: 3, hp: 90, reach: 13, does: "Cuts whatever walks through it" },
   { name: "Thumper", cost: 220, burrow: 4, hp: 240, reach: 30, does: "Its drumming draws whoever comes on foot to it before the larder, and brings up whatever is tunnelling near it" },
   { name: "Smoke brazier", cost: 260, burrow: 4, hp: 120, reach: 0, does: "Its smoke hides the larder: they go for whatever is nearest instead of straight to it" },

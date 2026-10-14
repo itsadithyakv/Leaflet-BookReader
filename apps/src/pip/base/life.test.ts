@@ -9,9 +9,13 @@ import {
   build,
   campWaits,
   chooseHero,
-  dewWaits,
   finishRaid,
   gather,
+  gatherBrings,
+  holds,
+  openParcel,
+  parcelGives,
+  PARCELS_MOST,
   grantWant,
   heroWith,
   minutesOf,
@@ -34,7 +38,9 @@ import {
   type BuildingId,
   type Now
 } from "./rules";
-import { heroTraits } from "./heroes";
+import { HEROES, heroTraits } from "./heroes";
+import { BLADES, BLADE_AT_BOND } from "./guards";
+import { bladesWon } from "./rules";
 
 // A winter day: the season does nothing to a gathering (in autumn the oak gives a fifth more, which has its own test).
 const DAY = "2026-01-12";
@@ -50,30 +56,19 @@ const lived = (change: Partial<BaseState> = {}, levels: Partial<Record<BuildingI
 const days = Array.from({ length: 120 }, (_, index) => `2027-${String(1 + Math.floor(index / 28)).padStart(2, "0")}-${String(1 + (index % 28)).padStart(2, "0")}`);
 const dayWhen = (state: BaseState, hero: number, wants: RegExp) => days.find((day) => wants.test(wantOf(state, hero, { ...at(1000), day })?.text ?? ""))!;
 
-describe("the first acorns of the day", () => {
-  it("come with one more fall of the oak, once a day, and never more than was gathered", () => {
+describe("a gathering", () => {
+  it("brings what the tree has, the same on any day: the dew of the first gathering went on 2026-10-15", () => {
     const state = camp({ acorns: 0, oakFrom: 0 }, { store: 3 });
     const drop = oakDrops(state);
-    expect(dewWaits(state, DAY)).toBe(true);
-    // Three falls on the tree: the dew is one fall more.
     const first = gather(state, 30, 0, DAY);
-    expect(first.acorns).toBe(drop * 3 + drop);
-    expect(first.dewDay).toBe(DAY);
-    expect(dewWaits(first, DAY)).toBe(false);
-    // Again the same day: only what the tree has.
+    expect(first.acorns).toBe(drop * 3);
+    expect(first.dewDay).toBeNull();
     expect(gather(first, 60, 0, DAY).acorns - first.acorns).toBe(drop * 3);
-    // And tomorrow it is there again.
-    expect(gather(first, 60, 0, NEXT_DAY).acorns - first.acorns).toBe(drop * 4);
-    // Gathered without a day (the old call): no dew, and none used up.
-    expect(gather(state, 30).acorns).toBe(drop * 3);
-    expect(gather(state, 30).dewDay).toBeNull();
-  });
-
-  it("is worth most to the reader who reads least", () => {
-    const state = camp({ acorns: 0, oakFrom: 0 }, { store: 5 });
-    const share = (minutes: number) => gather(state, minutes, 0, DAY).acorns / gather(state, minutes).acorns;
-    expect(share(10)).toBe(2);
-    expect(share(60)).toBeLessThan(1.2);
+    expect(gather(first, 60, 0, NEXT_DAY).acorns - first.acorns).toBe(drop * 3);
+    // What the screen says before the tap is what the tap brings, a streak and the season counted in.
+    expect(gatherBrings(state, 30, 14, "2026-10-12")).toBe(gather(state, 30, 14, "2026-10-12").acorns - state.acorns);
+    // And no more than the larder has room for.
+    expect(gatherBrings({ ...state, acorns: holds(state) - 5 }, 30, 0, DAY)).toBe(5);
   });
 });
 
@@ -91,73 +86,43 @@ describe("Pip's mood, from the house", () => {
 });
 
 describe("the people of the camp", () => {
-  it("are the heroes who have come, each with one want a day that is reading or what reading pays for", () => {
+  it("are the heroes who have come; their daily wants are not asked since 2026-10-15, and a day's goal met sends a parcel instead", () => {
     expect(residents(camp())).toEqual([]);
-    expect(wantOf(camp(), 0, at(1000))).toBeNull();
     const state = lived();
     expect(residents(state).map((hero) => hero.id)).toEqual([0]);
-    const want = wantOf(state, 0, at(1000))!;
-    expect(want).toMatchObject({ hero: 0, granted: false, reward: 6 });
-    expect(wantOf(state, 0, at(1000))).toEqual(want);
-    // Over the days it is not always the same thing, and it is only ever one of these.
-    const said = new Set(days.map((day) => wantOf(state, 0, { ...at(1000), day })!.text.replace(/\d+/, "N")));
-    expect(said.size).toBeGreaterThan(2);
-    for (const text of said) expect(text).toMatch(/^(Read for N minutes today|Gather the oak's acorns today|Meet your reading goal today)$/);
-    // A raid is asked for only of a camp with a hut, and a thing for the clearing only once the burrow has grown.
-    const grown = lived({}, { burrow: 2, hut: 1 });
-    const more = new Set(days.map((day) => wantOf(grown, 0, { ...at(1000), day })!.text));
-    expect([...more].some((text) => text === "Take me on a raid, and win it")).toBe(true);
-    expect([...more].some((text) => /^I should like an? .+ in the clearing$/.test(text))).toBe(true);
+    const goal: Now = { ...at(1000), goalMet: true };
+    const met = settle(state, goal);
+    expect(met.parcels).toBe(state.parcels + 1);
+    expect(met.wishDay).toBe(DAY);
+    // Once a day.
+    expect(settle(met, goal).parcels).toBe(met.parcels);
+    expect(settle(met, { ...goal, day: NEXT_DAY }).parcels).toBe(met.parcels + 1);
+    // Not met, nothing.
+    expect(settle(state, at(1000)).parcels).toBe(state.parcels);
+    // A friend made before then is still a friend.
+    expect(bondOf({ ...state, bonds: state.bonds.map((_, hero) => (hero === 0 ? 2 : 0)) }, 0)).toBe(2);
   });
 
-  it("come true by reading, and are seen to once for a step of friendship and a few acorns", () => {
-    const state = lived();
-    const day = dayWhen(state, 0, /^Read for/);
-    const minutes = Number(/\d+/.exec(wantOf(state, 0, { ...at(1000), day })!.text)![0]);
-    const before: Now = { ...at(1000), day, today: minutes - 1 };
-    const after: Now = { ...before, today: minutes };
-    expect(wantOf(state, 0, before)!.done).toBe(false);
-    expect(grantWant(state, 0, before)).toBe(state);
-    expect(wantWaits(state, before)).toBe(false);
-    expect(wantWaits(state, after)).toBe(true);
-    expect(campWaits({ ...state, visitor: day, night: day, quest: 99, wishDay: day }, after)).toBe(true);
-    const seen = grantWant(settle(state, after), 0, after);
-    expect(bondOf(seen, 0)).toBe(1);
-    expect(seen.acorns).toBe(state.acorns + 6);
-    expect(seen.events[0].text).toBe("Marian is settling in.");
-    expect(wantOf(seen, 0, after)).toMatchObject({ done: true, granted: true, reward: 8 });
-    expect(grantWant(seen, 0, after)).toBe(seen);
-    // The next day there is another want, and yesterday's is not held against it.
-    const morning: Now = { ...at(1000), day: "2099-01-01" };
-    expect(wantOf(settle(seen, morning), 0, morning)!.granted).toBe(false);
-  });
-
-  it("are seen to by the oak gathered, the goal met, a raid won with them, or a thing set down", () => {
-    const state = lived({}, { burrow: 2, hut: 2 });
-    const gatherDay = dayWhen(state, 0, /^Gather/);
-    expect(wantOf(gather({ ...state, oakFrom: 0 }, 1000, 0, gatherDay), 0, { ...at(1000), day: gatherDay })!.done).toBe(true);
-    const goalDay = dayWhen(state, 0, /^Meet/);
-    expect(wantOf(state, 0, { ...at(1000), day: goalDay, goalMet: true })!.done).toBe(true);
-
-    const raidDay = dayWhen(state, 0, /^Take me/);
-    const now: Now = { ...at(1000), day: raidDay };
-    const set = settle(chooseHero(state, 0), now);
-    const begun = startRaid(set, "camp", now)!;
-    expect(begun.raid.setup.hero).toMatchObject({ id: 0 });
-    const lost = finishRaid(begun.state, begun.raid, { stars: 0, destroyed: 0.1, hoards: 0 }, raidDay);
-    expect(wantOf(lost.state, 0, now)!.done).toBe(false);
-    const won = finishRaid(begun.state, begun.raid, { stars: 2, destroyed: 0.7, hoards: 1 }, raidDay);
-    expect(wantOf(won.state, 0, now)!.done).toBe(true);
-
-    // The thing wanted is still the thing wanted once it is there: the want does not move on for being met.
-    const decorDay = dayWhen(state, 0, /^I should like/);
-    const then: Now = { ...at(1000), day: decorDay };
-    const asked = settle(state, then);
-    const text = wantOf(asked, 0, then)!.text;
-    const kind = DECOR.findIndex((thing) => text.includes(thing.name.toLowerCase()));
-    expect(kind).toBeGreaterThanOrEqual(0);
-    const placed = placeDecor({ ...asked, acorns: 500 }, kind, 100, 100);
-    expect(wantOf(placed, 0, then)).toMatchObject({ text, done: true });
+  it("grow fonder of the camp with each day's goal met, so a hero's own blade can still be had", () => {
+    // Piers, who gives Undertow as a friend, brought by the books he comes for.
+    const piers = HEROES[2];
+    const blade = BLADES.find((entry) => entry.hero === 2)!;
+    const state = lived({ shelf: lived().shelf.map((count, kind) => (kind === piers.kinds[0] ? piers.need : count)) });
+    expect(residents(state).map((hero) => hero.id)).toContain(2);
+    let now = state;
+    for (const [index, day] of days.slice(0, BLADE_AT_BOND).entries()) {
+      now = settle({ ...now, parcels: 0 }, { ...at(1000), day, goalMet: true });
+      expect(bondOf(now, 2)).toBe(index + 1);
+      expect(bondOf(now, 0)).toBe(index + 1);
+    }
+    expect(bladesWon(now)).toContain(blade.id);
+    expect(now.events.some((event) => event.text.includes(blade.name))).toBe(true);
+    // A day not met, or the parcel already sent, brings nobody closer.
+    expect(settle(now, { ...at(1000), day: days[BLADE_AT_BOND - 1], goalMet: true }).bonds).toEqual(now.bonds);
+    expect(settle(now, { ...at(1000), day: days[BLADE_AT_BOND] }).bonds).toEqual(now.bonds);
+    // And no further than sworn.
+    const sworn = { ...state, bonds: state.bonds.map(() => BOND_MOST) };
+    expect(settle(sworn, { ...at(1000), goalMet: true }).bonds).toEqual(sworn.bonds);
   });
 
   it("go no further than sworn, and a hero who knows the camp is a little stronger on a raid", () => {
@@ -174,52 +139,52 @@ describe("the people of the camp", () => {
   });
 });
 
-describe("Pip's walks", () => {
+describe("Pip's walks, and the tales", () => {
   const home = camp({ acorns: 0 }, { store: 3, oak: 2 });
 
-  it("last as long as the reading does: she is back when the minutes are read, and not before", () => {
-    expect(tripLeft(home, 1000)).toBeNull();
-    expect(sendOut(home, 1000, 15)).toBe(home);
-    const out = sendOut(home, 1000, 20);
-    expect(out.trip).toEqual({ from: 1000, needs: 20 });
-    expect(sendOut(out, 1000, 10)).toBe(out);
-    expect(tripLeft(out, 1000)).toBe(20);
+  it("are not sent since 2026-10-15; one from a camp kept before comes back as a parcel once it is read through", () => {
+    const out = { ...home, trip: { from: 1000, needs: 20 } };
     expect(tripLeft(out, 1012)).toBe(8);
-    expect(welcomeBack(out, 1012, DAY)).toBe(out);
-    expect(tripLeft(out, 1500)).toBe(0);
-    expect(campWaits({ ...out, visitor: DAY, night: DAY, quest: 99, wishDay: DAY, oakFrom: 1500 }, at(1500))).toBe(true);
+    expect(settle(out, at(1012)).trip).toEqual({ from: 1000, needs: 20 });
+    const back = settle(out, at(1020));
+    expect(back.trip).toBeNull();
+    expect(back.parcels).toBe(out.parcels + 1);
+    // A walk that started after the reading the library now has starts again from here.
+    expect(settle({ ...home, trip: { from: 5000, needs: 10 } }, at(1000)).trip).toEqual({ from: 1000, needs: 10 });
   });
 
-  it("bring back a share of what the oak gave for those minutes, and a tale not told before", () => {
-    const out = sendOut(home, 1000, 20);
-    const brings = tripBrings(out)!;
-    expect(brings.acorns).toBe(Math.round(2 * oakDrops(home) * 0.4));
-    expect(brings.tale).not.toBeNull();
-    const back = welcomeBack(out, 1020, DAY);
-    expect(back).toMatchObject({ acorns: brings.acorns, trip: null, tales: [brings.tale] });
-    expect(back.events[0].text).toBe(`Pip came back from her walk with ${brings.acorns} acorns, and a tale.`);
-    // The longer the walk, the more she has; and it is always less than the oak's own for the same reading.
-    const [short, , long] = TRIPS.map((needs) => tripBrings(sendOut(home, 1000, needs))!.acorns);
-    expect(long).toBeGreaterThan(short);
-    for (const needs of TRIPS) expect(tripBrings(sendOut(home, 1000, needs))!.acorns).toBeLessThan((needs / 10) * oakDrops(home));
-  });
-
-  it("find every tale once, and then come back with acorns alone", () => {
-    let state = home;
-    let minutes = 1000;
-    for (let walk = 0; walk < TALES.length; walk++) {
-      state = welcomeBack(sendOut({ ...state, acorns: 0 }, minutes, 30), minutes + 30, DAY);
-      minutes += 30;
+  it("come in parcels now: every other one or so has a tale in it, each found once", () => {
+    let state: BaseState = { ...home, acorns: 0, parcels: 0 };
+    let opened = 0;
+    for (let round = 0; round < 400 && state.tales.length < TALES.length; round++) {
+      state = { ...state, acorns: 0, parcels: 1, stats: { ...state.stats, gathered: state.stats.gathered + 1 } };
+      const after = openParcel(state);
+      expect(after.acorns).toBe(parcelGives(state));
+      state = after;
+      opened++;
     }
     expect([...state.tales].sort((a, b) => a - b)).toEqual(TALES.map((_, tale) => tale));
-    expect(tripBrings(sendOut(state, minutes, 30))!.tale).toBeNull();
+    expect(opened).toBeGreaterThan(TALES.length);
     expect(new Set(TALES).size).toBe(TALES.length);
     for (const tale of TALES) expect(tale.length).toBeLessThanOrEqual(110);
   });
 
-  it("start again from here in a library restored from before she set out", () => {
-    const out = sendOut(home, 5000, 10);
-    expect(settle(out, at(1000)).trip).toEqual({ from: 1000, needs: 10 });
+  it("wait, and are never lost to a full larder: a parcel is opened whole or not at all", () => {
+    const full = { ...home, acorns: holds(home) - parcelGives(home) + 1, parcels: 2 };
+    expect(openParcel(full)).toBe(full);
+    const roomy = { ...full, acorns: holds(home) - parcelGives(home) };
+    expect(openParcel(roomy)).toMatchObject({ parcels: 1, acorns: holds(home) });
+    expect(PARCELS_MOST).toBe(6);
+  });
+
+  it("are what the dot on the way in is for, with a building finished and a full oak: nothing that asks to be come back for", () => {
+    const quiet = camp({ oakFrom: 1000, acorns: 0 }, { store: 3 });
+    expect(campWaits(quiet, at(1000))).toBe(false);
+    expect(campWaits({ ...quiet, parcels: 1 }, at(1000))).toBe(true);
+    // A parcel the larder has no room for is not something waiting to be done.
+    expect(campWaits({ ...quiet, parcels: 1, acorns: holds(quiet) }, at(1000))).toBe(false);
+    // A day turned, a hedgehog, a fence not put down: none of them is a dot.
+    expect(campWaits({ ...quiet, visitor: null, night: "2020-01-01", levels: { ...quiet.levels, fence: 1, burrow: 3 } }, at(1000))).toBe(false);
   });
 });
 

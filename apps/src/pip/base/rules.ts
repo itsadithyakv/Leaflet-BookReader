@@ -5,32 +5,28 @@
  * from reading in focus, and buy Pip's things), never anything a server
  * counts. The camp is built by reading. A building is paid for in acorns and
  * finished by so many minutes read after it was begun; the oak drops acorns
- * for every ten minutes read; the lookout's lantern is lit by a day's goal
- * met. Nothing here is finished by waiting.
+ * for every ten minutes read; a chapter read sends a parcel up the path.
+ * Nothing here is finished by waiting, and nothing is lost by being away.
  *
- * Where things stand is the reader's to choose, and it matters: at night the
- * magpies come at the camp as it is laid out (`battle.ts`), from a side the
- * lookout can see beforehand. The larder is what they are after; the fence
- * is put down piece by piece to be in their way; the lookout, the scouts'
- * hut and the burrow throw at whatever comes in reach.
+ * The point of it is a camp to show: your reading, built into a place your
+ * friends see on your card. One thing is always next (`nextStep`), Pip's
+ * tips teach the rest (`tips.ts`), and what a level brings appears when it
+ * comes. From the second level prowlers come out of the wood while the
+ * camp is on screen (`scene.ts`): what throws, the fence, the constructs
+ * and the guardians at their signposts see them off, and one who gets
+ * through knocks a building about or makes off with a few acorns, a little
+ * and at most so much a day.
  *
- * Reading is what lets the camp be played. Scouts rest between raids, and
- * it is reading that rests them; the arcade's games pay only for runs that
- * reading has earned. So the game is never somewhere to be instead of a
- * book: a quarter of an hour read is a raid to go on.
- *
- * A raid (`battle.ts`) is a small battle on a magpie camp: scouts put down
- * where the reader chooses, who then fight by themselves. The arcade's three
- * games pay a little for each run earned, and a wager on beating one's own
- * usual score is how acorns are lost.
+ * Simplified on 2026-10-15. The calendar night fought out of sight, the
+ * hedgehog's daily offers, Pip's wish and the heroes' wants, her walks,
+ * the dew, the paths at level 3, the road's daily camps, the arcade's
+ * wagers and the quiz's tips are no longer played. Their fields are still
+ * read and written back as they were, and most of their rules are still
+ * here, unused, so that any of them could be brought back.
  *
  * Every rule is a plain function of the state and of what is handed in (the
- * minutes read in all, the day, whether the lantern was lit), so none of it
- * needs a clock or a place to keep things, and all of it is tested. The first
- * version, played through for seven kinds of reader, came out as a progress
- * bar: nothing to do two days in three, magpies that never won a night, raids
- * that were a roll of dice, and no end but running out. This one was written
- * against that list (`apps/node_modules/.leaflet-test/hollow-sim.ts`).
+ * minutes read in all, the day, whether the goal was met), so none of it
+ * needs a clock or a place to keep things, and all of it is tested.
  */
 
 import { SIDES, autoBest, runAuto, type Result, type Setup, type Side, type Structure, type UnitKind } from "./battle";
@@ -238,7 +234,7 @@ export type BaseState = {
   rivals: { day: string; raided: string[] };
   /** A friend's raid the camp is still mending after: whose, how many stars, and the reading that mends it. */
   wreck: { by: string; stars: number; from: number; needs: number } | null;
-  /** A thing carried off on a lost night, and where it stood: brought home by the next camp taken on the road. */
+  /** A thing carried off on a lost night (when there were nights), and where it stood: brought home by the next raid won. */
   stolen: Decor | null;
 };
 
@@ -287,14 +283,23 @@ const yardBurrow = (to: number) => to + 1;
 export const PLOT_FROM: Record<"yard0" | "yard1", number> = { yard0: 2, yard1: 3 };
 /** The level at which things can be set down for their own sake: decorations, and the lie of the land. */
 export const DECOR_FROM = 2;
+/**
+ * Level 2 is where the camp has something to defend and to show: prowlers
+ * come out of the wood from then (`scene.ts`), the fence can be built, and a
+ * postcard of the camp can be made. A first camp is the burrow, the oak, the
+ * larder, the hut and the lookout, and nothing else to think about.
+ */
+export const PROWLERS_FROM = 2;
+export const FENCE_FROM = 2;
+export const POSTCARD_FROM = 2;
 
 /** Acorns the larder holds, and how many of them it keeps from the magpies, by its level. */
 const STORE_HOLDS = [60, 150, 300, 550, 900, 1400];
 const STORE_HIDES = [10, 40, 90, 160, 260, 400];
 
 /** Acorns the oak drops for every ten minutes read, and how many it holds until gathered, by its level. */
-const OAK_DROPS = [0, 5, 8, 12, 17, 24];
-const OAK_HOLDS = [0, 30, 50, 80, 120, 180];
+const OAK_DROPS = [0, 8, 13, 20, 28, 40];
+const OAK_HOLDS = [0, 50, 80, 130, 200, 300];
 const OAK_EVERY = 10;
 
 /** By level: how much quicker a workshop makes building, what the bees leave a day, what a well adds to the oak, what a stall adds to a game's pay. */
@@ -382,7 +387,8 @@ const TIP_SCOUTS = 2;
 const TRAINED_AT: Record<Exclude<UnitKind, "hero">, number> = { sprout: 1, slinger: 2, mole: 4 };
 /** Sent without the reader, a raid brings this much of the loot. */
 const SENT_BRINGS = 0.6;
-const KING_FROM_CAMPS = 3;
+/** The King is not shown until this many strongholds have fallen (it was 3; 10 since 2026-10-15, so a new camp has one ladder to climb). */
+const KING_FROM_CAMPS = 10;
 
 const TROPHY_GIFT = 15;
 const FORK_AGAIN = 60;
@@ -469,7 +475,8 @@ export const newBase = (minutesRead: number, day: string): BaseState => ({
   story: null,
   parcels: 0,
   prowled: { day: "", knocks: 0, thefts: 0 },
-  taught: [],
+  // A new camp begins on the list as it is now (see `LIST_MARK`).
+  taught: [LIST_MARK],
   hero: null,
   shelf: Array.from({ length: SHELF_KINDS }, () => 0),
   raised: [],
@@ -619,7 +626,8 @@ export const readBase = (raw: unknown): BaseState | null => {
     purse: { day: text(purse.day) ?? "", wagers: wholeOr(purse.wagers, 0, 100, 0) },
     wager: wagerGame ? { game: wagerGame, stake: wholeOr(keptWager.stake, 1, 20, 5), target: wholeOr(keptWager.target, 1, 1_000_000, 1) } : null,
     scores,
-    quest: wholeOr(from.quest, 0, QUESTS.length, 0),
+    // Kept as it was, past the end of the list too: a camp from before the list was rewritten points into the old one (see `LIST_MARK`).
+    quest: wholeOr(from.quest, 0, 100, 0),
     stats: {
       gathered: wholeOr(stats.gathered, 0, 1e9, 0),
       raids: wholeOr(stats.raids, 0, 1e9, 0),
@@ -801,14 +809,13 @@ export const builders = (state: BaseState) => (yardLevel(state, "workshop") > 0 
 export const oakDrops = (state: BaseState) =>
   OAK_DROPS[state.levels.oak] * (1 + (state.forks.oak === "b" ? 0.25 : 0) + WELL_MORE[yardLevel(state, "well")]) * ((state.harm.oak ?? 0) >= 4 ? BROKEN_OAK : 1 - (state.harm.oak ?? 0) * WEAR_A_KNOCK);
 /**
- * What a knock costs, left unmended: a tenth of what the building does,
- * for each of them. A knocked building used to be as good as new until the
- * fourth knock broke it, so there was nothing to say to "why mend it?"
- * but "it looks bad". Now the oak drops a tenth less for each, the larder
- * hides a tenth less, and what throws throws a tenth less hard; and at
- * four it is broken, which is worse again (see `BROKEN_DOES`).
+ * What a knock costs, left unmended, short of broken. It was a tenth of what
+ * the building does for each knock; nobody could see it happen, so since
+ * 2026-10-15 (the simplifying) it is nothing: a knocked building looks
+ * knocked, and only broken (four knocks, `BROKEN_DOES`) stops it working.
+ * Set this back to 0.1 to bring the wear back.
  */
-export const WEAR_A_KNOCK = 0.1;
+export const WEAR_A_KNOCK = 0;
 /** The share of its acorns a broken oak still drops: half. Never none, so that a camp with nothing can still get the acorns to mend it. */
 export const BROKEN_OAK = 0.5;
 export const oakHolds = (state: BaseState) => Math.round(OAK_HOLDS[state.levels.oak] * (state.forks.oak === "a" ? 1.5 : 1));
@@ -833,15 +840,15 @@ export const does = (building: BuildingId, level: number): string => {
     case "oak":
       return level === 0 ? "Drops acorns as you read" : `${OAK_DROPS[level]} acorns every ${OAK_EVERY} minutes read, holds ${OAK_HOLDS[level]}`;
     case "store":
-      return `Holds ${STORE_HOLDS[level]} acorns, hides ${STORE_HIDES[level]} from magpies`;
+      return `Holds ${STORE_HOLDS[level]} acorns; ${STORE_HIDES[level]} of them are hidden from prowlers`;
     case "fence":
-      return level === 0 ? "Pieces of fence to put in the magpies' way" : `${level * PIECES_A_LEVEL} pieces of fence, each sturdier`;
+      return level === 0 ? "Pieces of fence to put in the prowlers' way" : `${level * PIECES_A_LEVEL} pieces of fence, each holding them longer`;
     case "tower":
-      return level === 0 ? "Sees which way the magpies will come, and throws at them" : `Throws ${towerThrows(level).range} far, ${level === 1 ? "lightly" : level < 4 ? "hard" : "very hard"}; holds the lantern`;
+      return level === 0 ? "Throws at prowlers" : `Throws ${towerThrows(level).range} far, ${level === 1 ? "lightly" : level < 4 ? "hard" : "very hard"}; its lantern is lit on a day your reading goal is met`;
     case "hut":
       return level === 0
         ? "Scouts to raid with"
-        : `${SCOUTS_FIRST + level * SCOUTS_A_LEVEL} scouts${level >= TRAINED_AT.mole ? ", slingers and moles" : level >= TRAINED_AT.slinger ? " and slingers" : ""}, each ${level === 1 ? "green" : `${Math.round((level - 1) * 15)}% stronger`}; they throw from the roof at night`;
+        : `${SCOUTS_FIRST + level * SCOUTS_A_LEVEL} scouts${level >= TRAINED_AT.mole ? ", slingers and moles" : level >= TRAINED_AT.slinger ? " and slingers" : ""}, each ${level === 1 ? "green" : `${Math.round((level - 1) * 15)}% stronger`}; they raid, and throw at prowlers from the roof`;
   }
 };
 
@@ -851,7 +858,7 @@ export const yardDoes = (kind: YardKind, level: number): string => {
     case "workshop":
       return at === 1 ? "A second builder" : `A second builder, and building ${Math.round(WORKSHOP_QUICKER[at] * 100)}% quicker`;
     case "hive":
-      return `${HIVE_HONEY[at]} acorns' worth of honey each day`;
+      return at === 1 ? "A parcel of honey each day" : `${at} parcels of honey each day`;
     case "well":
       return `The oak drops ${Math.round(WELL_MORE[at] * 100)}% more`;
     case "stall":
@@ -885,7 +892,7 @@ export const choosePath = (state: BaseState, building: Forked, path: ForkId): Ba
 // ---- the camp's level, and what each one opens ----------------------------------------
 
 /** What kind of thing a level opens: for the screen to draw it by. */
-export type OpenKind = "ground" | "plot" | "decor" | "meadow" | "guards" | "paths" | "work" | "foe" | "top";
+export type OpenKind = "ground" | "plot" | "decor" | "meadow" | "guards" | "paths" | "work" | "foe" | "top" | "fence" | "postcard";
 export type Opened = { kind: OpenKind; name: string; says: string; which?: number };
 
 /**
@@ -902,13 +909,15 @@ export const campOpens = (level: number): Opened[] => {
   if (level === DECOR_FROM) opens.push({ kind: "decor", name: "Things to set down", says: "Decorations, and ponds, knolls and trees to shape the ground with" });
   if (level === MEADOW_FROM) opens.push({ kind: "meadow", name: "The meadow", says: "A second clearing, where the animals live" });
   if (level === GUARDS_FROM) opens.push({ kind: "guards", name: "Guardians", says: "One for each building, posted and trained by reading" });
-  if (level === 3) opens.push({ kind: "paths", name: "Paths", says: "The oak, the lookout and the hut each take one of two ways at level 3" });
+  if (level === FENCE_FROM) opens.push({ kind: "fence", name: "The fence", says: "Pieces of fence to lay in the prowlers' way" });
+  if (level === POSTCARD_FROM) opens.push({ kind: "postcard", name: "A postcard", says: "A picture of your camp, to save or send" });
   WORKS.forEach((work, which) => {
     if (work.burrow === level) opens.push({ kind: "work", name: work.name, says: work.does, which });
   });
-  FOES.forEach((foe) => {
-    if (foe.from === level) opens.push({ kind: "foe", name: foe.name, says: `They come by night from now on. ${foe.does}`, which: foe.id });
-  });
+  // Who comes out of the wood (`scene.ts`, `prowlStart`): most kinds from level 2, the mole from 3, Fizzwick from 4.
+  if (level === PROWLERS_FROM) opens.push({ kind: "foe", name: "Prowlers", says: "They come out of the wood now and then, while you watch, after the larder, the oak or whatever is nearest" });
+  if (level === 3) opens.push({ kind: "foe", name: "The Rootgnaw", says: "A mole: he comes under the ground, under the fence, and up by the larder" });
+  if (level === 4) opens.push({ kind: "foe", name: "Fizzwick", says: "Slow, and he goes off with a pop when he gets there: two knocks" });
   if (level === yardBurrow(YARD_MAX)) opens.push({ kind: "top", name: "The yard at its best", says: `What stands on a plot can reach level ${YARD_MAX}` });
   return opens;
 };
@@ -942,8 +951,9 @@ export type Blocked = "top" | "busy" | "mend" | "harm" | "burrow" | "taken" | "r
 export const blocked = (state: BaseState, site: Site, kind?: YardKind): Blocked | null => {
   const to = levelOf(state, site) + 1;
   if (to > topOf(site)) return "top";
-  // After a friend's raid Pip is mending: nothing new is begun until that is read off.
-  if (state.wreck) return "mend";
+  // After a friend's raid Pip is mending the fence they came through: it is not built on until that is read off.
+  // (It used to stop all building; since 2026-10-15 it is the fence alone.)
+  if (state.wreck && site === "fence") return "mend";
   // What a prowler has knocked about is put right before it is built on.
   if (harmOf(state, site) > 0) return "harm";
   if (state.jobs.some((job) => job.site === site) || state.jobs.length >= builders(state)) return "busy";
@@ -956,6 +966,9 @@ export const blocked = (state: BaseState, site: Site, kind?: YardKind): Blocked 
   } else if (site !== "burrow" && to > state.levels.burrow) {
     // The burrow leads: nothing else is built past it.
     return "burrow";
+  } else if (site === "fence" && to === 1 && state.levels.burrow < FENCE_FROM) {
+    // A first camp has nothing coming at it: the fence comes with the prowlers.
+    return "burrow";
   }
   // More than the larder could ever hold as it is: no saving up gets there.
   if (costOf(site, to) > holds(state)) return "room";
@@ -965,7 +978,11 @@ export const blocked = (state: BaseState, site: Site, kind?: YardKind): Blocked 
 
 /** The burrow level a site's next level wants. */
 export const burrowFor = (state: BaseState, site: Site) =>
-  yardIndex(site) >= 0 ? Math.max(yardBurrow(levelOf(state, site) + 1), plotOpen(state, site) ? 0 : PLOT_FROM[site as "yard0" | "yard1"]) : levelOf(state, site) + 1;
+  yardIndex(site) >= 0
+    ? Math.max(yardBurrow(levelOf(state, site) + 1), plotOpen(state, site) ? 0 : PLOT_FROM[site as "yard0" | "yard1"])
+    : site === "fence"
+      ? Math.max(FENCE_FROM, levelOf(state, site) + 1)
+      : levelOf(state, site) + 1;
 
 /** Pays for the next level of a site and begins it; the state unchanged when it cannot be. */
 export const build = (state: BaseState, site: Site, minutesRead: number, kind?: YardKind, mood?: number): BaseState => {
@@ -1024,14 +1041,13 @@ export const gather = (state: BaseState, minutesRead: number, streak = 0, day: s
   // A streak makes the gathering richer: more for the same acorns off the tree.
   const streaked = { ...gathered, acorns: gathered.acorns + give(gathered, taken * streakAdds(streak)) };
   // And in autumn the oak is heavy.
-  const rich = day !== null && seasonOf(day) === 1 ? { ...streaked, acorns: streaked.acorns + give(streaked, taken * AUTUMN_OAK) } : streaked;
-  // The first gathering of a day has the dew on it: as much again as one fall of the oak, and no more than was gathered.
-  if (day === null || state.dewDay === day) return rich;
-  return { ...rich, dewDay: day, acorns: rich.acorns + give(rich, Math.min(taken, oakDrops(state))) };
+  // (The first gathering of a day used to come with dew on it, a little more. It was a bonus nobody could see coming,
+  // and it made the oak say one figure and give another; since 2026-10-15 it is gone, and `dewDay` is kept as it was.)
+  return day !== null && seasonOf(day) === 1 ? { ...streaked, acorns: streaked.acorns + give(streaked, taken * AUTUMN_OAK) } : streaked;
 };
 
-/** Whether today's first gathering is still to be made: it comes with a little more. */
-export const dewWaits = (state: BaseState, day: string) => state.levels.oak > 0 && state.dewDay !== day;
+/** What a gathering would bring in now, every bonus counted and as far as the larder has room: what the screen says before the tap. */
+export const gatherBrings = (state: BaseState, minutesRead: number, streak = 0, day: string | null = null) => gather(state, minutesRead, streak, day).acorns - state.acorns;
 
 /** What a reading streak of so many days adds to what is gathered from the oak, as a share. */
 export const streakAdds = (streak: number) => STREAK_ADDS.find(([days]) => streak >= days)?.[1] ?? 0;
@@ -1396,10 +1412,24 @@ export const settle = (state: BaseState, now: Now): BaseState => {
       next = { ...next, animals: [...next.animals, animal.id], events: noted(next, day, `${/^[AEIOU]/.test(animal.name) ? "An" : "A"} ${animal.name.toLowerCase()} has wandered into the meadow, and means to stay.`) };
     }
   }
-  // The hen lays most mornings.
-  if (next.animals.includes(0) && next.eggDay !== day) next = { ...next, eggDay: day, acorns: next.acorns + give(next, HEN_LAYS) };
-  // A new day: what the camp's people wanted yesterday is yesterday's.
-  if (next.wants.day !== day) next = { ...next, wants: { day, done: [], won: [], set: [] } };
+  // The hen lays most mornings: the egg comes as a parcel, like everything else that arrives.
+  if (next.animals.includes(0) && next.eggDay !== day && next.parcels < PARCELS_MOST) next = { ...next, eggDay: day, parcels: next.parcels + 1 };
+  // Pip's walk, from a camp kept while walks were still sent (they are not since 2026-10-15): read through, she is
+  // back, and what she found is a parcel.
+  if (next.trip && read - next.trip.from >= next.trip.needs && next.parcels < PARCELS_MOST) next = { ...next, trip: null, parcels: next.parcels + 1 };
+  // A day's reading goal met sends a parcel, once a day. (`wishDay`, which was the day Pip's wish was granted, is the
+  // day this one came: the wish and the heroes' wants became this one parcel on 2026-10-15.)
+  if (now.goalMet === true && next.wishDay !== day && next.parcels < PARCELS_MOST) {
+    next = { ...next, wishDay: day, parcels: next.parcels + 1, events: noted(next, day, "Your reading goal was met: a parcel came up the path.") };
+    // And everyone who lives in the camp is a step fonder of it. Friendship grew from the heroes' wants until they were
+    // put away; without this, the three blades a hero gives as a friend (`BLADE_AT_BOND`) could no longer be had.
+    const before = bladesWon(next);
+    next = { ...next, bonds: next.bonds.map((had, hero) => (heroHere(next, hero) ? Math.min(BOND_MOST, had + 1) : had)) };
+    for (const blade of bladesWon(next).filter((owned) => !before.includes(owned))) {
+      next = { ...next, events: noted(next, day, `${HEROES[BLADES[blade].hero ?? 0].short} is a friend now, and gives the camp ${BLADES[blade].name}.`) };
+    }
+  }
+  // (The heroes' daily wants were reset here each day. They are not asked since 2026-10-15, and `wants` is left as it was.)
   // A library restored from before she set out: the walk starts from here.
   if (next.trip && next.trip.from > read) next = { ...next, trip: { ...next.trip, from: read } };
   // A library restored from before the camp: the counts start again from here.
@@ -1431,54 +1461,17 @@ export const settle = (state: BaseState, now: Now): BaseState => {
     if (job.site === "oak" && job.to === 1) next = { ...next, oakFrom: read };
   }
   if (next.night !== day) {
-    // Raiders come to a camp that has been read for since they last came. A camp nobody has read for is left alone:
-    // being away costs nothing, however long.
-    if (next.night !== null && read > next.nightAt) {
-      // The night that has just gone: they came from where that day's lookout said they would.
-      const night = nightOutcome(next, next.night, now.lit || next.oil === next.night, now.at);
-      const who = night ? FOES[night.foe].name : "";
-      if (night && !night.held) {
-        // What it cost, beyond what was taken: the fence that came down is to put up again, and from a larder
-        // emptied they carry one thing off with them.
-        const walls = next.walls.filter((_, index) => !night.broken.includes(index));
-        const felled = next.walls.length - walls.length;
-        const pick = night.emptied && next.stolen === null && next.decor.length > 0 ? hashOf(`took|${next.night}`) % next.decor.length : -1;
-        const stolen = pick >= 0 ? next.decor[pick] : null;
-        const said = [
-          night.taken > 0 ? `${who} got to the larder and took ${night.taken}.` : `${who} got to the larder, and found nothing in reach.`,
-          felled > 0 ? `${felled} ${felled === 1 ? "piece" : "pieces"} of fence came down.` : "",
-          stolen ? `They made off with the ${DECOR[stolen.kind].name.toLowerCase()}.` : ""
-        ]
-          .filter(Boolean)
-          .join(" ");
-        next = {
-          ...next,
-          acorns: next.acorns - night.taken,
-          walls,
-          decor: pick >= 0 ? next.decor.filter((_, index) => index !== pick) : next.decor,
-          stolen: stolen ?? next.stolen,
-          report: { day, held: false, count: night.taken, lit: night.lit, side: night.side, foe: night.foe, felled, stolen: stolen?.kind ?? null },
-          events: noted(next, day, said)
-        };
-      } else if (night) {
-        // Seen off: they drop something as they go.
-        const found = give(next, 1 + Math.ceil(next.levels.tower / 2));
-        next = {
-          ...next,
-          acorns: next.acorns + found,
-          stats: { ...next.stats, nights: next.stats.nights + 1 },
-          report: { day, held: true, count: found, lit: night.lit, side: night.side, foe: night.foe, felled: 0, stolen: null },
-          events: noted(next, day, found > 0 ? `The camp held the night against ${who.toLowerCase().startsWith("the ") ? who.replace(/^The /, "the ") : who.toLowerCase()}. They dropped ${found}.` : "The camp held the night.")
-        };
-      }
-    }
+    // A day has turned. The calendar night used to be fought here, out of sight (`nightOutcome`): since 2026-10-15
+    // it is not, and the prowlers the picture shows are the only thing that comes at the camp. The night is still
+    // marked as through, so that bringing the battle back would not play every night since.
     if (next.night !== null) {
-      const honey = give(next, HIVE_HONEY[yardLevel(next, "hive")]);
-      if (honey > 0) next = { ...next, acorns: next.acorns + honey, events: noted(next, day, `The bees left ${honey} acorns' worth of honey.`) };
+      // The bees have been busy: a parcel of honey for every level of the hives.
+      const honey = Math.min(PARCELS_MOST - next.parcels, yardLevel(next, "hive"));
+      if (honey > 0) next = { ...next, parcels: next.parcels + honey };
     }
     next = { ...next, night: day, nightAt: read };
   }
-  return next;
+  return advanceList(next, day);
 };
 
 /** The night has been looked at. */
@@ -1905,7 +1898,10 @@ export const harmSite = (state: BaseState, site: Placed, day: string): BaseState
   };
 };
 /** What it costs to put a building right: by how knocked about it is, and how good a building it is. */
-export const fixCost = (state: BaseState, site: Site, day?: string) => Math.ceil(harmOf(state, site) * (2 + levelOf(state, site)) * (day !== undefined && seasonOf(day) === 3 ? SPRING_MENDS : 1));
+/** The owl keeps watch: mending is a quarter cheaper with her about (her own good thing since 2026-10-15, when the night she watched for was put away). */
+export const OWL_MENDS = 0.75;
+export const fixCost = (state: BaseState, site: Site, day?: string) =>
+  Math.ceil(harmOf(state, site) * (2 + levelOf(state, site)) * (day !== undefined && seasonOf(day) === 3 ? SPRING_MENDS : 1) * (hasAnimal(state, 3) ? OWL_MENDS : 1));
 /** Puts a building right, for acorns; unchanged when there is nothing to fix or not enough to fix it with. */
 export const fixSite = (state: BaseState, site: Placed, day?: string): BaseState => {
   const cost = fixCost(state, site, day);
@@ -2152,12 +2148,13 @@ const finishRaidPlain = (state: BaseState, raid: Raid, result: Result, day: stri
       pack: won ? false : state.pack,
       camps: won && plan.kind === "camp" ? state.camps + (fled ? 2 : 1) : state.camps,
       banners: won && king && !state.banners.includes(month) ? [...state.banners, month] : state.banners,
-      wants: won && raid.setup.hero ? { ...wantsOn(state, day), won: [...new Set([...wantsOn(state, day).won, raid.setup.hero.id])] } : state.wants,
+      // (A hero brought home from a raid won was noted for their daily want; wants are not asked since 2026-10-15.)
       stats: { ...state.stats, raids: state.stats.raids + (won ? 1 : 0), stars: state.stats.stars + result.stars },
       events: noted(state, day, line)
   };
   // What was carried off on a lost night is in the first camp on the road that falls.
-  const home = won && plan.kind === "wild" && state.stolen ? state.stolen : null;
+  // A thing carried off on a night (from before the nights were put away) comes home with the next raid won, whatever it was on.
+  const home = won && state.stolen ? state.stolen : null;
   // A blade is won the first time its lord falls.
   const blade = bladesWon(next).find((owned) => !bladesWon(state).includes(owned)) ?? null;
   return {
@@ -2420,7 +2417,7 @@ export const decorBlocked = (state: BaseState, kind: number, place: Place = "cam
 export const placeDecor = (state: BaseState, kind: number, x: number, y: number, place: Place = "camp"): BaseState =>
   !DECOR[kind] || decorBlocked(state, kind, place) || (place === "meadow" && !meadowOpen(state))
     ? state
-    : { ...withSet(state, place, [...setIn(state, place), { kind, ...onLand(x, y, place === "camp" ? woodAt(state.levels.burrow) : 0) }]), acorns: state.acorns - DECOR[kind].cost, wants: { ...state.wants, set: [...new Set([...state.wants.set, kind])] } };
+    : { ...withSet(state, place, [...setIn(state, place), { kind, ...onLand(x, y, place === "camp" ? woodAt(state.levels.burrow) : 0) }]), acorns: state.acorns - DECOR[kind].cost };
 
 /** Moves a thing already bought: as often as the reader likes, for nothing. */
 export const moveDecor = (state: BaseState, index: number, x: number, y: number, place: Place = "camp"): BaseState =>
@@ -2556,8 +2553,8 @@ export const drillLeft = (state: BaseState, minutesRead: number) => (state.drill
  */
 export const STRETCH_MINUTES = 8;
 export const PARCELS_MOST = 6;
-/** What a parcel has in it: a few acorns, more in a bigger camp. */
-export const parcelGives = (state: BaseState) => 3 + Math.max(1, state.levels.burrow);
+/** What a parcel has in it: a few acorns, more in a bigger camp, and one more for every 30 of the camp's charm (the most charming camps get the best parcels: this was the hedgehog's sack, before 2026-10-15). */
+export const parcelGives = (state: BaseState) => 4 + 2 * Math.max(1, state.levels.burrow) + Math.floor(Math.min(150, charm(state)) / 30);
 export const storyRead = (state: BaseState, bookId: string, stretch: number, minutesRead: number, day: string, title = ""): BaseState => {
   const key = trophyKey(bookId);
   const read = Math.floor(minutesRead);
@@ -2576,11 +2573,23 @@ export const storyRead = (state: BaseState, bookId: string, stretch: number, min
     events: full ? state.events : noted(state, day, title ? `A parcel came up the path, from “${title.slice(0, 60)}”.` : "A parcel came up the path."),
   };
 };
-/** Opens a parcel: its acorns, as far as the larder has room. With no room it is left for later. */
+/**
+ * Opens a parcel: its acorns, all of them, and every other parcel a tale
+ * Pip found while you read (what her walks used to bring, before
+ * 2026-10-15). Without room in the larder for the whole of it, it is left
+ * for later: nothing in a parcel is lost to a full larder.
+ */
 export const openParcel = (state: BaseState): BaseState => {
-  if (state.parcels <= 0) return state;
-  const gift = give(state, parcelGives(state));
-  return gift <= 0 ? state : { ...state, parcels: state.parcels - 1, acorns: state.acorns + gift };
+  if (state.parcels <= 0 || room(state) < parcelGives(state)) return state;
+  const opened = { ...state, parcels: state.parcels - 1, acorns: state.acorns + parcelGives(state) };
+  const tale = parcelTale(state);
+  return tale === null ? opened : { ...opened, tales: [...state.tales, tale] };
+};
+/** The tale the next parcel opened has in it, if it has one: every other parcel, while there are tales not yet told. */
+export const parcelTale = (state: BaseState): number | null => {
+  const untold = TALES.map((_, tale) => tale).filter((tale) => !state.tales.includes(tale));
+  const roll = hashOf(`parcel|${state.tales.length}|${state.stats.gathered}|${state.parcels}`);
+  return untold.length > 0 && roll % 2 === 0 ? untold[(roll >>> 3) % untold.length] : null;
 };
 
 // ---- trophies: the books finished ------------------------------------------------------------
@@ -2850,38 +2859,51 @@ export const welcomeBack = (state: BaseState, minutesRead: number, day: string):
   };
 };
 
-// ---- Pip's list: what to do next --------------------------------------------------------------
+// ---- Pip's list: the one next thing ---------------------------------------------------------------
 
-/** Where a thing on the list is done: a plot of the camp, a building with a path to choose, tonight's card, the raids, or the arcade's other games. */
-export type QuestAt = Site | "path" | "tonight" | "raids" | "arcade" | "meadow";
+/** Where a thing on the list is done: a plot of the camp, the raids, or the meadow. */
+export type QuestAt = Site | "raids" | "meadow";
 export type Quest = { text: string; reward: number; done: (state: BaseState) => boolean; at: QuestAt };
 
-/** In order. Each is a thing the camp can show it has done, so none can be claimed twice or early; and each says where it is done, so the reader can be shown. */
+/**
+ * In order, and in the order the camp opens: the first five are a first
+ * camp (the oak, the larder, the hut, the lookout, the burrow's second
+ * level), and the rest walk through what each level brings. Each is a thing
+ * the camp can show it has done, and each says where it is done, so the
+ * reader can be shown. Rewritten on 2026-10-15, when the list was made the
+ * one "next thing" the camp shows; the old list's steps for the night, the
+ * paths, the arcade's wagers and the King are gone with them.
+ */
 export const QUESTS: readonly Quest[] = [
-  { text: "Gather acorns from the oak", reward: 10, done: (state) => state.stats.gathered > 0, at: "oak" },
+  { text: "Read 10 minutes, then tap the oak", reward: 10, done: (state) => state.stats.gathered > 0, at: "oak" },
   { text: "Build a larder", reward: 10, done: (state) => state.levels.store >= 1, at: "store" },
   { text: "Build a scouts' hut", reward: 15, done: (state) => state.levels.hut >= 1, at: "hut" },
-  { text: "Win a raid", reward: 20, done: (state) => state.stats.raids >= 1, at: "raids" },
-  { text: "Build a fence, and put three pieces of it down", reward: 15, done: (state) => state.levels.fence >= 1 && state.walls.length >= Math.min(3, fencePieces(state)), at: "fence" },
+  { text: "Build a lookout", reward: 15, done: (state) => state.levels.tower >= 1, at: "tower" },
   { text: "Raise the burrow to level 2", reward: 25, done: (state) => state.levels.burrow >= 2, at: "burrow" },
-  { text: "Build a lookout", reward: 20, done: (state) => state.levels.tower >= 1, at: "tower" },
-  { text: "Hold a night against the magpies", reward: 20, done: (state) => state.stats.nights >= 1, at: "tonight" },
+  { text: "Build a fence, and lay three pieces of it", reward: 15, done: (state) => state.levels.fence >= 1 && state.walls.length >= Math.min(3, fencePieces(state)), at: "fence" },
+  { text: "Win a raid", reward: 20, done: (state) => state.stats.raids >= 1 || state.camps >= 1, at: "raids" },
+  { text: "Set down a construct", reward: 20, done: (state) => state.works.length > 0, at: "fence" },
   { text: "Build something in the yard", reward: 30, done: (state) => state.yard.some((slot) => slot.level > 0), at: "yard0" },
-  { text: "Take the first stronghold", reward: 30, done: (state) => state.camps >= 1, at: "raids" },
-  { text: "Take 5 strongholds", reward: 40, done: (state) => state.camps >= 5, at: "raids" },
   { text: "Raise the burrow to level 3", reward: 40, done: (state) => state.levels.burrow >= 3, at: "burrow" },
-  { text: "Choose a path for a level 3 building", reward: 30, done: (state) => Object.keys(state.forks).length > 0, at: "path" },
-  { text: "Win a wager at the arcade", reward: 20, done: (state) => state.stats.wagers >= 1, at: "arcade" },
-  { text: "Win a season's banner from the Magpie King", reward: 80, done: (state) => state.banners.length >= 1, at: "raids" },
-  { text: "Take 10 strongholds", reward: 60, done: (state) => state.camps >= 10, at: "raids" },
-  { text: "Raise the burrow to level 5", reward: 100, done: (state) => state.levels.burrow >= 5, at: "burrow" },
-  { text: "Take 20 strongholds", reward: 120, done: (state) => state.camps >= 20, at: "raids" },
   { text: "Post a guardian at a building", reward: 60, done: (state) => state.guards.some((rank) => rank > 0), at: "tower" },
+  { text: "Take 5 strongholds", reward: 40, done: (state) => state.camps >= 5, at: "raids" },
+  { text: "Raise the burrow to level 4", reward: 60, done: (state) => state.levels.burrow >= 4, at: "burrow" },
   { text: "Make the camp charming enough for an animal to come", reward: 50, done: (state) => state.animals.length > 0, at: "meadow" },
+  { text: "Raise the burrow to level 5", reward: 100, done: (state) => state.levels.burrow >= 5, at: "burrow" },
+  { text: "Take 10 strongholds", reward: 60, done: (state) => state.camps >= 10, at: "raids" },
   { text: "Train a guardian to the top rank", reward: 150, done: (state) => state.guards.some((rank) => rank >= GUARD_MOST), at: "tower" },
   { text: "Have all seven guardians at their posts", reward: 300, done: (state) => state.guards.every((rank) => rank > 0), at: "burrow" },
   { text: "Give all six animals a home", reward: 300, done: (state) => state.animals.length >= ANIMALS.length, at: "meadow" }
 ];
+
+/**
+ * Kept in `taught` (a list of names, and older builds keep names they do
+ * not know): this camp has been brought onto the list above. A camp from
+ * before it has its `quest` pointing into the old list; the first time it
+ * is settled, whatever it has already done of the new one is passed over
+ * without a reward, so nobody is paid twice for one larder.
+ */
+export const LIST_MARK = "list2";
 
 /** The thing on Pip's list now, and whether it is done; null when the list is. */
 export const questNow = (state: BaseState): { quest: Quest; done: boolean; index: number } | null => {
@@ -2889,18 +2911,10 @@ export const questNow = (state: BaseState): { quest: Quest; done: boolean; index
   return quest ? { quest, done: quest.done(state), index: state.quest } : null;
 };
 
-/**
- * Where the thing on the list now is done, for showing the reader: a plot,
- * "tonight", "raids" or "arcade". A path is chosen at a building that has
- * one open, or failing that the one nearest to having one.
- */
-export const questAt = (state: BaseState): Exclude<QuestAt, "path"> | null => {
-  const at = questNow(state)?.quest.at ?? null;
-  if (at !== "path") return at;
-  return FORKED.find((site) => forkOpen(state, site)) ?? [...FORKED].sort((a, b) => state.levels[b] - state.levels[a])[0];
-};
+/** Where the thing on the list now is done, for showing the reader. */
+export const questAt = (state: BaseState): QuestAt | null => questNow(state)?.quest.at ?? null;
 
-/** Ticks the thing off, for its acorns. */
+/** Ticks the thing off by hand, for its acorns, as far as there is room (`advanceList` does it by itself). */
 export const claimQuest = (state: BaseState, day: string): BaseState => {
   const now = questNow(state);
   if (!now || !now.done) return state;
@@ -2911,6 +2925,65 @@ export const claimQuest = (state: BaseState, day: string): BaseState => {
     quest: state.quest + 1,
     events: noted(state, day, `Done: ${now.quest.text[0].toLowerCase()}${now.quest.text.slice(1)}. ${reward} acorns.`)
   };
+};
+
+/**
+ * The list moves on by itself: a thing done is ticked off and its acorns go
+ * in, and the next is shown. Its acorns go in only whole: while the larder
+ * has no room for them the thing waits, ticked (`nextStep` says so), and
+ * nothing is promised that would not arrive. Unchanged, the same object.
+ */
+export const advanceList = (state: BaseState, day: string): BaseState => {
+  let next = state;
+  if (!next.taught.includes(LIST_MARK)) {
+    let at = Math.min(next.quest, QUESTS.length);
+    while (QUESTS[at]?.done(next)) at++;
+    return { ...next, quest: at, taught: [...next.taught, LIST_MARK] };
+  }
+  for (let step = 0; step < QUESTS.length; step++) {
+    const quest = QUESTS[next.quest];
+    if (!quest || !quest.done(next) || room(next) < quest.reward) break;
+    next = {
+      ...next,
+      acorns: next.acorns + quest.reward,
+      quest: next.quest + 1,
+      events: noted(next, day, `Done: ${quest.text[0].toLowerCase()}${quest.text.slice(1)}. ${quest.reward} acorns.`)
+    };
+  }
+  return next;
+};
+
+/** The one next thing, as the camp shows it: what to do, where, and what it brings (null when nothing is promised). */
+export type NextStep = { text: string; at: QuestAt; reward: number | null; full: boolean };
+
+/**
+ * What Pip says to do next. There is always something: the list while it
+ * lasts (said as reading while what it asks for is going up), and after it
+ * whatever is building, the cheapest thing that can be built, or reading.
+ */
+export const nextStep = (state: BaseState, minutesRead: number): NextStep => {
+  const quest = QUESTS[state.quest];
+  const reading = (site: Site): string | null => {
+    const job = jobOn(state, site);
+    if (!job) return null;
+    const left = jobLeft(job, minutesRead);
+    return left > 0 ? `Read ${left} more ${left === 1 ? "minute" : "minutes"}: the ${siteName(state, site).toLowerCase()} is finished` : null;
+  };
+  if (quest) {
+    if (quest.done(state)) return { text: `Done: ${quest.text[0].toLowerCase()}${quest.text.slice(1)}. The larder is full`, at: "store", reward: quest.reward, full: true };
+    if (state.quest === 0 && oakReady(state, minutesRead) > 0) return { text: "Tap the oak to take in its acorns", at: "oak", reward: quest.reward, full: false };
+    const building = quest.at !== "raids" && quest.at !== "meadow" ? reading(quest.at) : null;
+    return { text: building ?? quest.text, at: quest.at, reward: quest.reward, full: false };
+  }
+  const going = state.jobs.map((job) => job.site).find((site) => reading(site) !== null);
+  if (going) return { text: reading(going)!, at: going, reward: null, full: false };
+  const can = SITES.filter((site) => blocked(state, site) === null).sort((a, b) => costOf(a, levelOf(state, a) + 1) - costOf(b, levelOf(state, b) + 1))[0];
+  if (can) {
+    const to = levelOf(state, can) + 1;
+    const name = siteName(state, can).toLowerCase();
+    return { text: to === 1 ? `Build ${/^[aeiou]/.test(name) ? "an" : "a"} ${name}` : `Raise the ${name} to level ${to}`, at: can, reward: null, full: false };
+  }
+  return { text: `Read on: every ten minutes the oak drops ${Math.round(oakDrops(state))} acorns`, at: "oak", reward: null, full: false };
 };
 
 // ---- what the camp has to say elsewhere ----------------------------------------------------------
@@ -2932,12 +3005,8 @@ export const campNews = (state: BaseState, minutesRead: number): string | null =
 
 /** Whether the camp has something waiting for the reader: for a dot on the way in. */
 export const campWaits = (state: BaseState, now: Now): boolean =>
+  // Only what reading has brought and is ready to be taken in: never a day's visitor or a list to keep up with
+  // (since 2026-10-15), so the dot on the way in is never a nudge to come back for its own sake.
   state.jobs.some((job) => jobLeft(job, now.minutes) === 0) ||
   (state.levels.oak > 0 && oakReady(state, now.minutes) >= oakHolds(state)) ||
-  state.visitor !== now.day ||
-  Boolean(questNow(state)?.done) ||
-  Boolean(wishToday(state, now)?.done) ||
-  state.walls.length < fencePieces(state) ||
-  (state.night !== now.day && magpies(state) > 0) ||
-  wantWaits(state, now) ||
-  tripLeft(state, now.minutes) === 0;
+  (state.parcels > 0 && room(state) >= parcelGives(state));

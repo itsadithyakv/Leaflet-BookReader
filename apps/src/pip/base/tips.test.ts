@@ -58,8 +58,12 @@ describe("Pip's tips", () => {
     expect(tipNow({ ...small, parcels: 1 })?.id).toBe("parcel");
     // A fence built, and not yet laid.
     expect(tipNow({ ...small, levels: levels(1, { store: 1, fence: 1 }) })?.id).toBe("fence");
+    // The second level: the prowlers, then the postcard, a tip each.
+    const second = { ...small, levels: levels(2, { store: 1 }) };
+    expect(tipNow(second)?.id).toBe("prowler");
+    expect(tipNow(learnt(second, "prowler"))?.id).toBe("postcard");
     // The gate, only once there is fence enough for one and the fence is good enough.
-    let fenced: BaseState = { ...small, levels: levels(2, { store: 1, fence: GATE_FROM }), taught: [...small.taught, "prowler"] };
+    let fenced: BaseState = { ...small, levels: levels(2, { store: 1, fence: GATE_FROM }), taught: [...small.taught, "prowler", "postcard"] };
     for (const x of [100, 110, 120, 130]) fenced = placeWall(fenced, x, 114);
     expect(tipNow(fenced)?.id).toBe("gate");
     expect(tipNow(setGate(fenced, 110, 114))).toBeNull();
@@ -76,6 +80,6 @@ describe("Pip's tips", () => {
     expect(noTips(quiet)).toBe(quiet);
     // A name that is no tip's is not kept.
     expect(learnt(fresh, "nonsense")).toBe(fresh);
-    expect(learnt(learnt(fresh, "oak"), "oak").taught).toEqual(["oak"]);
+    expect(learnt(learnt(fresh, "oak"), "oak").taught).toEqual([...fresh.taught, "oak"]);
   });
 });

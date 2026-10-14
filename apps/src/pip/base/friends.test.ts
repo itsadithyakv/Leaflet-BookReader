@@ -137,13 +137,14 @@ describe("being raided by a friend", () => {
     expect(after.walls).toHaveLength(1);
     expect(after.wreck).toEqual({ by: "Tovah", stars: 2, from: 600, needs: 2 * MEND_A_STAR });
     expect(wreckLeft(after, 603)).toBe(2 * MEND_A_STAR - 3);
-    // Nothing new is begun while Pip is mending; what was going up goes on.
-    expect(blocked(after, "oak")).toBe("mend");
+    // The fence is not built on while Pip mends it; everything else is (since 2026-10-15 a raid stops the fence alone).
+    expect(blocked(after, "fence")).toBe("mend");
+    expect(blocked(after, "oak")).not.toBe("mend");
     // Read off, it is mended, and building is open again.
     const mended = settle(after, { minutes: 600 + 2 * MEND_A_STAR, day: DAY, lit: false });
     expect(mended.wreck).toBeNull();
     expect(mended.events.some((event) => event.text === "The camp is mended.")).toBe(true);
-    expect(blocked(mended, "oak")).not.toBe("mend");
+    expect(blocked(mended, "fence")).not.toBe("mend");
   });
 
   it("is never more than twenty minutes to mend, however many came, and gets no worse for being left", () => {

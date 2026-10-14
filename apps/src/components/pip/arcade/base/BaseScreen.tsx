@@ -1,16 +1,9 @@
 import { Suspense, lazy, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowDown,
   ArrowLeft,
   ArrowRight,
-  ArrowUp,
-  Backpack,
-  Bird,
   BookOpen,
-  Droplets,
-  Flame,
   Flower2,
-  Footprints,
   Hammer,
   Heart,
   House,
@@ -25,14 +18,10 @@ import {
   Shield,
   ShieldAlert,
   Signpost,
-  ShieldCheck,
   BedDouble,
   Camera,
   DoorOpen,
-  Leaf,
   Package,
-  Snowflake,
-  Sun,
   Sparkles,
   Star,
   Swords,
@@ -46,14 +35,12 @@ import {
   X
 } from "lucide-react";
 import {
-  BOND_MOST,
   BUILDINGS,
   GUARDS_FROM,
   bladeOf,
   bladesWon,
   drillLeft,
   landBlocked,
-  nightFoe,
   workBlocked,
   guardAt,
   guardBlocked,
@@ -61,10 +48,7 @@ import {
   guardMinutes,
   guardOf,
   meadowOpen,
-  sideKnown,
   DECOR,
-  FORKS,
-  PATH_AGAIN_COSTS,
   PLACED,
   PLOT_FROM,
   POST_REACH,
@@ -87,7 +71,6 @@ import {
   BROKEN_DOES,
   WORN_DOES,
   SEASONS,
-  bedsOf,
   hasBed,
   lodgers,
   friendBlocked,
@@ -96,20 +79,27 @@ import {
   wreckLeft,
   type FriendRaid,
   DECOR_FROM,
+  MEADOW_FROM,
+  FENCE_FROM,
+  KING_NEEDS_CAMPS,
+  POSTCARD_FROM,
+  PROWLERS_FROM,
+  TALES,
+  gatherBrings,
+  litTonight,
+  nextStep,
+  PARCELS_MOST,
+  QUESTS,
   campOpens,
   decorOpen,
   plotOpen,
   MAX_LEVEL,
   standing as sitesStanding,
   type Opened,
-  QUESTS,
   RAIDS_IN_HAND,
   RAID_EVERY,
-  ROAD_CAMPS,
   SENT_SHARE,
   SITES,
-  TALES,
-  TRIPS,
   TROPHY_GIVES,
   YARD_KINDS,
   YARD_NAMES,
@@ -126,54 +116,32 @@ import {
   fencePieces,
   heroHere,
   holds,
-  isForked,
   jobLeft,
   jobOn,
   kingClosed,
   levelOf,
-  litTonight,
-  magpies,
   minutesOf,
-  nightOutcome,
-  nightRaiders,
-  nightSide,
   monthName,
   monthOf,
   nextCamp,
   oakHolds,
   oakReady,
-  offerWasted,
-  offers,
-  questAt,
-  questNow,
   raidBlocked,
   raidsReady,
   restIn,
-  roadCamp,
-  roadDone,
   scoutsOf,
   scoutsSay,
   seasonOf,
-  sideWord,
   siteName,
   spotBlocked,
   streakAdds,
-  streakNext,
   theKing,
   topOf,
   wallAt,
   wallBlocked,
-  bondOf,
-  bondWord,
-  dewWaits,
   moodQuicker,
   oakDrops,
   residents,
-  tripBrings,
-  tripLeft,
-  wantOf,
-  wantWaits,
-  wishToday,
   yardDoes,
   type BaseState,
   type Blocked,
@@ -190,7 +158,7 @@ import {
   type Site,
   type YardKind
 } from "../../../../pip/base/rules";
-import { ANIMALS, BLADES, FOES, GUARDIANS, GUARD_MOST, SCENERY, WORKS, bladeSays, type Guardian } from "../../../../pip/base/guards";
+import { ANIMALS, BLADES, GUARDIANS, GUARD_MOST, SCENERY, WORKS, bladeSays, type Guardian } from "../../../../pip/base/guards";
 import { HEROES, heroWants } from "../../../../pip/base/heroes";
 import { TROPHY_KINDS, toRaise, trophyKind, trophyRow } from "../../../../pip/base/trophies";
 import { tipNow } from "../../../../pip/base/tips";
@@ -224,13 +192,12 @@ const prefersReducedMotion = () => {
   }
 };
 
-/** How long the burst over a finished building, and the magpies of the morning after, take. */
+/** How long the burst over a finished building takes. */
 const BURST_FRAMES = 8;
-const MAGPIES_MS = 3200;
 
 const WHY_NOT: Record<Blocked, (base: BaseState, site: Site) => string> = {
   top: () => "As good as it gets",
-  mend: (base) => `Pip is mending the camp after ${base.wreck?.by ?? "a friend"}'s raid`,
+  mend: (base) => `Pip is mending the fence after ${base.wreck?.by ?? "a friend"}'s raid`,
   harm: () => "Fix what the prowler did first",
   busy: (base, site) => (jobOn(base, site) ? "Going up" : base.jobs.length > 1 ? "Both builders are busy" : `Pip is busy with the ${siteName(base, base.jobs[0].site).toLowerCase()}`),
   burrow: (base, site) => `Needs a level ${burrowFor(base, site)} burrow`,
@@ -238,9 +205,6 @@ const WHY_NOT: Record<Blocked, (base: BaseState, site: Site) => string> = {
   room: () => "Needs a bigger larder",
   acorns: (base, site) => `${costOf(site, levelOf(base, site) + 1) - base.acorns} more acorns`
 };
-
-/** Where the magpies come in from, by the side they come from: one end of the line they take to the larder. */
-const GATES = { left: [4, 84], right: [236, 84], top: [120, 50], bottom: [120, 116] } as const;
 
 const WHY_NO_GUARD: Record<GuardBlocked, (base: BaseState, guard: number) => string> = {
   top: () => "",
@@ -254,7 +218,7 @@ const WHY_NO_RAID: Record<RaidBlocked, (base: BaseState, plan: RaidPlan, now: No
   hut: () => "Needs a scouts' hut",
   rest: (base, _plan, now) => `Scouts rested after ${restIn(base, now.minutes)} more min of reading`,
   acorns: (base, plan) => `${plan.cost - base.acorns} more acorns`,
-  camps: () => "After three strongholds",
+  camps: () => `After ${KING_NEEDS_CAMPS} strongholds`,
   won: (_base, _plan, now) => `${monthName(monthOf(now.day))}'s banner is won`,
   today: () => "Once a day",
   done: () => "Raided today"
@@ -269,8 +233,6 @@ const acorns = (count: number | string, size = 12) => (
   </span>
 );
 
-const SIDE_ARROWS = { left: ArrowRight, right: ArrowLeft, top: ArrowDown, bottom: ArrowUp } as const;
-const OFFER_ICONS = { sack: Nut, tip: Lightbulb, hand: Hammer, oil: Flame, pack: Backpack } as const;
 
 const stars = (count: number, size = 14) => (
   <span className="pip-base-stars" aria-label={`${count} of 3 stars`}>
@@ -281,8 +243,8 @@ const stars = (count: number, size = 14) => (
 );
 
 type Tab = "camp" | "raids" | "journal";
-/** What the card under the picture is about: the chosen plot, who lives here, tonight, the hedgehog, or things to set down. */
-type Panel = "site" | "people" | "tonight" | "visitor" | "decor" | "guard" | "garden";
+/** What the card under the picture is about: the chosen plot, who lives here, things to set down, a guardian, or the garden. */
+type Panel = "site" | "people" | "decor" | "guard" | "garden";
 
 /**
  * The picture is the page. Where Pip's tab is at least this wide and tall,
@@ -335,30 +297,11 @@ const FLIGHT_MS = 650;
 const ARRIVE_MS = 1500;
 const BOUNCE_MS = 600;
 
-/** Where the hedgehog stands in the picture, for a tap on him. */
-const HEDGEHOG_SPOT = { x: 146, top: 102 };
-
-/** What Pip says to a reader who has never seen the camp, a bubble at a time. Shown once. */
-const INTRO = [
-  "This is my camp! Every minute you read drops acorns from the oak, and finishes whatever I am building.",
-  "Magpies come at night for the larder. Where things stand decides whether they get to it.",
-  "My scouts raid them back. Rest the pointer on anything, or hold a finger on it, and I will say what it is."
-];
-const INTRO_KEY = "leaflet.pip.base.intro";
-const introSeen = () => {
-  try {
-    return localStorage.getItem(INTRO_KEY) === "seen";
-  } catch {
-    return true;
-  }
-};
-const introDone = () => {
-  try {
-    localStorage.setItem(INTRO_KEY, "seen");
-  } catch {
-    // Said again next time.
-  }
-};
+/*
+ * (There was a three-bubble introduction here, and a hedgehog with a daily
+ * offer. Both went on 2026-10-15: the first said things a new camp does not
+ * have yet, and Pip's tips (`pip/base/tips.ts`) say each when it comes.)
+ */
 
 /** Acorns into the larder: a patter of them, more for more. */
 const acornsSound = (count: number) => {
@@ -370,21 +313,19 @@ const acornsSound = (count: number) => {
  * The Hollow, Pip's camp: the arcade's building game (`pip/base/rules.ts`).
  *
  * Three pages. The camp: the clearing as a picture to pick things from, and
- * under it what the chosen thing does and costs, tonight's magpies, the
- * hedgehog's offer, and things to set about the place. "Arrange" turns the
- * picture into the place where the camp is laid out: buildings are picked up
- * and put down, fence goes down a piece at a time, and tonight can be watched
- * before it comes. The raids: who goes, the camps on the road today, the next
- * stronghold and the month's King, each with what the scouts say of it. The
- * journal: what happened lately and what the camp has done. A raid being
- * fought, or a night being watched, takes the whole screen (BattleScreen).
+ * over it a card for whatever is chosen. "Arrange" turns the picture into
+ * the place where the camp is laid out: fence goes down a piece at a time,
+ * and every reach is shown. The raids: who goes, the next stronghold (and,
+ * after ten, the month's King), with what the scouts say of it. The (i):
+ * how the camp works, and what happened lately. A raid takes the whole
+ * screen (BattleScreen).
  *
- * The camp page is three things and no more: what Pip has to say (how the
- * night went, the next thing on her list, her wish for today, a trophy to
- * raise), the picture, and one card for whatever is chosen from the row of
- * tiles under it. The next thing on the list is marked on the tile, or the
- * tab, where it is done, and a tap on its line goes there: that is the way
- * a new reader is walked through the camp.
+ * The camp page is three things and no more: Pip's bubble, the picture, and
+ * one card for whatever is chosen. The bubble has three lines at most: a
+ * tip when one is due, the one next thing (always there: `nextStep`, or a
+ * finished book's trophy to raise), and the parcels when there are any.
+ * The next thing is marked on the key where it is done, and a tap on its
+ * line goes there: that is the way a new reader is walked through the camp.
  *
  * The picture is for looking and pointing; everything it does is also on the
  * buttons under it, so none of it needs a pointer. What a thing means is in
@@ -415,8 +356,8 @@ export const BaseScreen = ({
   // How Pip is at home, as the page her house is on has said: she brings it with her.
   const mood = useBaseStore((state) => state.mood);
   const now = useMemo(() => ({ ...nowFrom(snapshot), ...(mood === undefined ? {} : { mood }) }), [snapshot, mood]);
-  /** What Pip brought back from a walk just now, until the reader has heard it. */
-  const [told, setTold] = useState<{ acorns: number; tale: number | null } | null>(null);
+  /** The tale the last parcel opened had in it, until the reader has heard it. */
+  const [told, setTold] = useState<number | null>(null);
   const books = useLibraryStore((state) => state.books);
   const [tab, setTab] = useState<Tab>("camp");
   const [selected, setSelected] = useState<Site>("burrow");
@@ -432,11 +373,9 @@ export const BaseScreen = ({
   const [lay, setLay] = useState<{ mode: "stage" | "stack"; sky: number; ground: number }>({ mode: "stack", sky: 0, ground: 0 });
   /** Which clearing the picture shows: the camp, or the meadow beyond it. */
   const [area, setArea] = useState<Place>("camp");
-  /** What "Collect all" just brought in, for a moment. */
+  /** What the list just paid, for a moment, over the acorns. */
   const [gained, setGained] = useState<{ acorns: number; at: number } | null>(null);
   const petted = useRef<{ x: number; y: number; at: number } | null>(null);
-  /** Which of Pip's first words is showing; null once they have been heard. */
-  const [intro, setIntro] = useState<number | null>(() => (introSeen() ? null : 0));
   const [sound, setSound] = useSoundOn();
   const [chosenDecor, setChosenDecor] = useState(-1);
   /** What the next tap on the picture does: sets a new thing down, or moves the chosen one. */
@@ -462,9 +401,7 @@ export const BaseScreen = ({
   /** Laying the camp out: moving buildings, or putting fence down. Null when not. */
   const [arrange, setArrange] = useState<"move" | "fence" | null>(null);
   const [carrying, setCarrying] = useState<Placed | null>(null);
-  const [watching, setWatching] = useState(false);
-  const [explaining, setExplaining] = useState(false);
-  const [useTip, setUseTip] = useState(false);
+  const [watching] = useState(false);
   const [raid, setRaid] = useState<Raid | null>(null);
   const [end, setEnd] = useState<RaidEnd | null>(null);
   const [sent, setSent] = useState<RaidEnd | null>(null);
@@ -520,11 +457,13 @@ export const BaseScreen = ({
         harm: base.harm,
         posts: base.posts,
         asleep: sleepers(base, minute),
+        // The lantern is lit on a day the reading goal is met: the lookout throws further at prowlers for it.
         lit: litTonight(base, now.day, now.goalMet === true),
         banners: base.banners.slice(-BANNERS_SHOWN).map((month) => seasonOf(`${month}-15`)),
         trophies: standing.map((trophy) => trophy.kind),
         decor: base.decor,
-        visitor: base.visitor !== now.day,
+        // The hedgehog does not call since 2026-10-15.
+        visitor: false,
         oakReady: oakReady(base, now.minutes) > 0,
         // Those with a bed in the hut: whoever goes raiding first, then the ones who know the camp best.
         residents: lodgers(base)
@@ -546,8 +485,6 @@ export const BaseScreen = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [base, season, night, now, standing, area, garden?.ripe, garden?.growing, garden === undefined, minute, readingKind]
   );
-  /** Minutes of reading until Pip is back from a walk; 0 when she is; null when she is at home. */
-  const away = base ? tripLeft(base, now.minutes) : null;
 
   // A building that went up while the camp is on screen: a burst over it.
   const levelsSeen = useRef<string | null>(null);
@@ -565,13 +502,22 @@ export const BaseScreen = ({
     }
     levelsSeen.current = key;
   }, [base]);
-  // The morning after a night: the magpies go over once.
-  const reportDay = base?.report?.day ?? null;
-  const magpiesFrom = useRef<number | null>(null);
+  // The list moved on: what it paid is heard, and seen over the acorns for a moment.
+  const listSeen = useRef<{ quest: number; acorns: number } | null>(null);
   useEffect(() => {
-    magpiesFrom.current = reportDay ? performance.now() : null;
-    if (reportDay) playSound("caw", { volume: 0.7 });
-  }, [reportDay]);
+    if (!base) return;
+    const was = listSeen.current;
+    if (was && base.quest > was.quest) {
+      // What the list paid: its rewards for the steps just ticked off (the oak's own acorns, gathered by the same tap, are not counted).
+      const paid = Math.min(base.acorns - was.acorns, QUESTS.slice(was.quest, base.quest).reduce((sum, quest) => sum + quest.reward, 0));
+      if (paid > 0) {
+        setGained({ acorns: paid, at: performance.now() });
+        acornsSound(paid);
+      }
+      playSound("chime");
+    }
+    listSeen.current = { quest: base.quest, acorns: base.acorns };
+  }, [base]);
 
   useLayoutEffect(() => {
     const wrap = wrapRef.current;
@@ -611,13 +557,8 @@ export const BaseScreen = ({
     // The scene is only there once the camp has been read, on its own page, with no raid on.
   }, [loaded, tab, raid, watching]);
 
-  // Tonight, as the camp stands: fought through by rule, so it is worked out when the camp or the day changes, not on every paint.
+  // The lantern: lit on a day the reading goal is met.
   const litNow = base ? litTonight(base, now.day, now.goalMet === true) : false;
-  const tonight = useMemo(
-    () => (base ? nightOutcome(base, now.day, litNow, minute) : null),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [base?.levels, base?.yard, base?.spots, base?.walls, base?.forks, base?.camps, base?.acorns, now.day, litNow]
-  );
   // Everything in the camp that throws, and how far: shown while things are moved about, so a layout can be reasoned about.
   const defence = useMemo(
     () => {
@@ -676,6 +617,25 @@ export const BaseScreen = ({
   const float = (x: number, y: number, text?: string, bad = false) => {
     floats.current = [...floats.current.filter((entry) => performance.now() - entry.at < 1400), { x, y, at: performance.now(), text, bad }];
   };
+  /**
+   * The oak's acorns taken in: heard, seen flying to the larder, and counted
+   * up over the tree. By the Gather button, and by a tap on the oak itself
+   * when it has some (the owner, 2026-10-14: "on clicking it collects
+   * automatically").
+   */
+  const gatherOak = () => {
+    const live = useBaseStore.getState().base;
+    if (!live) return;
+    // What will really come in, every bonus counted and as far as the larder has room: that is the figure shown.
+    const got = gatherBrings(live, now.minutes, now.streak ?? 0, now.day);
+    if (got <= 0) return;
+    acornsSound(got);
+    // Seen as well as heard: a few acorns from the oak to the larder, one after another.
+    const at = performance.now();
+    flights.current = Array.from({ length: Math.min(6, 1 + Math.floor(got / 6)) }, (_, index) => at + index * 90);
+    float(live.spots.oak[0], live.spots.oak[1] - 6, `+${got}`);
+    store.gather();
+  };
   const choose = (site: Site) => {
     setSelected(site);
     setPanel("site");
@@ -700,7 +660,6 @@ export const BaseScreen = ({
     const extras = (frame: number, seconds: number | null): CampExtras => {
       const time = performance.now();
       const burstFrame = burst ? Math.floor(((time - burst.at) / 1000) * ART_FPS) : BURST_FRAMES;
-      const flown = magpiesFrom.current === null ? null : (time - magpiesFrom.current) / MAGPIES_MS;
       void frame;
       const at = pointer.current;
       const spotted = (PLACED as readonly Site[]).includes(selected) ? (selected as Placed) : null;
@@ -722,7 +681,7 @@ export const BaseScreen = ({
               flying: flights.current.map((from) => (time - from) / FLIGHT_MS),
               arriving: (time - opened.current) / ARRIVE_MS
             }),
-        pip: !arrange && away === null,
+        pip: !arrange,
         selected: chosenDecor >= 0 || placing || arrange || !panelOpen || panel !== "site" ? null : spotted,
         selectedDecor: placing?.moving || arrange ? -1 : chosenDecor,
         placing: placing && !placing.what && at ? { kind: placing.kind, ...at } : null,
@@ -781,8 +740,9 @@ export const BaseScreen = ({
           const drag = press.current;
           return drag?.dragging && drag.grab?.what === "post" && at ? { guard: drag.grab.guard, x: at.x, y: at.y } : null;
         })(),
-        path: arrange && base && defence && sideKnown(base) && magpies(base) > 0 ? { from: GATES[nightSide(now.day)], to: defence.larder } : null,
-        from: arrange && base && sideKnown(base) && magpies(base) > 0 ? nightSide(now.day) : null,
+        // (While arranging, the line the night's raiders would take to the larder was drawn. There is no such night now.)
+        path: null,
+        from: null,
         bars: base ? PLACED.filter((site) => (base.harm[site] ?? 0) > 0 && (hovered.current === site || time - (knockedAt.current[site] ?? -1e9) < 4000)) : undefined,
         // Between raids the odd prowler comes out of the wood, and what throws sees him off: not while things are being moved about.
         watch: defence && area === "camp" && !arrange && !placing ? defence.rings.filter((ring) => ring.throws) : undefined,
@@ -792,7 +752,7 @@ export const BaseScreen = ({
         floats: floats.current.filter((entry) => time - entry.at < 1300).map((entry) => ({ x: entry.x, y: entry.y, age: (time - entry.at) / 1000, text: entry.text, bad: entry.bad })),
         petted: petted.current && time - petted.current.at < 900 ? { x: petted.current.x, y: petted.current.y, age: (time - petted.current.at) / 1000 } : null,
         burst: burst && burstFrame < BURST_FRAMES ? { site: burst.site, frame: burstFrame } : null,
-        magpies: flown !== null && flown < 1 ? flown : null
+        magpies: null
       };
     };
     // The first drawing is by the camp's clock like every one after it: drawn without it, the picture was the day's for
@@ -822,13 +782,13 @@ export const BaseScreen = ({
     };
     // `base` and `now` reach the picture through `look`, which changes when they do.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [art, look, selected, chosenDecor, placing, burst, tab, raid, arrange, carrying, watching, defence, panel, fit, away, chosenLand, area, lay, panelOpen, chosenGuard]);
+  }, [art, look, selected, chosenDecor, placing, burst, tab, raid, arrange, carrying, watching, defence, panel, fit, chosenLand, area, lay, panelOpen, chosenGuard]);
 
   // The scouts' word on each raid: worked out when the camp or the day changes, not on every paint.
   const scouting = useMemo(() => {
     if (!base || base.levels.hut < 1) return null;
-    const road = Array.from({ length: ROAD_CAMPS }, (_, slot) => roadCamp(base, now.day, slot));
-    return { road: road.map((plan) => scoutsSay(base, plan)), camp: scoutsSay(base, nextCamp(base)), king: scoutsSay(base, theKing(base)) };
+    // (The road's three camps a day are not shown since 2026-10-15: the strongholds are one ladder to climb.)
+    return { camp: scoutsSay(base, nextCamp(base)), king: scoutsSay(base, theKing(base)) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [base?.levels.hut, base?.camps, base?.forks.hut, now.day]);
 
@@ -965,25 +925,6 @@ export const BaseScreen = ({
       />
     );
   }
-  if (watching && tonight) {
-    return (
-      <BattleScreen
-        mode="watch"
-        setup={nightRaiders(base, now.day)}
-        structures={campStructures(base, litNow, minute)}
-        side={tonight.side}
-        night
-        title={`Tonight: ${FOES[tonight.foe].name.replace(/^The /, "the ")}, from ${sideWord(tonight.side)}`}
-        verdict={tonight.held ? "The camp holds." : tonight.taken > 0 ? `They get to the larder: ${tonight.taken} taken.` : "They get to the larder, and find nothing in reach."}
-        held={tonight.held}
-        skin={skin}
-        outfit={outfit}
-        season={season}
-        onClose={() => setWatching(false)}
-      />
-    );
-  }
-
   /** The lookout that has taken a path is another tower to look at: which picture, for its tile and its card. */
   const pathLook = (site: Site, level: number) => (site === "tower" && base.forks.tower && level >= 3 ? { name: base.forks.tower === "a" ? "spire" : "darkwatch", variant: level - 3 } : null);
   /** What is set down in the clearing that is looked at. */
@@ -995,22 +936,18 @@ export const BaseScreen = ({
   const nextAnimal = ANIMALS.filter((animal) => !base.animals.includes(animal.id)).sort((a, b) => a.charm - b.charm)[0] ?? null;
   const room = holds(base) - base.acorns;
   const streak = now.streak ?? 0;
-  const lit = litNow;
-  const birds = magpies(base);
-  const risk = tonight?.taken ?? 0;
   const piecesLeft = fencePieces(base) - base.walls.length;
-  const wish = wishToday(base, now);
-  const quest = questNow(base);
-  const today = offers(base, now.day);
   const rested = raidsReady(base, now.minutes);
-  // Where the next thing on Pip's list is done: marked there until it is.
-  const nudge: Exclude<QuestAt, "path"> | null = quest && !quest.done ? questAt(base) : null;
-  const goTo = (at: Exclude<QuestAt, "path">) => {
+  /** The one next thing: always something (see `nextStep`). */
+  const next = nextStep(base, now.minutes);
+  /** A finished book whose trophy can be raised now: that comes before anything else on the list. */
+  const raisable = waiting.length > 0 && trophyWaits(base, now.minutes) === 0 ? waiting[0] : null;
+  /** How many of the parcels waiting the larder has room for, each whole. */
+  const opensNow = Math.min(base.parcels, Math.floor(Math.max(0, room) / parcelGives(base)));
+  // Where it is done: marked there until it is.
+  const nudge: QuestAt | null = next.full ? null : next.at;
+  const goTo = (at: QuestAt) => {
     playSound("click");
-    if (at === "arcade") {
-      onArcade?.();
-      return;
-    }
     if (at === "raids") {
       setTab("raids");
       return;
@@ -1029,27 +966,35 @@ export const BaseScreen = ({
       return;
     }
     setArea("camp");
-    if (at === "tonight") {
-      // Before the magpies have found the camp there is no tonight: the burrow is what brings them.
-      if (birds > 0) setPanel("tonight");
-      else {
-        setSelected("burrow");
-        setPanel("site");
-      }
-      return;
-    }
-    setSelected(at);
+    // A plot that is not there yet (a yard plot before its level): the burrow is what brings it.
+    setSelected(plotOpen(base, at) ? at : "burrow");
     setPanel("site");
   };
-  /** Pip is back from her walk: what she brought goes in, and what she saw is told. */
-  const welcome = () => {
-    const brought = store.welcomeBack();
-    if (!brought) return;
-    setTold(brought);
-    playSound("chime");
-    acornsSound(brought.acorns);
-    const from = performance.now();
-    flights.current = Array.from({ length: Math.min(5, 1 + Math.floor(brought.acorns / 8)) }, (_, index) => from + index * 90);
+  /**
+   * Opens the parcels waiting by the burrow's door: one (a tap on one in the
+   * picture) or all that the larder has room for. What came in is heard and
+   * seen, and a tale, if one came, is told in Pip's bubble.
+   */
+  const openParcels = (one: { x: number; y: number } | null = null) => {
+    const first = useBaseStore.getState().base;
+    if (!first) return;
+    for (let count = 0; count < PARCELS_MOST; count++) {
+      const before = useBaseStore.getState().base;
+      store.openParcel();
+      const after = useBaseStore.getState().base;
+      if (!before || !after || after.parcels >= before.parcels) break;
+      if (after.tales.length > before.tales.length) setTold(after.tales[after.tales.length - 1]);
+      if (one) break;
+    }
+    const got = (useBaseStore.getState().base?.acorns ?? first.acorns) - first.acorns;
+    playSound(got > 0 ? "pop" : "womp", { volume: 0.6 });
+    if (got > 0) {
+      const at = performance.now();
+      flights.current = Array.from({ length: Math.min(5, 1 + Math.floor(got / 8)) }, (_, index) => at + index * 90);
+      float(one?.x ?? base.spots.burrow[0], one?.y ?? base.spots.burrow[1] + 6, `+${got}`);
+      acornsSound(got);
+      store.learn("parcel");
+    }
   };
   const chosenTile = (what: string) => what === "meadow" && area === "meadow";
   const mark = (at: QuestAt | Panel) => (nudge === at ? <span className="pip-base-nudge" aria-label="Next on Pip's list" /> : null);
@@ -1409,15 +1354,7 @@ export const BaseScreen = ({
     }
     // A parcel that came up the path from the reading: a tap opens it.
     if (parcelAtPoint(look, at.x, at.y)) {
-      const had = base.acorns;
-      store.openParcel();
-      const got = (useBaseStore.getState().base?.acorns ?? had) - had;
-      playSound(got > 0 ? "pop" : "womp", { volume: 0.6 });
-      if (got > 0) {
-        flights.current = [performance.now(), performance.now() + 90];
-        float(at.x, at.y, `+${got}`);
-        store.learn("parcel");
-      }
+      openParcels(at);
       return;
     }
     // A trophy says which book it is.
@@ -1445,18 +1382,9 @@ export const BaseScreen = ({
       // A tap on a construct opens the shelf it is on. To move it, it is dragged: a tap used to pick it up, and
       // the next tap anywhere put it down, which nobody could have expected.
       setChosenLand(-1);
-      if (birds > 0) setPanel("tonight");
-      else {
-        setSelected("fence");
-        setPanel("site");
-      }
+      setSelected(base.levels.fence > 0 || base.levels.tower === 0 ? "fence" : "tower");
+      setPanel("site");
       playSound("click");
-      return;
-    }
-    // The hedgehog, while he is here: a tap on him is a word with him.
-    if (look.visitor && Math.abs(at.x - HEDGEHOG_SPOT.x) <= 10 && at.y >= HEDGEHOG_SPOT.top) {
-      setPanel("visitor");
-      playSound("squeak", { pitch: 0.8 });
       return;
     }
     // A guardian at their post: a tap is their card, where they are posted and trained.
@@ -1477,6 +1405,8 @@ export const BaseScreen = ({
         playSound("squeak", { pitch: 1.15 });
       }
       choose(found);
+      // A tap on an oak with acorns on it takes them in, without a button.
+      if (found === "oak") gatherOak();
       return;
     }
     if (garden && gardenAt(base.spots, at.x, at.y)) {
@@ -1493,7 +1423,7 @@ export const BaseScreen = ({
 
   // ---- the guardian whose post the chosen site is ------------------------------------------------
   const guardRow = (guard: Guardian | null = guardAt(selected), alone = false) => {
-    if (!guard || (!alone && (levelOf(base, selected) === 0 || base.levels.burrow < GUARDS_FROM - 1))) return null;
+    if (!guard || (!alone && (levelOf(base, selected) === 0 || base.levels.burrow < GUARDS_FROM))) return null;
     const rank = guardOf(base, guard.id);
     const drilling = base.drill?.guard === guard.id;
     const why = guardBlocked(base, guard.id);
@@ -1566,8 +1496,8 @@ export const BaseScreen = ({
   };
 
   // ---- the shelves: tiles for what there is, by what it is for -------------------------------------------
-  /** Which shelf is open: it follows what is chosen. None in the meadow, or while the hedgehog is being spoken to. */
-  const shelf: Shelf | null = area !== "camp" || panel === "visitor" ? null : panel === "decor" ? "decor" : panel === "people" ? "heroes" : panel === "tonight" ? "defence" : panel === "guard" ? "heroes" : panel === "garden" ? "camp" : shelfOfSite(selected);
+  /** Which shelf is open: it follows what is chosen. None in the meadow. */
+  const shelf: Shelf | null = area !== "camp" ? null : panel === "decor" ? "decor" : panel === "people" ? "heroes" : panel === "guard" ? "heroes" : panel === "garden" ? "camp" : shelfOfSite(selected);
   const openShelf = (to: Shelf) => {
     // The key of the shelf that is open shuts it: the clearing is all there is to see again.
     if (panelOpen && shelf === to && tab === "camp" && chosenDecor < 0 && chosenLand < 0) {
@@ -1583,12 +1513,9 @@ export const BaseScreen = ({
       if (shelfOfSite(selected) !== "camp") setSelected("burrow");
       setPanel("site");
     } else if (to === "defence") {
-      // Tonight first, once there is a night to speak of; before that, the fence.
-      if (birds > 0) setPanel("tonight");
-      else {
-        setSelected(base.levels.fence === 0 && base.levels.tower > 0 ? "tower" : "fence");
-        setPanel("site");
-      }
+      // The lookout until there is a fence to be had; then the fence.
+      setSelected(base.levels.burrow < FENCE_FROM || (base.levels.fence === 0 && base.levels.tower === 0) ? "tower" : "fence");
+      setPanel("site");
     } else setPanel(to === "heroes" ? "people" : "decor");
     playSound("click");
   };
@@ -1647,11 +1574,11 @@ export const BaseScreen = ({
     ) : entry.kind === "work" ? (
       <Sprite name="work" variant={entry.which ?? 0} box={22} />
     ) : entry.kind === "foe" ? (
-      (entry.which ?? 0) > 0 ? (
-        <Sprite name="foe" variant={(entry.which ?? 1) - 1} box={22} />
-      ) : (
-        <Bird size={15} aria-hidden />
-      )
+      <ShieldAlert size={15} aria-hidden />
+    ) : entry.kind === "fence" ? (
+      <Sprite name="fencepiece" variant={1} box={22} />
+    ) : entry.kind === "postcard" ? (
+      <Camera size={15} aria-hidden />
     ) : (
       <Star size={15} aria-hidden />
     );
@@ -1678,9 +1605,12 @@ export const BaseScreen = ({
           </p>
         )}
         <div className="pip-base-shelf-row" role="group" aria-label="Buildings">
-          {SHELF_SITES.camp.map((site) =>
-            plotOpen(base, site) ? siteTile(site) : shutTile(site, site === "yard0" ? "A plot in the yard" : "A second plot", PLOT_FROM[site as "yard0" | "yard1"], <Sprite name="workshop" variant={0} box={30} />)
-          )}
+          {/* What stands, and of what is still to come only the next: nothing else stands about locked. */}
+          {SHELF_SITES.camp
+            .filter((site, index, all) => plotOpen(base, site) || all.findIndex((other) => !plotOpen(base, other)) === index)
+            .map((site) =>
+              plotOpen(base, site) ? siteTile(site) : shutTile(site, site === "yard0" ? "A plot in the yard" : "A second plot", PLOT_FROM[site as "yard0" | "yard1"], <Sprite name="workshop" variant={0} box={30} />)
+            )}
           {garden && (
             <button
               type="button"
@@ -1704,131 +1634,90 @@ export const BaseScreen = ({
     );
   };
 
-  const defenceShelf = () => (
-    <section className="pip-base-card pip-base-shelf" aria-label="Defence">
-      <h3
-        className="pip-base-title"
-        title="What stands between the night and the larder. Where each thing stands decides how a night goes: Arrange shows the line they take, and how far everything reaches."
-      >
-        Defence
-      </h3>
-      <div className="pip-base-shelf-row" role="group" aria-label="Walls and watch">
-        {siteTile("fence")}
-        {siteTile("tower")}
-        {birds > 0 && (
-          <button
-            type="button"
-            className={`pip-base-tile ${panel === "tonight" && chosenDecor < 0 ? "is-chosen" : ""}`}
-            aria-pressed={panel === "tonight" && chosenDecor < 0}
-            aria-label={`Tonight: ${tonight?.held ? "the camp holds" : `${risk} at risk`}`}
-            title="Tonight"
-            onClick={() => {
-              setPanel("tonight");
-              setChosenDecor(-1);
-              playSound("click");
-            }}
-          >
-            <Moon size={20} aria-hidden />
-            {tonight?.held ? <ShieldCheck size={12} className="pip-base-tile-mark is-good" aria-hidden /> : <ShieldAlert size={12} className="pip-base-tile-mark is-bad" aria-hidden />}
-            {panel !== "tonight" && mark("tonight")}
-          </button>
+  const defenceShelf = () => {
+    // Of the constructs: those this level has, and the next one to come. Nothing else stands about locked.
+    const nextWork = WORKS.map((work, kind) => ({ work, kind }))
+      .filter((entry) => base.levels.burrow < entry.work.burrow)
+      .sort((a, b) => a.work.burrow - b.work.burrow || a.work.cost - b.work.cost)[0];
+    const shown = WORKS.map((work, kind) => ({ work, kind })).filter((entry) => base.levels.burrow >= entry.work.burrow || entry.kind === nextWork?.kind);
+    return (
+      <section className="pip-base-card pip-base-shelf" aria-label="Defence">
+        <h3 className="pip-base-title" title="What sees the prowlers off. Where each thing stands decides who gets through: Arrange shows how far everything reaches.">
+          Defence
+        </h3>
+        <div className="pip-base-shelf-row" role="group" aria-label="Walls and watch">
+          {siteTile("tower")}
+          {base.levels.burrow < FENCE_FROM && base.levels.fence === 0 ? shutTile("fence", "The fence", FENCE_FROM, <Sprite name="fencepiece" variant={1} box={30} />) : siteTile("fence")}
+        </div>
+        {shown.length > 0 && (
+          <>
+            <h4 className="pip-base-heading mt-3" title="One of each. Set down where you want it, and moved for nothing: each does one thing to whoever comes near it.">
+              Constructs
+            </h4>
+            <div className="pip-base-shelf-row" role="group" aria-label="Constructs">
+              {shown.map(({ work, kind }) => {
+                if (base.levels.burrow < work.burrow) return shutTile(`work-${kind}`, work.name, work.burrow, <Sprite name="work" variant={kind} box={30} />);
+                const why = workBlocked(base, kind);
+                const here = base.works.some((entry) => entry.kind === kind);
+                return (
+                  <button
+                    key={work.name}
+                    type="button"
+                    className={`pip-base-tile is-wide ${placing?.what === "work" && placing.kind === kind ? "is-chosen" : ""}`}
+                    disabled={why !== null}
+                    aria-label={`${work.name}${here ? ", move it" : `, ${work.cost} acorns`}`}
+                    title={`${work.name}. ${work.does}.`}
+                    onPointerDown={(event) => offShelf(event, { kind, moving: here, what: "work" })}
+                    onClick={() => {
+                      setChosenDecor(-1);
+                      setChosenLand(-1);
+                      pointer.current = null;
+                      setPlacing({ kind, moving: here, what: "work" });
+                      playSound("pick");
+                    }}
+                  >
+                    <Sprite name="work" variant={kind} box={32} className={why ? "is-locked" : ""} />
+                    {here ? <Move size={11} aria-hidden /> : acorns(work.cost, 10)}
+                    {!here && kind === WORKS.findIndex((other, at) => base.levels.burrow >= other.burrow && !base.works.some((entry) => entry.kind === at)) && mark("fence")}
+                  </button>
+                );
+              })}
+            </div>
+          </>
         )}
-      </div>
-      <p className="mt-3">
-        <button
-          type="button"
-          className="pip-base-chip"
-          title="The guardians are with everyone else in the camp, on the Heroes shelf"
-          onClick={() => {
-            setChosenGuard(Math.max(0, base.guards.findIndex((rank) => rank > 0)));
-            setPanel("guard");
-            playSound("click");
-          }}
-        >
-          <Users size={12} aria-hidden /> Guardians {base.guards.filter((rank) => rank > 0).length} / {GUARDIANS.length}
-        </button>
-      </p>
-      <h4 className="pip-base-heading mt-3" title="One of each. Set down where you want it, and moved for nothing: each changes how a night goes, and which of them matters depends on who is coming.">
-        Constructs
-      </h4>
-      <div className="pip-base-shelf-row" role="group" aria-label="Constructs">
-        {WORKS.map((work, kind) => {
-          if (base.levels.burrow < work.burrow) return shutTile(`work-${kind}`, work.name, work.burrow, <Sprite name="work" variant={kind} box={30} />);
-          const why = workBlocked(base, kind);
-          const here = base.works.some((entry) => entry.kind === kind);
-          return (
-            <button
-              key={work.name}
-              type="button"
-              className={`pip-base-tile is-wide ${placing?.what === "work" && placing.kind === kind ? "is-chosen" : ""}`}
-              disabled={why !== null}
-              aria-label={`${work.name}${here ? ", move it" : `, ${work.cost} acorns`}`}
-              title={`${work.name}. ${work.does}.`}
-              onPointerDown={(event) => offShelf(event, { kind, moving: here, what: "work" })}
-              onClick={() => {
-                setChosenDecor(-1);
-                setChosenLand(-1);
-                pointer.current = null;
-                setPlacing({ kind, moving: here, what: "work" });
-                playSound("pick");
-              }}
-            >
-              <Sprite name="work" variant={kind} box={32} className={why ? "is-locked" : ""} />
-              {here ? <Move size={11} aria-hidden /> : acorns(work.cost, 10)}
-            </button>
-          );
-        })}
-      </div>
-    </section>
-  );
+      </section>
+    );
+  };
 
   const heroesShelf = () => {
     const here = residents(base).length;
-    const waits = wantWaits(base, now) || away === 0;
+    const blades = bladesWon(base).length;
     return (
-      <section className="pip-base-card pip-base-shelf" aria-label="Heroes">
+      <section className="pip-base-card pip-base-shelf" aria-label="People">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h3 className="pip-base-title" title="Three sorts of people, each for one thing. Scouts are the army. Heroes lead it, and answer the alarm at home. Guardians hold a post and never leave it.">
+          <h3
+            className="pip-base-title"
+            title="The scouts' hut trains the scouts who raid. Heroes come for the books you finish: one leads each raid, and they are about the camp for friends to see. Guardians are hired, and hold the camp against prowlers."
+          >
             People
           </h3>
           <p className="pip-base-level" title={`${here} of the ${HEROES.length} heroes have come`}>
             {here} of {HEROES.length}
           </p>
-          <p
-            className={`pip-base-chip ${here > bedsOf(base) ? "is-bad" : ""}`}
-            title={`Beds: ${Math.min(here, bedsOf(base))} of ${bedsOf(base)} taken. The heroes with a bed are about the camp, and go out to whatever comes out of the wood; a bigger hut has more beds. Whoever leads the raids always has one.`}
-          >
-            <BedDouble size={12} aria-hidden /> {Math.min(here, bedsOf(base))} / {bedsOf(base)}
-          </p>
-          <p
-            className="pip-base-chip"
-            title={`Blades won: ${bladesWon(base).length} of ${BLADES.length}. Each was a magpie lord's, or a friend's gift. A hero is given one under "Who lives here": press the blade beside their name to change it.`}
-          >
-            <Swords size={12} aria-hidden /> {bladesWon(base).length} / {BLADES.length}
-          </p>
+          {blades > 0 && (
+            <p className="pip-base-chip" title={`Blades won: ${blades} of ${BLADES.length}. Each was a magpie lord's, or a friend's gift. A hero is given one under "Who lives here".`}>
+              <Swords size={12} aria-hidden /> {blades} / {BLADES.length}
+            </p>
+          )}
         </div>
-        <h4
-          className="pip-base-heading mt-2"
-          title={`Nameless, and many: ${scoutsOf(base)} of them now. The hut trains them, more and of more kinds for every level of it. They are who goes on a raid, and at home they are the ones up on the roofs, throwing. They are never bought one by one, and have no names to learn.`}
-        >
-          Scouts <span className="pip-base-role">the army</span>
-        </h4>
-        <div className="pip-base-shelf-row" role="group" aria-label="Scouts">
+        <div className="pip-base-shelf-row" role="group" aria-label="The hut, and who lives here">
           {siteTile("hut")}
-        </div>
-        <h4
-          className="pip-base-heading mt-3"
-          title={`Ten, out of the stories. They cannot be bought: a hero comes for books finished, with the reading to show for it (${TROPHY_MINUTES} minutes behind each trophy). One leads every raid, with a way of their own and a blade. At home, the ones with a bed answer the alarm: wherever a prowler gets to, one of them goes. They grow by friendship.`}
-        >
-          Heroes <span className="pip-base-role">lead raids, answer alarms</span>
-        </h4>
-        <div className="pip-base-shelf-row" role="group" aria-label="Heroes">
           <button
             type="button"
             className={`pip-base-tile ${panel === "people" && chosenDecor < 0 ? "is-chosen" : ""}`}
             aria-pressed={panel === "people" && chosenDecor < 0}
-            aria-label={`Who lives here${waits ? ": someone is waiting" : ""}`}
-            title="Who lives here"
+            aria-label="Who lives here"
+            title="Who lives here: Pip, and the heroes your finished books have brought"
             onClick={() => {
               setPanel("people");
               setChosenDecor(-1);
@@ -1836,44 +1725,46 @@ export const BaseScreen = ({
             }}
           >
             <Users size={20} aria-hidden />
-            {waits && <span className="pip-base-tile-dot" aria-hidden="true" />}
           </button>
         </div>
-      <h4
-        className="pip-base-heading mt-3"
-        title="Seven, hired for acorns and trained by reading. Each holds the ground about a signpost you place, and does not leave it for anything; each also makes their own building better at the one thing it is for. They never go raiding. They grow by rank, and look it."
-      >
-        Guardians <span className="pip-base-role">hold a post</span>
-      </h4>
-      <div className="pip-base-shelf-row" role="group" aria-label="Guardians">
-        {GUARDIANS.map((guard) => {
-          if (base.levels.burrow < GUARDS_FROM) return shutTile(`guard-${guard.id}`, guard.name, GUARDS_FROM, <Sprite name="guardian" variant={guard.id} box={30} />);
-          const rank = guardOf(base, guard.id);
-          const drilling = base.drill?.guard === guard.id;
-          const chosen = panel === "guard" && chosenGuard === guard.id && chosenDecor < 0;
-          return (
-            <button
-              key={guard.id}
-              type="button"
-              className={`pip-base-tile ${chosen ? "is-chosen" : ""}`}
-              aria-pressed={chosen}
-              aria-label={`${guard.name}, ${rank === 0 ? "not posted" : `rank ${rank}`}${drilling ? ", in training" : ""}`}
-              title={`${guard.name}, ${guard.title}`}
-              onClick={() => {
-                setChosenGuard(guard.id);
-                setPanel("guard");
-                setChosenDecor(-1);
-                setChosenLand(-1);
-                playSound("click");
-              }}
+        {base.levels.burrow >= GUARDS_FROM && (
+          <>
+            <h4
+              className="pip-base-heading mt-3"
+              title="Seven, hired for acorns and trained by reading, each at a building of the camp. Each holds the ground about a signpost you place, and fights whoever comes into it. They never go raiding. They grow by rank, and look it."
             >
-              <Sprite name="guardian" variant={guard.id} box={30} className={rank === 0 && !drilling ? "is-locked" : ""} />
-              <span className="pip-base-tile-level">{rank > 0 ? rank : "+"}</span>
-              {drilling && <BookOpen size={11} className="pip-base-tile-mark is-working" aria-hidden />}
-            </button>
-          );
-        })}
-      </div>
+              Guardians
+            </h4>
+            <div className="pip-base-shelf-row" role="group" aria-label="Guardians">
+              {GUARDIANS.map((guard) => {
+                const rank = guardOf(base, guard.id);
+                const drilling = base.drill?.guard === guard.id;
+                const chosen = panel === "guard" && chosenGuard === guard.id && chosenDecor < 0;
+                return (
+                  <button
+                    key={guard.id}
+                    type="button"
+                    className={`pip-base-tile ${chosen ? "is-chosen" : ""}`}
+                    aria-pressed={chosen}
+                    aria-label={`${guard.name}, ${rank === 0 ? "not posted" : `rank ${rank}`}${drilling ? ", in training" : ""}`}
+                    title={`${guard.name}, ${guard.title}`}
+                    onClick={() => {
+                      setChosenGuard(guard.id);
+                      setPanel("guard");
+                      setChosenDecor(-1);
+                      setChosenLand(-1);
+                      playSound("click");
+                    }}
+                  >
+                    <Sprite name="guardian" variant={guard.id} box={30} className={rank === 0 && !drilling ? "is-locked" : ""} />
+                    <span className="pip-base-tile-level">{rank > 0 ? rank : "+"}</span>
+                    {drilling && <BookOpen size={11} className="pip-base-tile-mark is-working" aria-hidden />}
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
       </section>
     );
   };
@@ -1968,12 +1859,6 @@ export const BaseScreen = ({
             <p className="text-sm text-on-surface">{says}</p>
           </div>
         </div>
-        {selected === "oak" && level > 0 && (
-          <p className="text-xs text-on-surface-variant" title="A reading streak adds to what is gathered: 10% from 3 days, 20% from 7, 30% from 14, 50% from 30">
-            {streakAdds(streak) > 0 ? `Your ${streak}-day streak adds ${Math.round(streakAdds(streak) * 100)}%` : "A streak adds to what you gather"}
-            {streakNext(streak) ? `, more from ${streakNext(streak)} days` : ""}. Holds {oakHolds(base)}.
-          </p>
-        )}
         {level > 0 && level < top && nextSays && <p className="text-xs text-on-surface-variant">Next: {nextSays}</p>}
         <div className="mt-3 flex flex-wrap items-center gap-2">
           {job ? (
@@ -1987,7 +1872,8 @@ export const BaseScreen = ({
             <p className="text-xs text-on-surface-variant">{WHY_NOT.top(base, selected)}</p>
           ) : yard && !yard.kind ? (
             <>
-              {YARD_KINDS.filter((kind) => !base.yard.some((slot) => slot.kind === kind)).map((kind) => upgrade(kind))}
+              {/* (The market stall paid the arcade's games more: not offered since 2026-10-15. One already built stays.) */}
+              {YARD_KINDS.filter((kind) => kind !== "stall" && !base.yard.some((slot) => slot.kind === kind)).map((kind) => upgrade(kind))}
               {why && why !== "taken" && <span className="text-xs text-on-surface-variant">{WHY_NOT[why](base, selected)}</span>}
             </>
           ) : (
@@ -2026,7 +1912,7 @@ export const BaseScreen = ({
             </button>
           )}
           {selected === "fence" && level > 0 && (
-            <button type="button" className="tactile-button px-3 py-1.5 text-xs" title="Fence goes down a piece at a time, wherever you want the magpies kept out" onClick={() => setArrange("fence")}>
+            <button type="button" className="tactile-button px-3 py-1.5 text-xs" title="Fence goes down a piece at a time, wherever you want the prowlers held" onClick={() => setArrange("fence")}>
               {piecesLeft > 0 ? `Put down ${piecesLeft} ${piecesLeft === 1 ? "piece" : "pieces"}` : "Move the fence"}
             </button>
           )}
@@ -2035,23 +1921,14 @@ export const BaseScreen = ({
               type="button"
               className="tactile-button px-3 py-1.5 text-xs disabled:opacity-60"
               disabled={ready === 0 || room === 0}
-              title={room === 0 ? "The larder is full" : undefined}
-              onClick={() => {
-                const got = Math.min(ready, room);
-                acornsSound(got);
-                // Seen as well as heard: a few acorns from the oak to the larder, one after another.
-                const now = performance.now();
-                flights.current = Array.from({ length: Math.min(6, 1 + Math.floor(got / 6)) }, (_, index) => now + index * 90);
-                if (got > 0) float(base.spots.oak[0], base.spots.oak[1] - 6, `+${got}`);
-                store.gather();
-              }}
+              title={
+                room === 0
+                  ? "The larder is full"
+                  : `The oak holds ${oakHolds(base)}. ${streakAdds(streak) > 0 ? `Your ${streak}-day streak adds ${Math.round(streakAdds(streak) * 100)}% to what is gathered.` : "A reading streak adds to what is gathered: 10% from 3 days, up to 50% from 30."}`
+              }
+              onClick={gatherOak}
             >
-              Gather {ready}
-              {dewWaits(base, now.day) && ready > 0 && (
-                <span className="pip-base-acorns ml-1.5" title="The first acorns of the day have the dew on them: a little more comes with them">
-                  <Droplets size={11} aria-hidden />+{Math.min(ready, room, oakDrops(base))}
-                </span>
-              )}
+              Gather {acorns(gatherBrings(base, now.minutes, streak, now.day))}
             </button>
           )}
           {yard?.kind && !job && (
@@ -2069,29 +1946,8 @@ export const BaseScreen = ({
             </button>
           )}
         </div>
-        {isForked(selected) && level >= 3 && (
-          <div className="mt-3 flex flex-wrap items-center gap-2" role="group" aria-label="Its path">
-            <span className="text-xs text-on-surface-variant" title={`The first choice is free. Changing it costs ${PATH_AGAIN_COSTS} acorns.`}>
-              Path:
-            </span>
-            {(["a", "b"] as const).map((path) => (
-              <button
-                key={path}
-                type="button"
-                className={`tactile-button px-2.5 py-1 text-xs disabled:opacity-60 ${base.forks[selected] === path ? "tactile-button-primary" : ""}`}
-                aria-pressed={base.forks[selected] === path}
-                disabled={base.forks[selected] !== undefined && base.forks[selected] !== path && base.acorns < PATH_AGAIN_COSTS}
-                title={FORKS[selected][path].does}
-                onClick={() => {
-                  store.choosePath(selected, path);
-                  playSound("chime", { pitch: 0.9 });
-                }}
-              >
-                {FORKS[selected][path].name}
-              </button>
-            ))}
-          </div>
-        )}
+        {/* (Each of the oak, the lookout and the hut used to take one of two paths at level 3. The choice is not offered since
+            2026-10-15; a path already taken keeps what it does.) */}
         {guardRow()}
       </section>
     );
@@ -2102,15 +1958,14 @@ export const BaseScreen = ({
     const why = raidBlocked(base, kind, now, slot);
     const begin = () => {
       setSent(null);
-      const begun = store.startRaid(kind, slot, useTip && base.intel > 0);
+      const begun = store.startRaid(kind, slot, false);
       if (begun) {
-        setUseTip(false);
         setRaid(begun);
         playSound("horn");
       }
     };
     return (
-      <section key={`${kind}-${slot}`} className={`pip-base-card min-w-0 ${kind === "wild" && roadDone(base, now.day, slot) ? "opacity-60" : ""}`}>
+      <section key={`${kind}-${slot}`} className="pip-base-card min-w-0">
         <div className="flex items-start gap-3">
           <span className="pip-base-portrait">
             <Sprite name={kind === "king" ? "king" : "nest"} variant={kind === "king" ? undefined : plan.tier} box={52} />
@@ -2161,71 +2016,15 @@ export const BaseScreen = ({
     );
   };
 
-  // ---- tonight's card ----------------------------------------------------------------------------
-  const tonightCard = () => (
-    <section className="pip-base-card mt-3" aria-live="polite">
-      <div className="flex items-start gap-3">
-        <span className="pip-base-portrait is-site">
-          <Sprite name="raider" box={36} />
-        </span>
-        <div className="min-w-0 flex-1">
-          <h3 className="pip-base-title" title="Magpies come by every night and take what the camp cannot keep. Meeting your reading goal lights the lookout's lantern.">
-            Tonight
-          </h3>
-          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-on-surface">
-            {sideKnown(base) ? (
-              <span className="pip-base-chip" title={`${FOES[nightFoe(base, now.day)].name}, from ${sideWord(nightSide(now.day))}. ${FOES[nightFoe(base, now.day)].does}.`}>
-                {nightFoe(base, now.day) === 0 ? <Sprite name="raider" box={18} /> : <Sprite name="foe" variant={nightFoe(base, now.day) - 1} box={20} />}
-                <span className="font-semibold">{FOES[nightFoe(base, now.day)].name}</span>
-                {(() => {
-                  const Arrow = SIDE_ARROWS[nightSide(now.day)];
-                  return <Arrow size={14} aria-hidden />;
-                })()}
-                <span className="sr-only">From {sideWord(nightSide(now.day))}.</span>
-              </span>
-            ) : (
-              <span className="pip-base-chip" title="With no lookout and no owl, nobody sees who is coming, or which way">
-                <Sprite name="raider" box={18} />?
-              </span>
-            )}
-            {tonight?.held ? (
-              <span className="pip-base-chip is-good" title="As the camp stands, they do not reach the larder">
-                <ShieldCheck size={15} aria-hidden /> Holds
-              </span>
-            ) : (
-              <span className="pip-base-chip is-bad" title="As the camp stands, they reach the larder">
-                <ShieldAlert size={15} aria-hidden /> {risk > 0 ? acorns(`-${risk}`, 13) : "Nothing in reach"}
-              </span>
-            )}
-            {base.levels.tower > 0 && (
-              <span className={`pip-base-chip ${lit ? "is-lit" : "is-dim"}`} title={lit ? "The lantern is lit" : "Meet today's reading goal to light the lantern: the lookout throws further and harder"}>
-                <Sprite name="lantern" box={18} />
-              </span>
-            )}
-          </p>
-        </div>
-      </div>
-      <div className="mt-3 flex flex-wrap gap-2">
-        <button type="button" className="tactile-button tactile-button-primary px-3 py-1.5 text-xs font-semibold" title="See tonight played through, as the camp stands now" onClick={() => setWatching(true)}>
-          Watch it
-        </button>
-        <button type="button" className="tactile-button flex items-center gap-1.5 px-3 py-1.5 text-xs" onClick={() => setArrange("move")}>
-          <Move size={12} aria-hidden /> Arrange
-        </button>
-      </div>
-    </section>
-  );
-
   // ---- who lives here: Pip, and the heroes who have come ------------------------------------------------
-  const brings = tripBrings(base);
   const peopleCard = () => (
     <section className="pip-base-card mt-3" aria-live="polite">
-      <h3 className="pip-base-title" title="Pip, and the heroes your finished books have brought. Each has a want a day; seeing to it makes a friend of them, and a friend is a little stronger on a raid.">
+      <h3 className="pip-base-title" title="Pip, and the heroes your finished books have brought. One leads each raid; the ones with a bed in the hut are about the camp.">
         Who lives here
       </h3>
       <ul className="pip-base-people">
         <li>
-          <PipFace skin={skin} outfit={outfit} box={40} move={away !== null ? "idle" : (now.mood ?? 0) >= 75 ? "cheer" : "idle"} className={away !== null && away > 0 ? "is-locked" : ""} />
+          <PipFace skin={skin} outfit={outfit} box={40} move={(now.mood ?? 0) >= 75 ? "cheer" : "idle"} />
           <div className="min-w-0 flex-1">
             <p className="pip-base-person">
               Pip
@@ -2235,43 +2034,9 @@ export const BaseScreen = ({
                   `As happy as she is at home. ${moodQuicker(now.mood) > 0 ? `She builds ${Math.round(moodQuicker(now.mood) * 100)}% quicker for it.` : "Happier, she builds quicker: reading, play and a snack cheer her up."}`
                 )}
             </p>
-            {away === null ? (
-              <p className="flex flex-wrap items-center gap-1.5" title="Send Pip for a walk. She is back when you have read that long, with acorns and often a tale.">
-                <Footprints size={13} aria-hidden />
-                <span className="sr-only">A walk of</span>
-                {TRIPS.map((needs) => (
-                  <button
-                    key={needs}
-                    type="button"
-                    className="tactile-button px-2.5 py-0.5 text-xs"
-                    aria-label={`Send Pip for a walk of ${needs} minutes of reading`}
-                    onClick={() => {
-                      store.sendOut(needs);
-                      playSound("whee", { volume: 0.7 });
-                    }}
-                  >
-                    <span className="pip-base-acorns">
-                      <BookOpen size={11} aria-hidden />
-                      {needs}m
-                    </span>
-                  </button>
-                ))}
-              </p>
-            ) : away > 0 ? (
-              <div className="pip-base-job" title="She is back when you have read that long, not before">
-                <progress max={base.trip?.needs ?? 1} value={(base.trip?.needs ?? 0) - away} aria-label="Reading done toward her coming back" />
-                <span className="text-xs tabular-nums text-on-surface-variant">Out walking: {away} min of reading to go</span>
-              </div>
-            ) : (
-              <button type="button" className="tactile-button tactile-button-primary is-ready px-2.5 py-0.5 text-xs font-semibold" onClick={welcome}>
-                Welcome her back {brings && acorns(`+${brings.acorns}`)}
-              </button>
-            )}
           </div>
         </li>
         {residents(base).map((hero) => {
-          const want = wantOf(base, hero.id, now);
-          const bond = bondOf(base, hero.id);
           return (
             <li key={hero.id}>
               <Sprite name="hero" variant={hero.id} box={40} className={asleepUntil(base, 100 + hero.id, minute) > 0 ? "is-locked" : ""} />
@@ -2281,7 +2046,7 @@ export const BaseScreen = ({
                 </span>
               )}
               {asleepUntil(base, 100 + hero.id, minute) > 0 && (
-                <span className="pip-base-chip is-bad" title="Worn out: put down on a raid, or by a prowler. Asleep in the hut, and no use to anyone until they wake. It mends by itself.">
+                <span className="pip-base-chip is-bad" title="Worn out: put down on a raid. Asleep in the hut, and no use to anyone until they wake. It mends by itself.">
                   <Moon size={11} aria-hidden /> {Math.max(1, Math.ceil((asleepUntil(base, 100 + hero.id, minute) - minute) / 60_000))} min
                 </span>
               )}
@@ -2309,31 +2074,7 @@ export const BaseScreen = ({
               <div className="min-w-0 flex-1">
                 <p className="pip-base-person" title={`${hero.name}, ${hero.title}. ${hero.does}.`}>
                   {hero.short}
-                  {hearts(bond, `${bondWord(bond)[0].toUpperCase()}${bondWord(bond).slice(1)}${bond < BOND_MOST ? "" : ": as strong as friendship makes them"}`)}
                 </p>
-                {want && (
-                  <p className="flex flex-wrap items-center gap-2 text-xs text-on-surface">
-                    <span className="min-w-0 flex-1">{want.granted ? "Seen to today." : `“${want.text}.”`}</span>
-                    {!want.granted && (
-                      <button
-                        type="button"
-                        className={`tactile-button px-2.5 py-0.5 text-xs disabled:opacity-50 ${want.done ? "tactile-button-primary is-ready" : ""}`}
-                        disabled={!want.done}
-                        aria-label={`See to it: ${want.reward} acorns, and a step of friendship`}
-                        onClick={() => {
-                          store.grantWant(hero.id);
-                          playSound("chime", { pitch: 0.9 + (hero.id % 4) * 0.08 });
-                          acornsSound(want.reward);
-                        }}
-                      >
-                        <span className="pip-base-acorns">
-                          <Heart size={11} aria-hidden />
-                          {acorns(`+${want.reward}`)}
-                        </span>
-                      </button>
-                    )}
-                  </p>
-                )}
               </div>
             </li>
           );
@@ -2344,64 +2085,6 @@ export const BaseScreen = ({
           Finish a book, and someone moves in.
         </p>
       )}
-    </section>
-  );
-
-  // ---- the hedgehog's card ------------------------------------------------------------------------
-  const visitorCard = () => (
-    <section className="pip-base-card mt-3" aria-live="polite">
-      <div className="flex items-start gap-3">
-        <span className="pip-base-portrait is-site">
-          <Sprite name="hedgehog" box={40} className={today ? "" : "is-locked"} />
-        </span>
-        <div className="min-w-0 flex-1">
-          <h3 className="pip-base-title" title="The hedgehog comes by every day with a few things. One may be taken.">
-            The hedgehog
-          </h3>
-          {today ? (
-            <div className="mt-1 flex flex-wrap gap-2">
-              {today.map((offer) => {
-                const wasted = offerWasted(base, offer.id);
-                const Icon = OFFER_ICONS[offer.id];
-                return (
-                  <button
-                    key={offer.id}
-                    type="button"
-                    className="tactile-button flex items-center gap-1.5 px-3 py-1.5 text-xs disabled:opacity-50"
-                    disabled={wasted !== null}
-                    aria-label={offer.name}
-                    title={`${offer.name}. ${wasted ?? offer.does}.`}
-                    onClick={() => {
-                      store.takeOffer(offer.id);
-                      if (offer.id === "sack") acornsSound(12);
-                      else playSound("pop");
-                    }}
-                  >
-                    <Icon size={14} aria-hidden />
-                    {offer.id === "sack" ? offer.does.replace(" acorns", "") : offer.id === "tip" ? "Tip" : offer.id === "hand" ? "Help" : offer.id === "oil" ? "Oil" : "Pack"}
-                  </button>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="text-sm text-on-surface-variant">Back tomorrow.</p>
-          )}
-          {(base.intel > 0 || base.pack) && (
-            <p className="mt-2 flex flex-wrap gap-2 text-xs text-on-surface-variant">
-              {base.intel > 0 && (
-                <span className="pip-base-chip" title="A tip is two more scouts on one raid">
-                  <Lightbulb size={12} aria-hidden /> {base.intel}
-                </span>
-              )}
-              {base.pack && (
-                <span className="pip-base-chip" title="A sturdy pack: half as much again from the next raid won">
-                  <Backpack size={12} aria-hidden />
-                </span>
-              )}
-            </p>
-          )}
-        </div>
-      </div>
     </section>
   );
 
@@ -2559,28 +2242,6 @@ export const BaseScreen = ({
     playSound("swish");
   };
 
-  /** Everything that is ready, taken in one go: the oak, the list, the wish, the walk, and whoever has a want come true. */
-  const collectable =
-    (ready > 0 && room > 0 ? 1 : 0) + (quest?.done ? 1 : 0) + (wish?.done ? 1 : 0) + (away === 0 ? 1 : 0) + residents(base).filter((hero) => {
-      const want = wantOf(base, hero.id, now);
-      return Boolean(want && want.done && !want.granted);
-    }).length;
-  const collectAll = () => {
-    const before = base.acorns;
-    if (ready > 0 && room > 0) store.gather();
-    for (let step = 0; step < 6 && questNow(useBaseStore.getState().base ?? base)?.done; step++) store.claimQuest();
-    store.grantWish();
-    const brought = store.welcomeBack();
-    if (brought) setTold(brought);
-    for (const hero of residents(base)) store.grantWant(hero.id);
-    const acornsIn = (useBaseStore.getState().base?.acorns ?? before) - before;
-    const from = performance.now();
-    flights.current = Array.from({ length: Math.min(6, 1 + Math.floor(acornsIn / 8)) }, (_, index) => from + index * 80);
-    setGained({ acorns: acornsIn, at: from });
-    playSound("chime");
-    acornsSound(acornsIn);
-  };
-
   const leaveArrange = () => {
     setGating(false);
     setArrange(null);
@@ -2609,11 +2270,23 @@ export const BaseScreen = ({
         <p className="pip-base-stats">
           <span
             className="pip-base-chip"
-            title={`The camp's level: the burrow's. ${base.levels.burrow < MAX_LEVEL ? `Level ${base.levels.burrow + 1} brings ${campOpens(base.levels.burrow + 1).map((entry) => entry.name.toLowerCase()).join(", ")}.` : "It is as high as it goes."}`}
+            title={[
+              `The camp's level: the burrow's. ${base.levels.burrow < MAX_LEVEL ? `Level ${base.levels.burrow + 1} brings ${campOpens(base.levels.burrow + 1).map((entry) => entry.name.toLowerCase()).join(", ")}.` : "It is as high as it goes."}`,
+              `${SEASONS[season].name}: ${SEASONS[season].does.toLowerCase()}.`,
+              streak > 0 ? `A ${streak}-day reading streak${streakAdds(streak) > 0 ? `: ${Math.round(streakAdds(streak) * 100)}% more from the oak` : ""}.` : "",
+              base.levels.burrow >= PROWLERS_FROM && readingNow && readingKind !== null && GENRE_FOE[readingKind] !== null && GENRE_FOE[readingKind] !== undefined
+                ? `Reading “${readingNow.title}”: ${PROWLER_NAMES[GENRE_FOE[readingKind] as number]} come out of the wood oftener.`
+                : ""
+            ]
+              .filter(Boolean)
+              .join(" ")}
           >
             <House size={13} aria-hidden /> Level <strong>{base.levels.burrow}</strong>
           </span>
-          <span className="pip-base-chip" title={`Acorns. The larder holds ${holds(base)}.`}>
+          <span
+            className="pip-base-chip"
+            title={`Acorns. The larder holds ${holds(base)}.${base.levels.oak > 0 ? ` Ten minutes of reading drops ${Math.round(oakDrops(base) * (1 + streakAdds(streak)))} from the oak.` : ""}`}
+          >
             <Sprite name="acorn" box={16} />
             <strong key={base.acorns} className="pip-base-pop">
               {base.acorns}
@@ -2626,177 +2299,65 @@ export const BaseScreen = ({
               </span>
             )}
           </span>
-          {base.levels.oak > 0 && (
-            <span className="pip-base-chip" title="What ten minutes of reading drops from the oak, your streak counted in. Every upgrade to the oak raises it.">
-              <BookOpen size={13} aria-hidden /> <strong>+{Math.round(oakDrops(base) * (1 + streakAdds(streak)))}</strong>
-              <span className="pip-base-of">/ 10m</span>
-              <span className="sr-only"> acorns for ten minutes of reading</span>
-            </span>
-          )}
-          {base.levels.hut > 0 && (
-            <span className="pip-base-chip" title="Scouts the hut sends on a raid">
-              <Swords size={14} aria-hidden /> <strong>{scoutsOf(base)}</strong>
-              <span className="sr-only"> scouts</span>
-            </span>
-          )}
-          {tonight && (
-            <span
-              className={`pip-base-chip ${tonight.held ? "is-good" : "is-bad"}`}
-              title={tonight.held ? "As the camp stands, it holds tonight" : `As the camp stands, the magpies take ${tonight.taken} tonight`}
-            >
-              <Shield size={14} aria-hidden /> <strong>{tonight.held ? "Safe" : `-${tonight.taken}`}</strong>
-              <span className="sr-only"> tonight</span>
-            </span>
-          )}
-          <span className="pip-base-chip" title={`${SEASONS[season].name}. ${SEASONS[season].does}.`}>
-            {season === 0 ? <Sun size={14} aria-hidden /> : season === 1 ? <Leaf size={14} aria-hidden /> : season === 2 ? <Snowflake size={14} aria-hidden /> : <Flower2 size={14} aria-hidden />}
-            <span className="sr-only">{SEASONS[season].name}</span>
-          </span>
-          {readingNow && readingKind !== null && GENRE_FOE[readingKind] !== null && GENRE_FOE[readingKind] !== undefined && (
-            <span
-              className="pip-base-chip"
-              title={`Reading “${readingNow.title}”. ${TROPHY_KINDS[readingKind]}: a book of that kind brings ${PROWLER_NAMES[GENRE_FOE[readingKind] as number]} out of the wood oftener.`}
-            >
-              <BookOpen size={14} aria-hidden />
-              <span className="sr-only">Reading {TROPHY_KINDS[readingKind]}</span>
-            </span>
-          )}
-          {charm(base) > 0 && (
-            <span className="pip-base-chip" title="How charming the camp is: what is set about it, its trophies and its banners. The hedgehog brings more to a charming camp.">
+          {base.levels.burrow >= MEADOW_FROM && charm(base) > 0 && (
+            <span className="pip-base-chip" title={`How charming the camp is: what is set about it, its trophies and its banners. Charm brings the animals, and better parcels.${nextAnimal ? ` ${nextAnimal.name} comes at ${nextAnimal.charm}.` : ""}`}>
               <Sparkles size={14} aria-hidden /> <strong>{charm(base)}</strong>
               <span className="sr-only"> charm</span>
-            </span>
-          )}
-          {streak > 0 && (
-            <span className="pip-base-chip" title="Your reading streak. It adds to what the oak gives and to Pip's wishes.">
-              <Flame size={14} aria-hidden /> <strong>{streak}</strong>
-              <span className="sr-only"> day streak</span>
             </span>
           )}
         </p>
         {tab === "camp" && (
           <div className="pip-camp-say">
-            <PipFace
-              skin={skin}
-              outfit={outfit}
-              box={52}
-              move={intro !== null || quest?.done || wish?.done || away === 0 ? "cheer" : told ? "idea" : "idle"}
-              className={`pip-camp-say-face${away !== null && away > 0 ? " is-locked" : ""}`}
-            />
+            <PipFace skin={skin} outfit={outfit} box={52} move={next.full ? "idea" : told !== null ? "idea" : "idle"} className="pip-camp-say-face" />
+            {/* Three lines at most: a tip when one is due (or the book a tapped trophy stands for), the one next thing, and the parcels. What has gone wrong is said while it is so. */}
             <div className="pip-camp-say-bubble" role="status">
-              {intro !== null ? (
+              {base.wreck && (
                 <p className="pip-camp-say-line">
-                  <span className="min-w-0 flex-1">{INTRO[intro]}</span>
+                  <Hammer size={14} className="shrink-0" aria-hidden />
+                  <span className="min-w-0 flex-1" title="Mended by reading, like everything here. The fence is not built on until it is.">
+                    {base.wreck.by}'s scouts got in. I am mending the fence: {wreckLeft(base, now.minutes)} more {wreckLeft(base, now.minutes) === 1 ? "minute" : "minutes"} of reading.
+                  </span>
+                </p>
+              )}
+              {hurt.length > 0 && (
+                <p className="pip-camp-say-line">
+                  <ShieldAlert size={14} className="shrink-0" aria-hidden />
+                  <span className="min-w-0 flex-1" title="A prowler nobody stopped knocks about what he came for. Where enough of the camp reaches the way in, none get through.">
+                    A prowler got to {hurt.length === 1 ? `the ${siteName(base, hurt[0]).toLowerCase()}` : `${hurt.length} buildings`}.
+                  </span>
                   <button
                     type="button"
-                    className="tactile-button tactile-button-primary px-2.5 py-0.5 text-xs font-semibold"
-                    autoFocus
+                    className="tactile-button flex items-center gap-1.5 px-2.5 py-0.5 text-xs disabled:opacity-50"
+                    disabled={base.acorns < fixAll}
                     onClick={() => {
-                      playSound("squeak");
-                      if (intro + 1 < INTRO.length) setIntro(intro + 1);
-                      else {
-                        introDone();
-                        setIntro(null);
-                      }
+                      hurt.forEach((site) => store.fixSite(site));
+                      playSound("hammer");
                     }}
                   >
-                    {intro + 1 < INTRO.length ? "Next" : "Right!"}
+                    Fix {acorns(fixAll)}
                   </button>
                 </p>
-              ) : (
-                <>
-                  {collectable >= 2 && (
-                    <p className="pip-camp-say-line">
-                      <Nut size={14} className="shrink-0" aria-hidden />
-                      <span className="min-w-0 flex-1">{collectable} things are ready.</span>
-                      <button type="button" className="tactile-button tactile-button-primary is-ready px-2.5 py-0.5 text-xs font-semibold" onClick={collectAll}>
-                        Collect all
-                      </button>
-                    </p>
-                  )}
-                  {away !== null && away > 0 && (
-                    <p className="pip-camp-say-line">
-                      <Footprints size={14} className="shrink-0" aria-hidden />
-                      <span className="min-w-0 flex-1" title="She is back when you have read that long, with acorns and often a tale">
-                        Pip is out walking. Back after {away} more {away === 1 ? "minute" : "minutes"} of reading.
-                      </span>
-                    </p>
-                  )}
-                  {away === 0 && (
-                    <p className="pip-camp-say-line">
-                      <Footprints size={14} className="shrink-0" aria-hidden />
-                      <span className="min-w-0 flex-1">I am back from my walk!</span>
-                      <button type="button" className="tactile-button tactile-button-primary is-ready flex items-center gap-1.5 px-2.5 py-0.5 text-xs font-semibold" onClick={welcome}>
-                        Welcome back {brings && acorns(`+${brings.acorns}`)}
-                      </button>
-                    </p>
-                  )}
-                  {base.wreck && (
-                    <p className="pip-camp-say-line">
-                      <Hammer size={14} className="shrink-0" aria-hidden />
-                      <span className="min-w-0 flex-1" title="Mended by reading, like everything here. Nothing new is begun until it is.">
-                        {base.wreck.by}'s scouts got in. I am mending: {wreckLeft(base, now.minutes)} more {wreckLeft(base, now.minutes) === 1 ? "minute" : "minutes"} of reading.
-                      </span>
-                    </p>
-                  )}
-                  {hurt.length > 0 && (
-                    <p className="pip-camp-say-line">
-                      <ShieldAlert size={14} className="shrink-0" aria-hidden />
-                      <span className="min-w-0 flex-1" title="A prowler nobody stops knocks about what he came for. Where enough of the camp reaches the way in, none get through.">
-                        A prowler got to {hurt.length === 1 ? `the ${siteName(base, hurt[0]).toLowerCase()}` : `${hurt.length} buildings`}.
-                      </span>
-                      <button
-                        type="button"
-                        className="tactile-button flex items-center gap-1.5 px-2.5 py-0.5 text-xs disabled:opacity-50"
-                        disabled={base.acorns < fixAll}
-                        onClick={() => {
-                          hurt.forEach((site) => store.fixSite(site));
-                          playSound("hammer");
-                        }}
-                      >
-                        Fix {acorns(fixAll)}
-                      </button>
-                    </p>
-                  )}
-                  {told && (
-                    <p className="pip-camp-say-line">
-                      <Sparkles size={14} className="shrink-0" aria-hidden />
-                      <span className="min-w-0 flex-1">{told.tale === null ? `I found ${told.acorns} acorns, and nothing else worth telling.` : TALES[told.tale]}</span>
-                      <button type="button" className="tactile-button px-2.5 py-0.5 text-xs" onClick={() => setTold(null)}>
-                        {told.tale === null ? "Right" : "Lovely"}
-                      </button>
-                    </p>
-                  )}
-                  {base.report && (
-                    <p className="pip-camp-say-line">
-                      <Bird size={14} className="shrink-0" aria-hidden />
-                      <span className="min-w-0 flex-1" title={`They came from ${sideWord(base.report.side)}. ${base.report.lit ? "The lantern was lit." : "The lantern was dark."}`}>
-                        {base.report.held
-                          ? `The camp held against ${FOES[base.report.foe].name.replace(/^The /, "the ").replace(/^(Magpies|Frostwights)$/, (name) => name.toLowerCase())}${base.report.count > 0 ? `, and they dropped ${base.report.count}` : ""}.`
-                          : base.report.count > 0
-                            ? `${FOES[base.report.foe].name} got to the larder and took ${base.report.count}.`
-                            : `${FOES[base.report.foe].name} got to the larder, and found nothing in reach.`}
-                        {base.report.felled > 0 && ` ${base.report.felled} of the fence came down: it is to put up again.`}
-                        {base.report.stolen !== null && ` They made off with the ${DECOR[base.report.stolen].name.toLowerCase()}. It is in a camp on the road.`}
-                      </span>
-                      {!base.report.held && (
-                        <button
-                          type="button"
-                          className="tactile-button px-2.5 py-0.5 text-xs"
-                          onClick={() => {
-                            store.seenReport();
-                            beginArrange();
-                          }}
-                        >
-                          Arrange
+              )}
+              {shownTrophy
+                ? (() => {
+                    const book = books.find((entry) => entry.id === shownTrophy);
+                    if (!book) return null;
+                    const on = finishedOn(book);
+                    return (
+                      <p className="pip-camp-say-line">
+                        <Sprite name="trophy" variant={trophyKind(book.genres)} box={20} />
+                        <span className="min-w-0 flex-1 truncate" title={`${book.title}${book.author ? `, by ${book.author}` : ""}`}>
+                          <strong>{book.title}</strong>
+                          {book.author ? ` · ${book.author}` : ""}
+                          {on ? ` · ${new Date(on).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}` : ""}
+                        </span>
+                        <button type="button" className="tactile-button px-2 py-0.5 text-xs" aria-label="Close" onClick={() => setShownTrophy(null)}>
+                          <X size={12} aria-hidden />
                         </button>
-                      )}
-                      <button type="button" className="tactile-button px-2.5 py-0.5 text-xs" onClick={store.seenReport}>
-                        Right
-                      </button>
-                    </p>
-                  )}
-                  {(() => {
+                      </p>
+                    );
+                  })()
+                : (() => {
                     const tip = tipNow(base);
                     if (!tip) return null;
                     return (
@@ -2821,135 +2382,71 @@ export const BaseScreen = ({
                       </p>
                     );
                   })()}
-                  {shownTrophy &&
-                    (() => {
-                      const book = books.find((entry) => entry.id === shownTrophy);
-                      if (!book) return null;
-                      const on = finishedOn(book);
-                      return (
-                        <p className="pip-camp-say-line">
-                          <Sprite name="trophy" variant={trophyKind(book.genres)} box={20} />
-                          <span className="min-w-0 flex-1 truncate" title={`${book.title}${book.author ? `, by ${book.author}` : ""}`}>
-                            <strong>{book.title}</strong>
-                            {book.author ? ` · ${book.author}` : ""}
-                            {on ? ` · ${new Date(on).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}` : ""}
-                          </span>
-                          <button type="button" className="tactile-button px-2 py-0.5 text-xs" aria-label="Close" onClick={() => setShownTrophy(null)}>
-                            <X size={12} aria-hidden />
-                          </button>
-                        </p>
-                      );
-                    })()}
-                  {base.parcels > 0 && (
-                    <p className="pip-camp-say-line">
-                      <Package size={14} className="shrink-0" aria-hidden />
-                      <span className="min-w-0 flex-1 truncate" title="A chapter read sends a parcel up the path: eight minutes of reading for each. They wait by the burrow's door, six at most.">
-                        {base.parcels === 1 ? "A parcel came from your reading" : `${base.parcels} parcels came from your reading`}
-                      </span>
-                      <button
-                        type="button"
-                        className="tactile-button tactile-button-primary flex items-center gap-1.5 px-2.5 py-0.5 text-xs font-semibold"
-                        onClick={() => {
-                          const had = base.acorns;
-                          store.openParcel();
-                          const got = (useBaseStore.getState().base?.acorns ?? had) - had;
-                          playSound(got > 0 ? "pop" : "womp", { volume: 0.6 });
-                          if (got > 0) {
-                            float(base.spots.burrow[0], base.spots.burrow[1] + 6, `+${got}`);
-                            store.learn("parcel");
-                          }
-                        }}
-                      >
-                        Open {acorns(`+${parcelGives(base)}`)}
-                      </button>
-                    </p>
+              {raisable ? (
+                <p className="pip-camp-say-line">
+                  <Sprite name="trophy" variant={trophyKind(raisable.genres)} box={20} />
+                  <span
+                    className="min-w-0 flex-1 truncate"
+                    title={`Every book you finish, with ${TROPHY_MINUTES} minutes of reading behind it, stands in the camp as a trophy, and may bring a hero.`}
+                  >
+                    You finished <strong>{raisable.title}</strong>!
+                  </span>
+                  <button
+                    type="button"
+                    className="tactile-button tactile-button-primary is-ready flex items-center gap-1.5 px-2.5 py-0.5 text-xs font-semibold"
+                    title={room < TROPHY_GIVES ? `The larder has room for ${Math.max(0, room)} of its ${TROPHY_GIVES} acorns` : undefined}
+                    onClick={() => {
+                      store.raise(raisable.id, raisable.title, raisable.genres);
+                      playSound("fanfare", { volume: 0.7 });
+                    }}
+                  >
+                    Raise its trophy {room > 0 && acorns(`+${Math.min(TROPHY_GIVES, room)}`)}
+                  </button>
+                </p>
+              ) : (
+                <p className="pip-camp-say-line">
+                  <ListChecks size={14} className="shrink-0" aria-hidden />
+                  <button type="button" className="pip-camp-say-go min-w-0 flex-1" title="The next thing to do. Tap to be shown where." onClick={() => goTo(next.at)}>
+                    {next.text}
+                  </button>
+                  {next.reward !== null && (
+                    <span
+                      className={`pip-base-chip ${next.full ? "is-bad" : ""}`}
+                      title={next.full ? `${next.reward} acorns wait for room in the larder: spend some, or build the larder up` : `${next.reward} acorns when it is done`}
+                    >
+                      {acorns(`+${next.reward}`)}
+                    </span>
                   )}
-                  {waiting.length > 0 && (
-                    <p className="pip-camp-say-line">
-                      <Sprite name="trophy" variant={trophyKind(waiting[0].genres)} box={20} />
-                      <span
-                        className="min-w-0 flex-1 truncate"
-                        title={`Every book you finish stands in the camp as a trophy, and brings ${TROPHY_GIVES} acorns. It may bring a hero too. A trophy stands on reading: ${TROPHY_MINUTES} minutes of it for each, read here.`}
-                      >
-                        You finished <strong>{waiting[0].title}</strong>
-                        {waiting.length > 1 ? `, and ${waiting.length - 1} more` : ""}!
-                      </span>
-                      <button
-                        type="button"
-                        className="tactile-button tactile-button-primary flex items-center gap-1.5 px-2.5 py-0.5 text-xs font-semibold disabled:opacity-60"
-                        disabled={trophyWaits(base, now.minutes) > 0}
-                        title={
-                          trophyWaits(base, now.minutes) > 0
-                            ? `A trophy stands on reading, ${TROPHY_MINUTES} minutes for each. ${trophyWaits(base, now.minutes)} more and this one can be raised.`
-                            : undefined
-                        }
-                        onClick={() => {
-                          store.raise(waiting[0].id, waiting[0].title, waiting[0].genres);
-                          playSound("fanfare", { volume: 0.7 });
-                        }}
-                      >
-                        {trophyWaits(base, now.minutes) > 0 ? (
-                          <>
-                            <BookOpen size={12} aria-hidden /> {trophyWaits(base, now.minutes)} min
-                          </>
-                        ) : (
-                          <>Raise it {acorns(`+${TROPHY_GIVES}`)}</>
-                        )}
-                      </button>
-                    </p>
-                  )}
-                  {quest && (
-                    <p className="pip-camp-say-line">
-                      <ListChecks size={14} className="shrink-0" aria-hidden />
-                      <button
-                        type="button"
-                        className="pip-camp-say-go min-w-0 flex-1"
-                        title={`${quest.index + 1} of ${QUESTS.length} on Pip's list. Tap to be shown where.`}
-                        onClick={() => {
-                          const at = questAt(base);
-                          if (at) goTo(at);
-                        }}
-                      >
-                        {quest.quest.text}
-                      </button>
-                      <button
-                        type="button"
-                        className={`tactile-button px-2.5 py-0.5 text-xs disabled:opacity-50 ${quest.done ? "tactile-button-primary is-ready" : ""}`}
-                        disabled={!quest.done}
-                        aria-label={`Done: ${quest.quest.reward} acorns`}
-                        onClick={() => {
-                          store.claimQuest();
-                          playSound("chime");
-                          acornsSound(quest.quest.reward);
-                        }}
-                      >
-                        {acorns(`+${quest.quest.reward}`)}
-                      </button>
-                    </p>
-                  )}
-                  {wish && (
-                    <p className="pip-camp-say-line">
-                      <Heart size={14} className="shrink-0" aria-hidden />
-                      <span className="min-w-0 flex-1" title="Pip's wish for today. It is always some reading.">
-                        {wish.text}
-                      </span>
-                      <button
-                        type="button"
-                        className={`tactile-button px-2.5 py-0.5 text-xs disabled:opacity-50 ${wish.done ? "tactile-button-primary is-ready" : ""}`}
-                        disabled={!wish.done}
-                        aria-label={`Granted: ${wish.reward} acorns`}
-                        onClick={() => {
-                          store.grantWish();
-                          playSound("chime", { pitch: 1.12 });
-                          acornsSound(wish.reward);
-                        }}
-                      >
-                        {acorns(`+${wish.reward}`)}
-                      </button>
-                    </p>
-                  )}
-                  {!quest && !wish && !base.report && waiting.length === 0 && away === null && !told && <p className="pip-camp-say-line">All is well in the Hollow.</p>}
-                </>
+                </p>
+              )}
+              {told !== null ? (
+                <p className="pip-camp-say-line">
+                  <Package size={14} className="shrink-0" aria-hidden />
+                  <span className="min-w-0 flex-1" title="A tale Pip found while you read. Each is found once: they are all in the (i).">
+                    {TALES[told]}
+                  </span>
+                  <button type="button" className="tactile-button px-2.5 py-0.5 text-xs" onClick={() => setTold(null)}>
+                    Lovely
+                  </button>
+                </p>
+              ) : (
+                base.parcels > 0 && (
+                  <p className="pip-camp-say-line">
+                    <Package size={14} className="shrink-0" aria-hidden />
+                    <span className="min-w-0 flex-1 truncate" title="From your reading: a chapter read sends a parcel, eight minutes of reading for each, and a day's goal met sends one. Six wait by the burrow's door at most.">
+                      {base.parcels === 1 ? "A parcel came from your reading" : `${base.parcels} parcels came from your reading`}
+                    </span>
+                    <button
+                      type="button"
+                      className="tactile-button tactile-button-primary flex items-center gap-1.5 px-2.5 py-0.5 text-xs font-semibold disabled:opacity-60"
+                      disabled={opensNow === 0}
+                      title={opensNow === 0 ? "The larder is full: a parcel waits until it has room for the whole of it" : opensNow < base.parcels ? `The larder has room for ${opensNow} of them` : undefined}
+                      onClick={() => openParcels()}
+                    >
+                      {opensNow === 0 ? "Larder full" : <>{opensNow > 1 ? "Open all" : "Open"} {acorns(`+${opensNow * parcelGives(base)}`)}</>}
+                    </button>
+                  </p>
+                )
               )}
             </div>
           </div>
@@ -2973,16 +2470,21 @@ export const BaseScreen = ({
           <button
             type="button"
             className="pip-base-round"
-            aria-expanded={explaining}
-            aria-label="How the Hollow works"
-            title="How the Hollow works"
-            onClick={() => setExplaining((value) => !value)}
+            aria-expanded={tab === "journal"}
+            aria-label="How the Hollow works, and what has happened"
+            title="How the Hollow works, and what has happened"
+            onClick={() => {
+              setTab(tab === "journal" ? "camp" : "journal");
+              playSound("click");
+            }}
           >
             <Info size={16} aria-hidden />
           </button>
-          <button type="button" className="pip-base-round" aria-label="A postcard of your camp" title="A postcard of your camp, to save or copy" onClick={() => setPostcard(true)}>
-            <Camera size={16} aria-hidden />
-          </button>
+          {base.levels.burrow >= POSTCARD_FROM && (
+            <button type="button" className="pip-base-round" aria-label="A postcard of your camp" title="A postcard of your camp, to save or copy" onClick={() => setPostcard(true)}>
+              <Camera size={16} aria-hidden />
+            </button>
+          )}
           {corner}
         </span>
       </div>
@@ -3006,43 +2508,6 @@ export const BaseScreen = ({
             onClose={() => setPostcard(false)}
           />
         </Suspense>
-      )}
-
-      {explaining && (
-        <ul className="pip-base-card pip-base-how mt-3">
-          <li>
-            <BookOpen size={14} aria-hidden />
-            Reading runs the camp. Ten minutes read drops acorns from the oak; a chapter sends a parcel up the path; a quarter hour rests the scouts for a raid; and a building is finished by reading, not by waiting.
-          </li>
-          <li>
-            <Hammer size={14} aria-hidden />
-            Acorns build things. The burrow leads: nothing else is built past its level, and each of its levels clears more of the wood.
-          </li>
-          <li>
-            <Users size={14} aria-hidden />
-            Three sorts of people. Scouts are the army, and raid. Heroes come for books you have read: one leads a raid, and at home they answer the alarm. Guardians are hired, and hold the ground about a signpost you place.
-          </li>
-          <li>
-            <Shield size={14} aria-hidden />
-            Prowlers come out of the wood while you watch, and magpies come at night for the larder. What throws, the fence, constructs and guardians stop them; water, knolls and a gate turn them. Red is the ground a thing takes, blue how far it reaches.
-          </li>
-          <li>
-            <ShieldAlert size={14} aria-hidden />
-            One who gets through knocks a building about (four knocks and it is broken until fixed) or makes off with a few acorns: two knocks and one theft a day at the most. A night lost costs no more than a fifth of your acorns, and never what the larder hides.
-          </li>
-          <li>
-            <Swords size={14} aria-hidden />
-            Raids are fought: put scouts down outside a magpie camp and they do the rest. Half of it down is a star, the nest another, all of it the third; one wins most raids, and three on a stronghold empties the next one too.
-          </li>
-          <li>
-            <Flame size={14} aria-hidden />
-            Meet your reading goal and the lookout's lantern is lit that night. A streak makes the oak richer, and each season does one thing of its own.
-          </li>
-          <li>
-            <Star size={14} aria-hidden />
-            Every book you finish, with an hour and a half of reading behind it, is a trophy in the clearing, and may bring a hero.
-          </li>
-        </ul>
       )}
 
           <div ref={wrapRef} className="pip-arcade-screen pip-base-scene">
@@ -3122,28 +2587,9 @@ export const BaseScreen = ({
                   <DoorOpen size={13} aria-hidden /> {gateOf(base) ? "Move gate" : "Gate"}
                 </button>
               )}
-              <span className={`pip-base-chip ${carrying ? "" : tonight?.held ? "is-good" : tonight ? "is-bad" : ""}`} role="status">
-                {carrying ? (
-                  `Where should the ${siteName(base, carrying).toLowerCase()} stand?`
-                ) : tonight ? (
-                  tonight.held ? (
-                    <>
-                      <ShieldCheck size={14} aria-hidden /> Holds tonight
-                    </>
-                  ) : (
-                    <>
-                      <ShieldAlert size={14} aria-hidden /> Tonight {acorns(`-${tonight.taken}`)}
-                    </>
-                  )
-                ) : (
-                  "Drag a building to move it"
-                )}
+              <span className="pip-base-chip" role="status">
+                {carrying ? `Where should the ${siteName(base, carrying).toLowerCase()} stand?` : arrange === "fence" ? "Drag across the grass to lay fence" : "Drag a building to move it"}
               </span>
-              {tonight && !carrying && (
-                <button type="button" className="tactile-button px-2.5 py-1 text-xs" title="See tonight played through, as the camp stands now" onClick={() => setWatching(true)}>
-                  Watch
-                </button>
-              )}
               <button type="button" className="tactile-button tactile-button-primary ml-auto px-3 py-1 text-xs font-semibold" onClick={leaveArrange}>
                 Done
               </button>
@@ -3186,76 +2632,50 @@ export const BaseScreen = ({
             </div>
           ) : (
             <div className="pip-base-dock" role="group" aria-label="The camp">
-              {SHELVES.map(({ id, name, says, icon: Icon }) => {
+              {SHELVES.filter(({ id }) => id !== "decor" || decorOpen(base)).map(({ id, name, says, icon: Icon }) => {
                 const chosen = shelf === id && chosenDecor < 0 && panelOpen && tab === "camp";
                 const sites = SHELF_SITES[id];
-                const pointed = nudge !== null && (nudge === "tonight" ? id === "defence" : nudge !== "raids" && nudge !== "arcade" && nudge !== "meadow" && sites.includes(nudge));
+                const pointed = nudge !== null && nudge !== "raids" && nudge !== "meadow" && sites.includes(nudge);
                 return (
                   <button key={id} type="button" className={`pip-base-tile is-key ${chosen ? "is-chosen" : ""}`} aria-pressed={chosen} title={says} onClick={() => openShelf(id)}>
                     <Icon size={17} aria-hidden />
                     {name}
                     {id === "camp" && ready > 0 && room > 0 && !chosen && <Nut size={11} className="pip-base-tile-mark is-waiting" aria-hidden />}
                     {id === "camp" && garden && garden.ripe > 0 && !chosen && <span className="pip-base-tile-dot" aria-hidden="true" />}
-                    {id === "defence" && birds > 0 && tonight && !tonight.held && <ShieldAlert size={12} className="pip-base-tile-mark is-bad" aria-hidden />}
-                    {id === "heroes" && (wantWaits(base, now) || away === 0) && !chosen && <span className="pip-base-tile-dot" aria-hidden="true" />}
-                    {!chosen && pointed && <span className="pip-base-nudge" aria-label="Next on Pip's list" />}
+                    {!chosen && pointed && <span className="pip-base-nudge" aria-label="Next" />}
                   </button>
                 );
               })}
-              <span className="pip-base-dock-gap" aria-hidden="true" />
-              <button
-                type="button"
-                className={`pip-base-tile ${panel === "visitor" && chosenDecor < 0 ? "is-chosen" : ""}`}
-                aria-pressed={panel === "visitor" && chosenDecor < 0}
-                aria-label={`The hedgehog${today ? ", with something to offer" : ", back tomorrow"}`}
-                title="The hedgehog"
-                onClick={() => {
-                  setPanel("visitor");
-                  setChosenDecor(-1);
-                  playSound("click");
-                }}
-              >
-                <Sprite name="hedgehog" box={28} className={today ? "" : "is-locked"} />
-                {today && <span className="pip-base-tile-dot" aria-hidden="true" />}
-              </button>
-              {meadowOpen(base) && (
-                <button type="button" className="pip-base-tile" aria-label="Out to the meadow" title="The meadow: where the animals live, and there is room for more to be set down" onClick={() => goArea("meadow")}>
-                  <TreePine size={20} aria-hidden />
-                  {!chosenTile("meadow") && mark("meadow")}
+              {base.levels.hut > 0 && (
+                <>
+                  <span className="pip-base-dock-gap" aria-hidden="true" />
+                  <button
+                    type="button"
+                    className={`pip-base-tile is-key ${tab === "raids" ? "is-chosen" : ""}`}
+                    aria-pressed={tab === "raids"}
+                    title="Send the scouts against the magpies' strongholds"
+                    onClick={() => {
+                      setTab(tab === "raids" ? "camp" : "raids");
+                      playSound("click");
+                    }}
+                  >
+                    <Swords size={17} aria-hidden />
+                    Raids
+                    {rested > 0 && <span className="pip-base-count">{rested}</span>}
+                    {tab !== "raids" && mark("raids")}
+                  </button>
+                </>
+              )}
+              {base.levels.burrow >= FENCE_FROM && (
+                <button
+                  type="button"
+                  className="tactile-button ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs"
+                  title="Lay the camp out: lay fence, and see how far everything reaches. Anything can be dragged at any time."
+                  onClick={() => beginArrange(base.levels.fence > 0 && piecesLeft > 0 ? "fence" : "move")}
+                >
+                  <Move size={13} aria-hidden /> Arrange
                 </button>
               )}
-              <span className="pip-base-dock-gap" aria-hidden="true" />
-              {(["raids", "journal"] as const).map((entry) => (
-                <button
-                  key={entry}
-                  type="button"
-                  className={`pip-base-tile is-key ${tab === entry ? "is-chosen" : ""}`}
-                  aria-pressed={tab === entry}
-                  title={entry === "raids" ? "Send the scouts against the magpies' camps" : "What has happened, what has been won, and the clubs' bosses"}
-                  onClick={() => {
-                    setTab(tab === entry ? "camp" : entry);
-                    playSound("click");
-                  }}
-                >
-                  {entry === "raids" ? <Swords size={17} aria-hidden /> : <ListChecks size={17} aria-hidden />}
-                  {entry === "raids" ? "Raids" : "Journal"}
-                  {entry === "raids" && rested > 0 && base.levels.hut > 0 && <span className="pip-base-count">{rested}</span>}
-                  {entry === "raids" && tab !== "raids" && mark("raids")}
-                </button>
-              ))}
-              <button
-                type="button"
-                className="tactile-button ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs"
-                title="Where things stand decides the night: the magpies make straight for the larder, whatever is in their way has to come down first, and everything that throws, throws at what comes in reach"
-                onClick={() => beginArrange()}
-              >
-                <Move size={13} aria-hidden /> Arrange
-                {piecesLeft > 0 && (
-                  <span className="pip-base-count" title={`${piecesLeft} ${piecesLeft === 1 ? "piece" : "pieces"} of fence to put down`}>
-                    {piecesLeft}
-                  </span>
-                )}
-              </button>
             </div>
           )}
           {placing && !carriedOff && (
@@ -3314,10 +2734,6 @@ export const BaseScreen = ({
                 </button>
               </div>
             </section>
-          ) : panel === "tonight" && birds > 0 ? (
-            tonightCard()
-          ) : panel === "visitor" ? (
-            visitorCard()
           ) : panel === "decor" ? (
             // In the camp the shelf above is the whole of it; the meadow has no shelves, so there it is a card.
             area === "meadow" ? decorCard() : null
@@ -3348,12 +2764,6 @@ export const BaseScreen = ({
               : rested > 0
                 ? `Scouts rested for ${rested} ${rested === 1 ? "raid" : "raids"}.`
                 : `Scouts rested after ${restIn(base, now.minutes)} more min of reading.`}
-            {base.intel > 0 && base.levels.hut > 0 && (
-              <label className="flex items-center gap-1.5 text-xs" title="A tip is two more scouts on one raid">
-                <input type="checkbox" checked={useTip} onChange={(event) => setUseTip(event.target.checked)} />
-                <Lightbulb size={12} aria-hidden /> Use a tip ({base.intel})
-              </label>
-            )}
           </p>
           {base.levels.hut > 0 && HEROES.some((hero) => heroHere(base, hero.id)) && (
           <div
@@ -3376,8 +2786,8 @@ export const BaseScreen = ({
             >
               <UserX size={20} aria-hidden />
             </button>
-            {HEROES.map((hero) => {
-              const here = heroHere(base, hero.id);
+            {HEROES.filter((hero) => heroHere(base, hero.id)).map((hero) => {
+              const here = true;
               return (
                 <button
                   key={hero.id}
@@ -3399,7 +2809,6 @@ export const BaseScreen = ({
                   }}
                 >
                   <Sprite name="hero" variant={hero.id} box={32} className={here && asleepUntil(base, 100 + hero.id, minute) === 0 ? "" : "is-locked"} />
-                  {!here && <Lock size={10} className="pip-base-tile-mark" aria-hidden />}
                   {here && asleepUntil(base, 100 + hero.id, minute) > 0 && <Moon size={10} className="pip-base-tile-mark" aria-hidden />}
                 </button>
               );
@@ -3414,13 +2823,7 @@ export const BaseScreen = ({
           )}
           {base.levels.hut > 0 && (
             <>
-          <p className="mt-4 text-xs uppercase tracking-[0.18em] text-on-surface-variant" title="Three new camps every day, each raided once: an easy one, an even one and a rich one, measured against your scouts. They pay; they move nothing on.">
-            On the road today
-          </p>
-          <div className="mt-2 grid gap-3 sm:grid-cols-3">
-            {Array.from({ length: ROAD_CAMPS }, (_, slot) => raidCard("wild", roadCamp(base, now.day, slot), scouting?.road[slot] ?? null, slot))}
-          </div>
-          <p className="mt-4 text-xs uppercase tracking-[0.18em] text-on-surface-variant" title="Taking a stronghold moves the camp on: the road gets richer, and the magpies bolder. Three stars empties the next one too.">
+          <p className="mt-4 text-xs uppercase tracking-[0.18em] text-on-surface-variant" title="One after another, each a little harder and richer than the last. Three stars on one empties the next one too.">
             Strongholds
           </p>
           <div className="mt-2 grid gap-3 sm:grid-cols-2">
@@ -3512,15 +2915,34 @@ export const BaseScreen = ({
           <button type="button" className="pip-base-round pip-base-sheet-close" aria-label="Back to the camp" title="Back to the camp" onClick={() => setTab("camp")}>
             <X size={16} aria-hidden />
           </button>
+          <ul className="pip-base-how mt-3">
+            <li>
+              <BookOpen size={14} aria-hidden />
+              Reading runs the camp. Ten minutes read drops acorns from the oak, a chapter sends a parcel up the path, and a building is finished by reading, not by waiting.
+            </li>
+            <li>
+              <Hammer size={14} aria-hidden />
+              Acorns build things. The burrow is the camp's level: nothing else is built past it, and each level clears more of the wood and brings something new.
+            </li>
+            <li>
+              <ShieldAlert size={14} aria-hidden />
+              From level 2, prowlers come out of the wood while you watch. What throws, the fence, constructs and guardians see them off. One who gets through knocks a building about or takes a few acorns: a little, and two knocks and one theft a day at most.
+            </li>
+            <li>
+              <Swords size={14} aria-hidden />
+              The scouts raid the magpies' strongholds, led by a hero. Heroes come for the books you finish, with an hour and a half of reading behind each.
+            </li>
+            <li>
+              <Star size={14} aria-hidden />
+              Your camp is on your profile for friends to see, and the camera makes a postcard of it.
+            </li>
+          </ul>
           <p className="pip-base-stats mt-3">
             <span title="Strongholds taken">
               <Swords size={15} aria-hidden /> <strong>{base.camps}</strong> strongholds
             </span>
             <span title="Stars won on raids, in all">
               <Star size={15} aria-hidden /> <strong>{base.stats.stars}</strong>
-            </span>
-            <span title="Nights the camp has held">
-              <Shield size={15} aria-hidden /> <strong>{base.stats.nights}</strong> nights
             </span>
             <span title="Banners won from the Magpie King, one a month">
               <strong>{base.banners.length}</strong> {base.banners.length === 1 ? "banner" : "banners"}
@@ -3565,8 +2987,8 @@ export const BaseScreen = ({
             })}
           {base.tales.length > 0 && (
             <section className="pip-base-card mt-3">
-              <h3 className="pip-base-heading" title="What Pip has seen on her walks. Each is found once.">
-                <Footprints size={14} aria-hidden /> Tales from her walks
+              <h3 className="pip-base-heading" title="What Pip has found while you read: one comes in a parcel now and then. Each is found once.">
+                <Package size={14} aria-hidden /> Tales Pip has found
                 <span className="ml-auto text-xs font-normal tabular-nums text-on-surface-variant">
                   {base.tales.length} of {TALES.length}
                 </span>

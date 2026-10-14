@@ -1,12 +1,13 @@
 /**
  * Pip's tips: how the camp is learnt.
  *
- * The camp has a list of things to do (`QUESTS`), which says *what* next
- * and never *how*; and by now it has a good many things in it that nobody
- * would find by looking (that anything can be dragged, that fence is drawn
- * across the grass, that a signpost is where a guardian stands). A tip is
- * Pip saying one of those, once, when it first matters: when the thing it
- * is about has just become possible, and not before.
+ * The camp says one next thing at a time (`nextStep`), which is *what* and
+ * never *how*; and a good deal of it nobody would find by looking (that
+ * anything can be dragged, that fence is drawn across the grass, that a
+ * signpost is where a guardian stands). A tip is Pip saying one of those,
+ * once, when it first matters: when the thing it is about has just become
+ * possible, and not before. They are the camp's teaching: nothing else on
+ * its screen explains, beyond what a tooltip or the (i) says.
  *
  * One at a time, in her bubble. A tip is done with when the reader has
  * done the thing (most can be told from the camp itself, so a reader who
@@ -14,11 +15,11 @@
  * says they want none. They are kept with the camp, so a second computer
  * does not begin again.
  *
- * There is no tour to sit through. The first three come one after another
- * on a new camp and are the whole of a first visit: the oak, a building,
- * and moving it.
+ * There is no tour to sit through. A first visit is the oak, a building,
+ * and moving it; the second level of the camp brings the prowlers, the
+ * postcard and the fence, a tip each.
  */
-import { BUILDINGS, GATE_FROM, GUARDS_FROM, bedsOf, gateOf, residents, type BaseState } from "./rules";
+import { BUILDINGS, GATE_FROM, GUARDS_FROM, POSTCARD_FROM, PROWLERS_FROM, bedsOf, gateOf, residents, type BaseState } from "./rules";
 
 export type Tip = {
   id: string;
@@ -34,47 +35,52 @@ const built = (state: BaseState) => BUILDINGS.filter((site) => state.levels[site
 export const TIPS: readonly Tip[] = [
   {
     id: "oak",
-    text: "Reading runs the camp. Every ten minutes you read, the oak drops acorns: press Gather when it has some.",
+    text: "Reading runs the camp. Every ten minutes you read, the oak drops acorns: tap the oak to take them in.",
     when: () => true,
     did: (state) => state.stats.gathered > 0
   },
   {
     id: "build",
-    text: "Acorns build things. Open Camp below and pick one: it is finished by reading, not by waiting.",
+    text: "Acorns build things. Tap the next thing in my bubble, or open Camp below: a building is finished by reading, not by waiting.",
     when: (state) => state.stats.gathered > 0,
     // (A camp begins with its burrow and its oak: it is the third thing that is the first one built.)
     did: (state) => state.jobs.length > 0 || built(state) > 2
   },
   {
     id: "move",
-    text: "Anything can be moved: drag it, and new things can be dragged off a shelf. Arrange shows the ground each takes in red and its reach in blue.",
+    text: "Anything in the camp can be moved: drag it to where you want it.",
     when: (state) => built(state) >= 3
   },
   {
     id: "parcel",
-    text: "A parcel, from your reading: a chapter read sends one up the path. Tap it to open it.",
+    text: "A parcel, from your reading: a chapter read sends one up the path, and so does a day's goal met. Tap it to open it.",
     when: (state) => state.parcels > 0
   },
   {
     id: "raid",
-    text: "The hut's scouts can raid a magpie camp: open Raids. They say first whether it can be won, and a quarter hour of reading rests them for the next.",
+    text: "The scouts can take a magpie stronghold: open Raids. A quarter hour of reading rests them for the next one.",
     when: (state) => state.levels.hut > 0,
     did: (state) => state.stats.raids > 0 || state.camps > 0
   },
   {
     id: "prowler",
-    text: "Prowlers come out of the wood now and then. What throws sees them off; one who gets through knocks a building about or makes off with a few acorns.",
-    when: (state) => state.levels.burrow >= 2
+    text: "Prowlers come out of the wood now, while you watch. What throws sees them off; one who gets through knocks a building about, or takes a few acorns.",
+    when: (state) => state.levels.burrow >= PROWLERS_FROM
+  },
+  {
+    id: "postcard",
+    text: "The camera at the top makes a postcard of your camp, to save or to send to somebody.",
+    when: (state) => state.levels.burrow >= POSTCARD_FROM
   },
   {
     id: "fence",
-    text: "Fence goes down in Arrange: press the fence button and drag across the grass. A piece is dragged to move it. Whoever comes on foot is held at it.",
+    text: "Fence is laid in Arrange: press the fence button and drag across the grass. Whoever comes on foot is held at it, under what throws.",
     when: (state) => state.levels.fence > 0,
     did: (state) => state.walls.length >= 3
   },
   {
     id: "works",
-    text: "Constructs are under Defence: traps and throwers, to set where the fence and the lookout do not reach.",
+    text: "Constructs are on the Defence shelf: traps and throwers, for where the lookout does not reach.",
     when: (state) => state.levels.burrow >= 2 && state.levels.tower > 0,
     did: (state) => state.works.length > 0
   },
@@ -85,7 +91,7 @@ export const TIPS: readonly Tip[] = [
   },
   {
     id: "guard",
-    text: "Guardians can be hired under People. Each holds the ground about a signpost: drag the post to where you want them.",
+    text: "Guardians come now: each building's card has one to post. A guardian holds the ground about a signpost: drag it to where you want them.",
     when: (state) => state.levels.burrow >= GUARDS_FROM,
     did: (state) => state.guards.some((rank) => rank > 0)
   },
@@ -97,13 +103,8 @@ export const TIPS: readonly Tip[] = [
   },
   {
     id: "beds",
-    text: "More heroes have come than the hut has beds for. Build it up, and more of them are about the camp.",
+    text: "More heroes have come than the hut has beds for: the rest are away on the road. Build the hut up, and more of them are about the camp.",
     when: (state) => residents(state).length > bedsOf(state)
-  },
-  {
-    id: "postcard",
-    text: "The camera at the top makes a postcard of your camp, to save or to send to somebody.",
-    when: (state) => state.levels.burrow >= 3
   }
 ];
 

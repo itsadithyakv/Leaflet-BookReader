@@ -215,33 +215,24 @@ describe("a night lost", () => {
     return !night.held && night.broken.length > 0 && night.emptied;
   })!;
 
-  it("costs a little that can be seen: the fence that came down is to put up again, and one thing is carried off", () => {
+  it("is not fought since 2026-10-15: a day turning leaves the fence, the things set about and the larder as they were", () => {
     expect(lostOn).toBeTruthy();
     const before = { ...doomed, night: lostOn };
-    const night = nightOutcome(before, lostOn, false)!;
     const after = settle(before, at(1000, "2028-06-01"));
-    expect(after.report).toMatchObject({ held: false, foe: night.foe, felled: night.broken.length });
-    expect(after.walls).toHaveLength(before.walls.length - night.broken.length);
-    // What was in the larder is fewer by about what they took (a hen may have come that morning, and laid).
-    expect(after.report!.count).toBeGreaterThan(0);
-    expect(Math.abs(after.acorns - (before.acorns - night.taken))).toBeLessThanOrEqual(4);
-    // One thing gone from the clearing, and remembered: which, and where it stood.
-    expect(after.decor).toHaveLength(1);
-    expect(after.stolen).not.toBeNull();
-    expect(after.report!.stolen).toBe(after.stolen!.kind);
-    expect(after.events[0].text).toMatch(/of fence came down\. They made off with the /);
-    // Nothing built is lost, and no level.
-    expect(after.levels).toEqual(before.levels);
-    // And with one thing already carried off, they do not take a second.
-    const again = settle({ ...after, report: null, night: lostOn, nightAt: 900 }, at(1000, "2028-06-02"));
-    expect(again.decor).toHaveLength(after.decor.length);
+    expect(after.report).toBeNull();
+    expect(after.walls).toEqual(before.walls);
+    expect(after.decor).toEqual(before.decor);
+    expect(after.acorns).toBe(before.acorns);
+    expect(after.stolen).toBeNull();
+    // The night is still marked as through, so that bringing the battle back would not play every night since.
+    expect(after.night).toBe("2028-06-01");
   });
 
-  it("is made good by a camp taken on the road: the thing carried off comes home to where it stood", () => {
-    const after = settle({ ...doomed, night: lostOn }, at(1000, "2028-06-01"));
-    const gone = after.stolen!;
-    const hunting = { ...after, levels: { ...after.levels, hut: 3 }, raidFrom: 0, acorns: 500 };
-    const begun = startRaid(hunting, "wild", at(1000, "2028-06-01"), false, 0)!;
+  it("left a thing carried off in a camp kept from before: the next raid won brings it home to where it stood", () => {
+    const gone = doomed.decor[0];
+    const robbed = { ...doomed, decor: doomed.decor.slice(1), stolen: gone };
+    const hunting = { ...robbed, levels: { ...robbed.levels, hut: 3 }, raidFrom: 0, acorns: 500 };
+    const begun = startRaid(hunting, "camp", at(1000, "2028-06-01"))!;
     const lost = finishRaid(begun.state, begun.raid, { stars: 0, destroyed: 0.1, hoards: 0 }, "2028-06-01");
     expect(lost.state.stolen).toEqual(gone);
     expect(lost.end.home).toBeNull();

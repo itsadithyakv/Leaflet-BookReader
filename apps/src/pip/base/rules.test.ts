@@ -7,6 +7,13 @@ import {
   PURSE_IN_HAND,
   PURSE_MOST,
   QUESTS,
+  LIST_MARK,
+  advanceList,
+  nextStep,
+  openParcel,
+  parcelGives,
+  gatherBrings,
+  TALES,
   RAIDS_IN_HAND,
   RAID_EVERY,
   SITES,
@@ -130,14 +137,15 @@ describe("a new camp", () => {
     expect(fresh.acorns).toBe(20);
     // Reading done before the camp was made is not owed to it.
     expect(oakReady(fresh, 1234)).toBe(0);
-    expect(oakReady(fresh, 1244)).toBe(5);
+    expect(oakReady(fresh, 1244)).toBe(8);
   });
 
-  it("cannot be spent into a corner: reading still pays a reader who never plays the arcade", () => {
-    let fresh = newBase(0, DAY);
-    fresh = settle(build(fresh, "fence", 0), at(5));
-    expect(fresh.acorns).toBe(5);
+  it("cannot be spent into a corner: it has nothing to spend on until reading pays, and reading always pays", () => {
+    const fresh = newBase(0, DAY);
+    // Twenty acorns build nothing: the first thing is to read, and gather.
     expect(SITES.every((site) => blocked(fresh, site, "hive") !== null)).toBe(true);
+    // The fence is not a first camp's: it comes with the prowlers, at level 2.
+    expect(blocked({ ...fresh, acorns: 999 }, "fence")).toBe("burrow");
     expect(blocked(gather(fresh, 120), "store")).toBeNull();
   });
 
@@ -217,11 +225,13 @@ describe("the yard", () => {
 
   it("gives honey each day from the bees, more acorns from a well, and better pay from a stall", () => {
     const bees = camp({ acorns: 0, yard: yard({ kind: "hive", level: 2 }) }, { store: 1 });
+    // The bees' honey comes as parcels: one for every level of the hives, each day.
     const morning = settle(bees, at(1000, NEXT_DAY));
-    expect(morning.acorns).toBe(12);
+    expect(morning.parcels).toBe(2);
+    expect(morning.acorns).toBe(0);
     expect(settle(morning, at(1000, NEXT_DAY))).toBe(morning);
     const watered = camp({ yard: yard({ kind: "well", level: 3 }) }, { oak: 2 });
-    expect(oakDrops(watered)).toBeCloseTo(8 * 1.45);
+    expect(oakDrops(watered)).toBeCloseTo(13 * 1.45);
     const selling = camp({ yard: yard({ kind: "stall", level: 2 }) });
     expect(payout(selling, "flap", 8)).toBe(12);
     expect(payout(camp(), "flap", 8)).toBe(8);
@@ -246,10 +256,10 @@ describe("paths", () => {
     expect(forkOpen(grown, "store")).toBe(false);
     const wide = choosePath(grown, "oak", "a");
     expect(wide.acorns).toBe(100);
-    expect(oakHolds(wide)).toBe(120);
+    expect(oakHolds(wide)).toBe(195);
     const deep = choosePath(wide, "oak", "b");
     expect(deep.acorns).toBe(40);
-    expect(oakDrops(deep)).toBeCloseTo(12 * 1.25);
+    expect(oakDrops(deep)).toBeCloseTo(20 * 1.25);
     expect(choosePath({ ...deep, acorns: 10 }, "oak", "a").forks.oak).toBe("b");
     expect(Object.keys(FORKS)).toEqual(["oak", "tower", "hut"]);
   });
@@ -258,21 +268,21 @@ describe("paths", () => {
 describe("the oak", () => {
   it("drops acorns for reading, up to what it holds, and is gathered into the larder", () => {
     const grown = camp({ oakFrom: 1000, acorns: 0 }, { oak: 1, store: 1 });
-    expect(oakReady(grown, 1025)).toBe(12);
-    expect(oakReady(grown, 9000)).toBe(30);
+    expect(oakReady(grown, 1025)).toBe(20);
+    expect(oakReady(grown, 9000)).toBe(50);
     const gathered = gather(grown, 1030);
-    expect(gathered.acorns).toBe(15);
-    expect(gathered.stats.gathered).toBe(15);
-    expect(oakReady(gathered, 1040)).toBe(5);
+    expect(gathered.acorns).toBe(24);
+    expect(gathered.stats.gathered).toBe(24);
+    expect(oakReady(gathered, 1040)).toBe(8);
   });
 
   it("keeps on the tree only what did not fit, however long it stood full", () => {
     const full = camp({ oakFrom: 0, acorns: holds(camp()) - 5 }, { oak: 1 });
     const gathered = gather(full, 100_000);
     expect(gathered.acorns).toBe(holds(full));
-    expect(oakReady(gathered, 100_000)).toBe(25);
+    expect(oakReady(gathered, 100_000)).toBe(45);
     const emptied = gather({ ...gathered, acorns: 0 }, 100_000);
-    expect(emptied.acorns).toBe(25);
+    expect(emptied.acorns).toBe(45);
     expect(oakReady(emptied, 100_000)).toBe(0);
   });
 });
@@ -399,37 +409,18 @@ describe("the nights", () => {
     expect(nightOutcome(near, day, false)!.taken).toBeGreaterThan(nightOutcome(far, day, false)!.taken);
   });
 
-  it("are settled once, however long the reader was away, with a report of how it went", () => {
-    // Read for since the night before: nine hundred minutes then, a thousand now.
+  it("are not fought since 2026-10-15: a day turning brings no report, takes nothing, and is marked as through", () => {
+    // Read for since the night before, and a camp that would lose: still nothing happens to it.
     const weak = camp({ acorns: 200, camps: 12, night: "2026-03-01", nightAt: 900 }, { burrow: 3, oak: 3, store: 3, fence: 1, tower: 1, hut: 1 });
-    const outcome = nightOutcome(weak, "2026-03-01", false)!;
-    const back = settle(weak, at(1000, "2026-12-25"));
-    expect(back.report).toMatchObject({ day: "2026-12-25", held: outcome.held, side: outcome.side, lit: false });
-    expect(back.acorns).toBe(outcome.held ? 200 + back.report!.count : 200 - outcome.taken);
-    expect(settle(back, at(1000, "2026-12-25"))).toBe(back);
-    expect(back.stats.nights).toBe(outcome.held ? 1 : 0);
-    expect(back.report).toMatchObject({ foe: outcome.foe });
-    expect(back.nightAt).toBe(1000);
-  });
-
-  it("do not come to a camp nobody has read for: being away costs nothing, however long", () => {
-    const weak = camp({ acorns: 200, camps: 12, night: "2026-03-01", nightAt: 1000 }, { burrow: 3, oak: 3, store: 3, fence: 1, tower: 1, hut: 1 });
     const back = settle(weak, at(1000, "2026-12-25"));
     expect(back.report).toBeNull();
     expect(back.acorns).toBe(200);
+    expect(back.stats.nights).toBe(0);
     expect(back.night).toBe("2026-12-25");
-    // A minute read, and the next morning there has been a night.
-    expect(settle(back, at(1001, "2026-12-26")).report).not.toBeNull();
-  });
-
-  it("are lit by yesterday's goal met, or by oil bought for that night", () => {
-    const state = kept(3, { night: "2026-03-01", nightAt: 900 });
-    expect(settle(state, at(1000, "2026-03-02", true)).report?.lit).toBe(true);
-    expect(settle(state, at(1000, "2026-03-02", false)).report?.lit).toBe(false);
-    expect(settle({ ...state, oil: "2026-03-01" }, at(1000, "2026-03-02", false)).report?.lit).toBe(true);
-    expect(settle({ ...state, oil: "2026-02-20" }, at(1000, "2026-03-02", false)).report?.lit).toBe(false);
-    // No lookout, no lantern.
-    expect(settle({ ...state, levels: { ...state.levels, tower: 0 } }, at(1000, "2026-03-02", true)).report?.lit).toBe(false);
+    expect(back.nightAt).toBe(1000);
+    expect(settle(back, at(1000, "2026-12-25"))).toBe(back);
+    // The rules of the night are still here, for whenever it is wanted back.
+    expect(nightOutcome(weak, "2026-03-01", false)).not.toBeNull();
   });
 });
 
@@ -618,12 +609,12 @@ describe("raids", () => {
 });
 
 describe("the Magpie King", () => {
-  const ready = camp({ acorns: 300, camps: 4 }, { burrow: 3, hut: 3, store: 3 });
+  const ready = camp({ acorns: 300, camps: 10 }, { burrow: 3, hut: 3, store: 3 });
 
-  it("is there once three camps are beaten, once a day, until the month's banner is won", () => {
-    expect(kingClosed(camp({ camps: 2 }), DAY)).toBe("camps");
+  it("is there once ten camps are beaten (three, before 2026-10-15), once a day, until the month's banner is won", () => {
+    expect(kingClosed(camp({ camps: 9 }), DAY)).toBe("camps");
     expect(kingClosed(ready, DAY)).toBeNull();
-    expect(theKing(ready)).toMatchObject({ kind: "king", n: 7, need: 2, loot: 128, cost: 28 });
+    expect(theKing(ready)).toMatchObject({ kind: "king", n: 7, need: 2, loot: 200, cost: 40 });
     // He is as hard as the scouts are strong, not as the ladder is long.
     expect(theKing({ ...ready, camps: 20 }).n).toBe(7);
     expect(theKing({ ...ready, levels: { ...ready.levels, hut: 5 } }).n).toBeGreaterThan(7);
@@ -638,7 +629,7 @@ describe("the Magpie King", () => {
     const won = finishRaid(begun.state, begun.raid, WHOLE, DAY);
     expect(won.end.banner).toBe("2026-10");
     expect(won.state.banners).toEqual(["2026-10"]);
-    expect(won.state.camps).toBe(4);
+    expect(won.state.camps).toBe(10);
     // And his own blade is the camp's, the first time he falls.
     expect(won.end.blade).toBe(5);
     expect(won.state.events[0].text).toBe("The Magpie King fell. October's banner flies over the camp. Dawnsplitter is the camp's.");
@@ -751,7 +742,7 @@ describe("the visitor", () => {
       }
       throw new Error(`no day offers ${id}`);
     };
-    const busy = build(camp({ acorns: 100 }, { store: 1, tower: 1 }), "fence", 1000);
+    const busy = build(camp({ acorns: 100 }, { store: 1, tower: 1 }), "hut", 1000);
     expect(takeOffer(busy, "tip", at(1000, dayWith("tip", busy))).intel).toBe(1);
     expect(takeOffer(busy, "hand", at(1000, dayWith("hand", busy))).jobs[0].needs).toBe(0);
     const oilDay = dayWith("oil", busy);
@@ -771,9 +762,9 @@ describe("a reading streak", () => {
     expect([0, 2, 3, 7, 14, 30, 400].map(streakAdds)).toEqual([0, 0, 0.1, 0.2, 0.3, 0.5, 0.5]);
     expect([0, 3, 29, 30].map(streakNext)).toEqual([3, 7, 30, null]);
     const grown = camp({ oakFrom: 1000, acorns: 0 }, { oak: 1, store: 1 });
-    expect(gather(grown, 1050).acorns).toBe(25);
-    expect(gather(grown, 1050, 7).acorns).toBe(30);
-    expect(gather(grown, 1050, 30).acorns).toBe(38);
+    expect(gather(grown, 1050).acorns).toBe(40);
+    expect(gather(grown, 1050, 7).acorns).toBe(48);
+    expect(gather(grown, 1050, 30).acorns).toBe(60);
     // The tree is emptied the same either way: the streak adds, it does not take.
     expect(oakReady(gather(grown, 1050, 30), 1050)).toBe(0);
   });
@@ -881,17 +872,26 @@ describe("the club's boss", () => {
 });
 
 describe("Pip's list", () => {
-  it("is one thing at a time, ticked off only once it is done", () => {
+  it("is one thing at a time, ticked off by itself once it is done, its acorns in whole", () => {
     const fresh = camp({ acorns: 0 });
+    expect(fresh.taught).toContain(LIST_MARK);
     expect(questNow(fresh)).toMatchObject({ index: 0, done: false });
-    expect(claimQuest(fresh, DAY)).toBe(fresh);
+    expect(advanceList(fresh, DAY)).toBe(fresh);
     const gathered = gather({ ...fresh, oakFrom: 0, levels: { ...fresh.levels, oak: 1 } }, 1000);
     expect(questNow(gathered)?.done).toBe(true);
-    const ticked = claimQuest(gathered, DAY);
+    const ticked = advanceList(gathered, DAY);
     expect(ticked.quest).toBe(1);
     expect(ticked.acorns).toBe(gathered.acorns + QUESTS[0].reward);
-    expect(ticked.events[0].text).toBe("Done: gather acorns from the oak. 10 acorns.");
+    expect(ticked.events[0].text).toBe("Done: read 10 minutes, then tap the oak. 10 acorns.");
     expect(questNow(ticked)?.quest.text).toBe("Build a larder");
+    // By hand it is the same.
+    expect(claimQuest(gathered, DAY).quest).toBe(1);
+  });
+
+  it("follows the order the camp opens: a first camp is the oak, the larder, the hut, the lookout and the burrow's level 2", () => {
+    expect(QUESTS.slice(0, 5).map((quest) => quest.at)).toEqual(["oak", "store", "hut", "tower", "burrow"]);
+    // Nothing on it asks for what is gone: the night, the paths, wagers, the King.
+    for (const quest of QUESTS) expect(quest.text).not.toMatch(/night|path|wager|King/);
   });
 
   it("can be finished by a camp that has done everything", () => {
@@ -899,11 +899,11 @@ describe("Pip's list", () => {
       acorns: 0,
       camps: 25,
       banners: ["2026-10"],
-      forks: { oak: "a" },
       yard: yard({ kind: "hive", level: 1 }),
       stats: { gathered: 5, raids: 25, stars: 60, nights: 3, wagers: 2 },
       guards: [3, 1, 1, 1, 1, 1, 1],
-      animals: [0, 1, 2, 3, 4, 5]
+      animals: [0, 1, 2, 3, 4, 5],
+      works: [{ kind: 4, x: 100, y: 100 }]
     }, { burrow: 5, oak: 3, store: 5, fence: 1, tower: 1, hut: 1 });
     done = placeWall(placeWall(placeWall(done, 100, 64), 110, 64), 120, 64);
     // The goat brought two more pieces, and they are down too.
@@ -914,6 +914,151 @@ describe("Pip's list", () => {
     }
     expect(questNow(done)).toBeNull();
     expect(claimQuest(done, DAY)).toBe(done);
+  });
+
+  it("passes over, without a reward, what a camp kept from before the list was rewritten has already done", () => {
+    // A camp on the old list: its index pointed at the old fifth step, and it has a larder, a hut and a lookout.
+    const old = { ...camp({ acorns: 0, quest: 4, stats: { gathered: 50, raids: 0, stars: 0, nights: 0, wagers: 0 } }, { oak: 1, store: 1, hut: 1, tower: 1 }), taught: [] };
+    const moved = advanceList(old, DAY);
+    expect(moved.taught).toContain(LIST_MARK);
+    // Index 4 of the new list is the burrow's level 2, not done: it stays there, and nothing is paid.
+    expect(moved.quest).toBe(4);
+    expect(moved.acorns).toBe(0);
+    // Past the end of the new list, it is done with it.
+    expect(advanceList({ ...old, quest: 22 }, DAY).quest).toBe(QUESTS.length);
+    // An index past the end is read back as it was kept.
+    expect(readBase(JSON.parse(JSON.stringify({ ...old, quest: 22 })))!.quest).toBe(22);
+  });
+});
+
+describe("nothing promised that would not arrive", () => {
+  it("a thing on the list done with no room in the larder waits, ticked, until there is room, and says so", () => {
+    const full = gather({ ...camp({ oakFrom: 0 }, { oak: 1 }), acorns: 0 }, 1000);
+    const brim = { ...full, acorns: holds(full) - QUESTS[0].reward + 1 };
+    const waiting = advanceList(brim, DAY);
+    expect(waiting).toBe(brim);
+    expect(nextStep(brim, 1000)).toMatchObject({ full: true, reward: QUESTS[0].reward, at: "store" });
+    // Room made, it goes in whole.
+    const room = { ...brim, acorns: holds(full) - QUESTS[0].reward };
+    expect(advanceList(room, DAY)).toMatchObject({ quest: 1, acorns: holds(full) });
+  });
+
+  it("a parcel is opened whole or not at all, and the gathering says what it will bring", () => {
+    const state = camp({ parcels: 2, oakFrom: 0 }, { oak: 2, store: 1 });
+    const brim = { ...state, acorns: holds(state) - parcelGives(state) + 1 };
+    expect(openParcel(brim)).toBe(brim);
+    expect(openParcel({ ...brim, acorns: brim.acorns - 1 }).acorns).toBe(holds(state));
+    // The oak: what the button says is what comes in, streak and season counted, as far as there is room.
+    for (const acorns of [0, holds(state) - 3, holds(state)]) {
+      const before = { ...state, acorns };
+      expect(gather(before, 1100, 14, "2026-10-12").acorns - before.acorns).toBe(gatherBrings(before, 1100, 14, "2026-10-12"));
+    }
+  });
+});
+
+describe("the one next thing", () => {
+  it("is always there, says where it is done, and is said as reading while what it asks for goes up", () => {
+    const states: BaseState[] = [
+      newBase(0, DAY),
+      { ...newBase(0, DAY), oakFrom: -20 },
+      build(camp({ acorns: 100 }, { oak: 1 }), "store", 1000),
+      camp({ acorns: 5000, quest: 9 }, { burrow: 3, oak: 3, store: 4, fence: 2, tower: 2, hut: 2 }),
+      camp({ acorns: 0, quest: QUESTS.length }, { burrow: 5, oak: 5, store: 5, fence: 5, tower: 5, hut: 5 }),
+      camp({ acorns: 9999, quest: QUESTS.length }, { burrow: 2, oak: 1, store: 5 }),
+      build(camp({ acorns: 9999, quest: QUESTS.length }, { burrow: 2, oak: 1, store: 5 }), "burrow", 1000)
+    ];
+    for (const state of states) {
+      const next = nextStep(state, 1000);
+      expect(next.text.length).toBeGreaterThan(5);
+      expect([...SITES, "raids", "meadow"]).toContain(next.at);
+    }
+    expect(nextStep(newBase(0, DAY), 0).text).toBe("Read 10 minutes, then tap the oak");
+    expect(nextStep({ ...newBase(0, DAY), oakFrom: -20 }, 0).text).toBe("Tap the oak to take in its acorns");
+    // The larder going up, and it is what the list asks for: said as reading.
+    const going = build(camp({ acorns: 100, quest: 1 }, { oak: 1 }), "store", 1000);
+    expect(nextStep(going, 1002).text).toBe("Read 3 more minutes: the larder is finished");
+    // The list done: whatever is cheapest to build next, or reading.
+    expect(nextStep(camp({ acorns: 9999, quest: QUESTS.length }, { burrow: 2, oak: 1, store: 5 }), 1000).text).toMatch(/^(Build|Raise) /);
+    expect(nextStep(camp({ acorns: 0, quest: QUESTS.length }, { burrow: 5, oak: 5, store: 5, fence: 5, tower: 5, hut: 5 }), 1000).text).toMatch(/^Read on/);
+  });
+});
+
+describe("a camp kept before the simplifying (2026-10-15)", () => {
+  /** A camp with every part of the state set, the parts no longer played among them, as a 1.4 build would have kept it. */
+  const everything = (): BaseState => {
+    let kept = camp(
+      {
+        acorns: 400,
+        camps: 7,
+        intel: 2,
+        oil: "2026-10-11",
+        pack: true,
+        visitor: "2026-10-11",
+        quizDay: "2026-10-11",
+        kingDay: "2026-10-01",
+        wild: { day: "2026-10-11", done: [0, 2] },
+        wishDay: "2026-10-11",
+        decor: [{ kind: 3, x: 100, y: 100 }],
+        purse: { day: "2026-10-11", wagers: 2 },
+        wager: { game: "flap", stake: 5, target: 6 },
+        scores: { dash: [10, 20, 30], catch: [4], flap: [1, 2, 3] },
+        quest: 12,
+        stats: { gathered: 900, raids: 9, stars: 20, nights: 4, wagers: 1 },
+        story: { book: "abc", mark: 3, from: 900 },
+        parcels: 2,
+        prowled: { day: "2026-10-11", knocks: 1, thefts: 0 },
+        taught: ["oak", "build"],
+        hero: 0,
+        banners: ["2026-09"],
+        clubWins: ["club|2026-W41"],
+        report: { day: "2026-10-11", held: false, count: 12, lit: true, side: "left", foe: 1, felled: 1, stolen: 3 },
+        events: [{ day: "2026-10-11", text: "Something happened." }],
+        dewDay: "2026-10-11",
+        bonds: [3, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        wants: { day: "2026-10-11", done: [0], won: [], set: [2] },
+        trip: { from: 990, needs: 30 },
+        tales: [1, 5],
+        guards: [2, 0, 1, 0, 0, 0, 0],
+        drill: { guard: 2, from: 995, needs: 45 },
+        animals: [0, 3],
+        meadow: [{ kind: 1, x: 60, y: 90 }],
+        eggDay: "2026-10-11",
+        land: [{ kind: 0, x: 200, y: 80 }],
+        works: [{ kind: 4, x: 100, y: 100 }],
+        arms: [0, -1, -1, -1, -1, -1, -1, -1, -1, -1],
+        nightAt: 990,
+        harm: { store: 1 },
+        rivals: { day: "2026-10-11", raided: ["tovah"] },
+        wreck: { by: "Tovah", stars: 1, from: 995, needs: 4 },
+        stolen: { kind: 2, x: 140, y: 100 }
+      },
+      { burrow: 3, oak: 3, store: 3, fence: 2, tower: 3, hut: 3 }
+    );
+    kept = { ...kept, forks: { tower: "b" }, gate: null, walls: [[100, 64], [110, 64]], posts: { 0: [120, 90] } };
+    return kept;
+  };
+  const HIDDEN = ["intel", "oil", "pack", "visitor", "quizDay", "kingDay", "wild", "purse", "wager", "scores", "report", "dewDay", "bonds", "wants", "forks", "stolen", "banners", "clubWins"] as const;
+  /** What a friend's card is drawn from (Rust's `camp_summary`): it must keep its shape. */
+  const SUMMARY = ["levels", "yard", "camps", "banners", "raised", "spots", "walls", "decor", "land", "works", "guards", "posts"] as const;
+
+  it("loads, and is written back as it was read", () => {
+    const kept = JSON.parse(JSON.stringify(everything()));
+    const read = readBase(kept)!;
+    expect(read).not.toBeNull();
+    expect(read.v).toBe(2);
+    expect(JSON.parse(JSON.stringify(read))).toEqual(kept);
+  });
+
+  it("keeps every part that is no longer played, and what a friend's card shows, through a day of being looked at", () => {
+    const read = readBase(JSON.parse(JSON.stringify(everything())))!;
+    const after = settle(read, { minutes: 1000, day: "2026-10-12", lit: false, goalMet: false, at: 0 });
+    for (const part of HIDDEN) expect(after[part], part).toEqual(read[part]);
+    for (const part of SUMMARY) expect(after[part], part).toEqual(read[part]);
+    // And it is put on the new list, once, without being paid for what it had done.
+    expect(after.taught).toEqual([...read.taught, LIST_MARK]);
+    expect(after.acorns).toBe(read.acorns);
+    // Written and read again, nothing moves.
+    expect(readBase(JSON.parse(JSON.stringify(after)))).toEqual(after);
   });
 });
 
@@ -990,20 +1135,20 @@ describe("what the camp says elsewhere", () => {
   it("is a line at the end of a session, when there is one to say", () => {
     const quiet = camp();
     expect(campNews(quiet, 1000)).toBeNull();
-    const busy = build(camp({ oakFrom: 1000, acorns: 100 }, { oak: 1, store: 1 }), "fence", 1000);
+    const busy = build(camp({ oakFrom: 1000, acorns: 100 }, { oak: 1, store: 1 }), "hut", 1000);
     expect(campNews(busy, 1001)).toBeNull();
-    expect(campNews(busy, 1003)).toBe("1 acorn on the oak.");
-    expect(campNews(busy, 1005)).toBe("The fence is finished, 2 acorns on the oak.");
-    expect(campNews(settle(busy, at(1005)), 1030)).toBe("15 acorns on the oak.");
+    expect(campNews(busy, 1003)).toBe("2 acorns on the oak.");
+    expect(campNews(busy, 1005)).toBe("The scouts' hut is finished, 4 acorns on the oak.");
+    expect(campNews(settle(busy, at(1005)), 1030)).toBe("24 acorns on the oak.");
   });
 
-  it("says whether anything is waiting", () => {
-    const quiet = { ...camp(), visitor: DAY };
-    // Fence built and not yet put down is a thing waiting.
-    expect(campWaits({ ...quiet, levels: { ...quiet.levels, fence: 1 } }, at(1000))).toBe(true);
+  it("says whether anything is waiting: only what reading has brought", () => {
+    const quiet = camp();
     expect(campWaits(quiet, at(1000))).toBe(false);
-    expect(campWaits(camp(), at(1000))).toBe(true);
-    expect(campWaits({ ...build({ ...quiet, acorns: 100 }, "fence", 1000) }, at(1005))).toBe(true);
+    // Fence built and not put down, a hedgehog not seen, a day turned: none of them a dot (since 2026-10-15).
+    expect(campWaits({ ...quiet, visitor: null, night: "2020-01-01", levels: { ...quiet.levels, burrow: 3, fence: 1 } }, at(1000))).toBe(false);
+    expect(campWaits({ ...build({ ...quiet, acorns: 100 }, "hut", 1000) }, at(1005))).toBe(true);
     expect(campWaits({ ...quiet, levels: { ...quiet.levels, oak: 1 }, oakFrom: 0 }, at(5000))).toBe(true);
+    expect(campWaits({ ...quiet, parcels: 1 }, at(1000))).toBe(true);
   });
 });
