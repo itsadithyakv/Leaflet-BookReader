@@ -396,12 +396,13 @@ holds:**
   or 1.3.4, so what the two hold (the next entry, and "1.3.3" further
   down) goes out together as 1.4.0, the first release after `v1.3.2`.
   Committed and pushed on `release/1.3`, which keeps its name. **Built on
-  2026-10-13 at the owner's word, from `adda2b0`, with everything below
-  that was "not committed" now committed and pushed (ten commits,
-  `0a8bb9d` to `adda2b0`; built twice that day, the second time for the
-  colour of the light on Pip):** `target\msix\Leaflet_1.4.0.0_x64.msix`,
-  13,114,313 bytes, unsigned, with all five values taken from `build.env`
-  and no warning of a missing one (release compile 12 m 42 s). It has not
+  2026-10-13 at the owner's word, and last built on 2026-10-14 from
+  `6e63e13`, with everything below that was "not committed" now committed
+  and pushed (`0a8bb9d` to `6e63e13`; built three times, for the colour of
+  the light on Pip, then for the fixes found trying the installed
+  package):** `target\msix\Leaflet_1.4.0.0_x64.msix`,
+  13,115,138 bytes, unsigned, with all five values taken from `build.env`
+  and no warning of a missing one (release compile 8 m 26 s). It has not
   been installed or opened. `Leaflet_1.4.0.0_x64.2026-10-10-old.msix`
   beside it is an earlier build from `1a47453`, never uploaded, kept only
   so that nothing was deleted: it is not for upload, and nor is
