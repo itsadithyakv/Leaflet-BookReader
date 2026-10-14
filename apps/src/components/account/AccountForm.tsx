@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { MailWarning } from "lucide-react";
 import type { SocialProfile } from "@shared/sync/types";
 import { useAccountStore } from "../../store/accountStore";
 import { accountService, errorMessage, type AccountStatus } from "../../services/accountService";
@@ -269,10 +270,17 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
         >
           <p
             className="mt-2 text-xs leading-relaxed text-on-surface-variant"
-            title="A password reset can only reach an address that works. Not there after a minute? Check spam."
+            title="A password reset can only reach an address that works."
           >
             Enter the code we emailed to{" "}
             <span className="break-all font-semibold text-on-surface">{confirming.status.account?.email}</span>
+          </p>
+          {/* Said, not left to a tooltip: the mail is often taken for spam (the owner, 2026-10-14). */}
+          <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-surface-container-high/50 px-2.5 py-1.5 text-[11px] leading-snug text-on-surface-variant">
+            <MailWarning size={13} className="mt-px shrink-0 text-primary" aria-hidden />
+            <span>
+              Not in your inbox? Look in <span className="font-semibold text-on-surface">Spam</span> or <span className="font-semibold text-on-surface">Junk</span>: it often lands there. Marking it "not spam" helps the next one arrive.
+            </span>
           </p>
           <input
             aria-label="Code from the email"
@@ -427,7 +435,7 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
           >
             <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
               If <span className="font-semibold text-on-surface">{codeSent.email}</span> has a Leaflet account, a code
-              is on its way. It works for {codeSent.minutes} minutes. Not there after a minute? Check spam. (An
+              is on its way. It works for {codeSent.minutes} minutes. Not there after a minute? Look in <span className="font-semibold text-on-surface">Spam</span> or <span className="font-semibold text-on-surface">Junk</span>: it often lands there. (An
               account can be reset three times a year.)
             </p>
             <label htmlFor={`${fieldId}-reset-code`} className={labelClass}>Code from the email</label>

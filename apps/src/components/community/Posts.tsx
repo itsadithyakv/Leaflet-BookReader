@@ -7,6 +7,7 @@ import { askConfirm } from "../ConfirmDialog";
 import { useDiscussStore } from "../discuss/discussStore";
 import { Reactions } from "../discuss/Reactions";
 import { useCommunityStore } from "./communityStore";
+import { BookChooser } from "./BookChooser";
 import { PipAvatar } from "./PipAvatar";
 import { usePostStore } from "./postStore";
 import { at, errorText, nameOf, relativeTime } from "./format";
@@ -161,11 +162,6 @@ export const PostList = ({ posts, showToast, onRemoved }: { posts: BookPost[]; s
 
 type Kind = "finished" | "review" | "quote";
 
-const KINDS: Array<{ id: Kind; label: string }> = [
-  { id: "finished", label: "Finished" },
-  { id: "review", label: "Review" },
-  { id: "quote", label: "Quote" }
-];
 
 /**
  * Saying something about a book: that it is finished (stars and a line), a
@@ -184,8 +180,9 @@ export const PostDialog = ({ showToast }: { showToast: (message: string) => void
       books
         // Begun or finished: a book not opened has nothing to be said of it yet.
         .filter((book) => (book.progress ?? 0) > 0 || Boolean(book.finishedAt))
-        .map((book) => ({ title: book.title, author: book.author ?? null }))
-        .sort((a, b) => a.title.localeCompare(b.title)),
+        // The one read most lately first: it is most likely the one to say something about, and it is chosen to begin with.
+        .sort((a, b) => (b.lastOpened ?? b.finishedAt ?? "").localeCompare(a.lastOpened ?? a.finishedAt ?? "") || a.title.localeCompare(b.title))
+        .map((book) => ({ title: book.title, author: book.author ?? null })),
     [books]
   );
   const [kind, setKind] = useState<Kind>("finished");
@@ -215,7 +212,9 @@ export const PostDialog = ({ showToast }: { showToast: (message: string) => void
     // Capture phase, so the reader's own Escape (close the book) never sees it.
     const onKey = (event: KeyboardEvent) => {
       // Not while the guidelines are up over it: that Escape is theirs.
-      if (event.key === "Escape" && !useDiscussStore.getState().rulesAsked) {
+      // Nor while the book field is open: its Escape puts the field away (`BookChooser`).
+      const chooser = (document.activeElement as HTMLElement | null)?.dataset?.chooser === "open";
+      if (event.key === "Escape" && !useDiscussStore.getState().rulesAsked && !chooser) {
         event.preventDefault();
         event.stopImmediatePropagation();
         close();
@@ -229,8 +228,15 @@ export const PostDialog = ({ showToast }: { showToast: (message: string) => void
     return null;
   }
   const book = open.book ?? choices[picked] ?? null;
-  const wordsMax = kind === "review" ? REVIEW_MAX : LINE_MAX;
-  const ready = Boolean(book) && (kind === "finished" || (kind === "review" && rating !== null && words.trim().length > 0) || (kind === "quote" && quote.trim().length > 0));
+  // One form, not three tabs (the owner, 2026-10-14: "review, quote etc does not make a whole lot of sense, it can
+  // get confusing"). What is posted follows from what is written: a quote when it was opened on one (a highlight),
+  // a review when more than a line is written, and otherwise the book with its stars and a line.
+  const quoting = kind === "quote";
+  const posting: Kind = quoting ? "quote" : words.trim().length > LINE_MAX ? "review" : "finished";
+  const wordsMax = quoting ? LINE_MAX : REVIEW_MAX;
+  // A review needs its stars; nothing else does.
+  const needsStars = posting === "review" && rating === null;
+  const ready = Boolean(book) && (posting === "finished" || (posting === "review" && !needsStars) || (posting === "quote" && quote.trim().length > 0));
 
   const send = async () => {
     if (!book || !ready) {
@@ -243,11 +249,11 @@ export const PostDialog = ({ showToast }: { showToast: (message: string) => void
     }
     const about = { title: book.title, author: book.author, audience };
     const post: NewPost =
-      kind === "review"
-        ? { kind, ...about, rating: rating as number, body: words.trim(), spoiler }
-        : kind === "quote"
-          ? { kind, ...about, quote: quote.trim(), note: words.trim() || null, spoiler }
-          : { kind, ...about, rating, line: words.trim() || null };
+      posting === "review"
+        ? { kind: posting, ...about, rating: rating as number, body: words.trim(), spoiler }
+        : posting === "quote"
+          ? { kind: posting, ...about, quote: quote.trim(), note: words.trim() || null, spoiler }
+          : { kind: posting, ...about, rating, line: words.trim() || null };
     setBusy(true);
     discussService
       .post(post)
@@ -263,27 +269,9 @@ export const PostDialog = ({ showToast }: { showToast: (message: string) => void
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 px-4 py-6" onMouseDown={(event) => event.target === event.currentTarget && close()}>
       <div className="modal-surface dialog-fit flex max-h-full w-full max-w-lg flex-col overflow-y-auto p-6" role="dialog" aria-modal="true" aria-labelledby="post-dialog-title">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 id="post-dialog-title" className="page-title text-2xl">
-            About a book
-          </h2>
-          <div className="flex" role="tablist" aria-label="What to post">
-            {KINDS.map((entry, index) => (
-              <button
-                key={entry.id}
-                type="button"
-                role="tab"
-                aria-selected={kind === entry.id}
-                className={`tactile-button px-3 py-1.5 text-xs ${kind === entry.id ? "tactile-button-primary" : ""} ${
-                  index === 0 ? "rounded-r-none" : index === KINDS.length - 1 ? "rounded-l-none" : "rounded-none"
-                }`}
-                onClick={() => setKind(entry.id)}
-              >
-                {entry.label}
-              </button>
-            ))}
-          </div>
-        </div>
+        <h2 id="post-dialog-title" className="page-title text-2xl">
+          {quoting ? "Share a quote" : "Share a book"}
+        </h2>
 
         {open.book ? (
           <p className="mt-3 text-sm text-on-surface [overflow-wrap:anywhere]">
@@ -293,16 +281,10 @@ export const PostDialog = ({ showToast }: { showToast: (message: string) => void
         ) : choices.length === 0 ? (
           <p className="mt-3 text-sm text-on-surface-variant">Start a book and it can be talked about here.</p>
         ) : (
-          <select className="inset-field mt-3 w-full px-3 py-2 text-sm text-on-surface" aria-label="Which book" value={picked} onChange={(event) => setPicked(Number(event.target.value))}>
-            {choices.map((choice, index) => (
-              <option key={`${choice.title}|${choice.author ?? ""}`} value={index}>
-                {choice.title}
-              </option>
-            ))}
-          </select>
+          <BookChooser choices={choices} picked={picked} onPick={setPicked} />
         )}
 
-        {kind !== "quote" && (
+        {!quoting && (
           <div className="rating-pick mt-4 flex items-center gap-1" role="radiogroup" aria-label="Your rating">
             {[1, 2, 3, 4, 5].map((star) => (
               <button
@@ -312,8 +294,8 @@ export const PostDialog = ({ showToast }: { showToast: (message: string) => void
                 aria-checked={rating === star}
                 aria-label={`${star} out of 5`}
                 className="rating-stars"
-                // The same star again takes the rating away (a review needs one; a finished book need not).
-                onClick={() => setRating(rating === star && kind === "finished" ? null : star)}
+                // The same star again takes the rating away.
+                onClick={() => setRating(rating === star ? null : star)}
               >
                 <Star size={24} className={rating !== null && star <= rating ? undefined : "is-off"} fill={rating !== null && star <= rating ? "currentColor" : "none"} aria-hidden />
               </button>
@@ -321,7 +303,7 @@ export const PostDialog = ({ showToast }: { showToast: (message: string) => void
           </div>
         )}
 
-        {kind === "quote" && (
+        {quoting && (
           <>
             <textarea
               className="inset-field mt-4 w-full resize-none px-3 py-2 font-serif text-sm text-on-surface"
@@ -339,14 +321,15 @@ export const PostDialog = ({ showToast }: { showToast: (message: string) => void
         <textarea
           ref={field}
           className="inset-field mt-3 w-full resize-none px-3 py-2 text-sm text-on-surface"
-          rows={kind === "review" ? 7 : 3}
+          rows={quoting ? 3 : 5}
           maxLength={wordsMax}
-          placeholder={kind === "review" ? "What you made of it" : kind === "quote" ? "Why this one (optional)" : "A line about it (optional)"}
-          aria-label={kind === "review" ? "Your review" : "A line about it"}
+          placeholder={quoting ? "Why this one (optional)" : "What did you think? (optional)"}
+          aria-label={quoting ? "Why this one" : "What you thought of it"}
           value={words}
           onChange={(event) => setWords(event.target.value)}
         />
         {words.length > wordsMax - 60 && <p className="mt-1 text-right text-[11px] tabular-nums text-on-surface-variant">{wordsMax - words.length}</p>}
+        {needsStars && <p className="mt-1 text-[11px] text-on-surface-variant">Give it stars to post more than a line.</p>}
 
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-on-surface">
           <label className="flex items-center gap-1.5" title="Followers: the readers who follow you. Everyone: any reader, on Discover and on the book's page.">
@@ -356,7 +339,7 @@ export const PostDialog = ({ showToast }: { showToast: (message: string) => void
               <option value="everyone">Everyone</option>
             </select>
           </label>
-          {kind !== "finished" && (
+          {posting !== "finished" && (
             <label className="flex cursor-pointer items-center gap-1.5" title="It is covered until a reader asks to see it">
               <input type="checkbox" className="h-4 w-4 accent-[rgb(var(--color-primary))]" checked={spoiler} onChange={(event) => setSpoiler(event.target.checked)} />
               Gives the book away
