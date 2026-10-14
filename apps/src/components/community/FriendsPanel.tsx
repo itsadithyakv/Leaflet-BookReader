@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Copy, LogOut, Plus } from "lucide-react";
 import { friendsService, type BookPost, type Club, type FriendsBook } from "../../services/friendsService";
+import { socialService } from "../../services/socialService";
 import { FEATURES } from "../../constants/features";
 import { useAccountStore } from "../../store/accountStore";
 import { useLibraryStore } from "../../store/libraryStore";
@@ -10,8 +11,10 @@ import { SectionHeader } from "../ui/SectionHeader";
 import { useCommunityStore } from "./communityStore";
 import { COPY, PROFILE_PLACE } from "./copy";
 import { ErrorLine } from "./ErrorLine";
+import { Inbox } from "./Inbox";
 import { PipAvatar } from "./PipAvatar";
 import { PostList } from "./Posts";
+import { ReaderSearch } from "./ReaderSearch";
 import { composePost, usePostStore } from "./postStore";
 import { at, errorText, minutesText, nameOf } from "./format";
 import "./friends.css";
@@ -410,6 +413,51 @@ const ClubsCard = ({ showToast }: { showToast: Toast }) => {
 // ---- the tab ------------------------------------------------------------------
 
 /**
+ * A private profile, before any of this: one press shares it with followers
+ * only (nobody sees it until they ask and are let in), where it used to say
+ * where in the app to go and do so. A reader with no handle yet is sent to
+ * pick one, which is where the rest of the profile is.
+ */
+const ShareFirst = ({ handle, showToast }: { handle: string | null; showToast: Toast }) => {
+  const loadMe = useCommunityStore((state) => state.loadMe);
+  const [busy, setBusy] = useState(false);
+  const share = () => {
+    setBusy(true);
+    socialService
+      .saveProfile({ handle, visibility: "followers" })
+      .then(() => {
+        showToast("Shared with followers. Nobody sees it until you let them in.");
+        return loadMe();
+      })
+      .catch((cause) => showToast(errorText(cause)))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <section className="paper-surface flex flex-wrap items-center gap-5 rounded-xl p-6">
+      <div className="min-w-0 flex-1">
+        <SectionHeader eyebrow="Friends" title="Share your profile first" />
+        <p className="mt-2 max-w-prose text-sm leading-6 text-on-surface-variant">
+          {handle
+            ? `Your profile (${at(handle)}) is private, so nobody can follow you or be followed back.`
+            : `Pick a handle under ${PROFILE_PLACE}, so friends can find you.`}
+        </p>
+      </div>
+      {handle && (
+        <button
+          type="button"
+          className="tactile-button tactile-button-primary px-4 py-2 text-xs"
+          disabled={busy}
+          onClick={share}
+          title="Share with followers only: a reader asks, and you let them in. Change it any time under Board, You."
+        >
+          {busy ? "…" : "Share with friends"}
+        </button>
+      )}
+    </section>
+  );
+};
+
+/**
  * The Friends tab of the Social page: what the readers you follow finished,
  * where they are in the books you share, and your book clubs. Needs an
  * account and a shared profile, like following does.
@@ -450,18 +498,17 @@ export const FriendsPanel = ({ showToast, onNavigate }: { showToast: Toast; onNa
     );
   }
   if (me && (me.visibility === "private" || !me.handle)) {
-    return (
-      <section className="paper-surface rounded-xl p-6">
-        <SectionHeader eyebrow="Friends" title="Share your profile first" />
-        <p className="mt-3 max-w-prose text-sm leading-6 text-on-surface-variant">
-          Your profile is private{me.handle ? ` (${at(me.handle)})` : ""}. Share it, or keep it to followers, under {PROFILE_PLACE}.
-        </p>
-      </section>
-    );
+    return <ShareFirst handle={me.handle} showToast={showToast} />;
   }
 
+  // Finding a reader to follow, and the requests to follow you, first: this is where they are looked for. (They are
+  // under Board as well, where they were before there was a Friends tab, and the owner found no way to send one.)
   return (
     <>
+      <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
+        <ReaderSearch showToast={showToast} />
+        <Inbox showToast={showToast} />
+      </div>
       <FeedCard showToast={showToast} />
       <FriendsBooksCard />
       <ClubsCard showToast={showToast} />

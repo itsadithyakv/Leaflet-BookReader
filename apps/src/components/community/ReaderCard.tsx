@@ -186,7 +186,7 @@ export const ReaderCard = ({ signedIn, canJoin, showToast, onChanged }: ReaderCa
   const incoming = duel?.status === "pending" && !duel.youChallenged;
   const relation = reader ? relationText(Boolean(reader.isFollowing), Boolean(reader.followsYou)) : null;
   const respondToDuel = useCommunityStore.getState().respondToDuel;
-  const reportReader = useDiscussStore((state) => state.report);
+  const reportReader = useDiscussStore.getState().report;
   // Blocking: neither sees the other from then on, anywhere. Undone under Board → You.
   const block = async (who: { handle: string }) => {
     const ok = await askConfirm({

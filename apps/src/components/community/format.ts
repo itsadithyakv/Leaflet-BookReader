@@ -120,4 +120,19 @@ export const writeJson = (key: string, value: unknown) => {
   }
 };
 
-export const errorText = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
+/** An error as words for the reader; a part the server has not got yet is "Coming soon." (`gentleError`), not "Not found.". */
+export const errorText = (cause: unknown) => gentleError(cause instanceof Error ? cause.message : String(cause));
+
+/**
+ * The server's answer for a path it does not have at all (server/src/http.js,
+ * `notFound`), as opposed to a thing it has not got ("No shared profile with
+ * that handle."). Seen when the app is newer than the server it talks to:
+ * the feature is on its way, and nothing is wrong.
+ */
+export const NOT_THERE_YET = "Not found.";
+// (Either as the server said it, or as `errorText` has already put it.)
+export const notThereYet = (message: string) => message.trim() === NOT_THERE_YET || message.trim() === COMING_SOON;
+
+/** What is said of an error: a feature the server has not got yet is "Coming soon.", anything else as it came. */
+export const COMING_SOON = "Coming soon.";
+export const gentleError = (message: string) => (notThereYet(message) ? COMING_SOON : message);
