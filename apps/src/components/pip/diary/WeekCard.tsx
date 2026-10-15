@@ -5,6 +5,7 @@ import type { DiaryFacts } from "../../../pip/diary/facts";
 import { weekSummary } from "../../../pip/diary/week";
 import { copyPicture, pictureFileName, savePicture } from "./picture";
 import { CARD_H, CARD_W, cardFontsReady, cardText, drawPostcard, weekRange, type CardLook } from "./postcard";
+import { onAndroid } from "../../../platform/android";
 
 type WeekCardProps = {
   facts: DiaryFacts;
@@ -51,7 +52,7 @@ export const WeekCard = ({ facts, entries, weeks, week, onWeek, look }: WeekCard
     }
     setBusy(true);
     try {
-      setSaid((await savePicture(pictureFileName(summary.start), canvas)) ? "Saved." : null);
+      setSaid((await savePicture(pictureFileName(summary.start), canvas)) && !onAndroid() ? "Saved." : null);
     } catch (cause) {
       setSaid(typeof cause === "string" ? cause : cause instanceof Error ? cause.message : "The picture couldn't be saved.");
     } finally {
@@ -96,7 +97,7 @@ export const WeekCard = ({ facts, entries, weeks, week, onWeek, look }: WeekCard
         <div className="pip-diary-share">
           <button type="button" className="pip-key pip-key-primary" onClick={() => void save()} disabled={busy}>
             <UiIcon name="upload" size={15} />
-            Save as picture
+            {onAndroid() ? "Share" : "Save as picture"}
           </button>
           <button type="button" className="pip-key" onClick={() => void copy()} disabled={busy}>
             <UiIcon name="copy" size={15} />

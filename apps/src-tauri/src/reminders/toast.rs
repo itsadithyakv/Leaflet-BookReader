@@ -195,8 +195,9 @@ mod imp {
   }
 }
 
-/// Everywhere else there is nothing to deliver with: the reminders card is
-/// hidden (`supported` is false), and these are never reached in practice.
+/// Everywhere else there are no toasts: Android delivers by the phone's alarm
+/// clock instead (`phone`), and elsewhere the reminders card is hidden
+/// (`supported` is false), so these are never reached in practice.
 #[cfg(not(windows))]
 mod imp {
   use crate::reminders::Reminder;
@@ -205,6 +206,7 @@ mod imp {
     false
   }
 
+  #[cfg_attr(target_os = "android", allow(dead_code))]
   pub fn blocked(_identifier: &str) -> bool {
     false
   }

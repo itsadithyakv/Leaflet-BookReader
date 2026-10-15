@@ -202,8 +202,16 @@ phone.)
 - "Use Windows Theme" is "Use system theme"; sounds follow "the phone's
   volume".
 - **Rate Leaflet** goes to Google Play; the update card offers Google Play.
-- **Reminders** are shown when Android notifications are built (stage 5 of
-  mobile.md); until then they stay hidden, as now.
+- **Reminders** are real notifications, delivered by the phone whether
+  Leaflet is open or not; the same three kinds and rules as on Windows.
+  Turning one on is when Android 13+ asks for notifications. When the phone
+  has them off, the card says so and "Turn On" opens the phone's page.
+  **They do not say the same thing every day** (the owner: "fun
+  notifications, not the same all the time"): each kind has several lines
+  in Pip's voice (fewer and plainer when she is quiet, none of her when she
+  is off), and Saturday and Sunday have their own. A day keeps one line all
+  day, never yesterday's, and every line comes round (`reminders/mod.rs`,
+  `lines` and `line_for`). Windows says the same lines.
 - Desktop-only cards stay hidden (Calibre, library copy, tidy a folder, a
   sync folder, Pip on the desktop). A Kindle file still opens: the built-in
   reader handles most, and the rest are told to convert on a computer.
@@ -233,17 +241,110 @@ picks or saves a file goes through the Android side:
 - **Sign-in kept**: the session and Drive tokens are kept in Leaflet's
   private storage on Android (no other app can read it), since `keyring` has
   no Android store. (The Keystore is better and comes later.)
-- **Google Drive's sign-in** needs an Android OAuth client and a link back
-  into the app (mobile.md, "Signing in"); until then Drive is not offered on
-  the phone, and the Leaflet account carries the shelf and the habit.
+- **Google Drive's sign-in** is the laptop's own, run on the phone (see
+  "Google Drive between laptop and phone" below).
 - **A broken database** shows its message on screen (today it is a Windows
   message box, so on Android the app would start to nothing).
+- **Reminders** (`Reminders.kt`, `reminders/phone.rs`): Rust works out the
+  plan (`plan_ahead`, as the Windows build leaves with Windows on exit) and
+  hands it over whenever Leaflet comes to the front or leaves it, a session
+  ends, a book closes or the settings change. Kotlin keeps it in
+  `AlarmManager` (inexact: a ten-minute window, and again allowed while
+  idle; no exact-alarm permission), sets it again after a reboot or an
+  update, and at fire time drops a reminder when Leaflet is in front, the
+  day's goal is already met, it is over an hour late, or that kind went out
+  today. What went out is read back at the next hand-over. A tap opens the
+  book the reader was in. In a debug build,
+  `adb shell am broadcast -n com.leaflet.app/.ReminderBootReceiver -a com.leaflet.app.REMINDER_TEST --ei seconds 60`
+  sends a sample through the alarm path a minute later.
 
 ## Not in this first round
 
-Android notifications for reminders, Google Drive on the phone, pairing a
-phone to a computer by code, Play Store signing and listing, the Keystore,
+Pairing a phone to a computer by code, Play Store signing and listing, the Keystore,
 a home-screen widget. Each is in mobile.md's stages.
+
+## Building it
+
+From PowerShell, in `apps\src-tauri\msix` (run it plainly; piping its
+output through `*>&1` makes PowerShell 5.1 stop it, as with the MSIX):
+
+```powershell
+.\build-android.ps1                  # debug APK for a phone (arm64)
+.\build-android.ps1 -Target x86_64   # debug APK for the emulator
+.\build-android.ps1 -Release         # release APK and AAB, unsigned
+```
+
+It reads the same `build.env` as `build-msix.ps1` (the Google Drive client,
+the account and community switches, the API's address), and in a git
+worktree, which has no `build.env` of its own, the main checkout's. It
+prints the names of what it took, never the values, finds the SDK, the NDK
+and a JDK 21 (Gradle cannot use a newer Java), and says where the APK is.
+A debug APK installs on any phone with USB debugging (`adb install -r`).
+A release build has to be signed with the upload key before Google Play
+takes it; that key is the owner's to make and keep.
+
+## Google Drive between laptop and phone
+
+Built 2026-10-15; not yet tried on a real phone or with a real Google
+sign-in. The rules for two devices are in [two-devices.md](two-devices.md).
+
+**One OAuth client for both.** The phone runs the laptop's own sign-in: the
+Desktop client compiled in (`LEAFLET_GOOGLE_CLIENT_ID` / `_SECRET`, from
+`build.env`), PKCE, and Google's answer to a listener on `127.0.0.1` — on
+the phone itself. The consent page opens in the phone's browser; when Google
+sends it back to `127.0.0.1:<port>`, Leaflet (still running behind the
+browser) takes the code and answers with a page that links back into the
+app, `intent://drive-connected#Intent;scheme=com.leaflet.app;…`, followed at
+once and as a "Back to Leaflet" button (Chrome sometimes wants the tap). The
+manifest has a BROWSABLE filter for that scheme; DevicePlugin ignores it as
+a book. Android does not let an app in the background bring itself forward,
+so a native "bring to front" would not work; the link is the way back.
+`drive.file` belongs to the Google project, not to the client, so the phone
+sees the `Leaflet` folder the laptop made. A client pasted in Settings works
+the same way on the phone.
+
+An Android-type OAuth client was not used: Google has turned custom URI
+schemes off for new Android clients, and its replacement (Credential
+Manager with an authorization request) is a native SDK and a Play Services
+dependency. If Google ever stops the loopback flow for this client on a
+phone, that is the way, and the Drive code below the sign-in stays as it is.
+
+**What the phone gets.** After connecting: the shelf (titles, places,
+progress, highlights, the habit, Pip) from `state.json` in one round; covers
+are looked up again on the phone (a cover is never synced). A book whose
+file is not on the phone shows **Cloud** and downloads when tapped
+(`download_book`, streamed into Leaflet's own storage). Opening a book pulls
+first, opens where this phone left it, and offers the other device's place
+("Your other device is further on: Chapter 14 · 62%. Go there / Stay
+here"). It syncs as the app goes to the background and pulls as it comes
+back.
+
+**The laptop needs this branch too**: 1.4.2 adds up a day read on both
+devices as the larger, not the sum, until it is updated.
+
+**What the owner does by hand**
+
+1. Build the phone app with `apps\src-tauri\msix\build-android.ps1` (it
+   reads the same `build.env`, so the same Google client is compiled in;
+   nothing new to set). Build the desktop app from this branch as usual
+   (`build-msix.ps1`) and install both.
+2. On the laptop: Settings → Library → Sync → Connect Drive, sign in, Sync
+   Now. Read a few minutes in a book, close it.
+3. On the phone: Settings → Library → Sync (or the profile button) →
+   Connect Drive. Chrome opens Google's page; sign in with the same account
+   and allow. Chrome shows "Leaflet is connected" and should switch back to
+   Leaflet (tap "Back to Leaflet" if it does not). Expect the shelf with
+   Cloud badges within a few seconds.
+4. Tap a book: it downloads and opens at the laptop's place.
+5. Read on the phone for five minutes; press Home (a sync goes up). On the
+   laptop, Sync Now: the day's minutes are the laptop's and the phone's
+   together, and the book offers "Your other device is further on".
+6. Edit one highlight's note on both; delete a book on one; turn the
+   phone's network off, read, turn it back on: all arrive (two-devices.md).
+
+If step 3 fails at Google ("invalid request", or the browser cannot reach
+127.0.0.1), say what the page said: that is the loopback flow refused on a
+phone, and the Android-client route above is next.
 
 ## How it is checked
 
@@ -256,3 +357,51 @@ a home-screen widget. Each is in mobile.md's stages.
 - **Not checked until a real phone**: the feel of the swipes and the
   long-press timing, the selection handles against Android's own bar,
   battery with the screen kept on, a real notch.
+
+## Every feature on a phone
+
+Gone through on 2026-10-15, feature by feature from [features.md](features.md),
+outside the reader and Pip (theirs are their own sections). "Preview" is the
+browser preview at 360 × 800 and 640/740 × 360 with touch emulated; the
+community screens were drawn there against a made-up server (board, reader
+card, feed, Discover, communities, duels, inbox, clubs), the rest of them
+read in the code. Status: **works**, **fixed** (changed this round),
+**hidden** (not offered on a phone), **not checked**.
+
+| Feature | Upright | Sideways | What changed | Status |
+| --- | --- | --- | --- | --- |
+| Any dialog's backdrop | Sheet; a tap outside closes it | Centred card; same | Closes on the tap's click, and only if the press began on the backdrop (`components/ui/backdrop.ts`): it closed on the press, and the rest of the tap landed on what was under it | fixed |
+| Library grid and list | Two covers a row; ⋯ hit at 44 px, hold a book for its menu | Rail; three to four a row | The big "Import Books" box gives way to the books once there are some (the + over the tab bar, or in the header sideways, adds them; the tour points at the +) | fixed |
+| Search, filters, sort | Search above the shelf; selects on a row of their own | Header search | The author and genre selects were squeezed to empty 40 px boxes beside the buttons at 360 px; the search key now closes the keyboard | fixed |
+| Series, series covers, shelves | Cards one a row; a series' page | Two to three a row | Back from a series, shelf, genre or collection returns to Collections, not to the Library; the back link is hit at 44 px | fixed |
+| Collections and the book picker | Sheet with its own scrolling list | Card | — | works |
+| Genre wall | Two tiles a row (twelve screen-wide blocks before) | Three a row | `touch-shell.css` | fixed |
+| Book menu (collections, series, highlights, finished, remove) | Sheet, by ⋯ or a held finger | Sheet at the thumb's side | — (no rename, details or cover in this menu) | works |
+| Highlights and Kindle clippings | Sheet; the clippings file by the system picker (`<input type=file>`, which the WebView supports) | Card | — | works |
+| Search inside books | Sheet, field on top | Card | Search key on the keyboard | works |
+| Reading calendar, session shelf | A tap on a day or a spine shows its line | Same | — | works |
+| Reading pace, daily goal, streak | Settings → Reading; goal ± at 44 px tall | Two columns | — | works |
+| Quote card, year in review | Sheet; **Share** opens the share sheet (Save to Files, Photos, a message) | Picture down the left at full height, choices beside it | "Save picture" reads "Share" and says no "Saved." on Android; the Hollow postcard uses the same path (`savePicture`) | fixed |
+| Focus session, wrap-up, flower | Library card; wrap-up a sheet | Wrap-up a card, its Done pinned | "Full screen" switch hit at 44 px | works |
+| Focus lock | Full screen; Back shows Pip and "Hold to leave" | Same | — (round 1) | works, not on a device |
+| Settings | Four tabs; desktop-only cards hidden (Calibre, copies, tidy, sync folder, Pip on the desktop) | Two columns | "A rating on Google Play"; Delete All Data no longer lists a sync folder, copies and Calibre on a phone. Drive and Reminders are their own sections | fixed |
+| Fonts | System picker (reader's Aa) | — | — | not checked here (reader) |
+| Account: sign up, sign in, confirm, reset | Sheet that scrolls; the window shrinks for the keyboard, so fields stay above it | Card | Email is `username` + email keyboard, so the phone's password manager pairs it with the password; Next/Go keys; codes not autocorrected; "this phone" | fixed |
+| Profile and ProfileButton panel | Sheet | Sheet | — | works |
+| Friends, add friends, invites | Feed, inbox, clubs, search | Same | Invite, handle and club code go through the **share sheet** on a phone ("Share"), not the clipboard; club code keyboard in capitals | fixed |
+| Reader cards, follow | Full-screen drawer; "Following" asks before unfollowing | Drawer at the right | Close, Report and Block hit at 44 px | fixed |
+| Posts, composer, feed, Discover | Composer a tall sheet | Card | Post/Cancel stay at the sheet's foot above the keyboard; stars 40 px; like, dislike, report, remove, More hit at 44 px | fixed |
+| Communities and threads | List, community, thread | Same | Back walks thread → community → list before leaving the tab; thread actions hit at 44 px | fixed |
+| Clubs, duels, presents, leaderboards, badges | As drawn on the board | Same | — | works (preview, made-up server) |
+| Admin panel | — | — | Version field takes a number keyboard; the notice is "its store", not "the Store" | fixed |
+| Update banner | Above the tab bar; Update opens Google Play | Bottom right | × hit at 44 px | works |
+| Rate prompt | Says Google Play, opens it | Same | — | works |
+| Welcome and the account offer | Sheet, no Drive or folder choice on a phone | Card | — | works |
+| Converter | No Calibre on a phone | — | A book that needs it says to convert it to EPUB on a computer (it promised a sync back that a phone does not have) | fixed |
+| "Open with", Share to Leaflet | Imports and opens the book | Same | A file Leaflet cannot read now says so instead of vanishing | fixed |
+
+Left for their owners: Pip's dialogs (`PipShop`, `AlbumDialog`, `DiaryBook`,
+`ArcadeOverlay`, `PurchaseConfirm`, `HollowPostcard`) and `ReminderOptIn`
+still close on the press; `{...backdropClose(close)}` is the one-line fix.
+The Hollow postcard's button still reads "Save picture" on a phone. The
+characters setting's three choices are 29 px tall.

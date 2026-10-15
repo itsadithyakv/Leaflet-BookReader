@@ -12,6 +12,7 @@ import { at, errorText, nameOf } from "./format";
 import { SheetHandle } from "../ui/SheetHandle";
 import { useBackClose } from "../../hooks/useBackClose";
 import { isTouchInput } from "../../platform/device";
+import { backdropClose } from "../ui/backdrop";
 
 /** The kinds of thing that can be given: ones Pip keeps. Food and seed packets are used up, floors and plots are a reader's own. */
 const KINDS: Partial<Record<ShopItem["kind"], string>> = {
@@ -119,7 +120,7 @@ export const GiftDialog = ({ to, onClose, showToast }: Props) => {
   };
 
   return (
-    <div className="sheet-backdrop fixed inset-0 z-[85] flex items-center justify-center bg-black/55 px-4 py-6" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <div className="sheet-backdrop fixed inset-0 z-[85] flex items-center justify-center bg-black/55 px-4 py-6" {...backdropClose(() => onClose())}>
       <div className="modal-surface sheet-panel sheet-inner-scroll flex max-h-full w-full max-w-lg flex-col p-6" role="dialog" aria-modal="true" aria-labelledby="gift-dialog-title">
         <SheetHandle onClose={onClose} />
         <h2 id="gift-dialog-title" className="page-title text-2xl">

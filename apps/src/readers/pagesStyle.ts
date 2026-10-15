@@ -78,3 +78,54 @@ export const PHONE_PAGES_CSS = `
     max-height: calc(100vh - ${PHONE_PAGE_PAD * 2}px) !important;
   }
 `;
+
+/**
+ * A phone's margins (docs/android.md, "The reader"). A phone is narrow
+ * already: upright the text runs the width less 18 px a side, the least a
+ * thumb's edge and a rounded corner leave readable (24 px, the desktop's, was
+ * 12% of a 412 px screen), with no line length to cap it; the type panel's
+ * line length is not offered there.
+ */
+export const PHONE_TEXT_PAD = 18;
+
+/**
+ * A phone's pages: the room between two columns of a spread, which epub.js
+ * also takes for the margins (half each side; its own is a twelfth of the
+ * width, 56 px a gap and 28 a side on a phone on its side).
+ */
+export const PHONE_PAGE_GAP = 36;
+
+/**
+ * Each side's margin of a phone's page, in px, inside the frame (which is
+ * already clear of the system's bars and a camera's cutout). Beside a cutout
+ * the cutout is the margin: the text starts where it ends, and the other side
+ * takes the rest. The two always add up to the gap, which keeps every page
+ * a whole turn wide.
+ */
+export const phonePageSides = (gap: number, insetLeft: number, insetRight: number): { left: number; right: number } => {
+  if (insetLeft > insetRight) {
+    return { left: 0, right: gap };
+  }
+  if (insetRight > insetLeft) {
+    return { left: gap, right: 0 };
+  }
+  return { left: gap / 2, right: gap / 2 };
+};
+
+/**
+ * A phone's chapters (`html[data-leaflet-phone]`): upright, narrower than any
+ * line length, the text runs the width; hyphenation is fitted to short lines
+ * (the chapter's language is set from the book's when it names none, or
+ * `hyphens: auto` breaks nothing and justified lines gape).
+ */
+export const PHONE_TEXT_CSS = `
+  @media (max-width: 560px) {
+    html[data-leaflet-phone] {
+      --reader-measure: 100vw !important;
+    }
+  }
+  html[data-leaflet-phone] body,
+  html[data-leaflet-phone] body p {
+    hyphenate-limit-chars: 6 3 2;
+  }
+`;

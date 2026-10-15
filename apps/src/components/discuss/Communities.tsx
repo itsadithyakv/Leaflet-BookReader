@@ -11,6 +11,7 @@ import { ErrorLine } from "../community/ErrorLine";
 import { at, errorText, nameOf, relativeTime } from "../community/format";
 import { PipAvatar } from "../community/PipAvatar";
 import { useDiscussStore } from "./discussStore";
+import { pushBackLayer } from "../../platform/back";
 import { Reactions } from "./Reactions";
 import { bookPlace, bookSpoilerChoices, isPast, seriesPlace, seriesSpoilerChoices, spoilerText, type BookPlace, type SeriesPlace } from "./spoilers";
 
@@ -90,17 +91,17 @@ const ReplyRow = ({
         <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-on-surface-variant">
           <Reactions target="reply" id={reply.id} likes={reply.likes} dislikes={reply.dislikes} mine={reply.myReaction} own={reply.isYou} showToast={showToast} />
           {reply.canRemove && (
-            <button type="button" className="flex items-center gap-1 hover:text-error" onClick={() => void remove()}>
+            <button type="button" className="touch-hit flex items-center gap-1 hover:text-error" onClick={() => void remove()}>
               <Trash2 size={11} aria-hidden /> Remove
             </button>
           )}
           {onRemoveMember && reply.author && !reply.isYou && (
-            <button type="button" className="flex items-center gap-1 hover:text-error" onClick={() => onRemoveMember(reply.author!.handle)}>
+            <button type="button" className="touch-hit flex items-center gap-1 hover:text-error" onClick={() => onRemoveMember(reply.author!.handle)}>
               <UserMinus size={11} aria-hidden /> Remove from community
             </button>
           )}
           {!reply.isYou && (
-            <button type="button" className="flex items-center gap-1 hover:text-on-surface" onClick={() => report({ target: "reply", id: reply.id, what: "this reply" })}>
+            <button type="button" className="touch-hit flex items-center gap-1 hover:text-on-surface" onClick={() => report({ target: "reply", id: reply.id, what: "this reply" })}>
               <Flag size={11} aria-hidden /> Report
             </button>
           )}
@@ -211,7 +212,7 @@ const ThreadView = ({ id, showToast }: { id: string; showToast: Toast }) => {
 
   return (
     <section className="paper-surface rounded-xl p-4 sm:p-6">
-      <button type="button" className="flex items-center gap-1.5 py-1 text-xs font-semibold text-on-surface-variant hover:text-on-surface" onClick={back}>
+      <button type="button" className="touch-hit flex items-center gap-1.5 py-1 text-xs font-semibold text-on-surface-variant hover:text-on-surface" onClick={back}>
         <ArrowLeft size={14} aria-hidden /> {community ? community.title : "Communities"}
       </button>
       {error ? (
@@ -237,17 +238,17 @@ const ThreadView = ({ id, showToast }: { id: string; showToast: Toast }) => {
           <p className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-on-surface-variant">
             <Reactions target="thread" id={thread.id} likes={thread.likes} dislikes={thread.dislikes} mine={thread.myReaction} own={thread.isYou} showToast={showToast} />
             {thread.canRemove && (
-              <button type="button" className="flex items-center gap-1 hover:text-error" onClick={() => void remove()}>
+              <button type="button" className="touch-hit flex items-center gap-1 hover:text-error" onClick={() => void remove()}>
                 <Trash2 size={11} aria-hidden /> Remove
               </button>
             )}
             {thread.author && !thread.isYou && removable(thread.author.handle) && (
-              <button type="button" className="flex items-center gap-1 hover:text-error" onClick={() => void removeMember(thread.author!.handle)}>
+              <button type="button" className="touch-hit flex items-center gap-1 hover:text-error" onClick={() => void removeMember(thread.author!.handle)}>
                 <UserMinus size={11} aria-hidden /> Remove from community
               </button>
             )}
             {!thread.isYou && (
-              <button type="button" className="flex items-center gap-1 hover:text-on-surface" onClick={() => report({ target: "thread", id: thread.id, what: "this thread" })}>
+              <button type="button" className="touch-hit flex items-center gap-1 hover:text-on-surface" onClick={() => report({ target: "thread", id: thread.id, what: "this thread" })}>
                 <Flag size={11} aria-hidden /> Report
               </button>
             )}
@@ -358,7 +359,7 @@ const ThreadRow = ({
             <span>{relativeTime(thread.lastActivityAt)}</span>
             {spoilerText(thread.spoiler) && <span className="state-chip">{spoilerText(thread.spoiler)}</span>}
             {canPin && (
-              <button type="button" className="hover:text-on-surface" onClick={() => void pin()}>
+              <button type="button" className="touch-hit hover:text-on-surface" onClick={() => void pin()}>
                 {thread.pinned ? "Unpin" : "Pin"}
               </button>
             )}
@@ -582,7 +583,7 @@ const CommunityView = ({ id, showToast }: { id: string; showToast: Toast }) => {
 
   return (
     <section className="paper-surface rounded-xl p-4 sm:p-6">
-      <button type="button" className="flex items-center gap-1.5 py-1 text-xs font-semibold text-on-surface-variant hover:text-on-surface" onClick={() => go({ at: "list" })}>
+      <button type="button" className="touch-hit flex items-center gap-1.5 py-1 text-xs font-semibold text-on-surface-variant hover:text-on-surface" onClick={() => go({ at: "list" })}>
         <ArrowLeft size={14} aria-hidden /> Communities
       </button>
       <div className="mt-3 flex flex-wrap items-end justify-between gap-3">
@@ -832,6 +833,13 @@ const CommunityList = ({ showToast }: { showToast: Toast }) => {
  */
 export const CommunitiesPanel = ({ showToast }: { showToast: Toast }) => {
   const view = useDiscussStore((state) => state.view);
+  const go = useDiscussStore((state) => state.go);
+  // Android's Back walks back up, thread to community to the list, before it leaves the tab.
+  // One press a step: the layer is set again for each place it leads to.
+  useEffect(() => {
+    if (view.at === "list") return undefined;
+    return pushBackLayer(() => go(view.at === "thread" && view.communityId ? { at: "community", id: view.communityId } : { at: "list" }));
+  }, [view, go]);
   if (view.at === "thread") {
     return <ThreadView key={view.id} id={view.id} showToast={showToast} />;
   }

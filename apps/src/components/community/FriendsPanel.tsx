@@ -17,6 +17,7 @@ import { PostList } from "./Posts";
 import { ReaderSearch } from "./ReaderSearch";
 import { composePost, usePostStore } from "./postStore";
 import { at, errorText, minutesText, nameOf } from "./format";
+import { passOn } from "./passOn";
 import "./friends.css";
 
 type Toast = (message: string) => void;
@@ -215,10 +216,7 @@ const ClubCard = ({ club, showToast, onChanged }: { club: Club; showToast: Toast
   };
 
   const copyCode = () => {
-    navigator.clipboard
-      .writeText(`Join my Leaflet book club “${club.name}”: Social → Friends → Join a club, code ${club.code}`)
-      .then(() => showToast("Copied. Send it to a friend."))
-      .catch(() => showToast(`The code is ${club.code}.`));
+    passOn(`Join my Leaflet book club “${club.name}”: Social → Friends → Join a club, code ${club.code}`, showToast, `The code is ${club.code}.`);
   };
 
   const leave = async () => {
@@ -385,6 +383,10 @@ const ClubsCard = ({ showToast }: { showToast: Toast }) => {
             className="inset-field min-w-0 flex-1 px-3 py-2 text-sm text-on-surface"
             placeholder={form === "new" ? "The club's name" : "The code you were sent"}
             maxLength={form === "new" ? 60 : 12}
+            autoCapitalize={form === "new" ? "sentences" : "characters"}
+            autoCorrect={form === "new" ? undefined : "off"}
+            spellCheck={form === "new"}
+            enterKeyHint="go"
             value={text}
             onChange={(event) => setText(event.target.value)}
           />

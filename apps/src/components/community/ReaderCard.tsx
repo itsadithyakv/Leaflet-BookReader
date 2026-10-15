@@ -225,7 +225,7 @@ export const ReaderCard = ({ signedIn, canJoin, showToast, onChanged }: ReaderCa
           ref={closeButton}
           type="button"
           onClick={close}
-          className="absolute right-4 top-4 rounded-full p-1.5 text-on-surface-variant hover:bg-surface-container-high"
+          className="touch-hit absolute right-4 top-4 rounded-full p-1.5 text-on-surface-variant hover:bg-surface-container-high"
           aria-label="Close"
         >
           <X size={18} />
@@ -529,10 +529,10 @@ export const ReaderCard = ({ signedIn, canJoin, showToast, onChanged }: ReaderCa
         )}
         {answer && !answer.isYou && signedIn && (
           <p className="mt-auto flex gap-4 border-t border-outline-variant/25 pt-3 text-[11px] text-on-surface-variant">
-            <button type="button" className="hover:text-on-surface" onClick={() => reportReader({ target: "profile", id: answer.handle, what: at(answer.handle) })}>
+            <button type="button" className="touch-hit hover:text-on-surface" onClick={() => reportReader({ target: "profile", id: answer.handle, what: at(answer.handle) })}>
               Report
             </button>
-            <button type="button" className="hover:text-error" onClick={() => void block(answer)}>
+            <button type="button" className="touch-hit hover:text-error" onClick={() => void block(answer)}>
               Block
             </button>
           </p>

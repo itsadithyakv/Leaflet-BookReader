@@ -236,7 +236,7 @@ export const BookPostsDrawer = ({ showToast, onOpenCommunity }: { showToast: Toa
     <div className="fixed inset-0 z-[72] flex justify-end" role="dialog" aria-modal="true" aria-label={`What readers said of ${book.title}`}>
       <button type="button" tabIndex={-1} className="absolute inset-0 bg-black/40 backdrop-blur-[1px]" aria-label="Close" onClick={close} />
       <aside className="paper-surface relative flex h-full w-full max-w-lg flex-col gap-4 overflow-y-auto rounded-none p-6 shadow-2xl sm:rounded-l-2xl">
-        <button type="button" onClick={close} className="absolute right-4 top-4 rounded-full p-1.5 text-on-surface-variant hover:bg-surface-container-high" aria-label="Close">
+        <button type="button" onClick={close} className="touch-hit absolute right-4 top-4 rounded-full p-1.5 text-on-surface-variant hover:bg-surface-container-high" aria-label="Close">
           <X size={18} />
         </button>
         <div className="pr-8">

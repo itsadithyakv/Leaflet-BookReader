@@ -15,6 +15,7 @@ import { handleProblem, suggestHandle } from "../community/handle";
 import { HandleField } from "../community/HandleField";
 import { emailHint } from "./emailHint";
 import { asksForEmailCode, emailCodeReady, signUpWithProfile } from "./signUpFlow";
+import { isAndroid } from "../../platform/device";
 
 export type AccountFormMode = "signin" | "signup" | "reset";
 
@@ -286,6 +287,8 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
             aria-label="Code from the email"
             autoComplete="one-time-code"
             autoCapitalize="characters"
+            autoCorrect="off"
+            enterKeyHint="done"
             spellCheck={false}
             placeholder="ABCD-EFGH"
             maxLength={12}
@@ -397,13 +400,16 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
             }}
           >
             <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
-              We'll email you a code to set a new password. Your library on this computer is not affected.
+              We'll email you a code to set a new password. Your library on {isAndroid() ? "this phone" : "this computer"} is not affected.
             </p>
             <label htmlFor={`${fieldId}-reset-email`} className={labelClass}>Email</label>
             <input
               id={`${fieldId}-reset-email`}
+              name="email"
               type="email"
-              autoComplete="email"
+              inputMode="email"
+              autoComplete="username"
+              enterKeyHint="send"
               autoCapitalize="none"
               spellCheck={false}
               value={email}
@@ -443,6 +449,8 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
               id={`${fieldId}-reset-code`}
               autoComplete="one-time-code"
               autoCapitalize="characters"
+              autoCorrect="off"
+              enterKeyHint="next"
               spellCheck={false}
               placeholder="ABCD-EFGH"
               maxLength={12}
@@ -453,7 +461,9 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
             <label htmlFor={`${fieldId}-reset-password`} className={labelClass}>New password</label>
             <input
               id={`${fieldId}-reset-password`}
+              name="new-password"
               type="password"
+              enterKeyHint="go"
               autoComplete="new-password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
@@ -514,8 +524,12 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
         <label htmlFor={`${fieldId}-email`} className={labelClass}>Email</label>
         <input
           id={`${fieldId}-email`}
+          name="email"
           type="email"
-          autoComplete="email"
+          inputMode="email"
+          // The email is the account's name: "username" is what a phone's password manager pairs with the password.
+          autoComplete="username"
+          enterKeyHint="next"
           autoCapitalize="none"
           spellCheck={false}
           value={email}
@@ -557,7 +571,9 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
         <label htmlFor={`${fieldId}-password`} className={labelClass}>Password</label>
         <input
           id={`${fieldId}-password`}
+          name="password"
           type="password"
+          enterKeyHint="go"
           autoComplete={signingUp ? "new-password" : "current-password"}
           value={password}
           onChange={(event) => setPassword(event.target.value)}

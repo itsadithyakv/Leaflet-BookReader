@@ -62,7 +62,7 @@ export const CharactersSetting = ({ renderToggle }: CharactersSettingProps) => {
                 <button
                   key={choice.mode}
                   type="button"
-                  className={`rounded-md border px-2.5 py-1.5 text-[11px] transition ${
+                  className={`touch-hit rounded-md border px-2.5 py-1.5 text-[11px] transition ${
                     wiki === choice.mode ? "border-primary text-primary" : "border-outline-variant hover:text-primary"
                   }`}
                   aria-pressed={wiki === choice.mode}

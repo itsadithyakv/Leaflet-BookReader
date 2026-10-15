@@ -7,8 +7,12 @@ const EMPTY_REPORT: SyncReport = {
   booksRemoved: 0,
   booksPending: 0,
   entriesUpdated: 0,
-  booksHeld: 0
+  booksHeld: 0,
+  updateNeeded: false
 };
+
+/** A place in a book: how far, and exactly where (an EPUB CFI; null for page-based books). */
+export type Place = { progress: number; position: string | null };
 
 /**
  * Sync has two transports and one set of rules.
@@ -33,7 +37,7 @@ export const syncService = {
    */
   async startDriveAuth(): Promise<void> {
     if (!isTauri()) {
-      throw new Error("Drive sync needs the desktop app.");
+      throw new Error("Drive sync needs the Leaflet app.");
     }
     await invoke<string>("drive_auth_start");
   },
@@ -124,9 +128,20 @@ export const syncService = {
    */
   async downloadBook(bookId: string): Promise<string> {
     if (!isTauri()) {
-      throw new Error("Downloading needs the desktop app.");
+      throw new Error("Downloading needs the Leaflet app.");
     }
     return invoke<string>("download_book", { bookId });
+  },
+
+  /**
+   * Where this device itself last stood in a book, apart from the place a
+   * sync may have brought; null if it was never read here.
+   */
+  async placeHere(bookId: string): Promise<Place | null> {
+    if (!isTauri()) {
+      return null;
+    }
+    return invoke<Place | null>("place_here", { bookId });
   },
 
   /** Removes a book everywhere; the tombstone carries the removal to devices. */

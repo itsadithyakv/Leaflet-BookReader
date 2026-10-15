@@ -12,8 +12,13 @@
 const flag = (value: string | undefined) => value === "true";
 
 export const FEATURES = {
-  /** Folder sync and multi-device wording. Returns with the mobile app. */
-  multiDeviceSync: flag(import.meta.env.VITE_ENABLE_MULTI_DEVICE),
+  /**
+   * Several devices in step: folder sync, and "sync" rather than "backup".
+   * On from the Android branch, for the laptop and the phone alike (both
+   * need the two-device fixes of docs/two-devices.md); a build can still
+   * turn it off with VITE_ENABLE_MULTI_DEVICE=false.
+   */
+  multiDeviceSync: import.meta.env.VITE_ENABLE_MULTI_DEVICE !== "false",
   /** Leaderboards and shared shelves. Needs a hosted Leaflet server. */
   community: flag(import.meta.env.VITE_ENABLE_COMMUNITY),
   /** Optional email + password accounts. Also needs a Leaflet API base. */

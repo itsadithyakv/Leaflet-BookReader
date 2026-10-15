@@ -1,4 +1,5 @@
 import { UiIcon } from "../../components/UiIcon";
+import { useTouchInput } from "../../platform/device";
 import type { ReaderScope } from "./scope";
 
 /** SpeedRead's stage: one word at a time, on the page's own colours. */
@@ -7,6 +8,7 @@ export const SpeedReadStage = ({ reader }: { reader: ReaderScope }) => {
     readingMode, readingPaused, readingWord, rsvpDark, rsvpMinutesLeft, rsvpPivot, rsvpProgress, rsvpStyle,
     rsvpWordStyle, setReadingPaused, setSpeedReadWpm, speedReadWpm
   } = reader;
+  const touch = useTouchInput();
   return (
     <>
       {readingMode === "speed" && readingWord && (
@@ -85,7 +87,7 @@ export const SpeedReadStage = ({ reader }: { reader: ReaderScope }) => {
             >
               <UiIcon name="plus" size={16} />
             </button>
-            {readingPaused && <span className="reader-rsvp-hint">Paused · Space to resume</span>}
+            {readingPaused && <span className="reader-rsvp-hint">{touch ? "Paused · Tap to resume" : "Paused · Space to resume"}</span>}
           </div>
         </div>
       )}

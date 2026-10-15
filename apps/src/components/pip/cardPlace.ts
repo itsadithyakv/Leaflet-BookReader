@@ -20,3 +20,13 @@ export const placeCard = (anchor: Rect, size: Size, bounds: Rect, gap = 8): Card
   const top = Math.max(bounds.top, Math.min(bounds.top + bounds.height - size.height, anchor.top + anchor.height / 2 - size.height / 2));
   return { left: right >= size.width ? anchor.left + anchor.width + gap : anchor.left - gap - size.width, top, side: "beside", tailAt: 50 };
 };
+
+/**
+ * Where a card or a picker over the room may go: the window, less a margin, and clear of the app's rail (a phone
+ * on its side has the rail down the left with the room right beside it, and a card at the window's edge lay over it).
+ */
+export const cardBounds = () => {
+  const rail = document.querySelector(".sidebar-stage")?.getBoundingClientRect();
+  const left = rail && rail.width > 0 ? Math.max(8, rail.right + 6) : 8;
+  return { left, top: 8, width: window.innerWidth - left - 8, height: window.innerHeight - 16 };
+};

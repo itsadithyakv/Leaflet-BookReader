@@ -15,6 +15,8 @@ import { dueCount } from "./quiz/boxes";
 import { MyWords } from "./quiz/MyWords";
 import { WordQuiz } from "./quiz/WordQuiz";
 import { useBackLayer } from "../../../platform/back";
+import { holdRotation } from "../../../platform/android";
+import { backdropClose } from "../../ui/backdrop";
 
 const BEST_KEY = "leaflet.pip.arcadeBest";
 /** Best scores kept in the browser too, for the dev server (no Rust there). */
@@ -78,6 +80,8 @@ export const ArcadeOverlay = ({ initial = null, skin, outfit, best, mood, moodTo
   // arcade mounts with it, and a child's layer, pushed first, would go under its parent's.)
   useBackLayer(!chosen && page === null, onClose);
   useBackLayer(!chosen && page !== null, () => setPage(null));
+  // The games are drawn sideways: on a phone the screen stays so while the arcade is open (Pip's tab holds it too).
+  useEffect(() => holdRotation("landscape"), []);
   // The camp is read as the arcade opens: the games pay into it.
   useEffect(() => {
     void useBaseStore.getState().open();
@@ -127,7 +131,7 @@ export const ArcadeOverlay = ({ initial = null, skin, outfit, best, mood, moodTo
   );
 
   return (
-    <div className="pip-arcade-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <div className="pip-arcade-backdrop" role="presentation" {...backdropClose(onClose)}>
       <div
         ref={dialogRef}
         className="pip-arcade modal-surface"

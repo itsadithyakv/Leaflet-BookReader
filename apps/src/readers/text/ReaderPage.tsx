@@ -11,6 +11,7 @@ import { selectedTextBox } from "../lookupPlacement";
 import { SpeedReadStage } from "./SpeedReadStage";
 import type { ReaderScope } from "./scope";
 import { android, onAndroid } from "../../platform/android";
+import { FurtherOnOffer } from "../../components/sync/FurtherOnOffer";
 
 /** The page: the book itself, and what sits over its foot (the selection bar, a note, the dock). */
 export const ReaderPage = ({ reader }: { reader: ReaderScope }) => {
@@ -62,14 +63,15 @@ export const ReaderPage = ({ reader }: { reader: ReaderScope }) => {
       )}
       {!loadError && (
         <div className="reader-page-frame relative h-full overflow-hidden">
-          {loading && (
+          {/* (Not while the book is laid out anew: the page that was stays until the new one is up.) */}
+          {loading && !reader.relayingRef.current && (
             <div className="absolute inset-0 z-10 flex items-center justify-center text-sm reader-panel-soft reader-muted">
               Loading book...
             </div>
           )}
           <div
             ref={viewerRef}
-            className={`reader-container ${paged ? "reader-pages" : "reader-scroll"} h-full w-full overflow-hidden overscroll-x-none`}
+            className={`reader-container ${paged ? "reader-pages" : "reader-scroll"} relative h-full w-full overflow-hidden overscroll-x-none`}
             style={
               // (A spread spans the window: its two columns are the line length.)
               paged && !reader.spread && pagesViewerMaxWidth(measure, fontSize) !== null
@@ -234,6 +236,22 @@ export const ReaderPage = ({ reader }: { reader: ReaderScope }) => {
             onNearChange={setDockNear}
           />
         </div>
+      )}
+      {/* Another device read further (components/sync): offered, and gone to only on a tap. Kept mounted
+          while the book is laid out anew: unmounting lets the offer go. */}
+      {!loadError && (
+        <FurtherOnOffer
+          bookId={book.id}
+          chapterOf={(place) => chapterAtFraction(place.progress)}
+          onGo={(place) => {
+            if (place.position?.startsWith("epubcfi(")) {
+              reader.noteJumpFromHere();
+              reader.goToPlace(place.position);
+            } else {
+              reader.seekTo(place.progress);
+            }
+          }}
+        />
       )}
     </main>
   );

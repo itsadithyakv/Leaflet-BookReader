@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The reading reminder's status-bar icon: a leaf (Android draws only its shape). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M4.5,19.5 C4.5,10.5 9.5,4 20,3.5 C20.5,14 14,19.5 5.5,19.5 Z M6.8,17.6 L15.6,8.4 L16.3,9.1 L7.5,18.3 Z" />
+</vector>

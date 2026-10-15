@@ -55,7 +55,7 @@ export const Reactions = ({ target, id, likes, dislikes, mine, own, showToast, o
     return (
       <button
         type="button"
-        className={`flex items-center gap-1 rounded-full px-2 py-1 text-[11px] tabular-nums transition-colors disabled:cursor-default ${
+        className={`touch-hit flex items-center gap-1 rounded-full px-2 py-1 text-[11px] tabular-nums transition-colors disabled:cursor-default ${
           on ? "bg-primary/15 font-semibold text-primary" : "text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface disabled:hover:bg-transparent disabled:hover:text-on-surface-variant"
         }`}
         aria-pressed={on}

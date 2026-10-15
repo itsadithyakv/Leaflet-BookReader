@@ -16,6 +16,11 @@ class MainActivity : TauriActivity() {
 
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
+    // A tapped reading reminder opened Leaflet: noted before the plugins load
+    // (the device plugin replaces the launch intent once it has read it).
+    if (savedInstanceState == null) {
+      Reminders.noteLaunch(intent)
+    }
     super.onCreate(savedInstanceState)
   }
 

@@ -14,12 +14,19 @@
 //!   scheduled toasts. Reading minutes only change while the app is open, so
 //!   "the goal is not met yet" stays true until the reader comes back, and
 //!   launching clears the schedule again.
+//!
+//! On Android the phone's alarm clock delivers everything, open or closed
+//! (`phone`): the same [`plan_ahead`] is handed over again whenever anything
+//! it depends on changes, each alarm carrying the latest moment it may still
+//! go out ([`deliver_until`]).
 
 use crate::habit::{self, DayRecord, StreakState};
-use chrono::{Duration, MappedLocalTime, NaiveDateTime, TimeZone, Timelike, Utc};
+use chrono::{Datelike, Duration, MappedLocalTime, NaiveDateTime, TimeZone, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+#[cfg(target_os = "android")]
+pub mod phone;
 pub mod runtime;
 mod toast;
 
@@ -65,8 +72,9 @@ impl ReminderKind {
   pub const BY_PRIORITY: [ReminderKind; 3] =
     [ReminderKind::StreakRisk, ReminderKind::Daily, ReminderKind::Close];
 
-  /// The toast tag, so a new reminder of a kind replaces the last one.
-  #[cfg(any(windows, test))]
+  /// The toast (or notification) tag, so a new reminder of a kind replaces
+  /// the last one.
+  #[cfg(any(windows, target_os = "android", test))]
   pub fn tag(self) -> &'static str {
     match self {
       ReminderKind::Daily => "daily",
@@ -232,6 +240,31 @@ impl FiredLog {
   pub fn mark(&mut self, kind: ReminderKind, date_key: &str) {
     *self.slot(kind) = Some(date_key.to_string());
   }
+
+  /// Takes in what another record says went out (the phone's alarm clock
+  /// delivers while the app is closed), keeping the later day of each kind.
+  /// Returns whether anything changed.
+  #[cfg(any(target_os = "android", test))]
+  pub fn merge(&mut self, other: &FiredLog) -> bool {
+    let mut changed = false;
+    for kind in ReminderKind::BY_PRIORITY {
+      let theirs = match kind {
+        ReminderKind::Daily => &other.daily,
+        ReminderKind::StreakRisk => &other.streak_risk,
+        ReminderKind::Close => &other.close
+      };
+      let Some(theirs) = theirs else {
+        continue;
+      };
+      let ours = self.slot(kind);
+      // `YYYY-MM-DD` sorts as it reads.
+      if ours.as_deref().map(|day| day < theirs.as_str()).unwrap_or(true) {
+        *ours = Some(theirs.clone());
+        changed = true;
+      }
+    }
+    changed
+  }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -321,33 +354,146 @@ fn minutes_phrase(minutes: i64) -> String {
   }
 }
 
-/// The words. Quiet Pip is mentioned once and says less; with Pip off the
-/// reminder does not mention Pip at all.
-pub fn compose(kind: ReminderKind, voice: PipVoice, remaining: i64, streak: i64, date_key: &str) -> Reminder {
-  let left = minutes_phrase(remaining);
-  let (title, body) = match (kind, voice) {
-    (ReminderKind::Daily, PipVoice::Chatty) => (
-      "Time to read?".to_string(),
-      format!("Pip's saving you a seat. {left} gets today's goal.")
-    ),
-    (ReminderKind::Daily, PipVoice::Quiet) => ("Time to read?".to_string(), "Pip's saving you a seat.".to_string()),
-    (ReminderKind::Daily, PipVoice::Off) => ("Time to read?".to_string(), format!("{left} of reading meets today's goal.")),
-    (ReminderKind::StreakRisk, voice) => {
-      let title = format!("Your {streak}-day streak is waiting");
-      let body = match voice {
-        PipVoice::Chatty => format!("Pip's pacing by the shelf. {left} before midnight keeps it going."),
-        PipVoice::Quiet => format!("Pip's keeping watch. {left} before midnight keeps it going."),
-        PipVoice::Off => format!("{left} before midnight keeps it going.")
-      };
-      (title, body)
-    }
-    (ReminderKind::Close, PipVoice::Chatty) => (
-      "So close".to_string(),
-      format!("Just {left} more and today's goal is done. Pip's already cheering.")
-    ),
-    (ReminderKind::Close, _) => ("So close".to_string(), format!("Just {left} more and today's goal is done."))
+/// The lines a reminder can say, for its kind and Pip's voice: (title, body),
+/// with `{left}` the minutes still to read, `{streak}` the days so far and
+/// `{next}` the day the streak reaches if today is read. Chatty Pip has the
+/// most to say; quiet Pip mentions herself at most once and briefly; with Pip
+/// off nothing mentions her. Kind, never a telling-off: a reminder is an
+/// invitation (the owner, 2026-10-15: "fun notifications, not the same all
+/// the time").
+fn lines(kind: ReminderKind, voice: PipVoice, weekend: bool) -> Vec<(&'static str, &'static str)> {
+  let mut lines = match (kind, voice) {
+    (ReminderKind::Daily, PipVoice::Chatty) => vec![
+      ("Time to read?", "Pip's saving you a seat. {left} gets today's goal."),
+      ("Your book misses you", "It's been sitting very still all day, Pip says. {left} and it's a happy book again."),
+      ("Your bookmark is waiting", "Pip found it right where you left it. {left} would make today count."),
+      ("Psst. Chapter time?", "Pip has fluffed every cushion in the house. {left} to today's goal."),
+      ("A page or two?", "Even a few pages count. {left} meets the goal, and Pip does a little spin."),
+      ("Story o'clock", "The characters want to know what happens next. So does Pip. {left} to go."),
+      ("Open your book?", "Pip wants to read over your shoulder. {left} gets today's goal."),
+      ("Tea, blanket, book?", "Pip can't make tea, but she can keep you company for {left}.")
+    ],
+    (ReminderKind::Daily, PipVoice::Quiet) => vec![
+      ("Time to read?", "Pip's saving you a seat."),
+      ("A few pages?", "Your book is right where you left it."),
+      ("Story o'clock", "{left} to today's goal."),
+      ("Your book's waiting", "Pip kept your place."),
+      ("Reading time", "{left} and today counts.")
+    ],
+    (ReminderKind::Daily, PipVoice::Off) => vec![
+      ("Time to read?", "{left} of reading meets today's goal."),
+      ("A few pages?", "Your book is right where you left it. {left} to today's goal."),
+      ("Story o'clock", "{left} and today's reading is done."),
+      ("Your book's waiting", "{left} gets today's goal.")
+    ],
+    (ReminderKind::StreakRisk, PipVoice::Chatty) => vec![
+      ("Your {streak}-day streak is waiting", "Pip's pacing by the shelf. {left} before midnight keeps it going."),
+      ("{streak} days and counting?", "Pip has the confetti ready. {left} before midnight makes it {next}."),
+      ("{streak} days, and heavy too", "Pip is holding your streak for you. {left} before midnight and it's yours again."),
+      ("Last call for today", "{left} keeps your {streak}-day streak. Pip's leaving the lamp on."),
+      ("Day {next} is right there", "One more evening chapter. {left} before midnight, and Pip will be insufferable about it.")
+    ],
+    (ReminderKind::StreakRisk, PipVoice::Quiet) => vec![
+      ("Your {streak}-day streak is waiting", "Pip's keeping watch. {left} before midnight keeps it going."),
+      ("Keep your {streak}-day streak?", "{left} before midnight. Pip's leaving the lamp on."),
+      ("{streak} days so far", "{left} tonight makes it {next}.")
+    ],
+    (ReminderKind::StreakRisk, PipVoice::Off) => vec![
+      ("Your {streak}-day streak is waiting", "{left} before midnight keeps it going."),
+      ("Keep the streak going?", "{left} tonight and it's {next} days."),
+      ("{streak} days so far", "{left} before midnight keeps it going.")
+    ],
+    (ReminderKind::Close, PipVoice::Chatty) => vec![
+      ("So close", "Just {left} more and today's goal is done. Pip's already cheering."),
+      ("Nearly there!", "{left} left. Pip has started the victory dance a little early."),
+      ("Almost!", "You stopped {left} short. Pip's holding the door open."),
+      ("Just a smidge more", "{left} and today's goal is done. Pip is counting on her leaves.")
+    ],
+    (ReminderKind::Close, _) => vec![
+      ("So close", "Just {left} more and today's goal is done."),
+      ("Nearly there", "{left} left for today's goal."),
+      ("Almost done", "{left} more and today counts.")
+    ]
   };
-  Reminder { kind, date_key: date_key.to_string(), title, body }
+  // A Saturday or a Sunday has lines of its own, when there's time for more.
+  // (Saturday and Sunday are consecutive days on one list, so `line_for`
+  // still never repeats a line; Friday and Monday are on the other list.)
+  if weekend && kind == ReminderKind::Daily {
+    lines = match voice {
+      PipVoice::Chatty => vec![
+        ("A slow weekend read?", "Pip votes for a blanket, a book and {left}. The motion carries."),
+        ("Weekend chapter?", "No alarms, no rush. Pip has found the comfiest spot for {left}."),
+        ("Any day ending in -day", "is a reading day, says Pip. {left} to today's goal."),
+        ("Cosy weekend plans?", "Pip has stolen your blanket and wants {left} of story before she gives it back.")
+      ],
+      PipVoice::Quiet => vec![
+        ("A weekend chapter?", "{left} to today's goal."),
+        ("Weekend pages?", "Pip kept your place."),
+        ("A slow read?", "{left} and today counts.")
+      ],
+      PipVoice::Off => vec![
+        ("A weekend chapter?", "{left} of reading meets today's goal."),
+        ("Weekend pages?", "Your book is right where you left it. {left} to go."),
+        ("A slow read?", "{left} and today's reading is done.")
+      ]
+    };
+  }
+  lines
+}
+
+/// Which of `count` lines a day gets: the same all day (a reminder planned
+/// again in the afternoon keeps its words), and never the line of the day
+/// before. Each day moves a fixed step through the list, a step that shares
+/// no factor with its length, so consecutive days always differ and every
+/// line comes round; each kind starts from its own place.
+fn line_for(count: usize, kind: ReminderKind, date_key: &str) -> usize {
+  if count <= 1 {
+    return 0;
+  }
+  let day = chrono::NaiveDate::parse_from_str(date_key, "%Y-%m-%d")
+    .map(|date| i64::from(date.num_days_from_ce()))
+    .unwrap_or(0);
+  let start = match kind {
+    ReminderKind::Daily => 0,
+    ReminderKind::StreakRisk => 1,
+    ReminderKind::Close => 2
+  };
+  let gcd = |mut a: usize, mut b: usize| {
+    while b != 0 {
+      (a, b) = (b, a % b);
+    }
+    a
+  };
+  // 3 reads less like counting than 1; the first that fits the length.
+  let step = [3, 2, 1].into_iter().find(|&step| step < count && gcd(step, count) == 1).unwrap_or(1);
+  ((day.rem_euclid(count as i64) as usize) * step + start) % count
+}
+
+/// The words. Which line is chosen by the day (`line_for`), so the same kind
+/// of reminder says something new each day but the same thing all day.
+pub fn compose(kind: ReminderKind, voice: PipVoice, remaining: i64, streak: i64, date_key: &str) -> Reminder {
+  let weekend = chrono::NaiveDate::parse_from_str(date_key, "%Y-%m-%d")
+    .map(|date| matches!(date.weekday(), chrono::Weekday::Sat | chrono::Weekday::Sun))
+    .unwrap_or(false);
+  let choices = lines(kind, voice, weekend);
+  let (title, body) = choices[line_for(choices.len(), kind, date_key)];
+  let fill = |text: &str| {
+    text
+      .replace("{left}", &minutes_phrase(remaining))
+      .replace("{streak}", &streak.to_string())
+      .replace("{next}", &(streak + 1).to_string())
+  };
+  // A line that starts with the minutes reads better with a capital.
+  let body = capitalise(&fill(body));
+  Reminder { kind, date_key: date_key.to_string(), title: fill(title), body }
+}
+
+fn capitalise(text: &str) -> String {
+  let mut chars = text.chars();
+  match chars.next() {
+    Some(first) => first.to_uppercase().chain(chars).collect(),
+    None => String::new()
+  }
 }
 
 /// When `kind` is meant to go out on the view's day, if it is meant to at all.
@@ -471,6 +617,14 @@ pub fn plan_ahead(
   }
   plans.sort_by_key(|plan| plan.at);
   plans
+}
+
+/// The latest a reminder planned for `at` may still go out when the phone
+/// delivers it late (asleep, saving battery, or Leaflet was in front): the
+/// running app's catch-up, and never into the night.
+#[cfg(any(target_os = "android", test))]
+pub fn deliver_until(at: NaiveDateTime) -> NaiveDateTime {
+  (at + Duration::minutes(CATCH_UP_MINUTES)).min(at_minute(at.date(), QUIET_START))
 }
 
 /// The moment a local wall-clock time happens, in UTC, for Windows' schedule.
@@ -600,9 +754,9 @@ mod tests {
     assert_eq!(due_kind(due_now(&settings, PipVoice::Chatty, &habit, idle(), &log, at("2026-03-03", 18, 59))), None);
     let due = due_now(&settings, PipVoice::Chatty, &habit, idle(), &log, at("2026-03-03", 19, 0)).unwrap();
     assert_eq!(due.reminder.kind, ReminderKind::Daily);
-    assert_eq!(due.reminder.title, "Time to read?");
-    assert!(due.reminder.body.starts_with("Pip's saving you a seat."));
-    assert!(due.reminder.body.contains("15 minutes"));
+    // Today's line, whichever it is, with the minutes still to read.
+    assert_eq!(due.reminder, compose(ReminderKind::Daily, PipVoice::Chatty, 15, 0, "2026-03-03"));
+    assert!(due.reminder.body.contains("15 minutes"), "{:?}", due.reminder);
   }
 
   #[test]
@@ -792,13 +946,92 @@ mod tests {
       let chatty = compose(kind, PipVoice::Chatty, 5, 3, "2026-03-03");
       assert!(chatty.body.contains("Pip"), "{kind:?}: {chatty:?}");
     }
-    assert_eq!(compose(ReminderKind::Daily, PipVoice::Quiet, 5, 0, "2026-03-03").body, "Pip's saving you a seat.");
+    for (title, body) in lines(ReminderKind::Daily, PipVoice::Quiet, true).into_iter().chain(lines(ReminderKind::Daily, PipVoice::Quiet, false)) {
+      assert!(format!("{title} {body}").matches("Pip").count() <= 1, "{title} {body}");
+    }
   }
 
   #[test]
   fn one_minute_is_singular() {
-    let reminder = compose(ReminderKind::Close, PipVoice::Off, 1, 0, "2026-03-03");
-    assert!(reminder.body.contains("Just 1 minute more"));
+    for day in days(14) {
+      for kind in KINDS {
+        for voice in VOICES {
+          let reminder = compose(kind, voice, 1, 4, &day);
+          let text = format!("{} {}", reminder.title, reminder.body);
+          assert!(!text.contains("1 minutes"), "{text}");
+        }
+      }
+    }
+  }
+
+  const KINDS: [ReminderKind; 3] = [ReminderKind::Daily, ReminderKind::StreakRisk, ReminderKind::Close];
+  const VOICES: [PipVoice; 3] = [PipVoice::Chatty, PipVoice::Quiet, PipVoice::Off];
+
+  /// `count` days in a row from 2026-03-01 (a Sunday), as date keys.
+  fn days(count: i64) -> Vec<String> {
+    let first = chrono::NaiveDate::from_ymd_opt(2026, 3, 1).unwrap();
+    (0..count).map(|offset| (first + Duration::days(offset)).format("%Y-%m-%d").to_string()).collect()
+  }
+
+  #[test]
+  fn a_reminder_says_the_same_thing_all_day_and_something_new_the_next() {
+    for kind in KINDS {
+      for voice in VOICES {
+        let said: Vec<Reminder> = days(60).iter().map(|day| compose(kind, voice, 12, 7, day)).collect();
+        for (index, reminder) in said.iter().enumerate() {
+          // Planned again later the same day, it keeps its words.
+          assert_eq!(*reminder, compose(kind, voice, 12, 7, &reminder.date_key));
+          if index > 0 {
+            assert_ne!(
+              (&reminder.title, &reminder.body),
+              (&said[index - 1].title, &said[index - 1].body),
+              "{kind:?} {voice:?} repeated on {}",
+              reminder.date_key
+            );
+          }
+        }
+        let different: std::collections::HashSet<&String> = said.iter().map(|reminder| &reminder.title).collect();
+        assert!(different.len() >= 3, "{kind:?} {voice:?} had only {} titles in 60 days", different.len());
+      }
+    }
+  }
+
+  #[test]
+  fn every_line_is_filled_in_and_pip_speaks_only_when_she_is_on() {
+    for day in days(21) {
+      for kind in KINDS {
+        for voice in VOICES {
+          let reminder = compose(kind, voice, 12, 7, &day);
+          let text = format!("{} {}", reminder.title, reminder.body);
+          assert!(!text.contains('{') && !text.contains('}'), "unfilled: {text}");
+          assert!(reminder.body.chars().next().is_some_and(|first| !first.is_lowercase()), "{text}");
+          let pips = text.matches("Pip").count();
+          match voice {
+            PipVoice::Off => assert_eq!(pips, 0, "{text}"),
+            PipVoice::Quiet => assert!(pips <= 1, "{text}"),
+            PipVoice::Chatty => {}
+          }
+          if kind == ReminderKind::StreakRisk {
+            assert!(text.contains('7') || text.contains('8'), "the streak is not mentioned: {text}");
+          }
+        }
+      }
+    }
+  }
+
+  #[test]
+  fn a_weekend_has_lines_of_its_own() {
+    for day in days(366) {
+      let date = chrono::NaiveDate::parse_from_str(&day, "%Y-%m-%d").unwrap();
+      let weekend = matches!(date.weekday(), chrono::Weekday::Sat | chrono::Weekday::Sun);
+      for voice in VOICES {
+        let said = compose(ReminderKind::Daily, voice, 12, 0, &day);
+        let from_weekend = lines(ReminderKind::Daily, voice, true)
+          .iter()
+          .any(|(title, _)| said.title == title.replace("{left}", "12 minutes"));
+        assert_eq!(from_weekend, weekend, "{day} {voice:?}: {said:?}");
+      }
+    }
   }
 
   // ---- planning for a closed app ------------------------------------------
@@ -834,7 +1067,8 @@ mod tests {
         (ReminderKind::StreakRisk, "2026-03-04".to_string())
       ]
     );
-    assert_eq!(plans[1].reminder.title, "Your 5-day streak is waiting");
+    // Its words are tomorrow's line for a 5-day streak (which line varies by the day).
+    assert_eq!(plans[1].reminder, compose(ReminderKind::StreakRisk, PipVoice::Chatty, 20, 5, "2026-03-04"));
   }
 
   #[test]
@@ -996,5 +1230,58 @@ mod tests {
     assert!(!unpackaged.contains("launch="));
     assert!(!unpackaged.contains("<actions>"));
     assert!(!unpackaged.contains("<image"));
+  }
+
+  // ---- the phone's alarm clock ----------------------------------------------
+
+  #[test]
+  fn a_late_alarm_may_go_out_within_the_hour_but_never_at_night() {
+    assert_eq!(deliver_until(at("2026-03-03", 19, 0)), at("2026-03-03", 20, 0));
+    // "Streak at risk" at 22:00 may run until the night starts, not past it.
+    assert_eq!(deliver_until(at("2026-03-03", 22, 0)), at("2026-03-03", 23, 0));
+    assert_eq!(deliver_until(at("2026-03-03", 22, 50)), at("2026-03-03", 23, 0));
+  }
+
+  #[test]
+  fn what_the_phone_delivered_counts_as_sent() {
+    let mut log = FiredLog::default();
+    log.mark(ReminderKind::Daily, "2026-03-02");
+    let phone = FiredLog {
+      daily: Some("2026-03-03".to_string()),
+      streak_risk: None,
+      close: Some("2026-03-03".to_string())
+    };
+    assert!(log.merge(&phone));
+    assert!(log.fired_on(ReminderKind::Daily, "2026-03-03"));
+    assert!(log.fired_on(ReminderKind::Close, "2026-03-03"));
+    assert_eq!(log.streak_risk, None);
+    // Nothing new the second time, and an older day never wins.
+    assert!(!log.merge(&phone));
+    let older = FiredLog { daily: Some("2026-03-01".to_string()), ..FiredLog::default() };
+    assert!(!log.merge(&older));
+    assert!(log.fired_on(ReminderKind::Daily, "2026-03-03"));
+  }
+
+  #[test]
+  fn one_close_nudge_a_day_even_after_a_second_short_session() {
+    // The phone said "so close" at 15:15; a second short session ends at 17:00.
+    let settings = ReminderSettings { close_nudge: true, ..ReminderSettings::default() };
+    let mut log = FiredLog::default();
+    log.merge(&FiredLog { close: Some("2026-03-03".to_string()), ..FiredLog::default() });
+    let mut habit = view("2026-03-03", 18.0, 20, 0);
+    habit.last_session_end = Some(at("2026-03-03", 17, 0));
+    let plans = plan_ahead(&settings, PipVoice::Chatty, &habit, 20, &log, at("2026-03-03", 17, 1));
+    assert!(plans.is_empty());
+  }
+
+  #[test]
+  fn meeting_the_goal_leaves_the_phone_nothing_for_today() {
+    // Handed over at 14:00 with today unmet, then again once the goal is met:
+    // the second plan replaces the first, so tonight's alarms are gone.
+    let before = plan_ahead(&all_on(), PipVoice::Chatty, &view("2026-03-03", 5.0, 20, 4), 20, &FiredLog::default(), at("2026-03-03", 14, 0));
+    assert!(before.iter().any(|plan| plan.reminder.date_key == "2026-03-03"));
+    let after = plan_ahead(&all_on(), PipVoice::Chatty, &view("2026-03-03", 21.0, 20, 5), 20, &FiredLog::default(), at("2026-03-03", 14, 30));
+    assert!(after.iter().all(|plan| plan.reminder.date_key == "2026-03-04"));
+    assert!(!after.is_empty(), "tomorrow is still planned");
   }
 }

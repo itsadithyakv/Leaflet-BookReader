@@ -162,6 +162,9 @@ pub fn run() {
   // books arriving from other apps (`mobile.rs`).
   #[cfg(target_os = "android")]
   let builder = builder.plugin(mobile::init());
+  // Reading reminders by the phone's alarm clock (`reminders/phone.rs`).
+  #[cfg(target_os = "android")]
+  let builder = builder.plugin(reminders::phone::init());
 
   builder
     .plugin(tauri_plugin_dialog::init())
@@ -247,6 +250,7 @@ pub fn run() {
       reminders::runtime::reminders_context,
       reminders::runtime::reminders_take_activation,
       reminders::runtime::reminders_preview,
+      reminders::runtime::reminders_open_settings,
       desktop_pip::runtime::desktop_pip_set,
       desktop_pip::runtime::desktop_pip_status,
       desktop_pip::runtime::desktop_pip_attach,
@@ -371,6 +375,7 @@ pub fn run() {
       commands::open_store_review,
       commands::open_store_page,
       commands::download_book,
+      commands::place_here,
       commands::delete_book,
       commands::converter_status,
       commands::install_converter,

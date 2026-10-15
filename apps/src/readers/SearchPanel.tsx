@@ -19,7 +19,8 @@ type SearchPanelProps = {
   bookOf?: (section: number) => number;
   chapterNameOf?: (section: number) => string | null;
   readingBook?: number;
-  onOpen: (hit: SearchHit) => void;
+  /** Goes to a match; `query` is what was searched for (a phone closes the sheet and keeps it for next time). */
+  onOpen: (hit: SearchHit, query: string) => void;
   onClose: () => void;
   /** Words to search for straight away (text selected in the book); the panel opens empty without it. */
   initialQuery?: string;
@@ -162,7 +163,7 @@ export const SearchPanel = ({ book, chapterOf, books, bookOf, chapterNameOf, rea
             {all > 1 && <span className="tabular-nums">{all.toLocaleString()}</span>}
           </div>
         )}
-        <button type="button" className="reader-search-hit w-full rounded-lg px-2 py-1.5 text-left" onClick={() => onOpen(hit)}>
+        <button type="button" className="reader-search-hit w-full rounded-lg px-2 py-1.5 text-left" onClick={() => onOpen(hit, query)}>
           {marked(hit.excerpt, words)}
         </button>
         {last && more > 0 && (
@@ -194,7 +195,7 @@ export const SearchPanel = ({ book, chapterOf, books, bookOf, chapterNameOf, rea
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && hits[0]) {
-              onOpen(hits[0]);
+              onOpen(hits[0], query);
             }
           }}
           placeholder="Search in this book"

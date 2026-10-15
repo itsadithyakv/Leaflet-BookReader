@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Book } from "@shared/models/book";
 import { accountService } from "../services/accountService";
 import { bookService } from "../services/bookService";
+import { FurtherOnOffer } from "../components/sync/FurtherOnOffer";
 import {
   createComicPageSource,
   createPdfPageSource,
@@ -216,6 +217,10 @@ const readJson = <Value,>(key: string): Value | null => {
 };
 
 const readPageBookmarks = (key: string): PageBookmark[] => parsePageBookmarks(readJson<unknown>(key));
+
+/** The page a share of the way through falls on (as a synced place is opened, below). */
+const placePage = (progress: number, pageCount: number) =>
+  Math.min(pageCount, Math.max(1, Math.round(Math.min(1, Math.max(0, progress)) * Math.max(0, pageCount - 1)) + 1));
 
 // Rows are absolutely positioned so the sidebar can virtualize a
 // thousand-page PDF, or a table of contents as long, instead of mounting a
@@ -2792,6 +2797,17 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
       </div>
 
       {notes.dock}
+
+      {/* Another device read further (components/sync): its page, gone to only on a tap. */}
+      <FurtherOnOffer
+        bookId={book.id}
+        chapterOf={(place) => (pageCount > 0 ? chapterOf(placePage(place.progress, pageCount)) : null)}
+        onGo={(place) => {
+          if (pageCount > 0) {
+            jumpToPage(placePage(place.progress, pageCount));
+          }
+        }}
+      />
 
       {toast && (
         <div className="reader-toast fixed bottom-6 right-6 z-[60]" role="status">

@@ -15,11 +15,11 @@ export type ReminderKind = "daily" | "streakRisk" | "close";
 
 export type ReminderStatus = {
   settings: ReminderSettings;
-  /** Reminders can be delivered here at all (Windows only). */
+  /** Reminders can be delivered here at all (Windows and Android). */
   supported: boolean;
-  /** The Store (MSIX) build: reminders also arrive with Leaflet closed. */
+  /** The Store (MSIX) build, or a phone: reminders also arrive with Leaflet closed. */
   whileClosed: boolean;
-  /** Windows has notifications for Leaflet turned off. */
+  /** Windows (or the phone) has notifications for Leaflet turned off. */
   blocked: boolean;
 };
 
@@ -79,5 +79,12 @@ export const reminderService = {
       return;
     }
     await invoke("reminders_preview", { kind });
+  },
+  /** The phone's notification settings for Leaflet (Android only). */
+  async openSettings(): Promise<void> {
+    if (!isTauri()) {
+      return;
+    }
+    await invoke("reminders_open_settings");
   }
 };

@@ -15,6 +15,7 @@ import "./friends.css";
 import { SheetHandle } from "../ui/SheetHandle";
 import { useBackClose } from "../../hooks/useBackClose";
 import { isTouchInput } from "../../platform/device";
+import { backdropClose } from "../ui/backdrop";
 
 /** The server's limits, counted here so nothing typed is cut off there. */
 const LINE_MAX = 280;
@@ -105,7 +106,7 @@ export const PostCard = ({ post, showToast, onRemoved }: CardProps) => {
               <p className="mt-1 whitespace-pre-line text-sm leading-6 text-on-surface [overflow-wrap:anywhere]">
                 {folded ? `${body.slice(0, FOLD_AT).trimEnd()}…` : body}
                 {folded && (
-                  <button type="button" className="ml-1 text-xs font-semibold text-primary hover:underline" onClick={() => setWhole(true)}>
+                  <button type="button" className="touch-hit ml-1 text-xs font-semibold text-primary hover:underline" onClick={() => setWhole(true)}>
                     More
                   </button>
                 )}
@@ -135,13 +136,13 @@ export const PostCard = ({ post, showToast, onRemoved }: CardProps) => {
             </span>
           )}
           {post.isYou ? (
-            <button type="button" className="flex items-center gap-1 hover:text-error" onClick={() => void remove()} aria-label={`Remove your post about ${post.title}`}>
+            <button type="button" className="touch-hit flex items-center gap-1 hover:text-error" onClick={() => void remove()} aria-label={`Remove your post about ${post.title}`}>
               <Trash2 size={11} aria-hidden /> Remove
             </button>
           ) : (
             <button
               type="button"
-              className="flex items-center gap-1 hover:text-on-surface"
+              className="touch-hit flex items-center gap-1 hover:text-on-surface"
               onClick={() => report({ target: "post", id: post.id, what: "this post" })}
               aria-label={`Report this post by ${at(post.person.handle)}`}
             >
@@ -274,7 +275,7 @@ export const PostDialog = ({ showToast }: { showToast: (message: string) => void
   };
 
   return (
-    <div className="sheet-backdrop fixed inset-0 z-[80] flex items-center justify-center bg-black/55 px-4 py-6" onMouseDown={(event) => event.target === event.currentTarget && close()}>
+    <div className="sheet-backdrop fixed inset-0 z-[80] flex items-center justify-center bg-black/55 px-4 py-6" {...backdropClose(() => close())}>
       <div className="modal-surface dialog-fit sheet-panel sheet-tall flex max-h-full w-full max-w-lg flex-col overflow-y-auto p-6" role="dialog" aria-modal="true" aria-labelledby="post-dialog-title">
         <SheetHandle onClose={close} />
         <h2 id="post-dialog-title" className="page-title text-2xl">
@@ -357,7 +358,7 @@ export const PostDialog = ({ showToast }: { showToast: (message: string) => void
 
         {error && <p className="mt-3 rounded-lg bg-error-container/40 px-3 py-2 text-xs text-on-surface">{error}</p>}
 
-        <div className="mt-5 flex justify-end gap-2">
+        <div className="sheet-actions mt-5 flex justify-end gap-2">
           <button type="button" className="tactile-button px-4 py-2 text-xs" onClick={close} disabled={busy}>
             Cancel
           </button>

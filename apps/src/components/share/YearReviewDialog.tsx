@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { UiIcon } from "../UiIcon";
 import { copyPicture, savePicture } from "../pip/diary/picture";
+import { onAndroid } from "../../platform/android";
 import { annotationService } from "../../services/annotationService";
 import { wordService } from "../../services/wordService";
 import { useHabitStore } from "../../store/habitStore";
@@ -13,6 +14,7 @@ import { timeWords, yearReview, yearsRead } from "./yearReview";
 import "./share.css";
 import { SheetHandle } from "../ui/SheetHandle";
 import { useBackClose } from "../../hooks/useBackClose";
+import { backdropClose } from "../ui/backdrop";
 
 const STYLE_KEY = "leaflet.share.yearStyle";
 /** Highlights are counted in this many books at most: the ones read in most lately. */
@@ -178,11 +180,7 @@ export const YearReviewDialog = () => {
   return (
     <div
       className="sheet-backdrop fixed inset-0 z-[95] flex items-center justify-center bg-black/55 px-4"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
-          closeYearReview();
-        }
-      }}
+      {...backdropClose(() => closeYearReview())}
     >
       <div ref={panel} role="dialog" aria-modal="true" aria-label={`Your ${year} in review`} className="modal-surface confirm-pop share-dialog sheet-panel rounded-2xl p-5">
         <SheetHandle onClose={closeYearReview} />
@@ -272,9 +270,9 @@ export const YearReviewDialog = () => {
                   className="share-action is-primary"
                   data-autofocus
                   disabled={busy}
-                  onClick={() => void run(async () => (canvas.current && (await savePicture(yearFileName(year), canvas.current)) ? "Saved." : null))}
+                  onClick={() => void run(async () => (canvas.current && (await savePicture(yearFileName(year), canvas.current)) && !onAndroid() ? "Saved." : null))}
                 >
-                  Save picture
+                  {onAndroid() ? "Share" : "Save picture"}
                 </button>
               </div>
             </div>

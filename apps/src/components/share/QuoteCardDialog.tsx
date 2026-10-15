@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { UiIcon } from "../UiIcon";
 import { copyPicture, savePicture } from "../pip/diary/picture";
+import { onAndroid } from "../../platform/android";
 import { CARD_HEIGHT, CARD_STYLES, CARD_WIDTH, drawQuoteCard, quoteFileName } from "./quoteCard";
 import { closeQuoteCard, useShareStore } from "./shareStore";
 import { FEATURES } from "../../constants/features";
@@ -9,6 +10,7 @@ import { composePost } from "../community/postStore";
 import "./share.css";
 import { SheetHandle } from "../ui/SheetHandle";
 import { useBackClose } from "../../hooks/useBackClose";
+import { backdropClose } from "../ui/backdrop";
 
 const STYLE_KEY = "leaflet.share.quoteStyle";
 
@@ -103,11 +105,7 @@ export const QuoteCardDialog = () => {
   return (
     <div
       className="sheet-backdrop fixed inset-0 z-[95] flex items-center justify-center bg-black/55 px-4"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
-          closeQuoteCard();
-        }
-      }}
+      {...backdropClose(() => closeQuoteCard())}
     >
       <div ref={panel} role="dialog" aria-modal="true" aria-label="Share this passage as a picture" className="modal-surface confirm-pop share-dialog sheet-panel rounded-2xl p-5">
         <SheetHandle onClose={closeQuoteCard} />
@@ -189,10 +187,10 @@ export const QuoteCardDialog = () => {
               data-autofocus
               disabled={busy}
               onClick={() =>
-                void run(async () => (canvas.current && (await savePicture(quoteFileName(quote.title), canvas.current)) ? "Saved." : null))
+                void run(async () => (canvas.current && (await savePicture(quoteFileName(quote.title), canvas.current)) && !onAndroid() ? "Saved." : null))
               }
             >
-              Save picture
+              {onAndroid() ? "Share" : "Save picture"}
             </button>
           </div>
         </div>

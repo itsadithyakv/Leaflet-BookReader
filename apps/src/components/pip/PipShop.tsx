@@ -8,6 +8,7 @@ import { levelHint, levelLabel } from "./rare";
 import { shortfall } from "./shopParts";
 import "./rare.css";
 import { useBackLayer } from "../../platform/back";
+import { backdropClose } from "../ui/backdrop";
 
 /** What previewing an entry on Pip changes: the look, and a move to show it off. */
 export type PreviewLook = { variant?: string; outfit?: string[]; move?: string };
@@ -234,7 +235,7 @@ export const PipShop = ({ categories, balance, request, goal, onGoal, onBuy, onP
   let dealt = 0;
 
   return (
-    <div className="pip-shop-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <div className="pip-shop-backdrop" role="presentation" {...backdropClose(onClose)}>
       <div
         ref={dialogRef}
         className="pip-shop modal-surface"

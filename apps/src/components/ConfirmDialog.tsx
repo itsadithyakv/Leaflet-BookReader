@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { PipSprite } from "./PipSprite";
 import { SheetHandle } from "./ui/SheetHandle";
 import { useBackClose } from "../hooks/useBackClose";
+import { backdropClose } from "./ui/backdrop";
 
 /**
  * Leaflet's own yes/no dialog.
@@ -87,11 +88,7 @@ export const ConfirmDialog = () => {
   return (
     <div
       className="sheet-backdrop fixed inset-0 z-[90] flex items-center justify-center bg-black/50 px-4"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
-          settle(false);
-        }
-      }}
+      {...backdropClose(() => settle(false))}
     >
       <div
         role="alertdialog"

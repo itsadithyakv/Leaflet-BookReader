@@ -340,3 +340,8 @@
 .ambience-switch {
   min-height: 24px;
 }
+
+/* By finger a switch row is a thumb tall (it is a full-width row: no neighbour to overlap). */
+html[data-input="touch"] .ambience-switch {
+  min-height: var(--touch-target, 44px);
+}

@@ -17,6 +17,33 @@ export type PickKind = "books" | "font";
 
 export const onAndroid = () => isAndroid() && isTauri();
 
+/**
+ * Who decides which way up the screen may be. Pip's house and the arcade
+ * hold it sideways; an open book holds the reader's own choice. The newest
+ * hold wins, and when it is let go the one before it applies again (a book
+ * opened from Pip's tab, then closed, gives the screen back to Pip); with
+ * none, the screen turns with the phone.
+ */
+type Hold = { id: number; lock: RotationLock };
+const holds: Hold[] = [];
+let holdId = 0;
+const applyHolds = () => {
+  void call("lock_rotation", { lock: holds.length > 0 ? holds[holds.length - 1].lock : "auto" });
+};
+
+/** Holds the screen one way up until the returned function is called. Use from an effect. */
+export const holdRotation = (lock: RotationLock): (() => void) => {
+  holdId += 1;
+  const hold = { id: holdId, lock };
+  holds.push(hold);
+  applyHolds();
+  return () => {
+    const at = holds.findIndex((entry) => entry.id === hold.id);
+    if (at >= 0) holds.splice(at, 1);
+    applyHolds();
+  };
+};
+
 const call = async <T>(command: string, args?: Record<string, unknown>): Promise<T | null> => {
   if (!onAndroid()) return null;
   try {

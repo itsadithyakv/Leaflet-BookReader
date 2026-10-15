@@ -21,6 +21,7 @@ import { FocusFlower, flowerCaption, flowerLook } from "../components/FocusFlowe
 import { askConfirm } from "../components/ConfirmDialog";
 import { MobileComingSoonBanner } from "../components/MobileComingSoonBanner";
 import { useAddBooksRequest } from "../hooks/useAddBooksRequest";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 import { isAndroid, useTouchInput } from "../platform/device";
 import { DailyHighlight } from "../components/highlights/DailyHighlight";
 import { UpNextStrip } from "../components/UpNextStrip";
@@ -318,6 +319,10 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
     }
   });
   const touch = useTouchInput();
+  // A phone has a + of its own (over the tab bar upright, in the header
+  // sideways), so once there are books the big import box gives its screen to them.
+  const phoneShape = useMediaQuery("(max-width: 767px) and (min-height: 521px), (max-height: 520px)");
+  const importBox = libraryEmpty || !phoneShape;
 
   /** A book's ⋯ menu removed it (the menu asks first, and has no toast of its own). */
   const sayRemoved = useCallback((title: string) => showToast(`Removed ${title}.`), [showToast]);
@@ -466,7 +471,10 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
             className="inset-field w-full py-2.5 pl-12 pr-4 text-sm text-on-surface focus:border-primary/40 focus:outline-none"
             placeholder="Search your library…"
             aria-label="Search your library"
-            type="text"
+            type="search"
+            enterKeyHint="search"
+            // It searches as it is typed: the phone's search key only puts the keyboard away.
+            onKeyDown={(event) => event.key === "Enter" && event.currentTarget.blur()}
             value={filters.query}
             onChange={(event) => setFilter({ query: event.target.value })}
           />
@@ -580,6 +588,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
           </div>
         </div>
 
+        {importBox && (
         <button
           ref={importDropRef}
           data-tour="import"
@@ -618,6 +627,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
             {isAndroid() ? "Kindle books (MOBI, AZW3) open too." : `${externalConverterCount()} more formats need the optional converter.`}
           </p>
         </button>
+        )}
       </section>
 
       <UpNextStrip onOpen={onOpenBook} onSeeAll={() => onNavigate("collections")} />
@@ -773,6 +783,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
       <button
         type="button"
         className="add-books-fab"
+        data-tour={importBox ? undefined : "import"}
         onClick={handleImport}
         disabled={importing}
         aria-label="Add books"

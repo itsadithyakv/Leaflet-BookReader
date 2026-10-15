@@ -4,6 +4,7 @@ import { UiIcon } from "../UiIcon";
 import { placeNear, type Rect } from "./layout";
 import { shortfall } from "./shopParts";
 import { useBackLayer } from "../../platform/back";
+import { cardBounds } from "./cardPlace";
 
 type PacketPickerProps = {
   plot: number;
@@ -43,7 +44,7 @@ export const PacketPicker = ({ plot, packets, balance, priceOf, anchor, art, onP
         closeRef.current();
         return;
       }
-      const viewport = { left: 8, top: 8, width: window.innerWidth - 16, height: window.innerHeight - 16 };
+      const viewport = cardBounds();
       setPlace(placeNear(box, { width: root.offsetWidth, height: root.offsetHeight }, viewport, { gap: 6 }));
     };
     measure();

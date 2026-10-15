@@ -493,7 +493,10 @@ export const BattleScreen = (props: Props) => {
     if (!wrap) return;
     const measure = () => {
       // Less the frame it hangs in, on each side (index.css).
-      const next = fitPicture(FIELD_W, FIELD_H, wrap.clientWidth - 16, Math.max(180, window.innerHeight - 260), screenRatio());
+      // (A phone on its side has its name above and the scouts below the field, and no more: 260 px kept for them left
+      // a 360 px screen a field of 150.)
+      const kept = window.innerHeight <= 520 ? 150 : 260;
+      const next = fitPicture(FIELD_W, FIELD_H, wrap.clientWidth - 16, Math.max(180, window.innerHeight - kept), screenRatio());
       setFit((was) => (was.css === next.css && was.backing === next.backing ? was : next));
     };
     measure();

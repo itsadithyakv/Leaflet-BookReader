@@ -8,6 +8,8 @@ import { drawPostcard, postcardFileName, postcardSize, postcardWords, type Postc
 import type { CampLook } from "./scene";
 import "./postcard.css";
 import { useBackLayer } from "../../../../platform/back";
+import { backdropClose } from "../../../ui/backdrop";
+import { onAndroid } from "../../../../platform/android";
 
 export type { PostcardStats } from "./postcard";
 
@@ -102,18 +104,23 @@ export const HollowPostcard = ({ art, look, stats, onClose }: HollowPostcardProp
     }
   };
 
+  const closer = backdropClose(onClose);
   return createPortal(
     <div
       className="pip-confirm-backdrop"
-      onMouseDown={(event) => {
-        event.stopPropagation();
-        if (event.target === event.currentTarget) onClose();
+      onMouseDown={kept}
+      // A portal's events still climb to the page that opened it: the camp is not to take them for its own. (The
+      // backdrop shuts it on a tap that began and ended on it: backdropClose.)
+      onPointerDown={(event) => {
+        kept(event);
+        closer.onPointerDown(event);
       }}
-      // A portal's events still climb to the page that opened it: the camp is not to take them for its own.
-      onPointerDown={kept}
       onPointerMove={kept}
       onPointerUp={kept}
-      onClick={kept}
+      onClick={(event) => {
+        kept(event);
+        closer.onClick(event);
+      }}
       onDoubleClick={kept}
       onContextMenu={kept}
       onWheel={kept}
@@ -153,10 +160,10 @@ export const HollowPostcard = ({ art, look, stats, onClose }: HollowPostcardProp
             className="pip-key pip-key-primary"
             data-autofocus
             disabled={busy}
-            onClick={() => void run(async () => (canvas.current && (await savePicture(postcardFileName(new Date()), canvas.current)) ? "Saved." : null))}
+            onClick={() => void run(async () => (canvas.current && (await savePicture(postcardFileName(new Date()), canvas.current)) && !onAndroid() ? "Saved." : null))}
           >
             <UiIcon name="upload" size={15} />
-            Save
+            {onAndroid() ? "Share" : "Save"}
           </button>
         </div>
       </div>

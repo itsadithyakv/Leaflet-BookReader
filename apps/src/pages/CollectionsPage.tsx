@@ -6,6 +6,7 @@ import { useLibrarySeries } from "../library/useSeries";
 import { buildShelves, type Shelf, type ShelfId } from "../library/shelves";
 import { faceOf, genreColours, genreShelves } from "../library/genres";
 import type { SeriesGroup } from "../library/series";
+import { useBackLayer } from "../platform/back";
 import { BookGrid } from "../components/BookGrid";
 import type { BookMenuAction } from "../components/BookMenu";
 import { CoverStack } from "../components/collections/CoverStack";
@@ -114,6 +115,8 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
   const sayRemoved = useCallback((title: string) => showToast(`Removed ${title}.`), [showToast]);
   const [showAllBrowse, setShowAllBrowse] = useState(false);
   const [showAllGenres, setShowAllGenres] = useState(false);
+  // Android's Back from a series, shelf, genre or collection comes back here, not to the Library.
+  useBackLayer(view !== null, () => setView(null));
 
   useEffect(() => {
     if (!loaded) {
@@ -471,7 +474,7 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
 };
 
 const BackButton = ({ onClick }: { onClick: () => void }) => (
-  <button type="button" className="flex items-center gap-1.5 self-start py-1 text-xs font-semibold text-on-surface-variant hover:text-on-surface" onClick={onClick}>
+  <button type="button" className="touch-hit flex items-center gap-1.5 self-start py-1 text-xs font-semibold text-on-surface-variant hover:text-on-surface" onClick={onClick}>
     <UiIcon name="back" size={14} /> Collections
   </button>
 );

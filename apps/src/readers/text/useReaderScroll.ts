@@ -5,6 +5,7 @@ import { isScrollCorrection } from "../smartScroll";
 import { glideFrame, glideSet, startGlide } from "../glide";
 import { NOT_HELD, STILL_MS, isOnScrollbar, letGo, pageScrolled, pressOn, type ScrollbarHold } from "../scrollbarHold";
 import type { Later, WithCover, WithLook } from "./scope";
+import { GHOST_ATTR } from "./renditionGhost";
 
 /**
  * The scrolling window and the chapters in it: finding it, moving it, and
@@ -153,7 +154,8 @@ export const useReaderScroll = (reader: WithLook & Later<"cancelSmartPageTurn" |
 
   const getScrollContainer = (): HTMLElement | null => {
     const cached = scrollContainerRef.current;
-    if (cached && cached.isConnected) {
+    // (Not a page held on screen while the book is laid out anew: renditionGhost.ts.)
+    if (cached && cached.isConnected && !cached.hasAttribute(GHOST_ATTR)) {
       return cached;
     }
     const manager = renditionRef.current?.manager as any;
@@ -168,8 +170,8 @@ export const useReaderScroll = (reader: WithLook & Later<"cancelSmartPageTurn" |
       return null;
     }
     const candidate =
-      root.querySelector(".epub-container") ||
-      root.querySelector(".epub-view");
+      root.querySelector(`.epub-container:not([${GHOST_ATTR}])`) ||
+      root.querySelector(`.epub-container:not([${GHOST_ATTR}]) .epub-view`);
     if (candidate) {
       return candidate as HTMLElement;
     }

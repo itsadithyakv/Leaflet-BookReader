@@ -221,6 +221,18 @@
     cursor: grab;
   }
 
+  /* A form's buttons stay at the foot of the sheet as it scrolls: with the
+     keyboard up, "Post" is above it, not under the fields. */
+  .sheet-panel .sheet-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    margin-inline: -0.75rem;
+    margin-bottom: calc(-1.25rem - max(var(--inset-bottom) - var(--inset-keyboard), 0px));
+    padding: 0.625rem 0.75rem calc(0.625rem + max(var(--inset-bottom) - var(--inset-keyboard), 0px));
+    background: rgb(var(--color-surface));
+  }
+
   .sheet-handle > span {
     display: block;
     width: 40px;
@@ -290,6 +302,33 @@
   .book-menu-trigger::after {
     position: absolute;
     inset: -6px;
+    content: "";
+  }
+
+  /* The session's "Full screen" switch is a line of text with a track. */
+  .focus-fullscreen-switch {
+    min-height: 44px;
+  }
+
+  /* A post's stars, five in a row: each a thumb wide. */
+  .rating-pick .rating-stars {
+    min-width: 40px;
+    min-height: 40px;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* A small control (a dialog's ×, a text link) keeps its look and is hit at
+     44 px: put `touch-hit` on it. */
+  .touch-hit,
+  .share-close {
+    position: relative;
+  }
+
+  .touch-hit::after,
+  .share-close::after {
+    position: absolute;
+    inset: min(0px, calc((100% - 44px) / 2));
     content: "";
   }
 
@@ -401,10 +440,29 @@
     width: 100%;
   }
 
+  /* Never squeezed in beside the buttons (they were 40 px boxes with nothing
+     legible in them): too narrow for 6.5rem, the three go to a row of their own. */
   .library-toolbar > select {
-    flex: 1 1 0;
+    flex: 1 1 6.5rem;
     min-width: 0;
     max-width: none;
+  }
+}
+
+/* The genre wall, upright: two tiles a row, as a music app's genres are,
+   not twelve screen-wide blocks one under another. */
+@media (max-width: 520px) {
+  .genre-wall {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .genre-tile {
+    padding: 11px 11px 10px;
+  }
+
+  .genre-tile-name {
+    font-size: 0.98rem;
   }
 }
 
@@ -438,5 +496,36 @@
 @media (max-width: 420px) {
   .now-reading-actions .now-reading-action:not(.now-reading-action-primary) {
     display: none;
+  }
+}
+
+/* ---- A picture to share, sideways ----------------------------------------- */
+
+/* A quote card or a year in review on a phone on its side: the picture down
+   the left as tall as the screen allows, its choices beside it, rather than
+   a 200 px picture in a box that scrolls. */
+@media (max-height: 520px) and (min-width: 640px) {
+  .share-dialog:has(> .share-canvas) {
+    display: grid;
+    width: min(46rem, calc(100vw - 2rem - var(--inset-left) - var(--inset-right)));
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-auto-rows: min-content;
+    column-gap: 18px;
+    align-content: start;
+  }
+
+  .share-dialog:has(> .share-canvas) > * {
+    grid-column: 2;
+  }
+
+  .share-dialog:has(> .share-canvas) > .share-canvas {
+    grid-column: 1;
+    grid-row: 1 / span 6;
+    height: calc(100dvh - 2rem - 2.5rem - 6px);
+    margin: 0;
+  }
+
+  .share-dialog:has(> .share-canvas) > .mt-4 {
+    margin-top: 12px;
   }
 }

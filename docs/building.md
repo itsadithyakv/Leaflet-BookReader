@@ -145,7 +145,7 @@ the build (the MSIX script warns about any that are missing):
 | `LEAFLET_GOOGLE_CLIENT_ID`, `LEAFLET_GOOGLE_CLIENT_SECRET` | Rust, `option_env!` | Drive backup |
 | `VITE_ENABLE_ACCOUNTS` | Frontend | Shows the Account card (`"true"`) |
 | `VITE_ENABLE_COMMUNITY` | Frontend | Leaderboards and the community UI (`"true"`) |
-| `VITE_ENABLE_MULTI_DEVICE` | Frontend | Folder sync and multi-device wording; off until mobile ships |
+| `VITE_ENABLE_MULTI_DEVICE` | Frontend | Folder sync and multi-device wording; on from the `android` branch (set `false` to turn off) |
 | `LEAFLET_API_BASE` | Rust, `option_env!` | Fallback API address; the signed config normally wins |
 | `LEAFLET_CONFIG_URL` | Rust, `option_env!` | Where the signed config lives; defaults to GitHub Pages |
 | `LEAFLET_STORE_BUILD` | Rust, `option_env!` | Set by the MSIX script: compiles out the Calibre auto-installer |

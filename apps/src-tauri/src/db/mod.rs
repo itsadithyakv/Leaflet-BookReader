@@ -491,7 +491,31 @@ impl Database {
     if let Some(opened_at) = last_opened {
       self.log_reading_session(book_id, &opened_at)?;
     }
+    // Where this device itself last stood in the book, apart from where a
+    // sync may later move the row above: what the reader offers to go from
+    // ("Your other device is further on", `place_here`).
+    self.conn.execute(
+      "INSERT INTO places_here (book_id, progress, position, at)
+       SELECT id, progress, position, ?2 FROM books WHERE id = ?1
+       ON CONFLICT(book_id) DO UPDATE SET progress = excluded.progress, position = excluded.position, at = excluded.at",
+      params![book_id, now_iso()]
+    )?;
     Ok(())
+  }
+
+  /// Where this device itself last stood in a book (progress and place), if
+  /// it has ever been read here. Never written by a sync.
+  pub fn place_here(&self, book_id: &str) -> Result<Option<(f32, Option<String>)>> {
+    Ok(
+      self
+        .conn
+        .query_row(
+          "SELECT progress, position FROM places_here WHERE book_id = ?1",
+          params![book_id],
+          |row| Ok((row.get(0)?, row.get(1)?))
+        )
+        .optional()?
+    )
   }
 
   /// "Mark as finished" and "Mark as not started", from a book's menu.
@@ -558,6 +582,62 @@ impl Database {
          goal_minutes = excluded.goal_minutes",
       params![date_key, minutes.max(0.0), goal_minutes]
     )?;
+    // The same minutes under this device's own name: what lets two devices'
+    // reading on one day add up when they meet (docs/two-devices.md).
+    if minutes > 0.0 {
+      self.conn.execute(
+        "INSERT INTO reading_day_devices (date_key, device_id, minutes) VALUES (?1, ?2, min(?3, 1440))
+         ON CONFLICT(date_key, device_id) DO UPDATE SET
+           minutes = min(1440, reading_day_devices.minutes + excluded.minutes)",
+        params![date_key, self.device_id()?, minutes]
+      )?;
+    }
+    Ok(())
+  }
+
+  /// This install's name in the sync document: random, made once, kept in
+  /// settings. It says nothing about the machine, and goes nowhere but the
+  /// reader's own document.
+  pub fn device_id(&self) -> Result<String> {
+    const KEY: &str = "device_id";
+    if let Some(id) = self.get_setting(KEY)?.filter(|value| !value.is_empty()) {
+      return Ok(id);
+    }
+    use ring::rand::SecureRandom;
+    let mut bytes = [0u8; 16];
+    if ring::rand::SystemRandom::new().fill(&mut bytes).is_err() {
+      // No system randomness is vanishingly unlikely; the clock still tells
+      // two installs apart.
+      let nanos = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+      bytes[..8].copy_from_slice(&nanos.to_le_bytes());
+    }
+    let id = hex::encode(bytes);
+    self.set_setting(KEY, &id)?;
+    Ok(id)
+  }
+
+  /// What each device read on each day, by day.
+  pub fn reading_day_devices(&self) -> Result<HashMap<String, std::collections::BTreeMap<String, f64>>> {
+    let mut stmt = self.conn.prepare("SELECT date_key, device_id, minutes FROM reading_day_devices")?;
+    let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, f64>(2)?)))?;
+    let mut days: HashMap<String, std::collections::BTreeMap<String, f64>> = HashMap::new();
+    for row in rows {
+      let (date_key, device_id, minutes) = row?;
+      days.entry(date_key).or_default().insert(device_id, minutes);
+    }
+    Ok(days)
+  }
+
+  /// Writes a day's devices as given, in place of what was there. Like
+  /// `put_day`, only for applying a merge result.
+  pub fn put_day_devices(&self, date_key: &str, devices: &std::collections::BTreeMap<String, f64>) -> Result<()> {
+    self.conn.execute("DELETE FROM reading_day_devices WHERE date_key = ?1", params![date_key])?;
+    for (device_id, minutes) in devices {
+      self.conn.execute(
+        "INSERT INTO reading_day_devices (date_key, device_id, minutes) VALUES (?1, ?2, ?3)",
+        params![date_key, device_id, minutes]
+      )?;
+    }
     Ok(())
   }
 
@@ -1163,6 +1243,8 @@ impl Database {
        DELETE FROM settings;
        DELETE FROM reading_sessions;
        DELETE FROM reading_days;
+       DELETE FROM reading_day_devices;
+       DELETE FROM places_here;
        DELETE FROM focus_sessions;
        DELETE FROM pip_purchases;
        DELETE FROM pip_state;
@@ -1264,6 +1346,24 @@ fn apply_schema(conn: &Connection) -> Result<()> {
         freeze_used INTEGER NOT NULL DEFAULT 0,
         grace_used INTEGER NOT NULL DEFAULT 0
       );
+      /* What each device itself read on a day (docs/two-devices.md): this
+         device's own row grows as it reads, the others' arrive by sync. A
+         day's minutes above are never below the sum of its rows here. */
+      CREATE TABLE IF NOT EXISTS reading_day_devices (
+        date_key TEXT NOT NULL,
+        device_id TEXT NOT NULL,
+        minutes REAL NOT NULL DEFAULT 0,
+        PRIMARY KEY (date_key, device_id)
+      );
+      /* Where this device itself last stood in each book. The books row
+         holds the place every device agrees on, which a sync can move; this
+         is what the reader opens at instead, offering the other. */
+      CREATE TABLE IF NOT EXISTS places_here (
+        book_id TEXT PRIMARY KEY,
+        progress REAL NOT NULL,
+        position TEXT,
+        at TEXT NOT NULL
+      );
       /* The shelf. burned_at tombstones a session rather than deleting it, so a
          broken streak leaves a scar in the history instead of erasing it. */
       CREATE TABLE IF NOT EXISTS focus_sessions (
@@ -1348,7 +1448,7 @@ fn apply_schema(conn: &Connection) -> Result<()> {
 /// version, and put the new shape in the `CREATE TABLE`s above too (a new
 /// library is created at the latest version directly). Never edit a step that
 /// has shipped.
-pub const SCHEMA_VERSION: i64 = 6;
+pub const SCHEMA_VERSION: i64 = 7;
 
 /// From this much of a book on, it is finished: the last page often reports
 /// 0.99x rather than 1. The same number is `FINISHED_AT` in
@@ -1412,6 +1512,11 @@ fn upgrade(conn: &Connection) -> Result<()> {
     add_column(&tx, "books", "metadata_checked_at TEXT")?;
     tx.execute("UPDATE books SET metadata_checked_at = NULL WHERE cover_url IS NULL", [])?;
   }
+  // Version 7 added reading_day_devices (what each device read on a day) and
+  // places_here (where this device last stood in each book), which the
+  // CREATE TABLE IF NOT EXISTS above makes for every library; there is
+  // nothing to move. Days read before it have minutes and no figures, and
+  // books opened before it have no place here until they are opened again.
   tx.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))?;
   tx.commit()?;
   crate::diag::info(&format!("library database upgraded from version {from} to {SCHEMA_VERSION}"));
@@ -1897,6 +2002,73 @@ pub(crate) mod tests {
     let days = db.reading_days().expect("read");
     assert_eq!(days["2026-03-01"].minutes, 15.5);
     assert_eq!(days["2026-03-01"].goal_minutes, 20);
+  }
+
+  /// A sync moves the books row; the place this device stood at stays put
+  /// until this device reads again.
+  #[test]
+  fn the_place_here_is_this_devices_own() {
+    let db = memory_db();
+    let mut book = BookRecord {
+      finished_at: None,
+      id: "aaa".to_string(),
+      title: "A book".to_string(),
+      author: None,
+      genres: Vec::new(),
+      cover_url: None,
+      local_path: "/books/aaa.epub".to_string(),
+      file_hash: "aaa".to_string(),
+      progress: 0.0,
+      position: None,
+      series: None,
+      series_index: None,
+      last_opened: None,
+      created_at: now_iso(),
+      metadata_checked_at: None,
+      metadata_updated_at: None,
+      progress_updated_at: None,
+      deleted_at: None,
+      available: true
+    };
+    book.progress = 0.0;
+    db.upsert_book(&book).expect("import");
+    assert_eq!(db.place_here("aaa").expect("place"), None, "never read here");
+
+    db.update_progress("aaa", 0.2, Some(now_iso()), Some("epubcfi(/6/4)".to_string())).expect("read");
+    assert_eq!(db.place_here("aaa").expect("place"), Some((0.2, Some("epubcfi(/6/4)".to_string()))));
+
+    // Another device's place arrives by sync.
+    book.progress = 0.6;
+    book.position = Some("epubcfi(/6/30)".to_string());
+    db.upsert_book(&book).expect("sync");
+    assert_eq!(db.place_here("aaa").expect("place"), Some((0.2, Some("epubcfi(/6/4)".to_string()))));
+
+    db.update_progress("aaa", 0.6, Some(now_iso()), Some("epubcfi(/6/30)".to_string())).expect("went there");
+    assert_eq!(db.place_here("aaa").expect("place"), Some((0.6, Some("epubcfi(/6/30)".to_string()))));
+  }
+
+  #[test]
+  fn reading_is_also_counted_under_this_devices_own_name() {
+    let db = memory_db();
+    let me = db.device_id().expect("an id");
+    assert_eq!(me.len(), 32);
+    assert_eq!(db.device_id().expect("again"), me, "made once");
+
+    db.credit_minutes("2026-03-01", 8.0, 20).expect("first");
+    db.credit_minutes("2026-03-01", 7.5, 20).expect("second");
+    // Opening the day (no minutes yet) puts no name down.
+    db.credit_minutes("2026-03-02", 0.0, 20).expect("an empty day");
+    let devices = db.reading_day_devices().expect("devices");
+    assert_eq!(devices["2026-03-01"][&me], 15.5);
+    assert!(!devices.contains_key("2026-03-02"));
+
+    // A merge result replaces a day's devices whole.
+    let merged = std::collections::BTreeMap::from([(me.clone(), 15.5), ("other".to_string(), 20.0)]);
+    db.put_day_devices("2026-03-01", &merged).expect("put");
+    db.credit_minutes("2026-03-01", 1.0, 20).expect("more");
+    let devices = db.reading_day_devices().expect("devices");
+    assert_eq!(devices["2026-03-01"][&me], 16.5);
+    assert_eq!(devices["2026-03-01"]["other"], 20.0);
   }
 
   #[test]

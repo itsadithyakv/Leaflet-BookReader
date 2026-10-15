@@ -15,8 +15,8 @@ import { flattenToc, tocPlace } from "../toc";
 import { markInkImages } from "../inkImages";
 import { friendlyOpenError } from "../openErrors";
 import { markOpenings, OPENINGS_CSS } from "../dropCaps";
-import { PAGE_FOOT_PAD, PAGES_CSS, PHONE_PAGES_CSS } from "../pagesStyle";
-import { isPhoneShape, readerShape } from "../touchLayout";
+import { PAGE_FOOT_PAD, PAGES_CSS, PHONE_PAGE_GAP, PHONE_PAGES_CSS, PHONE_TEXT_CSS, PHONE_TEXT_PAD, phonePageSides } from "../pagesStyle";
+import { insetPx, isPhoneShape, readerShape } from "../touchLayout";
 import { BLOCKS_CSS, markBlocks, markListedLines, pictureRoom } from "../bookBlocks";
 import { sectionsFromArchive } from "../archiveSections";
 import { holdsFetching } from "../scrollbarHold";
@@ -34,6 +34,8 @@ import { isLook } from "../openAt";
 import type { WithCover } from "./scope";
 import { noteChapter } from "../../pip/base/storyFeed";
 import { isTouchInput } from "../../platform/device";
+import { freezeRendition, windowChangesLayout, type Ghost } from "./renditionGhost";
+import { selectionIsAccidental, type Press } from "../touchSelect";
 
 /**
  * Opens the book: reads the file, builds the contents, makes the rendition,
@@ -64,6 +66,21 @@ export const useBookOpening = (reader: WithCover) => {
   const { markSearchHit, openAt, openedAtPlaceRef, searchBookFor, soughtRef } = reader;
   const relocateHandlerRef =useRef<((location: { start?: { percentage?: number } }) => void) | null>(null);
   const lastProgressAtRef = useRef(0);
+  /**
+   * The book as parsed, kept while it is laid out again in another layout
+   * (useReaderLook's `relayout`): which book it is, and how many hooks its
+   * spine had before a rendition added its own (a new rendition adds them
+   * again, and the old one's would run on a rendition taken down).
+   */
+  const parsedRef = useRef<{ id: string; spineHooks: number } | null>(null);
+  /** The last press on the page, and where the page was then: whether a selection was held for (readers/touchSelect.ts). */
+  const pressRef = useRef<Press | null>(null);
+  /** The page that was, held over the viewer until the new layout's page is up (renditionGhost.ts). */
+  const ghostRef = useRef<Ghost | null>(null);
+  const dropGhost = () => {
+    ghostRef.current?.remove();
+    ghostRef.current = null;
+  };
 
   const localPath =
     (book as { localPath?: string; local_path?: string }).localPath ??
@@ -71,12 +88,29 @@ export const useBookOpening = (reader: WithCover) => {
     "";
 
   useEffect(() => {
+    // Laid out again in another layout (a turn of the phone, the type
+    // panel): the book already parsed is drawn again, not read again.
+    const relayingRef = reader.relayingRef;
+    const reuse = relayingRef.current && bookRef.current !== null && parsedRef.current?.id === book.id;
+    relayingRef.current = reuse;
     setLoading(true);
     setLoadError(null);
-    setToc([]);
+    if (!reuse) {
+      setToc([]);
+    }
     // Closing the book (or opening another) mid-load must stop this one:
     // otherwise it kept parsing a whole book nobody was looking at.
     let cancelled = false;
+    /** This rendition has drawn the reader's place: it can be held on screen while the next is made. */
+    let shown = false;
+    /** Heard before epub.js hears it: a resize that changes the layout holds the page as it is (renditionGhost.ts). */
+    const onResizeFirst = () => {
+      const rendition = renditionRef.current;
+      if (!shown || ghostRef.current || !rendition || !windowChangesLayout({ layout: layoutRef.current, spread: reader.spreadRef.current })) {
+        return;
+      }
+      ghostRef.current = freezeRendition(rendition);
+    };
 
     if (!localPath) {
       setLoadError("Missing book file.");
@@ -86,66 +120,80 @@ export const useBookOpening = (reader: WithCover) => {
 
     const load = async () => {
       try {
-        const ext = getBookExtension(localPath);
-        if (ext && !isReadableExtension(ext)) {
-          setLoadError(`This reader supports ${formatSummary()} files.`);
-          setLoading(false);
-          return;
-        }
-        let buffer: ArrayBuffer;
-        if (isTauri()) {
-          // Raw bytes straight from the backend: no base64 round trip, which
-          // used to cost four to five times the book's size in memory.
-          buffer = await bookService.readBookBytes(book.id);
+        const kept = reuse ? bookRef.current : null;
+        let epub: ReturnType<typeof ePub>;
+        if (kept) {
+          epub = kept;
+          // The spine's own hooks; the rendition about to be made adds its own.
+          const spineHooks = (epub.spine as any)?.hooks?.content?.hooks;
+          if (Array.isArray(spineHooks) && parsedRef.current) {
+            spineHooks.splice(parsedRef.current.spineHooks);
+          }
+        } else {
+          const ext = getBookExtension(localPath);
+          if (ext && !isReadableExtension(ext)) {
+            setLoadError(`This reader supports ${formatSummary()} files.`);
+            setLoading(false);
+            return;
+          }
+          let buffer: ArrayBuffer;
+          if (isTauri()) {
+            // Raw bytes straight from the backend: no base64 round trip, which
+            // used to cost four to five times the book's size in memory.
+            buffer = await bookService.readBookBytes(book.id);
+            if (cancelled) {
+              return;
+            }
+          } else {
+            const source = localPath;
+            const response = await fetch(source);
+            if (!response.ok) {
+              throw new Error("fetch failed");
+            }
+            buffer = await response.arrayBuffer();
+          }
           if (cancelled) {
             return;
           }
-        } else {
-          const source = localPath;
-          const response = await fetch(source);
-          if (!response.ok) {
-            throw new Error("fetch failed");
-          }
-          buffer = await response.arrayBuffer();
-        }
-        if (cancelled) {
-          return;
-        }
 
-        if (bookRef.current) {
+          if (bookRef.current) {
+            try {
+              bookRef.current.destroy();
+            } catch {
+              // Half built (see the cleanup below).
+            }
+            bookRef.current = null;
+          }
+
           try {
-            bookRef.current.destroy();
+            epub = ePub(buffer);
           } catch {
-            // Half built (see the cleanup below).
+            setLoadError(
+              ext && ext !== "epub"
+                ? `Leaflet converted this ${ext.toUpperCase()} file but could not read the result. Re-import the book and try again.`
+                : "This file is not a readable EPUB. It may be damaged."
+            );
+            setLoading(false);
+            return;
           }
-          bookRef.current = null;
+          bookRef.current = epub;
+          parsedRef.current = { id: book.id, spineHooks: ((epub.spine as any)?.hooks?.content?.hooks ?? []).length };
         }
-
-        let epub: ReturnType<typeof ePub>;
-        try {
-          epub = ePub(buffer);
-        } catch {
-          setLoadError(
-            ext && ext !== "epub"
-              ? `Leaflet converted this ${ext.toUpperCase()} file but could not read the result. Re-import the book and try again.`
-              : "This file is not a readable EPUB. It may be damaged."
-          );
-          setLoading(false);
-          return;
-        }
-        bookRef.current = epub;
 
         if (!viewerRef.current) {
           throw new Error("Reader container not ready.");
         }
 
+        window.addEventListener("resize", onResizeFirst);
+        /** On a phone (readers/pagesStyle.ts): narrower margins, the cutout as a page's margin, hyphenation that works. */
+        const phone = isPhoneShape(readerShape(window.innerWidth, window.innerHeight, isTouchInput()));
         // Scrolling is one continuous book: the chapters follow each other
         // down the page, fetched as the reading nears them. It used to be a
         // chapter at a time, swapped for the next at its last line.
         const rendition = epub.renderTo(viewerRef.current, {
           width: "100%",
           height: "100%",
-          ...(layoutRef.current === "pages" ? {} : { manager: "continuous", flow: "scrolled" })
+          ...(layoutRef.current === "pages" ? (phone ? { gap: PHONE_PAGE_GAP } : {}) : { manager: "continuous", flow: "scrolled" })
         });
         renditionRef.current = rendition;
         // epub.js decides which chapters to fetch from a scroll position it
@@ -212,12 +260,37 @@ export const useBookOpening = (reader: WithCover) => {
         setPicture(null);
         setCanSeek(false);
 
+        /** A phone's page margins, put back each time epub.js lays the columns out (it sets them to half its gap). */
+        const phoneSides = (contents: any) => {
+          if (!phone || layoutRef.current !== "pages" || typeof contents?.css !== "function") {
+            return;
+          }
+          const sides = phonePageSides(PHONE_PAGE_GAP, insetPx("left"), insetPx("right"));
+          contents.css("padding-left", `${sides.left}px`, true);
+          contents.css("padding-right", `${sides.right}px`, true);
+        };
         rendition.hooks?.content?.register((contents: any) => {
           const doc = contents?.document;
           if (!doc) {
             return;
           }
-          const pad = 24;
+          const pad = phone ? PHONE_TEXT_PAD : 24;
+          // A chapter that names no language takes the book's, so that its words can be broken at the line's end.
+          const bookLanguage = phone ? String((epub as any)?.packaging?.metadata?.language ?? "").trim() : "";
+          if (bookLanguage && !doc.documentElement.getAttribute("lang") && !doc.documentElement.getAttribute("xml:lang")) {
+            doc.documentElement.setAttribute("lang", bookLanguage);
+          }
+          const layout = (rendition.manager as any)?.layout;
+          if (phone && layout && typeof layout.format === "function" && !layout.__leafletSides) {
+            const format = layout.format.bind(layout);
+            layout.__leafletSides = true;
+            layout.format = (...args: any[]) => {
+              const formatted = format(...args);
+              phoneSides(args[0]);
+              return formatted;
+            };
+          }
+          phoneSides(contents);
           doc.documentElement.style.setProperty("--reader-content-pad", `${pad}px`);
           doc.documentElement.style.setProperty("--reader-measure", bookMeasureCss());
           applyTypeChoice(doc.documentElement, typeChoiceRef.current);
@@ -226,7 +299,7 @@ export const useBookOpening = (reader: WithCover) => {
           applyCustomFont(doc, customFontRef.current);
           doc.documentElement.setAttribute("data-leaflet-layout", layoutRef.current);
           // A phone's pages keep no room for chrome that is away (readers/pagesStyle.ts).
-          doc.documentElement.toggleAttribute("data-leaflet-phone", isPhoneShape(readerShape(window.innerWidth, window.innerHeight, isTouchInput())));
+          doc.documentElement.toggleAttribute("data-leaflet-phone", phone);
           if (!doc.getElementById("reader-font-scale")) {
             // The book's drop caps and opening small capitals are found
             // first, while the publisher's own sizes can still be read: the
@@ -414,6 +487,7 @@ export const useBookOpening = (reader: WithCover) => {
               ${BLOCKS_CSS}
               ${PAGES_CSS}
               ${PHONE_PAGES_CSS}
+              ${PHONE_TEXT_CSS}
             `;
             doc.head.appendChild(style);
           } else {
@@ -1140,6 +1214,21 @@ export const useBookOpening = (reader: WithCover) => {
           const text = String(contents?.window?.getSelection?.()?.toString?.() ?? "")
             .replace(/\s+/g, " ")
             .trim();
+          // A word selected by a swipe that scrolled the page (or turned it) was
+          // never held: it is let go, and no bar comes up (readers/touchSelect.ts).
+          const frame = (rendition.manager as any)?.container as HTMLElement | undefined;
+          if (
+            text &&
+            reader.selectionRef.current === null &&
+            selectionIsAccidental(pressRef.current, Date.now(), { top: frame?.scrollTop ?? 0, left: frame?.scrollLeft ?? 0 })
+          ) {
+            try {
+              contents?.window?.getSelection?.()?.removeAllRanges?.();
+            } catch {
+              // Gone with its chapter.
+            }
+            return;
+          }
           if (text) {
             // A note and the selection bar share a place: one at a time.
             closeNoteRef.current();
@@ -1171,7 +1260,9 @@ export const useBookOpening = (reader: WithCover) => {
             let pressedAt = 0;
             doc.addEventListener(
               "pointerdown",
-              () => {
+              (event: PointerEvent) => {
+                const frame = (rendition.manager as any)?.container as HTMLElement | undefined;
+                pressRef.current = { at: Date.now(), pointerType: event.pointerType, top: frame?.scrollTop ?? 0, left: frame?.scrollLeft ?? 0 };
                 handsOn();
                 scrollbarLetGoRef.current();
                 pressedAt = Date.now();
@@ -1350,7 +1441,11 @@ export const useBookOpening = (reader: WithCover) => {
           return;
         }
         scheduleReaderWordIndex(true);
+        shown = true;
+        relayingRef.current = false;
         setLoading(false);
+        // The page that was goes once the new one is drawn.
+        window.requestAnimationFrame(dropGhost);
         // The match the book was opened at is marked as a result of the
         // in-book search is, with that search open on the same words: the
         // book's other matches are a click away.
@@ -1363,7 +1458,7 @@ export const useBookOpening = (reader: WithCover) => {
         // With section sizes known, progress needs no index at all; this is
         // for the books where they could not be read.
         const locations = epub.locations;
-        if (!sectionWeightsRef.current && locations && typeof locations.generate === "function") {
+        if (!sectionWeightsRef.current && locations && typeof locations.generate === "function" && !(reuse && (locations as any).length?.() > 0)) {
           const start = () => {
             if (!cancelled) {
               void locations.generate(1600);
@@ -1379,6 +1474,8 @@ export const useBookOpening = (reader: WithCover) => {
         if (cancelled) {
           return;
         }
+        relayingRef.current = false;
+        dropGhost();
         setLoadError(friendlyOpenError(error instanceof Error ? error.message : String(error ?? "")));
         setLoading(false);
       }
@@ -1388,6 +1485,13 @@ export const useBookOpening = (reader: WithCover) => {
 
     return () => {
       cancelled = true;
+      window.removeEventListener("resize", onResizeFirst);
+      // Laid out again in another layout: the book stays, parsed, and its
+      // page stays on screen until the next one is up.
+      const relaying = relayingRef.current;
+      if (relaying && shown && !ghostRef.current && renditionRef.current) {
+        ghostRef.current = freezeRendition(renditionRef.current);
+      }
       if (renditionRef.current && relocateHandlerRef.current) {
         renditionRef.current.off("relocated", relocateHandlerRef.current);
       }
@@ -1415,15 +1519,19 @@ export const useBookOpening = (reader: WithCover) => {
       // A book left in the moment between epub.js making its manager and
       // drawing the first chapter is half built, and taking it down throws:
       // leaving then showed "Something went wrong" instead of the library.
-      if (renditionRef.current) {
+      if (renditionRef.current && renditionRef.current !== ghostRef.current?.rendition) {
         try {
           renditionRef.current.destroy();
         } catch {
           // Half built: there was nothing more of it to take down.
         }
-        renditionRef.current = null;
       }
-      if (bookRef.current) {
+      renditionRef.current = null;
+      if (!relaying) {
+        dropGhost();
+        parsedRef.current = null;
+      }
+      if (bookRef.current && !relaying) {
         try {
           bookRef.current.destroy();
         } catch {
@@ -1433,4 +1541,21 @@ export const useBookOpening = (reader: WithCover) => {
       }
     };
   }, [book.id, localPath, reloadKey]);
+
+  // The reader closing in the middle of a new layout: the book kept for it goes too.
+  useEffect(
+    () => () => {
+      dropGhost();
+      parsedRef.current = null;
+      if (bookRef.current) {
+        try {
+          bookRef.current.destroy();
+        } catch {
+          // Half built.
+        }
+        bookRef.current = null;
+      }
+    },
+    []
+  );
 };

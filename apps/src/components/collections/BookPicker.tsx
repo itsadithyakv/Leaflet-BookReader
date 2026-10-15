@@ -5,6 +5,7 @@ import { UiIcon } from "../UiIcon";
 import { SheetHandle } from "../ui/SheetHandle";
 import { useBackClose } from "../../hooks/useBackClose";
 import { isTouchInput } from "../../platform/device";
+import { backdropClose } from "../ui/backdrop";
 
 type Props = {
   title: string;
@@ -43,11 +44,7 @@ export const BookPicker = ({ title, books, onDone, onCancel }: Props) => {
   return createPortal(
     <div
       className="sheet-backdrop fixed inset-0 z-[90] flex items-center justify-center bg-black/50 px-4"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
-          onCancel();
-        }
-      }}
+      {...backdropClose(() => onCancel())}
     >
       <div
         role="dialog"

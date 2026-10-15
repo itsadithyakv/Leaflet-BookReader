@@ -563,3 +563,42 @@ html[data-keyboard="open"] .page-reader .reader-chapter-dock.is-awake {
 .reader-scope[data-shape="sideways"]:not(.reader-chrome-hidden) .leaflet-flower {
   right: calc(var(--reader-strip-width) + 8px);
 }
+
+/* "Your other device is further on" (components/sync/FurtherOnOffer.tsx):
+   above the chapter dock and the selection's bar, clear of the gesture bar. */
+html[data-input="touch"] .reader-scope .further-on-offer,
+html[data-input="touch"] .page-reader .further-on-offer {
+  bottom: calc(var(--inset-bottom) + 100px);
+}
+
+.reader-scope[data-shape="sideways"] .further-on-offer {
+  bottom: calc(var(--inset-bottom) + 72px);
+}
+
+/* The chapter list keeps its last rows clear of the gesture bar, and its
+   text clear of a cutout on the left of a phone on its side. */
+.reader-scope[data-shape] .reader-sidebar {
+  padding-bottom: calc(1.5rem + var(--inset-bottom));
+}
+
+.reader-scope[data-shape="sideways"] .reader-sidebar {
+  padding-left: calc(1.5rem + var(--inset-left));
+}
+
+/* ---- Small controls on the reader's cards, hit at 44 px by a finger ----
+   (the look-up and characters cards, "Where you are", a note, the highlight
+   card): each keeps its look, and an invisible area round it takes the tap. */
+html[data-input="touch"] .reader-scope :is(.reader-mini-control, .reader-notes-action, .reader-people-link, .reader-recap-mark, .reader-lookup-more) {
+  position: relative;
+}
+
+html[data-input="touch"] .reader-scope :is(.reader-mini-control, .reader-notes-action, .reader-people-link, .reader-lookup-more)::after {
+  position: absolute;
+  inset: min(0px, calc((100% - 44px) / 2));
+  content: "";
+}
+
+/* Names in a row of pills are a little taller, so their areas barely meet. */
+html[data-input="touch"] .reader-scope .reader-people-link {
+  min-height: 34px;
+}

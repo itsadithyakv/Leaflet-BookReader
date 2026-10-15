@@ -25,6 +25,8 @@ import { MobileNav } from "./components/MobileNav";
 import { UiIcon } from "./components/UiIcon";
 import { LibraryPage } from "./pages/LibraryPage";
 import { useLibraryStore } from "./store/libraryStore";
+import { watchSyncMoments } from "./services/syncTiming";
+import { placeChecked, withPlaceHere } from "./services/placeElsewhere";
 import { useAccountStore } from "./store/accountStore";
 import { FEATURES } from "./constants/features";
 import { ALIVE_EVERY_MS, AWAY_FREE_MS, flowerGrowing, useHabitStore } from "./store/habitStore";
@@ -276,6 +278,10 @@ const App = () => {
     }
   }, [sync.driveConnected, sync.accountBackup, syncNow]);
 
+  // And as the app goes to the background (a phone may stop it any time
+  // after) and comes back (services/syncTiming).
+  useEffect(() => watchSyncMoments(), []);
+
   // Backing up to the Leaflet account ends with the session (signing out, or
   // the account deleted), and what the backup's state says has to follow.
   const signedIn = useAccountStore((state) => state.status.signedIn);
@@ -411,6 +417,12 @@ const App = () => {
 
   /** `at` is a place to open at (a highlight's) rather than the saved one; it rides along every way in. */
   const handleOpenBook = (book: Book, at: string | null = null) => {
+    // A pull first; then the book opens where this device left it, with
+    // another device's place offered, never taken silently (services/placeElsewhere).
+    if (at === null && !placeChecked(book)) {
+      void withPlaceHere(book).then((ready) => handleOpenBookRef.current(ready, null));
+      return;
+    }
     // Sync carries the library index everywhere but leaves the files where they
     // are, so a book can be listed on this device with nothing to open yet.
     if (book.available === false) {
@@ -489,6 +501,10 @@ const App = () => {
         new Set(paths.filter((path) => isImportableExtension(getBookExtension(path))))
       );
       if (supportedPaths.length === 0) {
+        // Shared to Leaflet from another app, a file it cannot read used to vanish without a word.
+        if (paths.length > 0) {
+          showToast(paths.length === 1 ? "Leaflet can't open that kind of file." : "Leaflet can't open those kinds of file.");
+        }
         return;
       }
 
@@ -1244,7 +1260,7 @@ const App = () => {
               </div>
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">
-                  {converterOfferKind === "install" ? "Optional download" : "Needs Calibre"}
+                  {converterOfferKind === "install" ? "Optional download" : converterOfferKind === "none" ? "Needs a computer" : "Needs Calibre"}
                 </p>
                 <h2 id="converter-dialog-title" className="page-title mt-1 text-2xl">
                   Open {getBookExtension(converterPromptBook.localPath).toUpperCase()} books
@@ -1267,9 +1283,8 @@ const App = () => {
                 </>
               ) : (
                 <>
-                  “{converterPromptBook.title}” needs Calibre, which has no version for this
-                  device — so it is not built into the app here. Open it once on a desktop and the
-                  converted book syncs back to this device like any other.
+                  “{converterPromptBook.title}” needs Calibre to open, and Calibre has no version for
+                  this device. Convert it to EPUB on a computer and add that instead.
                 </>
               )}
             </p>

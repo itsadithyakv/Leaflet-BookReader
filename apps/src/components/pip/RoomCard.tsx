@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import { createPortal } from "react-dom";
 import { UiIcon } from "../UiIcon";
 import type { Rect } from "./layout";
-import { placeCard, type CardPlace } from "./cardPlace";
+import { cardBounds, placeCard, type CardPlace } from "./cardPlace";
 import { useBackLayer } from "../../platform/back";
 
 type RoomCardProps = {
@@ -50,7 +50,7 @@ export const RoomCard = ({ title, note, size = "narrow", anchor, owner, onClose,
         closeRef.current();
         return;
       }
-      const viewport = { left: 8, top: 8, width: window.innerWidth - 16, height: window.innerHeight - 16 };
+      const viewport = cardBounds();
       setPlace(placeCard(box, { width: root.offsetWidth, height: root.offsetHeight }, viewport));
     };
     measure();

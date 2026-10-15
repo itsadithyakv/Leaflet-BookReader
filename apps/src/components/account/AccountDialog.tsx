@@ -83,7 +83,7 @@ export const AccountDialog = ({ showToast }: { showToast: (message: string) => v
         <SheetHandle onClose={close} />
         <button
           type="button"
-          className="absolute right-4 top-4 rounded-full px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface"
+          className="touch-hit absolute right-4 top-4 rounded-full px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface"
           onClick={close}
           aria-label={firstRun ? "Skip for now" : "Close"}
         >

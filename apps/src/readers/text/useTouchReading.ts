@@ -10,11 +10,33 @@ import type { WithCover } from "./scope";
  * the chrome. Scrolling has no page to turn, so a plain tap anywhere on the
  * text shows the toolbar and the dock, or sends them away; one on a link, a
  * note, a name or a highlight is that thing's, and a scroll is reading.
+ *
+ * While something reads on by itself (docs/mobile.md, "Dotty on a phone") a
+ * tap is its pause instead: SpeedRead pauses and carries on, Smart Read and
+ * auto-scroll pause (the pace pill's play carries on, and the chrome comes
+ * with the next tap).
  */
 export const useScrollTaps = (reader: WithCover) => {
   const { book, interruptedRef, layout, loading, renditionRef, selectionRef, toggleChrome, viewerRef } = reader;
   const toggleRef = useRef(toggleChrome);
   toggleRef.current = toggleChrome;
+  const tapRef = useRef(() => undefined as void);
+  tapRef.current = () => {
+    if (reader.readingModeRef.current === "speed") {
+      reader.setReadingPaused((paused) => !paused);
+      return;
+    }
+    if (reader.readingModeRef.current === "smart" && !reader.readingPausedRef.current) {
+      reader.readingPausedRef.current = true;
+      reader.setReadingPaused(true);
+      return;
+    }
+    if (reader.readingModeRef.current === "standard" && reader.autoScrollActiveRef.current) {
+      reader.setAutoScrollActive(false);
+      return;
+    }
+    toggleRef.current();
+  };
   useEffect(() => {
     const rendition = renditionRef.current;
     if (loading || layout !== "scroll" || !rendition) {
@@ -65,7 +87,7 @@ export const useScrollTaps = (reader: WithCover) => {
         slack: TAP_SLACK_PX
       });
       if (plain) {
-        toggleRef.current();
+        tapRef.current();
       }
     };
     const bound = new WeakSet<Document>();

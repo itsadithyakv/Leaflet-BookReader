@@ -2,6 +2,7 @@ import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { create } from "zustand";
 import { UiIcon } from "../UiIcon";
 import { useBackLayer } from "../../platform/back";
+import { backdropClose } from "../ui/backdrop";
 
 /**
  * The question before a purchase worth asking about (QUICK_BUY_UNDER seeds
@@ -97,9 +98,7 @@ export const PurchaseConfirm = () => {
   return (
     <div
       className="pip-confirm-backdrop"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) settle(false);
-      }}
+      {...backdropClose(() => settle(false))}
     >
       <div
         ref={dialogRef}

@@ -33,7 +33,7 @@
 
 .reader-image-viewer-bar {
   position: absolute;
-  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(18px + var(--inset-bottom, env(safe-area-inset-bottom, 0px)));
   left: 50%;
   display: flex;
   align-items: center;

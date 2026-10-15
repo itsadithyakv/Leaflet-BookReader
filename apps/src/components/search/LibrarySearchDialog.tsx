@@ -13,6 +13,7 @@ import { closeLibrarySearch, useLibrarySearchStore } from "./librarySearchStore"
 import { readPdfBook } from "./readPdfBook";
 import { SheetHandle } from "../ui/SheetHandle";
 import { useBackClose } from "../../hooks/useBackClose";
+import { backdropClose } from "../ui/backdrop";
 
 /** Typing waits this long before a search starts; the search before it is stopped. */
 const DEBOUNCE_MS = 300;
@@ -253,11 +254,7 @@ export const LibrarySearchDialog = ({ onOpenInBook }: LibrarySearchDialogProps) 
   return (
     <div
       className="sheet-backdrop fixed inset-0 z-[90] flex items-center justify-center bg-black/50 px-4"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
-          closeLibrarySearch();
-        }
-      }}
+      {...backdropClose(() => closeLibrarySearch())}
     >
       <div
         role="dialog"
@@ -284,7 +281,8 @@ export const LibrarySearchDialog = ({ onOpenInBook }: LibrarySearchDialogProps) 
           <input
             ref={inputRef}
             className="inset-field w-full py-2.5 pl-11 pr-4 text-sm text-on-surface focus:border-primary/40 focus:outline-none"
-            type="text"
+            type="search"
+            enterKeyHint="search"
             value={query}
             maxLength={MAX_QUERY}
             onChange={(event) => setQuery(event.target.value)}

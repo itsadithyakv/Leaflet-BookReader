@@ -22,6 +22,7 @@ pub mod large;
 pub mod merge;
 pub mod reading;
 pub mod remote_config;
+pub mod shared_doc;
 pub mod store;
 
 use anyhow::Result;

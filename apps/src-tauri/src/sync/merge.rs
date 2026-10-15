@@ -98,11 +98,25 @@ impl BookEntry {
 #[serde(rename_all = "camelCase")]
 pub struct DayEntry {
   pub date_key: String,
+  /// The day's total as the writer knows it. Each device adds its own reading
+  /// to it, and versions before per-device minutes know nothing else.
   pub minutes: f64,
   pub goal_minutes: i64,
   pub freeze_used: bool,
-  pub grace_used: bool
+  pub grace_used: bool,
+  /// What each device itself read that day, by its id (docs/two-devices.md).
+  /// Left out when empty, and for days too old to be merged again, so those
+  /// read exactly as they did before it existed.
+  #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+  pub by_device: BTreeMap<String, f64>
 }
+
+/// How long a day keeps its per-device minutes in the document. After this
+/// only the total travels: no device still holds unsynced reading that old.
+pub const BY_DEVICE_RETENTION_DAYS: i64 = TOMBSTONE_RETENTION_DAYS;
+
+/// No day holds more minutes than it has.
+const DAY_MINUTES: f64 = 1440.0;
 
 /// One entry on the session shelf.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -230,6 +244,63 @@ impl SyncDoc {
   pub fn live_books(&self) -> impl Iterator<Item = &BookEntry> {
     self.books.iter().filter(|book| !book.is_deleted())
   }
+}
+
+/// What a transport found where the shared document lives.
+#[derive(Debug, PartialEq)]
+pub enum Remote {
+  /// Nothing, or something that is no document: a file cut short, a blob that
+  /// will not decode. This device publishes its own state, as it always has.
+  Absent,
+  /// A document this version reads and writes.
+  Ours(SyncDoc),
+  /// A document a later version wrote. This version takes what it understands
+  /// from it (when it can read it at all) and writes nothing back: what it
+  /// would write is the document without everything it does not know.
+  Newer(Option<SyncDoc>)
+}
+
+/// Reads the shared document, looking at its version before anything else.
+///
+/// The version comes first because of what happens otherwise: a document that
+/// does not parse is taken for a damaged one and written over, and a document
+/// from a later version may well not parse here. See docs/two-devices.md.
+pub fn read_remote(bytes: &[u8]) -> Remote {
+  #[derive(Deserialize)]
+  struct Versioned {
+    version: u32
+  }
+  let newer = serde_json::from_slice::<Versioned>(bytes)
+    .map(|doc| doc.version > DOC_VERSION)
+    .unwrap_or(false);
+  match (serde_json::from_slice::<SyncDoc>(bytes), newer) {
+    (Ok(doc), false) => Remote::Ours(doc),
+    (Ok(doc), true) => Remote::Newer(Some(doc)),
+    (Err(_), true) => Remote::Newer(None),
+    (Err(_), false) => Remote::Absent
+  }
+}
+
+/// Whether the merged document has to be sent: whether it says anything the
+/// one the transport holds (`held`) does not.
+///
+/// A sync used to end by writing the whole document back every time, though
+/// most syncs find the server's copy already has all this device has (the
+/// one at launch, the one after a book is closed with nothing read in it):
+/// the merge comes out as what was pulled, to the letter, but for the moment
+/// it was made (`updated_at`, which every merge sets to now). Such a
+/// document is not sent.
+///
+/// Always sent: the first there is (the server holds none), one in place of
+/// a copy that could not be read (so a damaged one is put right), and one
+/// that differs from the server's in anything at all, however small.
+pub fn has_news(merged: &SyncDoc, held: Option<&SyncDoc>) -> bool {
+  let Some(held) = held else {
+    return true;
+  };
+  let mut undated = merged.clone();
+  undated.updated_at.clone_from(&held.updated_at);
+  undated != *held
 }
 
 /// An RFC 3339 timestamp as milliseconds since the epoch, or 0 if unparseable.
@@ -393,9 +464,15 @@ fn merge_book(a: &BookEntry, b: &BookEntry) -> BookEntry {
 
 /// Same day seen by two devices.
 ///
-/// Minutes take the maximum rather than the sum. Neither device knows how much
-/// of the other's time overlapped its own, and a sum would let a reader inflate
-/// a streak by syncing repeatedly. The maximum is monotone, so it converges.
+/// Each device's own minutes (`by_device`) merge figure by figure, the larger
+/// of each: a device only ever raises its own. The day's minutes are then the
+/// largest of three: one side's total, the other's, and the sum of the merged
+/// figures. So reading on two devices before either synced adds up, which the
+/// larger-of-two alone could not do; and a document rewritten by a version
+/// that knows only `minutes` (it drops the figures) loses nothing, since the
+/// total it kept is one of the three and the figures come back from any
+/// device that still holds them. Every part is "the larger of", so syncing
+/// again, or in another order, cannot inflate a day. See docs/two-devices.md.
 ///
 /// The goal: a day that met its goal on a device stays met. "Met" is a goal
 /// above zero and that device's own minutes at or over it.
@@ -408,17 +485,29 @@ fn merge_book(a: &BookEntry, b: &BookEntry) -> BookEntry {
 ///   harder of the two, so a day is never judged against a goal the reader
 ///   had already raised.
 ///
-/// The minutes kept are the larger, so they are at or over any goal either
-/// device met: a met day cannot come out of a merge unmet, and a day met by
-/// neither cannot come out met (the goal kept is over the minutes kept). The
-/// rule is the same whichever side is `a`, merging a day with itself changes
-/// nothing, and three devices reach the same day in any order.
+/// The minutes kept are at least the larger, so they are at or over any goal
+/// either device met: a met day cannot come out of a merge unmet. A day met
+/// by neither alone comes out met only when their figures together reach the
+/// goal kept, which is the point. The rule is the same whichever side is
+/// `a`, and merging a day with itself changes nothing. Three copies reach
+/// the same day in any order whenever they share a goal, or none carries
+/// figures; with different goals on different devices the goal kept can
+/// depend on which two met first (the devices still agree, since they all
+/// take the document's word). One goal for every device ends that.
 fn merge_day(a: &DayEntry, b: &DayEntry) -> DayEntry {
   let met = |day: &DayEntry| day.goal_minutes > 0 && day.minutes >= day.goal_minutes as f64;
   let leader = if a.minutes >= b.minutes { a } else { b };
+  let mut by_device = a.by_device.clone();
+  for (device, minutes) in &b.by_device {
+    let kept = by_device.entry(device.clone()).or_insert(0.0);
+    *kept = kept.max(*minutes);
+  }
+  let together: f64 = by_device.values().sum();
   DayEntry {
     date_key: a.date_key.clone(),
-    minutes: leader.minutes,
+    // A sum cannot claim more minutes than a day has.
+    minutes: leader.minutes.max(together.min(DAY_MINUTES)),
+    by_device,
     goal_minutes: match (met(a), met(b)) {
       (true, true) => a.goal_minutes.max(b.goal_minutes),
       (true, false) => a.goal_minutes,
@@ -610,6 +699,12 @@ pub fn merge(local: &SyncDoc, remote: &SyncDoc, now: &str) -> SyncDoc {
     })
     .collect();
 
+  // The first day that still carries its per-device minutes. Day keys are
+  // local dates and `now` is an instant; a day either way is nothing here.
+  let figures_since = DateTime::parse_from_rfc3339(now)
+    .map(|at| (at - Duration::days(BY_DEVICE_RETENTION_DAYS)).format("%Y-%m-%d").to_string())
+    .unwrap_or_default();
+
   let mut days: BTreeMap<&str, DayEntry> = BTreeMap::new();
   for day in &local.days {
     days.insert(day.date_key.as_str(), day.clone());
@@ -655,7 +750,16 @@ pub fn merge(local: &SyncDoc, remote: &SyncDoc, now: &str) -> SyncDoc {
     plantings: union_by_id(&local.plantings, &remote.plantings, |p| p.id.as_str()),
     harvests: union_by_id(&local.harvests, &remote.harvests, |h| h.id.as_str()),
     books,
-    days: days.into_values().collect(),
+    days: days
+      .into_values()
+      .map(|mut day| {
+        // Old days travel as a total alone, as they did before the figures.
+        if day.date_key.as_str() < figures_since.as_str() {
+          day.by_device.clear();
+        }
+        day
+      })
+      .collect(),
     sessions: sessions.into_values().collect(),
     purchases: purchases.into_values().collect(),
     pip: merge_pip(&local.pip, &remote.pip),
@@ -757,13 +861,15 @@ impl BookEntry {
 }
 
 impl DayEntry {
-  pub fn from_record(day: &DayRecord) -> Self {
+  /// A day of this device's ledger, with what each device read on it.
+  pub fn from_record(day: &DayRecord, by_device: BTreeMap<String, f64>) -> Self {
     DayEntry {
       date_key: day.date_key.clone(),
       minutes: day.minutes,
       goal_minutes: day.goal_minutes,
       freeze_used: day.freeze_used,
-      grace_used: day.grace_used
+      grace_used: day.grace_used,
+      by_device
     }
   }
 
@@ -1407,13 +1513,15 @@ mod tests {
       minutes,
       goal_minutes: 20,
       freeze_used: false,
-      grace_used: false
+      grace_used: false,
+      by_device: BTreeMap::new()
     }
   }
 
-  /// Minutes take the maximum, not the sum: neither device knows how much of the
-  /// other's time overlapped its own, and summing would let repeated syncing
-  /// inflate a streak.
+  /// Two totals with no figures behind them take the larger, not the sum:
+  /// neither says how much of the other's time is its own, and summing would
+  /// let repeated syncing inflate a streak. (It is what versions before
+  /// per-device minutes write, and what days past the figures' keep are.)
   #[test]
   fn day_minutes_take_the_maximum() {
     let mine = SyncDoc { days: vec![day("2026-08-01", 12.0)], ..doc(vec![]) };
@@ -1516,6 +1624,195 @@ mod tests {
     assert_eq!(a, c);
     assert_eq!((a.days[0].minutes, a.days[0].goal_minutes), (45.0, 30));
     assert_eq!(merge(&a, &phone, NOW), a, "a device syncing again changes nothing");
+  }
+
+  // ---- the document's version ----------------------------------------------
+
+  #[test]
+  fn the_version_is_read_before_the_document() {
+    let ours = serde_json::to_vec(&doc(vec![entry("aaa")])).expect("json");
+    assert!(matches!(read_remote(&ours), Remote::Ours(found) if found.books.len() == 1));
+
+    // A later version's document that still reads: taken from, not written over.
+    let mut later = doc(vec![entry("aaa")]);
+    later.version = DOC_VERSION + 1;
+    let later = serde_json::to_vec(&later).expect("json");
+    assert!(matches!(read_remote(&later), Remote::Newer(Some(found)) if found.books.len() == 1));
+
+    // One that does not read here is still known for what it is, and left alone.
+    let unreadable = format!(r#"{{"version":{},"books":"moved elsewhere"}}"#, DOC_VERSION + 1);
+    assert_eq!(read_remote(unreadable.as_bytes()), Remote::Newer(None));
+
+    // Damage at this version or before is damage, as it always was.
+    assert_eq!(read_remote(b"{ this is not json"), Remote::Absent);
+    assert_eq!(read_remote(br#"{"version":1,"books":"cut sho"#), Remote::Absent);
+    assert_eq!(read_remote(br#"{"version":1,"books":7}"#), Remote::Absent);
+    assert_eq!(read_remote(b""), Remote::Absent);
+  }
+
+  // ---- minutes per device (docs/two-devices.md) ---------------------------
+
+  /// A day one device read on, and has told nobody about.
+  fn read_on(device: &str, minutes: f64) -> DayEntry {
+    DayEntry { by_device: BTreeMap::from([(device.to_string(), minutes)]), ..day("2026-10-03", minutes) }
+  }
+
+  /// A device reads some more: on top of the total it knows, and under its own name.
+  fn reads_more(day: &DayEntry, device: &str, minutes: f64) -> DayEntry {
+    let mut next = day.clone();
+    next.minutes += minutes;
+    *next.by_device.entry(device.to_string()).or_insert(0.0) += minutes;
+    next
+  }
+
+  /// What 1.0 to 1.2 do with a day: keep the larger total, add their own
+  /// reading to it, and write it back with nothing they do not know.
+  fn as_an_old_version_writes(seen: &DayEntry, own_total: f64, read_since: f64) -> DayEntry {
+    DayEntry { minutes: seen.minutes.max(own_total) + read_since, by_device: BTreeMap::new(), ..seen.clone() }
+  }
+
+  /// The fault this fixes: twenty minutes on the laptop and twenty on the
+  /// phone, before either had synced, was twenty, and the goal was missed.
+  #[test]
+  fn reading_on_two_devices_in_one_day_adds_up() {
+    let merged = merge_day(&read_on("laptop", 20.0), &read_on("phone", 20.0));
+    assert_eq!(merged.minutes, 40.0);
+    assert_eq!(merged.by_device, BTreeMap::from([("laptop".to_string(), 20.0), ("phone".to_string(), 20.0)]));
+    assert_eq!(merged.goal_minutes, 20);
+    assert!(merge_day(&DayEntry { goal_minutes: 30, ..read_on("laptop", 20.0) }, &DayEntry { goal_minutes: 30, ..read_on("phone", 20.0) }).to_record().goal_met(), "a goal neither met alone is met together");
+
+    // Syncing again, either way round, changes nothing: no pressing a button inflates a day.
+    assert_eq!(merge_day(&merged, &read_on("phone", 20.0)), merged);
+    assert_eq!(merge_day(&read_on("laptop", 20.0), &merged), merged);
+
+    // The laptop reads five more, on top of what it now knows.
+    let laptop = reads_more(&merged, "laptop", 5.0);
+    let again = merge_day(&laptop, &merged);
+    assert_eq!(again.minutes, 45.0);
+    assert_eq!(again.by_device["laptop"], 25.0);
+  }
+
+  /// Read one after the other with a sync between, it added up before the
+  /// figures and still does: the second device starts from the first's total.
+  #[test]
+  fn reading_in_turn_counts_once_each() {
+    let laptop = read_on("laptop", 20.0);
+    let phone = reads_more(&laptop, "phone", 15.0);
+    assert_eq!(phone.minutes, 35.0);
+    assert_eq!(merge_day(&laptop, &phone).minutes, 35.0);
+  }
+
+  /// 1.0, 1.1 and 1.2 rewrite the document without the figures. The total
+  /// they keep never goes down, and the figures come back from any device
+  /// that still holds them.
+  #[test]
+  fn a_version_that_drops_the_figures_loses_nothing() {
+    let shared = merge_day(&read_on("laptop", 20.0), &read_on("phone", 20.0));
+    // An old desktop takes the 40, reads ten more, and writes 50 with no figures.
+    let rewritten = as_an_old_version_writes(&shared, 0.0, 10.0);
+    assert!(rewritten.by_device.is_empty());
+    assert_eq!(rewritten.minutes, 50.0);
+
+    // The laptop still holds what it last saw: the figures are whole again, the total is the old app's.
+    let healed = merge_day(&shared, &rewritten);
+    assert_eq!(healed.minutes, 50.0);
+    assert_eq!(healed.by_device, shared.by_device);
+    // And reading goes on counting from there.
+    assert_eq!(merge_day(&reads_more(&healed, "laptop", 3.0), &rewritten).minutes, 53.0);
+  }
+
+  /// A figure dropped before any other device saw it, and put back later by
+  /// its own device: nothing is counted twice.
+  #[test]
+  fn a_figure_put_back_is_not_counted_twice() {
+    let phone = read_on("phone", 20.0);
+    // An old app rewrites the phone's day before the laptop has seen it.
+    let rewritten = as_an_old_version_writes(&phone, 0.0, 0.0);
+    // The laptop, with fifteen of its own unsynced, meets a bare 20.
+    let laptop = merge_day(&read_on("laptop", 15.0), &rewritten);
+    assert_eq!(laptop.minutes, 20.0, "as before the figures: the larger, since nothing says whose the 20 are");
+    // It reads ten more, then the phone syncs again and its figure returns.
+    let laptop = reads_more(&laptop, "laptop", 10.0);
+    assert_eq!(laptop.minutes, 30.0);
+    let all = merge_day(&laptop, &phone);
+    assert_eq!(all.by_device, BTreeMap::from([("laptop".to_string(), 25.0), ("phone".to_string(), 20.0)]));
+    assert_eq!(all.minutes, 45.0, "twenty and twenty-five, each once");
+  }
+
+  /// With figures: any two copies either way round, again, and (sharing a
+  /// goal) any three in any order. A merge never comes out below either copy
+  /// or the figures' sum, and never above the two copies' totals together.
+  #[test]
+  fn day_merges_with_figures_commute_repeat_and_converge() {
+    let mut grid = Vec::new();
+    // (laptop, phone, tablet, minutes nobody is named for)
+    for (laptop, phone, tablet, unnamed) in [
+      (0.0, 0.0, 0.0, 0.0),
+      (0.0, 0.0, 0.0, 30.0),
+      (10.0, 0.0, 0.0, 0.0),
+      (0.0, 15.0, 0.0, 0.0),
+      (10.0, 15.0, 0.0, 0.0),
+      (12.0, 15.0, 0.0, 5.0),
+      (25.0, 0.0, 8.0, 0.0),
+      (0.0, 15.0, 8.0, 40.0),
+      (700.0, 600.0, 500.0, 0.0)
+    ] {
+      let total: f64 = laptop + phone + tablet + unnamed;
+      let mut entry = day_with(total.min(DAY_MINUTES), 20);
+      for (device, minutes) in [("laptop", laptop), ("phone", phone), ("tablet", tablet)] {
+        if minutes > 0.0 {
+          entry.by_device.insert(device.to_string(), minutes);
+        }
+      }
+      grid.push(entry);
+    }
+    let sum = |day: &DayEntry| day.by_device.values().sum::<f64>();
+    for a in &grid {
+      for b in &grid {
+        let ab = merge_day(a, b);
+        assert_eq!(ab, merge_day(b, a), "commutative: {a:?} {b:?}");
+        assert_eq!(merge_day(a, &ab), ab, "idempotent: {a:?} {b:?}");
+        assert_eq!(merge_day(&ab, b), ab, "idempotent: {a:?} {b:?}");
+        assert_eq!(merge_day(&ab, &ab), ab, "a merged day merged with itself is itself");
+        assert!(ab.minutes >= a.minutes.max(b.minutes), "never below either: {a:?} {b:?}");
+        assert!(ab.minutes >= sum(&ab).min(DAY_MINUTES), "never below the figures: {a:?} {b:?}");
+        assert!(ab.minutes <= a.minutes + b.minutes, "never more than both: {a:?} {b:?}");
+        for c in &grid {
+          let one = merge_day(&ab, c);
+          assert_eq!(one, merge_day(a, &merge_day(b, c)), "three copies: {a:?} {b:?} {c:?}");
+          assert_eq!(one, merge_day(&merge_day(c, a), b), "three copies: {a:?} {b:?} {c:?}");
+        }
+      }
+    }
+  }
+
+  /// A day without figures is written as it always was, and a document from
+  /// before them parses: versions before the figures and after read each other.
+  #[test]
+  fn the_figures_are_left_out_where_there_are_none() {
+    let bare = serde_json::to_string(&day("2026-08-01", 12.0)).expect("json");
+    assert!(!bare.contains("byDevice"), "{bare}");
+    let with = serde_json::to_string(&read_on("laptop", 20.0)).expect("json");
+    assert!(with.contains(r#""byDevice":{"laptop":20.0}"#), "{with}");
+
+    let old = r#"{"dateKey":"2026-08-01","minutes":12.0,"goalMinutes":20,"freezeUsed":false,"graceUsed":false}"#;
+    let parsed: DayEntry = serde_json::from_str(old).expect("parses");
+    assert_eq!(parsed, day("2026-08-01", 12.0));
+  }
+
+  /// Past ninety days a day travels as its total alone.
+  #[test]
+  fn old_days_let_their_figures_go() {
+    let recent = DayEntry { date_key: "2026-08-20".to_string(), ..read_on("laptop", 20.0) };
+    let old = DayEntry { date_key: "2026-01-01".to_string(), ..read_on("laptop", 20.0) };
+    let here = SyncDoc { days: vec![recent.clone(), old.clone()], ..doc(vec![]) };
+
+    let merged = merge(&here, &doc(vec![]), NOW);
+    let find = |key: &str| merged.days.iter().find(|d| d.date_key == key).expect("day").clone();
+    assert_eq!(find("2026-08-20"), recent);
+    assert!(find("2026-01-01").by_device.is_empty());
+    assert_eq!(find("2026-01-01").minutes, 20.0, "its minutes stay");
+    assert_eq!(merge(&merged, &here, NOW), merged, "and merging again changes nothing");
   }
 
   #[test]

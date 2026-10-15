@@ -87,6 +87,10 @@ export const useReadingModes = (reader: WithPanels) => {
     }
     setPendingReadingMode(null);
     setReadingMode(mode);
+    // Already in this mode and paused ("Read from here" while Smart Read waits): it reads on from the new start.
+    if (readingMode === mode && !startPausedRef.current) {
+      setReadingPaused(false);
+    }
   };
 
   // The optimal recognition point: the letter the eye should land on, a little
@@ -231,11 +235,13 @@ export const useReadingEngine = (reader: WithCover) => {
         savePaceProfileRef.current();
         if (autoScrollActiveRef.current) {
           setAutoScrollActive(false);
-          pausedWhileAwayRef.current = "Auto-scroll paused while you were away. Space to carry on.";
+          pausedWhileAwayRef.current = isTouchInput()
+            ? "Auto-scroll paused while you were away."
+            : "Auto-scroll paused while you were away. Space to carry on.";
         } else if (readingModeRef.current !== "standard" && !readingPausedRef.current) {
           readingPausedRef.current = true;
           setReadingPaused(true);
-          pausedWhileAwayRef.current = "Paused while you were away. Space to carry on.";
+          pausedWhileAwayRef.current = isTouchInput() ? "Paused while you were away. Tap to carry on." : "Paused while you were away. Space to carry on.";
         }
       }),
     []
@@ -436,7 +442,7 @@ export const useReadingEngine = (reader: WithCover) => {
         if (stillTooLong(quiet)) {
           readingPausedRef.current = true;
           setReadingPaused(true);
-          showFocusToast("Still reading? Press Space to carry on.");
+          showFocusToast(isTouchInput() ? "Still reading? Tap to carry on." : "Still reading? Press Space to carry on.");
           schedule(180);
           return;
         }

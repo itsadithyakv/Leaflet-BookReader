@@ -7,6 +7,7 @@ import { PipAvatar } from "./PipAvatar";
 import { at, errorText, gentleError, minutesText, nameOf } from "./format";
 import { HandleField } from "./HandleField";
 import { SectionHeader } from "../ui/SectionHeader";
+import { passOn, passOnLabel } from "./passOn";
 
 const DEBOUNCE_MS = 300;
 
@@ -62,10 +63,7 @@ export const ReaderSearch = ({ showToast }: { showToast?: (message: string) => v
     if (!mine) {
       return;
     }
-    navigator.clipboard
-      .writeText(`Follow me on Leaflet: ${at(mine)}`)
-      .then(() => toast("Copied. Send it to a friend."))
-      .catch(() => toast(`You are ${at(mine)}.`));
+    passOn(`Follow me on Leaflet: ${at(mine)}`, toast, `You are ${at(mine)}.`);
   };
 
   const follow = (handle: string) => {
@@ -101,7 +99,7 @@ export const ReaderSearch = ({ showToast }: { showToast?: (message: string) => v
             onClick={copyHandle}
             title="Copy your handle, to send to a friend so they can follow you"
           >
-            <Copy size={12} aria-hidden /> Copy
+            <Copy size={12} aria-hidden /> {passOnLabel("Copy")}
           </button>
         </div>
       )}

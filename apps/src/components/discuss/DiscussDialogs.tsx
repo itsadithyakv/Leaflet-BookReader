@@ -5,6 +5,7 @@ import { useDiscussStore } from "./discussStore";
 import { CONSEQUENCES, GUIDELINES, REPORT_REASONS } from "./guidelines";
 import { SheetHandle } from "../ui/SheetHandle";
 import { useBackClose } from "../../hooks/useBackClose";
+import { backdropClose } from "../ui/backdrop";
 
 /** Escape closes the dialog on top and nothing under it; so does Android's Back. */
 const useEscape = (open: boolean, close: () => void) => {
@@ -72,7 +73,7 @@ const RulesDialog = () => {
           ))}
         </ul>
         {error && <p className="mt-3 rounded-lg bg-error-container/40 px-3 py-2 text-xs text-on-surface">{error}</p>}
-        <div className="mt-5 flex justify-end gap-2">
+        <div className="sheet-actions mt-5 flex justify-end gap-2">
           <button type="button" className="tactile-button px-4 py-2 text-xs" onClick={decline} disabled={busy}>
             Not now
           </button>
@@ -117,7 +118,7 @@ const ReportDialog = ({ showToast }: { showToast: (message: string) => void }) =
   // A spoiler is a thread's or a post's fault, never a reader's or a community's.
   const reasons = REPORT_REASONS.filter((entry) => entry.id !== "spoiler" || reporting.target === "thread" || reporting.target === "post" || reporting.target === "reply");
   return (
-    <div className="sheet-backdrop fixed inset-0 z-[90] flex items-center justify-center bg-black/55 px-4 py-6" onMouseDown={(event) => event.target === event.currentTarget && close()}>
+    <div className="sheet-backdrop fixed inset-0 z-[90] flex items-center justify-center bg-black/55 px-4 py-6" {...backdropClose(() => close())}>
       <div className="modal-surface sheet-panel w-full max-w-md p-6" role="dialog" aria-modal="true" aria-labelledby="report-title">
         <SheetHandle onClose={close} />
         <h2 id="report-title" className="page-title text-2xl">
@@ -141,7 +142,7 @@ const ReportDialog = ({ showToast }: { showToast: (message: string) => void }) =
           onChange={(event) => setNote(event.target.value)}
         />
         {error && <p className="mt-2 rounded-lg bg-error-container/40 px-3 py-2 text-xs text-on-surface">{error}</p>}
-        <div className="mt-5 flex justify-end gap-2">
+        <div className="sheet-actions mt-5 flex justify-end gap-2">
           <button type="button" className="tactile-button px-4 py-2 text-xs" onClick={close} disabled={busy}>
             Cancel
           </button>

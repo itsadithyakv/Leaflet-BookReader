@@ -9,6 +9,7 @@ import { lineAt } from "../lineAt";
 import { isLook, placeAtOpen, placeFollows } from "../openAt";
 import { decodeFindPlace } from "../findPlace";
 import type { WithCover, WithDot } from "./scope";
+import { isFrozen } from "./renditionGhost";
 
 /**
  * Where the reader is: the reading line, the place saved with the book, a
@@ -605,6 +606,10 @@ export const useResizeRelayout = (reader: WithCover) => {
     const syncViewport = () => {
       window.cancelAnimationFrame(frame);
       frame = window.requestAnimationFrame(() => {
+        // A page held on screen while the book is laid out anew is not laid out again (renditionGhost.ts).
+        if (isFrozen(rendition) || renditionRef.current !== rendition) {
+          return;
+        }
         const width = Math.max(1, Math.round(viewer.clientWidth));
         const height = Math.max(1, Math.round(viewer.clientHeight));
         if (width === laidOut.width && height === laidOut.height) {

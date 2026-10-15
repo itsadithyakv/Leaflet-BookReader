@@ -14,7 +14,7 @@
 
 use crate::db::Database;
 use crate::sync::large::{self, Decision};
-use crate::sync::merge::{self, SyncDoc};
+use crate::sync::merge::{self, Remote, SyncDoc};
 use crate::sync::store;
 use anyhow::{anyhow, Result};
 use std::fs;
@@ -39,7 +39,10 @@ pub struct SyncReport {
   pub entries_updated: usize,
   /// Large files not sent because the reader has not been asked about them
   /// yet (`sync::large`).
-  pub books_held: usize
+  pub books_held: usize,
+  /// The shared document was written by a later version of Leaflet: this
+  /// device took what it understands from it and wrote nothing back.
+  pub update_needed: bool
 }
 
 impl SyncReport {
@@ -54,7 +57,23 @@ impl SyncReport {
     self.books_pending = other.books_pending;
     // The same books wait on every transport: they are counted once.
     self.books_held = self.books_held.max(other.books_held);
+    self.update_needed |= other.update_needed;
   }
+}
+
+/// A document a later version wrote: what this version understands of it is
+/// applied to this device, and nothing is written back. What this device has
+/// done since stays on it, and goes up once it is updated.
+pub(crate) fn take_from_newer(db: &Database, remote: Option<SyncDoc>, now: &str) -> Result<SyncReport> {
+  let mut report = SyncReport { update_needed: true, ..SyncReport::default() };
+  if let Some(remote) = remote {
+    let local = store::snapshot(db, now)?;
+    let applied = store::apply(db, &merge::merge(&local, &remote, now))?;
+    report.entries_updated = applied.updated;
+    report.books_removed = applied.removed.len();
+    report.books_pending = applied.missing.len();
+  }
+  Ok(report)
 }
 
 /// Held for the duration of a sync so two devices writing to the same folder at
@@ -95,19 +114,16 @@ impl Drop for FolderLock {
   }
 }
 
-fn read_state(root: &Path) -> Result<Option<SyncDoc>> {
+fn read_state(root: &Path) -> Result<Remote> {
   let path = root.join(STATE_FILE);
   if !path.exists() {
-    return Ok(None);
+    return Ok(Remote::Absent);
   }
-  let bytes = fs::read(&path)?;
   // A truncated or hand-edited document must not take the library down with it.
   // Treating it as absent means this device re-publishes its own state, which is
-  // the recoverable outcome.
-  match serde_json::from_slice::<SyncDoc>(&bytes) {
-    Ok(doc) => Ok(Some(doc)),
-    Err(_) => Ok(None)
-  }
+  // the recoverable outcome. A document from a later version is not that case,
+  // and is told apart by its version before anything else is read.
+  Ok(merge::read_remote(&fs::read(&path)?))
 }
 
 /// Writes `state.json` through a temporary file, so a crash or a cloud client
@@ -126,8 +142,12 @@ pub fn sync(db: &Database, root: &Path, now: &str) -> Result<SyncReport> {
   let books_root = root.join(BOOKS_DIR);
   fs::create_dir_all(&books_root)?;
 
+  let remote = match read_state(root)? {
+    Remote::Ours(doc) => doc,
+    Remote::Absent => SyncDoc::empty(now),
+    Remote::Newer(doc) => return take_from_newer(db, doc, now)
+  };
   let local = store::snapshot(db, now)?;
-  let remote = read_state(root)?.unwrap_or_else(|| SyncDoc::empty(now));
   let merged = merge::merge(&local, &remote, now);
 
   // Publish before moving files: if the copy stage fails halfway, the other
@@ -385,6 +405,96 @@ mod tests {
     assert_eq!(days.get("2026-08-01").expect("day").minutes, 25.0);
   }
 
+  fn minutes_on(db: &Database, day: &str) -> f64 {
+    db.reading_days().expect("days").get(day).expect("day").minutes
+  }
+
+  /// Read on both devices in one day before either syncs: the day is both
+  /// readings together, on both, and syncing on does not move it.
+  #[test]
+  fn reading_on_both_devices_in_one_day_adds_up() {
+    let scratch = Scratch::new("both-read");
+    let laptop = memory_db();
+    let phone = memory_db();
+
+    laptop.credit_minutes("2026-08-01", 20.0, 30).expect("laptop reads");
+    phone.credit_minutes("2026-08-01", 20.0, 30).expect("phone reads");
+
+    sync(&laptop, &scratch.path, "2026-08-01T20:00:00+00:00").expect("laptop");
+    sync(&phone, &scratch.path, "2026-08-01T20:00:01+00:00").expect("phone");
+    sync(&laptop, &scratch.path, "2026-08-01T20:00:02+00:00").expect("laptop again");
+
+    assert_eq!(minutes_on(&laptop, "2026-08-01"), 40.0);
+    assert_eq!(minutes_on(&phone, "2026-08-01"), 40.0);
+    assert!(laptop.reading_days().expect("days")["2026-08-01"].goal_met(), "a goal of 30 neither met alone");
+
+    for tick in 3..6 {
+      sync(&phone, &scratch.path, &format!("2026-08-01T20:00:0{tick}+00:00")).expect("sync");
+      sync(&laptop, &scratch.path, &format!("2026-08-01T20:00:0{tick}+00:00")).expect("sync");
+    }
+    assert_eq!(minutes_on(&laptop, "2026-08-01"), 40.0);
+    assert_eq!(minutes_on(&phone, "2026-08-01"), 40.0);
+
+    // The laptop reads five more: 45 on both.
+    laptop.credit_minutes("2026-08-01", 5.0, 30).expect("more");
+    sync(&laptop, &scratch.path, "2026-08-01T21:00:00+00:00").expect("laptop");
+    sync(&phone, &scratch.path, "2026-08-01T21:00:01+00:00").expect("phone");
+    assert_eq!(minutes_on(&phone, "2026-08-01"), 45.0);
+  }
+
+  /// What 1.0 to 1.2 do to the shared document: read it into the shapes they
+  /// know, add their own reading to the day's total, and write it back.
+  fn an_old_version_syncs(root: &Path, day: &str, read_since: f64) {
+    let path = root.join(STATE_FILE);
+    let mut doc: serde_json::Value = serde_json::from_slice(&fs::read(&path).expect("read")).expect("json");
+    for entry in doc["days"].as_array_mut().expect("days") {
+      let object = entry.as_object_mut().expect("a day");
+      object.remove("byDevice");
+      if object["dateKey"] == day {
+        let minutes = object["minutes"].as_f64().expect("minutes") + read_since;
+        object.insert("minutes".to_string(), minutes.into());
+      }
+    }
+    fs::write(&path, serde_json::to_vec_pretty(&doc).expect("json")).expect("write");
+  }
+
+  /// An installed 1.1 between two newer devices: the day's total never goes
+  /// down, its own reading counts, and what it dropped is back after the
+  /// newer devices' next syncs.
+  #[test]
+  fn an_old_version_in_between_loses_nothing() {
+    let scratch = Scratch::new("old-between");
+    let laptop = memory_db();
+    let phone = memory_db();
+    laptop.credit_minutes("2026-08-01", 20.0, 30).expect("laptop reads");
+    phone.credit_minutes("2026-08-01", 20.0, 30).expect("phone reads");
+    sync(&laptop, &scratch.path, "2026-08-01T20:00:00+00:00").expect("laptop");
+    sync(&phone, &scratch.path, "2026-08-01T20:00:01+00:00").expect("phone");
+
+    an_old_version_syncs(&scratch.path, "2026-08-01", 10.0);
+    let raw = fs::read_to_string(scratch.path.join(STATE_FILE)).expect("read");
+    assert!(!raw.contains("byDevice"), "the old version wrote none");
+
+    sync(&laptop, &scratch.path, "2026-08-01T20:10:00+00:00").expect("laptop");
+    assert_eq!(minutes_on(&laptop, "2026-08-01"), 50.0, "the forty, and the old version's ten");
+    let raw = fs::read_to_string(scratch.path.join(STATE_FILE)).expect("read");
+    assert!(raw.contains("byDevice"), "back in the document");
+    // The laptop synced before the phone did, so it never saw the phone's
+    // figure, and cannot put back what it never held. The total is whole all
+    // the same: the old version kept it.
+    assert_eq!(laptop.reading_day_devices().expect("figures")["2026-08-01"].len(), 1);
+
+    // The phone puts its own figure back, and nothing is counted twice.
+    sync(&phone, &scratch.path, "2026-08-01T20:10:01+00:00").expect("phone");
+    assert_eq!(minutes_on(&phone, "2026-08-01"), 50.0);
+    assert_eq!(phone.reading_day_devices().expect("figures")["2026-08-01"].len(), 2, "the laptop's and the phone's");
+    // And reading goes on counting from there.
+    phone.credit_minutes("2026-08-01", 4.0, 30).expect("more");
+    sync(&phone, &scratch.path, "2026-08-01T20:20:00+00:00").expect("phone");
+    sync(&laptop, &scratch.path, "2026-08-01T20:20:01+00:00").expect("laptop");
+    assert_eq!(minutes_on(&laptop, "2026-08-01"), 54.0);
+  }
+
   /// A half-written or hand-edited document must not take the library down; the
   /// device republishes its own state instead.
   #[test]
@@ -401,6 +511,40 @@ mod tests {
     let republished = fs::read(scratch.path.join("state.json")).expect("read back");
     let doc: SyncDoc = serde_json::from_slice(&republished).expect("valid json now");
     assert_eq!(doc.books.len(), 1);
+  }
+
+  /// A document a later version wrote is read from and left exactly as it
+  /// was: this version would write it back without what it does not know.
+  #[test]
+  fn a_later_versions_document_is_taken_from_and_not_written() {
+    let scratch = Scratch::new("newer");
+    let laptop = memory_db();
+    let newer = memory_db();
+    newer.upsert_book(&book("bbb", 0.4, "2026-08-01T09:00:00+00:00")).expect("import");
+    sync(&newer, &scratch.path, "2026-08-01T09:00:01+00:00").expect("publish");
+
+    // The document as a later version would leave it: a higher version, and a field this one has no name for.
+    let path = scratch.path.join(STATE_FILE);
+    let mut doc: serde_json::Value = serde_json::from_slice(&fs::read(&path).expect("read")).expect("json");
+    doc["version"] = (merge::DOC_VERSION + 1).into();
+    doc["somethingNew"] = serde_json::json!({ "kept": true });
+    let written = serde_json::to_vec_pretty(&doc).expect("json");
+    fs::write(&path, &written).expect("write");
+
+    laptop.upsert_book(&book("aaa", 0.3, "2026-08-01T10:00:00+00:00")).expect("import");
+    let report = sync(&laptop, &scratch.path, "2026-08-01T10:00:01+00:00").expect("survives");
+
+    assert!(report.update_needed);
+    assert_eq!(titles(&laptop), vec!["aaa".to_string(), "bbb".to_string()], "what it understands arrives");
+    assert_eq!(fs::read(&path).expect("read back"), written, "and the document is untouched");
+
+    // One it cannot read at all: nothing taken, nothing written, and its own books unharmed.
+    let unreadable = format!(r#"{{"version":{},"books":"moved elsewhere"}}"#, merge::DOC_VERSION + 1);
+    fs::write(&path, &unreadable).expect("write");
+    let report = sync(&laptop, &scratch.path, "2026-08-01T10:00:02+00:00").expect("survives");
+    assert!(report.update_needed);
+    assert_eq!(fs::read_to_string(&path).expect("read back"), unreadable);
+    assert_eq!(titles(&laptop), vec!["aaa".to_string(), "bbb".to_string()]);
   }
 
   /// The lock keeps two devices from interleaving a read-modify-write of the

@@ -69,6 +69,10 @@ the keys in `useReaderKeys.ts`, page turns and their gestures in
 `usePageTurning.ts`, the toolbar and its menu in `ReaderToolbar.tsx` and
 `ReaderMoreMenu.tsx`, SpeedRead's stage in `SpeedReadStage.tsx`.
 
+**Built 2026-10-15 on `android`** (minutes per device, the version rule, sync on
+leaving and returning, a fake-Drive two-device test): see
+[two-devices.md](two-devices.md). Not yet run on two real devices.
+
 **Done when:** two copies of the desktop app on two Windows accounts, signed
 in to the same accounts, pass a written two-device script (read on both in one
 day, edit a highlight on both, delete on one, go offline on one).

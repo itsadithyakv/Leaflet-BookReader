@@ -58,6 +58,7 @@ import { explainMood } from "../pip/mood";
 import { GAMES } from "../components/pip/arcade/games";
 import { useHabitStore } from "../store/habitStore";
 import { getDateKey } from "../services/habitService";
+import { holdRotation } from "../platform/android";
 import { FinishSheet, SlotSheet } from "./pip/DecorSheets";
 import { useBackFallback } from "../platform/back";
 
@@ -197,6 +198,10 @@ export const PipPage = ({ showToast, openSocial }: PipPageProps) => {
     setOnStage(true);
     return () => setOnStage(false);
   }, [setOnStage]);
+
+  // Pip's world is drawn sideways: on a phone it stays sideways while the tab is open (a book opened from here holds
+  // its own way up on top, and gives the screen back when it closes). Off Android, nothing.
+  useEffect(() => holdRotation("landscape"), []);
 
   // Leaving the tab leaves no seed mid-air, and makes a quick purchase not taken back.
   useEffect(() => {

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { Book, BookFilter } from "@shared/models/book";
-import { EMPTY_SYNC_STATUS, type DriveSyncStatus, type SyncStatus } from "@shared/sync/types";
+import { EMPTY_SYNC_STATUS, SYNC_UPDATE_NEEDED, type DriveSyncStatus, type SyncStatus } from "@shared/sync/types";
 import { bookService, type FinishedGone, type ImportOutcome } from "../services/bookService";
 import { syncService } from "../services/syncService";
 import { socialService } from "../services/socialService";
@@ -329,6 +329,12 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       // drift apart.
       const [books, status, finishedGone] = await Promise.all([bookService.list(), syncService.status(), bookService.finishedRemoved().catch(() => get().finishedGone)]);
       set({ books, finishedGone, sync: status, syncStatus: "success", largeHeld: report.booksHeld ?? 0 });
+      // A newer Leaflet wrote the library: what it holds has arrived, and
+      // nothing of this device's went up. Said where a failed sync is said.
+      if (report.updateNeeded) set({ syncStatus: "error", syncError: SYNC_UPDATE_NEEDED });
+      // Books another device added arrive without covers (a cover is this
+      // device's own file, never synced): they are looked up as an import's are.
+      if (report.entriesUpdated > 0 && !get().metadataRefreshing) void get().refreshMissingMetadata(books.filter((book) => !book.coverUrl));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       set({ syncStatus: "error", syncError: message });

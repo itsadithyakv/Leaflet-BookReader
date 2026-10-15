@@ -4,6 +4,7 @@ import { useLibraryStore } from "../store/libraryStore";
 import { guessSeries, librarySeries, seriesNumberLabel } from "../library/series";
 import { SheetHandle } from "./ui/SheetHandle";
 import { useBackClose } from "../hooks/useBackClose";
+import { backdropClose } from "./ui/backdrop";
 
 /**
  * Where the reader corrects a book's series: names it and its number, says it
@@ -100,11 +101,7 @@ export const SeriesEditorDialog = () => {
   return (
     <div
       className="sheet-backdrop fixed inset-0 z-[90] flex items-center justify-center bg-black/50 px-4"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
-          close();
-        }
-      }}
+      {...backdropClose(() => close())}
     >
       <form
         role="dialog"

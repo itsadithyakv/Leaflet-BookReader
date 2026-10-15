@@ -13,6 +13,7 @@ import { useEquippedPip } from "../../../store/pipWardrobeStore";
 import { WeekCard } from "./WeekCard";
 import "./diary.css";
 import { useBackLayer } from "../../../platform/back";
+import { backdropClose } from "../../ui/backdrop";
 
 export type DiaryAt = {
   /** The day to open at ("2026-10-04"); today when left out. */
@@ -327,7 +328,7 @@ export const DiaryBook = ({ onClose, ...at }: DiaryBookProps) => {
   }, []);
 
   return (
-    <div className="pip-diary-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <div className="pip-diary-backdrop" role="presentation" {...backdropClose(onClose)}>
       <div
         ref={dialogRef}
         className="pip-diary"

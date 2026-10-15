@@ -9,6 +9,7 @@ import { escapeTarget, type EscapeLayer } from "../escapeOrder";
 import { useBackFallback } from "../../platform/back";
 import { closeAmbiencePopover } from "../../ambience";
 import { SMART_NUDGE } from "./constants";
+import { setReaderTourSeen } from "../ReaderTour";
 import type { Later, WithSession } from "./scope";
 
 /**
@@ -300,6 +301,8 @@ export const useReaderKeys = (reader: WithSession & Later<"people">) => {
         setReadingPaused(false);
         break;
       case "tour":
+        // Closed by Escape or Back: seen, as Skip is, so it does not come back with the next book.
+        setReaderTourSeen(true);
         spotlightDotty(-1);
         setTourOpen(false);
         break;

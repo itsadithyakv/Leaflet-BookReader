@@ -4,6 +4,7 @@ import type { Album } from "../../../pip/expedition";
 import { AlbumPanel } from "./AlbumPanel";
 import { useAlbum } from "./useAlbum";
 import { useBackLayer } from "../../../platform/back";
+import { backdropClose } from "../../ui/backdrop";
 
 type AlbumDialogProps = {
   onClose: () => void;
@@ -58,7 +59,7 @@ export const AlbumDialog = ({ onClose, album, initial }: AlbumDialogProps) => {
   };
 
   return (
-    <div className="pip-shop-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <div className="pip-shop-backdrop" role="presentation" {...backdropClose(onClose)}>
       <div
         ref={dialogRef}
         className="pip-album-dialog modal-surface"

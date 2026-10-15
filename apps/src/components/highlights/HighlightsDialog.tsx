@@ -16,6 +16,7 @@ import { KINDLE_TAG_ABOUT, isKindlePlace } from "../../library/kindleClippings";
 import { KindleImport } from "./KindleImport";
 import { SheetHandle } from "../ui/SheetHandle";
 import { useBackClose } from "../../hooks/useBackClose";
+import { backdropClose } from "../ui/backdrop";
 
 type Tab = "highlights" | "bookmarks";
 const TABS_ID = "book-notes";
@@ -519,11 +520,7 @@ export const HighlightsDialog = ({ onOpenInBook }: HighlightsDialogProps) => {
   return (
     <div
       className="sheet-backdrop fixed inset-0 z-[90] flex items-center justify-center bg-black/50 px-4"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
-          close();
-        }
-      }}
+      {...backdropClose(() => close())}
     >
       <div
         ref={panelRef}

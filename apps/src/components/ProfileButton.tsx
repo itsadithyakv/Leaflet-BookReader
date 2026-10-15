@@ -59,6 +59,13 @@ const Face = ({ size }: { size: number }) => {
  * Quiet when all is well: "Backed up 5m ago", not a badge that says so forever.
  */
 const backupLine = (mode: SyncMode, status: DriveSyncStatus, sync: SyncStatus) => {
+  // Sync where several devices are kept in step, a backup where they are not (constants/features.ts).
+  if (FEATURES.multiDeviceSync) {
+    if (status === "syncing") return "Syncing…";
+    if (status === "error") return "Sync failed";
+    if (mode === "off") return "Not synced";
+    return sync.lastSyncedAt ? `Synced ${relativeTime(sync.lastSyncedAt)}` : "Sync on, nothing sent yet";
+  }
   if (status === "syncing") return "Backing up…";
   if (status === "error") return "Backup failed";
   if (mode === "off") return "Not backed up";
@@ -220,7 +227,7 @@ export const ProfileButton = ({
               </span>
               {mode !== "off" && (
                 <button type="button" className={small} onClick={onSyncNow} disabled={syncing}>
-                  {failed ? "Try again" : "Back up now"}
+                  {failed ? "Try again" : FEATURES.multiDeviceSync ? "Sync now" : "Back up now"}
                 </button>
               )}
             </div>
@@ -232,24 +239,10 @@ export const ProfileButton = ({
                 {sync.booksPending} {sync.booksPending === 1 ? "book" : "books"} will download when opened.
               </p>
             )}
-            {android && !sync.driveConnected ? (
-              // Drive's sign-in needs an Android client first (docs/android.md); the account carries the shelf meanwhile.
-              mode === "off" && (
-                <p className="mt-2 flex items-center gap-1.5 text-[11px] text-on-surface-variant">
-                  Google Drive
-                  <span
-                    className="inline-flex cursor-help text-on-surface-variant"
-                    title="Backing up to Google Drive comes to the phone later. A Leaflet account keeps your shelf and streak meanwhile."
-                    aria-label="Backing up to Google Drive comes to the phone later."
-                  >
-                    <UiIcon name="info" size={13} />
-                  </span>
-                </p>
-              )
-            ) : !sync.driveAvailable ? (
+            {!sync.driveAvailable ? (
               mode === "off" && (
                 <p className="mt-2 text-[11px] leading-relaxed text-on-surface-variant">
-                  Drive backup isn't available in this build.
+                  Google Drive isn't available in this build.
                 </p>
               )
             ) : sync.driveConnected ? (
@@ -264,10 +257,14 @@ export const ProfileButton = ({
             ) : (
               <>
                 <p className="mt-2 text-[11px] leading-relaxed text-on-surface-variant">
-                  Keep your books, progress and streak safe in your own Google Drive.
+                  {FEATURES.multiDeviceSync
+                    ? android
+                      ? "Get your books from your computer: the same Google Drive on both."
+                      : "Your books, places and streak in your own Google Drive, on every device."
+                    : "Keep your books, progress and streak safe in your own Google Drive."}
                 </p>
                 <button type="button" className={`${small} tactile-button-primary mt-2 w-full`} onClick={onConnectDrive}>
-                  Back up to Google Drive
+                  {FEATURES.multiDeviceSync ? "Connect Google Drive" : "Back up to Google Drive"}
                 </button>
               </>
             )}

@@ -8,6 +8,7 @@ import { PipSprite } from "./PipSprite";
 import { SheetHandle } from "./ui/SheetHandle";
 import { useBackClose } from "../hooks/useBackClose";
 import { isAndroid } from "../platform/device";
+import { backdropClose } from "./ui/backdrop";
 
 /**
  * Asking for a Store rating, politely.
@@ -152,11 +153,7 @@ export const RatePrompt = () => {
   return (
     <div
       className="sheet-backdrop fixed inset-0 z-[85] flex items-center justify-center bg-black/40 px-4"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
-          later();
-        }
-      }}
+      {...backdropClose(() => later())}
     >
       <div role="dialog" aria-modal="true" aria-labelledby="rate-title" className="modal-surface confirm-pop dialog-fit sheet-panel w-full max-w-sm rounded-2xl p-6 text-center">
         <SheetHandle onClose={later} />

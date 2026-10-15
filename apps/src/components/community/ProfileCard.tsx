@@ -15,6 +15,7 @@ import { SharedShelf } from "./SharedShelf";
 import { at, errorText, nameToEdit } from "./format";
 import { handleProblem } from "./handle";
 import { HandleField } from "./HandleField";
+import { passOn, passOnLabel } from "./passOn";
 
 type ProfileCardProps = {
   /** The reader's profile; null while it loads, and when it could not be read. */
@@ -216,10 +217,7 @@ export const ProfileCard = ({ profile, loadError = null, onRetry, handleNudge = 
       return;
     }
     const invite = `Add me on Leaflet: ${at(profile.handle)} (Social → Board → Find readers)`;
-    navigator.clipboard
-      .writeText(invite)
-      .then(() => showToast("Copied. Send it to a friend."))
-      .catch(() => showToast(`Your handle is ${at(profile.handle)}.`));
+    passOn(invite, showToast, `Your handle is ${at(profile.handle)}.`);
   };
 
   // Whether the readers who follow this one may see its whole library.
@@ -338,7 +336,7 @@ export const ProfileCard = ({ profile, loadError = null, onRetry, handleNudge = 
           {shared && profile?.handle && (
             <button type="button" className="tactile-button flex items-center gap-1.5 px-4 py-2 text-xs" onClick={copyInvite} title="Copies a line with your handle to send to a friend">
               <Copy size={13} aria-hidden />
-              Copy invite
+              {passOnLabel("Copy invite")}
             </button>
           )}
           {/* Who may see the profile: one of three, the one in force pressed. */}

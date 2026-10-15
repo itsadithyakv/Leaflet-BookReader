@@ -264,7 +264,8 @@ class DevicePlugin(private val activity: Activity) : Plugin(activity) {
       return
     }
     val uris = when (intent.action) {
-      Intent.ACTION_VIEW -> listOfNotNull(intent.data)
+      // Files only: com.leaflet.app://drive-connected (back from Drive's sign-in) is not a book.
+      Intent.ACTION_VIEW -> listOfNotNull(intent.data).filter { it.scheme == "content" || it.scheme == "file" }
       Intent.ACTION_SEND ->
         listOfNotNull(IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java))
           .ifEmpty { urisOf(intent) }

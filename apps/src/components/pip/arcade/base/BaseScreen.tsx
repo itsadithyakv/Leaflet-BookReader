@@ -255,6 +255,10 @@ type Panel = "site" | "people" | "decor" | "guard" | "garden";
  */
 const STAGE_WIDE = 820;
 const STAGE_TALL = 460;
+/** A phone on its side: a window at most this tall, and a page at least this wide and tall, is a stage too. */
+const PHONE_TALL = 520;
+const PHONE_WIDE = 480;
+const PHONE_MIN_TALL = 220;
 /** Sideways (a phone on its side): the column down the right of the picture, for Pip's word and the keys, is at least this wide (less on a small phone)... */
 const SIDE_COLUMN = 236;
 const SIDE_COLUMN_SMALL = 204;
@@ -566,7 +570,10 @@ export const BaseScreen = ({
       const host = rootRef.current?.parentElement ?? null;
       const wide = host?.clientWidth ?? 0;
       const tall = host?.clientHeight ?? 0;
-      if (wide >= STAGE_WIDE && tall >= STAGE_TALL) {
+      // A phone on its side (Pip's tab holds the screen so there) has the page's whole width for the picture: it is
+      // the page there too, with the rest laid over it as on a large screen, smaller (touch.css).
+      const phone = window.innerHeight <= PHONE_TALL && wide >= PHONE_WIDE && tall >= PHONE_MIN_TALL && wide >= tall * 1.3;
+      if ((wide >= STAGE_WIDE && tall >= STAGE_TALL) || phone) {
         // The picture is the page: as large as the page lets it be, and what height is left over the clearing is sky.
         const next = fitPicture(GAME_W, GAME_H, wide, tall, screenRatio(), 0);
         // To the canvas pixel. The first of it is ground at the foot, for the row of keys to stand on; the rest is sky.

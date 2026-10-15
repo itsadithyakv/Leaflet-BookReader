@@ -288,16 +288,37 @@ const readBounds = (): Bounds => {
   const scrollbar = main ? main.offsetWidth - main.clientWidth : 0;
   const sidebar = document.querySelector<HTMLElement>(".leaflet-sidebar");
   const sidebarShown = sidebar !== null && sidebar.offsetParent !== null;
+  // The rail's own width, a side notch's inset in it (a phone on its side), not the width it opens to on a hover.
+  const stage = document.querySelector(".sidebar-stage")?.getBoundingClientRect();
+  const railRight = stage && stage.width > 0 ? stage.right : sidebarShown ? sidebar.getBoundingClientRect().left + SIDEBAR_COLLAPSED : 0;
+  const insets = readInsets();
   // An upright phone's bottom bar lies over the foot of the page: the floor is its top edge, not the page's
   // (at 480 x 800 Pip walked 59 px under it, across the tabs).
   const bar = document.querySelector(".mobile-nav")?.getBoundingClientRect();
   const barTop = bar && bar.height > 0 ? bar.top : Infinity;
+  const left = sidebarShown ? railRight : mainRect?.left ?? 0;
+  const right = (mainRect?.right ?? window.innerWidth) - scrollbar - insets.right;
+  // The book being read floats over the foot of the page (above the tab bar on a phone): where it is most of the
+  // floor's width, the floor is its top, or Pip walked behind it with only her feet showing under it.
+  const dock = document.querySelector(".now-reading-dock .now-reading-bar")?.getBoundingClientRect();
+  const dockTop = dock && dock.height > 0 && dock.width >= (right - left) * 0.5 ? dock.top - 2 : Infinity;
   return {
-    left: sidebarShown ? sidebar.getBoundingClientRect().left + SIDEBAR_COLLAPSED : mainRect?.left ?? 0,
-    right: (mainRect?.right ?? window.innerWidth) - scrollbar,
+    left,
+    right,
     top: header ? Math.max(0, header.bottom) : 0,
-    floor: Math.min(mainRect?.bottom ?? window.innerHeight, barTop)
+    // Clear of the gesture bar too, where no tab bar already is.
+    floor: Math.min((mainRect?.bottom ?? window.innerHeight) - insets.bottom, barTop, dockTop)
   };
+};
+
+/** The system's bars over the window's edges (platform/device.css; 0 off Android). */
+const readInsets = () => {
+  const style = getComputedStyle(document.documentElement);
+  const px = (name: string) => {
+    const value = parseFloat(style.getPropertyValue(name));
+    return Number.isFinite(value) ? value : 0;
+  };
+  return { right: px("--inset-right"), bottom: px("--inset-bottom") };
 };
 
 /** Card tops Pip can stand on: any paper card in the page, or anything marked. */

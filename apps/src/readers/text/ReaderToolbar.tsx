@@ -111,6 +111,7 @@ export const ReaderToolbar = ({ reader }: { reader: ReaderScope }) => {
               onSpacing={chooseSpacing}
               align={align}
               onAlign={chooseAlign}
+              measureShown={!(shape === "upright" || (shape === "sideways" && reader.spread))}
             >
               {phone && <ReaderLookRows reader={reader} />}
             </TypePanel>

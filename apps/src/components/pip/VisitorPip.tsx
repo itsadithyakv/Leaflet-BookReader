@@ -16,7 +16,7 @@ import {
   type VisitRecord,
   type VisitorCandidate
 } from "../../pip/visitors";
-import { placeCard } from "./cardPlace";
+import { cardBounds, placeCard } from "./cardPlace";
 import type { Rect } from "./layout";
 import "./visitor.css";
 import { useBackLayer } from "../../platform/back";
@@ -72,7 +72,7 @@ const VisitorCard = ({ visitor, why, anchor, onClose, onOpenProfile }: CardProps
       const box = anchorRef.current();
       const root = card.current;
       if (!box || !root) return;
-      const viewport = { left: 8, top: 8, width: window.innerWidth - 16, height: window.innerHeight - 16 };
+      const viewport = cardBounds();
       const { left, top } = placeCard(box, { width: root.offsetWidth, height: root.offsetHeight }, viewport);
       setPlace((was) => (was && was.left === left && was.top === top ? was : { left, top }));
     };

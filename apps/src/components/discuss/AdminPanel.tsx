@@ -216,6 +216,7 @@ const UpdateNoticeCard = ({ showToast }: { showToast: (message: string) => void 
           className="inset-field w-28 px-3 py-2 text-sm tabular-nums text-on-surface"
           aria-label="The newest version"
           placeholder="1.4.2"
+          inputMode="decimal"
           value={version}
           onChange={(event) => setVersion(event.target.value)}
         />
@@ -233,7 +234,7 @@ const UpdateNoticeCard = ({ showToast }: { showToast: (message: string) => void 
           type="button"
           className="tactile-button tactile-button-primary px-3 py-1.5 text-xs disabled:opacity-60"
           disabled={busy || !/^\d{1,4}(\.\d{1,4}){1,3}$/.test(version.trim())}
-          title="Every app older than this version shows it in a corner, with a button to the Store"
+          title="Every app older than this version shows it in a corner, with a button to its store (Microsoft Store or Google Play)"
           onClick={() => save(version.trim())}
         >
           Tell everyone

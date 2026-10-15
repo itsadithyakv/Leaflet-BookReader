@@ -102,22 +102,14 @@ pub fn reading_stats(state: State<'_, AppState>) -> Result<db::ReadingStats, Str
 /// The frontend used to call `window.open`, which at best lands in an embedded
 /// webview — and Google refuses to run its sign-in there. Opening from the
 /// backend is the only reliable path.
+///
+/// The same on a phone: the listener binds `127.0.0.1` on the phone itself,
+/// the phone's browser comes back to it, and the page it serves there links
+/// back into Leaflet (`drive::SUCCESS_PAGE`). One Desktop OAuth client for
+/// both, so the phone sees the folder the laptop made (`drive.file` is per
+/// Google project, not per client).
 #[tauri::command]
 pub fn drive_auth_start(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<String, String> {
-  // Google's answer comes back to a listener on this device's loopback, which
-  // a phone's browser cannot reach in the app; it needs an Android OAuth
-  // client and a link back into Leaflet first (docs/mobile.md, "Signing in").
-  #[cfg(target_os = "android")]
-  {
-    let _ = (app, state);
-    Err("Google Drive is not available on the phone yet.".to_string())
-  }
-  #[cfg(not(target_os = "android"))]
-  drive_auth_start_desktop(app, state)
-}
-
-#[cfg(not(target_os = "android"))]
-fn drive_auth_start_desktop(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<String, String> {
   let credentials = {
     let db = state.db.guard();
     drive::load_credentials(&db).ok_or_else(|| {
@@ -275,8 +267,17 @@ pub fn set_large_book_backup(book_ids: Vec<String>, back_up: bool, state: State<
 /// Both may be: a folder covers this machine's other desktops, Drive covers a
 /// phone. They share the merge rules, so running both simply converges twice.
 #[tauri::command]
-pub async fn sync_now(state: State<'_, AppState>) -> Result<crate::sync::folder::SyncReport, String> {
+pub async fn sync_now(app: AppHandle, state: State<'_, AppState>) -> Result<crate::sync::folder::SyncReport, String> {
   let result = run_sync(&state).await;
+  // A goal met on the laptop silences the phone's reminders now, not at the
+  // next re-plan: the phone's alarms are planned again from what arrived.
+  #[cfg(target_os = "android")]
+  // (After every pull: the report does not count days, and a re-plan is cheap.)
+  if result.is_ok() {
+    crate::reminders::phone::request_sync(&app);
+  }
+  #[cfg(not(target_os = "android"))]
+  let _ = app;
   if let Err(error) = &result {
     crate::diag::warn(&format!("backup failed: {error}"));
   }
@@ -379,6 +380,28 @@ pub(crate) fn no_file_message(account_backup: bool) -> &'static str {
   } else {
     "That book is not on this device, and sync is not set up."
   }
+}
+
+/// Where this device itself last stood in a book, apart from the place a
+/// sync may have brought (`Database::place_here`).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaceHere {
+  pub progress: f32,
+  pub position: Option<String>
+}
+
+/// The reader opens a book here, and offers the other device's place when it
+/// differs ("Your other device is further on"). Nothing when the book was
+/// never read on this device: then the agreed place is the only one.
+#[tauri::command]
+pub fn place_here(book_id: String, state: State<'_, AppState>) -> Result<Option<PlaceHere>, String> {
+  let db = state.db.guard();
+  Ok(
+    db.place_here(&book_id)
+      .map_err(|e| e.to_string())?
+      .map(|(progress, position)| PlaceHere { progress, position })
+  )
 }
 
 /// Fetches a book this device has an entry for but no file.

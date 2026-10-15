@@ -18,37 +18,29 @@
 use crate::db::Database;
 use crate::sync::folder::SyncReport;
 use crate::sync::large;
-use crate::sync::merge::{self, BookEntry, SyncDoc};
+use crate::sync::merge::{self, BookEntry, Remote};
+use crate::sync::shared_doc;
 use crate::sync::store;
 use crate::sync::PendingAuth;
-// The loopback sign-in (`auth_start`) is not built for the phone.
-#[cfg(not(target_os = "android"))]
 use crate::sync::DriveState;
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use oauth2::basic::BasicClient;
 use oauth2::{AuthUrl, AuthorizationCode, ClientId, ClientSecret, RedirectUrl, TokenResponse, TokenUrl};
-#[cfg(not(target_os = "android"))]
 use oauth2::{CsrfToken, PkceCodeChallenge};
 use serde::{Deserialize, Serialize};
 use std::io::Read;
-#[cfg(not(target_os = "android"))]
 use std::io::Write;
-#[cfg(not(target_os = "android"))]
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::Path;
 use std::time::Duration;
-#[cfg(not(target_os = "android"))]
 use std::time::Instant;
-#[cfg(not(target_os = "android"))]
 use tokio::sync::oneshot;
 use crate::LockExt;
 
-#[cfg(not(target_os = "android"))]
 const DRIVE_SCOPE: &str = "https://www.googleapis.com/auth/drive.file";
 /// Identity, so the account panel can name the connected Google account instead
 /// of the placeholder the app used to invent. Both are non-sensitive scopes.
-#[cfg(not(target_os = "android"))]
 const IDENTITY_SCOPES: [&str; 2] = ["openid", "email"];
 const DRIVE_API: &str = "https://www.googleapis.com/drive/v3";
 const DRIVE_UPLOAD: &str = "https://www.googleapis.com/upload/drive/v3";
@@ -172,14 +164,11 @@ or use folder sync, which needs nothing at all.";
 /// How long the loopback listener waits for the browser to come back before it
 /// gives the port up. Without a bound, closing the consent tab left the UI
 /// waiting for a callback that would never arrive.
-#[cfg(not(target_os = "android"))]
 const AUTH_TIMEOUT: Duration = Duration::from_secs(300);
 /// Chunk size for resumable uploads. Bounds memory for a large book and gives
 /// the progress reporting somewhere to hook in later.
 const UPLOAD_CHUNK: usize = 8 * 1024 * 1024;
 const MAX_RETRIES: u32 = 4;
-/// How many times a losing race for `state.json` is re-merged before giving up.
-const MAX_CONFLICT_RETRIES: u32 = 3;
 
 // ---- wire types ------------------------------------------------------------
 
@@ -202,7 +191,6 @@ struct FilesList {
   next_page_token: Option<String>
 }
 
-#[cfg(not(target_os = "android"))]
 pub struct AuthStart {
   pub url: String
 }
@@ -226,7 +214,6 @@ fn oauth_client(credentials: &DriveCredentials) -> Result<BasicClient> {
 
 /// What arrived on the loopback listener.
 #[derive(Debug, PartialEq)]
-#[cfg(not(target_os = "android"))]
 enum Callback {
   Code(String),
   /// The consent screen was dismissed. Distinguishing this from noise is what
@@ -237,7 +224,6 @@ enum Callback {
   Ignored
 }
 
-#[cfg(not(target_os = "android"))]
 fn parse_callback(buffer: &[u8], expected_state: &str) -> Callback {
   let request = String::from_utf8_lossy(buffer);
   let Some(line) = request.lines().next() else {
@@ -285,7 +271,6 @@ fn parse_callback(buffer: &[u8], expected_state: &str) -> Callback {
   }
 }
 
-#[cfg(not(target_os = "android"))]
 fn respond(stream: &mut TcpStream, body: &str) {
   let response = format!(
     "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -299,7 +284,6 @@ fn respond(stream: &mut TcpStream, body: &str) {
 /// Reads until the end of the request head, rather than taking whatever one
 /// `read` happened to return. A request split across TCP segments used to parse
 /// as garbage and fail the sign-in with no explanation.
-#[cfg(not(target_os = "android"))]
 fn read_request(stream: &mut TcpStream) -> Vec<u8> {
   let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
   let mut buffer = Vec::with_capacity(2048);
@@ -334,12 +318,32 @@ const FAILURE_PAGE: &str =
    <body style=\"font:16px system-ui;padding:3rem;text-align:center\">\
    <h1>Connection cancelled</h1><p>Nothing was changed. You can close this tab.</p>";
 
+/// On a phone the browser is in front when Google answers, and Leaflet is
+/// behind it. Android does not let an app in the background bring itself
+/// forward, so the page Leaflet serves does it: a link (followed at once, and
+/// a button in case the browser wants a tap) that opens Leaflet by its own
+/// scheme (the BROWSABLE filter in AndroidManifest.xml).
+#[cfg(target_os = "android")]
+const SUCCESS_PAGE: &str =
+  "<!doctype html><meta charset=utf-8><meta name=viewport content=\"width=device-width,initial-scale=1\">\
+   <title>Leaflet</title><body style=\"font:17px system-ui;padding:3rem 1.5rem;text-align:center\">\
+   <h1>Leaflet is connected</h1>\
+   <p><a id=back href=\"intent://drive-connected#Intent;scheme=com.leaflet.app;package=com.leaflet.app;end\" \
+   style=\"display:inline-block;padding:14px 28px;border-radius:999px;background:#2f6b4f;color:#fff;text-decoration:none\">\
+   Back to Leaflet</a></p>\
+   <script>setTimeout(function(){location.href=document.getElementById('back').href},250)</script>";
+#[cfg(target_os = "android")]
+const FAILURE_PAGE: &str =
+  "<!doctype html><meta charset=utf-8><meta name=viewport content=\"width=device-width,initial-scale=1\">\
+   <title>Leaflet</title><body style=\"font:17px system-ui;padding:3rem 1.5rem;text-align:center\">\
+   <h1>Connection cancelled</h1><p>Nothing was changed.</p>\
+   <p><a href=\"intent://drive-connected#Intent;scheme=com.leaflet.app;package=com.leaflet.app;end\">Back to Leaflet</a></p>";
+
 /// Serves the loopback callback until the browser answers or the deadline passes.
 ///
 /// Non-blocking accept with a deadline, rather than a thread parked forever in
 /// `accept()`: the port is released when the user walks away, and repeatedly
 /// pressing "Connect Drive" no longer strands a thread per attempt.
-#[cfg(not(target_os = "android"))]
 fn serve_callback(listener: TcpListener, expected_state: String, tx: oneshot::Sender<Result<String>>) {
   let _ = listener.set_nonblocking(true);
   let deadline = Instant::now() + AUTH_TIMEOUT;
@@ -381,7 +385,6 @@ fn serve_callback(listener: TcpListener, expected_state: String, tx: oneshot::Se
   // Dropping the listener here frees the port whatever the outcome was.
 }
 
-#[cfg(not(target_os = "android"))]
 pub fn auth_start(state: &mut DriveState, credentials: &DriveCredentials) -> Result<AuthStart> {
   let client = oauth_client(credentials)?;
   let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))?;
@@ -750,10 +753,16 @@ async fn ensure_folder(client: &reqwest::Client, token: &str, name: &str, parent
     .ok_or_else(|| anyhow!("could not create the Leaflet folder in Drive"))
 }
 
+/// The file of that name; of several (two devices made `state.json` at the
+/// same moment), the one with the lowest id, so every device picks the same.
 async fn find_file(client: &reqwest::Client, token: &str, name: &str, parent: &str) -> Result<Option<DriveFile>> {
+  let files = find_files(client, token, name, parent).await?;
+  Ok(files.into_iter().min_by(|a, b| a.id.cmp(&b.id)))
+}
+
+async fn find_files(client: &reqwest::Client, token: &str, name: &str, parent: &str) -> Result<Vec<DriveFile>> {
   let query = format!("name = '{name}' and '{parent}' in parents and trashed = false");
-  let files = list_files(client, token, &query, "id,name,headRevisionId").await?;
-  Ok(files.into_iter().next())
+  list_files(client, token, &query, "id,name,headRevisionId").await
 }
 
 /// Uploads a small body whole. `uploadType=media` takes the raw bytes, so there
@@ -912,6 +921,23 @@ async fn download(client: &reqwest::Client, token: &str, file_id: &str) -> Resul
   Ok(response.bytes().await?.to_vec())
 }
 
+/// A file's bytes straight to `path`, a piece at a time.
+async fn download_to(client: &reqwest::Client, token: &str, file_id: &str, path: &Path) -> Result<()> {
+  let mut response = send(
+    client
+      .get(format!("{DRIVE_API}/files/{file_id}"))
+      .bearer_auth(token)
+      .query(&[("alt", "media")])
+  )
+  .await?;
+  let mut out = std::fs::File::create(path)?;
+  while let Some(piece) = response.chunk().await? {
+    out.write_all(&piece)?;
+  }
+  out.sync_all()?;
+  Ok(())
+}
+
 // ---- sync ------------------------------------------------------------------
 
 /// The connected Google account, so the UI can name it.
@@ -933,21 +959,65 @@ pub async fn fetch_account_email(client: &reqwest::Client, token: &str) -> Resul
   )
 }
 
-async fn read_remote_state(
-  client: &reqwest::Client,
-  token: &str,
-  root: &str,
-  now: &str
-) -> Result<(SyncDoc, Option<DriveFile>)> {
-  let file = find_file(client, token, STATE_FILE, root).await?;
-  let Some(file) = file else {
-    return Ok((SyncDoc::empty(now), None));
-  };
-  let bytes = download(client, token, &file.id).await?;
-  // A corrupt document must not take the library down. Treating it as empty
-  // means this device republishes its own state, which is recoverable.
-  let doc = serde_json::from_slice::<SyncDoc>(&bytes).unwrap_or_else(|_| SyncDoc::empty(now));
-  Ok((doc, Some(file)))
+/// `state.json` in the Leaflet folder, as `shared_doc` reads and writes it.
+struct DriveDoc<'a> {
+  client: &'a reqwest::Client,
+  token: &'a str,
+  root: &'a str
+}
+
+impl shared_doc::DocStore for DriveDoc<'_> {
+  fn read(&self) -> shared_doc::Pending<'_, (Remote, Option<shared_doc::Held>)> {
+    Box::pin(async move {
+      let Some(file) = find_file(self.client, self.token, STATE_FILE, self.root).await? else {
+        return Ok((Remote::Absent, None));
+      };
+      let bytes = download(self.client, self.token, &file.id).await?;
+      // A corrupt document reads as absent, and this device republishes its
+      // own state, which is recoverable. One a later version wrote is told
+      // apart by its version first, and is not written over.
+      Ok((
+        merge::read_remote(&bytes),
+        Some(shared_doc::Held { id: file.id, revision: file.head_revision_id })
+      ))
+    })
+  }
+
+  fn write<'a>(&'a self, held: Option<&'a shared_doc::Held>, body: Vec<u8>) -> shared_doc::Pending<'a, shared_doc::Written> {
+    Box::pin(async move {
+      let existing = held.map(|held| DriveFile {
+        id: held.id.clone(),
+        name: STATE_FILE.to_string(),
+        head_revision_id: held.revision.clone()
+      });
+      let revision = held.and_then(|held| held.revision.as_deref());
+      let written = match upload_simple(self.client, self.token, existing.as_ref(), STATE_FILE, self.root, body, revision).await {
+        Ok(file) => file,
+        Err(error) if error.to_string() == "CONFLICT" => return Ok(shared_doc::Written::Conflict),
+        Err(error) => return Err(error)
+      };
+      if held.is_none() {
+        // Made the first copy: if another device made one at the same moment,
+        // the one with the lowest id is everyone's, and ours (when it is not
+        // that one) goes; the round starts again over the keeper.
+        let all = find_files(self.client, self.token, STATE_FILE, self.root).await?;
+        if all.len() > 1 {
+          let keeper = all.iter().map(|file| file.id.as_str()).min().unwrap_or_default();
+          if keeper != written.id {
+            let _ = send(
+              self
+                .client
+                .delete(format!("{DRIVE_API}/files/{}", written.id))
+                .bearer_auth(self.token)
+            )
+            .await;
+          }
+          return Ok(shared_doc::Written::Conflict);
+        }
+      }
+      Ok(shared_doc::Written::Kept)
+    })
+  }
 }
 
 /// Merges with Drive and applies the result locally.
@@ -970,51 +1040,14 @@ pub async fn sync(db_mutex: &std::sync::Mutex<Database>, now: &str) -> Result<Sy
     }
   }
 
-  let mut attempt = 0;
-  let merged = loop {
-    let (remote, remote_file) = read_remote_state(&client, &token, &root, now).await?;
-    let local = {
-      let db = db_mutex.guard();
-      store::snapshot(&db, now)?
-    };
-    let merged = merge::merge(&local, &remote, now);
-    let body = serde_json::to_vec_pretty(&merged)?;
-
-    match upload_simple(
-      &client,
-      &token,
-      remote_file.as_ref(),
-      STATE_FILE,
-      &root,
-      body,
-      remote_file.as_ref().and_then(|file| file.head_revision_id.as_deref())
-    )
-    .await
-    {
-      Ok(_) => break merged,
-      Err(error) if error.to_string() == "CONFLICT" && attempt < MAX_CONFLICT_RETRIES => {
-        // Another device wrote between our read and our write. Re-read and
-        // re-merge rather than overwriting their work.
-        attempt += 1;
-        continue;
-      }
-      Err(error) if error.to_string() == "CONFLICT" => {
-        return Err(anyhow!("Another device is syncing right now. Try again shortly."))
-      }
-      Err(error) => return Err(error)
-    }
-  };
-
-  let applied = {
-    let db = db_mutex.guard();
-    store::apply(&db, &merged)?
-  };
-
-  let mut report = SyncReport {
-    entries_updated: applied.updated,
-    books_removed: applied.removed.len(),
-    books_pending: applied.missing.len(),
-    ..SyncReport::default()
+  // Read, merge, write over the copy read and no other, check it stuck
+  // (`shared_doc`); then apply here.
+  let doc_store = DriveDoc { client: &client, token: &token, root: &root };
+  let (mut report, merged) = shared_doc::sync(db_mutex, &doc_store, now).await?;
+  // A later Leaflet wrote the library: nothing of this device's goes up,
+  // files included, until it is updated.
+  let Some(merged) = merged else {
+    return Ok(report);
   };
 
   let remote_files: std::collections::HashMap<String, String> =
@@ -1098,15 +1131,18 @@ pub async fn fetch_book(db_mutex: &std::sync::Mutex<Database>, book_id: &str) ->
     .await?
     .ok_or_else(|| anyhow!("That book has not been uploaded from your other device yet."))?;
 
-  let bytes = download(&client, &token, &file.id).await?;
   let destination = store::local_path_for(&entry)?;
   if let Some(parent) = destination.parent() {
     std::fs::create_dir_all(parent)?;
   }
   // Stage then rename, so an interrupted download cannot leave a truncated book
-  // that later looks present.
+  // that later looks present. Written as it arrives: a phone has no room to
+  // hold a 300 MB comic in memory first.
   let staging = destination.with_extension("part");
-  std::fs::write(&staging, &bytes)?;
+  if let Err(error) = download_to(&client, &token, &file.id, &staging).await {
+    let _ = std::fs::remove_file(&staging);
+    return Err(error);
+  }
   std::fs::rename(&staging, &destination)?;
 
   Ok(destination.to_string_lossy().to_string())

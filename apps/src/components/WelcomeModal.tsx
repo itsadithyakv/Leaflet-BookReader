@@ -42,7 +42,7 @@ export const WelcomeModal = ({
   if (!open) {
     return null;
   }
-  // The phone has no sync folder (it would do nothing) and no Drive sign-in yet (docs/android.md).
+  // The phone has no sync folder (it would do nothing).
   const android = isAndroid();
   const here = android ? "this phone" : "this computer";
 
@@ -61,12 +61,16 @@ export const WelcomeModal = ({
   // Drive is offered only when this build can sign in to it. A first choice
   // that answers "not in this build" is a bad first impression; without it,
   // the screen is a plain welcome with one button, and backup waits in Settings.
-  const driveChoice: Choice[] = driveAvailable && !android
+  const driveChoice: Choice[] = driveAvailable
     ? [
         {
           icon: "cloud",
-          title: "Back up to Google Drive",
-          body: "Sign in with Google and your books, progress and streak are kept safe in your own Drive. Leaflet only ever sees the files it creates there.",
+          title: android ? "Get your books from your computer" : FEATURES.multiDeviceSync ? "Sync with Google Drive" : "Back up to Google Drive",
+          body: android
+            ? "Connect the Google Drive your computer's Leaflet uses: your shelf, places and streak arrive, and each book downloads when you open it."
+            : FEATURES.multiDeviceSync
+              ? "Sign in with Google and your books, places and streak are kept in your own Drive, the same on every device. Leaflet only ever sees the files it creates there."
+              : "Sign in with Google and your books, progress and streak are kept safe in your own Drive. Leaflet only ever sees the files it creates there.",
           action: "Connect Drive",
           onSelect: onConnectDrive,
           primary: true

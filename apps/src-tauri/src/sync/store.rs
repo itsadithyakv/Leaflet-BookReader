@@ -34,10 +34,11 @@ pub fn snapshot(db: &Database, now: &str) -> Result<SyncDoc> {
     .map(BookEntry::from_record)
     .collect();
 
+  let mut figures = db.reading_day_devices()?;
   let mut days: Vec<DayEntry> = db
     .reading_days()?
     .values()
-    .map(DayEntry::from_record)
+    .map(|day| DayEntry::from_record(day, figures.remove(&day.date_key).unwrap_or_default()))
     .collect();
   days.sort_by(|a, b| a.date_key.cmp(&b.date_key));
 
@@ -205,6 +206,7 @@ fn write(db: &Database, doc: &SyncDoc, gone: &mut Vec<String>) -> Result<Applied
 
   for day in &doc.days {
     db.put_day(&day.to_record())?;
+    db.put_day_devices(&day.date_key, &day.by_device)?;
   }
   for session in &doc.sessions {
     db.put_focus_session(&session.to_record())?;
@@ -628,7 +630,8 @@ mod tests {
         minutes: 32.0,
         goal_minutes: 20,
         freeze_used: false,
-        grace_used: true
+        grace_used: true,
+        by_device: Default::default()
       }],
       sessions: vec![merge::SessionEntry {
         id: "s1".to_string(),

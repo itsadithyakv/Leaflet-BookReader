@@ -15,7 +15,7 @@
 
 use crate::db::Database;
 use crate::sync::folder::SyncReport;
-use crate::sync::merge::{self, SyncDoc};
+use crate::sync::merge::{self, has_news, Remote, SyncDoc};
 use crate::sync::store;
 use anyhow::{anyhow, Result};
 use base64::Engine;
@@ -131,33 +131,26 @@ fn compress(doc: &SyncDoc) -> Result<String> {
 }
 
 /// The document the server holds, or nothing for one that cannot be read.
-fn decode(encoded: &str) -> Option<SyncDoc> {
-  let bytes = base64::engine::general_purpose::STANDARD.decode(encoded).ok()?;
+/// What the server holds, its version read first (`merge::read_remote`): a
+/// blob that will not decode is `Absent`, one a later version wrote is
+/// `Newer` and is not written over.
+fn decode_remote(encoded: &str) -> Remote {
+  let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(encoded) else {
+    return Remote::Absent;
+  };
   let mut json = Vec::new();
-  GzDecoder::new(&bytes[..]).read_to_end(&mut json).ok()?;
-  serde_json::from_slice(&json).ok()
+  if GzDecoder::new(&bytes[..]).read_to_end(&mut json).is_err() {
+    return Remote::Absent;
+  }
+  merge::read_remote(&json)
 }
 
-/// Whether the merged document has to be sent: whether it says anything the
-/// one the server holds (`held`) does not.
-///
-/// A sync used to end by writing the whole document back every time, though
-/// most syncs find the server's copy already has all this device has (the
-/// one at launch, the one after a book is closed with nothing read in it):
-/// the merge comes out as what was pulled, to the letter, but for the moment
-/// it was made (`updated_at`, which every merge sets to now). Such a
-/// document is not sent.
-///
-/// Always sent: the first there is (the server holds none), one in place of
-/// a copy that could not be read (so a damaged one is put right), and one
-/// that differs from the server's in anything at all, however small.
-fn has_news(merged: &SyncDoc, held: Option<&SyncDoc>) -> bool {
-  let Some(held) = held else {
-    return true;
-  };
-  let mut undated = merged.clone();
-  undated.updated_at.clone_from(&held.updated_at);
-  undated != *held
+#[cfg(test)]
+fn decode(encoded: &str) -> Option<SyncDoc> {
+  match decode_remote(encoded) {
+    Remote::Ours(doc) => Some(doc),
+    _ => None
+  }
 }
 
 async fn describe_failure(response: reqwest::Response) -> anyhow::Error {
@@ -776,7 +769,15 @@ pub async fn sync(db_mutex: &std::sync::Mutex<Database>, now: &str) -> Result<Sy
     // What the server holds, where it holds a document that can be read. A
     // corrupt one must not take the library down: it is merged as an empty
     // one, and republishing this device's own state puts it right.
-    let held = pulled.state.as_deref().and_then(decode);
+    let held = match pulled.state.as_deref().map(decode_remote).unwrap_or(Remote::Absent) {
+      Remote::Ours(doc) => Some(doc),
+      Remote::Absent => None,
+      // A later Leaflet wrote it: take what this one understands, write nothing.
+      Remote::Newer(doc) => {
+        let db = db_mutex.guard();
+        return crate::sync::folder::take_from_newer(&db, doc, now);
+      }
+    };
     let nothing;
     let remote = match &held {
       Some(remote) => remote,

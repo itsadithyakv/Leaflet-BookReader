@@ -23,6 +23,8 @@ type TypePanelProps = {
   onSpacing: (next: ReaderSpacing) => void;
   align: ReaderAlign;
   onAlign: (next: ReaderAlign) => void;
+  /** Whether a line length means anything here: not on a phone held upright (narrower than any), nor across a spread (its columns are the line). */
+  measureShown?: boolean;
   /** More rows at the foot: on a phone, the layout, the page finish and the turn lock (readers/text/ReaderTouchRows.tsx). */
   children?: ReactNode;
 };
@@ -80,6 +82,7 @@ export const TypePanel = ({
   onSpacing,
   align,
   onAlign,
+  measureShown = true,
   children
 }: TypePanelProps) => (
   <div
@@ -118,10 +121,12 @@ export const TypePanel = ({
       </div>
     </div>
 
-    <div className="reader-type-row">
-      <span className="reader-type-label reader-muted">Line length</span>
-      <MeasureControl value={measure} onChange={onMeasure} />
-    </div>
+    {measureShown && (
+      <div className="reader-type-row">
+        <span className="reader-type-label reader-muted">Line length</span>
+        <MeasureControl value={measure} onChange={onMeasure} />
+      </div>
+    )}
 
     <div className="reader-type-block">
       <span className="reader-type-label reader-muted" id="reader-type-face">

@@ -103,7 +103,13 @@ export const useReaderLook = (reader: WithPace & Later<"setAutoScrollActive" | "
   const linePx = () => lineHeightPx(fontSizeRef.current, typeChoiceRef.current.spacing);
   /** The column for the book's stylesheet. Pages narrow the viewer instead: their frame spans every column. */
   const bookMeasureCss = () => measureCss(layoutRef.current === "pages" ? "full" : measureRef.current);
-  /** Lays the book out again in `next` (and as a spread or not), keeping the place: the book reopens there. */
+  /**
+   * The book is being laid out again in another layout: the parsed book is
+   * kept and the page that was stays on screen until the new one is up
+   * (useBookOpening, renditionGhost.ts). Set here, let go when it is up.
+   */
+  const relayingRef = useRef(false);
+  /** Lays the book out again in `next` (and as a spread or not), keeping the place: the book is drawn again there. */
   const relayout = (next: ReaderLayout, nextSpread: boolean) => {
     if (next === layoutRef.current && nextSpread === spreadRef.current) {
       return;
@@ -119,6 +125,7 @@ export const useReaderLook = (reader: WithPace & Later<"setAutoScrollActive" | "
     spreadRef.current = nextSpread;
     setLayout(next);
     setSpread(nextSpread);
+    relayingRef.current = true;
     setReloadKey((key) => key + 1);
   };
   const chooseLayout = (next: ReaderLayout) => {
@@ -262,7 +269,7 @@ export const useReaderLook = (reader: WithPace & Later<"setAutoScrollActive" | "
 
   return {
     fontSize, setFontSize, fontSizeRef, displayMode, setDisplayMode, readerTheme, displayModeRef, readerThemeRef,
-    toggleTheme, shape, rotation, chooseRotation, layout, layoutRef, paged, spread, spreadRef, relayout, measure, chooseMeasure, typeface, spacing, align, typeChoiceRef,
+    toggleTheme, shape, rotation, chooseRotation, layout, layoutRef, paged, spread, spreadRef, relayout, relayingRef, measure, chooseMeasure, typeface, spacing, align, typeChoiceRef,
     customFontRef, setCustomFont, customFontOn: customFontNow?.id ?? "",
     chooseTypeface, chooseSpacing, chooseAlign, linePx, bookMeasureCss, chooseLayout, applyReaderInsets,
     ensureSingleScrollContainer, applyEndRoom, applyReaderTypography, isLight, rsvpDark, pageStyle, rsvpStyle

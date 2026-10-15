@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
+import { isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { usePipStore } from "../store/pipStore";
+import { isAndroid } from "../platform/device";
 import {
   DEFAULT_REMINDERS,
   minutesToTime,
@@ -24,18 +27,37 @@ const Toggle = ({ on }: { on: boolean }) => (
 );
 
 /**
- * Settings → Reminders. Windows only: elsewhere there is nothing to deliver
- * them with, so the card is not shown at all.
+ * Settings → Reminders. Windows and Android: elsewhere there is nothing to
+ * deliver them with, so the card is not shown at all.
  */
 export const RemindersCard = ({ showToast }: { showToast: (message: string) => void }) => {
   const [status, setStatus] = useState<ReminderStatus | null>(null);
   const pipOff = usePipStore((state) => state.mode === "off");
 
   useEffect(() => {
-    reminderService
-      .status()
-      .then(setStatus)
-      .catch(() => setStatus(null));
+    const refresh = () =>
+      reminderService
+        .status()
+        .then(setStatus)
+        .catch(() => setStatus(null));
+    void refresh();
+    if (!isTauri()) {
+      return undefined;
+    }
+    // On a phone the reader may have just come back from its notification
+    // settings: the reminders are handed over again then, and this follows.
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void listen("reminders-changed", () => void refresh())
+      .then((stop) => {
+        if (disposed) stop();
+        else unlisten = stop;
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
   }, []);
 
   if (!status?.supported) {
@@ -61,11 +83,21 @@ export const RemindersCard = ({ showToast }: { showToast: (message: string) => v
       });
   };
 
+  const phone = isAndroid();
   const preview = () => {
     reminderService
       .preview(settings.streakRisk && !settings.daily ? "streakRisk" : "daily")
       .then(() => showToast("Sent a sample reminder."))
-      .catch(() => showToast("Windows did not show the reminder. Check its notification settings."));
+      .catch(() =>
+        showToast(
+          phone
+            ? "Your phone did not show the reminder. Check Leaflet's notifications in its settings."
+            : "Windows did not show the reminder. Check its notification settings."
+        )
+      );
+  };
+  const openSettings = () => {
+    reminderService.openSettings().catch(() => showToast("Could not open the phone's settings."));
   };
 
   const anyOn = settings.daily || settings.streakRisk || settings.closeNudge;
@@ -132,7 +164,17 @@ export const RemindersCard = ({ showToast }: { showToast: (message: string) => v
       </div>
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
         <span className="min-w-0 flex-1 text-[11px] leading-relaxed text-on-surface-variant">
-          {status.blocked && "Windows has notifications for Leaflet turned off. Turn them on in Windows Settings › System › Notifications."}
+          {status.blocked &&
+            (phone ? (
+              <>
+                Notifications for Leaflet are off.{" "}
+                <button type="button" className="underline transition hover:text-primary" onClick={openSettings}>
+                  Turn On
+                </button>
+              </>
+            ) : (
+              "Windows has notifications for Leaflet turned off. Turn them on in Windows Settings › System › Notifications."
+            ))}
         </span>
         <button
           type="button"
@@ -141,7 +183,7 @@ export const RemindersCard = ({ showToast }: { showToast: (message: string) => v
           disabled={!anyOn}
           title={
             status.whileClosed
-              ? "Reminders arrive even when Leaflet is closed. Select one to pick up where you left off."
+              ? `Reminders arrive even when Leaflet is closed. ${phone ? "Tap" : "Select"} one to pick up where you left off.`
               : "This copy of Leaflet can only remind you while it's open, even minimised."
           }
         >

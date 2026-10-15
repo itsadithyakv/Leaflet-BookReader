@@ -5,6 +5,7 @@ import { titleToLookUp, type SeriesGroup } from "../../library/series";
 import { useLibraryStore } from "../../store/libraryStore";
 import { SheetHandle } from "../ui/SheetHandle";
 import { useBackClose } from "../../hooks/useBackClose";
+import { backdropClose } from "../ui/backdrop";
 
 /** One cover on offer, fetched small when its row comes up. Kept for the life of the app: a set looked at twice is not fetched twice. */
 const previews = new Map<number, Promise<string>>();
@@ -114,7 +115,7 @@ export const SeriesCovers = ({ group, onClose, showToast }: Props) => {
   };
 
   return (
-    <div className="sheet-backdrop fixed inset-0 z-[80] flex items-center justify-center bg-black/55 px-4 py-6" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <div className="sheet-backdrop fixed inset-0 z-[80] flex items-center justify-center bg-black/55 px-4 py-6" {...backdropClose(() => onClose())}>
       <div className="modal-surface sheet-panel sheet-inner-scroll flex max-h-full w-full max-w-3xl flex-col p-6" role="dialog" aria-modal="true" aria-labelledby="series-covers-title">
         <SheetHandle onClose={onClose} />
         <div className="flex items-start justify-between gap-4">

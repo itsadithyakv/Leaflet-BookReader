@@ -1,4 +1,4 @@
-import { keyboardOverFrame, selectionDockFoot } from "../touchLayout";
+import { isPhoneShape, keyboardOverFrame, selectionDockFoot } from "../touchLayout";
 import { isTouchInput } from "../../platform/device";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EpubCFI } from "epubjs";
@@ -309,10 +309,16 @@ export const useReaderMarks = (reader: WithOutlook & Later<"annotations" | "orde
     searchMarkRef.current = { cfi, timer };
   };
   /** Jumps to a search result and marks the words there for a few seconds. */
-  const openSearchHit = (hit: SearchHit) => {
+  const openSearchHit = (hit: SearchHit, query?: string) => {
     const rendition = renditionRef.current;
     if (!rendition) {
       return;
+    }
+    // A phone's search is a sheet over most of the page, the match under it:
+    // it goes down, and comes back with the same words (and the match marked).
+    if (isPhoneShape(reader.shape) && query !== undefined) {
+      setSearchOpen(false);
+      setSearchSeed(query);
     }
     noteJumpFromHere();
     releaseUserReadingAnchor();

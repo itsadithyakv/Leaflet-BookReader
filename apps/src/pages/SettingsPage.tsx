@@ -134,14 +134,17 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
     return () => window.clearTimeout(disarm);
   }, [confirmDelete, deleteBusy]);
 
+  // With several devices kept in step it is sync, and says so; a release
+  // without them still calls it a backup (constants/features.ts).
+  const syncWords = FEATURES.multiDeviceSync;
   const syncHelper =
     syncStatus === "syncing"
-      ? "Backing up now…"
+      ? syncWords ? "Syncing now…" : "Backing up now…"
       : syncStatus === "error"
-        ? syncError ?? "Last backup failed. Try again."
+        ? syncError ?? (syncWords ? "Last sync failed. Try again." : "Last backup failed. Try again.")
         : sync.lastSyncedAt
-          ? `Last backed up ${new Date(sync.lastSyncedAt).toLocaleString()}.`
-          : "Nothing backed up yet.";
+          ? `${syncWords ? "Last synced" : "Last backed up"} ${new Date(sync.lastSyncedAt).toLocaleString()}.`
+          : syncWords ? "Nothing synced yet." : "Nothing backed up yet.";
 
   const syncing = syncStatus === "syncing";
   const syncConfigured = sync.driveConnected || Boolean(sync.folderPath) || Boolean(sync.accountBackup);
@@ -150,8 +153,6 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
   // off can never strand a transport that is still running.
   // Never on the phone: a sync folder there silently does nothing.
   const showFolderSync = !android && (FEATURES.multiDeviceSync || Boolean(sync.folderPath));
-  // Drive's sign-in needs an Android client and a way back into the app (docs/android.md): not offered on the phone yet.
-  const showDrive = !android || sync.driveConnected;
   // Readers of a release build sign in with the client it ships. Pasting one's
   // own is a developer affordance, offered only when the build has none.
   const showClientSetup = sync.driveCredentialSource !== "built-in";
@@ -432,7 +433,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                 Enjoying Leaflet?
               </h3>
               <p className="mt-1 text-xs text-on-surface-variant">
-                A rating on the Microsoft Store helps other readers find it. Questions, bugs or ideas:{" "}
+                A rating on {android ? "Google Play" : "the Microsoft Store"} helps other readers find it. Questions, bugs or ideas:{" "}
                 <span className="selectable font-semibold text-on-surface">{SUPPORT_EMAIL}</span>
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
@@ -475,8 +476,10 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                 <p className="text-xs uppercase tracking-widest text-on-surface-variant">Danger Zone</p>
                 <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
                   Removes your library, covers, reading history, places and settings from {android ? "this phone" : "this computer"}, and signs
-                  it out. Left as they are: a Drive backup, a sync folder's contents, any folder of book copies, your
-                  Leaflet account on the server, and Calibre.
+                  it out. Left as they are:{" "}
+                  {android
+                    ? "a Drive backup and your Leaflet account on the server."
+                    : "a Drive backup, a sync folder's contents, any folder of book copies, your Leaflet account on the server, and Calibre."}
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-3">
@@ -599,7 +602,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
         <div {...panel("library")}>
           <div className={column}>
             <div className="paper-surface rounded-xl p-5">
-              <p className="text-xs uppercase tracking-widest text-on-surface-variant">Backup</p>
+              <p className="text-xs uppercase tracking-widest text-on-surface-variant">{syncWords ? "Sync" : "Backup"}</p>
               <p className="mt-3 font-headline text-2xl font-bold text-on-surface">
                 {sync.driveConnected
                   ? sync.accountEmail ?? "Google Drive"
@@ -607,7 +610,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                     ? "Sync folder"
                     : sync.accountBackup
                       ? "Leaflet account"
-                      : "Not backed up"}
+                      : syncWords ? "Not synced" : "Not backed up"}
               </p>
               <p className="mt-2 text-xs text-on-surface-variant">{syncHelper}</p>
               {sync.booksPending > 0 && (
@@ -649,25 +652,14 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
               </div>
               )}
 
-              {!showDrive && (
-                <p className="mt-5 flex items-center gap-1.5 border-t border-outline-variant/40 pt-4 text-xs font-semibold text-on-surface-variant">
-                  Google Drive
-                  <span
-                    className="inline-flex cursor-help"
-                    title="Backing up to Google Drive comes to the phone later. A Leaflet account keeps your shelf and streak meanwhile."
-                    aria-label="Backing up to Google Drive comes to the phone later."
-                  >
-                    <UiIcon name="info" size={14} />
-                  </span>
-                </p>
-              )}
-              {showDrive && (
               <div className="mt-5 border-t border-outline-variant/40 pt-4">
                 <p
                   className="text-xs font-semibold text-on-surface"
                   title={
                     sync.driveAvailable
-                      ? "Your books, reading progress and streak are copied to a Leaflet folder in your own Drive. Connect the same account on a new computer to restore them. Leaflet only ever sees the files it creates."
+                      ? syncWords
+                        ? "Your books, places, highlights and streak are kept in a Leaflet folder in your own Drive. Connect the same Google account on your phone and computer and they stay in step. Leaflet only ever sees the files it creates."
+                        : "Your books, reading progress and streak are copied to a Leaflet folder in your own Drive. Connect the same account on a new computer to restore them. Leaflet only ever sees the files it creates."
                       : driveNotSetUp
                   }
                 >
@@ -764,7 +756,6 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                   </div>
                 )}
               </div>
-              )}
 
               {FEATURES.accounts && accountSignedIn && (
                 <button
@@ -788,7 +779,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                 onClick={handleSync}
                 disabled={!syncConfigured || syncing}
               >
-                {syncing ? "Backing up…" : "Back Up Now"}
+                {syncing ? (syncWords ? "Syncing…" : "Backing up…") : syncWords ? "Sync Now" : "Back Up Now"}
               </button>
               {!FEATURES.multiDeviceSync && !android && (
                 <p className="mt-3 text-[11px] leading-relaxed text-on-surface-variant">

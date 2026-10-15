@@ -78,7 +78,7 @@ export const UpdateBanner = () => {
           </button>
         </div>
       </div>
-      <button type="button" className="shrink-0 rounded-full p-1 text-on-surface-variant hover:text-on-surface" aria-label="Put away" onClick={later}>
+      <button type="button" className="touch-hit shrink-0 rounded-full p-1 text-on-surface-variant hover:text-on-surface" aria-label="Put away" onClick={later}>
         <X size={14} aria-hidden />
       </button>
     </div>

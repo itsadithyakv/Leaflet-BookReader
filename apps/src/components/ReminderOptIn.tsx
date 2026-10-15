@@ -10,6 +10,7 @@ import {
 import { PipSprite } from "./PipSprite";
 import { SheetHandle } from "./ui/SheetHandle";
 import { useBackClose } from "../hooks/useBackClose";
+import { backdropClose } from "./ui/backdrop";
 
 /** How long to keep waiting for another dialog (the rating prompt) to close. */
 const WAIT_TRIES = 20;
@@ -91,11 +92,7 @@ export const ReminderOptIn = () => {
   return (
     <div
       className="sheet-backdrop fixed inset-0 z-[85] flex items-center justify-center bg-black/40 px-4"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
-          answer(false);
-        }
-      }}
+      {...backdropClose(() => answer(false))}
     >
       <div
         role="dialog"

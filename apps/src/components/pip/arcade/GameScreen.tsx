@@ -39,7 +39,11 @@ const prefersReducedMotion = () => {
  */
 const PLAY_AGAIN_AFTER_MS = 900;
 
+/** The set round a game's screen, above and below it, and a little to spare (index.css, `.pip-crt`). */
+const SET_FRAME_Y = 34;
+
 /** What a finished game gave: mood for Pip, acorns for the camp, and how a wager on it went (null for none). */
+
 export type Winnings = { mood: number; paid: number; wager: { won: boolean; stake: number } | null };
 
 type GameScreenProps = {
@@ -86,7 +90,16 @@ export const GameScreen = ({ game, skin, outfit, best, onFinished, onExit, betwe
     if (!wrap) return;
     // The set's own frame takes 32 px of the width. The arcade fills the
     // window, so the game has all the height the window can give it.
-    const measure = () => setPer(pixelsPerArtPixel(GAME_W, GAME_H, wrap.clientWidth - 32, Math.max(180, window.innerHeight * 0.7)));
+    // On a phone on its side 70 % of the height was more than was left under the arcade's name and the score: the set
+    // ran off the foot of the screen. There it has what is left, less its frame.
+    const tall = () => {
+      if (window.innerHeight > 520) return Math.max(180, window.innerHeight * 0.7);
+      const scroller = wrap.closest<HTMLElement>(".pip-arcade");
+      if (!scroller) return Math.max(150, window.innerHeight * 0.6);
+      const top = wrap.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      return Math.max(150, scroller.clientHeight - top - SET_FRAME_Y);
+    };
+    const measure = () => setPer(pixelsPerArtPixel(GAME_W, GAME_H, wrap.clientWidth - 32, tall()));
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(wrap);

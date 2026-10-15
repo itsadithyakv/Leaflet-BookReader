@@ -1,6 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { isAndroid, isTouchInput } from "../platform/device";
-import { android, type RotationLock } from "../platform/android";
+import { android, holdRotation, type RotationLock } from "../platform/android";
 import { LAYOUT_KEY, type ReaderLayout } from "./readerTypes";
 
 /**
@@ -171,11 +171,6 @@ export const saveRotationLock = (lock: RotationLock) => {
 /** Whether the rotation lock is offered: only the Android app can turn the screen. */
 export const canLockRotation = () => isAndroid() && typeof document !== "undefined" && document.documentElement.dataset.platform === "android";
 
-/** The lock while a book is open; the rest of the app always turns with the phone. */
-export const applyRotationLock = (lock: RotationLock | null) => {
-  void android.lockRotation(lock ?? "auto");
-};
-
 // ---- While a book is open --------------------------------------------------------
 
 /**
@@ -185,10 +180,9 @@ export const applyRotationLock = (lock: RotationLock | null) => {
  * Both are let go when the book closes. No-ops anywhere but the Android app.
  */
 export const useReaderDevice = (barsHidden: boolean, rotation: RotationLock) => {
-  useEffect(() => {
-    applyRotationLock(rotation);
-  }, [rotation]);
-  useEffect(() => () => applyRotationLock("auto"), []);
+  // Held while the book is open, and let go when it closes, so the screen goes
+  // back to whatever held it before (Pip's tab holds it sideways).
+  useEffect(() => holdRotation(rotation), [rotation]);
   useEffect(() => {
     void android.hideSystemBars(barsHidden);
   }, [barsHidden]);
