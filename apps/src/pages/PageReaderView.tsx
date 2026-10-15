@@ -2138,7 +2138,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
                     </select>
                   </label>
                 )}
-                {phone && <RotationChoice value={rotation} onChoose={chooseRotation} />}
+                {(phone || shape === "tablet") && <RotationChoice value={rotation} onChoose={chooseRotation} />}
               </div>
             )}
           </div>

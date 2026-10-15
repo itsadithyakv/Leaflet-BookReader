@@ -15,7 +15,7 @@ import { handleProblem, suggestHandle } from "../community/handle";
 import { HandleField } from "../community/HandleField";
 import { emailHint } from "./emailHint";
 import { asksForEmailCode, emailCodeReady, signUpWithProfile } from "./signUpFlow";
-import { isAndroid } from "../../platform/device";
+import { deviceNoun, isAndroid } from "../../platform/device";
 
 export type AccountFormMode = "signin" | "signup" | "reset";
 
@@ -400,7 +400,7 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
             }}
           >
             <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
-              We'll email you a code to set a new password. Your library on {isAndroid() ? "this phone" : "this computer"} is not affected.
+              We'll email you a code to set a new password. Your library on this {deviceNoun()} is not affected.
             </p>
             <label htmlFor={`${fieldId}-reset-email`} className={labelClass}>Email</label>
             <input

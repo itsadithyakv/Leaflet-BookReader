@@ -118,7 +118,7 @@ export const layoutChangesAt = (
 ) => {
   const shape = readerShape(width, height, touch);
   const layout = layoutFor(shape);
-  return layout !== now.layout || spreadFor(shape, layout) !== now.spread;
+  return layout !== now.layout || spreadFor(shape, layout, width, height) !== now.spread;
 };
 
 /** The same, for the window as it is now. */

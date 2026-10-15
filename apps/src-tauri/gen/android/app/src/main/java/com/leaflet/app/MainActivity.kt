@@ -21,6 +21,14 @@ class MainActivity : TauriActivity() {
     if (savedInstanceState == null) {
       Reminders.noteLaunch(intent)
     }
+    // The sign-in's sealing (SecretBox) is handed to Rust before the Rust app
+    // starts in super.onCreate, which may read the sign-in at once. The
+    // library is loaded by now (WryActivity's class init).
+    try {
+      SecretBox.attach()
+    } catch (error: UnsatisfiedLinkError) {
+      app.tauri.Logger.error("SecretBox.attach: ${error.message}")
+    }
     super.onCreate(savedInstanceState)
   }
 

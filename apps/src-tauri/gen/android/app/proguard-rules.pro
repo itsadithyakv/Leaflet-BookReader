@@ -19,3 +19,10 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+# SecretBox is called from Rust by JNI (sync/device_secret.rs): its name and
+# its seal/open methods must survive shrinking.
+-keep class com.leaflet.app.SecretBox {
+  public static *** seal(byte[]);
+  public static *** open(byte[]);
+  public static native void attach();
+}

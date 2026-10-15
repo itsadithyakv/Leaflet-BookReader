@@ -62,6 +62,32 @@ and `useTouchInput`.
 "portrait version" and a "landscape version" with different contents; the
 same parts rearrange.
 
+## Tablets and foldables
+
+A tablet is the desktop layout under a finger: every touch rule (no
+hover, 44 px targets, hold for a tooltip) keys on `(hover: none) and
+(pointer: coarse)`, not on width, so it holds at any size. What each shape
+gets (CSS px):
+
+| Shape | Example | Gets |
+| --- | --- | --- |
+| Big tablet, sideways | 1280 × 800 (Pixel Tablet) | Side rail; desktop header, dialogs and popovers; the reader's desktop toolbar and popover panels. Pages are a **spread of two columns** (`spreadFor`, from 800 px wide on its side); scrolling stays one centred column |
+| Big tablet, upright | 800 × 1280 | The same, one column of pages; a turn lays the book out again and keeps the place |
+| Small tablet, sideways | 960 × 600 | As the big one sideways |
+| Small tablet, upright | 600 × 960 | Under 768 px wide, so a phone: tab bar, sheets, the upright reader. Collections show two cards a row (one was the screen wide) |
+| Foldable, inner screen | ≈ 673 × 841 open; 841 × 673 turned | Upright it is a phone (as above); turned, a tablet |
+
+- **Pip's tab holds the screen sideways** on Android, so a tablet upright
+  turns for it; sideways her house, the Hollow and the arcade fill the
+  window beside the rail.
+- **Selecting text** on a tablet docks the bar at the foot, as on a phone,
+  and sends the toolbar and the chapter dock away (they sat under it).
+- **The turn lock** ("Turn with the phone / Keep upright / Keep sideways")
+  is in the Aa panel on a tablet too, and in a PDF's or comic's settings.
+- Checked in a headless Chromium with touch at 800 × 1280, 1280 × 800,
+  600 × 960, 960 × 600 and 673 × 841 (the preview emulates touch only under
+  768 px).
+
 ## Navigation and the app around the pages
 
 - **The side rail** (sideways phone) grows to show labels on hover on the
@@ -201,7 +227,13 @@ phone.)
 
 - "Use Windows Theme" is "Use system theme"; sounds follow "the phone's
   volume".
-- **Rate Leaflet** goes to Google Play; the update card offers Google Play.
+- **Rate Leaflet** (Settings, Pip's menu, the rate prompt) shows Google
+  Play's own rating sheet over Leaflet (the In-App Review API,
+  `request_review`). Google decides whether the sheet appears (a quota per
+  person; never in a build not installed from Play) and does not say; when
+  Leaflet was not paused under it, or Play is missing, Leaflet's Play page
+  opens instead, so the tap always does something. It is asked once per tap.
+  The update card offers Google Play.
 - **Reminders** are real notifications, delivered by the phone whether
   Leaflet is open or not; the same three kinds and rules as on Windows.
   Turning one on is when Android 13+ asks for notifications. When the phone
@@ -238,9 +270,21 @@ picks or saves a file goes through the Android side:
   sent to the page on every change (`setInsets`).
 - **Screen on**, **rotation lock**, **system bars hidden** (focus lock and
   sideways reading): small commands.
-- **Sign-in kept**: the session and Drive tokens are kept in Leaflet's
-  private storage on Android (no other app can read it), since `keyring` has
-  no Android store. (The Keystore is better and comes later.)
+- **Sign-in kept**: the session and Drive tokens are files in Leaflet's
+  private storage (`keyring` has no Android store), sealed with an
+  AES-256-GCM key made in the Android Keystore that never leaves it
+  (`SecretBox.kt`, reached from `sync/device_secret.rs` by JNI, so any
+  thread can use it). A plain file from 1.4.x is sealed and removed the first
+  time it is read. If the Keystore fails, the token is kept as the plain,
+  owner-only file and that is logged (`adb logcat -s Leaflet`): the sign-in
+  is never lost to it.
+- **Android's own backup is off** (`allowBackup="false"`, and
+  `res/xml/data_extraction_rules.xml` for moving to a new phone on Android
+  12+). It would copy the sealed tokens (useless without the old phone's
+  key, or plain if the Keystore had failed) and the random device id (two
+  phones counting as one), and it stops anyway past 25 MB, which the books
+  pass. **A library moves to a new phone by Leaflet's sync**: Google Drive or
+  the Leaflet account; without either, a new phone starts empty.
 - **Google Drive's sign-in** is the laptop's own, run on the phone (see
   "Google Drive between laptop and phone" below).
 - **A broken database** shows its message on screen (today it is a Windows
@@ -260,8 +304,8 @@ picks or saves a file goes through the Android side:
 
 ## Not in this first round
 
-Pairing a phone to a computer by code, Play Store signing and listing, the Keystore,
-a home-screen widget. Each is in mobile.md's stages.
+Pairing a phone to a computer by code, the Play listing, a home-screen
+widget. Each is in mobile.md's stages.
 
 ## Building it
 
@@ -271,7 +315,7 @@ output through `*>&1` makes PowerShell 5.1 stop it, as with the MSIX):
 ```powershell
 .\build-android.ps1                  # debug APK for a phone (arm64)
 .\build-android.ps1 -Target x86_64   # debug APK for the emulator
-.\build-android.ps1 -Release         # release APK and AAB, unsigned
+.\build-android.ps1 -Release         # release APK and AAB (arm64, armv7, x86_64)
 ```
 
 It reads the same `build.env` as `build-msix.ps1` (the Google Drive client,
@@ -280,8 +324,57 @@ worktree, which has no `build.env` of its own, the main checkout's. It
 prints the names of what it took, never the values, finds the SDK, the NDK
 and a JDK 21 (Gradle cannot use a newer Java), and says where the APK is.
 A debug APK installs on any phone with USB debugging (`adb install -r`).
-A release build has to be signed with the upload key before Google Play
-takes it; that key is the owner's to make and keep.
+A release build is signed with the upload key when
+`gen\android\keystore.properties` is there, unsigned otherwise, and the
+script says which for the APK and the AAB (below).
+
+**The launcher icon** is the desktop's green book, pixel for pixel:
+`python apps/src-tauri/msix/android-icons.py` (after `windows-icons.py`,
+whose two drawings it reads) writes every `mipmap-*` size, the adaptive
+icon (the book on its pages' paper, `#FFFBF0`, with a monochrome layer for
+Android 13's themed icons) and `brand/store-logos/leaflet-play-512.png` for
+the Play listing. Never `tauri icon`: it scales smoothly and blurs the art.
+
+## Signing for Google Play
+
+Google Play takes only signed builds. Leaflet uses **Play App Signing**:
+Google keeps the key that signs what phones install, and the owner keeps an
+**upload key** that proves a build came from them. The upload key is the
+owner's to make and keep; it is never in the repo, and no script makes one.
+
+1. **Make the upload key** (once), in PowerShell, somewhere outside the
+   repo; `keytool` is in the JDK 21 the build uses
+   (`$env:LOCALAPPDATA\Programs\jdk21\<version>\bin`):
+
+   ```powershell
+   keytool -genkeypair -v -keystore C:\Users\<you>\keys\leaflet-upload.jks -alias upload -keyalg RSA -keysize 4096 -validity 10000
+   ```
+
+   It asks for a keystore password, a name and organisation (seen by
+   Google, not by readers), and the key's password (Enter for the same one).
+2. **Keep it safe**: the `.jks` file and both passwords in a password
+   manager, and a copy of the `.jks` off this computer. Losing it is not the
+   end (Play App Signing keeps the real key), but the owner then has to ask
+   Google to reset the upload key in Play Console and wait for it.
+3. **Tell the build where it is**: copy
+   `apps\src-tauri\gen\android\keystore.properties.example` to
+   `keystore.properties` beside it (git ignores it) and fill in `storeFile`
+   (absolute, with forward slashes), `storePassword`, `keyAlias=upload`,
+   `keyPassword`.
+4. **Build**: `.\build-android.ps1 -Release`. It ends with
+   `app-universal-release.apk: signed` and `app-universal-release.aab:
+   signed`. "unsigned" means `keystore.properties` was not found.
+5. **Play Console**: create the app (`com.leaflet.app`), and on the first
+   release accept **Play App Signing** (the default: Google makes the app
+   signing key) and upload the `.aab` from
+   `gen\android\app\build\outputs\bundle\universalRelease\`. That first
+   upload registers the upload key.
+
+**Version codes** come from the version in `tauri.conf.json`: major ×
+1,000,000 + minor × 1,000 + patch (the Tauri CLI writes it into
+`gen/android/app/tauri.properties` at each build). 1.4.2 was 1004002; 1.5.0
+is **1005000**. Play refuses a code it has seen, so every upload needs a new
+version.
 
 ## Google Drive between laptop and phone
 
@@ -395,7 +488,7 @@ read in the code. Status: **works**, **fixed** (changed this round),
 | Clubs, duels, presents, leaderboards, badges | As drawn on the board | Same | — | works (preview, made-up server) |
 | Admin panel | — | — | Version field takes a number keyboard; the notice is "its store", not "the Store" | fixed |
 | Update banner | Above the tab bar; Update opens Google Play | Bottom right | × hit at 44 px | works |
-| Rate prompt | Says Google Play, opens it | Same | — | works |
+| Rate prompt | Says Google Play; Play's own rating sheet over Leaflet, or the Play page when Google shows none | Same | In-App Review API (`request_review`), also for Settings' and Pip's "Rate Leaflet" | fixed, the sheet not seen on a device |
 | Welcome and the account offer | Sheet, no Drive or folder choice on a phone | Card | — | works |
 | Converter | No Calibre on a phone | — | A book that needs it says to convert it to EPUB on a computer (it promised a sync back that a phone does not have) | fixed |
 | "Open with", Share to Leaflet | Imports and opens the book | Same | A file Leaflet cannot read now says so instead of vanishing | fixed |

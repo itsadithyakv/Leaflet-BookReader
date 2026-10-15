@@ -24,6 +24,18 @@ const TOUCH_QUERY = "(hover: none) and (pointer: coarse)";
 
 export const isAndroid = () => typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent);
 
+/**
+ * What to call this device in a sentence ("your library on this ___"): a
+ * tablet when the Android screen's short side is 600 dp or more (Android's
+ * own line between phones and tablets), a phone below that, and a computer
+ * anywhere else.
+ */
+export const deviceNoun = (): "phone" | "tablet" | "computer" => {
+  if (!isAndroid()) return "computer";
+  const shortSide = typeof screen === "undefined" ? 0 : Math.min(screen.width, screen.height);
+  return shortSide >= 600 ? "tablet" : "phone";
+};
+
 export const isTouchInput = () =>
   typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia(TOUCH_QUERY).matches;
 

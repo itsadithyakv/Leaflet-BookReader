@@ -26,7 +26,7 @@ cannot.
 
 ## What stays on your device
 
-The following is stored only on your computer and is never sent to us: your
+The following is stored only on your device (your computer, your phone or your tablet) and is never sent to us: your
 book files, your library (titles, authors, covers), your reading position and
 progress, your reading time, streaks and session history, your reading pace
 (how fast you read, book by book, so Smart Read can keep up with you), your
@@ -51,7 +51,17 @@ Leaflet asks; your place and notes in that book are backed up either way.
 - It also asks for your basic Google profile (your email address) so the app
   can show which account is connected. That email address stays on your device.
 - The sign-in key Google gives Leaflet is stored in your operating system's
-  secure credential store (the Windows Credential Manager), not in a file.
+  secure credential store (the Windows Credential Manager) on a computer. On
+  an Android phone or tablet it is kept in Leaflet's own private storage,
+  which no other app can read, encrypted with a key held in the Android
+  Keystore where the phone offers one.
+- **Using Leaflet on more than one device.** Connect the same Google account
+  on each, and they share that one "Leaflet" folder: the same library, places
+  and reading history on your computer and your phone. So that a day read on
+  both adds up, each device's reading minutes are kept apart in the progress
+  file under a random identifier Leaflet makes for that installation. It is
+  not your phone's or computer's hardware identifier, it is not sent to us,
+  and it is used for nothing else.
 - These files travel directly between your device and Google. They do not pass
   through our servers, and we cannot access them.
 
@@ -62,7 +72,7 @@ backup from your Drive; delete the "Leaflet" folder there if you want it gone.
 
 ## Leaflet accounts (optional)
 
-You can use every feature of the desktop app without an account. If you create
+You can use every feature of the app, on a computer or on a phone, without an account. If you create
 one, we store the following on our server:
 
 - **Account:** your email address, a display name if you give one, and your
@@ -137,7 +147,9 @@ one, we store the following on our server:
   reading history, so your devices agree. It includes your highlights, notes,
   bookmarks and collections if you have any, and never your book files. We do
   not read it: it is stored as you send it and used only to give it back to
-  your devices. It is compressed, not encrypted.
+  your devices. It is compressed, not encrypted. From Leaflet 1.5 it also
+  holds each device's own reading minutes for the last ninety days, under the
+  random identifier described under Google Drive above.
 
 We use this information only to run your account and the features you turn on.
 We do not sell it, rent it, or use it for advertising.
@@ -283,12 +295,20 @@ and cannot post, join a club or send presents.
   DuckDNS, which only translates the name into the server's IP address.
 - **Microsoft Store.** The Store handles downloads and updates of the app under
   Microsoft's own privacy terms.
+- **Google Play.** On Android, Google Play handles downloads and updates of
+  the app, and, when you choose to rate Leaflet, shows Google's own rating
+  sheet, under Google's privacy terms. Leaflet is not told what you rated.
+- **Reminders on a phone.** Reading reminders on Android are made and
+  scheduled on the phone itself, by its alarm clock. No server sends them,
+  and nothing about them leaves the phone.
 
 ## Keeping it secure
 
 Connections to our server use HTTPS. Passwords are hashed, and sign-in tokens
-are stored hashed on the server and in your operating system's credential
-store on your device. No system is perfectly secure, but we keep what we hold
+are stored hashed on the server, and on your device in your operating
+system's credential store (on Android, in Leaflet's private storage,
+encrypted with a key held in the Android Keystore where the phone offers
+one). No system is perfectly secure, but we keep what we hold
 to the minimum the features need.
 
 ## How long we keep it
@@ -333,6 +353,13 @@ contact us and we will delete it.
 If this policy changes, we will update the date above and, for significant
 changes, say so in the app.
 
+- **Leaflet 1.5:** Leaflet for Android phones and tablets. What it keeps and
+  sends is what the computer app keeps and sends, as described above; on the
+  phone, sign-in keys are kept in Leaflet's private storage, encrypted with a
+  key in the Android Keystore, and reading reminders are made on the phone
+  itself. Using more than one device with the same Google Drive or Leaflet
+  account now keeps each device's reading minutes apart, under a random
+  identifier made for that installation, so a day read on both adds up.
 - **Leaflet 1.4:** new and optional, each off until you use it: posting a
   review or a quote, for your followers or for everyone; liking and
   disliking posts; book communities with threads and replies; reporting and

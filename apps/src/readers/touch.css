@@ -246,9 +246,17 @@ html[data-keyboard="open"] .reader-scope[data-shape] .reader-search {
 }
 
 html[data-input="touch"] .reader-sheet-choices .reader-notes-tab,
-html[data-input="touch"] .reader-menu .reader-notes-tab {
+html[data-input="touch"] .reader-menu .reader-notes-tab,
+html[data-input="touch"] .reader-notes-panel .reader-notes-tab {
   min-height: 40px;
   padding-inline: 14px;
+}
+
+/* The ··· panel's text links ("Where was I?") and its pace slider, by a
+   finger on a tablet, where the panel is the desktop's. */
+html[data-input="touch"] .reader-menu .reader-menu-link,
+html[data-input="touch"] .reader-menu input[type="range"] {
+  min-height: var(--touch-target, 44px);
 }
 
 /* ---- The foot of the page: the chapter dock and the progress bar ----
@@ -536,9 +544,10 @@ html[data-input="touch"] .reader-scope .reader-menu button.justify-between {
   justify-content: space-between;
 }
 
-/* The chapter list's tab on the left edge lies over a phone's text: it comes
-   and goes with the chrome there (the toolbar's list button is the way in). */
-.reader-scope[data-shape].reader-chrome-hidden .reader-contents-handle {
+/* The chapter list's tab on the left edge lies over a phone's text, and in a
+   tablet's spread against its first column: by finger it comes and goes with
+   the chrome (the toolbar's list button is the way in). */
+html[data-input="touch"] .reader-scope.reader-chrome-hidden .reader-contents-handle {
   opacity: 0;
   pointer-events: none;
 }
@@ -588,11 +597,11 @@ html[data-input="touch"] .page-reader .further-on-offer {
 /* ---- Small controls on the reader's cards, hit at 44 px by a finger ----
    (the look-up and characters cards, "Where you are", a note, the highlight
    card): each keeps its look, and an invisible area round it takes the tap. */
-html[data-input="touch"] .reader-scope :is(.reader-mini-control, .reader-notes-action, .reader-people-link, .reader-recap-mark, .reader-lookup-more) {
+html[data-input="touch"] .reader-scope :is(.reader-mini-control, .reader-notes-action, .reader-people-link, .reader-recap-mark, .reader-lookup-more, .reader-outlook-percent) {
   position: relative;
 }
 
-html[data-input="touch"] .reader-scope :is(.reader-mini-control, .reader-notes-action, .reader-people-link, .reader-lookup-more)::after {
+html[data-input="touch"] .reader-scope :is(.reader-mini-control, .reader-notes-action, .reader-people-link, .reader-lookup-more, .reader-outlook-percent)::after {
   position: absolute;
   inset: min(0px, calc((100% - 44px) / 2));
   content: "";

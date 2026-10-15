@@ -248,7 +248,7 @@ export const ReaderMoreMenu = ({ reader }: { reader: ReaderScope }) => {
           </button>
           <button
             type="button"
-            className="mt-2 w-full py-1.5 text-center text-[10px] uppercase tracking-widest transition reader-muted reader-hover-accent"
+            className="reader-menu-link mt-2 w-full py-1.5 text-center text-[10px] uppercase tracking-widest transition reader-muted reader-hover-accent"
             onClick={() => {
               setMorePanelOpen(false);
               reader.setRecap({ days: null });
@@ -258,7 +258,7 @@ export const ReaderMoreMenu = ({ reader }: { reader: ReaderScope }) => {
           </button>
           <button
             type="button"
-            className="w-full py-1.5 text-center text-[10px] uppercase tracking-widest transition reader-muted reader-hover-accent"
+            className="reader-menu-link w-full py-1.5 text-center text-[10px] uppercase tracking-widest transition reader-muted reader-hover-accent"
             onClick={() => {
               setMorePanelOpen(false);
               setTourOpen(true);

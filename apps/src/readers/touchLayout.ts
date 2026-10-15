@@ -100,8 +100,25 @@ const asLayout = (value: string | null): ReaderLayout | null => (value === "page
 export const layoutForShape = (shape: ReaderShape, stored: StoredLayouts): ReaderLayout =>
   shape === "sideways" ? (asLayout(stored.sideways) ?? "pages") : (asLayout(stored.upright) ?? "scroll");
 
-/** Pages on a sideways phone are a spread: two columns a turn. */
-export const spreadFor = (shape: ReaderShape, layout: ReaderLayout) => shape === "sideways" && layout === "pages";
+/** A tablet on its side spreads its pages from this wide (epub.js's own threshold for a spread). */
+export const TABLET_SPREAD_MIN_WIDTH = 800;
+
+const windowWidth = () => (typeof window === "undefined" ? 0 : window.innerWidth);
+const windowHeight = () => (typeof window === "undefined" ? 0 : window.innerHeight);
+
+/**
+ * Pages are a spread, two columns a turn, on a phone on its side and on a
+ * tablet on its side: an open book, where one centred column left half the
+ * screen bare. Upright, on a desktop, and scrolling, one column.
+ */
+export const spreadFor = (shape: ReaderShape, layout: ReaderLayout, width = windowWidth(), height = windowHeight()) =>
+  layout === "pages" &&
+  (shape === "sideways" || (shape === "tablet" && width > height && width >= TABLET_SPREAD_MIN_WIDTH));
+
+const currentTabletSideways = () => currentShape() === "tablet" && windowWidth() > windowHeight();
+
+/** A tablet on its side, kept as it turns (its shape stays "tablet"; its pages become a spread or stop being one). */
+export const useTabletSideways = (): boolean => useSyncExternalStore(subscribeShape, currentTabletSideways, () => false);
 
 /** The key a layout chosen on this shape of screen is kept under. */
 export const layoutKeyFor = (shape: ReaderShape) => (shape === "sideways" ? SIDEWAYS_LAYOUT_KEY : LAYOUT_KEY);

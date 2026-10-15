@@ -4,7 +4,7 @@ import { isAndroid } from "./device";
 /**
  * What only the Android side can do, for the rest of the app to call without
  * knowing how: keep the screen on, lock the rotation, hide the system bars,
- * pick and share files, open Leaflet in Google Play. Each is a no-op (or
+ * pick and share files, open Leaflet in Google Play or its rating sheet. Each is a no-op (or
  * answers nothing) anywhere but the Android app, so callers need not check.
  *
  * The native half is a small Tauri plugin, `leaflet-device`, in Kotlin
@@ -97,5 +97,18 @@ export const android = {
   /** Leaflet's page in Google Play (to rate it, or update it). */
   async openStore(): Promise<void> {
     await call("open_store");
+  },
+
+  /**
+   * Google Play's own rating sheet, over Leaflet. Google may show nothing (a
+   * quota per person, or a build not installed from Play) and does not say
+   * so; when the sheet was not on screen, or Play is missing, Leaflet's page
+   * in Google Play opens instead, so a tap on "Rate" always does something.
+   * Asked once per call, never again.
+   */
+  async requestReview(): Promise<void> {
+    if (!onAndroid()) return;
+    const answer = await call<{ launched?: boolean; shown?: boolean }>("request_review");
+    if (!answer?.launched || !answer.shown) await call("open_store");
   }
 };

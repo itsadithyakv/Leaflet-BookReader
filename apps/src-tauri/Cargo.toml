@@ -1,6 +1,6 @@
 [package]
 name = "leaflet"
-version = "1.4.2"
+version = "1.5.0"
 edition = "2021"
 build = "build.rs"
 
@@ -74,6 +74,11 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 # A phone has no such concept and the plugin has no mobile implementation.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = "2.4.3"
+
+# The phone's sign-in sealed by the Android Keystore (src/sync/device_secret.rs):
+# Rust calls SecretBox.kt by JNI. Same version wry already builds on Android.
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
 
 # Reading reminders (src/reminders/toast.rs): Windows toasts, shown now or
 # scheduled with Windows for when the app is closed. Called directly because

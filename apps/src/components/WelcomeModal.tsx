@@ -2,7 +2,7 @@ import { UiIcon, type UiIconName } from "./UiIcon";
 import { FEATURES } from "../constants/features";
 import { SheetHandle } from "./ui/SheetHandle";
 import { useBackClose } from "../hooks/useBackClose";
-import { isAndroid } from "../platform/device";
+import { deviceNoun, isAndroid } from "../platform/device";
 
 type WelcomeModalProps = {
   open: boolean;
@@ -44,7 +44,7 @@ export const WelcomeModal = ({
   }
   // The phone has no sync folder (it would do nothing).
   const android = isAndroid();
-  const here = android ? "this phone" : "this computer";
+  const here = `this ${deviceNoun()}`;
 
   const folderChoice: Choice[] = FEATURES.multiDeviceSync && !android
     ? [

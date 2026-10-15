@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { TAP_SLACK_PX, pressIsClick } from "../pageTurn";
-import { isPhoneShape, readLayoutFor, spreadFor } from "../touchLayout";
+import { readLayoutFor, spreadFor, useTabletSideways } from "../touchLayout";
 import { OWN_CLICK, textAt, within } from "./usePageTurning";
 import type { WithCover } from "./scope";
 
@@ -118,26 +118,28 @@ export const useScrollTaps = (reader: WithCover) => {
 /**
  * A phone turned: the layout kept for this way up (readers/touchLayout.ts).
  * Sideways defaults to pages as a spread; turned back, the upright choice
- * returns. Only a change of layout (or of spread) lays the book out again,
- * round the place; a turn that keeps the layout is a resize, which keeps the
- * reading line by itself (useResizeRelayout).
+ * returns. A tablet keeps one layout, and its pages are a spread on its side.
+ * Only a change of layout (or of spread) lays the book out again, round the
+ * place; a turn that keeps the layout is a resize, which keeps the reading
+ * line by itself (useResizeRelayout).
  */
 export const useShapeLayout = (reader: WithCover) => {
   const { relayout, shape } = reader;
   const relayoutRef = useRef(relayout);
   relayoutRef.current = relayout;
+  const tabletSideways = useTabletSideways();
   useEffect(() => {
     const next = readLayoutFor(shape);
     relayoutRef.current(next, spreadFor(shape, next));
-  }, [shape]);
+  }, [shape, tabletSideways]);
 };
 
-/** On a phone a selection's bar docks where the chapter dock is: selecting sends the chrome away. */
+/** By finger (a phone or a tablet) a selection's bar docks where the chapter dock is: selecting sends the chrome away. */
 export const useSelectionHidesChrome = (reader: WithCover) => {
   const { hideChrome, selection, shape } = reader;
   const selecting = selection !== null;
   useEffect(() => {
-    if (selecting && isPhoneShape(shape)) {
+    if (selecting && shape !== "desktop") {
       hideChrome();
     }
   }, [selecting]);

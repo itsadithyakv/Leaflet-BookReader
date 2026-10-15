@@ -25,6 +25,7 @@ import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSArray
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
+import com.google.android.play.core.review.ReviewManagerFactory
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.atomic.AtomicLong
@@ -71,8 +72,9 @@ class ShareTargetArgs {
 /**
  * What only Android can do for Leaflet (`platform/android.ts` is the other
  * half): the screen kept on, the rotation held, the system bars hidden, the
- * system picker and share sheet, Google Play, and books arriving from other
- * apps ("Open with", "Share to Leaflet").
+ * system picker and share sheet, Google Play (its page and its in-app
+ * review), and books arriving from other apps ("Open with", "Share to
+ * Leaflet").
  *
  * Android hands over `content://` addresses, not paths, so everything picked
  * or received is copied into Leaflet's cache first and the copy's path is what
@@ -82,6 +84,9 @@ class ShareTargetArgs {
 class DevicePlugin(private val activity: Activity) : Plugin(activity) {
   private val opened = mutableListOf<String>()
   private val batch = AtomicLong(0)
+  /** Set when Leaflet is paused: during a review flow, that is Google Play's sheet on top. */
+  @Volatile
+  private var pausedSinceReview = false
 
   override fun load(webView: WebView) {
     super.load(webView)
@@ -241,6 +246,51 @@ class DevicePlugin(private val activity: Activity) : Plugin(activity) {
         }
       }
     }
+  }
+
+  /**
+   * Google Play's in-app review: the rating sheet over Leaflet, without
+   * leaving it. Answers `launched` (the flow ran) and `shown` (Leaflet was
+   * paused while it ran, so the sheet was on top). Google decides whether to
+   * show it at all (a quota per person, nothing in a build not installed from
+   * Play) and never says, so "not shown" is the page's cue to open the
+   * listing instead (`platform/android.ts`). Asked once per tap, never again.
+   */
+  @Command
+  fun requestReview(invoke: Invoke) {
+    fun answer(launched: Boolean, shown: Boolean) {
+      invoke.resolve(JSObject().put("launched", launched).put("shown", shown))
+    }
+    activity.runOnUiThread {
+      val manager = try {
+        ReviewManagerFactory.create(activity)
+      } catch (error: Exception) {
+        Logger.error("request_review: ${error.message}")
+        answer(launched = false, shown = false)
+        return@runOnUiThread
+      }
+      manager.requestReviewFlow().addOnCompleteListener { request ->
+        if (!request.isSuccessful) {
+          // No Play Store, no network, or Play said no.
+          Logger.error("request_review: ${request.exception?.message}")
+          answer(launched = false, shown = false)
+          return@addOnCompleteListener
+        }
+        pausedSinceReview = false
+        try {
+          manager.launchReviewFlow(activity, request.result).addOnCompleteListener {
+            answer(launched = true, shown = pausedSinceReview)
+          }
+        } catch (error: Exception) {
+          Logger.error("request_review: ${error.message}")
+          answer(launched = false, shown = false)
+        }
+      }
+    }
+  }
+
+  override fun onPause() {
+    pausedSinceReview = true
   }
 
   /** Asked by the Rust side after each page load: the page may have missed the first insets. */

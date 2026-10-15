@@ -332,6 +332,42 @@
     content: "";
   }
 
+  /* Icon-only keys (the theme switch, grid and list) were 42 px wide. */
+  .key-button {
+    min-width: 44px;
+  }
+
+  /* Pill tabs (components/ui/SegmentedTabs.tsx) are drawn 36 px tall in their
+     4 px tray, and hit across the tray's edge: 44. */
+  .segmented-tab {
+    position: relative;
+  }
+
+  .segmented-tab::after {
+    position: absolute;
+    inset: -4px 0;
+    content: "";
+  }
+
+  /* The bar of the book being read: its 42 px buttons and its narrow "make
+     small" are hit at 44 (the bar's own padding takes the rest). */
+  .now-reading-action,
+  .now-reading-shrink {
+    position: relative;
+  }
+
+  .now-reading-action::after {
+    position: absolute;
+    inset: -1px;
+    content: "";
+  }
+
+  .now-reading-shrink::after {
+    position: absolute;
+    inset: -1px -12px -1px -10px;
+    content: "";
+  }
+
   /* Long-pressed for a tooltip or a menu, titled text is not selected as well. */
   [title]:not(input):not(textarea),
   [data-long-press] {

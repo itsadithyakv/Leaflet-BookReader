@@ -332,6 +332,55 @@ holds:**
     try again (`format.ts`, `gentleError`; `ErrorLine.tsx`). Not seen
     signed in: the preview has the community switched off, so these
     were checked by tests and type only. Tests: 3,053 app.
+- **1.5.0: Leaflet for Android, and one library across a computer and a
+  phone (2026-10-15, at the owner's word: "bump this to 1.5 as it is a major
+  thing").** On branch `android`, in the worktree
+  `D:\Leaflet\.claude\worktrees\android`, off `release/1.3` at 9988f49
+  (1.4.2). Committed there at the owner's word in rounds (03005a4, 1b41621,
+  3b7fc94, and the 1.5.0 commit); **not pushed, not merged, not built for
+  release**. `release/1.3` in `D:\Leaflet` is still exactly 1.4.2.
+  The design is `docs/android.md` (with "Every feature on a phone",
+  "Tablets and foldables", "Signing for Google Play"); the sync design is
+  `docs/two-devices.md`; the Play paperwork is `docs/play-store.md`.
+  - **The phone app**: upright and sideways by touch; Back walks the open
+    things (`platform/back.ts`); insets, sheets, long-press tooltips and
+    menus; the reader with four buttons upright and a strip sideways, a
+    two-column spread on its side, turns without reopening the book, 18 px
+    margins and real hyphenation; PDF and comic gestures; Pip's tab and the
+    arcade held sideways (`holdRotation`); a native plugin (`DevicePlugin.kt`)
+    for the screen, rotation, bars, picking and sharing files, Open with,
+    Google Play's rating sheet; reminders as Android notifications
+    (`Reminders.kt`); sign-in tokens sealed by the Android Keystore
+    (`SecretBox.kt`); Android's own backup off (Leaflet's sync moves a
+    library); the green-book icon, pixel-perfect (`msix/android-icons.py`);
+    tablets and foldables.
+  - **Sync between devices** (both apps): minutes per device, the document
+    version, sync on background and foreground, a read-merge-write-check
+    loop on Drive, Drive sign-in on the phone with the desktop client, books
+    downloaded on tap, "your other device is further on". Schema 6 → 7.
+  - **Reminders say a different line each day** (both apps; weekends have
+    their own).
+  - **Building**: `apps\src-tauri\msix\build-android.ps1` reads `build.env`
+    (the main checkout's from a worktree) and prints only names; `-Release`
+    signs when `gen\android\keystore.properties` exists. The library is
+    aligned for 16 KB pages (`build.rs`), as Play requires. Version code
+    1005000.
+  - **Seen on the emulator** (`leaflet_phone36`, a Pixel 7 on Android 36;
+    the Android 37 preview image on this PC crash-loops): the library, the
+    picker, reading upright and sideways, Back, the tour, Pip held sideways
+    and given back, the Hollow and the house, Settings, a reminder through
+    the alarm clock, the 16 KB build starting. **Not seen anywhere**: Google
+    Drive sign-in on a phone (the owner signs in), the Keystore and the
+    rating sheet on a real phone, a signed release build (no key yet), two
+    real devices syncing, real gestures, a real notch.
+  - **The owner's, in order**: make the upload key (docs/android.md,
+    "Signing for Google Play"); try the debug APK on a real phone; the
+    end-to-end Drive test with a computer on this branch's desktop build
+    (docs/android.md, "Google Drive between laptop and phone"); a Play
+    developer account and its 12-tester, 14-day closed test; publish the
+    privacy policy with its date set; then a release from this branch for
+    both stores (the desktop must ship from here too: a 1.4.2 laptop counts a
+    day read on both once). Free and paid tiers come later (not built).
 - **1.4.2 (2026-10-14/15, at the owner's word; 1.4.0 was never uploaded,
   and 1.4.1 was skipped by the owner).** Version in the five places.
   What it adds over the 1.4.0 package:

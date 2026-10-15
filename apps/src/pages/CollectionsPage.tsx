@@ -36,10 +36,11 @@ const GENRE_PREVIEW = 12;
 
 /**
  * The cards of a section. Four to a row in a desktop window; more past it, so
- * a card on a 4K or ultrawide screen is no wider than one at 1,600 px.
+ * a card on a 4K or ultrawide screen is no wider than one at 1,600 px. Two
+ * from 540 px by finger: a small tablet upright had one card the screen wide.
  */
 const CARD_GRID =
-  "grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 [@media(min-width:1900px)]:grid-cols-5 [@media(min-width:2300px)]:grid-cols-6";
+  "grid gap-4 [@media(hover:none)_and_(pointer:coarse)_and_(min-width:540px)_and_(max-width:639px)]:grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 [@media(min-width:1900px)]:grid-cols-5 [@media(min-width:2300px)]:grid-cols-6";
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 

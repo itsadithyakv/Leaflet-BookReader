@@ -75,13 +75,13 @@ const mayAsk = () => {
 /**
  * Opens Leaflet's Store page on its reviews. The Store app's own review
  * dialog when it can; the web listing (which hands over to the Store app)
- * otherwise.
+ * otherwise. On a phone, Google Play's rating sheet over Leaflet, or
+ * Leaflet's Play page when Google shows none.
  */
 export const openStoreReview = async () => {
   writeState({ ...readState(), done: true });
-  // The phone app's ratings are on Google Play (the Play Store app, or its web page).
   if (onAndroid()) {
-    await android.openStore();
+    await android.requestReview();
     return;
   }
   if (isTauri()) {

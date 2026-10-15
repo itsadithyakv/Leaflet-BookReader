@@ -66,6 +66,14 @@ describe("the layout each way up", () => {
     expect(spreadFor("upright", "pages")).toBe(false);
   });
 
+  it("spreads a tablet's pages on its side, and not upright, scrolling or on a desktop", () => {
+    expect(spreadFor("tablet", "pages", 1280, 800)).toBe(true);
+    expect(spreadFor("tablet", "pages", 960, 600)).toBe(true);
+    expect(spreadFor("tablet", "pages", 800, 1280)).toBe(false);
+    expect(spreadFor("tablet", "scroll", 1280, 800)).toBe(false);
+    expect(spreadFor("desktop", "pages", 1280, 800)).toBe(false);
+  });
+
   it("remembers each way up apart", () => {
     const stored = { upright: "pages", sideways: "scroll" };
     expect(layoutForShape("upright", stored)).toBe("pages");

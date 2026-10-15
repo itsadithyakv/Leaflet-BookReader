@@ -78,7 +78,7 @@ export const SegmentedTabs = <T extends string>({ label, idPrefix, tabs, value, 
             disabled={tab.disabled}
             title={tab.hint}
             onClick={() => onChange(tab.id)}
-            className={`rounded-full font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50 ${pad} ${
+            className={`segmented-tab rounded-full font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50 ${pad} ${
               selected ? "bg-primary text-on-primary" : "text-on-surface-variant hover:bg-surface-container-high"
             }`}
           >

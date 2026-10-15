@@ -12,7 +12,7 @@ import { useAccountDialog } from "./account/AccountDialog";
 import { SheetHandle } from "./ui/SheetHandle";
 import { useBackClose } from "../hooks/useBackClose";
 import { useSheetLayout } from "../hooks/useMediaQuery";
-import { isAndroid } from "../platform/device";
+import { deviceNoun, isAndroid } from "../platform/device";
 
 /**
  * How backup is set up. There is no paid tier: backup runs against the
@@ -183,7 +183,7 @@ export const ProfileButton = ({
                 <p className="truncate text-[11px] text-on-surface-variant">{account.displayName ? account.email : "Leaflet account"}</p>
               ) : (
                 <p className="text-[11px] text-on-surface-variant">
-                  {accountsOn ? "An account puts you on the leaderboard." : `Everything works on ${android ? "this phone" : "this computer"}.`}
+                  {accountsOn ? "An account puts you on the leaderboard." : `Everything works on this ${deviceNoun()}.`}
                 </p>
               )}
             </div>

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { usePipStore } from "../store/pipStore";
-import { isAndroid } from "../platform/device";
+import { deviceNoun, isAndroid } from "../platform/device";
 import {
   DEFAULT_REMINDERS,
   minutesToTime,
@@ -97,7 +97,7 @@ export const RemindersCard = ({ showToast }: { showToast: (message: string) => v
       );
   };
   const openSettings = () => {
-    reminderService.openSettings().catch(() => showToast("Could not open the phone's settings."));
+    reminderService.openSettings().catch(() => showToast(`Could not open the ${deviceNoun()}'s settings.`));
   };
 
   const anyOn = settings.daily || settings.streakRisk || settings.closeNudge;

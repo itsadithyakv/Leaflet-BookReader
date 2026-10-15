@@ -9,8 +9,19 @@
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
 
+    <!-- Android's own backup is off. Leaflet's sync (Google Drive, or the
+         Leaflet account) is how a library moves to a new phone, and does it
+         right; Android's would copy the sign-in tokens (sealed by a key that
+         stays on the old phone) and the random device id (so two phones
+         would count as one), and stops anyway once an app holds over 25 MB,
+         which the books alone pass. dataExtractionRules covers Android 12+,
+         where moving to a new phone copies apps even with allowBackup off. -->
     <application
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
         android:theme="@style/Theme.leaflet"
         android:usesCleartextTraffic="${usesCleartextTraffic}">

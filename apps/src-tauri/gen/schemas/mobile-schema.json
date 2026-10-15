@@ -2379,10 +2379,10 @@
           "markdownDescription": "Denies the save command without any pre-configured scope."
         },
         {
-          "description": "Default plugin permissions.\n#### This default permission set includes:\n\n- `allow-keep-awake`\n- `allow-lock-rotation`\n- `allow-hide-system-bars`\n- `allow-pick-files`\n- `allow-share-target`\n- `allow-share-file`\n- `allow-share-text`\n- `allow-open-store`",
+          "description": "Default plugin permissions.\n#### This default permission set includes:\n\n- `allow-keep-awake`\n- `allow-lock-rotation`\n- `allow-hide-system-bars`\n- `allow-pick-files`\n- `allow-share-target`\n- `allow-share-file`\n- `allow-share-text`\n- `allow-open-store`\n- `allow-request-review`",
           "type": "string",
           "const": "leaflet-device:default",
-          "markdownDescription": "Default plugin permissions.\n#### This default permission set includes:\n\n- `allow-keep-awake`\n- `allow-lock-rotation`\n- `allow-hide-system-bars`\n- `allow-pick-files`\n- `allow-share-target`\n- `allow-share-file`\n- `allow-share-text`\n- `allow-open-store`"
+          "markdownDescription": "Default plugin permissions.\n#### This default permission set includes:\n\n- `allow-keep-awake`\n- `allow-lock-rotation`\n- `allow-hide-system-bars`\n- `allow-pick-files`\n- `allow-share-target`\n- `allow-share-file`\n- `allow-share-text`\n- `allow-open-store`\n- `allow-request-review`"
         },
         {
           "description": "Enables the hide_system_bars command without any pre-configured scope.",
@@ -2413,6 +2413,12 @@
           "type": "string",
           "const": "leaflet-device:allow-pick-files",
           "markdownDescription": "Enables the pick_files command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the request_review command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:allow-request-review",
+          "markdownDescription": "Enables the request_review command without any pre-configured scope."
         },
         {
           "description": "Enables the share_file command without any pre-configured scope.",
@@ -2461,6 +2467,12 @@
           "type": "string",
           "const": "leaflet-device:deny-pick-files",
           "markdownDescription": "Denies the pick_files command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the request_review command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:deny-request-review",
+          "markdownDescription": "Denies the request_review command without any pre-configured scope."
         },
         {
           "description": "Denies the share_file command without any pre-configured scope.",

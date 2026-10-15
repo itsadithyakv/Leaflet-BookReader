@@ -53,6 +53,22 @@ name must match the reserved name exactly ("Leaflet Book Reader", as in
 
 ## What's new in this version
 
+For 1.5.0 (the version that comes with Leaflet for Android, from the
+`android` branch). If 1.4.2 has been released, use this; if 1.4.2 never
+went out, put this first and the 1.4.2 text below it, trimmed to fit 1,500
+characters:
+
+> Leaflet is on Android now, and your computer and your phone can share one
+> library. Connect the same Google Drive on both: your books, places,
+> highlights, streak and Pip follow you, a day read on both adds up, and
+> opening a book offers the place you reached on the other device.
+>
+> Reminders say something different each day, in Pip's voice (or plainly,
+> with Pip quiet or off), with lines of their own at the weekend.
+>
+> Smaller things: a dialog closes only on a click, never on a press that
+> began inside it; Escape closes an open highlight card first.
+
 For 1.4.2 (the first release after 1.3.2: 1.4.0 was built but never
 uploaded, and 1.4.1 was skipped; the Store's field takes 1,500 characters,
 this is 1,339, or 1,349 if it counts a line break as two; written on 2026-10-15):

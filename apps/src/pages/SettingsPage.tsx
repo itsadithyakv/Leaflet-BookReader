@@ -32,7 +32,7 @@ import { playSound, useSoundOn } from "../pip/sound";
 import { SegmentedTabs, panelId, tabId, type SegmentedTab } from "../components/ui/SegmentedTabs";
 import { readSettingsSection, rememberSettingsSection, type SettingsSection } from "./settingsSection";
 import { DesktopPipSetting } from "../desktop-pip/DesktopPipSetting";
-import { isAndroid, isTouchInput } from "../platform/device";
+import { deviceNoun, isAndroid, isTouchInput } from "../platform/device";
 
 const PIP_MODES: Array<{ mode: PipMode; label: string; detail: string; preview: string }> = [
   { mode: "chatty", label: "Chatty", detail: "Pip lives out in the app: it wanders, naps, celebrates, and can be picked up and thrown. Select the logo to call it home.", preview: "look" },
@@ -418,7 +418,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                 aria-checked={pipSounds}
                 className="inset-field mt-3 flex w-full items-center justify-between gap-3 px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
                 onClick={togglePipSounds}
-                title={`Soft little sounds when you pick, plant, buy and place things. They follow ${android ? "the phone's" : "your computer's"} volume.`}
+                title={`Soft little sounds when you pick, plant, buy and place things. They follow ${android ? `the ${deviceNoun()}'s` : "your computer's"} volume.`}
               >
                 <span>Sounds in Pip's house</span>
                 {renderToggle(pipSounds)}
@@ -475,7 +475,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
               <div className="min-w-0 flex-1 basis-64">
                 <p className="text-xs uppercase tracking-widest text-on-surface-variant">Danger Zone</p>
                 <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
-                  Removes your library, covers, reading history, places and settings from {android ? "this phone" : "this computer"}, and signs
+                  Removes your library, covers, reading history, places and settings from this {deviceNoun()}, and signs
                   it out. Left as they are:{" "}
                   {android
                     ? "a Drive backup and your Leaflet account on the server."
@@ -524,7 +524,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      className="tactile-button h-8 w-8 text-sm"
+                      className="tactile-button h-8 w-8 text-sm touch:w-11"
                       onClick={() => void setGoalMinutes(Math.max(5, goalMinutes - 5))}
                       aria-label="Decrease daily goal"
                     >
@@ -535,7 +535,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                     </span>
                     <button
                       type="button"
-                      className="tactile-button h-8 w-8 text-sm"
+                      className="tactile-button h-8 w-8 text-sm touch:w-11"
                       onClick={() => void setGoalMinutes(Math.min(240, goalMinutes + 5))}
                       aria-label="Increase daily goal"
                     >

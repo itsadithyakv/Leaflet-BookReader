@@ -23,6 +23,13 @@ describe("a turn of the phone that lays the book out again", () => {
     expect(layoutChangesAt(915, 412, true, { layout: "pages", spread: true }, pages)).toBe(false);
   });
 
+  it("is one when a tablet with pages turns on its side, or back upright", () => {
+    const pages = stored("pages", null);
+    expect(layoutChangesAt(1280, 800, true, { layout: "pages", spread: false }, pages)).toBe(true);
+    expect(layoutChangesAt(800, 1280, true, { layout: "pages", spread: true }, pages)).toBe(true);
+    expect(layoutChangesAt(800, 1280, true, { layout: "scroll", spread: false }, stored(null, null))).toBe(false);
+  });
+
   it("never happens on a desktop window being resized", () => {
     expect(layoutChangesAt(700, 400, false, { layout: "scroll", spread: false }, stored(null, null))).toBe(false);
   });

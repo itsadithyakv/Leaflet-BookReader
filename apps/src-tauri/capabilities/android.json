@@ -1,6 +1,6 @@
 {
   "identifier": "android",
-  "description": "The Android side's own commands: screen, rotation, system bars, picker, share sheet, Google Play",
+  "description": "The Android side's own commands: screen, rotation, system bars, picker, share sheet, Google Play and its in-app review",
   "local": true,
   "windows": [
     "main"

@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-  <color name="ic_launcher_background">#fff</color>
+  <!-- The paper of the book's pages: made by src-tauri/msix/android-icons.py. -->
+  <color name="ic_launcher_background">#FFFBF0</color>
 </resources>
