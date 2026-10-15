@@ -46,7 +46,13 @@ export type SyncReport = {
   entriesUpdated: number;
   /** Large files not sent because the reader has not been asked about them yet. */
   booksHeld?: number;
+  /** A later version of Leaflet wrote the shared library: this device read it and wrote nothing back. */
+  updateNeeded?: boolean;
 };
+
+/** What the reader is told then, in place of a sync error. */
+export const SYNC_UPDATE_NEEDED =
+  "Your library was last saved by a newer Leaflet. Update Leaflet on this device to keep it in step.";
 
 /**
  * A book whose file is over the size a backup sends without asking (10 MB),
