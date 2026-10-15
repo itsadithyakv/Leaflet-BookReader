@@ -12,6 +12,7 @@ import { useLibraryStore } from "../../../store/libraryStore";
 import { useEquippedPip } from "../../../store/pipWardrobeStore";
 import { WeekCard } from "./WeekCard";
 import "./diary.css";
+import { useBackLayer } from "../../../platform/back";
 
 export type DiaryAt = {
   /** The day to open at ("2026-10-04"); today when left out. */
@@ -315,6 +316,8 @@ export const DiaryPages = ({ onClose, initialDay = null, initialView = "days" }:
  * comes in and goes back, Escape or a click outside closes.
  */
 export const DiaryBook = ({ onClose, ...at }: DiaryBookProps) => {
+  // Android's Back closes it, as Escape does.
+  useBackLayer(true, onClose);
   const dialogRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {

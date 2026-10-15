@@ -228,6 +228,8 @@ const WeekShelf = memo(({ row, dropId, showTip, hideTip }: WeekProps) => {
               tabIndex={index === last ? 0 : -1}
               onMouseEnter={(event) => reveal(event, spine)}
               onMouseLeave={hideTip}
+              // A finger has no hover: a tap shows the spine's line, until the next tap elsewhere (blur).
+              onClick={(event) => reveal(event, spine)}
               onFocus={(event) => reveal(event, spine)}
               onBlur={hideTip}
               onKeyDown={moveFocus}
@@ -262,6 +264,7 @@ const WeekShelf = memo(({ row, dropId, showTip, hideTip }: WeekProps) => {
             aria-label={`Perfect week: goal met all seven days, ${row.label}`}
             onMouseEnter={(event) => showTip(event.currentTarget, { bookend: row.label })}
             onMouseLeave={hideTip}
+            onClick={(event) => showTip(event.currentTarget, { bookend: row.label })}
             onFocus={(event) => showTip(event.currentTarget, { bookend: row.label })}
             onBlur={hideTip}
           />

@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { useAutoHideChrome } from "../../hooks/useAutoHideChrome";
 import { guessSeries } from "../../library/series";
 import { usePeopleReader } from "../people/usePeopleReader";
+import { isPhoneShape } from "../touchLayout";
 import type { Book } from "@shared/models/book";
 import type { WithKeys } from "./scope";
 
@@ -17,10 +18,13 @@ const seriesName = (book: Book): string | null => {
  */
 export const useReaderChrome = (reader: WithKeys) => {
   const {
-    book, bookmarkPanelOpen, bookRef, chapterLabel, chapterOfSection, contentsOver, fontPanelOpen, goToPlace,
+    book, bookmarkPanelOpen, exitGuard, bookRef, chapterLabel, chapterOfSection, contentsOver, fontPanelOpen, goToPlace,
     lastCfiProgressRef, lastCfiRef, loadError, loading, morePanelOpen, note, noteJumpFromHere, notesFocus, pendingReadingMode,
-    picture, renditionRef, searchOpen, selection, shortcutsOpen, showFocusToastRef, soundPanelOpen, tourOpen
+    picture, renditionRef, searchOpen, selection, shape, shortcutsOpen, showFocusToastRef, soundPanelOpen, tourOpen
   } = reader;
+  // On a phone the selection's bar docks at the foot of the screen, where the
+  // chapter dock would be: selecting does not hold the chrome up there.
+  const phone = isPhoneShape(shape);
   // Characters (readers/people): who is who, as far as the reader has got.
   // Everything it is handed is asked for when needed, so it can sit up here.
   const people = usePeopleReader({
@@ -62,7 +66,9 @@ export const useReaderChrome = (reader: WithKeys) => {
   const {
     visible: chromeVisible,
     reveal: revealChrome,
-    hover: hoverChrome
+    hover: hoverChrome,
+    toggle: toggleChrome,
+    hide: hideChrome
   } = useAutoHideChrome(
     fontPanelOpen ||
       bookmarkPanelOpen ||
@@ -73,7 +79,9 @@ export const useReaderChrome = (reader: WithKeys) => {
       tourOpen ||
       people.cardOpen ||
       people.panelOpen ||
-      selection !== null ||
+      (selection !== null && !phone) ||
+      // Pip at the door with her "Hold to leave", which is under the Back button.
+      Boolean(exitGuard.guardShown?.hold) ||
       loading ||
       loadError !== null
   );
@@ -83,5 +91,5 @@ export const useReaderChrome = (reader: WithKeys) => {
   const revealChromeRef = useRef(revealChrome);
   revealChromeRef.current = revealChrome;
 
-  return { people, peopleMarkedRef, chromeVisible, revealChrome, hoverChrome, revealChromeRef };
+  return { people, peopleMarkedRef, chromeVisible, revealChrome, hoverChrome, toggleChrome, hideChrome, revealChromeRef };
 };

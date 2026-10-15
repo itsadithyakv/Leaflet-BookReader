@@ -15,7 +15,8 @@ import { flattenToc, tocPlace } from "../toc";
 import { markInkImages } from "../inkImages";
 import { friendlyOpenError } from "../openErrors";
 import { markOpenings, OPENINGS_CSS } from "../dropCaps";
-import { PAGE_FOOT_PAD, PAGES_CSS } from "../pagesStyle";
+import { PAGE_FOOT_PAD, PAGES_CSS, PHONE_PAGES_CSS } from "../pagesStyle";
+import { isPhoneShape, readerShape } from "../touchLayout";
 import { BLOCKS_CSS, markBlocks, markListedLines, pictureRoom } from "../bookBlocks";
 import { sectionsFromArchive } from "../archiveSections";
 import { holdsFetching } from "../scrollbarHold";
@@ -32,6 +33,7 @@ import { findInBook } from "../findPlace";
 import { isLook } from "../openAt";
 import type { WithCover } from "./scope";
 import { noteChapter } from "../../pip/base/storyFeed";
+import { isTouchInput } from "../../platform/device";
 
 /**
  * Opens the book: reads the file, builds the contents, makes the rendition,
@@ -49,7 +51,7 @@ export const useBookOpening = (reader: WithCover) => {
     notePageShownRef, noteRef, noteRequestRef, openedAtRef, openPictureRef, pagePlaceRef, pageRelayoutsRef,
     pageSlideRef, peopleMarkedRef, persistReaderState, placeFollowsNow, progressArmedRef, queuedTurnRef,
     readerKeyHandlerRef, readerThemeRef, readerWordsRef, readingPaceScaleRef, readingPlace, reloadKey,
-    removeLastReadMarker, renditionRef, revealChromeRef, scheduleReaderDotUpdate, scheduleReaderWordIndex,
+    removeLastReadMarker, renditionRef, scheduleReaderDotUpdate, scheduleReaderWordIndex,
     scrollAdvanceLockRef, scrollbarHoldRef, scrollbarLetGoRef, searchMarkRef, sectionPlace, sectionWeightsRef,
     selectionChangedRef, setCanSeek, setContents, setLoadError, setLoading, setNote, setPageOf, setPicture,
     setSelection, settleOnPage, setToc, showFocusToastRef, shownLineRef, spineIndexByHrefRef, storyEndBottom,
@@ -223,6 +225,8 @@ export const useBookOpening = (reader: WithCover) => {
           // it is put in when it has (useTypeChange).
           applyCustomFont(doc, customFontRef.current);
           doc.documentElement.setAttribute("data-leaflet-layout", layoutRef.current);
+          // A phone's pages keep no room for chrome that is away (readers/pagesStyle.ts).
+          doc.documentElement.toggleAttribute("data-leaflet-phone", isPhoneShape(readerShape(window.innerWidth, window.innerHeight, isTouchInput())));
           if (!doc.getElementById("reader-font-scale")) {
             // The book's drop caps and opening small capitals are found
             // first, while the publisher's own sizes can still be read: the
@@ -409,6 +413,7 @@ export const useBookOpening = (reader: WithCover) => {
               ${OPENINGS_CSS}
               ${BLOCKS_CSS}
               ${PAGES_CSS}
+              ${PHONE_PAGES_CSS}
             `;
             doc.head.appendChild(style);
           } else {
@@ -610,15 +615,22 @@ export const useBookOpening = (reader: WithCover) => {
         applyReaderTypography();
         applyReaderInsets();
         const initialFlow = layoutRef.current === "pages" ? "paginated" : "scrolled";
-        const initialSpread = "none";
+        // Pages on a phone on its side are a spread, two columns a turn
+        // (readers/touchLayout.ts), at whatever width the phone has: epub.js's
+        // own threshold (800 px) would take most phones' sideways width for
+        // one column.
+        const initialSpread = layoutRef.current === "pages" && reader.spreadRef.current ? "auto" : "none";
         rendition.flow(initialFlow);
         const manager = rendition.manager as any;
         if (manager?.settings) {
           manager.settings.flow = initialFlow;
           manager.settings.spread = initialSpread;
+          if (initialSpread === "auto") {
+            manager.settings.minSpreadWidth = 1;
+          }
         }
         if (typeof rendition.spread === "function") {
-          rendition.spread(initialSpread);
+          (rendition as any).spread(initialSpread, initialSpread === "auto" ? 1 : undefined);
         }
         ensureSingleScrollContainer();
 
@@ -1134,7 +1146,8 @@ export const useBookOpening = (reader: WithCover) => {
             setSelection({ cfi: cfiRange, text });
             // A word double-clicked is looked up without the button being
             // pressed (Settings, "Look a word up when I double-click it").
-            if (lookUpOnDoubleClick() && isDoubleClickedWord(text, doubleClickedAtRef.current)) {
+            // (Not by a finger: a phone selects by a press and hold, and Look up leads its bar.)
+            if (!isTouchInput() && lookUpOnDoubleClick() && isDoubleClickedWord(text, doubleClickedAtRef.current)) {
               doubleClickedAtRef.current = 0;
               reader.setLookUpCfi(cfiRange);
             }
@@ -1158,13 +1171,12 @@ export const useBookOpening = (reader: WithCover) => {
             let pressedAt = 0;
             doc.addEventListener(
               "pointerdown",
-              (event) => {
+              () => {
                 handsOn();
                 scrollbarLetGoRef.current();
                 pressedAt = Date.now();
-                if (event.pointerType === "touch") {
-                  revealChromeRef.current();
-                }
+                // (A finger brings the chrome by a tap in the middle of the
+                // page, not by any touch: readers/text/useTouchReading.ts.)
                 holdAutoScrollRef.current(true);
                 // A click on the page lets a note go (a click on another
                 // note reference then opens that one).

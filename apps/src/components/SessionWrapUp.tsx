@@ -15,6 +15,8 @@ import { NOTHING_FOUND, broughtBackText } from "./pip/album/words";
 import { coldAfterSession } from "../pip/cold";
 import { CampLine } from "./pip/arcade/base/CampExtras";
 import "./pip/album/album.css";
+import { SheetHandle } from "./ui/SheetHandle";
+import { useBackClose } from "../hooks/useBackClose";
 
 // The find's picture is drawn with the house's art, which loads with the Pip
 // tab and not with the app: it is fetched when a wrap-up has one to show.
@@ -239,6 +241,9 @@ export const SessionWrapUp = () => {
     }
   }, [sessionId, brought]);
 
+  // Back is Done, as Escape is: a note typed is saved.
+  useBackClose(wrapUp !== null, () => close(true));
+
   // The reader and the library both listen for Space, arrows and Escape on the
   // window. Capturing here keeps those keys from paging the book or closing the
   // reader underneath; Escape closes this instead.
@@ -275,12 +280,13 @@ export const SessionWrapUp = () => {
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 px-4"
+      className="sheet-backdrop fixed inset-0 z-[80] flex items-center justify-center bg-black/55 px-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="wrapup-title"
     >
-      <div className="modal-surface flex max-h-[calc(100dvh-1.5rem)] w-full max-w-md flex-col overflow-hidden rounded-2xl">
+      <div className="modal-surface sheet-panel sheet-inner-scroll flex max-h-[calc(100dvh-1.5rem)] w-full max-w-md flex-col overflow-hidden rounded-2xl pt-3">
+        <SheetHandle onClose={() => close(true)} />
         {/* The body scrolls when the card is taller than the window; the foot below it stays put. */}
         <div ref={cardRef} className="wrapup-body min-h-0 flex-1 overflow-y-auto px-6 pb-1 pt-6">
           <div className="flex flex-col items-center gap-4 text-center sm:flex-row sm:items-center sm:text-left">

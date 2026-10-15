@@ -1,4 +1,8 @@
 import { UiIcon, type UiIconName } from "./UiIcon";
+import { useMediaQuery } from "../hooks/useMediaQuery";
+
+/** Where the rail is shown (App.tsx: `md:block short:block`); elsewhere the bottom bar is the tour's "nav". */
+export const RAIL_QUERY = "(min-width: 768px), (max-height: 520px)";
 
 const navItems = [
   { label: "Library", icon: "library" },
@@ -17,12 +21,13 @@ type SidebarProps = {
 };
 
 export const Sidebar = ({ activeItem, onNavigate, onStartReading, startDisabled, badge }: SidebarProps) => {
+  const shown = useMediaQuery(RAIL_QUERY);
   return (
     <aside
       className="leather-surface leaflet-sidebar absolute inset-y-0 left-0 z-40 flex h-full flex-col border-r border-black/60 py-5"
       aria-label="Primary navigation"
     >
-      <nav className="flex-1 space-y-2 text-sm" data-tour="nav">
+      <nav className="flex-1 space-y-2 text-sm" data-tour={shown ? "nav" : undefined}>
         {navItems.map((item) => (
           <button
             key={item.label}
@@ -41,6 +46,10 @@ export const Sidebar = ({ activeItem, onNavigate, onStartReading, startDisabled,
               )}
             </span>
             <span className="sidebar-copy font-semibold">{item.label}</span>
+            {/* Under a finger the rail stays a rail: a small label under the icon (styles/touch-shell.css). */}
+            <span className="sidebar-rail-label" aria-hidden="true">
+              {item.label}
+            </span>
           </button>
         ))}
       </nav>
@@ -55,6 +64,9 @@ export const Sidebar = ({ activeItem, onNavigate, onStartReading, startDisabled,
           <UiIcon name="settings" size={20} />
         </span>
         <span className="sidebar-copy font-semibold">Settings</span>
+        <span className="sidebar-rail-label" aria-hidden="true">
+          Settings
+        </span>
       </button>
 
       <div className="sidebar-reading-action mt-auto">
@@ -69,6 +81,9 @@ export const Sidebar = ({ activeItem, onNavigate, onStartReading, startDisabled,
             <UiIcon name="book-open" size={22} strokeWidth={2.1} />
           </span>
           <span className="sidebar-copy font-bold">Start Reading</span>
+          <span className="sidebar-rail-label" aria-hidden="true">
+            Read
+          </span>
         </button>
       </div>
     </aside>

@@ -32,6 +32,7 @@ import { playSound, useSoundOn } from "../pip/sound";
 import { SegmentedTabs, panelId, tabId, type SegmentedTab } from "../components/ui/SegmentedTabs";
 import { readSettingsSection, rememberSettingsSection, type SettingsSection } from "./settingsSection";
 import { DesktopPipSetting } from "../desktop-pip/DesktopPipSetting";
+import { isAndroid, isTouchInput } from "../platform/device";
 
 const PIP_MODES: Array<{ mode: PipMode; label: string; detail: string; preview: string }> = [
   { mode: "chatty", label: "Chatty", detail: "Pip lives out in the app: it wanders, naps, celebrates, and can be picked up and thrown. Select the logo to call it home.", preview: "look" },
@@ -44,6 +45,8 @@ export type SettingsPageProps = {
 };
 
 export const SettingsPage = ({ showToast }: SettingsPageProps) => {
+  // Words and cards follow the device (docs/android.md, rule 9).
+  const android = isAndroid();
   const {
     sync,
     syncStatus,
@@ -145,7 +148,10 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
   const accountSignedIn = useAccountStore((state) => state.status.signedIn);
   // A folder someone already set up keeps its controls, so turning the feature
   // off can never strand a transport that is still running.
-  const showFolderSync = FEATURES.multiDeviceSync || Boolean(sync.folderPath);
+  // Never on the phone: a sync folder there silently does nothing.
+  const showFolderSync = !android && (FEATURES.multiDeviceSync || Boolean(sync.folderPath));
+  // Drive's sign-in needs an Android client and a way back into the app (docs/android.md): not offered on the phone yet.
+  const showDrive = !android || sync.driveConnected;
   // Readers of a release build sign in with the client it ships. Pasting one's
   // own is a developer affordance, offered only when the build has none.
   const showClientSetup = sync.driveCredentialSource !== "built-in";
@@ -238,7 +244,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
     }
     if (!confirmDelete) {
       setConfirmDelete(true);
-      showToast("Click confirm to delete all data.");
+      showToast(`${isTouchInput() ? "Tap" : "Click"} confirm to delete all data.`);
       return;
     }
     setDeleteBusy(true);
@@ -370,7 +376,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
               <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                 <span className="text-xs text-on-surface-variant">
                   {followSystem
-                    ? "Following the Windows appearance setting."
+                    ? `Following the ${android ? "system" : "Windows"} appearance setting.`
                     : "For the library and the reader, on this device."}
                 </span>
                 <button
@@ -379,7 +385,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                   onClick={followSystemTheme}
                   disabled={followSystem}
                 >
-                  Use Windows Theme
+                  {android ? "Use system theme" : "Use Windows Theme"}
                 </button>
               </div>
             </section>
@@ -411,7 +417,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                 aria-checked={pipSounds}
                 className="inset-field mt-3 flex w-full items-center justify-between gap-3 px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
                 onClick={togglePipSounds}
-                title="Soft little sounds when you pick, plant, buy and place things. They follow your computer's volume."
+                title={`Soft little sounds when you pick, plant, buy and place things. They follow ${android ? "the phone's" : "your computer's"} volume.`}
               >
                 <span>Sounds in Pip's house</span>
                 {renderToggle(pipSounds)}
@@ -468,7 +474,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
               <div className="min-w-0 flex-1 basis-64">
                 <p className="text-xs uppercase tracking-widest text-on-surface-variant">Danger Zone</p>
                 <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
-                  Removes your library, covers, reading history, places and settings from this computer, and signs
+                  Removes your library, covers, reading history, places and settings from {android ? "this phone" : "this computer"}, and signs
                   it out. Left as they are: a Drive backup, a sync folder's contents, any folder of book copies, your
                   Leaflet account on the server, and Calibre.
                 </p>
@@ -550,7 +556,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                   aria-checked={focusSettings.kioskMode}
                   className="inset-field flex w-full items-center justify-between px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
                   onClick={() => void toggleFullScreen()}
-                  title="Sessions run full screen and grow a focus flower, which blooms if you stay to the end. Pip guards the way out; hold Esc to leave."
+                  title={`Sessions run full screen and grow a focus flower, which blooms if you stay to the end. Pip guards the way out; ${android ? "press Back, then hold to leave" : "hold Esc to leave"}.`}
                 >
                   <span className="text-left">Full screen (focus lock)</span>
                   {renderToggle(focusSettings.kioskMode)}
@@ -643,6 +649,19 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
               </div>
               )}
 
+              {!showDrive && (
+                <p className="mt-5 flex items-center gap-1.5 border-t border-outline-variant/40 pt-4 text-xs font-semibold text-on-surface-variant">
+                  Google Drive
+                  <span
+                    className="inline-flex cursor-help"
+                    title="Backing up to Google Drive comes to the phone later. A Leaflet account keeps your shelf and streak meanwhile."
+                    aria-label="Backing up to Google Drive comes to the phone later."
+                  >
+                    <UiIcon name="info" size={14} />
+                  </span>
+                </p>
+              )}
+              {showDrive && (
               <div className="mt-5 border-t border-outline-variant/40 pt-4">
                 <p
                   className="text-xs font-semibold text-on-surface"
@@ -745,6 +764,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                   </div>
                 )}
               </div>
+              )}
 
               {FEATURES.accounts && accountSignedIn && (
                 <button
@@ -770,7 +790,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
               >
                 {syncing ? "Backing up…" : "Back Up Now"}
               </button>
-              {!FEATURES.multiDeviceSync && (
+              {!FEATURES.multiDeviceSync && !android && (
                 <p className="mt-3 text-[11px] leading-relaxed text-on-surface-variant">
                   Reading across your phone and computer arrives with the Leaflet mobile app — coming
                   soon.
@@ -783,7 +803,8 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
 
             <TidyFolderCard key={`tidy-${wiped}`} showToast={showToast} />
 
-            <ConverterCard showToast={showToast} />
+            {/* Calibre has no phone version: a Kindle file the reader cannot open says so when it is opened. */}
+            {!android && <ConverterCard showToast={showToast} />}
           </div>
         </div>
       )}

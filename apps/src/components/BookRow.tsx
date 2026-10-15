@@ -1,8 +1,9 @@
-import { memo } from "react";
+import { memo, useRef } from "react";
 import type { Book } from "@shared/models/book";
 import { useCoverSrc } from "../hooks/useCoverSrc";
 import { useSeriesInfo } from "../library/useSeries";
 import { BookMenu } from "./BookMenu";
+import { useLongPress } from "../hooks/useLongPress";
 
 type Props = {
   book: Book;
@@ -17,9 +18,14 @@ const BookRowComponent = ({ book, onRefresh, onOpen, onRemoved }: Props) => {
   const { src: resolvedCover, onError: handleCoverError } = useCoverSrc(book, { thumb: true });
   const series = useSeriesInfo(book.id);
   const progressPercent = Math.round(Math.min(1, Math.max(0, book.progress)) * 100);
+  // Held with a finger, the row opens its menu, as the ⋯ does.
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  const hold = useLongPress(() => rowRef.current?.querySelector<HTMLButtonElement>("[data-book-menu]")?.click());
 
   return (
     <div
+      ref={rowRef}
+      {...hold}
       role="button"
       tabIndex={0}
       aria-label={`Open ${book.title}${book.author ? ` by ${book.author}` : ""}`}

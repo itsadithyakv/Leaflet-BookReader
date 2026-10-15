@@ -66,7 +66,7 @@ export const ChapterDock = forwardRef<HTMLDivElement, ChapterDockProps>(
     const back = (
       <button
         type="button"
-        className="reader-mini-control"
+        className={`reader-mini-control ${paged ? "reader-dock-page-step" : ""}`}
         onClick={onPrev}
         title={paged ? `Previous page (${mirrored ? "Right" : "Left"} arrow)` : "Previous chapter (Left arrow)"}
         aria-label={paged ? "Previous page" : "Previous chapter"}
@@ -79,7 +79,7 @@ export const ChapterDock = forwardRef<HTMLDivElement, ChapterDockProps>(
     const on = (
       <button
         type="button"
-        className="reader-mini-control"
+        className={`reader-mini-control ${paged ? "reader-dock-page-step" : ""}`}
         onClick={onNext}
         title={paged ? `Next page (${mirrored ? "Left" : "Right"} arrow or Space)` : "Next chapter (Right arrow)"}
         aria-label={paged ? "Next page" : "Next chapter"}
@@ -90,12 +90,12 @@ export const ChapterDock = forwardRef<HTMLDivElement, ChapterDockProps>(
       </button>
     );
     const chapterBack = paged && onPrevChapter && (
-      <button type="button" className="reader-mini-control" onClick={onPrevChapter} title="Previous chapter (Ctrl+Left)" aria-label="Previous chapter">
+      <button type="button" className="reader-mini-control reader-dock-chapter-step" onClick={onPrevChapter} title="Previous chapter (Ctrl+Left)" aria-label="Previous chapter">
         {mirrored ? <ChevronsRight size={16} aria-hidden="true" /> : <ChevronsLeft size={16} aria-hidden="true" />}
       </button>
     );
     const chapterOn = paged && onNextChapter && (
-      <button type="button" className="reader-mini-control" onClick={onNextChapter} title="Next chapter (Ctrl+Right)" aria-label="Next chapter">
+      <button type="button" className="reader-mini-control reader-dock-chapter-step" onClick={onNextChapter} title="Next chapter (Ctrl+Right)" aria-label="Next chapter">
         {mirrored ? <ChevronsLeft size={16} aria-hidden="true" /> : <ChevronsRight size={16} aria-hidden="true" />}
       </button>
     );
@@ -137,7 +137,7 @@ export const ChapterDock = forwardRef<HTMLDivElement, ChapterDockProps>(
           {canGoForward && (
             <button
               type="button"
-              className="reader-mini-control"
+              className="reader-mini-control reader-dock-forward"
               onClick={onForward}
               title="Forward again (Alt+Right)"
               aria-label="Forward again"

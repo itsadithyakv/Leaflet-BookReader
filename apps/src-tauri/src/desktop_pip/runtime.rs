@@ -50,21 +50,29 @@ const PAGE: &str = "desktop-pip.html";
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum HostEvent {
   /// Night fell or ended, or Pip's mode changed.
+  #[cfg(windows)]
   World { night: bool, quiet: bool },
   /// She is walking, this way (-1 left, 1 right).
+  #[cfg(windows)]
   Walking { facing: i8 },
   /// She has reached where she was going, or was stopped.
+  #[cfg(windows)]
   Arrived,
   /// The hand let go.
+  #[cfg(windows)]
   Falling { tossed: bool },
   /// She is on the ground again: how hard she met it (art pixels a second),
   /// and whether that was hard enough to land flat.
+  #[cfg(windows)]
   Landed { impact: f64, flat: bool },
   /// Where the pointer is from her.
+  #[cfg(windows)]
   Glance { side: i8, up: bool, near: bool },
   /// The sign to hold up, or none.
+  #[cfg(windows)]
   Sign { text: Option<String> },
   /// The reader has left Leaflet's window: her look may have changed there.
+  #[cfg(windows)]
   Look
 }
 
@@ -268,7 +276,10 @@ pub fn desktop_pip_status(pip: State<'_, DesktopPip>) -> DesktopPipStatus {
 /// window is shown only after this, so it never appears empty.
 #[tauri::command]
 pub fn desktop_pip_attach(channel: Channel<HostEvent>, still: bool, pip: State<'_, DesktopPip>) -> Option<Snapshot> {
+  #[cfg(windows)]
   let mut inner = pip.0.inner.guard();
+  #[cfg(not(windows))]
+  let inner = pip.0.inner.guard();
   let quiet = inner.wanted.quiet;
   let sign = sign_now(&inner);
   #[cfg(windows)]

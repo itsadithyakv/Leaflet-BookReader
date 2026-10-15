@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { Book } from "@shared/models/book";
 import { useCollectionStore } from "../store/collectionStore";
@@ -14,6 +14,9 @@ import { syncService } from "../services/syncService";
 import { openSeriesEditor } from "./SeriesEditor";
 import { askConfirm } from "./ConfirmDialog";
 import { UiIcon } from "./UiIcon";
+import { SheetHandle } from "./ui/SheetHandle";
+import { useBackClose } from "../hooks/useBackClose";
+import { usePhoneMenus } from "../hooks/useMediaQuery";
 
 export type BookMenuAction = { label: string; onSelect: () => void; danger?: boolean };
 
@@ -40,6 +43,9 @@ const menuItemsOf = (menu: HTMLElement | null) =>
  * The menu is drawn at the top of the page rather than inside the card: cards
  * lift on hover (a transform) and sit in rows drawn one over another, either of
  * which would clip or bury a menu drawn inside them.
+ *
+ * On a phone it is a sheet from the bottom instead, and opens by holding a
+ * finger on the book too (the card clicks this button: `data-book-menu`).
  */
 export const BookMenu = ({ book, actions = [], onRemoved, className = "" }: Props) => {
   const [open, setOpen] = useState(false);
@@ -48,6 +54,11 @@ export const BookMenu = ({ book, actions = [], onRemoved, className = "" }: Prop
   const [place, setPlace] = useState<{ top?: number; bottom?: number; left: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  // A phone's menus are sheets: they hang from nothing, so a scroll or a turn
+  // of the phone does not take them away.
+  const sheet = usePhoneMenus();
+  const sheetRef = useRef(sheet);
+  sheetRef.current = sheet;
   const collections = useCollectionStore((state) => state.collections);
   const loaded = useCollectionStore((state) => state.loaded);
   const load = useCollectionStore((state) => state.load);
@@ -116,6 +127,10 @@ export const BookMenu = ({ book, actions = [], onRemoved, className = "" }: Prop
       setCreating(false);
     };
     const onPointer = (event: MouseEvent) => {
+      // A sheet's backdrop takes its own tap (below), so the tap is not left to land on the card beneath.
+      if (sheetRef.current) {
+        return;
+      }
       const target = event.target as Node;
       if (!menuRef.current?.contains(target) && !triggerRef.current?.contains(target)) {
         dismiss();
@@ -178,19 +193,28 @@ export const BookMenu = ({ book, actions = [], onRemoved, className = "" }: Prop
     };
     // A scroll moves the card from under the menu.
     const onScroll = (event: Event) => {
-      if (!menuRef.current?.contains(event.target as Node)) {
+      if (!sheetRef.current && !menuRef.current?.contains(event.target as Node)) {
         dismiss();
       }
+    };
+    // So does a resize, but not the phone's keyboard opening for "New
+    // collection" (the window is resized for it), and not a sheet.
+    const onResize = () => {
+      const typing = menuRef.current?.contains(document.activeElement) && document.activeElement instanceof HTMLInputElement;
+      if (sheetRef.current || typing || document.documentElement.dataset.keyboard === "open") {
+        return;
+      }
+      dismiss();
     };
     window.addEventListener("mousedown", onPointer, true);
     window.addEventListener("keydown", onKey, true);
     window.addEventListener("scroll", onScroll, true);
-    window.addEventListener("resize", dismiss);
+    window.addEventListener("resize", onResize);
     return () => {
       window.removeEventListener("mousedown", onPointer, true);
       window.removeEventListener("keydown", onKey, true);
       window.removeEventListener("scroll", onScroll, true);
-      window.removeEventListener("resize", dismiss);
+      window.removeEventListener("resize", onResize);
     };
   }, [open, loaded, load]);
 
@@ -230,6 +254,7 @@ export const BookMenu = ({ book, actions = [], onRemoved, className = "" }: Prop
     setCreating(false);
     triggerRef.current?.focus();
   };
+  useBackClose(open, close);
 
   /** Says what went wrong, in the app's own dialog (this menu has no toast), with the menu out of the way. */
   const failed = (title: string, cause: unknown) => {
@@ -322,7 +347,8 @@ export const BookMenu = ({ book, actions = [], onRemoved, className = "" }: Prop
         aria-expanded={open}
         aria-label={`More for ${book.title}`}
         title={highlightable ? "Collections, series and highlights" : "Collections and series"}
-        className={`flex h-8 w-8 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface ${className}`}
+        data-book-menu=""
+        className={`book-menu-trigger relative flex h-8 w-8 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface ${className}`}
         onClick={(event) => {
           event.stopPropagation();
           setOpen((value) => !value);
@@ -332,15 +358,15 @@ export const BookMenu = ({ book, actions = [], onRemoved, className = "" }: Prop
         <UiIcon name="more" size={18} />
       </button>
       {open &&
-        place &&
+        (sheet || place) &&
         createPortal(
-          <div
-            ref={menuRef}
-            role="menu"
-            aria-label={`${book.title}: ${highlightable ? "collections, series and highlights" : "collections and series"}`}
-            className="modal-surface fixed z-[80] max-h-[70vh] overflow-y-auto rounded-xl p-2 shadow-xl"
-            style={{ ...place, width: MENU_WIDTH }}
-            onClick={(event) => event.stopPropagation()}
+          <MenuFrame
+            sheet={sheet}
+            menuRef={menuRef}
+            place={place}
+            label={`${book.title}: ${highlightable ? "collections, series and highlights" : "collections and series"}`}
+            title={book.title}
+            onClose={close}
           >
             <p className="px-3 pb-1 pt-2 text-[10px] uppercase tracking-[0.18em] text-on-surface-variant">Collections</p>
             {collections.map((collection) => {
@@ -513,9 +539,60 @@ export const BookMenu = ({ book, actions = [], onRemoved, className = "" }: Prop
               <UiIcon name="trash" size={16} />
               Remove from library…
             </button>
-          </div>,
+          </MenuFrame>,
           document.body
         )}
     </>
+  );
+};
+
+type FrameProps = {
+  sheet: boolean;
+  menuRef: MutableRefObject<HTMLDivElement | null>;
+  place: { top?: number; bottom?: number; left: number } | null;
+  label: string;
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+};
+
+/** The menu hanging from its button, or, on a phone, a sheet rising from the bottom with the book's name on it. */
+const MenuFrame = ({ sheet, menuRef, place, label, title, onClose, children }: FrameProps) => {
+  if (!sheet) {
+    return (
+      <div
+        ref={menuRef}
+        role="menu"
+        aria-label={label}
+        className="modal-surface fixed z-[80] max-h-[70dvh] overflow-y-auto rounded-xl p-2 shadow-xl"
+        style={{ ...place, width: MENU_WIDTH }}
+        onClick={(event) => event.stopPropagation()}
+      >
+        {children}
+      </div>
+    );
+  }
+  return (
+    <div
+      className="sheet-backdrop sheet-backdrop-menu fixed inset-0 z-[80] flex items-end justify-center bg-black/45"
+      onClick={(event) => {
+        event.stopPropagation();
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div
+        ref={menuRef}
+        role="menu"
+        aria-label={label}
+        className="modal-surface sheet-panel book-menu-sheet overflow-y-auto p-2"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <SheetHandle onClose={onClose} />
+        <p className="book-title truncate px-3 pb-1 text-base text-on-surface">{title}</p>
+        {children}
+      </div>
+    </div>
   );
 };

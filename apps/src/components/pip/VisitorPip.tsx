@@ -19,6 +19,7 @@ import {
 import { placeCard } from "./cardPlace";
 import type { Rect } from "./layout";
 import "./visitor.css";
+import { useBackLayer } from "../../platform/back";
 
 /**
  * What a visitor needs of the room: its scale and floor, as `HouseScene`'s
@@ -58,6 +59,8 @@ type CardProps = {
  * the cross closes it.
  */
 const VisitorCard = ({ visitor, why, anchor, onClose, onOpenProfile }: CardProps) => {
+  // Android's Back closes it, as Escape does.
+  useBackLayer(true, onClose);
   const card = useRef<HTMLDivElement | null>(null);
   const close = useRef<HTMLButtonElement | null>(null);
   const anchorRef = useRef(anchor);

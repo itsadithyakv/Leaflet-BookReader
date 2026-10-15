@@ -8,6 +8,8 @@ import {
   type ReminderStatus
 } from "../services/reminderService";
 import { PipSprite } from "./PipSprite";
+import { SheetHandle } from "./ui/SheetHandle";
+import { useBackClose } from "../hooks/useBackClose";
 
 /** How long to keep waiting for another dialog (the rating prompt) to close. */
 const WAIT_TRIES = 20;
@@ -61,6 +63,12 @@ export const ReminderOptIn = () => {
     return () => window.clearTimeout(timer);
   }, [wrapUp]);
 
+  // Back is "no", as a tap outside is (`answer` is made below, once there is a status to answer with).
+  const answerRef = useRef<(yes: boolean) => void>(() => setOpen(false));
+  useBackClose(open && status !== null, () => {
+    answerRef.current(false);
+  });
+
   if (!open || !status) {
     return null;
   }
@@ -78,10 +86,11 @@ export const ReminderOptIn = () => {
       })
       .catch(() => undefined);
   };
+  answerRef.current = answer;
 
   return (
     <div
-      className="fixed inset-0 z-[85] flex items-center justify-center bg-black/40 px-4"
+      className="sheet-backdrop fixed inset-0 z-[85] flex items-center justify-center bg-black/40 px-4"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
           answer(false);
@@ -92,8 +101,9 @@ export const ReminderOptIn = () => {
         role="dialog"
         aria-modal="true"
         aria-labelledby="reminder-optin-title"
-        className="modal-surface confirm-pop dialog-fit w-full max-w-sm rounded-2xl p-6 text-center"
+        className="modal-surface confirm-pop dialog-fit sheet-panel w-full max-w-sm rounded-2xl p-6 text-center"
       >
+        <SheetHandle onClose={() => answer(false)} />
         {!pipOff && (
           <div className="mb-2 flex justify-center">
             <PipSprite move="welcome" size={80} />

@@ -3,6 +3,7 @@ import type { HouseLevel } from "../../pip/home.js";
 import { UiIcon } from "../UiIcon";
 import { liftShowsAll, liftShowsArrows } from "./layout";
 import { useCoarsePointer } from "./useCoarsePointer";
+import { useBackLayer } from "../../platform/back";
 
 type Props = {
   levels: HouseLevel[];
@@ -28,6 +29,8 @@ type Props = {
 export const FloorSwitch = ({ levels, current, unlocked, lockReason, priceOf, onOpen, height, style }: Props) => {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLElement | null>(null);
+  // Android's Back folds the list of floors, as Escape does.
+  useBackLayer(open, () => setOpen(false));
   const index = Math.max(0, levels.findIndex((level) => level.id === current.id));
   const above = levels[index + 1];
   const below = levels[index - 1];

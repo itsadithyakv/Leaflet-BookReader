@@ -1,9 +1,54 @@
 import { useEffect, useRef, useState } from "react";
 import { easeInOutCubic } from "../smartScroll";
-import { DOUBLE_CLICK_MS, WHEEL_AT_REST, clickZone, pageAt, pageCount, pageTurnDuration, pageTurnTarget, pressIsClick, strayPageTarget, swipeTurn, wheelTurn } from "../pageTurn";
+import { tapAction, tapZone } from "../touchLayout";
+import { DOUBLE_CLICK_MS, TAP_SLACK_PX, WHEEL_AT_REST, clickZone, pageAt, pageCount, pageTurnDuration, pageTurnTarget, pressIsClick, strayPageTarget, swipeTurn, wheelTurn } from "../pageTurn";
 import { MARK_NAME } from "../people/marks";
 import { chapterPageRange } from "../chapterSpan";
 import type { Later, WithAnnotations, WithContentsList } from "./scope";
+
+/**
+ * What a click on the page means of itself, for telling a page turn (or, on a
+ * touch screen, a tap for the chrome) from a click on something: a link, a
+ * note, a picture, a control.
+ */
+export const OWN_CLICK =
+  "a[href], area[href], [role='link'], [role='button'], [role='doc-noteref'], button, input, textarea, select, option, label, summary, details, audio, video, [contenteditable], [onclick], [data-leaflet-zoom]";
+export const within = (x: number, y: number, rects: Iterable<DOMRect>, slack = 2) => {
+  for (const rect of rects) {
+    if (x >= rect.left - slack && x <= rect.right + slack && y >= rect.top - slack && y <= rect.bottom + slack) {
+      return true;
+    }
+  }
+  return false;
+};
+/** What of the book's text is under a point of its document: whether any is, and whether it is a name the character tracker marked. */
+export const textAt = (doc: Document, x: number, y: number) => {
+  try {
+    const caret = (doc as any).caretRangeFromPoint?.(x, y) as Range | null;
+    const node = caret?.startContainer;
+    if (!caret || !node || node.nodeType !== 3) {
+      return { text: false, name: false };
+    }
+    const length = (node as Text).data.length;
+    const letters = doc.createRange();
+    letters.setStart(node, Math.max(0, caret.startOffset - 1));
+    letters.setEnd(node, Math.min(length, caret.startOffset + 1));
+    if (!within(x, y, Array.from(letters.getClientRects()))) {
+      return { text: false, name: false };
+    }
+    const marks = (doc.defaultView as any)?.CSS?.highlights?.get?.(MARK_NAME) as Iterable<Range> | undefined;
+    let name = false;
+    for (const mark of marks ?? []) {
+      if (mark.isPointInRange(node, caret.startOffset) && within(x, y, Array.from(mark.getClientRects()))) {
+        name = true;
+        break;
+      }
+    }
+    return { text: true, name };
+  } catch {
+    return { text: false, name: false };
+  }
+};
 
 /** Turning pages (the pages layout), and the page showing. */
 export const usePageTurning = (reader: WithContentsList & Later<"markReadingActivity">) => {
@@ -401,10 +446,13 @@ export const usePageTurning = (reader: WithContentsList & Later<"markReadingActi
  */
 export const usePageInput = (reader: WithAnnotations) => {
   const {
-    book, chapterTurnUntilRef, interruptedRef, layout, layoutRef, loading, morePanelOpen, navigatingUntilRef,
-    pageFrame, pageSlideRef, pictureRef, renditionRef, selectionRef, shortcutsOpenRef, soundPanelOpen, turnPageRef,
-    viewerRef
+    book, chapterTurnUntilRef, hideChrome, interruptedRef, layout, layoutRef, loading, morePanelOpen, navigatingUntilRef,
+    pageFrame, pageSlideRef, pictureRef, renditionRef, selectionRef, shortcutsOpenRef, soundPanelOpen, toggleChrome,
+    turnPageRef, viewerRef
   } = reader;
+  // For the listeners bound once a book: a finger's page turn sends the chrome away, a tap in the middle toggles it.
+  const chromeRef = useRef({ hide: hideChrome, toggle: toggleChrome });
+  chromeRef.current = { hide: hideChrome, toggle: toggleChrome };
   /** The ··· menu or the radio's controls are open (a click on the page is not a page turn then). */
   const pagesMenuOpenRef = useRef(false);
   pagesMenuOpenRef.current = morePanelOpen || soundPanelOpen;
@@ -458,7 +506,7 @@ export const usePageInput = (reader: WithAnnotations) => {
     };
     // A press, from the button (or finger) going down to its coming up: what
     // a click at the side of the page and a swipe across it are told from.
-    let press: { x: number; y: number; at: number; selection: boolean; covered: boolean; sideways: boolean; fingers: number } | null = null;
+    let press: { x: number; y: number; at: number; selection: boolean; covered: boolean; sideways: boolean; fingers: number; touch: boolean } | null = null;
     const fingersDown = new Set<number>();
     let clickTimer = 0;
     const selecting = (doc: Document | null | undefined) => {
@@ -503,7 +551,8 @@ export const usePageInput = (reader: WithAnnotations) => {
         selection: selectionRef.current !== null || selecting(onto?.ownerDocument),
         covered: covered(),
         sideways,
-        fingers: 1
+        fingers: 1,
+        touch: event.pointerType === "touch"
       };
     };
     const up = (event?: PointerEvent) => {
@@ -529,6 +578,9 @@ export const usePageInput = (reader: WithAnnotations) => {
       );
       if (turn !== null) {
         press = null;
+        if (event.pointerType === "touch") {
+          chromeRef.current.hide();
+        }
         turnPageRef.current(turn);
       }
     };
@@ -538,46 +590,12 @@ export const usePageInput = (reader: WithAnnotations) => {
     // on a link, a note, a picture, a marked name, a highlight or a control,
     // and not while something is open over the page. On text it waits out a
     // double-click, which selects a word.
-    const OWN_CLICK =
-      "a[href], area[href], [role='link'], [role='button'], [role='doc-noteref'], button, input, textarea, select, option, label, summary, details, audio, video, [contenteditable], [onclick], [data-leaflet-zoom]";
-    const within = (x: number, y: number, rects: Iterable<DOMRect>, slack = 2) => {
-      for (const rect of rects) {
-        if (x >= rect.left - slack && x <= rect.right + slack && y >= rect.top - slack && y <= rect.bottom + slack) {
-          return true;
-        }
-      }
-      return false;
-    };
-    /** What of the book's text is under a point of its document: whether any is, and whether it is a name the character tracker marked. */
-    const textAt = (doc: Document, x: number, y: number) => {
-      try {
-        const caret = (doc as any).caretRangeFromPoint?.(x, y) as Range | null;
-        const node = caret?.startContainer;
-        if (!caret || !node || node.nodeType !== 3) {
-          return { text: false, name: false };
-        }
-        const length = (node as Text).data.length;
-        const letters = doc.createRange();
-        letters.setStart(node, Math.max(0, caret.startOffset - 1));
-        letters.setEnd(node, Math.min(length, caret.startOffset + 1));
-        if (!within(x, y, Array.from(letters.getClientRects()))) {
-          return { text: false, name: false };
-        }
-        const marks = (doc.defaultView as any)?.CSS?.highlights?.get?.(MARK_NAME) as Iterable<Range> | undefined;
-        let name = false;
-        for (const mark of marks ?? []) {
-          if (mark.isPointInRange(node, caret.startOffset) && within(x, y, Array.from(mark.getClientRects()))) {
-            name = true;
-            break;
-          }
-        }
-        return { text: true, name };
-      } catch {
-        return { text: false, name: false };
-      }
-    };
-    /** Which way a click at this point of the page turns it, if it is in a zone; and the facts of where it landed. */
-    const clickPlace = (event: MouseEvent) => {
+    //
+    // A finger's tap (readers/touchLayout.ts, `tapZone`): the outer thirds
+    // turn, the middle brings the toolbar and the dock or sends them away. It
+    // does not wait: a phone selects by a press and hold, not a double tap.
+    /** Which way a click at this point of the page turns it (0, the middle: a finger's tap there is for the chrome); and the facts of where it landed. */
+    const clickPlace = (event: MouseEvent, touch: boolean) => {
       const frameNow = (rendition.manager as any)?.container === container ? container : null;
       const onto = event.target as Node | null;
       const target = onto?.nodeType === 1 ? (onto as Element) : (onto?.parentElement ?? null);
@@ -595,9 +613,10 @@ export const usePageInput = (reader: WithAnnotations) => {
       const held = inBook ? (doc.defaultView?.frameElement?.getBoundingClientRect() ?? null) : null;
       const x = event.clientX + (held?.left ?? 0);
       const y = event.clientY + (held?.top ?? 0);
+      const rtl = (rendition.manager as any)?.settings?.direction === "rtl";
       const margin = inBook && doc.body ? parseFloat(doc.defaultView?.getComputedStyle(doc.body).paddingLeft ?? "") || 0 : 0;
-      const turn = clickZone(x, box.left, box.width, margin, (rendition.manager as any)?.settings?.direction === "rtl");
-      if (turn === null) {
+      const turn: 1 | -1 | 0 = touch ? tapZone(x, box.left, box.width, rtl) : (clickZone(x, box.left, box.width, margin, rtl) ?? 0);
+      if (turn === 0 && !touch) {
         return null;
       }
       const under = inBook ? textAt(doc, event.clientX, event.clientY) : { text: false, name: false };
@@ -607,7 +626,8 @@ export const usePageInput = (reader: WithAnnotations) => {
     const onClick = (event: MouseEvent) => {
       const from = press;
       press = null;
-      const place = clickPlace(event);
+      const touch = from?.touch ?? (event as PointerEvent).pointerType === "touch";
+      const place = clickPlace(event, touch);
       if (!place) {
         return;
       }
@@ -617,22 +637,32 @@ export const usePageInput = (reader: WithAnnotations) => {
         moved: from ? Math.hypot(event.clientX - from.x, event.clientY - from.y) : 0,
         ms: from ? performance.now() - from.at : 0,
         // In the margin every click is its own (see onMouseDown); on text the second of two selects a word.
-        count: place.onText ? event.detail || 1 : 1,
+        count: place.onText && !touch ? event.detail || 1 : 1,
         selection: (from?.selection ?? false) || selectionRef.current !== null || selecting(place.doc),
         covered: (from?.covered ?? false) || covered(),
-        claimed: event.defaultPrevented || place.claimed
+        claimed: event.defaultPrevented || place.claimed,
+        slack: touch ? TAP_SLACK_PX : undefined
       });
       if (!plain) {
         return;
       }
+      const action = tapAction(place.turn, "pages");
       const turn = () => {
         clickTimer = 0;
-        if (renditionRef.current === rendition && layoutRef.current === "pages" && !covered() && !selecting(place.doc)) {
-          turnPageRef.current(place.turn);
+        if (renditionRef.current !== rendition || layoutRef.current !== "pages" || covered() || selecting(place.doc)) {
+          return;
+        }
+        if (action.kind === "chrome") {
+          chromeRef.current.toggle();
+        } else if (action.kind === "turn") {
+          if (touch) {
+            chromeRef.current.hide();
+          }
+          turnPageRef.current(action.step);
         }
       };
       window.clearTimeout(clickTimer);
-      if (place.onText) {
+      if (place.onText && !touch) {
         clickTimer = window.setTimeout(turn, DOUBLE_CLICK_MS);
       } else {
         turn();
@@ -644,7 +674,7 @@ export const usePageInput = (reader: WithAnnotations) => {
       if (event.detail < 2 || event.button !== 0) {
         return;
       }
-      const place = clickPlace(event);
+      const place = clickPlace(event, false);
       if (place && place.inBook && !place.onText && !place.claimed) {
         event.preventDefault();
       }

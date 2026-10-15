@@ -7,6 +7,7 @@ import type { GameArt } from "../gameArt";
 import { drawPostcard, postcardFileName, postcardSize, postcardWords, type PostcardStats } from "./postcard";
 import type { CampLook } from "./scene";
 import "./postcard.css";
+import { useBackLayer } from "../../../../platform/back";
 
 export type { PostcardStats } from "./postcard";
 
@@ -43,6 +44,8 @@ export const HollowPostcard = ({ art, look, stats, onClose }: HollowPostcardProp
   drawn.current = stats;
   const close = useRef(onClose);
   close.current = onClose;
+  // Android's Back closes it, as Escape does.
+  useBackLayer(true, () => close.current());
 
   useEffect(() => {
     let live = true;

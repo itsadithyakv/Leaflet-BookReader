@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { UiIcon } from "../components/UiIcon";
+import { useTouchInput } from "../platform/device";
 
 /**
  * The reader's first-open walkthrough: what Dotty is, setting up Smart Read,
@@ -99,6 +100,8 @@ export const ReaderTour = ({ paged, onStep, onClose, onTrySmartRead }: ReaderTou
   const [step, setStep] = useState(0);
   const [openInSmart, setOpenInSmart] = useState(() => readStartMode() === "smart");
   const cardRef = useRef<HTMLDivElement | null>(null);
+  // By finger: taps and the buttons, not keys (keycaps only with a keyboard).
+  const touch = useTouchInput();
 
   const steps: Step[] = [
     {
@@ -107,7 +110,12 @@ export const ReaderTour = ({ paged, onStep, onClose, onTrySmartRead }: ReaderTou
       body: paged ? (
         <>
           Dotty keeps your place in the Scroll layout. Switch <strong>Layout</strong> to <strong>Scroll</strong> in
-          the <strong>···</strong> menu to meet it.
+          the {touch ? <strong>Aa</strong> : <strong>···</strong>} menu to meet it.
+        </>
+      ) : touch ? (
+        <>
+          The glowing dot at the left of the page is Dotty. It keeps your place as you read. Press and hold a word,
+          then <strong>Read from here</strong>, and Dotty starts there.
         </>
       ) : (
         <>
@@ -120,7 +128,12 @@ export const ReaderTour = ({ paged, onStep, onClose, onTrySmartRead }: ReaderTou
       title: "The chapter list",
       clear: true,
       art: <ContentsArt />,
-      body: (
+      body: touch ? (
+        <>
+          Tap the middle of the page for the toolbar, then the <strong>list</strong> button, or the chapter's name
+          at the foot of the page. Tap the sides of a page to turn it.
+        </>
+      ) : (
         <>
           The <strong>Contents</strong> tab on the left edge of the window opens the chapter list, and is always
           there. So does a click on the chapter's name at the foot of the page, or <Keycap>C</Keycap>. Opened that
@@ -154,9 +167,18 @@ export const ReaderTour = ({ paged, onStep, onClose, onTrySmartRead }: ReaderTou
       ),
       body: (
         <>
-          Reading faster than Dotty? Just scroll on ahead: it catches up and speeds up. Too fast? Press{" "}
-          <Keycap>−</Keycap> or drag Dotty back a line. Leaflet learns your pace in every book, even with Smart
-          Read off, and it follows you to your other devices.
+          Reading faster than Dotty? Just scroll on ahead: it catches up and speeds up. Too fast?{" "}
+          {touch ? (
+            <>
+              Tap <strong>−</strong> on the pace button
+            </>
+          ) : (
+            <>
+              Press <Keycap>−</Keycap>
+            </>
+          )}{" "}
+          or drag Dotty back a line. Leaflet learns your pace in every book, even with Smart Read off, and it
+          follows you to your other devices.
         </>
       )
     },
@@ -164,11 +186,16 @@ export const ReaderTour = ({ paged, onStep, onClose, onTrySmartRead }: ReaderTou
       title: "Pausing",
       art: (
         <div className="reader-tour-keys" aria-hidden="true">
-          <Keycap>Space</Keycap>
+          {touch ? <UiIcon name="pause" size={22} /> : <Keycap>Space</Keycap>}
           <UiIcon name="hand" size={22} />
         </div>
       ),
-      body: (
+      body: touch ? (
+        <>
+          Tap the pace button to pause and carry on. Rest a finger on the text and Dotty waits while you think.
+          Switch to another app and Smart Read and auto-scroll pause until you are back.
+        </>
+      ) : (
         <>
           <Keycap>Space</Keycap> pauses and carries on. Hold a finger or the mouse on the text and Dotty waits
           while you think. Switch to another app and Smart Read and auto-scroll pause until you are back.

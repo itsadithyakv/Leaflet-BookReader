@@ -1,4 +1,6 @@
 import { UiIcon, type UiIconName } from "./UiIcon";
+import { useMediaQuery } from "../hooks/useMediaQuery";
+import { RAIL_QUERY } from "./Sidebar";
 
 export type MobileNavItem = {
   label: string;
@@ -40,10 +42,13 @@ export const MobileNav = ({
   startDisabled,
   badge
 }: MobileNavProps) => {
+  // The tour points at whichever of this and the rail is on screen.
+  const railShown = useMediaQuery(RAIL_QUERY);
   return (
     <nav
       className="mobile-nav md:hidden short:hidden"
       aria-label="Primary navigation"
+      data-tour={railShown ? undefined : "nav"}
     >
       {navItems.map((item) => {
         const active = item.label === activeItem;

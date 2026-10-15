@@ -172,6 +172,7 @@ import { useCommunityStore } from "../../../community/communityStore";
 // The postcard is its own piece: nobody pays for it who never asks for one.
 const HollowPostcard = lazy(() => import("./HollowPostcard").then((module) => ({ default: module.HollowPostcard })));
 import { nowFrom, useBaseStore } from "../../../../store/baseStore";
+import { useBackFallback } from "../../../../platform/back";
 import { useHabitStore } from "../../../../store/habitStore";
 import { useLibraryStore } from "../../../../store/libraryStore";
 import { weekKeyOf } from "../../../community/ownRow";
@@ -254,6 +255,40 @@ type Panel = "site" | "people" | "decor" | "guard" | "garden";
  */
 const STAGE_WIDE = 820;
 const STAGE_TALL = 460;
+/** Sideways (a phone on its side): the column down the right of the picture, for Pip's word and the keys, is at least this wide (less on a small phone)... */
+const SIDE_COLUMN = 236;
+const SIDE_COLUMN_SMALL = 204;
+/** ...and the picture and the column have this between them, and the frame round the picture this much (touch.css). */
+const SIDE_GAP = 12;
+const SIDE_FRAME_X = 16;
+const SIDE_FRAME_Y = 22;
+
+/**
+ * The room for the picture on a page wider than tall and too short for the
+ * stage: the height of the scrolling page it is on, less what is above it, and
+ * the width less the column beside it. Null where the page is not that shape
+ * (upright, or too narrow for a column beside a picture worth having).
+ */
+const sidewaysRoom = (root: HTMLElement): { wide: number; tall: number } | null => {
+  if (typeof window === "undefined" || window.innerWidth <= window.innerHeight || window.innerHeight >= STAGE_TALL + 120) return null;
+  let scroller: HTMLElement | null = root.parentElement;
+  while (scroller && scroller !== document.body) {
+    const flow = getComputedStyle(scroller).overflowY;
+    if (flow === "auto" || flow === "scroll") break;
+    scroller = scroller.parentElement;
+  }
+  if (!scroller || scroller === document.body) return null;
+  const own = getComputedStyle(scroller);
+  const mine = getComputedStyle(root);
+  const box = scroller.getBoundingClientRect();
+  // Where the page begins in the scroller's content, and what of its height the padding (its own, and the scroller's) takes.
+  const above = Math.max(0, root.getBoundingClientRect().top - box.top + scroller.scrollTop - parseFloat(own.paddingTop));
+  const tall = scroller.clientHeight - parseFloat(own.paddingTop) - parseFloat(own.paddingBottom) - above - parseFloat(mine.paddingTop) - parseFloat(mine.paddingBottom) - SIDE_FRAME_Y;
+  const across = root.clientWidth - parseFloat(mine.paddingLeft) - parseFloat(mine.paddingRight);
+  const wide = across - (across < 600 ? SIDE_COLUMN_SMALL : SIDE_COLUMN) - SIDE_GAP - SIDE_FRAME_X;
+  if (wide < 260 || tall < 120) return null;
+  return { wide, tall };
+};
 /** Art pixels of sky there may be above the clearing: more than this is not a sky but a gap. */
 const SKY_MOST = 90;
 /** Screen pixels the row of keys takes at the foot of the picture: that much more ground is laid for it to stand on, where the page is tall enough. */
@@ -370,7 +405,12 @@ export const BaseScreen = ({
   };
   const rootRef = useRef<HTMLDivElement | null>(null);
   /** The picture as the page (and how much sky there is above the clearing), or hung at the top of it. */
-  const [lay, setLay] = useState<{ mode: "stage" | "stack"; sky: number; ground: number }>({ mode: "stack", sky: 0, ground: 0 });
+  /**
+   * How the page is laid out: the picture is the page (`stage`); it is hung at the top and the rest follows under it
+   * (`stack`: a small window, an upright phone); or it fills the height and the rest goes down its right (`side`: a
+   * phone turned sideways, where hung at the top it was 175 px of camp).
+   */
+  const [lay, setLay] = useState<{ mode: "stage" | "stack" | "side"; sky: number; ground: number }>({ mode: "stack", sky: 0, ground: 0 });
   /** Which clearing the picture shows: the camp, or the meadow beyond it. */
   const [area, setArea] = useState<Place>("camp");
   /** What the list just paid, for a moment, over the acorns. */
@@ -537,22 +577,42 @@ export const BaseScreen = ({
         setLay((was) => (was.mode === "stage" && was.sky === sky && was.ground === ground ? was : { mode: "stage", sky, ground }));
         return;
       }
-      setLay((was) => (was.mode === "stack" ? was : { mode: "stack", sky: 0, ground: 0 }));
       // Not on show (another page of a small window): there is nothing to measure.
+      const root = rootRef.current;
+      const side = root ? sidewaysRoom(root) : null;
+      if (side) {
+        setLay((was) => (was.mode === "side" ? was : { mode: "side", sky: 0, ground: 0 }));
+        const next = fitPicture(GAME_W, GAME_H, side.wide, side.tall, screenRatio(), 0.08);
+        setFit((was) => (was.css === next.css && was.backing === next.backing ? was : next));
+        return;
+      }
+      setLay((was) => (was.mode === "stack" ? was : { mode: "stack", sky: 0, ground: 0 }));
       if (wrap.clientWidth === 0) return;
       // The picture hangs in a frame: the room for it is the wrap's, less the frame on each side.
       const room = Math.max(window.innerHeight * 0.45, window.innerHeight - 440);
-      const next = fitPicture(GAME_W, GAME_H, wrap.clientWidth - FRAME * 2, Math.max(170, room), screenRatio());
+      // (Across an upright phone a whole-pixel size left a quarter of the width empty: there it fills the width.)
+      const next = fitPicture(GAME_W, GAME_H, wrap.clientWidth - FRAME * 2, Math.max(170, room), screenRatio(), wrap.clientWidth < 600 ? 0.08 : undefined);
       setFit((was) => (was.css === next.css && was.backing === next.backing ? was : next));
     };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(wrap);
     if (rootRef.current?.parentElement) observer.observe(rootRef.current.parentElement);
-    window.addEventListener("resize", measure);
+    // A phone turned: the window's new size comes before the page under it is laid out again, so it is measured
+    // again once it has been (sideways, the room is the height of the page it scrolls in).
+    let settle = 0;
+    const turned = () => {
+      measure();
+      cancelAnimationFrame(settle);
+      settle = requestAnimationFrame(() => {
+        settle = requestAnimationFrame(measure);
+      });
+    };
+    window.addEventListener("resize", turned);
     return () => {
       observer.disconnect();
-      window.removeEventListener("resize", measure);
+      cancelAnimationFrame(settle);
+      window.removeEventListener("resize", turned);
     };
     // The scene is only there once the camp has been read, on its own page, with no raid on.
   }, [loaded, tab, raid, watching]);
@@ -743,7 +803,10 @@ export const BaseScreen = ({
         // (While arranging, the line the night's raiders would take to the larder was drawn. There is no such night now.)
         path: null,
         from: null,
-        bars: base ? PLACED.filter((site) => (base.harm[site] ?? 0) > 0 && (hovered.current === site || time - (knockedAt.current[site] ?? -1e9) < 4000)) : undefined,
+        // (And while it is the one chosen: a finger cannot rest on a building to be told, it taps it.)
+        bars: base
+          ? PLACED.filter((site) => (base.harm[site] ?? 0) > 0 && (hovered.current === site || (panelOpen && panel === "site" && spotted === site) || time - (knockedAt.current[site] ?? -1e9) < 4000))
+          : undefined,
         // Between raids the odd prowler comes out of the wood, and what throws sees him off: not while things are being moved about.
         watch: defence && area === "camp" && !arrange && !placing ? defence.rings.filter((ring) => ring.throws) : undefined,
         // The building under the pointer, or the one chosen: a fence in front of it is drawn thin.
@@ -889,6 +952,38 @@ export const BaseScreen = ({
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded, tab, area, arrange, placing, raid, watching]);
+
+  // Android's Back steps out of the camp's own states one at a time, as a hand would: what is being set down, the
+  // moving about, the panel, a trophy's line, the raids or the journal, the meadow. With none of them, it is not the
+  // camp's (the Pip tab's, then the app's). A raid's own Back is BattleScreen's; the postcard's, its own.
+  useBackFallback(() => {
+    if (raid) return false;
+    if (placing) {
+      setPlacing(null);
+      return true;
+    }
+    if (arrange) {
+      leaveArrange();
+      return true;
+    }
+    if (panelOpen) {
+      setPanelOpen(false);
+      return true;
+    }
+    if (shownTrophy !== null) {
+      setShownTrophy(null);
+      return true;
+    }
+    if (tab !== "camp") {
+      setTab("camp");
+      return true;
+    }
+    if (area !== "camp") {
+      goArea("camp");
+      return true;
+    }
+    return false;
+  });
 
   if (!base || !look) {
     return <p className="mt-4 text-sm text-on-surface-variant">…</p>;
@@ -2308,7 +2403,7 @@ export const BaseScreen = ({
         </p>
         {tab === "camp" && (
           <div className="pip-camp-say">
-            <PipFace skin={skin} outfit={outfit} box={52} move={next.full ? "idea" : told !== null ? "idea" : "idle"} className="pip-camp-say-face" />
+            <PipFace skin={skin} outfit={outfit} box={lay.mode === "side" ? 36 : 52} move={next.full ? "idea" : told !== null ? "idea" : "idle"} className="pip-camp-say-face" />
             {/* Three lines at most: a tip when one is due (or the book a tapped trophy stands for), the one next thing, and the parcels. What has gone wrong is said while it is so. */}
             <div className="pip-camp-say-bubble" role="status">
               {base.wreck && (

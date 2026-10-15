@@ -14,6 +14,8 @@ import { showHighlightsView, useHighlightsStore } from "./highlightsStore";
 import { booksWithHighlights, countLabel, groupByChapter, orderHighlights } from "./highlightsView";
 import { KINDLE_TAG_ABOUT, isKindlePlace } from "../../library/kindleClippings";
 import { KindleImport } from "./KindleImport";
+import { SheetHandle } from "../ui/SheetHandle";
+import { useBackClose } from "../../hooks/useBackClose";
 
 type Tab = "highlights" | "bookmarks";
 const TABS_ID = "book-notes";
@@ -471,6 +473,7 @@ export const HighlightsDialog = ({ onOpenInBook }: HighlightsDialogProps) => {
   const book = view?.kind === "book" ? books.find((item) => item.id === view.bookId) ?? null : null;
   // A book removed (here or by a sync) while its highlights are showing.
   const bookGone = view?.kind === "book" && !book;
+  useBackClose(open, close);
 
   useEffect(() => {
     if (!open) {
@@ -515,7 +518,7 @@ export const HighlightsDialog = ({ onOpenInBook }: HighlightsDialogProps) => {
 
   return (
     <div
-      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 px-4"
+      className="sheet-backdrop fixed inset-0 z-[90] flex items-center justify-center bg-black/50 px-4"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
           close();
@@ -529,8 +532,9 @@ export const HighlightsDialog = ({ onOpenInBook }: HighlightsDialogProps) => {
         aria-labelledby="highlights-dialog-title"
         // One height for the list and for a book, long or short: the dialog
         // does not jump under the pointer as highlights are removed.
-        className="modal-surface confirm-pop flex h-[min(85vh,44rem)] w-full max-w-2xl flex-col rounded-2xl p-5"
+        className="modal-surface confirm-pop sheet-panel sheet-tall sheet-inner-scroll flex h-[min(85dvh,44rem)] w-full max-w-2xl flex-col rounded-2xl p-5"
       >
+        <SheetHandle onClose={close} />
         {view.kind === "book" && book ? (
           <BookView key={book.id} book={book} fromList={view.fromList} onOpenInBook={onOpenInBook} />
         ) : (

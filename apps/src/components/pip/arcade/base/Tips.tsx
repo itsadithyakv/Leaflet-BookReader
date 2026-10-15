@@ -1,4 +1,6 @@
 import { useEffect, useState, type RefObject } from "react";
+import { isTouchInput } from "../../../../platform/device";
+import { stripKeyHints } from "../../../touchTipWords";
 
 /**
  * What a thing means, said where a pointer cannot hover.
@@ -33,6 +35,17 @@ export const holderOf = (target: EventTarget | null, root: HTMLElement): HTMLEle
 
 export const wordsOf = (holder: HTMLElement) => (holder.getAttribute("title") || holder.dataset.tip || "").trim();
 
+/**
+ * The words for a finger: the keys a tooltip names for the keyboard ("Close (Esc)", "Esc pauses.") are left out,
+ * since a phone has none of them to press. The app's own rule for that (touchTipWords.ts), and besides it a sentence
+ * that is only about Escape.
+ */
+export const forFinger = (text: string) =>
+  stripKeyHints(text)
+    .replace(/(?:^|\s+)(?:Esc|Escape)\b[^.]*\./g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
 export const TipLayer = ({ rootRef }: { rootRef: RefObject<HTMLElement | null> }) => {
   const [tip, setTip] = useState<Tip | null>(null);
 
@@ -46,7 +59,7 @@ export const TipLayer = ({ rootRef }: { rootRef: RefObject<HTMLElement | null> }
     let held = false;
 
     const show = (holder: HTMLElement) => {
-      const text = wordsOf(holder);
+      const text = isTouchInput() ? forFinger(wordsOf(holder)) : wordsOf(holder);
       if (!text) return;
       const box = holder.getBoundingClientRect();
       const frame = root.getBoundingClientRect();

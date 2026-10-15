@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useRef, type ReactNode } from "react";
+import { useBackLayer } from "../../platform/back";
 
 type PipDrawerProps = {
   title: string;
@@ -18,6 +19,8 @@ type PipDrawerProps = {
  * button that opened it.
  */
 export const PipDrawer = forwardRef<HTMLElement, PipDrawerProps>(function PipDrawer({ title, note, size, onClose, children }, ref) {
+  // Android's Back closes it, as Escape does.
+  useBackLayer(true, onClose);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
 
   useEffect(() => {

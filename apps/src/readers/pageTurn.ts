@@ -161,6 +161,8 @@ export const clickZone = (x: number, pageLeft: number, pageWidth: number, sideMa
 
 /** A press that moved further than this before letting go was a drag, not a click. */
 export const CLICK_SLACK_PX = 5;
+/** A finger wanders further than a mouse in a tap (and the browser has already told a tap from a drag). */
+export const TAP_SLACK_PX = 12;
 /** Held longer than this it is a long press (holding the page, starting a selection), not a click. */
 export const CLICK_MAX_MS = 500;
 /** A click on text waits this long before it turns the page, so the first click of a double-click (selecting a word) does not. */
@@ -183,12 +185,14 @@ export type PressFacts = {
   covered: boolean;
   /** The click has a meaning of its own where it landed: a link, a note, a picture, a name, a highlight, a control. */
   claimed: boolean;
+  /** How far it may move and still be a click: `CLICK_SLACK_PX` for a mouse, `TAP_SLACK_PX` for a finger. */
+  slack?: number;
 };
 
 export const pressIsClick = (press: PressFacts) =>
   press.button === 0 &&
   !press.modified &&
-  press.moved <= CLICK_SLACK_PX &&
+  press.moved <= (press.slack ?? CLICK_SLACK_PX) &&
   press.ms <= CLICK_MAX_MS &&
   press.count <= 1 &&
   !press.selection &&

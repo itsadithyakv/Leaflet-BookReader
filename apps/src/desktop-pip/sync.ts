@@ -12,6 +12,7 @@ import { useSyncExternalStore } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { usePipStore, type PipMode } from "../store/pipStore";
 import { FEATURES } from "../constants/features";
+import { isAndroid } from "../platform/device";
 import { DESKTOP_PIP_KEYS, readChoice, wantedFrom, writeEnabled, writeHiddenOn, type Wanted } from "./setting";
 
 /** Mirrors `desktop_pip::runtime::DesktopPipStatus`. */
@@ -38,7 +39,8 @@ export type Reach = {
 // her (`VITE_ENABLE_DESKTOP_PIP`). Without the flag Rust is never told to make
 // the window and the switch in Settings is not shown.
 const tauriReach: Reach = {
-  available: () => FEATURES.desktopPip && isTauri(),
+  // (Windows only: on a phone there is no desktop for her, and Rust is not asked.)
+  available: () => FEATURES.desktopPip && isTauri() && !isAndroid(),
   set: (wanted, recall) => invoke<DesktopPipStatus>("desktop_pip_set", { wanted, recall }),
   status: () => invoke<DesktopPipStatus>("desktop_pip_status")
 };
@@ -131,7 +133,7 @@ let started = false;
  * nothing, and nothing on the page shows the switch.
  */
 export const startDesktopPip = () => {
-  if (started || !isTauri()) {
+  if (started || !isTauri() || isAndroid()) {
     return;
   }
   started = true;

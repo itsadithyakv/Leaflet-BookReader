@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Book } from "@shared/models/book";
 import { UiIcon } from "../UiIcon";
+import { SheetHandle } from "../ui/SheetHandle";
+import { useBackClose } from "../../hooks/useBackClose";
+import { isTouchInput } from "../../platform/device";
 
 type Props = {
   title: string;
@@ -14,6 +17,7 @@ type Props = {
 export const BookPicker = ({ title, books, onDone, onCancel }: Props) => {
   const [query, setQuery] = useState("");
   const [chosen, setChosen] = useState<string[]>([]);
+  useBackClose(true, onCancel);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -38,7 +42,7 @@ export const BookPicker = ({ title, books, onDone, onCancel }: Props) => {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 px-4"
+      className="sheet-backdrop fixed inset-0 z-[90] flex items-center justify-center bg-black/50 px-4"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
           onCancel();
@@ -49,13 +53,14 @@ export const BookPicker = ({ title, books, onDone, onCancel }: Props) => {
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="modal-surface confirm-pop flex max-h-[80vh] w-full max-w-lg flex-col rounded-2xl p-5"
+        className="modal-surface confirm-pop sheet-panel sheet-inner-scroll flex max-h-[80dvh] w-full max-w-lg flex-col rounded-2xl p-5"
       >
+        <SheetHandle onClose={onCancel} />
         <h2 className="page-title text-xl text-on-surface">{title}</h2>
         <div className="relative mt-4">
           <UiIcon name="search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant" />
           <input
-            autoFocus
+            autoFocus={!isTouchInput()}
             className="inset-field w-full py-2 pl-9 pr-3 text-sm text-on-surface"
             placeholder="Search by title or author"
             aria-label="Search by title or author"

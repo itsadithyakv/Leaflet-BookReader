@@ -1,6 +1,7 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { IMPORTABLE_EXTENSIONS, setSupportedFormats, type BookFormat } from "../../constants/bookFormats";
+import { android, onAndroid } from "../android";
 
 /**
  * Ask the backend which formats it accepts so the picker can never offer a file
@@ -25,13 +26,15 @@ async function dialogExtensions(): Promise<string[]> {
 /**
  * Picks books on a phone or tablet.
  *
- * This used to `invoke("pick_books")`, a command that does not exist in the
- * backend — so importing a book on mobile failed at the first tap. The dialog
- * plugin already handles Android and iOS, and it is the same one the desktop
- * picker uses, so both platforms now go through one code path that the backend
- * actually answers.
+ * On Android the system picker hands over `content://` addresses, which the
+ * importer cannot open; Leaflet's own picker (`android.pickFiles`) copies each
+ * chosen file into Leaflet's storage and answers with those paths. Elsewhere
+ * (iOS, one day) the dialog plugin's picker.
  */
 export async function pickBookFiles(): Promise<string[]> {
+  if (onAndroid()) {
+    return android.pickFiles("books", true);
+  }
   const selected = await open({
     multiple: true,
     filters: [{ name: "Books", extensions: await dialogExtensions() }]

@@ -18,6 +18,8 @@ import { at, errorText, minutesText, nameOf } from "./format";
 import { COPY, duelDeclinedText, duelOnText, duelSentText, followingText, kudosSentText, relationText, streakText } from "./copy";
 import { EYEBROW } from "../ui/SectionHeader";
 import { CampVisit } from "../pip/arcade/base/CampExtras";
+import { useBackClose } from "../../hooks/useBackClose";
+import { isTouchInput } from "../../platform/device";
 
 const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
@@ -123,6 +125,7 @@ export const ReaderCard = ({ signedIn, canJoin, showToast, onChanged }: ReaderCa
       opener?.focus?.();
     };
   }, [handle]);
+  useBackClose(Boolean(handle), close);
 
   if (!handle) {
     return null;
@@ -325,8 +328,15 @@ export const ReaderCard = ({ signedIn, canJoin, showToast, onChanged }: ReaderCa
                 className={`tactile-button group flex items-center justify-center gap-2 px-4 py-2.5 text-sm disabled:cursor-not-allowed disabled:opacity-60 ${
                   reader.isFollowing ? "" : "tactile-button-primary"
                 }`}
-                onClick={() => {
+                onClick={async () => {
                   const follow = !reader.isFollowing;
+                  // A finger cannot hover to see "Unfollow": a tap on "Following" asks first.
+                  if (!follow && isTouchInput()) {
+                    const ok = await askConfirm({ title: `Stop following ${at(reader.handle)}?`, confirmLabel: "Unfollow", cancelLabel: "Keep following" });
+                    if (!ok) {
+                      return;
+                    }
+                  }
                   void act(
                     "follow",
                     async () => {

@@ -12,6 +12,9 @@ import { PipAvatar } from "./PipAvatar";
 import { usePostStore } from "./postStore";
 import { at, errorText, nameOf, relativeTime } from "./format";
 import "./friends.css";
+import { SheetHandle } from "../ui/SheetHandle";
+import { useBackClose } from "../../hooks/useBackClose";
+import { isTouchInput } from "../../platform/device";
 
 /** The server's limits, counted here so nothing typed is cut off there. */
 const LINE_MAX = 280;
@@ -195,6 +198,7 @@ export const PostDialog = ({ showToast }: { showToast: (message: string) => void
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const field = useRef<HTMLTextAreaElement | null>(null);
+  useBackClose(open !== null, close);
 
   useEffect(() => {
     if (!open) {
@@ -208,7 +212,10 @@ export const PostDialog = ({ showToast }: { showToast: (message: string) => void
     setAudience("followers");
     setSpoiler(false);
     setError(null);
-    field.current?.focus();
+    // On a phone the keyboard waits for a tap in the field: it would cover the stars and the book.
+    if (!isTouchInput()) {
+      field.current?.focus();
+    }
     // Capture phase, so the reader's own Escape (close the book) never sees it.
     const onKey = (event: KeyboardEvent) => {
       // Not while the guidelines are up over it: that Escape is theirs.
@@ -267,8 +274,9 @@ export const PostDialog = ({ showToast }: { showToast: (message: string) => void
   };
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 px-4 py-6" onMouseDown={(event) => event.target === event.currentTarget && close()}>
-      <div className="modal-surface dialog-fit flex max-h-full w-full max-w-lg flex-col overflow-y-auto p-6" role="dialog" aria-modal="true" aria-labelledby="post-dialog-title">
+    <div className="sheet-backdrop fixed inset-0 z-[80] flex items-center justify-center bg-black/55 px-4 py-6" onMouseDown={(event) => event.target === event.currentTarget && close()}>
+      <div className="modal-surface dialog-fit sheet-panel sheet-tall flex max-h-full w-full max-w-lg flex-col overflow-y-auto p-6" role="dialog" aria-modal="true" aria-labelledby="post-dialog-title">
+        <SheetHandle onClose={close} />
         <h2 id="post-dialog-title" className="page-title text-2xl">
           {quoting ? "Share a quote" : "Share a book"}
         </h2>

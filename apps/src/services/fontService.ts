@@ -1,5 +1,6 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { android, onAndroid } from "../platform/android";
 
 /** A font the reader added: the id Rust keeps it under, and what it is called. */
 export type CustomFont = { id: string; name: string };
@@ -35,7 +36,10 @@ export const fontService = {
     if (!isTauri()) {
       return null;
     }
-    const picked = await open({ multiple: false, title: "Add a font", filters: [{ name: "Fonts", extensions: EXTENSIONS }] });
+    // On Android the system picker, which copies the font in (a `content://` address is not a path).
+    const picked = onAndroid()
+      ? (await android.pickFiles("font", false))[0]
+      : await open({ multiple: false, title: "Add a font", filters: [{ name: "Fonts", extensions: EXTENSIONS }] });
     if (typeof picked !== "string") {
       return null;
     }

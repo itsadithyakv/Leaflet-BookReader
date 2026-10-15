@@ -33,6 +33,11 @@ describe("what Escape closes", () => {
     expect(presses(["chapters", "selection"])).toEqual(["chapters", "selection", "exit"]);
   });
 
+  it("closes a highlight's card (or \"Where was I?\") before the panels and the book", () => {
+    expect(presses(["card"])).toEqual(["card", "exit"]);
+    expect(presses(["search", "card", "playing"])).toEqual(["card", "search", "playing", "exit"]);
+  });
+
   it("closes the look-up card before the selection it belongs to", () => {
     expect(presses(["selection", "lookup"])).toEqual(["lookup", "selection", "exit"]);
     expect(presses(["selection", "character"])).toEqual(["character", "selection", "exit"]);

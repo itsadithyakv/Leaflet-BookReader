@@ -9,6 +9,7 @@ import { errorText } from "../community/format";
 import { PostList, Stars } from "../community/Posts";
 import { composePost, usePostStore } from "../community/postStore";
 import { useDiscussStore } from "./discussStore";
+import { useBackClose } from "../../hooks/useBackClose";
 
 type Toast = (message: string) => void;
 type Sort = "new" | "top";
@@ -191,6 +192,7 @@ export const BookPostsDrawer = ({ showToast, onOpenCommunity }: { showToast: Toa
       .finally(() => setLoadingOlder(false));
   };
 
+  useBackClose(Boolean(book), close);
   useEffect(() => {
     if (!book) {
       return;

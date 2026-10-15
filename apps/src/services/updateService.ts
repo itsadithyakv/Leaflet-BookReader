@@ -1,4 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { android, onAndroid } from "../platform/android";
 
 /**
  * Telling readers a newer Leaflet is out. The Microsoft Store updates most
@@ -50,8 +51,12 @@ export const updateService = {
     }
   },
 
-  /** Leaflet's page in the Microsoft Store, where an update is one press. */
+  /** Leaflet's page in the store it came from (Google Play on Android, the Microsoft Store elsewhere), where an update is one press. */
   async openStore(): Promise<void> {
+    if (onAndroid()) {
+      await android.openStore();
+      return;
+    }
     if (isTauri()) await invoke("open_store_page");
   },
 

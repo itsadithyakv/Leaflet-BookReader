@@ -35,7 +35,15 @@ export interface Game {
   draw(ctx: CanvasRenderingContext2D, art: GameArt, frame: number): void;
 }
 
-export type GameInfo = { id: GameId; name: string; blurb: string; controls: string; create: (seed: number) => Game };
+export type GameInfo = {
+  id: GameId;
+  name: string;
+  blurb: string;
+  controls: string;
+  /** How it is played with a finger (a phone): no keys. */
+  touchControls: string;
+  create: (seed: number) => Game;
+};
 
 type Box = { x: number; y: number; w: number; h: number };
 
@@ -443,6 +451,7 @@ export const GAMES: GameInfo[] = [
     name: "Pip Dash",
     blurb: "Run the shelves. Jump the book stacks, duck the bats.",
     controls: "Space or ↑ to jump (hold to go higher), ↓ to duck. Tap to jump.",
+    touchControls: "Tap to jump (hold to go higher), swipe down to duck.",
     create: (seed) => new Dash(seed)
   },
   {
@@ -450,6 +459,7 @@ export const GAMES: GameInfo[] = [
     name: "Leaf Catch",
     blurb: "Catch leaves, seeds and letters in Pip's basket. Dodge the ink.",
     controls: "← and → to move, or follow the pointer. Three ink blots and it's over.",
+    touchControls: "Slide a finger to move the basket. Three ink blots and it's over.",
     create: (seed) => new Catch(seed)
   },
   {
@@ -457,6 +467,7 @@ export const GAMES: GameInfo[] = [
     name: "Page Flap",
     blurb: "Leaf-copter between towers of book spines.",
     controls: "Space, ↑ or tap to flap.",
+    touchControls: "Tap to flap.",
     create: (seed) => new Flap(seed)
   }
 ];

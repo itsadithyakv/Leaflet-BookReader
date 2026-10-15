@@ -20,6 +20,8 @@ import { UiIcon } from "../components/UiIcon";
 import { FocusFlower, flowerCaption, flowerLook } from "../components/FocusFlower";
 import { askConfirm } from "../components/ConfirmDialog";
 import { MobileComingSoonBanner } from "../components/MobileComingSoonBanner";
+import { useAddBooksRequest } from "../hooks/useAddBooksRequest";
+import { isAndroid, useTouchInput } from "../platform/device";
 import { DailyHighlight } from "../components/highlights/DailyHighlight";
 import { UpNextStrip } from "../components/UpNextStrip";
 import { openHighlightsList, useHighlightsStore } from "../components/highlights/highlightsStore";
@@ -309,6 +311,14 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
       });
   };
 
+  // The header's + (a phone held sideways) asks for the same.
+  useAddBooksRequest(() => {
+    if (!importing) {
+      handleImport();
+    }
+  });
+  const touch = useTouchInput();
+
   /** A book's ⋯ menu removed it (the menu asks first, and has no toast of its own). */
   const sayRemoved = useCallback((title: string) => showToast(`Removed ${title}.`), [showToast]);
 
@@ -464,7 +474,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
       </div>
 
       {/* News about the phone app can wait until there is a library to carry over. */}
-      {!libraryEmpty && <MobileComingSoonBanner />}
+      {!libraryEmpty && !isAndroid() && <MobileComingSoonBanner />}
 
       {/* Side by side wherever the rail is: stacked, the pair is 456 px tall and
           pushes the first row of covers off a laptop's first screen. */}
@@ -598,13 +608,14 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
           </div>
           <h3 className="page-title text-2xl">{libraryEmpty ? "Add your first book" : "Import Books"}</h3>
           <p className="mt-2 max-w-xs text-center text-sm text-on-surface-variant">
-            Drop a book here, or click to browse
+            {touch ? "Tap to add books" : "Drop a book here, or click to browse"}
           </p>
           {/* With books to show, a window short of height drops this line (index.css). */}
           <p className={`mt-3 max-w-xs text-center text-xs leading-5 text-on-surface-variant/75 ${libraryEmpty ? "" : "import-formats"}`}>
             {dependencyFreeSummary()} open straight away.
             <br />
-            {externalConverterCount()} more formats need the optional converter.
+            {/* A phone has no converter; its own Kindle reader takes most MOBI and AZW3 books. */}
+            {isAndroid() ? "Kindle books (MOBI, AZW3) open too." : `${externalConverterCount()} more formats need the optional converter.`}
           </p>
         </button>
       </section>
@@ -629,7 +640,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
               </span>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="library-toolbar flex flex-wrap items-center gap-3">
             {/* Every highlight in the library, by book, without opening one. */}
             {!libraryEmpty && (
               <button
@@ -731,7 +742,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
             <div className="paper-surface flex h-full flex-col items-center justify-center gap-2 rounded-xl p-8 text-center text-on-surface-variant">
               <p className="text-lg font-semibold text-on-surface">Your books will appear here</p>
               <p className="max-w-md text-sm">
-                {dependencyFreeSummary()} open straight away; drop one anywhere on this page.
+                {touch ? `${dependencyFreeSummary()} open straight away.` : `${dependencyFreeSummary()} open straight away; drop one anywhere on this page.`}
               </p>
             </div>
           ) : filteredBooks.length === 0 ? (
@@ -757,6 +768,18 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
           )}
         </div>
       </section>
+
+      {/* Upright on a phone: a round + over the tab bar, in reach of the thumb wherever the shelf is scrolled to. */}
+      <button
+        type="button"
+        className="add-books-fab"
+        onClick={handleImport}
+        disabled={importing}
+        aria-label="Add books"
+        title="Add books"
+      >
+        <UiIcon name="plus" size={26} strokeWidth={2.2} />
+      </button>
     </div>
   );
 };

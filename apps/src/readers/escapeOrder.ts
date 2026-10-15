@@ -23,6 +23,8 @@ export type EscapeLayer =
   | "lookup"
   /** A footnote shown in place. */
   | "note"
+  /** A highlight's card opened beside the page, or "Where was I?". */
+  | "card"
   | "search"
   /** The type panel, the notes and the ··· menu, under their toolbar buttons. */
   | "typePanel"
@@ -49,6 +51,7 @@ export const ESCAPE_ORDER: EscapeLayer[] = [
   "character",
   "lookup",
   "note",
+  "card",
   "search",
   "typePanel",
   "notesPanel",

@@ -5,7 +5,8 @@ import { AUTO_SCROLL_YIELD_BACK_MS, AUTO_SCROLL_YIELD_AHEAD_MS, autoScrollLinesP
 import { screenStep } from "../smartScroll";
 import { keyTurns } from "../pageTurn";
 import { actionFor, keyBelongsToControl } from "../readerKeys";
-import { escapeTarget } from "../escapeOrder";
+import { escapeTarget, type EscapeLayer } from "../escapeOrder";
+import { useBackFallback } from "../../platform/back";
 import { closeAmbiencePopover } from "../../ambience";
 import { SMART_NUDGE } from "./constants";
 import type { Later, WithSession } from "./scope";
@@ -243,8 +244,9 @@ export const useReaderKeys = (reader: WithSession & Later<"people">) => {
   /** The progress bar's handle, for Escape (see ProgressBar's holdRef). */
   const seekHoldRef = useRef<{ held: () => boolean; letGo: () => void } | null>(null);
 
-  escapeRef.current = (event) => {
-    const layer = escapeTarget({
+  /** What is open, nearest first (readers/escapeOrder.ts): what one press of Escape, or of Android's Back, closes. */
+  const nearestLayer = () =>
+    escapeTarget({
       picture: picture !== null,
       shortcuts: shortcutsOpen,
       startDialog: pendingReadingMode !== null,
@@ -253,6 +255,7 @@ export const useReaderKeys = (reader: WithSession & Later<"people">) => {
       character: reader.people.cardOpen,
       lookup: lookUpShowing,
       note: note !== null,
+      card: (reader.notesFocus !== null && !bookmarkPanelOpen) || reader.recap !== null,
       search: searchOpen,
       typePanel: fontPanelOpen,
       notesPanel: bookmarkPanelOpen,
@@ -263,6 +266,9 @@ export const useReaderKeys = (reader: WithSession & Later<"people">) => {
       speedRead: readingMode === "speed",
       playing: (readingMode === "standard" && autoScrollActive) || (readingMode === "smart" && !readingPaused)
     });
+
+  escapeRef.current = (event) => {
+    const layer = nearestLayer();
     if (layer === "exit") {
       // The same held key that just closed something does not go on to leave the book.
       if (event.repeat && escapeClosedLayerRef.current) {
@@ -277,6 +283,11 @@ export const useReaderKeys = (reader: WithSession & Later<"people">) => {
       return;
     }
     escapeClosedLayerRef.current = true;
+    closeLayer(layer);
+  };
+
+  /** Closes one thing that is open. */
+  const closeLayer = (layer: EscapeLayer) => {
     switch (layer) {
       case "picture":
         setPicture(null);
@@ -303,6 +314,10 @@ export const useReaderKeys = (reader: WithSession & Later<"people">) => {
         break;
       case "note":
         closeNoteRef.current();
+        break;
+      case "card":
+        reader.setNotesFocus(null);
+        reader.setRecap(null);
         break;
       case "search":
         closeSearch();
@@ -347,6 +362,19 @@ export const useReaderKeys = (reader: WithSession & Later<"people">) => {
         break;
     }
   };
+
+  // Android's Back (platform/back.ts) walks the same order, one thing a
+  // press; with nothing left open it leaves the book, through the exit guard
+  // (under focus lock, Pip and her "Hold to leave").
+  useBackFallback(() => {
+    const layer = nearestLayer();
+    if (layer === "exit") {
+      exitGuard.back();
+    } else {
+      closeLayer(layer);
+    }
+    return true;
+  });
 
   return { readerKeyHandlerRef, seekHoldRef };
 };

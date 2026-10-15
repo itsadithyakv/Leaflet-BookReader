@@ -9,6 +9,9 @@ import { PipSprite } from "../PipSprite";
 import { PixelImage } from "../pip/PixelImage";
 import { renderFinish, renderItem } from "../../pip/home.js";
 import { at, errorText, nameOf } from "./format";
+import { SheetHandle } from "../ui/SheetHandle";
+import { useBackClose } from "../../hooks/useBackClose";
+import { isTouchInput } from "../../platform/device";
 
 /** The kinds of thing that can be given: ones Pip keeps. Food and seed packets are used up, floors and plots are a reader's own. */
 const KINDS: Partial<Record<ShopItem["kind"], string>> = {
@@ -68,13 +71,17 @@ export const GiftDialog = ({ to, onClose, showToast }: Props) => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const field = useRef<HTMLInputElement | null>(null);
+  useBackClose(true, () => (busy ? false : onClose()));
 
   useEffect(() => {
     // The balance on the Social page may never have been asked for.
     if (!overview) {
       void load();
     }
-    field.current?.focus();
+    // Not on a phone: the keyboard would come up over the presents before anything was asked of it.
+    if (!isTouchInput()) {
+      field.current?.focus();
+    }
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -112,8 +119,9 @@ export const GiftDialog = ({ to, onClose, showToast }: Props) => {
   };
 
   return (
-    <div className="fixed inset-0 z-[85] flex items-center justify-center bg-black/55 px-4 py-6" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div className="modal-surface flex max-h-full w-full max-w-lg flex-col p-6" role="dialog" aria-modal="true" aria-labelledby="gift-dialog-title">
+    <div className="sheet-backdrop fixed inset-0 z-[85] flex items-center justify-center bg-black/55 px-4 py-6" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <div className="modal-surface sheet-panel sheet-inner-scroll flex max-h-full w-full max-w-lg flex-col p-6" role="dialog" aria-modal="true" aria-labelledby="gift-dialog-title">
+        <SheetHandle onClose={onClose} />
         <h2 id="gift-dialog-title" className="page-title text-2xl">
           A present for {nameOf(to)}
         </h2>

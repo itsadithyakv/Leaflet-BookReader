@@ -1,5 +1,8 @@
 import { UiIcon, type UiIconName } from "./UiIcon";
 import { FEATURES } from "../constants/features";
+import { SheetHandle } from "./ui/SheetHandle";
+import { useBackClose } from "../hooks/useBackClose";
+import { isAndroid } from "../platform/device";
 
 type WelcomeModalProps = {
   open: boolean;
@@ -34,11 +37,16 @@ export const WelcomeModal = ({
   onConnectDrive,
   onDismiss
 }: WelcomeModalProps) => {
+  // Back is "Start reading", the choice that keeps everything as it is.
+  useBackClose(open, onDismiss);
   if (!open) {
     return null;
   }
+  // The phone has no sync folder (it would do nothing) and no Drive sign-in yet (docs/android.md).
+  const android = isAndroid();
+  const here = android ? "this phone" : "this computer";
 
-  const folderChoice: Choice[] = FEATURES.multiDeviceSync
+  const folderChoice: Choice[] = FEATURES.multiDeviceSync && !android
     ? [
         {
           icon: "sync",
@@ -53,7 +61,7 @@ export const WelcomeModal = ({
   // Drive is offered only when this build can sign in to it. A first choice
   // that answers "not in this build" is a bad first impression; without it,
   // the screen is a plain welcome with one button, and backup waits in Settings.
-  const driveChoice: Choice[] = driveAvailable
+  const driveChoice: Choice[] = driveAvailable && !android
     ? [
         {
           icon: "cloud",
@@ -71,9 +79,9 @@ export const WelcomeModal = ({
     ...folderChoice,
     {
       icon: "book-open",
-      title: alone ? "Your books, on this computer" : "Just this device",
+      title: alone ? `Your books, on ${here}` : "Just this device",
       body: alone
-        ? "Everything stays on this computer and works offline. Backup can be turned on any time in Settings."
+        ? `Everything stays on ${here} and works offline. Backup can be turned on any time in Settings.`
         : "Read offline with nothing else involved. You can turn on backup later without losing anything.",
       action: "Start reading",
       onSelect: onDismiss,
@@ -82,8 +90,9 @@ export const WelcomeModal = ({
   ];
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 px-4">
-      <div className="modal-surface dialog-fit w-full max-w-lg rounded-2xl p-6">
+    <div className="sheet-backdrop fixed inset-0 z-[60] flex items-center justify-center bg-black/60 px-4">
+      <div className="modal-surface dialog-fit sheet-panel w-full max-w-lg rounded-2xl p-6">
+        <SheetHandle onClose={onDismiss} />
         <div className="text-center">
           <h2 className="page-title text-2xl text-on-surface">Welcome to Leaflet</h2>
           <p className="mt-2 text-sm text-on-surface-variant">
@@ -122,7 +131,7 @@ export const WelcomeModal = ({
 
         <p className="mt-4 text-center text-[11px] text-on-surface-variant">
           You can change this any time in Settings.
-          {!FEATURES.multiDeviceSync && " The Leaflet mobile app is coming soon."}
+          {!FEATURES.multiDeviceSync && !android && " The Leaflet mobile app is coming soon."}
         </p>
       </div>
     </div>

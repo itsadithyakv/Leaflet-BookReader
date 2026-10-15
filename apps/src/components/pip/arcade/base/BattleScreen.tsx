@@ -24,6 +24,8 @@ import { gameArt, type GameArt } from "../gameArt";
 import { drawAt, fitPicture, screenRatio, type Fit } from "./fit";
 import { ART_FPS, inLight } from "./scene";
 import { Sprite } from "./Sprite";
+import { useTouchInput } from "../../../../platform/device";
+import { useBackLayer } from "../../../../platform/back";
 
 const KIND_NAMES: Record<UnitKind, string> = { sprout: "Scout", slinger: "Slinger", mole: "Mole", hero: "Hero" };
 /** Each kind's picture, for its button. */
@@ -458,6 +460,8 @@ export const BattleScreen = (props: Props) => {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [fit, setFit] = useState<Fit>({ css: 2, backing: 2, crisp: true });
+  // A finger has no number keys to choose who goes down: the keys' numbers are not shown, or said.
+  const touch = useTouchInput();
   const watched = props.mode === "watch" ? props : null;
   // One battle for the raid or the night this screen was opened on: kept as it is, not worked out again.
   const [battle] = useState(() => (raid ? new Battle(raid.setup, (raid as { structures?: Structure[] }).structures) : new Battle(watched!.setup, watched!.structures)));
@@ -469,6 +473,13 @@ export const BattleScreen = (props: Props) => {
   const kindRef = useRef(kind);
   kindRef.current = kind;
   const [hud, setHud] = useState({ left: battle.left, hero: battle.heroLeft, seconds: battle.setup.seconds ?? RAID_SECONDS, stars: 0, destroyed: 0, over: false });
+  // Android's Back: a raid under way is ended as it stands (its "End the raid"), a watched night is left; once it is
+  // over, Back goes back to the camp.
+  useBackLayer(!hud.over, () => {
+    if (raid) battle.over = true;
+    else onClose();
+  });
+  useBackLayer(hud.over, onClose);
   const cursor = useRef<{ x: number; y: number } | null>(null);
   const refused = useRef<{ x: number; y: number; at: number } | null>(null);
   const done = useRef(false);
@@ -737,7 +748,9 @@ export const BattleScreen = (props: Props) => {
           style={{ width: FIELD_W * fit.css, height: FIELD_H * fit.css }}
           aria-label={
             raid
-              ? `${raid.plan.name}. Click or tap outside the camp to put a scout down. Arrows move a marker, Space puts one down, 1 to 4 choose who.`
+              ? touch
+                ? `${raid.plan.name}. Tap outside the camp to put a scout down.`
+                : `${raid.plan.name}. Click or tap outside the camp to put a scout down. Arrows move a marker, Space puts one down, 1 to 4 choose who.`
               : `${watched!.title}: your camp, and tonight's magpies coming at it.`
           }
         />
@@ -773,7 +786,7 @@ export const BattleScreen = (props: Props) => {
                 aria-pressed={entry === kind}
                 aria-label={entry === "hero" ? (hero?.name ?? "Hero") : KIND_NAMES[entry]}
                 disabled={entry === "hero" ? !hud.hero : hud.left === 0}
-                title={`${entry === "hero" ? `${hero?.name ?? "Hero"}. ${hero?.does ?? ""}` : `${KIND_NAMES[entry]}. ${KIND_SAYS[entry]}`} (${index + 1})`}
+                title={`${entry === "hero" ? `${hero?.name ?? "Hero"}. ${hero?.does ?? ""}` : `${KIND_NAMES[entry]}. ${KIND_SAYS[entry]}`}${touch ? "" : ` (${index + 1})`}`}
                 onClick={() => {
                   setKind(entry);
                   playSound("click");
@@ -781,7 +794,7 @@ export const BattleScreen = (props: Props) => {
                 }}
               >
                 {entry === "hero" ? <Sprite name="hero" variant={hero?.id ?? 0} box={30} /> : <Sprite name={KIND_ART[entry]} box={26} />}
-                <span className="pip-base-tile-level">{index + 1}</span>
+                {!touch && <span className="pip-base-tile-level">{index + 1}</span>}
               </button>
             ))}
           </span>

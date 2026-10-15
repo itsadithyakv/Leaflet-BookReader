@@ -7,6 +7,8 @@ import { FEATURES } from "../../constants/features";
 import { useAccountStore } from "../../store/accountStore";
 import { composePost } from "../community/postStore";
 import "./share.css";
+import { SheetHandle } from "../ui/SheetHandle";
+import { useBackClose } from "../../hooks/useBackClose";
 
 const STYLE_KEY = "leaflet.share.quoteStyle";
 
@@ -41,6 +43,7 @@ export const QuoteCardDialog = () => {
     }
   }, [quote, style]);
 
+  useBackClose(quote !== null, closeQuoteCard);
   useEffect(() => {
     if (!quote) {
       return undefined;
@@ -99,14 +102,15 @@ export const QuoteCardDialog = () => {
 
   return (
     <div
-      className="fixed inset-0 z-[95] flex items-center justify-center bg-black/55 px-4"
+      className="sheet-backdrop fixed inset-0 z-[95] flex items-center justify-center bg-black/55 px-4"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
           closeQuoteCard();
         }
       }}
     >
-      <div ref={panel} role="dialog" aria-modal="true" aria-label="Share this passage as a picture" className="modal-surface confirm-pop share-dialog rounded-2xl p-5">
+      <div ref={panel} role="dialog" aria-modal="true" aria-label="Share this passage as a picture" className="modal-surface confirm-pop share-dialog sheet-panel rounded-2xl p-5">
+        <SheetHandle onClose={closeQuoteCard} />
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-xs uppercase tracking-widest text-on-surface-variant">Share as a picture</h2>
           <button type="button" className="share-close" onClick={closeQuoteCard} aria-label="Close" title="Close (Esc)">

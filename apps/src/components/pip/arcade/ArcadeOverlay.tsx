@@ -14,6 +14,7 @@ import { TipLayer } from "./base/Tips";
 import { dueCount } from "./quiz/boxes";
 import { MyWords } from "./quiz/MyWords";
 import { WordQuiz } from "./quiz/WordQuiz";
+import { useBackLayer } from "../../../platform/back";
 
 const BEST_KEY = "leaflet.pip.arcadeBest";
 /** Best scores kept in the browser too, for the dev server (no Rust there). */
@@ -72,6 +73,11 @@ const acornTerms = (game: GameId) =>
 export const ArcadeOverlay = ({ initial = null, skin, outfit, best, mood, moodToday, moodCap, onFinished, onClose }: ArcadeOverlayProps) => {
   const [chosen, setChosen] = useState<GameInfo | null>(() => GAMES.find((game) => game.id === initial) ?? null);
   const [page, setPage] = useState<ArcadePage | null>(initial === "quiz" || initial === "words" ? initial : null);
+  // Android's Back: out of the arcade; from the quiz or the words, back to the games first. (A game's own Back is
+  // GameScreen's: it pauses, then leaves the game. Keyed on the game rather than always open: a game opened with the
+  // arcade mounts with it, and a child's layer, pushed first, would go under its parent's.)
+  useBackLayer(!chosen && page === null, onClose);
+  useBackLayer(!chosen && page !== null, () => setPage(null));
   // The camp is read as the arcade opens: the games pay into it.
   useEffect(() => {
     void useBaseStore.getState().open();

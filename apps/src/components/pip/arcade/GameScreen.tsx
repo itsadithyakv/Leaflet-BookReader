@@ -3,6 +3,8 @@ import { GAME_H, GAME_W, type Controls, type Game, type GameId, type GameInfo } 
 import { gameArt } from "./gameArt";
 import { pixelsPerArtPixel } from "../PixelImage";
 import { UiIcon } from "../../UiIcon";
+import { useTouchInput } from "../../../platform/device";
+import { useBackLayer } from "../../../platform/back";
 
 /**
  * One of the arcade's games on its screen: the canvas in its old television
@@ -10,6 +12,10 @@ import { UiIcon } from "../../UiIcon";
  * games themselves are plain simulations (`games.ts`); the overlay picks one
  * and says what a finished run gave.
  */
+
+/** A finger on Dash: this long still (or moving up) is a jump; moved down this far before then, a duck. */
+const SWIPE_WAIT_MS = 70;
+const SWIPE_DOWN_PX = 14;
 
 /** Simulation ticks per second: fixed, so a run plays the same at any frame rate. */
 const TICK = 1 / 120;
@@ -51,6 +57,7 @@ export const GameScreen = ({ game, skin, outfit, best, onFinished, onExit, betwe
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [per, setPer] = useState(2);
+  const touch = useTouchInput();
   const [hud, setHud] = useState({ score: 0, lives: null as number | null, over: false, ready: true });
   const [paused, setPaused] = useState(false);
   const [result, setResult] = useState<({ score: number; newBest: boolean } & Winnings) | null>(null);
@@ -60,6 +67,11 @@ export const GameScreen = ({ game, skin, outfit, best, onFinished, onExit, betwe
   const [run, setRun] = useState(0);
   // The running game's pause switch, for the Pause key (a pointer has no Esc).
   const pauseSwitch = useRef<(() => void) | null>(null);
+  // Android's Back does what Escape does: a run on is paused; paused, waiting or over, the game is left. (Two layers,
+  // so that the one Back leaves after a pause is there for the next.)
+  const runOn = !hud.ready && !hud.over && !paused;
+  useBackLayer(runOn, () => pauseSwitch.current?.());
+  useBackLayer(!runOn, onExit);
   // What Pip wears, by what it is and not by which list holds it. Recording a
   // finished game brings back a fresh overview, and with it a new list of the
   // same clothes: a game that began again for every new list began again the
@@ -217,6 +229,16 @@ export const GameScreen = ({ game, skin, outfit, best, onFinished, onExit, betwe
       const rect = canvas.getBoundingClientRect();
       return ((event.clientX - rect.left) / rect.width) * GAME_W;
     };
+    // A finger on Dash has no down arrow: a swipe down is the duck. So a finger's press waits a moment to be sure it is
+    // a jump (it moved up, or stayed), and moved down first it ducks instead, for as long as the finger stays down.
+    let swipe: { id: number; y: number; timer: number } | null = null;
+    let ducking: number | null = null;
+    const jumpNow = (held: boolean) => {
+      if (swipe) window.clearTimeout(swipe.timer);
+      swipe = null;
+      controls.pressed += 1;
+      controls.up = held;
+    };
     const pointerDown = (event: PointerEvent) => {
       event.preventDefault();
       if (isPaused) {
@@ -227,15 +249,56 @@ export const GameScreen = ({ game, skin, outfit, best, onFinished, onExit, betwe
         if (mayPlayAgain()) restart();
         return;
       }
+      if (game.id === "dash" && event.pointerType !== "mouse") {
+        try {
+          canvas.setPointerCapture(event.pointerId);
+        } catch {
+          // (A press made in a test: the canvas's own listeners still hear it.)
+        }
+        if (swipe) window.clearTimeout(swipe.timer);
+        const id = event.pointerId;
+        swipe = { id, y: event.clientY, timer: window.setTimeout(() => swipe?.id === id && jumpNow(true), SWIPE_WAIT_MS) };
+        start();
+        return;
+      }
       controls.pressed += 1;
       controls.up = true;
       controls.pointerX = game.id === "catch" ? toGame(event) : null;
       start();
     };
     const pointerMove = (event: PointerEvent) => {
+      if (swipe && swipe.id === event.pointerId) {
+        const dy = event.clientY - swipe.y;
+        if (dy >= SWIPE_DOWN_PX) {
+          window.clearTimeout(swipe.timer);
+          swipe = null;
+          ducking = event.pointerId;
+          controls.down = true;
+        } else if (dy <= -SWIPE_DOWN_PX) {
+          jumpNow(true);
+        }
+        return;
+      }
       if (game.id === "catch" && (event.buttons > 0 || event.pointerType === "mouse")) controls.pointerX = toGame(event);
     };
-    const pointerUp = () => {
+    const pointerUp = (event: PointerEvent) => {
+      // A tap quicker than the wait: a jump all the same, a short one.
+      if (swipe && swipe.id === event.pointerId) jumpNow(false);
+      if (ducking === event.pointerId) {
+        ducking = null;
+        controls.down = false;
+      }
+      controls.up = false;
+    };
+    const pointerCancel = (event: PointerEvent) => {
+      if (swipe && swipe.id === event.pointerId) {
+        window.clearTimeout(swipe.timer);
+        swipe = null;
+      }
+      if (ducking === event.pointerId) {
+        ducking = null;
+        controls.down = false;
+      }
       controls.up = false;
     };
     const pointerLeave = () => {
@@ -261,6 +324,7 @@ export const GameScreen = ({ game, skin, outfit, best, onFinished, onExit, betwe
     canvas.addEventListener("pointerdown", pointerDown);
     canvas.addEventListener("pointermove", pointerMove);
     canvas.addEventListener("pointerup", pointerUp);
+    canvas.addEventListener("pointercancel", pointerCancel);
     canvas.addEventListener("pointerleave", pointerLeave);
     // Running from the start, so the waiting screen breathes; a closed or
     // paused game stops the loop entirely.
@@ -278,7 +342,9 @@ export const GameScreen = ({ game, skin, outfit, best, onFinished, onExit, betwe
       canvas.removeEventListener("pointerdown", pointerDown);
       canvas.removeEventListener("pointermove", pointerMove);
       canvas.removeEventListener("pointerup", pointerUp);
+      canvas.removeEventListener("pointercancel", pointerCancel);
       canvas.removeEventListener("pointerleave", pointerLeave);
+      if (swipe) window.clearTimeout(swipe.timer);
     };
     // `best` is read once per run for the "new best" note.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -287,12 +353,15 @@ export const GameScreen = ({ game, skin, outfit, best, onFinished, onExit, betwe
   const ratio = window.devicePixelRatio || 1;
   const cssW = (GAME_W * per) / ratio;
   const cssH = (GAME_H * per) / ratio;
+  // Under a finger there is no Space to press, and no Esc: the words say tap, and Pause is the key above the screen.
+  const press = touch ? "Tap" : "Press Space or tap";
+  const controlsSaid = touch ? game.touchControls : game.controls;
   const status = paused
-    ? "Paused. Press Space or tap to carry on."
+    ? `Paused. ${press} to carry on.`
     : hud.over
-      ? `Game over. Score ${hud.score}.${again ? " Press Space or tap to play again." : ""}`
+      ? `Game over. Score ${hud.score}.${again ? ` ${press} to play again.` : ""}`
       : hud.ready
-        ? `Press Space or tap to start. ${game.controls}`
+        ? `${press} to start. ${controlsSaid}`
         : null;
 
   return (
@@ -323,11 +392,11 @@ export const GameScreen = ({ game, skin, outfit, best, onFinished, onExit, betwe
               tabIndex={0}
               className="pip-sprite pip-arcade-canvas"
               style={{ width: cssW, height: cssH }}
-              aria-label={`${game.name}. ${game.controls}`}
+              aria-label={`${game.name}. ${controlsSaid}`}
             />
             {status && (
               <div className={`pip-arcade-status${hud.over && !paused ? " is-over" : ""}`} aria-hidden="true">
-                <p>{hud.ready && !paused ? "Press Space or tap to start" : paused ? "Paused" : "Game over"}</p>
+                <p>{hud.ready && !paused ? `${press} to start` : paused ? "Paused" : "Game over"}</p>
                 {hud.over && !paused && (
                   <p className="pip-arcade-final">
                     Score {hud.score}
@@ -350,7 +419,7 @@ export const GameScreen = ({ game, skin, outfit, best, onFinished, onExit, betwe
                     )}
                   </p>
                 )}
-                {hud.over && !paused && <p className={`pip-arcade-again${again ? " is-on" : ""}`}>Space or tap to play again</p>}
+                {hud.over && !paused && <p className={`pip-arcade-again${again ? " is-on" : ""}`}>{touch ? "Tap to play again" : "Space or tap to play again"}</p>}
               </div>
             )}
           </div>
@@ -365,7 +434,7 @@ export const GameScreen = ({ game, skin, outfit, best, onFinished, onExit, betwe
       {(hud.ready || hud.over) && between}
       <p className="mt-2 flex items-center gap-1.5 text-xs text-on-surface-variant">
         <UiIcon name="hand" size={13} />
-        {game.controls} Esc pauses.
+        {touch ? controlsSaid : `${game.controls} Esc pauses.`}
       </p>
     </div>
   );

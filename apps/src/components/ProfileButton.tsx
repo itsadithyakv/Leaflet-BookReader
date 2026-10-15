@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type MutableRefObject, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import type { DriveSyncStatus, SyncStatus } from "@shared/sync/types";
 import { FEATURES } from "../constants/features";
 import { useAccountStore } from "../store/accountStore";
@@ -8,6 +9,10 @@ import { relativeTime } from "./community/format";
 import { PipSprite } from "./PipSprite";
 import { UiIcon } from "./UiIcon";
 import { useAccountDialog } from "./account/AccountDialog";
+import { SheetHandle } from "./ui/SheetHandle";
+import { useBackClose } from "../hooks/useBackClose";
+import { useSheetLayout } from "../hooks/useMediaQuery";
+import { isAndroid } from "../platform/device";
 
 /**
  * How backup is set up. There is no paid tier: backup runs against the
@@ -91,6 +96,12 @@ export const ProfileButton = ({
   const signedIn = accountsOn && accountStatus.signedIn;
   const account = signedIn ? accountStatus.account : null;
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  // On a phone the panel is a sheet from the bottom, drawn at the top of the page:
+  // inside the header (which slides away on scroll) a fixed sheet would hang from it.
+  const sheet = useSheetLayout();
+  const android = isAndroid();
+  useBackClose(open, onClose);
 
   useEffect(() => {
     if (accountsOn) {
@@ -104,9 +115,12 @@ export const ProfileButton = ({
       return;
     }
     const onPointer = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) {
-        onClose();
+      const target = event.target as Node;
+      // A sheet's backdrop takes its own tap, so that tap does not land on the page beneath.
+      if (sheet || rootRef.current?.contains(target) || panelRef.current?.contains(target)) {
+        return;
       }
+      onClose();
     };
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -119,14 +133,15 @@ export const ProfileButton = ({
       window.removeEventListener("mousedown", onPointer, true);
       window.removeEventListener("keydown", onKey);
     };
-  }, [open, onClose]);
+  }, [open, onClose, sheet]);
 
   const line = backupLine(mode, status, sync);
   const who = account ? account.displayName || account.email : accountsOn ? "Not signed in" : "Your Pip";
   const failed = status === "error";
   const syncing = status === "syncing";
   const tooltip = `${account ? `${who}. ` : ""}${line}${sync.booksPending > 0 ? `. ${sync.booksPending} to download` : ""}`;
-  const showFolderSync = FEATURES.multiDeviceSync || Boolean(sync.folderPath);
+  // Not on the phone: a sync folder there would do nothing.
+  const showFolderSync = !android && (FEATURES.multiDeviceSync || Boolean(sync.folderPath));
   const section = "border-t border-outline-variant/40 pt-3 mt-3";
   const small = "tactile-button px-3 py-1.5 text-[10px] uppercase tracking-[0.16em] disabled:cursor-not-allowed disabled:opacity-60";
 
@@ -147,11 +162,7 @@ export const ProfileButton = ({
       </button>
 
       {open && (
-        <div
-          role="dialog"
-          aria-label="Your profile and backup"
-          className="anchored-panel modal-surface absolute right-0 mt-3 w-80 rounded-xl p-4 text-xs text-on-surface"
-        >
+        <PanelFrame sheet={sheet} panelRef={panelRef} onClose={onClose}>
           {/* Who */}
           <div className="flex items-center gap-3">
             <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-primary/10">
@@ -165,7 +176,7 @@ export const ProfileButton = ({
                 <p className="truncate text-[11px] text-on-surface-variant">{account.displayName ? account.email : "Leaflet account"}</p>
               ) : (
                 <p className="text-[11px] text-on-surface-variant">
-                  {accountsOn ? "An account puts you on the leaderboard." : "Everything works on this computer."}
+                  {accountsOn ? "An account puts you on the leaderboard." : `Everything works on ${android ? "this phone" : "this computer"}.`}
                 </p>
               )}
             </div>
@@ -221,7 +232,21 @@ export const ProfileButton = ({
                 {sync.booksPending} {sync.booksPending === 1 ? "book" : "books"} will download when opened.
               </p>
             )}
-            {!sync.driveAvailable ? (
+            {android && !sync.driveConnected ? (
+              // Drive's sign-in needs an Android client first (docs/android.md); the account carries the shelf meanwhile.
+              mode === "off" && (
+                <p className="mt-2 flex items-center gap-1.5 text-[11px] text-on-surface-variant">
+                  Google Drive
+                  <span
+                    className="inline-flex cursor-help text-on-surface-variant"
+                    title="Backing up to Google Drive comes to the phone later. A Leaflet account keeps your shelf and streak meanwhile."
+                    aria-label="Backing up to Google Drive comes to the phone later."
+                  >
+                    <UiIcon name="info" size={13} />
+                  </span>
+                </p>
+              )
+            ) : !sync.driveAvailable ? (
               mode === "off" && (
                 <p className="mt-2 text-[11px] leading-relaxed text-on-surface-variant">
                   Drive backup isn't available in this build.
@@ -289,8 +314,50 @@ export const ProfileButton = ({
               </button>
             )}
           </div>
-        </div>
+        </PanelFrame>
       )}
     </div>
+  );
+};
+
+/** Hanging from the button, or, on a phone, a sheet over a dimmed page that a tap outside closes. */
+const PanelFrame = ({
+  sheet,
+  panelRef,
+  onClose,
+  children
+}: {
+  sheet: boolean;
+  panelRef: MutableRefObject<HTMLDivElement | null>;
+  onClose: () => void;
+  children: ReactNode;
+}) => {
+  if (!sheet) {
+    return (
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-label="Your profile and backup"
+        className="anchored-panel modal-surface absolute right-0 mt-3 w-80 rounded-xl p-4 text-xs text-on-surface"
+      >
+        {children}
+      </div>
+    );
+  }
+  return createPortal(
+    <div
+      className="sheet-backdrop fixed inset-0 z-[80] flex items-end justify-center bg-black/45"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div ref={panelRef} role="dialog" aria-label="Your profile and backup" className="modal-surface sheet-panel w-full p-4 text-xs text-on-surface">
+        <SheetHandle onClose={onClose} />
+        {children}
+      </div>
+    </div>,
+    document.body
   );
 };

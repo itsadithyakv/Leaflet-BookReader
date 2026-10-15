@@ -2379,6 +2379,108 @@
           "markdownDescription": "Denies the save command without any pre-configured scope."
         },
         {
+          "description": "Default plugin permissions.\n#### This default permission set includes:\n\n- `allow-keep-awake`\n- `allow-lock-rotation`\n- `allow-hide-system-bars`\n- `allow-pick-files`\n- `allow-share-target`\n- `allow-share-file`\n- `allow-share-text`\n- `allow-open-store`",
+          "type": "string",
+          "const": "leaflet-device:default",
+          "markdownDescription": "Default plugin permissions.\n#### This default permission set includes:\n\n- `allow-keep-awake`\n- `allow-lock-rotation`\n- `allow-hide-system-bars`\n- `allow-pick-files`\n- `allow-share-target`\n- `allow-share-file`\n- `allow-share-text`\n- `allow-open-store`"
+        },
+        {
+          "description": "Enables the hide_system_bars command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:allow-hide-system-bars",
+          "markdownDescription": "Enables the hide_system_bars command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the keep_awake command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:allow-keep-awake",
+          "markdownDescription": "Enables the keep_awake command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the lock_rotation command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:allow-lock-rotation",
+          "markdownDescription": "Enables the lock_rotation command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_store command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:allow-open-store",
+          "markdownDescription": "Enables the open_store command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the pick_files command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:allow-pick-files",
+          "markdownDescription": "Enables the pick_files command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the share_file command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:allow-share-file",
+          "markdownDescription": "Enables the share_file command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the share_target command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:allow-share-target",
+          "markdownDescription": "Enables the share_target command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the share_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:allow-share-text",
+          "markdownDescription": "Enables the share_text command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the hide_system_bars command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:deny-hide-system-bars",
+          "markdownDescription": "Denies the hide_system_bars command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the keep_awake command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:deny-keep-awake",
+          "markdownDescription": "Denies the keep_awake command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the lock_rotation command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:deny-lock-rotation",
+          "markdownDescription": "Denies the lock_rotation command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_store command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:deny-open-store",
+          "markdownDescription": "Denies the open_store command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the pick_files command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:deny-pick-files",
+          "markdownDescription": "Denies the pick_files command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the share_file command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:deny-share-file",
+          "markdownDescription": "Denies the share_file command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the share_target command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:deny-share-target",
+          "markdownDescription": "Denies the share_target command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the share_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:deny-share-text",
+          "markdownDescription": "Denies the share_text command without any pre-configured scope."
+        },
+        {
           "description": "This permission set allows opening `mailto:`, `tel:`, `https://` and `http://` urls using their default application\nas well as reveal file in directories using default file explorer\n#### This default permission set includes:\n\n- `allow-open-url`\n- `allow-reveal-item-in-dir`\n- `allow-default-urls`",
           "type": "string",
           "const": "opener:default",

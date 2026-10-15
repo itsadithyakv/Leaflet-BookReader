@@ -3,6 +3,7 @@ import type { Plant } from "../../pip/shop";
 import { UiIcon } from "../UiIcon";
 import { placeNear, type Rect } from "./layout";
 import { shortfall } from "./shopParts";
+import { useBackLayer } from "../../platform/back";
 
 type PacketPickerProps = {
   plot: number;
@@ -25,6 +26,8 @@ type PacketPickerProps = {
  * one is here; those out of reach say how many seeds they want.
  */
 export const PacketPicker = ({ plot, packets, balance, priceOf, anchor, art, onPick, onClose }: PacketPickerProps) => {
+  // Android's Back closes it, as Escape does.
+  useBackLayer(true, onClose);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [place, setPlace] = useState<{ left: number; top: number; side: "above" | "below"; tailAt: number } | null>(null);
   const anchorRef = useRef(anchor);

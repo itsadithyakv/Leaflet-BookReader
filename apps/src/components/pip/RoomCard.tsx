@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { UiIcon } from "../UiIcon";
 import type { Rect } from "./layout";
 import { placeCard, type CardPlace } from "./cardPlace";
+import { useBackLayer } from "../../platform/back";
 
 type RoomCardProps = {
   title: string;
@@ -29,6 +30,8 @@ type RoomCardProps = {
  * not to cover its thing (cardPlace.ts).
  */
 export const RoomCard = ({ title, note, size = "narrow", anchor, owner, onClose, children }: RoomCardProps) => {
+  // Android's Back closes it, as Escape does.
+  useBackLayer(true, onClose);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
   const [place, setPlace] = useState<CardPlace | null>(null);

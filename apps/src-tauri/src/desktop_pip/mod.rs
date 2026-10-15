@@ -21,22 +21,31 @@ pub mod runtime;
 mod win;
 
 /// Her window's label (and the name of her page, `desktop-pip.html`).
+#[cfg(any(windows, test))]
 pub const WINDOW_LABEL: &str = "desktop-pip";
 /// The sprite, in art pixels.
+#[cfg(any(windows, test))]
 pub const SPRITE: i32 = 32;
 /// The largest her window gets (the menu open above her), in art pixels.
+#[cfg(any(windows, test))]
 pub const WIDEST: i32 = 88;
+#[cfg(any(windows, test))]
 pub const TALLEST: i32 = 84;
 /// Art pixels a second: the pace of the Pip that walks about inside the app
 /// (46 CSS pixels a second at 64).
+#[cfg(any(windows, test))]
 pub const WALK_SPEED: f64 = 23.0;
 /// Art pixels a second squared, as in the app (2600 CSS pixels at 64).
+#[cfg(any(windows, test))]
 pub const GRAVITY: f64 = 1300.0;
 /// The fastest a throw counts for, art pixels a second.
+#[cfg(any(windows, test))]
 pub const MAX_THROW: f64 = 1400.0;
 /// Landing faster than this she bounces once...
+#[cfg(any(windows, test))]
 pub const BOUNCE_SPEED: f64 = 260.0;
 /// ...and faster than this she lands flat (the page plays the splat).
+#[cfg(any(windows, test))]
 pub const SPLAT_SPEED: f64 = 650.0;
 /// A sign stays up this long once it has been seen on screen.
 pub const SIGN_HOLD_MINUTES: i64 = 5;
@@ -46,12 +55,14 @@ pub const SIGN_HOLD_MINUTES: i64 = 5;
 /// The same sum as `pixelScale(64)` in `components/PipSprite.tsx`, which draws
 /// her: two device pixels per art pixel at 100%, and never a fraction, so the
 /// window Rust sizes is exactly the canvas the page draws.
+#[cfg(any(windows, test))]
 pub fn per_pixel(scale: f64) -> i32 {
   let scale = if scale.is_finite() { scale } else { 1.0 };
   ((2.0 * scale + 1e-6).floor() as i32).max(1)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[cfg(any(windows, test))]
 pub struct Rect {
   pub left: i32,
   pub top: i32,
@@ -59,6 +70,7 @@ pub struct Rect {
   pub bottom: i32
 }
 
+#[cfg(any(windows, test))]
 impl Rect {
   pub fn new(left: i32, top: i32, right: i32, bottom: i32) -> Self {
     Self { left, top, right, bottom }
@@ -84,6 +96,7 @@ impl Rect {
 /// Which side of the screen the taskbar takes, read off the work area.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg(any(windows, test))]
 pub enum TaskbarEdge {
   Bottom,
   Top,
@@ -96,6 +109,7 @@ pub enum TaskbarEdge {
 /// The side with the most taken off it. Not `SHAppBarMessage`: that only knows
 /// the primary monitor's taskbar, and the work area is what a window has to
 /// keep to on every monitor anyway.
+#[cfg(any(windows, test))]
 pub fn taskbar_edge(monitor: Rect, work: Rect) -> TaskbarEdge {
   let gaps = [
     (TaskbarEdge::Bottom, monitor.bottom - work.bottom),
@@ -114,6 +128,7 @@ pub fn taskbar_edge(monitor: Rect, work: Rect) -> TaskbarEdge {
 /// Where she can be on one monitor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg(any(windows, test))]
 pub struct Stage {
   pub monitor: Rect,
   /// The line her feet stand on: the bottom of the work area.
@@ -132,6 +147,7 @@ pub struct Stage {
 /// the bottom of the screen, and a side taskbar shortens her walk instead.
 /// She keeps half her widest window from each end, so the menu and the sign
 /// open centred on her without hanging off the monitor (or onto the next).
+#[cfg(any(windows, test))]
 pub fn stage_for(monitor: Rect, work: Rect, scale: f64) -> Stage {
   let per_pixel = per_pixel(scale);
   // Mid-change (a monitor unplugged, the taskbar moving) Windows can report
@@ -147,11 +163,13 @@ pub fn stage_for(monitor: Rect, work: Rect, scale: f64) -> Stage {
 }
 
 /// Where a newcomer starts: four fifths of the way along, near the clock.
+#[cfg(any(windows, test))]
 pub fn start_x(stage: &Stage) -> f64 {
   f64::from(stage.min_x) + f64::from(stage.max_x - stage.min_x) * 0.8
 }
 
 /// The corner she keeps to when motion is reduced.
+#[cfg(any(windows, test))]
 pub fn corner_x(stage: &Stage) -> f64 {
   f64::from(stage.max_x)
 }
@@ -159,11 +177,13 @@ pub fn corner_x(stage: &Stage) -> f64 {
 /// What her window holds, in art pixels: herself, or herself under a sign or
 /// a menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(any(windows, test))]
 pub struct Frame {
   pub width: i32,
   pub height: i32
 }
 
+#[cfg(any(windows, test))]
 impl Frame {
   pub const PLAIN: Frame = Frame { width: SPRITE, height: SPRITE };
 
@@ -176,6 +196,7 @@ impl Frame {
 }
 
 /// Her window for feet at (x, y): centred on her, growing upward.
+#[cfg(any(windows, test))]
 pub fn frame_rect(feet_x: i32, feet_y: i32, frame: Frame, per_pixel: i32) -> Rect {
   let width = frame.width * per_pixel;
   let height = frame.height * per_pixel;
@@ -185,6 +206,7 @@ pub fn frame_rect(feet_x: i32, feet_y: i32, frame: Frame, per_pixel: i32) -> Rec
 
 /// One step of a walk toward `target`: where her feet are after `dt` seconds,
 /// and whether she has arrived. The target is kept on her stage.
+#[cfg(any(windows, test))]
 pub fn walk_step(x: f64, target: f64, dt: f64, stage: &Stage) -> (f64, bool) {
   let target = target.clamp(f64::from(stage.min_x), f64::from(stage.max_x));
   let reach = WALK_SPEED * f64::from(stage.per_pixel) * dt.max(0.0);
@@ -202,6 +224,7 @@ pub fn walk_step(x: f64, target: f64, dt: f64, stage: &Stage) -> (f64, bool) {
 /// room that way (the end of her edge: the side of the screen, or where the
 /// next monitor begins) she turns round first. Off her stage, she heads back
 /// onto it.
+#[cfg(any(windows, test))]
 pub fn stroll_target(x: f64, facing: i8, stage: &Stage, roll: f64, turn: bool) -> (f64, i8) {
   let unit = f64::from(SPRITE * stage.per_pixel);
   let (min, max) = (f64::from(stage.min_x), f64::from(stage.max_x));
@@ -223,6 +246,7 @@ pub fn stroll_target(x: f64, facing: i8, stage: &Stage, roll: f64, turn: bool) -
 
 /// Her feet in the air: where, and how fast, in physical pixels.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg(any(windows, test))]
 pub struct Body {
   pub x: f64,
   pub y: f64,
@@ -231,6 +255,7 @@ pub struct Body {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg(any(windows, test))]
 pub struct Fall {
   pub body: Body,
   pub landed: bool,
@@ -243,6 +268,7 @@ pub struct Fall {
 /// A moment of a fall: gravity, the sides and top of her monitor (she bounces
 /// off them, so a throw never leaves the screen she was let go on), and the
 /// ground, off which she bounces once if she came down fast.
+#[cfg(any(windows, test))]
 pub fn fall_step(body: Body, dt: f64, stage: &Stage, bounced: bool) -> Fall {
   let scale = f64::from(stage.per_pixel);
   let half = f64::from(SPRITE / 2) * scale;
@@ -277,6 +303,7 @@ pub fn fall_step(body: Body, dt: f64, stage: &Stage, bounced: bool) -> Fall {
 
 /// How fast the hand was going as it let go: over the last tenth of a second
 /// of `samples` (seconds, x, y), capped at the fastest throw.
+#[cfg(any(windows, test))]
 pub fn release_velocity(samples: &[(f64, f64, f64)], now: f64, per_pixel: i32) -> (f64, f64) {
   let recent: Vec<&(f64, f64, f64)> = samples.iter().filter(|sample| now - sample.0 <= 0.11).collect();
   let (Some(first), Some(last)) = (recent.first(), recent.last()) else {
@@ -291,13 +318,16 @@ pub fn release_velocity(samples: &[(f64, f64, f64)], now: f64, per_pixel: i32) -
 }
 
 /// Slower than this at letting go (art pixels a second) is a drop, not a throw.
+#[cfg(any(windows, test))]
 pub const TOSS_MIN: f64 = 220.0;
 
+#[cfg(any(windows, test))]
 pub fn is_toss(velocity: (f64, f64), per_pixel: i32) -> bool {
   velocity.0.hypot(velocity.1) >= TOSS_MIN * f64::from(per_pixel)
 }
 
 /// Whether a window fills a monitor edge to edge.
+#[cfg(any(windows, test))]
 pub fn covers(window: Rect, monitor: Rect) -> bool {
   monitor.within(&window)
 }
@@ -308,6 +338,7 @@ pub fn covers(window: Rect, monitor: Rect) -> bool {
 /// A maximised window is not one, though with an auto-hiding taskbar it
 /// covers the monitor just the same: it keeps its title bar style, and a
 /// full-screen window has none. The desktop itself covers the monitor too.
+#[cfg(any(windows, test))]
 pub fn full_screen(window: Rect, captioned: bool, shell: bool, monitor: Rect) -> bool {
   !shell && !captioned && covers(window, monitor)
 }
@@ -315,6 +346,7 @@ pub fn full_screen(window: Rect, captioned: bool, shell: bool, monitor: Rect) ->
 /// Where the pointer is from her: which side, whether above her head, and
 /// whether it is close enough for her to look at all.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[cfg(any(windows, test))]
 pub struct Glance {
   pub side: i8,
   pub up: bool,
@@ -323,6 +355,7 @@ pub struct Glance {
 
 /// She notices the pointer within about three of her widths either side, from
 /// well above her head to the taskbar under her feet.
+#[cfg(any(windows, test))]
 pub fn glance(feet_x: i32, ground: i32, cursor: (i32, i32), per_pixel: i32) -> Glance {
   let dx = cursor.0 - feet_x;
   let dy = ground - cursor.1;

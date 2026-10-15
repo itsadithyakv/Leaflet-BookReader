@@ -13,6 +13,9 @@
 //!   other for the leaderboard.
 
 pub mod cloud;
+/// Sign-in kept in a private file where there is no keychain (Android).
+#[cfg(any(target_os = "android", test))]
+pub mod device_secret;
 pub mod drive;
 pub mod folder;
 pub mod large;

@@ -3,6 +3,7 @@ import { useLibraryStore } from "../../../store/libraryStore";
 import type { Album } from "../../../pip/expedition";
 import { AlbumPanel } from "./AlbumPanel";
 import { useAlbum } from "./useAlbum";
+import { useBackLayer } from "../../../platform/back";
 
 type AlbumDialogProps = {
   onClose: () => void;
@@ -20,6 +21,8 @@ const FOCUSABLE = 'button:not([disabled]):not([tabindex="-1"]), [href], [tabinde
  * click outside shuts it, and focus goes back to whatever opened it.
  */
 export const AlbumDialog = ({ onClose, album, initial }: AlbumDialogProps) => {
+  // Android's Back closes it, as Escape does.
+  useBackLayer(true, onClose);
   const own = useAlbum();
   const books = useLibraryStore((state) => state.books);
   const bookTitles = useMemo(() => new Map(books.map((book) => [book.id, book.title])), [books]);

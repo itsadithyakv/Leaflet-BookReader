@@ -1,3 +1,4 @@
+import { isTouchInput } from "../platform/device";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { isDoubleClickedWord, lookUpOnDoubleClick } from "./words/wordPrefs";
 import { orderHighlights } from "../components/highlights/highlightsView";
@@ -38,6 +39,8 @@ type Options = {
   onShowAll: (id: string) => void;
   /** A highlight's words as a picture to share. */
   onShare?: (text: string) => void;
+  /** The phone's share sheet for selected words (Android). */
+  onShareText?: (text: string) => void;
   toast: (message: string) => void;
 };
 
@@ -53,7 +56,7 @@ type Options = {
  * The words are pdf.js's text layer, which is the page reader's own document
  * (not a frame, as a book's chapters are), so the selection is the window's.
  */
-export const usePdfNotes = ({ bookId, enabled, stageRef, labelOf, language, progress, onSearch, onShowAll, onShare, toast }: Options) => {
+export const usePdfNotes = ({ bookId, enabled, stageRef, labelOf, language, progress, onSearch, onShowAll, onShare, onShareText, toast }: Options) => {
   // (The page reader keeps its bookmarks under the key a book's old bookmarks were moved from: not to be moved.)
   const annotations = useAnnotations(bookId, { moveOldBookmarks: false, enabled });
   const { highlights } = annotations;
@@ -126,7 +129,7 @@ export const usePdfNotes = ({ bookId, enabled, stageRef, labelOf, language, prog
       const around = range.getBoundingClientRect();
       setPicked({ page, rects, text, box: { left: around.left, right: around.right, top: around.top, bottom: around.bottom } });
       // A word double-clicked is looked up without the button being pressed.
-      if (lookUpOnDoubleClick() && isDoubleClickedWord(text, doubleClickedAt)) {
+      if (!isTouchInput() && lookUpOnDoubleClick() && isDoubleClickedWord(text, doubleClickedAt)) {
         doubleClickedAt = 0;
         setLookUp(true);
       }
@@ -143,12 +146,21 @@ export const usePdfNotes = ({ bookId, enabled, stageRef, labelOf, language, prog
         soon();
       }
     };
-    // A selection let go by a click elsewhere takes its bar with it.
+    // A selection let go by a click elsewhere takes its bar with it. By
+    // finger it is also read as it changes, a moment after the handles stop:
+    // Android's selection handles need not send a pointerup.
+    let settle = 0;
     const onChange = () => {
       const selection = document.getSelection();
       if (!selection || selection.isCollapsed) {
+        window.clearTimeout(settle);
         setPicked(null);
         setLookUp(false);
+        return;
+      }
+      if (isTouchInput()) {
+        window.clearTimeout(settle);
+        settle = window.setTimeout(read, 350);
       }
     };
     document.addEventListener("pointerup", soon);
@@ -156,6 +168,7 @@ export const usePdfNotes = ({ bookId, enabled, stageRef, labelOf, language, prog
     document.addEventListener("keyup", onKeyUp);
     document.addEventListener("selectionchange", onChange);
     return () => {
+      window.clearTimeout(settle);
       document.removeEventListener("dblclick", onDouble);
       document.removeEventListener("pointerup", soon);
       document.removeEventListener("keyup", onKeyUp);
@@ -328,6 +341,7 @@ export const usePdfNotes = ({ bookId, enabled, stageRef, labelOf, language, prog
             clearSelection();
           }}
           onDismiss={clearSelection}
+          onShare={onShareText ? () => onShareText(picked.text) : undefined}
           onLookUp={() => setLookUp((open) => !open)}
           lookUpOpen={lookUp}
           onSearchBook={
@@ -380,6 +394,8 @@ export const usePdfNotes = ({ bookId, enabled, stageRef, labelOf, language, prog
     busy: Boolean(picked) || Boolean(openedItem),
     opened: openedItem?.id ?? null,
     close: () => setOpened(null),
+    /** Lets the selected words go (Android's Back). */
+    clearSelection,
     update: annotations.update,
     remove: annotations.remove,
     copy

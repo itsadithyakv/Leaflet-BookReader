@@ -104,6 +104,20 @@ pub fn reading_stats(state: State<'_, AppState>) -> Result<db::ReadingStats, Str
 /// backend is the only reliable path.
 #[tauri::command]
 pub fn drive_auth_start(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+  // Google's answer comes back to a listener on this device's loopback, which
+  // a phone's browser cannot reach in the app; it needs an Android OAuth
+  // client and a link back into Leaflet first (docs/mobile.md, "Signing in").
+  #[cfg(target_os = "android")]
+  {
+    let _ = (app, state);
+    Err("Google Drive is not available on the phone yet.".to_string())
+  }
+  #[cfg(not(target_os = "android"))]
+  drive_auth_start_desktop(app, state)
+}
+
+#[cfg(not(target_os = "android"))]
+fn drive_auth_start_desktop(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<String, String> {
   let credentials = {
     let db = state.db.guard();
     drive::load_credentials(&db).ok_or_else(|| {

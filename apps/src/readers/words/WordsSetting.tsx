@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { useLookUpOnDoubleClick, useWordsSwitch } from "./wordPrefs";
+import { useTouchInput } from "../../platform/device";
 
 type WordsSettingProps = {
   /** The settings page's own switch drawing. */
@@ -13,6 +14,8 @@ type WordsSettingProps = {
 export const WordsSetting = ({ renderToggle }: WordsSettingProps) => {
   const [on, setOn] = useWordsSwitch();
   const [onDouble, setOnDouble] = useLookUpOnDoubleClick();
+  // A finger selects by a press and hold, and Look up leads the selection's bar: no double-click to set.
+  const touch = useTouchInput();
   return (
     <div className="paper-surface rounded-xl p-5">
       <p className="text-xs uppercase tracking-widest text-on-surface-variant">Looking words up</p>
@@ -33,6 +36,7 @@ export const WordsSetting = ({ renderToggle }: WordsSettingProps) => {
         </span>
         {renderToggle(on)}
       </button>
+      {!touch && (
       <button
         type="button"
         role="switch"
@@ -44,6 +48,7 @@ export const WordsSetting = ({ renderToggle }: WordsSettingProps) => {
         <span className="text-left">Look a word up when I double-click it</span>
         {renderToggle(onDouble)}
       </button>
+      )}
     </div>
   );
 };

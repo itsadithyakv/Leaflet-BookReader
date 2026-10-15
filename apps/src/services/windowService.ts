@@ -1,5 +1,6 @@
 import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { android, onAndroid } from "../platform/android";
 
 /**
  * The app window: fullscreen for focus lock, and whether Leaflet is the app in
@@ -8,6 +9,11 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
  */
 export const setAppFullscreen = async (on: boolean) => {
   try {
+    // On a phone, full screen is the status and gesture bars hidden (a swipe from the edge shows them).
+    if (onAndroid()) {
+      await android.hideSystemBars(on);
+      return;
+    }
     if (isTauri()) {
       const win = getCurrentWindow();
       if ((await win.isFullscreen()) !== on) {

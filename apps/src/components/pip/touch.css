@@ -1,0 +1,386 @@
+/* Pip on a phone or a tablet: a finger for a pointer, and a screen that turns.
+   (docs/android.md, "Pip's house" and "The arcade and the Hollow".) What is
+   here only adds to index.css's Pip regions: finger-sized targets, a tap for
+   whatever a hover revealed, and the Hollow laid out upright and sideways.
+   Selectors carry one class more than the rules they follow, so the order the
+   two files load in does not matter. */
+
+/* ---- Pip on the pages ---------------------------------------------------------------
+   A hold on her is her menu (PipWorld), not the system's: no callout, no
+   text picked up. */
+.pip-world .pip-body,
+.pip-world .pip-body * {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* ---- Finger-sized targets ------------------------------------------------------------ */
+@media (hover: none) and (pointer: coarse) {
+  /* The Hollow's round keys (sounds, how it works, the postcard, close). */
+  .pip-arcade .pip-base-round {
+    width: var(--touch-target, 44px);
+    height: var(--touch-target, 44px);
+  }
+
+  /* In Pip's word in the camp: the next thing (a link to where), and "No tips". */
+  .pip-camp-say-bubble .pip-camp-say-go,
+  .pip-camp-say-bubble .pip-camp-tip-off {
+    min-height: var(--touch-target, 44px);
+  }
+
+  .pip-camp-say-bubble .pip-camp-tip-off {
+    padding-inline: 8px;
+  }
+
+  /* The tab at the picture's edge to the meadow. */
+  .pip-base.is-stage[data-mode="stage"] > .pip-base-edge.pip-base-edge {
+    width: var(--touch-target, 44px);
+  }
+
+  /* Pip's keys (the shop's, her confirm's, the album's Close) and the shop's tabs. */
+  .pip-key.pip-key,
+  .pip-key.pip-key-small,
+  .pip-tab.pip-tab {
+    min-height: var(--touch-target, 44px);
+  }
+
+  /* A finger needs Pip herself a little larger than she is drawn small (her press is hers, over the room's things). */
+  .pip-house-pip-button.pip-house-pip-button {
+    position: relative;
+  }
+
+  .pip-house-pip-button.pip-house-pip-button::before {
+    position: absolute;
+    inset: -6px;
+    content: "";
+  }
+
+  /* The HUD's help key keeps its 44 px in a crowded row. */
+  .pip-hud-help.pip-hud-help {
+    min-width: var(--touch-target, 44px);
+    flex: none;
+  }
+
+  /* The cross that lets go of a pinned goal. */
+  .pip-goal .pip-goal-unpin,
+  .pip-goal-unpin.pip-goal-unpin {
+    width: var(--touch-target, 44px);
+    min-height: var(--touch-target, 44px);
+  }
+
+  /* A slot's pin in decorating: the dot stays 28 px drawn, the press is a thumb's. */
+  .pip-slot-pin .pip-slot-dot::after {
+    position: absolute;
+    inset: -8px;
+    border-radius: 999px;
+    content: "";
+  }
+
+  /* A rule in a few words, with the rest in a tip: a tap shows the tip, and it stays until the next tap. */
+  .pip-hint.pip-hint[data-tip]:focus::after {
+    display: block;
+  }
+
+  .pip-hint.pip-hint[data-tip]:focus {
+    outline: none;
+  }
+
+  /* What a quick purchase was, and Undo: it fits a 360 px phone. */
+  .pip-undo.pip-undo {
+    min-width: min(260px, calc(100vw - 24px));
+  }
+
+  /* The lift's list of floors: never wider than the room it hangs in. */
+  .pip-lift-menu.pip-lift-menu {
+    min-width: min(14rem, calc(100vw - 96px));
+  }
+}
+
+/* A sticky hover on a phone (the last thing tapped keeps it) must not show a
+   slot's outline that is not the chosen one. */
+@media (hover: none) {
+  .pip-slot-pin.pip-slot-pin:hover:not([aria-pressed="true"]):not(:focus-visible) .pip-slot-area {
+    opacity: 0;
+  }
+}
+
+/* ---- The Hollow, upright ---------------------------------------------------------------
+   A narrow page (an upright phone): what the camp has and the keys along the
+   top, the camp across under them, then Pip's word, then the row of keys.
+   (Laid out as the head's parts in one wrapping row, so each finds its line.) */
+@media (max-width: 640px) {
+  .pip-arcade .pip-base.is-stage[data-mode="stack"] {
+    flex-flow: row wrap;
+    align-items: center;
+    gap: 10px 6px;
+    padding: 4px 4px 24px;
+  }
+
+  .pip-arcade .pip-base.is-stage[data-mode="stack"] > * {
+    order: 9;
+    min-width: 0;
+    flex: 1 1 100%;
+  }
+
+  .pip-arcade .pip-base.is-stage[data-mode="stack"] > .pip-base-head,
+  .pip-arcade .pip-base.is-stage[data-mode="stack"] > .pip-base-head > .pip-base-head-left,
+  .pip-arcade .pip-base.is-stage[data-mode="stack"] > .pip-base-head > .pip-base-head-right {
+    display: contents;
+  }
+
+  .pip-arcade .pip-base.is-stage[data-mode="stack"] .pip-base-stats {
+    order: 1;
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    margin: 0 auto 0 0;
+  }
+
+  .pip-arcade .pip-base.is-stage[data-mode="stack"] .pip-base-head-right > * {
+    order: 2;
+    flex: none;
+  }
+
+  /* A line of its own for the ways out (the arcade, inside), shared between them. */
+  .pip-arcade .pip-base.is-stage[data-mode="stack"]::before {
+    order: 3;
+    flex: 1 1 100%;
+    height: 0;
+    content: "";
+  }
+
+  .pip-arcade .pip-base.is-stage[data-mode="stack"] .pip-base-head-right > .tactile-button {
+    order: 4;
+    flex: 1 1 0;
+    justify-content: center;
+  }
+
+  .pip-arcade .pip-base.is-stage[data-mode="stack"] > .pip-base-scene {
+    order: 5;
+  }
+
+  .pip-arcade .pip-base.is-stage[data-mode="stack"] .pip-base-head-left > .pip-camp-say {
+    order: 6;
+    flex: 1 1 100%;
+    max-width: none;
+  }
+
+  .pip-arcade .pip-base.is-stage[data-mode="stack"] > .pip-base-under {
+    order: 7;
+  }
+
+  .pip-arcade .pip-base.is-stage[data-mode="stack"] > .pip-base-side {
+    order: 8;
+  }
+}
+
+/* ---- The Hollow, sideways ---------------------------------------------------------------
+   A phone on its side: the camp fills the height (BaseScreen sizes it, `side`),
+   and what the camp has, the keys, Pip's word and the row of keys go down its
+   right; whatever is opened follows them there. */
+.pip-arcade .pip-base.is-stage[data-mode="side"] {
+  display: grid;
+  align-items: start;
+  gap: 8px 12px;
+  grid-template-areas:
+    "scene stats"
+    "scene keys"
+    "scene say"
+    "scene under"
+    "scene panel";
+  grid-template-columns: auto minmax(204px, 1fr);
+  grid-template-rows: auto auto auto auto 1fr;
+  padding: 0 0 8px;
+}
+
+.pip-arcade .pip-base.is-stage[data-mode="side"] > .pip-base-head,
+.pip-arcade .pip-base.is-stage[data-mode="side"] > .pip-base-head > .pip-base-head-left {
+  display: contents;
+}
+
+.pip-arcade .pip-base.is-stage[data-mode="side"] .pip-base-stats {
+  grid-area: stats;
+  flex-wrap: wrap;
+  margin: 0;
+}
+
+.pip-arcade .pip-base.is-stage[data-mode="side"] > .pip-base-head > .pip-base-head-right {
+  grid-area: keys;
+  justify-content: flex-start;
+  margin: 0;
+}
+
+.pip-arcade .pip-base.is-stage[data-mode="side"] .pip-base-head-left > .pip-camp-say {
+  grid-area: say;
+  max-width: none;
+}
+
+.pip-arcade .pip-base.is-stage[data-mode="side"] > .pip-base-scene {
+  position: sticky;
+  top: 0;
+  grid-area: scene;
+}
+
+.pip-arcade .pip-base.is-stage[data-mode="side"] > .pip-base-under {
+  grid-area: under;
+  min-width: 0;
+}
+
+.pip-arcade .pip-base.is-stage[data-mode="side"] > .pip-base-side {
+  grid-area: panel;
+  min-width: 0;
+}
+
+/* The raids and the journal are pages of their own: the camp steps aside for them, as it does upright. */
+.pip-arcade .pip-base.is-stage[data-mode="side"]:not([data-tab="camp"]) > .pip-base-scene {
+  display: none;
+}
+
+.pip-arcade .pip-base.is-stage[data-mode="side"] > .pip-base-sheet {
+  grid-column: 1 / -1;
+  grid-row: 5;
+  min-width: 0;
+}
+
+.pip-arcade .pip-base.is-stage[data-mode="side"]:not([data-tab="camp"]) {
+  grid-template-columns: 0 minmax(0, 1fr);
+}
+
+/* Beside the camp the column is narrow: Pip's face beside her word is smaller (BaseScreen), so her word has the width. */
+.pip-arcade .pip-base.is-stage[data-mode="side"] .pip-camp-say {
+  gap: 8px;
+}
+
+/* ---- Pip's house, sideways ---------------------------------------------------------------
+   A phone on its side: the room takes the height, and the rail of keys goes
+   down its right in a block of two (four while playing, for her eleven
+   ways), each key its icon over a small name; the HUD stays across the top. useRoomFrame reads
+   --rail-beside and keeps no room under the scene for the rail. */
+@media (orientation: landscape) and (max-height: 520px) {
+  .pip-house-page .pip-house {
+    --rail-beside: 1;
+    display: grid;
+    align-items: start;
+    gap: 6px 10px;
+    grid-template-areas:
+      "hud hud"
+      "body rail";
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .pip-house-page .pip-house > .pip-hud-top {
+    grid-area: hud;
+    width: auto;
+    margin-left: 0;
+    flex-wrap: nowrap;
+  }
+
+  .pip-house-page .pip-house > .pip-house-body {
+    grid-area: body;
+    min-width: 0;
+  }
+
+  .pip-house-page .pip-house > .pip-rail {
+    grid-area: rail;
+    align-self: stretch;
+    width: auto;
+    margin: 0;
+    padding: 0;
+    container-type: normal;
+  }
+
+  .pip-house-page .pip-house > .pip-rail > .pip-rail-belt {
+    display: grid;
+    height: 100%;
+    align-content: center;
+    gap: 6px;
+    grid-template-columns: repeat(2, minmax(52px, auto));
+    padding: 10px 10px 12px;
+  }
+
+  .pip-house-page .pip-house > .pip-rail > .pip-rail-belt.pip-rail-playing {
+    grid-template-columns: repeat(4, minmax(48px, auto));
+  }
+
+  /* What the rail is doing (decorating, playing): its title across the top of the block, the hint left to the tooltips. */
+  .pip-house-page .pip-house > .pip-rail .pip-rail-mode {
+    display: flex;
+    grid-column: 1 / -1;
+  }
+
+  .pip-house-page .pip-house > .pip-rail .pip-rail-mode-hint {
+    display: none;
+  }
+
+  .pip-house-page .pip-house > .pip-rail .pip-rail-key {
+    min-width: 52px;
+    min-height: 44px;
+    padding: 3px 4px;
+  }
+
+  .pip-house-page .pip-house > .pip-rail .pip-rail-playing .pip-rail-key {
+    min-width: 48px;
+  }
+}
+
+/* ---- Sheets and dialogs clear of the system's bars ---------------------------------------
+   The shop, the album and the arcade stand inside the status and gesture bars
+   (platform/device.css), and on a phone the shop's heading keeps to its name
+   (no paragraph over the shelves, where the shelves need the height). */
+.pip-shop-backdrop.pip-shop-backdrop,
+.pip-arcade-backdrop.pip-arcade-backdrop {
+  padding-top: max(16px, calc(var(--inset-top, 0px) + 8px));
+  padding-right: max(16px, calc(var(--inset-right, 0px) + 8px));
+  padding-bottom: max(16px, calc(var(--inset-bottom, 0px) + 8px));
+  padding-left: max(16px, calc(var(--inset-left, 0px) + 8px));
+}
+
+@media (max-height: 620px) {
+  .pip-shop-backdrop.pip-shop-backdrop,
+  .pip-arcade-backdrop.pip-arcade-backdrop {
+    padding-top: max(8px, var(--inset-top, 0px));
+    padding-bottom: max(8px, var(--inset-bottom, 0px));
+  }
+
+  .pip-shop-backdrop .pip-shop {
+    height: calc(100dvh - max(8px, var(--inset-top, 0px)) - max(8px, var(--inset-bottom, 0px)));
+  }
+}
+
+@media (max-width: 560px) {
+  .pip-shop-backdrop .pip-shop-head p {
+    display: none;
+  }
+}
+
+/* A drawer that is a sheet at the foot of a short window (a phone on its side, under 768 px): above the gesture bar. */
+@media (max-width: 767px) and (max-height: 520px) {
+  .pip-house .pip-drawer.pip-drawer {
+    bottom: calc(8px + var(--inset-bottom, 0px));
+  }
+}
+
+/* A game's word over its screen (game over, what it paid) wraps inside a phone's small screen, not off it. */
+@media (max-width: 560px) {
+  .pip-crt .pip-arcade-status {
+    padding-inline: 8px;
+  }
+
+  .pip-crt .pip-arcade-status > p {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .pip-crt .pip-arcade-status > p.text-xs {
+    font-size: 10px;
+    line-height: 1.25;
+  }
+}
+
+/* Out in the Hollow her house is behind it, hidden but laid out: nothing of it (the lift beside a room measured
+   while hidden) may widen the page under a phone's finger. */
+.pip-house-page.pip-house-page[data-place="hollow"] {
+  overflow-x: clip;
+}

@@ -215,7 +215,9 @@ fn forget_if_unauthorised(db_mutex: &std::sync::Mutex<Database>, status: reqwest
 // ---- account ----------------------------------------------------------------
 
 /// Where the session token lives: the OS keychain, never SQLite or the webview.
+#[cfg(not(target_os = "android"))]
 const KEYRING_SERVICE: &str = "app.leaflet.account";
+#[cfg(not(target_os = "android"))]
 const KEYRING_USER: &str = "session-token";
 /// The server a stored session belongs to. A token is meaningless elsewhere.
 pub const ACCOUNT_API_SETTING: &str = "account_api_base";
@@ -230,19 +232,54 @@ static SESSION_CACHE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(N
 
 fn store_session_token(token: &str) -> Result<()> {
   *SESSION_CACHE.lock().map_err(|_| anyhow!("session store is busy"))? = Some(token.to_string());
+  keep_session_token(token)
+}
+
+/// The keychain on a computer; Leaflet's private storage on a phone, where
+/// `keyring` keeps nothing past the process (`device_secret`).
+#[cfg(not(target_os = "android"))]
+fn keep_session_token(token: &str) -> Result<()> {
   keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
     .and_then(|entry| entry.set_password(token))
     .map_err(|e| anyhow!("Could not save your sign-in to the system keychain: {e}"))
+}
+
+#[cfg(target_os = "android")]
+fn keep_session_token(token: &str) -> Result<()> {
+  crate::sync::device_secret::store(crate::sync::device_secret::SESSION, token)
+    .map_err(|e| anyhow!("Could not save your sign-in on this phone: {e}"))
+}
+
+#[cfg(not(target_os = "android"))]
+fn kept_session_token() -> Option<String> {
+  keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
+    .and_then(|entry| entry.get_password())
+    .ok()
+    .filter(|token| !token.is_empty())
+}
+
+#[cfg(target_os = "android")]
+fn kept_session_token() -> Option<String> {
+  crate::sync::device_secret::load(crate::sync::device_secret::SESSION)
+}
+
+#[cfg(not(target_os = "android"))]
+fn forget_session_token() {
+  if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER) {
+    let _ = entry.delete_credential();
+  }
+}
+
+#[cfg(target_os = "android")]
+fn forget_session_token() {
+  crate::sync::device_secret::clear(crate::sync::device_secret::SESSION);
 }
 
 fn load_session_token() -> Option<String> {
   if let Some(token) = SESSION_CACHE.lock().ok().and_then(|cache| cache.clone()) {
     return Some(token);
   }
-  let token = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
-    .and_then(|entry| entry.get_password())
-    .ok()
-    .filter(|token| !token.is_empty())?;
+  let token = kept_session_token()?;
   if let Ok(mut cache) = SESSION_CACHE.lock() {
     *cache = Some(token.clone());
   }
@@ -254,9 +291,7 @@ pub fn clear_session(db: &Database) {
   if let Ok(mut cache) = SESSION_CACHE.lock() {
     *cache = None;
   }
-  if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER) {
-    let _ = entry.delete_credential();
-  }
+  forget_session_token();
   let _ = db.set_setting(ACCOUNT_API_SETTING, "");
   let _ = db.set_setting(ACCOUNT_CACHE_SETTING, "");
   // Whether the profile is shared belongs to the account that was signed in.

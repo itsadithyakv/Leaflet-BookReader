@@ -4,6 +4,9 @@ import { autoScrollLinesPerMinute } from "../autoScroll";
 import { ReaderAmbienceRow } from "../../ambience";
 import { SMART_NUDGE } from "./constants";
 import type { ReaderScope } from "./scope";
+import { ReaderMoreRows } from "./ReaderTouchRows";
+import { isPhoneShape } from "../touchLayout";
+import { useTouchInput } from "../../platform/device";
 
 /** The ··· menu: layout, page colour, auto-scroll, Smart Read and SpeedRead, and the rest. */
 export const ReaderMoreMenu = ({ reader }: { reader: ReaderScope }) => {
@@ -11,55 +14,73 @@ export const ReaderMoreMenu = ({ reader }: { reader: ReaderScope }) => {
     autoScrollActive, autoScrollSpeed, chooseLayout, displayMode, layout, morePanelCloseRef, morePanelOpen,
     morePanelRef, nudgeSmartPace, paged, readerDotEnabled, readerTheme, readingMode, readingPaused, requestReadingMode,
     setAutoScrollActive, setDisplayMode, setMorePanelOpen, setReaderDotEnabled, setReadingPaused, setShortcutsOpen,
-    setSpeedReadWpm, setTourOpen, smartAtPicture, smartWaiting, smartWpm, speedReadWpm, toggleSmartPlay, toggleTheme,
+    setSpeedReadWpm, setTourOpen, shape, smartAtPicture, smartWaiting, smartWpm, speedReadWpm, toggleSmartPlay, toggleTheme,
     tuneAutoScroll
   } = reader;
+  // A phone: the toolbar's other buttons are rows here, and the layout and the finish are in the Aa sheet.
+  const phone = isPhoneShape(shape);
+  const touch = useTouchInput();
+  // The menu opens as the mouse reaches it, and shuts a moment after it
+  // leaves. Only a mouse: a finger's tap sends the enter just before the
+  // click, and the click then shut what the enter had opened.
+  const holdOpen = () => {
+    if (morePanelCloseRef.current) {
+      window.clearTimeout(morePanelCloseRef.current);
+      morePanelCloseRef.current = null;
+    }
+  };
+  const closeSoon = () => {
+    holdOpen();
+    morePanelCloseRef.current = window.setTimeout(() => {
+      setMorePanelOpen(false);
+    }, 180);
+  };
   return (
     <div
       className="relative"
       ref={morePanelRef}
-      onMouseEnter={() => {
-        if (morePanelCloseRef.current) {
-          window.clearTimeout(morePanelCloseRef.current);
-          morePanelCloseRef.current = null;
+      onPointerEnter={(event) => {
+        if (event.pointerType === "mouse") {
+          holdOpen();
+          setMorePanelOpen(true);
         }
-        setMorePanelOpen(true);
       }}
-      onMouseLeave={() => {
-        if (morePanelCloseRef.current) {
-          window.clearTimeout(morePanelCloseRef.current);
+      onPointerLeave={(event) => {
+        if (event.pointerType === "mouse") {
+          closeSoon();
         }
-        morePanelCloseRef.current = window.setTimeout(() => {
-          setMorePanelOpen(false);
-        }, 180);
       }}
     >
       <button
         className="reader-icon transition-colors reader-hover-accent"
         type="button"
         onClick={() => setMorePanelOpen((prev) => !prev)}
+        aria-label="More: reading mode, Dotty and the rest"
+        aria-haspopup="dialog"
+        aria-expanded={morePanelOpen}
+        title="More"
       >
         <span className="material-symbols-outlined">more_horiz</span>
       </button>
       {morePanelOpen && (
         <div
           className="reader-menu absolute right-0 mt-3 w-72 rounded-xl border p-4 text-xs shadow-2xl reader-panel reader-border"
-          onMouseEnter={() => {
-            if (morePanelCloseRef.current) {
-              window.clearTimeout(morePanelCloseRef.current);
-              morePanelCloseRef.current = null;
+          role="dialog"
+          aria-label="More"
+          onPointerEnter={(event) => {
+            if (event.pointerType === "mouse") {
+              holdOpen();
             }
           }}
-          onMouseLeave={() => {
-            if (morePanelCloseRef.current) {
-              window.clearTimeout(morePanelCloseRef.current);
+          onPointerLeave={(event) => {
+            if (event.pointerType === "mouse") {
+              closeSoon();
             }
-            morePanelCloseRef.current = window.setTimeout(() => {
-              setMorePanelOpen(false);
-            }, 180);
           }}
         >
-          <div className="text-xs uppercase tracking-widest reader-muted">Reader</div>
+          {phone && <ReaderMoreRows reader={reader} close={() => setMorePanelOpen(false)} />}
+          {!phone && <div className="text-xs uppercase tracking-widest reader-muted">Reader</div>}
+          {!phone && (
           <div className="mt-3">
             <span className="text-[10px] uppercase tracking-widest reader-muted">Layout</span>
             <div className="mt-1.5 grid grid-cols-2 gap-1" role="radiogroup" aria-label="Layout">
@@ -77,6 +98,8 @@ export const ReaderMoreMenu = ({ reader }: { reader: ReaderScope }) => {
               ))}
             </div>
           </div>
+          )}
+          {!phone && (
           <label className="mt-3 block">
             <span className="text-[10px] uppercase tracking-widest reader-muted">Page finish</span>
             <select
@@ -91,6 +114,7 @@ export const ReaderMoreMenu = ({ reader }: { reader: ReaderScope }) => {
               <option value="app">Match app theme</option>
             </select>
           </label>
+          )}
           <label className="mt-3 block">
             <span className="text-[10px] uppercase tracking-widest reader-muted">Reading mode</span>
             <select
@@ -115,7 +139,7 @@ export const ReaderMoreMenu = ({ reader }: { reader: ReaderScope }) => {
             <span>App theme</span>
             <span className="reader-toggle" data-on={readerTheme === "light"} />
           </button>
-          <ReaderAmbienceRow onOpen={() => setMorePanelOpen(false)} />
+          {!phone && <ReaderAmbienceRow onOpen={() => setMorePanelOpen(false)} />}
           {readingMode === "standard" && !paged && (
           <div className="mt-3 rounded-lg border px-3 py-2 reader-border reader-pill">
             <div className="text-[10px] uppercase tracking-widest reader-muted">Auto scroll</div>
@@ -242,6 +266,8 @@ export const ReaderMoreMenu = ({ reader }: { reader: ReaderScope }) => {
           >
             How Dotty works
           </button>
+          {/* A phone has no keys to list. */}
+          {!touch && (
           <button
             type="button"
             className="w-full py-1.5 text-center text-[10px] uppercase tracking-widest transition reader-muted reader-hover-accent"
@@ -252,6 +278,7 @@ export const ReaderMoreMenu = ({ reader }: { reader: ReaderScope }) => {
           >
             Keyboard shortcuts (?)
           </button>
+          )}
         </div>
       )}
     </div>

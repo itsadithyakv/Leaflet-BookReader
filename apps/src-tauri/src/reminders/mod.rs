@@ -66,6 +66,7 @@ impl ReminderKind {
     [ReminderKind::StreakRisk, ReminderKind::Daily, ReminderKind::Close];
 
   /// The toast tag, so a new reminder of a kind replaces the last one.
+  #[cfg(any(windows, test))]
   pub fn tag(self) -> &'static str {
     match self {
       ReminderKind::Daily => "daily",
@@ -501,6 +502,7 @@ pub fn activation_route<I: IntoIterator<Item = String>>(args: I) -> Option<&'sta
   })
 }
 
+#[cfg(any(windows, test))]
 fn escape_xml(text: &str) -> String {
   text
     .replace('&', "&amp;")
@@ -512,6 +514,7 @@ fn escape_xml(text: &str) -> String {
 
 /// The toast. `activation` is off for unpackaged builds: without the MSIX's
 /// protocol registration a click would open Windows' "find an app" dialog.
+#[cfg(any(windows, test))]
 pub fn toast_xml(reminder: &Reminder, image: Option<&str>, activation: bool) -> String {
   let launch = if activation {
     format!(" launch=\"{CONTINUE_URI}\" activationType=\"protocol\"")

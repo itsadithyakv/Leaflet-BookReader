@@ -8,6 +8,8 @@
  *
  * Lines follow Pip's voice: short, lowercase, and drama aimed at Pip itself.
  */
+import { isTouchInput } from "../platform/device";
+
 export type PipMoment =
   | "goal"
   | "streakMilestone"
@@ -127,9 +129,10 @@ const POOLS: Record<PipMoment, Beat[]> = {
   // Reaching for the exit under focus lock. Pip guards the door, but the door
   // always opens: holding Escape or confirming still leaves.
   exitGuard: [
-    { move: "swat", line: () => "shoo. we're mid-session. hold esc to leave." },
-    { move: "swat", line: () => "nope. not yet. hold esc if you mean it." },
-    { move: "whistle", line: () => "foul! the session's still on. hold esc to leave." }
+    // (On a phone there is no Escape: Back brings up the guard's own button, which is held.)
+    { move: "swat", line: () => (isTouchInput() ? "shoo. we're mid-session. press back, then hold to leave." : "shoo. we're mid-session. hold esc to leave.") },
+    { move: "swat", line: () => (isTouchInput() ? "nope. not yet. press back, then hold if you mean it." : "nope. not yet. hold esc if you mean it.") },
+    { move: "whistle", line: () => (isTouchInput() ? "foul! the session's still on. press back, then hold to leave." : "foul! the session's still on. hold esc to leave.") }
   ],
   poke: [
     { move: "laugh", line: () => "that tickles!" },

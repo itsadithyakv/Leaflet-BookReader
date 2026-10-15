@@ -1,0 +1,565 @@
+/* The readers by finger: a phone held upright or on its side, and touch in
+   general (docs/android.md, "The reader"). Both readers import this.
+
+   `.reader-scope[data-shape]` is a phone ("upright" or "sideways",
+   readers/touchLayout.ts); `html[data-input="touch"]` any touch screen. The
+   system's bars are `--inset-*` (platform/device.css): the page colour runs
+   under them, the text and the controls keep clear of them. */
+
+/* ---- The page: clear of the status bar, the gesture bar and a notch ---- */
+
+/* (So the chapter dock, the progress bar and the cards, which sit in the
+   page's frame, are clear of the gesture bar already; what is fixed to the
+   window adds the inset itself.) */
+html[data-input="touch"] .reader-scope .reader-main {
+  box-sizing: border-box;
+  padding: var(--inset-top) var(--inset-right) var(--inset-bottom) var(--inset-left);
+}
+
+/* No pointer to rest on the top edge: the middle tap brings the bar. */
+html[data-input="touch"] .reader-toolbar-hot-zone {
+  display: none;
+}
+
+/* ---- The toolbar: upright, a slim bar under the status bar ---- */
+
+.reader-scope[data-shape="upright"] {
+  --reader-toolbar-height: calc(56px + var(--inset-top));
+}
+
+.reader-scope[data-shape] .reader-toolbar {
+  padding-top: var(--inset-top);
+  padding-left: max(0.5rem, var(--inset-left));
+  padding-right: max(0.5rem, var(--inset-right));
+  padding-bottom: 0;
+  height: var(--reader-toolbar-height);
+}
+
+.reader-scope[data-shape] .reader-toolbar > div {
+  gap: 4px;
+}
+
+/* The title and "Back to Library" are the desktop's: the arrow says it. */
+.reader-scope[data-shape] .reader-toolbar-title,
+.reader-scope[data-shape] .reader-back-label {
+  display: none !important;
+}
+
+/* The radio's mark: its way in is the ··· sheet's "Sound" row on a phone. */
+.reader-scope[data-shape] .reader-toolbar .ambience-mark {
+  display: none;
+}
+
+/* ---- Sideways: the toolbar is a strip down the right edge ---- */
+
+.reader-scope[data-shape="sideways"] {
+  --reader-toolbar-height: 0px;
+  --reader-strip-width: calc(56px + var(--inset-right));
+}
+
+.reader-scope[data-shape="sideways"] .reader-toolbar {
+  top: 0;
+  bottom: 0;
+  left: auto;
+  right: 0;
+  width: var(--reader-strip-width);
+  height: auto;
+  min-height: 0;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: calc(var(--inset-top) + 8px) var(--inset-right) calc(var(--inset-bottom) + 8px) 0;
+  border-bottom: 0;
+  border-left: 1px solid var(--reader-border);
+}
+
+.reader-scope[data-shape="sideways"] .reader-toolbar > div {
+  flex-direction: column;
+}
+
+.reader-scope[data-shape="sideways"].reader-chrome-hidden .reader-toolbar {
+  transform: translateX(100%);
+}
+
+/* The chapter list comes from the left, under no bar. */
+.reader-scope[data-shape="sideways"] .reader-shell .reader-sidebar {
+  top: 0;
+}
+
+/* ---- Sheets: what hangs from a toolbar button on the desktop rises from the
+   foot on a phone (upright), or stands beside the strip (sideways) ---- */
+
+.reader-sheet-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  border: 0;
+  padding: 0;
+  background: rgb(0 0 0 / 0.32);
+  cursor: default;
+}
+
+.reader-scope[data-shape="upright"] .reader-toolbar .reader-menu,
+.reader-scope[data-shape="upright"] .reader-toolbar .ambience-popover,
+.reader-scope[data-shape="upright"] .reader-notes-panel,
+.reader-scope[data-shape="upright"] .reader-search {
+  position: fixed;
+  top: auto;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 61;
+  width: auto;
+  max-width: none;
+  max-height: min(85dvh, calc(100dvh - var(--inset-top) - 24px));
+  margin: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: 18px 18px 0 0;
+  padding-bottom: calc(16px + var(--inset-bottom));
+  box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.28);
+  animation: reader-sheet-rise 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* The notes panel holds its own scrolling list. */
+.reader-scope[data-shape="upright"] .reader-notes-panel {
+  overflow: hidden;
+  padding-bottom: var(--inset-bottom);
+}
+
+/* A handle on each sheet: it is a sheet, and goes down. */
+.reader-scope[data-shape="upright"] .reader-toolbar .reader-menu::before,
+.reader-scope[data-shape="upright"] .reader-toolbar .ambience-popover::before {
+  display: block;
+  width: 40px;
+  height: 4px;
+  margin: -6px auto 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--reader-text) 24%, transparent);
+  content: "";
+}
+
+/* Search keeps its field over the keyboard. */
+html[data-keyboard="open"] .reader-scope[data-shape] .reader-search {
+  bottom: var(--inset-keyboard);
+  max-height: calc(100dvh - var(--inset-keyboard) - var(--inset-top) - 16px);
+  padding-bottom: 12px;
+}
+
+.reader-scope[data-shape="sideways"] .reader-toolbar .reader-menu,
+.reader-scope[data-shape="sideways"] .reader-toolbar .ambience-popover,
+.reader-scope[data-shape="sideways"] .reader-notes-panel,
+.reader-scope[data-shape="sideways"] .reader-search {
+  position: fixed;
+  top: calc(var(--inset-top) + 8px);
+  right: calc(var(--reader-strip-width) + 8px);
+  bottom: calc(var(--inset-bottom) + 8px);
+  left: auto;
+  z-index: 61;
+  width: min(24rem, calc(100vw - var(--reader-strip-width) - 24px));
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: 16px;
+}
+
+.reader-scope[data-shape="sideways"] .reader-notes-panel {
+  overflow: hidden;
+}
+
+/* The characters panel: a sheet too. */
+.reader-scope[data-shape="upright"] .reader-people-panel {
+  top: auto !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  left: 0 !important;
+  width: auto !important;
+  max-width: none !important;
+  max-height: 85dvh !important;
+  border-radius: 18px 18px 0 0 !important;
+  padding-bottom: var(--inset-bottom);
+}
+
+@keyframes reader-sheet-rise {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reader-scope[data-shape] .reader-toolbar .reader-menu,
+  .reader-scope[data-shape] .reader-notes-panel,
+  .reader-scope[data-shape] .reader-search {
+    animation: none;
+  }
+}
+
+/* The ··· sheet's rows (readers/text/ReaderTouchRows.tsx). */
+.reader-sheet-rows {
+  display: flex;
+  flex-direction: column;
+  margin: -4px -4px 8px;
+  border-bottom: 1px solid var(--reader-border);
+  padding-bottom: 6px;
+}
+
+.reader-sheet-row {
+  display: flex;
+  min-height: var(--touch-target, 44px);
+  width: 100%;
+  align-items: center;
+  gap: 14px;
+  border-radius: 10px;
+  padding: 0 8px;
+  font-size: 14px;
+  text-align: left;
+}
+
+.reader-sheet-row:active {
+  background: var(--reader-hover-bg);
+}
+
+.reader-sheet-row-icon {
+  display: inline-flex;
+  width: 24px;
+  justify-content: center;
+  color: var(--reader-accent);
+}
+
+.reader-sheet-row-label {
+  flex: 1;
+  min-width: 0;
+  color: var(--reader-text);
+}
+
+.reader-sheet-row-detail {
+  font-size: 12px;
+}
+
+.reader-sheet-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+html[data-input="touch"] .reader-sheet-choices .reader-notes-tab,
+html[data-input="touch"] .reader-menu .reader-notes-tab {
+  min-height: 40px;
+  padding-inline: 14px;
+}
+
+/* ---- The foot of the page: the chapter dock and the progress bar ----
+   By finger they come and go with the toolbar (a tap in the middle of the
+   page), and are full strength and finger-sized when they are there. */
+
+html[data-input="touch"] .reader-scope .reader-chapter-dock {
+  bottom: 30px;
+  opacity: 1;
+  filter: none;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 16px - var(--inset-left) - var(--inset-right));
+  transition: opacity 0.22s ease;
+}
+
+html[data-input="touch"] .reader-scope.reader-chrome-hidden .reader-chapter-dock:not(.is-awake) {
+  opacity: 0;
+  pointer-events: none;
+}
+
+html[data-input="touch"] .reader-scope.reader-chrome-hidden .reader-chapter-dock:not(.is-awake) > div {
+  pointer-events: none;
+}
+
+html[data-input="touch"] .reader-scope .reader-chapter-dock .reader-mini-control,
+html[data-input="touch"] .reader-scope .reader-chapter-dock .reader-dock-contents,
+html[data-input="touch"] .reader-scope .reader-chapter-dock .page-reader-place {
+  min-width: var(--touch-target, 44px);
+  min-height: var(--touch-target, 44px);
+}
+
+html[data-input="touch"] .reader-scope .reader-chapter-dock > div {
+  max-width: 100%;
+  min-width: 0;
+}
+
+html[data-input="touch"] .reader-scope .reader-chapter-dock .reader-dock-contents {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+/* A phone's dock is "‹ chapter ›" and how far: the page arrows are the page's
+   own taps there, and forward again is the desktop's. */
+.reader-scope[data-shape] .reader-chapter-dock .reader-dock-page-step,
+.reader-scope[data-shape] .reader-chapter-dock .reader-dock-forward,
+.reader-scope[data-shape] .reader-chapter-dock .reader-dock-book,
+.reader-scope[data-shape] .reader-chapter-dock .reader-dock-sep {
+  display: none;
+}
+
+/* Sideways it sits bottom left, clear of the strip. */
+html[data-input="touch"] .reader-scope[data-shape="sideways"] .reader-chapter-dock {
+  left: calc(var(--inset-left) + 12px);
+  transform: none;
+  max-width: calc(100vw - var(--reader-strip-width) - var(--inset-left) - 24px);
+}
+
+html[data-input="touch"] .reader-scope .reader-progress {
+  height: 28px;
+}
+
+html[data-input="touch"] .reader-scope .reader-progress-track::before {
+  height: 28px;
+}
+
+html[data-input="touch"] .reader-scope .reader-progress-line {
+  bottom: 10px;
+  height: 4px;
+}
+
+html[data-input="touch"] .reader-scope .reader-progress-handle {
+  bottom: 4px;
+  width: 16px;
+  height: 16px;
+}
+
+html[data-input="touch"] .reader-scope .reader-progress:not(.is-shown) {
+  pointer-events: none;
+}
+
+.reader-scope[data-shape="sideways"]:not(.reader-chrome-hidden) .reader-progress {
+  right: 56px;
+}
+
+/* ---- The selection's bar and the cards: at the foot, over the gesture bar ---- */
+
+html[data-input="touch"] .reader-scope .reader-selection-dock {
+  bottom: 8px;
+}
+
+html[data-input="touch"] .reader-scope .reader-selection-dock.is-above-pace {
+  bottom: 68px;
+}
+
+html[data-input="touch"] .pdf-notes-dock {
+  bottom: calc(var(--inset-bottom) + 8px);
+}
+
+/* A note being typed rides over the keyboard (the page's frame ends at the
+   gesture bar; the keyboard's inset is from the foot of the screen). */
+html[data-keyboard="open"] .reader-scope .reader-selection-dock {
+  bottom: calc(var(--inset-keyboard) - var(--inset-bottom) + 8px) !important;
+}
+
+html[data-keyboard="open"] .pdf-notes-dock {
+  bottom: calc(var(--inset-keyboard) + 8px) !important;
+}
+
+.reader-selection-bar.is-touch {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  max-width: calc(100vw - 16px);
+  padding: 6px;
+}
+
+.reader-selection-row,
+.reader-selection-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.reader-selection-more {
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--reader-border);
+  padding-bottom: 6px;
+}
+
+.reader-selection-bar.is-touch .reader-mini-control {
+  position: relative;
+  min-width: var(--touch-target, 44px);
+  height: var(--touch-target, 44px);
+  border-radius: 10px;
+}
+
+.reader-selection-swatches {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-inline: 4px;
+}
+
+.reader-selection-bar.is-touch .reader-selection-swatch {
+  width: 32px;
+  height: 32px;
+}
+
+.reader-selection-bar.is-touch .reader-selection-swatch::after {
+  width: 44px;
+  height: 44px;
+}
+
+.reader-selection-bar.is-touch .reader-selection-swatch[aria-pressed="true"] {
+  box-shadow: 0 0 0 2px var(--reader-accent);
+}
+
+.reader-selection-quick-dot {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--reader-panel);
+  border-radius: 999px;
+}
+
+/* ---- Dotty's and auto-scroll's pace pill: bottom right, 44 px, there to be
+   reached for (no hover to wake it) ---- */
+
+html[data-input="touch"] .reader-autoscroll-pill {
+  left: auto;
+  right: calc(var(--inset-right) + 12px);
+  bottom: calc(var(--inset-bottom) + 12px);
+  transform: none;
+}
+
+html[data-input="touch"] .reader-scope:not(.reader-chrome-hidden) .reader-autoscroll-pill {
+  bottom: calc(var(--inset-bottom) + 84px);
+}
+
+.reader-scope[data-shape="sideways"] .reader-autoscroll-pill {
+  right: calc(var(--inset-right) + 12px);
+}
+
+.reader-scope[data-shape="sideways"]:not(.reader-chrome-hidden) .reader-autoscroll-pill {
+  right: calc(var(--reader-strip-width) + 12px);
+  bottom: calc(var(--inset-bottom) + 12px);
+}
+
+html[data-input="touch"] .reader-autoscroll-pill:not(.is-held) {
+  opacity: 0.9;
+  animation: none;
+}
+
+html[data-input="touch"] .reader-autoscroll-button,
+html[data-input="touch"] .reader-autoscroll-main {
+  min-width: var(--touch-target, 44px);
+  height: var(--touch-target, 44px);
+}
+
+/* SpeedRead's controls: awake, over the gesture bar. */
+html[data-input="touch"] .reader-rsvp-controls {
+  opacity: 1;
+  bottom: calc(var(--inset-bottom) + 64px);
+}
+
+html[data-input="touch"] .reader-rsvp-button {
+  width: var(--touch-target, 44px);
+  height: var(--touch-target, 44px);
+}
+
+/* ---- Toasts and the focus checkpoint: over the gesture bar ---- */
+
+html[data-input="touch"] .reader-scope .reader-toast {
+  bottom: calc(var(--inset-bottom) + 76px);
+  right: calc(var(--inset-right) + 12px);
+}
+
+html[data-input="touch"] .reader-scope .reader-checkpoint {
+  bottom: calc(var(--inset-bottom) + 16px);
+  right: calc(var(--inset-right) + 12px);
+  max-width: min(20rem, calc(100vw - 24px));
+}
+
+/* ---- Focus lock: Pip at the door with "Hold to leave" (Back, on a phone) ---- */
+
+.reader-exit-guard.has-hold {
+  flex-wrap: wrap;
+  max-width: min(300px, calc(100vw - 24px));
+  z-index: 5;
+}
+
+.reader-scope[data-shape="sideways"] .reader-exit-guard {
+  top: 0;
+  left: auto;
+  right: calc(100% + 4px);
+  flex-direction: row-reverse;
+  transform-origin: right top;
+}
+
+.reader-exit-hold {
+  position: relative;
+  overflow: hidden;
+  min-height: var(--touch-target, 44px);
+  margin-left: 60px;
+  border: 1px solid var(--reader-accent);
+  border-radius: 999px;
+  padding: 0 18px;
+  background: var(--reader-panel);
+  color: var(--reader-accent);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.reader-exit-hold > span:last-child {
+  position: relative;
+}
+
+.reader-exit-hold-fill {
+  position: absolute;
+  inset: 0;
+  transform: scaleX(0);
+  transform-origin: left center;
+  background: color-mix(in srgb, var(--reader-accent) 28%, transparent);
+}
+
+.reader-exit-hold.is-holding .reader-exit-hold-fill {
+  transform: scaleX(1);
+  transition: transform var(--exit-hold-ms, 1000ms) linear;
+}
+
+/* A toggle row keeps its name left and its switch right (the touch rule for
+   `.reader-icon` centres what is in a button). */
+html[data-input="touch"] .reader-scope .reader-menu button.justify-between {
+  justify-content: space-between;
+}
+
+/* The chapter list's tab on the left edge lies over a phone's text: it comes
+   and goes with the chrome there (the toolbar's list button is the way in). */
+.reader-scope[data-shape].reader-chrome-hidden .reader-contents-handle {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* The page reader's go-to-page field rides over the keyboard with its dock. */
+html[data-keyboard="open"] .page-reader .reader-chapter-dock.is-awake {
+  bottom: calc(var(--inset-keyboard) - var(--inset-bottom) + 8px);
+}
+
+/* The focus session's mug (or flower) sat bottom right, over the dock and the
+   pace pill: on a phone it is small, top right, under the toolbar's place. */
+.reader-scope[data-shape] .leaflet-mug,
+.reader-scope[data-shape] .leaflet-flower {
+  top: calc(var(--reader-toolbar-height) + 8px);
+  right: calc(var(--inset-right) + 8px);
+  bottom: auto;
+  transform: scale(0.6);
+  transform-origin: top right;
+}
+
+.reader-scope[data-shape="sideways"]:not(.reader-chrome-hidden) .leaflet-mug,
+.reader-scope[data-shape="sideways"]:not(.reader-chrome-hidden) .leaflet-flower {
+  right: calc(var(--reader-strip-width) + 8px);
+}

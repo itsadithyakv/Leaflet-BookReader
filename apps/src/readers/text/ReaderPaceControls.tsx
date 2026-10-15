@@ -2,6 +2,7 @@ import { UiIcon } from "../../components/UiIcon";
 import { autoScrollLinesPerMinute } from "../autoScroll";
 import { SMART_NUDGE } from "./constants";
 import type { ReaderScope } from "./scope";
+import { useTouchInput } from "../../platform/device";
 
 /** Auto-scroll's and Smart Read's own controls, there while they run. */
 export const ReaderPaceControls = ({ reader }: { reader: ReaderScope }) => {
@@ -10,6 +11,7 @@ export const ReaderPaceControls = ({ reader }: { reader: ReaderScope }) => {
     paceTouched, pendingReadingMode, pillHeld, readingMode, readingPaused, setAutoScrollActive, smartAtPicture,
     smartWaiting, smartWpm, toggleSmartPlay, tuneAutoScroll
   } = reader;
+  const touch = useTouchInput();
   return (
     <>
       {/* Auto-scroll's own control while it runs: the toolbar hides itself
@@ -119,7 +121,7 @@ export const ReaderPaceControls = ({ reader }: { reader: ReaderScope }) => {
               looks like. How to work it is in the buttons' own titles. */}
           {(smartWaiting || smartAtPicture || (!readingPaused && holdReason)) && (
             <span className="reader-autoscroll-hint reader-muted">
-              {smartWaiting ? "Space reads from here" : smartAtPicture ? "A picture" : holdReason}
+              {smartWaiting ? (touch ? "Tap to read from here" : "Space reads from here") : smartAtPicture ? "A picture" : holdReason}
             </span>
           )}
         </div>

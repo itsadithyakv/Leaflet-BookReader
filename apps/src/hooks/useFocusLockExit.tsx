@@ -1,12 +1,13 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { askConfirm } from "../components/ConfirmDialog";
 import { PipSay } from "../components/PipSay";
 import { PipSprite } from "../components/PipSprite";
 import { pickBeat } from "../pip/moments";
 import { useHabitStore } from "../store/habitStore";
+import { useBackLayer } from "../platform/back";
 
-/** Holding Escape this long leaves a book under focus lock. */
-const EXIT_HOLD_MS = 1000;
+/** Holding Escape (or, on a phone, the guard's own button) this long leaves a book under focus lock. */
+export const EXIT_HOLD_MS = 1000;
 /** Pip guards the exit at most this often, so hovering back and forth is not a slapstick loop. */
 const EXIT_GUARD_COOLDOWN_MS = 8000;
 
@@ -26,7 +27,8 @@ export const useFocusLockExit = (onClose: () => void) => {
   lockedRef.current = locked;
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
-  const [guardShown, setGuardShown] = useState<{ key: number; line: string } | null>(null);
+  /** Pip at the door; `hold`: with her "Hold to leave" button (Android's Back, where there is no Escape to hold). */
+  const [guardShown, setGuardShown] = useState<{ key: number; line: string; hold?: boolean } | null>(null);
   const guardAtRef = useRef(0);
   const escapeDownAtRef = useRef<number | null>(null);
 
@@ -92,7 +94,22 @@ export const useFocusLockExit = (onClose: () => void) => {
       }
     };
 
-    return { guard, requestClose, escape };
+    /**
+     * Android's Back with nothing left open in the book. Unlocked it closes.
+     * Locked, Pip comes to the door with a button that leaves when it is held
+     * (as holding Escape does); Back again sends her away.
+     */
+    const back = () => {
+      if (!lockedRef.current) {
+        onCloseRef.current();
+        return;
+      }
+      const now = Date.now();
+      guardAtRef.current = now;
+      setGuardShown({ key: now, line: pickBeat("exitGuard", now).line, hold: true });
+    };
+
+    return { guard, requestClose, escape, back, leave };
   }, []);
 
   return { locked, guardShown, clearGuard: () => setGuardShown(null), ...api };
@@ -100,6 +117,53 @@ export const useFocusLockExit = (onClose: () => void) => {
 
 /** Long enough to read the line after the swat, short enough not to linger. */
 const LINGER_MS = 1600;
+/** With her button, long enough to reach for it. */
+const HOLD_LINGER_MS = 6000;
+
+/** "Hold to leave": a press held for `EXIT_HOLD_MS` leaves; let go sooner, nothing happens. */
+const HoldToLeave = ({ onLeave }: { onLeave: () => void }) => {
+  const [holding, setHolding] = useState(false);
+  const timer = useRef<number | null>(null);
+  const stop = () => {
+    if (timer.current !== null) {
+      window.clearTimeout(timer.current);
+      timer.current = null;
+    }
+    setHolding(false);
+  };
+  useEffect(() => stop, []);
+  const start = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    try {
+      // The hold stays the button's if the finger wanders a little.
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    } catch {
+      // A pointer the browser no longer knows: the hold is timed all the same.
+    }
+    stop();
+    setHolding(true);
+    timer.current = window.setTimeout(() => {
+      timer.current = null;
+      onLeave();
+    }, EXIT_HOLD_MS);
+  };
+  return (
+    <button
+      type="button"
+      className={`reader-exit-hold ${holding ? "is-holding" : ""}`}
+      style={{ ["--exit-hold-ms" as string]: `${EXIT_HOLD_MS}ms` }}
+      data-long-press=""
+      onPointerDown={start}
+      onPointerUp={stop}
+      onPointerCancel={stop}
+      onPointerLeave={stop}
+      onContextMenu={(event) => event.preventDefault()}
+      aria-label="Hold to leave the session"
+    >
+      <span className="reader-exit-hold-fill" aria-hidden="true" />
+      <span>Hold to leave</span>
+    </button>
+  );
+};
 
 /**
  * Pip, guarding the way out: pops up under Back, swats at the cursor
@@ -108,22 +172,30 @@ const LINGER_MS = 1600;
  */
 export const PipExitGuard = ({
   shown,
-  onDone
+  onDone,
+  onLeave
 }: {
-  shown: { key: number; line: string } | null;
+  shown: { key: number; line: string; hold?: boolean } | null;
   onDone: () => void;
-}) =>
-  shown === null ? null : (
-    <span className="reader-exit-guard" role="status" key={shown.key}>
+  /** Leaves the session (the guard's "Hold to leave", held). */
+  onLeave?: () => void;
+}) => {
+  const holding = Boolean(shown?.hold && onLeave);
+  // With her button up, Back sends her away and the reading goes on.
+  useBackLayer(holding, onDone);
+  return shown === null ? null : (
+    <span className={`reader-exit-guard ${holding ? "has-hold" : ""}`} role="status" key={shown.key}>
       <span className="reader-exit-guard-sprite" aria-hidden="true">
         <PipSprite
           move="swat"
           size={56}
           loops={1}
           playKey={shown.key}
-          onDone={() => window.setTimeout(onDone, LINGER_MS)}
+          onDone={() => window.setTimeout(onDone, holding ? HOLD_LINGER_MS : LINGER_MS)}
         />
       </span>
       <PipSay text={shown.line} tail="left" tailAt={50} className="reader-exit-guard-say" />
+      {holding && onLeave && <HoldToLeave onLeave={onLeave} />}
     </span>
   );
+};

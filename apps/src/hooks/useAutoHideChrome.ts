@@ -14,7 +14,10 @@ const LINGER_MS = 900;
  * - the pointer reaching the top edge of the window (`reveal`, from a hot
  *   strip the reader draws there), staying while the pointer is on the bar;
  * - keyboard focus moving into the bar;
- * - a tap, on a touch screen, where there is no pointer to aim.
+ * - on a touch screen, a tap in the middle of the page (`toggle`, from the
+ *   reader's own taps: readers/touchLayout.ts). It stays until the next such
+ *   tap or a page turned (`hide`); a touch that turns a page or scrolls does
+ *   not bring it.
  * Moving the mouse over the page, scrolling and reading keys do not bring it
  * back: that is reading, and a bar that popped up for it was a distraction.
  *
@@ -23,6 +26,8 @@ const LINGER_MS = 900;
  */
 export const useAutoHideChrome = (pinned: boolean) => {
   const [visible, setVisible] = useState(true);
+  const visibleRef = useRef(true);
+  visibleRef.current = visible;
   const timerRef = useRef<number | null>(null);
   const hoveringRef = useRef(false);
   // Read inside listeners without re-subscribing them on every toggle.
@@ -50,9 +55,16 @@ export const useAutoHideChrome = (pinned: boolean) => {
     hideAfter(FIRST_HIDE_MS);
   }, [hideAfter]);
 
-  /** The pointer is on the bar (true) or has left it (false). */
+  /**
+   * The pointer is on the bar (true) or has left it (false). A finger's
+   * enter and leave come with every tap and mean nothing: the bar would go
+   * a moment after any of its buttons was pressed.
+   */
   const hover = useCallback(
-    (on: boolean) => {
+    (on: boolean, pointerType?: string) => {
+      if (pointerType === "touch") {
+        return;
+      }
       hoveringRef.current = on;
       if (on) {
         clear();
@@ -63,6 +75,24 @@ export const useAutoHideChrome = (pinned: boolean) => {
     },
     [hideAfter]
   );
+
+  /** A tap in the middle of the page: the chrome comes, or goes. Brought this way it stays. */
+  const toggle = useCallback(() => {
+    clear();
+    if (visibleRef.current && !pinnedRef.current) {
+      setVisible(false);
+    } else {
+      setVisible(true);
+    }
+  }, []);
+
+  /** A page turned by a finger, or text being selected: the chrome goes (unless a panel of its own is open). */
+  const hide = useCallback(() => {
+    clear();
+    if (!pinnedRef.current) {
+      setVisible(false);
+    }
+  }, []);
 
   useEffect(() => {
     // A pinned panel cancels any pending hide, and arms a fresh one the moment
@@ -76,20 +106,7 @@ export const useAutoHideChrome = (pinned: boolean) => {
     return clear;
   }, [pinned, hideAfter]);
 
-  useEffect(() => {
-    // A tap brings the bar back on a touch screen only; a mouse aims for the
-    // top edge instead, and a click on the page is selecting text or reading.
-    const onPointerDown = (event: PointerEvent) => {
-      if (event.pointerType === "touch") {
-        reveal();
-      }
-    };
-    window.addEventListener("pointerdown", onPointerDown, { passive: true });
-    return () => {
-      window.removeEventListener("pointerdown", onPointerDown);
-      clear();
-    };
-  }, [reveal]);
+  useEffect(() => clear, []);
 
-  return { visible, reveal, hover };
+  return { visible, reveal, hover, toggle, hide };
 };

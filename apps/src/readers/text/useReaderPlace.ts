@@ -317,6 +317,29 @@ export const useReaderPlace = (reader: WithDot) => {
   const pagePlaceRef = useRef<{ cfi: string; section: number; pageWidth: number; height: number } | null>(null);
   /** Layouts on their way: the place is not taken from the pages they pass through. */
   const pageRelayoutsRef = useRef(0);
+  /**
+   * The reader's place carried across the book being opened again in another
+   * layout (a phone turned from pages to a spread, or to scrolling: readers/
+   * touchLayout.ts). The book reopens there (lastCfiRef), and with pages it
+   * becomes the place again once a page holding it comes up, rather than
+   * that page's first word: twenty turns of the phone used to walk the reader
+   * back a page each.
+   */
+  const carriedPlaceRef = useRef<{ cfi: string; until: number } | null>(null);
+  const holdPlaceForRelayout = () => {
+    // With pages, the reader's place; scrolling, the reading line as it was
+    // last seen (lastCfiRef can be a chapter further up the continuous scroll,
+    // and by the time a turn of the phone is heard the text has already been
+    // laid out again at the new width under the old scroll position).
+    const line = layoutRef.current === "scroll" ? (shownLineRef.current ?? readingPlace()) : null;
+    const place = line?.cfi ?? (layoutRef.current === "pages" ? pagePlaceRef.current?.cfi : null) ?? lastCfiRef.current;
+    if (!place) {
+      return;
+    }
+    lastCfiRef.current = place;
+    lastCfiBelowRef.current = line?.below ?? 0;
+    carriedPlaceRef.current = { cfi: place, until: Date.now() + 8000 };
+  };
 
   /** Whether the page showing holds a place. */
   const pageHolds = (cfi: string) => {
@@ -378,6 +401,19 @@ export const useReaderPlace = (reader: WithDot) => {
     }
     if (pageRelayoutsRef.current > 0) {
       return;
+    }
+    // Opened again in another layout: the place it was opened at, once a page holds it.
+    const carried = carriedPlaceRef.current;
+    if (!held && carried) {
+      if (Date.now() > carried.until) {
+        carriedPlaceRef.current = null;
+      } else if (pageHolds(carried.cfi)) {
+        carriedPlaceRef.current = null;
+        pagePlaceRef.current = { cfi: carried.cfi, section, pageWidth, height };
+        return;
+      } else {
+        return;
+      }
     }
     if (held && held.section === section && pageHolds(held.cfi)) {
       return;
@@ -543,7 +579,7 @@ export const useReaderPlace = (reader: WithDot) => {
     lastProgressRef, lastComputedProgressRef, progressArmedRef, openedAtRef, lastCfiRef, lastCfiProgressRef,
     shownLineRef, lastCfiBelowRef, chapterPositionsRef, openedAtPlaceRef, soughtRef, storedPlaceRef, placeFollowsNow,
     updateBookProgress, sectionWeightsRef, readingPlace, readingPlaceCfi, sectionPlace, storyEndBottom,
-    storyEndWasBelowRef, storyEndInView, goToPlace, settleOnPage, pageFrame, pagePlaceRef, pageRelayoutsRef,
+    storyEndWasBelowRef, storyEndInView, goToPlace, settleOnPage, pageFrame, pagePlaceRef, pageRelayoutsRef, holdPlaceForRelayout,
     notePagePlace, relayPages, measurePagesAgain, clearToolbar, displayChapter
   };
 };

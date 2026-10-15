@@ -7,11 +7,14 @@ import { useHabitStore } from "../store/habitStore";
 import { pickBeat } from "../pip/moments";
 import { loadNods, nodsNow } from "../pip/nods";
 import { hasMove } from "../pip/core";
-import { TOUR, type TourStop } from "../pip/tour";
+import { TOUR, tourLine, type TourStop } from "../pip/tour";
+import { useBackLayer } from "../platform/back";
+import { isTouchInput, useTouchInput } from "../platform/device";
 import { usePipPresence } from "../pip/usePipPresence";
 import { CLING_MS, HALF_W, clingX, meetWall } from "../pip/wall";
 import { PipSprite, pipCssSize } from "./PipSprite";
 import { PipSay, type PipSayTail } from "./PipSay";
+import "./pip/touch.css";
 
 /**
  * Where Pip lives: a layer over the whole window.
@@ -49,6 +52,12 @@ const WALK_SPEED = 46;
 const HEIGHT = 50;
 /** Where the hand holds Pip: by the leaf, so Pip dangles below the cursor. */
 const HOLD_DROP = 44;
+/** A finger held still on her this long opens her menu (the desktop's right-click)... */
+const MENU_HOLD_MS = 500;
+/** ...if it has not strayed further than this (a finger wobbles more than a mouse). Further, and she is picked up. */
+const FINGER_SLOP = 10;
+/** Once her menu is open under the finger, it may drift this far before she is picked up after all. */
+const MENU_SLOP = 18;
 /** The collapsed sidebar's width (index.css). Pip's left wall. */
 const SIDEBAR_COLLAPSED = 78;
 const MAX_THROW = 2800;
@@ -399,6 +408,7 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
     }))
   );
   const { base, line } = usePipPresence();
+  const touchInput = useTouchInput();
   const wrapUpOpen = useHabitStore((state) => state.wrapUp !== null);
   const onStage = usePipStore((state) => state.onStage);
   const waiting = usePipStore((state) => state.waiting);
@@ -416,7 +426,18 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
 
   // The pointer is followed on the window, not captured by the element: Pip
   // moves between layers mid-drag, which remounts it and would drop a capture.
-  const drag = useRef<null | { id: number; x: number; y: number; moved: boolean; samples: Array<{ t: number; x: number; y: number }> }>(null);
+  const drag = useRef<null | {
+    id: number;
+    x: number;
+    y: number;
+    moved: boolean;
+    samples: Array<{ t: number; x: number; y: number }>;
+    /** A finger (or pen): it may wobble more before it is a carry, and held still it opens her menu. */
+    finger: boolean;
+    /** The hold opened her menu: letting go is not a poke. */
+    menued: boolean;
+    hold: number | null;
+  }>(null);
 
   const [view, setView] = useState<View>({ move: "idle", key: 0, flip: false, visible: false });
   const [say, setSay] = useState<Say | null>(null);
@@ -967,7 +988,7 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
         s.phase = "guiding";
         s.facing = at.facing;
         show(at.pose, undefined, `tour-${index}`);
-        speak(stop.line, "tour");
+        speak(tourLine(stop, isTouchInput()), "tour");
       },
       true
     );
@@ -1785,6 +1806,9 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
     setMenuOpen(false);
     hush();
   };
+  // Back closes her menu, and ends the tour, as Escape and "Skip tour" do.
+  useBackLayer(menuOpen, closeMenu);
+  useBackLayer(tour !== null && !away, () => setTourStop(null));
 
   useEffect(() => {
     if (!menuOpen) {
@@ -1840,7 +1864,27 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
       return;
     }
     event.preventDefault();
-    drag.current = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false, samples: [{ t: performance.now(), x: event.clientX, y: event.clientY }] };
+    const finger = event.pointerType === "touch" || event.pointerType === "pen";
+    const d = {
+      id: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      moved: false,
+      samples: [{ t: performance.now(), x: event.clientX, y: event.clientY }],
+      finger,
+      menued: false,
+      hold: null as number | null
+    };
+    drag.current = d;
+    // A finger has no right button: held still on her, it asks for her menu.
+    if (finger) {
+      d.hold = window.setTimeout(() => {
+        d.hold = null;
+        if (drag.current !== d || d.moved) return;
+        d.menued = true;
+        openMenu();
+      }, MENU_HOLD_MS);
+    }
     wake();
     const move = (e: PointerEvent) => onPointerMove(e);
     const up = (e: PointerEvent) => finish(e, false);
@@ -1867,8 +1911,12 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
       d.samples.shift();
     }
     const s = st.current;
-    if (!d.moved && Math.hypot(event.clientX - d.x, event.clientY - d.y) > 6) {
+    if (!d.moved && Math.hypot(event.clientX - d.x, event.clientY - d.y) > (d.menued ? MENU_SLOP : d.finger ? FINGER_SLOP : 6)) {
       d.moved = true;
+      if (d.hold !== null) {
+        window.clearTimeout(d.hold);
+        d.hold = null;
+      }
       if (menuOpen) {
         closeMenu();
       }
@@ -1919,10 +1967,14 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
       return;
     }
     drag.current = null;
+    if (d.hold !== null) {
+      window.clearTimeout(d.hold);
+    }
     document.body.classList.remove("pip-dragging");
     clearPerchHint();
     if (!d.moved) {
-      if (!cancelled) {
+      // Held for her menu: the menu is the answer, not a poke as well.
+      if (!cancelled && !d.menued) {
         poke();
       }
       return;
@@ -1962,11 +2014,13 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
         type="button"
         className="pip-body"
         style={{ visibility: hidden ? "hidden" : "visible" }}
-        aria-label="Pip. Drag to pick up and throw, select for a reaction, or open the context menu for shortcuts."
+        aria-label={touchInput ? "Pip. Tap for a reaction, press and hold for shortcuts, or hold and move to pick her up and throw her." : "Pip. Drag to pick up and throw, select for a reaction, or open the context menu for shortcuts."}
         aria-haspopup="menu"
         onPointerDown={onPointerDown}
         onContextMenu={(event) => {
+          // (A long press on a touch screen asks for this too: the hold above has it, so the system's own menu and buzz are kept off her.)
           event.preventDefault();
+          if (drag.current?.finger) return;
           openMenu();
         }}
         onKeyDown={(event) => {

@@ -10,6 +10,7 @@ import { openQuoteCard } from "../../components/share/shareStore";
 import { selectedTextBox } from "../lookupPlacement";
 import { SpeedReadStage } from "./SpeedReadStage";
 import type { ReaderScope } from "./scope";
+import { android, onAndroid } from "../../platform/android";
 
 /** The page: the book itself, and what sits over its foot (the selection bar, a note, the dock). */
 export const ReaderPage = ({ reader }: { reader: ReaderScope }) => {
@@ -22,6 +23,20 @@ export const ReaderPage = ({ reader }: { reader: ReaderScope }) => {
     seekTo, selection, selectionChapter, selectionDockBottom, selectionDockRef, setBookmarkPanelOpen, setDockNear,
     setLookUpCfi, setNotesFocus, setReloadKey, sidebarOpen, toggleContents, turnPage, viewerRef
   } = reader;
+  /**
+   * "Read from here" (by finger, in the selection's ···): Dotty goes to the
+   * selected line and Smart Read starts there, as Space does from Dotty.
+   */
+  const readFromSelection = () => {
+    const box = selectedTextBox(renditionRef.current?.getContents?.() ?? []);
+    const frame = reader.ensureScrollContainer()?.getBoundingClientRect();
+    if (box && frame && frame.height > 0) {
+      reader.prepareReaderWords(false);
+      reader.readerDotAnchorIndexRef.current = reader.findNearestWordIndex(((box.top + box.bottom) / 2 - frame.top) / frame.height);
+    }
+    clearSelection();
+    reader.beginReadingMode("smart", "dot");
+  };
   // "Where was I?", when nothing else has the foot of the page.
   const recapShown = reader.recap !== null && !selection && !people.card && !note && !(notesFocus && !bookmarkPanelOpen) && bookRef.current;
   // A highlight opened beside the page (tapped, or just made to write a note on).
@@ -56,7 +71,8 @@ export const ReaderPage = ({ reader }: { reader: ReaderScope }) => {
             ref={viewerRef}
             className={`reader-container ${paged ? "reader-pages" : "reader-scroll"} h-full w-full overflow-hidden overscroll-x-none`}
             style={
-              paged && pagesViewerMaxWidth(measure, fontSize) !== null
+              // (A spread spans the window: its two columns are the line length.)
+              paged && !reader.spread && pagesViewerMaxWidth(measure, fontSize) !== null
                 ? { maxWidth: pagesViewerMaxWidth(measure, fontSize) ?? undefined, marginInline: "auto" }
                 : undefined
             }
@@ -107,6 +123,8 @@ export const ReaderPage = ({ reader }: { reader: ReaderScope }) => {
                   }
                   whoIsOpen={people.cardOpen}
                   onSearchBook={() => searchBookFor(selection.text)}
+                  onShare={onAndroid() ? () => void android.shareText(selection.text, book.title) : undefined}
+                  onReadFromHere={!paged ? () => readFromSelection() : undefined}
                 />
               )}
             </div>
@@ -189,7 +207,8 @@ export const ReaderPage = ({ reader }: { reader: ReaderScope }) => {
               bookAt={bookAtFraction}
               marks={bookMarks}
               onSeek={seekTo}
-              shown={dockNear || dockAwake}
+              // By finger the bar shows with the chrome (a tap in the middle of the page), at a thumb's size.
+              shown={dockNear || dockAwake || (reader.shape !== "desktop" && reader.chromeVisible)}
               holdRef={seekHoldRef}
             />
           )}

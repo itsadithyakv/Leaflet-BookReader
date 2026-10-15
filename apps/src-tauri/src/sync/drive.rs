@@ -20,25 +20,35 @@ use crate::sync::folder::SyncReport;
 use crate::sync::large;
 use crate::sync::merge::{self, BookEntry, SyncDoc};
 use crate::sync::store;
-use crate::sync::{DriveState, PendingAuth};
+use crate::sync::PendingAuth;
+// The loopback sign-in (`auth_start`) is not built for the phone.
+#[cfg(not(target_os = "android"))]
+use crate::sync::DriveState;
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use oauth2::basic::BasicClient;
-use oauth2::{
-  AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge,
-  RedirectUrl, TokenResponse, TokenUrl
-};
+use oauth2::{AuthUrl, AuthorizationCode, ClientId, ClientSecret, RedirectUrl, TokenResponse, TokenUrl};
+#[cfg(not(target_os = "android"))]
+use oauth2::{CsrfToken, PkceCodeChallenge};
 use serde::{Deserialize, Serialize};
-use std::io::{Read, Write};
+use std::io::Read;
+#[cfg(not(target_os = "android"))]
+use std::io::Write;
+#[cfg(not(target_os = "android"))]
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(not(target_os = "android"))]
+use std::time::Instant;
+#[cfg(not(target_os = "android"))]
 use tokio::sync::oneshot;
 use crate::LockExt;
 
+#[cfg(not(target_os = "android"))]
 const DRIVE_SCOPE: &str = "https://www.googleapis.com/auth/drive.file";
 /// Identity, so the account panel can name the connected Google account instead
 /// of the placeholder the app used to invent. Both are non-sensitive scopes.
+#[cfg(not(target_os = "android"))]
 const IDENTITY_SCOPES: [&str; 2] = ["openid", "email"];
 const DRIVE_API: &str = "https://www.googleapis.com/drive/v3";
 const DRIVE_UPLOAD: &str = "https://www.googleapis.com/upload/drive/v3";
@@ -162,6 +172,7 @@ or use folder sync, which needs nothing at all.";
 /// How long the loopback listener waits for the browser to come back before it
 /// gives the port up. Without a bound, closing the consent tab left the UI
 /// waiting for a callback that would never arrive.
+#[cfg(not(target_os = "android"))]
 const AUTH_TIMEOUT: Duration = Duration::from_secs(300);
 /// Chunk size for resumable uploads. Bounds memory for a large book and gives
 /// the progress reporting somewhere to hook in later.
@@ -191,6 +202,7 @@ struct FilesList {
   next_page_token: Option<String>
 }
 
+#[cfg(not(target_os = "android"))]
 pub struct AuthStart {
   pub url: String
 }
@@ -214,6 +226,7 @@ fn oauth_client(credentials: &DriveCredentials) -> Result<BasicClient> {
 
 /// What arrived on the loopback listener.
 #[derive(Debug, PartialEq)]
+#[cfg(not(target_os = "android"))]
 enum Callback {
   Code(String),
   /// The consent screen was dismissed. Distinguishing this from noise is what
@@ -224,6 +237,7 @@ enum Callback {
   Ignored
 }
 
+#[cfg(not(target_os = "android"))]
 fn parse_callback(buffer: &[u8], expected_state: &str) -> Callback {
   let request = String::from_utf8_lossy(buffer);
   let Some(line) = request.lines().next() else {
@@ -271,6 +285,7 @@ fn parse_callback(buffer: &[u8], expected_state: &str) -> Callback {
   }
 }
 
+#[cfg(not(target_os = "android"))]
 fn respond(stream: &mut TcpStream, body: &str) {
   let response = format!(
     "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -284,6 +299,7 @@ fn respond(stream: &mut TcpStream, body: &str) {
 /// Reads until the end of the request head, rather than taking whatever one
 /// `read` happened to return. A request split across TCP segments used to parse
 /// as garbage and fail the sign-in with no explanation.
+#[cfg(not(target_os = "android"))]
 fn read_request(stream: &mut TcpStream) -> Vec<u8> {
   let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
   let mut buffer = Vec::with_capacity(2048);
@@ -307,10 +323,12 @@ fn read_request(stream: &mut TcpStream) -> Vec<u8> {
   buffer
 }
 
+#[cfg(not(target_os = "android"))]
 const SUCCESS_PAGE: &str =
   "<!doctype html><meta charset=utf-8><title>Leaflet</title>\
    <body style=\"font:16px system-ui;padding:3rem;text-align:center\">\
    <h1>Leaflet is connected</h1><p>You can close this tab and return to the app.</p>";
+#[cfg(not(target_os = "android"))]
 const FAILURE_PAGE: &str =
   "<!doctype html><meta charset=utf-8><title>Leaflet</title>\
    <body style=\"font:16px system-ui;padding:3rem;text-align:center\">\
@@ -321,6 +339,7 @@ const FAILURE_PAGE: &str =
 /// Non-blocking accept with a deadline, rather than a thread parked forever in
 /// `accept()`: the port is released when the user walks away, and repeatedly
 /// pressing "Connect Drive" no longer strands a thread per attempt.
+#[cfg(not(target_os = "android"))]
 fn serve_callback(listener: TcpListener, expected_state: String, tx: oneshot::Sender<Result<String>>) {
   let _ = listener.set_nonblocking(true);
   let deadline = Instant::now() + AUTH_TIMEOUT;
@@ -362,6 +381,7 @@ fn serve_callback(listener: TcpListener, expected_state: String, tx: oneshot::Se
   // Dropping the listener here frees the port whatever the outcome was.
 }
 
+#[cfg(not(target_os = "android"))]
 pub fn auth_start(state: &mut DriveState, credentials: &DriveCredentials) -> Result<AuthStart> {
   let client = oauth_client(credentials)?;
   let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))?;
@@ -436,7 +456,9 @@ pub async fn auth_wait(pending: PendingAuth, credentials: &DriveCredentials) -> 
 
 // ---- token storage ---------------------------------------------------------
 
+#[cfg(not(target_os = "android"))]
 const KEYRING_SERVICE: &str = "app.leaflet.drive";
+#[cfg(not(target_os = "android"))]
 const KEYRING_USER: &str = "refresh-token";
 pub const REFRESH_SETTING: &str = "drive_refresh_token";
 pub const ACCESS_SETTING: &str = "drive_access_token";
@@ -449,7 +471,7 @@ pub const ACCOUNT_SETTING: &str = "drive_account_email";
 /// The database remains the fallback: on a machine with no usable keychain,
 /// refusing to sync would be worse than the previous behaviour.
 pub fn store_refresh_token(db: &Database, token: &str) -> Result<()> {
-  match keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER).and_then(|entry| entry.set_password(token)) {
+  match keep_refresh_token(token) {
     Ok(()) => {
       // Remove any copy an earlier version left in the database.
       let _ = db.set_setting(REFRESH_SETTING, "");
@@ -460,12 +482,8 @@ pub fn store_refresh_token(db: &Database, token: &str) -> Result<()> {
 }
 
 pub fn load_refresh_token(db: &Database) -> Result<Option<String>> {
-  if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER) {
-    if let Ok(token) = entry.get_password() {
-      if !token.is_empty() {
-        return Ok(Some(token));
-      }
-    }
+  if let Some(token) = kept_refresh_token() {
+    return Ok(Some(token));
   }
   let stored = db.get_setting(REFRESH_SETTING)?.filter(|value| !value.is_empty());
   // Move a legacy plaintext token into the keychain the first time it is read.
@@ -475,10 +493,47 @@ pub fn load_refresh_token(db: &Database) -> Result<Option<String>> {
   Ok(stored)
 }
 
-pub fn clear_tokens(db: &Database) -> Result<()> {
+/// The keychain on a computer; Leaflet's private storage on a phone, where
+/// `keyring` keeps nothing at all (`device_secret`).
+#[cfg(not(target_os = "android"))]
+fn keep_refresh_token(token: &str) -> std::result::Result<(), String> {
+  keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
+    .and_then(|entry| entry.set_password(token))
+    .map_err(|e| e.to_string())
+}
+
+#[cfg(target_os = "android")]
+fn keep_refresh_token(token: &str) -> std::result::Result<(), String> {
+  crate::sync::device_secret::store(crate::sync::device_secret::DRIVE_REFRESH, token).map_err(|e| e.to_string())
+}
+
+#[cfg(not(target_os = "android"))]
+fn kept_refresh_token() -> Option<String> {
+  keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
+    .and_then(|entry| entry.get_password())
+    .ok()
+    .filter(|token| !token.is_empty())
+}
+
+#[cfg(target_os = "android")]
+fn kept_refresh_token() -> Option<String> {
+  crate::sync::device_secret::load(crate::sync::device_secret::DRIVE_REFRESH)
+}
+
+#[cfg(not(target_os = "android"))]
+fn forget_refresh_token() {
   if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER) {
     let _ = entry.delete_credential();
   }
+}
+
+#[cfg(target_os = "android")]
+fn forget_refresh_token() {
+  crate::sync::device_secret::clear(crate::sync::device_secret::DRIVE_REFRESH);
+}
+
+pub fn clear_tokens(db: &Database) -> Result<()> {
+  forget_refresh_token();
   db.set_setting(REFRESH_SETTING, "")?;
   db.set_setting(ACCESS_SETTING, "")?;
   db.set_setting(EXPIRES_SETTING, "")?;

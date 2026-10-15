@@ -1,10 +1,11 @@
-import { memo } from "react";
+import { memo, useRef } from "react";
 import type { Book } from "@shared/models/book";
 import { useCoverSrc } from "../hooks/useCoverSrc";
 import { isFinished } from "../constants/books";
 import { useSeriesInfo } from "../library/useSeries";
 import { seriesNumberLabel } from "../library/series";
 import { BookMenu, type BookMenuAction } from "./BookMenu";
+import { useLongPress } from "../hooks/useLongPress";
 
 type Props = {
   book: Book;
@@ -24,11 +25,16 @@ const BookCardComponent = ({ book, onRefresh, onOpen, menuActions, onRemoved }: 
   // Sync carries the library index to every device but leaves the files where
   // they are, so a book can be listed here with nothing to open yet.
   const needsDownload = book.available === false;
+  // Held with a finger, the card opens its menu, as the ⋯ does.
+  const cardRef = useRef<HTMLElement | null>(null);
+  const hold = useLongPress(() => cardRef.current?.querySelector<HTMLButtonElement>("[data-book-menu]")?.click());
 
   return (
     // A card is opened like a button, so it behaves like one: reachable with
     // Tab, opened with Enter or Space, and announced with the book's name.
     <article
+      ref={cardRef}
+      {...hold}
       role="button"
       tabIndex={0}
       aria-label={`Open ${book.title}${book.author ? ` by ${book.author}` : ""}`}

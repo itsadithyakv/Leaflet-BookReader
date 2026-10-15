@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Sparkles, X } from "lucide-react";
 import { isNewer, updateService, type UpdateNotice } from "../services/updateService";
+import { useBackClose } from "../hooks/useBackClose";
 
 /** Asked this long after Leaflet opens (not at once: the first seconds are the library's), and then this often. */
 const FIRST_ASK_MS = 20_000;
@@ -42,6 +43,9 @@ export const UpdateBanner = () => {
     };
   }, []);
 
+  // Back puts it away for now (not for good: that is Later's).
+  useBackClose(Boolean(offer?.version), () => setOffer(null));
+
   if (!offer?.version) return null;
   const later = () => {
     try {
@@ -53,7 +57,7 @@ export const UpdateBanner = () => {
   };
 
   return (
-    <div role="status" className="modal-surface fixed bottom-24 right-5 z-[70] flex w-[min(22rem,calc(100vw-2.5rem))] items-start gap-3 rounded-2xl p-4 shadow-lg">
+    <div role="status" className="update-card modal-surface fixed bottom-24 right-5 z-[70] flex w-[min(22rem,calc(100vw-2.5rem))] items-start gap-3 rounded-2xl p-4 shadow-lg">
       <Sparkles size={18} className="mt-0.5 shrink-0 text-primary" aria-hidden />
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold text-on-surface">Leaflet {offer.version} is out</p>

@@ -48,6 +48,12 @@ import { toastMs } from "./library/importSummary";
 import { getPlatform, pickSyncFolder } from "./platform";
 import type { Book } from "@shared/models/book";
 import { requestSettingsSection } from "./pages/settingsSection";
+import { useBackFallback } from "./platform/back";
+import { useTouchInput } from "./platform/device";
+import { useBackClose } from "./hooks/useBackClose";
+import { TouchTips } from "./components/TouchTipLayer";
+import { SheetHandle } from "./components/ui/SheetHandle";
+import { requestAddBooks } from "./hooks/useAddBooksRequest";
 import {
   findBookFormat,
   getBookExtension,
@@ -205,6 +211,7 @@ const App = () => {
   // build, where the prompt used to offer a download that could only fail.
   const [converterOfferKind, setConverterOfferKind] = useState<ConverterOffer>("get");
   const [converterBusy, setConverterBusy] = useState(false);
+  const touch = useTouchInput();
 
   // Which transport is carrying sync, if any. There is no account tier: sync
   // runs against the reader's own storage, so there is nothing to sign up for.
@@ -547,6 +554,16 @@ const App = () => {
     };
   }, [openAssociatedPaths, showToast]);
 
+  const declineConverter = () => {
+    if (!converterPromptBook || converterBusy) {
+      return false;
+    }
+    setConverterPromptBook(null);
+    showToast(`“${converterPromptBook.title}” stays in your library. Open it once the converter is available.`);
+    return true;
+  };
+  useBackClose(converterPromptBook !== null, declineConverter);
+
   const handleConverterDownload = () => {
     if (!converterPromptBook || converterBusy) {
       return;
@@ -677,6 +694,17 @@ const App = () => {
   }, [accountStepOpen]);
 
   const closeProfile = useCallback(() => setAccountPanelOpen(false), []);
+
+  // Android's Back, once nothing is open over the page: another tab goes back
+  // to the Library; the Library itself lets Leaflet go to the background.
+  // (A book open has the reader's own, asked first while it is open.)
+  useBackFallback(() => {
+    if (selectedRef.current || activeTab === "library") {
+      return false;
+    }
+    setActiveTab("library");
+    return true;
+  });
 
   // First launch shows one thing at a time: the welcome screen alone, then
   // Pip comes out and starts the tour.
@@ -972,6 +1000,18 @@ const App = () => {
           </div>
         </div>
         <div className="flex items-center gap-2 md:gap-4">
+          {/* Sideways on a phone the Library's + is up here (upright, it floats over the tab bar). */}
+          {activeTab === "library" && (
+            <button
+              type="button"
+              className="key-button header-add-books"
+              onClick={requestAddBooks}
+              title="Add books"
+              aria-label="Add books"
+            >
+              <UiIcon name="plus" size={20} />
+            </button>
+          )}
           <button
             type="button"
             className="key-button"
@@ -1190,13 +1230,14 @@ const App = () => {
       )}
 
       {converterPromptBook && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/55 px-6">
+        <div className="sheet-backdrop fixed inset-0 z-[70] flex items-center justify-center bg-black/55 px-6">
           <div
-            className="modal-surface dialog-fit w-full max-w-md p-6"
+            className="modal-surface dialog-fit sheet-panel w-full max-w-md p-6"
             role="dialog"
             aria-modal="true"
             aria-labelledby="converter-dialog-title"
           >
+            <SheetHandle onClose={declineConverter} />
             <div className="flex items-start gap-4">
               <div className="paper-surface-raised flex h-12 w-12 shrink-0 items-center justify-center text-primary">
                 <UiIcon name="book-open" size={23} />
@@ -1236,12 +1277,7 @@ const App = () => {
               <button
                 type="button"
                 className="tactile-button px-4 py-2 text-sm"
-                onClick={() => {
-                  setConverterPromptBook(null);
-                  showToast(
-                    `“${converterPromptBook.title}” stays in your library. Open it once the converter is available.`
-                  );
-                }}
+                onClick={declineConverter}
                 disabled={converterBusy}
               >
                 {converterSupported ? "Not now" : "Close"}
@@ -1357,6 +1393,8 @@ const App = () => {
         onDismiss={dismissWelcome}
       />
       <AccountDialog showToast={showToast} />
+      {/* A held finger reads any tooltip (docs/android.md, rule 3). */}
+      {touch && <TouchTips />}
 
     </div>
   );

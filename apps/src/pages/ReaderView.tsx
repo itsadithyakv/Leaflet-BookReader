@@ -24,6 +24,9 @@ import { useReaderChrome } from "../readers/text/useReaderChrome";
 import { useReaderCover } from "../readers/text/useReaderCover";
 import { useBookOpening } from "../readers/text/useBookOpening";
 import { useKindlePlacing } from "../readers/text/useKindlePlacing";
+import { useScrollTaps, useSelectionHidesChrome, useShapeLayout } from "../readers/text/useTouchReading";
+import { isPhoneShape, useReaderDevice } from "../readers/touchLayout";
+import "../readers/touch.css";
 import { ReaderToolbar } from "../readers/text/ReaderToolbar";
 import { ReaderContentsPanel } from "../readers/text/ReaderContentsPanel";
 import { ReaderPage } from "../readers/text/ReaderPage";
@@ -87,6 +90,7 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
   Object.assign(reader, useReaderCover(reader));
   useBookOpening(reader);
   useResizeRelayout(reader);
+  useShapeLayout(reader);
   useThemeChange(reader);
   useScrollWatch(reader);
   useAutoScrollEngine(reader);
@@ -98,10 +102,14 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
   useRecapOnReturn(reader);
   useAwakeWhileReading(reader);
   Object.assign(reader, useSelectionDock(reader));
+  useScrollTaps(reader);
+  useSelectionHidesChrome(reader);
   // Last: it waits for the book to be up, and nothing waits on it.
   useKindlePlacing(reader);
 
-  const { chromeVisible, displayMode, focusToast, hoverChrome, isLight, pageStyle, readingMode } = reader;
+  const { chromeVisible, displayMode, exitGuard, focusToast, hoverChrome, isLight, pageStyle, readingMode, rotation, shape } = reader;
+  // The system's bars hide for a focus-lock session, and on a phone on its side while the chrome is away.
+  useReaderDevice(exitGuard.locked || (shape === "sideways" && !chromeVisible), rotation);
 
   return (
     <div
@@ -119,13 +127,14 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
         readingMode === "speed" ? "reader-speed-active" : ""
       }`}
       style={pageStyle}
+      data-shape={isPhoneShape(shape) ? shape : undefined}
     >
       <ReaderToolbar reader={reader} />
       {/* The top edge of the window: resting the pointer here brings the bar
           back. The page is an iframe, so the bar cannot see the pointer
           arrive over the text; this strip can. */}
       {!chromeVisible && (
-        <div className="reader-toolbar-hot-zone" aria-hidden="true" onPointerEnter={() => hoverChrome(true)}>
+        <div className="reader-toolbar-hot-zone" aria-hidden="true" onPointerEnter={(event) => hoverChrome(true, event.pointerType)}>
           <span className="reader-toolbar-handle" />
         </div>
       )}

@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { create } from "zustand";
 import { useLibraryStore } from "../store/libraryStore";
 import { guessSeries, librarySeries, seriesNumberLabel } from "../library/series";
+import { SheetHandle } from "./ui/SheetHandle";
+import { useBackClose } from "../hooks/useBackClose";
 
 /**
  * Where the reader corrects a book's series: names it and its number, says it
@@ -27,6 +29,7 @@ export const SeriesEditorDialog = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const nameRef = useRef<HTMLInputElement | null>(null);
+  useBackClose(Boolean(bookId), close);
 
   // The names already in the library, so one series is typed the same way twice.
   const knownNames = useMemo(() => [...new Set(series.groups.map((group) => group.name))].sort(), [series]);
@@ -96,7 +99,7 @@ export const SeriesEditorDialog = () => {
 
   return (
     <div
-      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 px-4"
+      className="sheet-backdrop fixed inset-0 z-[90] flex items-center justify-center bg-black/50 px-4"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
           close();
@@ -107,12 +110,13 @@ export const SeriesEditorDialog = () => {
         role="dialog"
         aria-modal="true"
         aria-labelledby="series-editor-title"
-        className="modal-surface confirm-pop dialog-fit w-full max-w-md rounded-2xl p-6"
+        className="modal-surface confirm-pop dialog-fit sheet-panel w-full max-w-md rounded-2xl p-6"
         onSubmit={(event) => {
           event.preventDefault();
           save();
         }}
       >
+        <SheetHandle onClose={close} />
         <p className="text-[10px] uppercase tracking-[0.2em] text-on-surface-variant">Series</p>
         <h2 id="series-editor-title" className="page-title mt-1 line-clamp-3 break-words text-xl text-on-surface" title={book.title}>
           {book.title}

@@ -19,6 +19,8 @@ mod http;
 mod lookup;
 mod wiki;
 mod metadata;
+#[cfg(target_os = "android")]
+mod mobile;
 mod pdf_text;
 mod pip;
 mod reminders;
@@ -156,6 +158,11 @@ pub fn run() {
     }
   }));
 
+  // The Android side: screen, rotation, system bars, picker, share sheet, and
+  // books arriving from other apps (`mobile.rs`).
+  #[cfg(target_os = "android")]
+  let builder = builder.plugin(mobile::init());
+
   builder
     .plugin(tauri_plugin_dialog::init())
     // Opens the OAuth consent page in the system browser: Google refuses to
@@ -171,6 +178,17 @@ pub fn run() {
       diag::info(&format!("Leaflet {} starting", env!("CARGO_PKG_VERSION")));
       let database = match open_database() {
         Ok(database) => database,
+        // A phone has no message box, and a failed setup would leave a blank
+        // screen: the page says it instead (`mobile::StartupFailure`).
+        #[cfg(target_os = "android")]
+        Err(message) => {
+          diag::error(&format!("Leaflet can't start: {message}"));
+          _app.manage(mobile::StartupFailure(format!(
+            "{message}\n\nClosing Leaflet and opening it again may help. If it does not, the library on this phone may be damaged."
+          )));
+          return Ok(());
+        }
+        #[cfg(not(target_os = "android"))]
         Err(message) => {
           diag::tell(
             "Leaflet can't start",

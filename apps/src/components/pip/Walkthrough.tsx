@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { PipSay } from "../PipSay";
 import { placeNear, type Rect } from "./layout";
 import { nextStep, type WalkStep, type WalkTarget } from "./walkSteps";
+import { useBackLayer } from "../../platform/back";
 
 type WalkthroughProps = {
   steps: WalkStep[];
@@ -40,6 +41,8 @@ export const Walkthrough = ({ steps, find, prepare, onClose }: WalkthroughProps)
     setIndex(null);
     closeRef.current();
   };
+  // Android's Back leaves the walk, as Escape does.
+  useBackLayer(true, close);
   const goTo = (next: number | null) => {
     if (next === null) {
       close();

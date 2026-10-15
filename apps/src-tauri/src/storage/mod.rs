@@ -5,8 +5,13 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 #[cfg(desktop)]
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager};
+use std::time::Duration;
+#[cfg(desktop)]
+use std::time::Instant;
+use tauri::AppHandle;
+#[cfg(desktop)]
+use tauri::Manager;
+#[cfg(desktop)]
 use tokio::io::AsyncWriteExt;
 #[cfg(desktop)]
 use regex::Regex;
@@ -406,6 +411,7 @@ fn resolve_converter_path(app: Option<&AppHandle>) -> Option<PathBuf> {
 /// Depth is capped so a symlink cycle inside a Calibre tree cannot hang startup;
 /// the binary sits within a couple of levels of the install root in every layout
 /// we look at.
+#[cfg(desktop)]
 const CONVERTER_SEARCH_DEPTH: usize = 4;
 
 #[cfg(desktop)]
@@ -624,11 +630,12 @@ impl std::fmt::Display for ConversionError {
   }
 }
 
-#[cfg(desktop)]
+// On phones too: the Kindle reader built in (`convert::mobi`) says it when it meets a locked book.
 const DRM_MESSAGE: &str = "This book is DRM-protected, so it cannot be converted. Open it in the app it was purchased from.";
 
 /// Calibre is slow on large books but should never run forever; a hung process
 /// used to leave the reader spinning with no way back.
+#[cfg(desktop)]
 const CONVERSION_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 #[cfg(desktop)]

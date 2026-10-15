@@ -227,6 +227,8 @@ pub fn list_books(state: State<'_, AppState>) -> Result<Vec<BookRecord>, String>
 
 #[tauri::command]
 pub fn take_pending_open_paths(state: State<'_, AppState>) -> Vec<String> {
+  #[cfg(target_os = "android")]
+  state.pending_open_paths.guard().extend(crate::mobile::take_arrived_early());
   std::mem::take(&mut *state.pending_open_paths.guard())
 }
 

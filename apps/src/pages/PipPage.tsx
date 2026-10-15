@@ -59,6 +59,7 @@ import { GAMES } from "../components/pip/arcade/games";
 import { useHabitStore } from "../store/habitStore";
 import { getDateKey } from "../services/habitService";
 import { FinishSheet, SlotSheet } from "./pip/DecorSheets";
+import { useBackFallback } from "../platform/back";
 
 /** Between the room and the lift beside it; the lift is 44 wide (index.css keeps the two in step). */
 const LIFT_GAP = 8;
@@ -633,6 +634,27 @@ export const PipPage = ({ showToast, openSocial }: PipPageProps) => {
     setPickerPlot(null);
     setDrawer((current) => (current === id ? null : id));
   };
+
+  // Android's Back, once nothing is open over the house (a drawer, the shop, a card: each closes itself): decorating
+  // steps back as Escape does, the play keys fold, and from her rooms it is out through the door to the Hollow. Out
+  // there the camp takes it (BaseScreen), and then the app (to the Library).
+  useBackFallback(() => {
+    if (place !== "home" || arcadeOpen) return false;
+    if (decorating) {
+      if (slotFocus) setSlotFocus(null);
+      else if (finishPanel) setFinishPanel(null);
+      else stopDecorating();
+      return true;
+    }
+    if (playing) {
+      setPlaying(false);
+      return true;
+    }
+    setDrawer(null);
+    setPickerPlot(null);
+    setPlace("hollow");
+    return true;
+  });
 
   // The sheet on screen: a drawer, or while decorating, what goes in a spot.
   const sheet: { key: string; title: string; note?: ReactNode; size?: "short"; body: ReactNode; close: () => void } | null = decorating

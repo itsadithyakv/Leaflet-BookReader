@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { EpubCFI } from "epubjs";
 import { useAppearanceStore } from "../../store/appearanceStore";
-import { ALIGN_KEY, LAYOUT_KEY, LINE_HEIGHT, MEASURE_KEY, MEASURE_PADDING, SPACING_KEY, TYPEFACE_KEY, applyTypeChoice, lineHeightPx, measureCss, readAlign, readLayout, readMeasure, readSpacing, readTypeface, type ReaderAlign, type ReaderLayout, type ReaderMeasure, type ReaderSpacing, type ReaderTypeface, type ReaderDisplayMode } from "../readerTypes";
+import { ALIGN_KEY, LINE_HEIGHT, MEASURE_KEY, MEASURE_PADDING, SPACING_KEY, TYPEFACE_KEY, applyTypeChoice, lineHeightPx, measureCss, readAlign, readMeasure, readSpacing, readTypeface, type ReaderAlign, type ReaderLayout, type ReaderMeasure, type ReaderSpacing, type ReaderTypeface, type ReaderDisplayMode } from "../readerTypes";
 import { applyCustomFont, customFontFaceCss, customFontId, type CustomFontFace } from "../customFonts";
 import { fontService } from "../../services/fontService";
 import { getReaderFinish, getReaderFinishBackground, PAGE_TOP_PAD } from "../finish";
+import { readLayoutFor, saveLayoutFor, spreadFor, useReaderShape, useRotationLock } from "../touchLayout";
 import type { Later, WithCover, WithPace } from "./scope";
 
 /** Room left below the last line of the book, as a share of the window: how far up that line can be brought. */
@@ -15,7 +16,7 @@ const END_ROOM = 0.5;
  * scrolling or pages, the page's colours. And putting those into the book's own
  * documents.
  */
-export const useReaderLook = (reader: WithPace & Later<"setAutoScrollActive">) => {
+export const useReaderLook = (reader: WithPace & Later<"setAutoScrollActive" | "holdPlaceForRelayout">) => {
   const { bookRef, initialPrefs, renditionRef, setReadingMode, setReloadKey, viewerRef } = reader;
   const [fontSize, setFontSize] = useState(initialPrefs?.fontSize ?? 18);
   const fontSizeRef = useRef(fontSize);
@@ -35,11 +36,20 @@ export const useReaderLook = (reader: WithPace & Later<"setAutoScrollActive">) =
   const toggleTheme = useAppearanceStore((state) => state.toggleTheme);
 
   // Scrolling (the default) or turning pages. A preference of this device,
-  // shared by every book; changing it rebuilds the page.
-  const [layout, setLayout] = useState<ReaderLayout>(readLayout);
+  // shared by every book; changing it rebuilds the page. A phone keeps one
+  // for each way up (readers/touchLayout.ts): sideways it defaults to pages,
+  // and its pages are a spread of two columns.
+  const shape = useReaderShape();
+  const [layout, setLayout] = useState<ReaderLayout>(() => readLayoutFor(shape));
   const layoutRef = useRef<ReaderLayout>(layout);
   layoutRef.current = layout;
   const paged = layout === "pages";
+  /** The pages are a spread (two columns a turn): what the book was opened with. */
+  const [spread, setSpread] = useState(() => spreadFor(shape, layout));
+  const spreadRef = useRef(spread);
+  spreadRef.current = spread;
+  /** Turn with the phone, or keep it one way up while reading (the type panel, on Android). */
+  const [rotation, chooseRotation] = useRotationLock();
   // How long a line may run (readers/readerTypes.ts): the text in a column on
   // a wide window. A preference of this device, like the layout.
   const [measure, setMeasure] = useState<ReaderMeasure>(readMeasure);
@@ -93,22 +103,31 @@ export const useReaderLook = (reader: WithPace & Later<"setAutoScrollActive">) =
   const linePx = () => lineHeightPx(fontSizeRef.current, typeChoiceRef.current.spacing);
   /** The column for the book's stylesheet. Pages narrow the viewer instead: their frame spans every column. */
   const bookMeasureCss = () => measureCss(layoutRef.current === "pages" ? "full" : measureRef.current);
-  const chooseLayout = (next: ReaderLayout) => {
-    if (next === layout) {
+  /** Lays the book out again in `next` (and as a spread or not), keeping the place: the book reopens there. */
+  const relayout = (next: ReaderLayout, nextSpread: boolean) => {
+    if (next === layoutRef.current && nextSpread === spreadRef.current) {
       return;
-    }
-    try {
-      localStorage.setItem(LAYOUT_KEY, next);
-    } catch {
-      // This session only.
     }
     if (next === "pages") {
       // Auto-scroll, Smart Read and SpeedRead are built on scrolling.
       reader.setAutoScrollActive(false);
       setReadingMode("standard");
     }
+    // The place goes with the book into the new layout (useReaderPlace).
+    reader.holdPlaceForRelayout();
+    layoutRef.current = next;
+    spreadRef.current = nextSpread;
     setLayout(next);
+    setSpread(nextSpread);
     setReloadKey((key) => key + 1);
+  };
+  const chooseLayout = (next: ReaderLayout) => {
+    if (next === layout) {
+      return;
+    }
+    // Kept for this way up of a phone, or for the device.
+    saveLayoutFor(shape, next);
+    relayout(next, spreadFor(shape, next));
   };
 
   const applyReaderInsets = () => {
@@ -243,7 +262,7 @@ export const useReaderLook = (reader: WithPace & Later<"setAutoScrollActive">) =
 
   return {
     fontSize, setFontSize, fontSizeRef, displayMode, setDisplayMode, readerTheme, displayModeRef, readerThemeRef,
-    toggleTheme, layout, layoutRef, paged, measure, chooseMeasure, typeface, spacing, align, typeChoiceRef,
+    toggleTheme, shape, rotation, chooseRotation, layout, layoutRef, paged, spread, spreadRef, relayout, measure, chooseMeasure, typeface, spacing, align, typeChoiceRef,
     customFontRef, setCustomFont, customFontOn: customFontNow?.id ?? "",
     chooseTypeface, chooseSpacing, chooseAlign, linePx, bookMeasureCss, chooseLayout, applyReaderInsets,
     ensureSingleScrollContainer, applyEndRoom, applyReaderTypography, isLight, rsvpDark, pageStyle, rsvpStyle

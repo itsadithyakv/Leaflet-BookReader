@@ -4,8 +4,10 @@ import { AnnotationsPanel } from "../AnnotationsPanel";
 import { openQuoteCard } from "../../components/share/shareStore";
 import { TypePanel } from "../TypePanel";
 import { toolbarTitleClass } from "../titleFit";
-import { ReaderAmbience } from "../../ambience";
+import { ReaderAmbience, closeAmbiencePopover } from "../../ambience";
 import { ReaderMoreMenu } from "./ReaderMoreMenu";
+import { ReaderLookRows } from "./ReaderTouchRows";
+import { isPhoneShape } from "../touchLayout";
 import type { ReaderScope } from "./scope";
 
 /** The bar across the top: back to the library, the title, and the panels' buttons. */
@@ -14,17 +16,35 @@ export const ReaderToolbar = ({ reader }: { reader: ReaderScope }) => {
     addBookmark, align, annotations, book, bookmarkPanelOpen, bookmarks, chapterInBook, chooseAlign, chooseMeasure,
     chooseSpacing, chooseTypeface, closeSearch, copyText, exitGuard, exportHighlights, fontPanelOpen, fontPanelRef, fontSize,
     hoverChrome, measure, notesFocus, openBookmark, orderedHighlights, people, revealChrome, searchOpen,
-    setBookmarkPanelOpen, setFontPanelOpen, setFontSize, setNotesFocus, setSearchOpen, sidebarOpen, sidebarPinned,
+    setBookmarkPanelOpen, setFontPanelOpen, setFontSize, setNotesFocus, setSearchOpen, shape, sidebarOpen, sidebarPinned,
     spacing, toggleContents, toolbarRef, typeface
   } = reader;
+  // A phone has room for four (Back, Contents, Aa, ···): search, characters
+  // and notes are rows of the ··· sheet there, and their panels open from it.
+  const phone = isPhoneShape(shape);
   return (
     <header
       ref={toolbarRef}
       className="reader-toolbar fixed left-0 right-0 top-0 z-50 flex w-full items-center justify-between px-6 py-5 md:px-8"
-      onPointerEnter={() => hoverChrome(true)}
-      onPointerLeave={() => hoverChrome(false)}
+      onPointerEnter={(event) => hoverChrome(true, event.pointerType)}
+      onPointerLeave={(event) => hoverChrome(false, event.pointerType)}
       onFocus={revealChrome}
     >
+      {/* On a phone the panels are sheets from the foot: a tap above one closes it (and does not turn the page). */}
+      {phone && (fontPanelOpen || reader.morePanelOpen || reader.soundPanelOpen || bookmarkPanelOpen) && (
+        <button
+          type="button"
+          className="reader-sheet-scrim"
+          aria-label="Close"
+          onClick={() => {
+            setFontPanelOpen(false);
+            reader.setMorePanelOpen(false);
+            closeAmbiencePopover();
+            setNotesFocus(null);
+            setBookmarkPanelOpen(false);
+          }}
+        />
+      )}
       <div className="relative flex items-center gap-2 md:gap-4">
         <button
           type="button"
@@ -39,11 +59,11 @@ export const ReaderToolbar = ({ reader }: { reader: ReaderScope }) => {
           </span>
           {/* The label is the first thing to drop on a narrow toolbar; the
               arrow carries the meaning on its own. */}
-          <span className="hidden text-xs uppercase tracking-widest reader-accent sm:inline">
+          <span className="reader-back-label hidden text-xs uppercase tracking-widest reader-accent sm:inline">
             Back to Library
           </span>
         </button>
-        <PipExitGuard shown={exitGuard.guardShown} onDone={exitGuard.clearGuard} />
+        <PipExitGuard shown={exitGuard.guardShown} onDone={exitGuard.clearGuard} onLeave={exitGuard.leave} />
         {/* The chapter list otherwise opens only from a 6px hover strip,
             which a finger cannot hit and a touch screen cannot reveal. */}
         <button
@@ -57,7 +77,7 @@ export const ReaderToolbar = ({ reader }: { reader: ReaderScope }) => {
           <span className="material-symbols-outlined">list</span>
         </button>
       </div>
-      <div className="absolute left-1/2 hidden -translate-x-1/2 flex-col items-center text-center md:flex">
+      <div className="reader-toolbar-title absolute left-1/2 hidden -translate-x-1/2 flex-col items-center text-center md:flex">
         <h1 className={toolbarTitleClass(book.title)} title={book.title}>
           {book.title}
         </h1>
@@ -91,9 +111,12 @@ export const ReaderToolbar = ({ reader }: { reader: ReaderScope }) => {
               onSpacing={chooseSpacing}
               align={align}
               onAlign={chooseAlign}
-            />
+            >
+              {phone && <ReaderLookRows reader={reader} />}
+            </TypePanel>
           )}
         </div>
+        {!phone && (
         <button
           className="reader-icon transition-colors reader-hover-accent"
           type="button"
@@ -103,7 +126,8 @@ export const ReaderToolbar = ({ reader }: { reader: ReaderScope }) => {
         >
           <UiIcon name="search" size={22} />
         </button>
-        {people.enabled && (
+        )}
+        {!phone && people.enabled && (
           <button
             className="reader-icon transition-colors reader-hover-accent"
             type="button"
@@ -125,6 +149,7 @@ export const ReaderToolbar = ({ reader }: { reader: ReaderScope }) => {
           </button>
         )}
         <div className="relative">
+          {!phone && (
           <button
             className="reader-icon transition-colors reader-hover-accent"
             type="button"
@@ -139,6 +164,7 @@ export const ReaderToolbar = ({ reader }: { reader: ReaderScope }) => {
           >
             <span className="material-symbols-outlined">bookmark</span>
           </button>
+          )}
           {bookmarkPanelOpen && (
             <AnnotationsPanel
               key={notesFocus ?? "notes"}

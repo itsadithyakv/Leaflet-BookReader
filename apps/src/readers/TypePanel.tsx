@@ -1,4 +1,4 @@
-import type { KeyboardEvent } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import { CustomFaces } from "./CustomFaces";
 import { MeasureControl } from "./MeasureControl";
 import {
@@ -23,6 +23,8 @@ type TypePanelProps = {
   onSpacing: (next: ReaderSpacing) => void;
   align: ReaderAlign;
   onAlign: (next: ReaderAlign) => void;
+  /** More rows at the foot: on a phone, the layout, the page finish and the turn lock (readers/text/ReaderTouchRows.tsx). */
+  children?: ReactNode;
 };
 
 export const MIN_FONT_SIZE = 14;
@@ -77,7 +79,8 @@ export const TypePanel = ({
   spacing,
   onSpacing,
   align,
-  onAlign
+  onAlign,
+  children
 }: TypePanelProps) => (
   <div
     className="reader-type-panel reader-menu absolute right-0 mt-3 rounded-xl border p-4 text-xs shadow-2xl reader-panel reader-border"
@@ -246,5 +249,6 @@ export const TypePanel = ({
         })}
       </div>
     </div>
+    {children}
   </div>
 );

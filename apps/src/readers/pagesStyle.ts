@@ -58,3 +58,23 @@ export const PAGES_CSS = `
     overflow-wrap: anywhere;
   }
 `;
+
+/**
+ * A phone's pages (readers/touchLayout.ts). Its chrome is away while reading
+ * and comes over the page only for a moment, so the page does not keep room
+ * for it: 80 px over the text and 56 under it were a third of a sideways
+ * phone's height, and left it six lines a page. The reader's frame is
+ * already clear of the status and gesture bars (readers/touch.css).
+ */
+export const PHONE_PAGE_PAD = 20;
+
+export const PHONE_PAGES_CSS = `
+  html[data-leaflet-layout="pages"][data-leaflet-phone] body {
+    padding-top: ${PHONE_PAGE_PAD}px !important;
+    padding-bottom: ${PHONE_PAGE_PAD}px !important;
+  }
+  html[data-leaflet-layout="pages"][data-leaflet-phone] body img,
+  html[data-leaflet-layout="pages"][data-leaflet-phone] body svg {
+    max-height: calc(100vh - ${PHONE_PAGE_PAD * 2}px) !important;
+  }
+`;

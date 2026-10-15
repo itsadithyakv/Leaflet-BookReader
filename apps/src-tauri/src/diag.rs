@@ -24,6 +24,9 @@ pub fn log_path() -> Option<PathBuf> {
 pub fn write(level: &str, message: &str) {
   #[cfg(debug_assertions)]
   eprintln!("[{level}] {message}");
+  // A phone's stderr goes nowhere; `adb logcat -s Leaflet` shows these.
+  #[cfg(target_os = "android")]
+  logcat(level, message);
   let Some(path) = log_path() else {
     return;
   };
@@ -37,6 +40,30 @@ pub fn write(level: &str, message: &str) {
   if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&path) {
     let one_line: String = message.chars().take(4000).collect::<String>().replace(['\r', '\n'], " | ");
     let _ = writeln!(file, "{} {level} {one_line}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f %z"));
+  }
+}
+
+/// One line to Android's log, under the tag "Leaflet".
+#[cfg(target_os = "android")]
+fn logcat(level: &str, message: &str) {
+  use std::ffi::CString;
+  use std::os::raw::{c_char, c_int};
+  #[link(name = "log")]
+  extern "C" {
+    fn __android_log_write(priority: c_int, tag: *const c_char, text: *const c_char) -> c_int;
+  }
+  // android/log.h: INFO 4, WARN 5, ERROR 6.
+  let priority = match level {
+    "ERROR" | "PANIC" => 6,
+    "WARN" => 5,
+    _ => 4
+  };
+  let (Ok(tag), Ok(text)) = (CString::new("Leaflet"), CString::new(message.replace('\0', " "))) else {
+    return;
+  };
+  // SAFETY: both are valid, NUL-terminated and outlive the call.
+  unsafe {
+    __android_log_write(priority, tag.as_ptr(), text.as_ptr());
   }
 }
 
@@ -101,6 +128,7 @@ pub fn ask(title: &str, text: &str) -> bool {
 }
 
 /// Tells the reader something went wrong, in a native dialog (Windows) or the log.
+#[cfg(not(target_os = "android"))]
 pub fn tell(title: &str, text: &str) {
   #[cfg(windows)]
   {

@@ -1,0 +1,14 @@
+/* What the system draws over Leaflet: the status bar, the gesture bar, a notch,
+   and the on-screen keyboard. `platform/device.ts` sets these from the real
+   window insets on Android; elsewhere they are the browser's own safe-area
+   values (all 0 on a desktop). Use these, not env() directly, so a phone
+   whose WebView reports no insets still keeps clear of its bars. */
+:root {
+  --inset-top: env(safe-area-inset-top, 0px);
+  --inset-right: env(safe-area-inset-right, 0px);
+  --inset-bottom: env(safe-area-inset-bottom, 0px);
+  --inset-left: env(safe-area-inset-left, 0px);
+  --inset-keyboard: 0px;
+  /* The smallest thing a finger can hit reliably (Android asks for 48 dp; 44 is the floor). */
+  --touch-target: 44px;
+}

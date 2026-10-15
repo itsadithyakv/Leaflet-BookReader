@@ -5,6 +5,7 @@ import { cuePip } from "../../pip/life";
 import { playSound } from "../../pip/sound";
 import { banner, bump, centerOf, collect, floatText, seedPixel, type Box } from "./fx";
 import { UiIcon } from "../UiIcon";
+import { useBackLayer } from "../../platform/back";
 
 /** The rewards this device has celebrated (its own record, never a claim). */
 const SEEN_KEY = "leaflet.pip.rewardsSeen";
@@ -87,6 +88,8 @@ export const PipGoals = ({ counter = defaultCounter, stage = defaultStage, onFli
   const next = rows.find((row) => row.next) ?? null;
   // A dropdown opens only when asked; its folding is not remembered either.
   const [open, setOpen] = useState(() => (dropdown ? false : readOpen(true)));
+  // Android's Back folds the dropdown, as Escape does.
+  useBackLayer(dropdown && open, () => setOpen(false));
   const [fresh, setFresh] = useState<Set<string>>(() => new Set());
   // Rewards arriving: the checklist stays up to show them, even the last step
   // ticked, and goes a moment after.

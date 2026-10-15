@@ -1,4 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { android, onAndroid } from "../../../platform/android";
 
 /**
  * A postcard as a picture on the reader's own disk or clipboard. Nothing is
@@ -27,6 +28,17 @@ const toBlob = (canvas: HTMLCanvasElement) =>
  * nowhere.
  */
 export const savePicture = async (name: string, canvas: HTMLCanvasElement): Promise<boolean> => {
+  if (onAndroid()) {
+    // "Save" on a phone is the share sheet (Save to Files, Photos, Drive, a message).
+    const path = await android.shareTarget(name);
+    const url = canvas.toDataURL("image/png");
+    if (!path || !url.startsWith(PNG_PREFIX)) {
+      throw new Error("The picture couldn't be made.");
+    }
+    await invoke("diary_save_picture", { path, png: url.slice(PNG_PREFIX.length) });
+    await android.shareFile(path, "image/png", name);
+    return true;
+  }
   if (isTauri()) {
     const { save } = await import("@tauri-apps/plugin-dialog");
     const path = await save({ defaultPath: name, filters: [{ name: "Picture", extensions: ["png"] }] });

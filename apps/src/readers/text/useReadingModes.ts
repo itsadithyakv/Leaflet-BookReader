@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { watchForeground } from "../../services/windowService";
-import { keepAwake } from "../../services/keepAwake";
+import { useReaderAwake } from "../readerAwake";
+import { isTouchInput } from "../../platform/device";
 import { type ReadingMode, type ReaderWord } from "../readerTypes";
 import { PAGE_TOP_PAD } from "../finish";
 import { rsvpStageVars, rsvpRamp, getPaceFactor, handsFreeCounts, stillTooLong } from "../pacing";
@@ -124,13 +125,12 @@ export const useReadingModes = (reader: WithPanels) => {
  * them.
  */
 export const useAwakeWhileReading = (reader: WithCover) => {
-  const { autoScrollActive, readingMode, readingPaused } = reader;
+  const { autoScrollActive, lastHandsOnAtRef, readingMode, readingPaused } = reader;
   const reading = autoScrollActive || (readingMode !== "standard" && !readingPaused);
-  useEffect(() => {
-    keepAwake(reading);
-  }, [reading]);
-  // Closing the book lets go whatever was playing.
-  useEffect(() => () => keepAwake(false), []);
+  // And on a phone while the book was touched lately (readers/readerAwake.ts);
+  // a touch on the text is in the book's own frame, kept in lastHandsOnAtRef.
+  // Closing the book lets go.
+  useReaderAwake(reading, () => lastHandsOnAtRef.current);
 };
 
 /** What hands-free reading is waiting on while something lies over the text. */
@@ -143,7 +143,9 @@ export const useReadingHold = (reader: WithChrome) => {
   // must never show a pace while nothing is moving.
   const holdReason =
     selection !== null
-      ? "Text is selected · Esc lets it go"
+      ? isTouchInput()
+        ? "Text is selected"
+        : "Text is selected · Esc lets it go"
       : searchOpen
         ? "Search is open"
         : bookmarkPanelOpen || notesFocus !== null

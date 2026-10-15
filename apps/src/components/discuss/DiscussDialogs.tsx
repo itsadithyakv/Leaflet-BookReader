@@ -3,9 +3,12 @@ import { discussService, type ReportReason } from "../../services/discussService
 import { errorText } from "../community/format";
 import { useDiscussStore } from "./discussStore";
 import { CONSEQUENCES, GUIDELINES, REPORT_REASONS } from "./guidelines";
+import { SheetHandle } from "../ui/SheetHandle";
+import { useBackClose } from "../../hooks/useBackClose";
 
-/** Escape closes the dialog on top and nothing under it. */
+/** Escape closes the dialog on top and nothing under it; so does Android's Back. */
 const useEscape = (open: boolean, close: () => void) => {
+  useBackClose(open, close);
   useEffect(() => {
     if (!open) {
       return;
@@ -45,8 +48,9 @@ const RulesDialog = () => {
       .finally(() => setBusy(false));
   };
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/55 px-4 py-6">
-      <div className="modal-surface flex max-h-full w-full max-w-lg flex-col overflow-y-auto p-6" role="dialog" aria-modal="true" aria-labelledby="rules-title">
+    <div className="sheet-backdrop fixed inset-0 z-[90] flex items-center justify-center bg-black/55 px-4 py-6">
+      <div className="modal-surface sheet-panel flex max-h-full w-full max-w-lg flex-col overflow-y-auto p-6" role="dialog" aria-modal="true" aria-labelledby="rules-title">
+        <SheetHandle onClose={decline} />
         <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Before you post for everyone</p>
         <h2 id="rules-title" className="page-title mt-1 text-2xl">
           Community guidelines
@@ -113,8 +117,9 @@ const ReportDialog = ({ showToast }: { showToast: (message: string) => void }) =
   // A spoiler is a thread's or a post's fault, never a reader's or a community's.
   const reasons = REPORT_REASONS.filter((entry) => entry.id !== "spoiler" || reporting.target === "thread" || reporting.target === "post" || reporting.target === "reply");
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/55 px-4 py-6" onMouseDown={(event) => event.target === event.currentTarget && close()}>
-      <div className="modal-surface w-full max-w-md p-6" role="dialog" aria-modal="true" aria-labelledby="report-title">
+    <div className="sheet-backdrop fixed inset-0 z-[90] flex items-center justify-center bg-black/55 px-4 py-6" onMouseDown={(event) => event.target === event.currentTarget && close()}>
+      <div className="modal-surface sheet-panel w-full max-w-md p-6" role="dialog" aria-modal="true" aria-labelledby="report-title">
+        <SheetHandle onClose={close} />
         <h2 id="report-title" className="page-title text-2xl">
           Report {reporting.what}
         </h2>

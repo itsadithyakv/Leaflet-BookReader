@@ -1,6 +1,8 @@
 import { useEffect, useRef } from "react";
 import { create } from "zustand";
 import { PipSprite } from "./PipSprite";
+import { SheetHandle } from "./ui/SheetHandle";
+import { useBackClose } from "../hooks/useBackClose";
 
 /**
  * Leaflet's own yes/no dialog.
@@ -58,6 +60,8 @@ export const ConfirmDialog = () => {
   const pending = useConfirmStore((state) => state.pending);
   const settle = useConfirmStore((state) => state.settle);
   const cancelRef = useRef<HTMLButtonElement | null>(null);
+  // Android's Back is "no", as Escape is.
+  useBackClose(pending !== null, () => settle(false));
 
   useEffect(() => {
     if (!pending) {
@@ -82,7 +86,7 @@ export const ConfirmDialog = () => {
 
   return (
     <div
-      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 px-4"
+      className="sheet-backdrop fixed inset-0 z-[90] flex items-center justify-center bg-black/50 px-4"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
           settle(false);
@@ -93,8 +97,9 @@ export const ConfirmDialog = () => {
         role="alertdialog"
         aria-modal="true"
         aria-labelledby={`confirm-title-${pending.id}`}
-        className="modal-surface confirm-pop dialog-fit w-full max-w-sm rounded-2xl p-6 text-center"
+        className="modal-surface confirm-pop dialog-fit sheet-panel w-full max-w-sm rounded-2xl p-6 text-center"
       >
+        <SheetHandle onClose={() => settle(false)} />
         {pending.pip && (
           <div className="mb-2 flex justify-center">
             <PipSprite move={pending.pip} size={72} playKey={pending.id} />

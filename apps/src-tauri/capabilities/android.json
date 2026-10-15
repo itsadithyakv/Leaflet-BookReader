@@ -1,0 +1,14 @@
+{
+  "identifier": "android",
+  "description": "The Android side's own commands: screen, rotation, system bars, picker, share sheet, Google Play",
+  "local": true,
+  "windows": [
+    "main"
+  ],
+  "platforms": [
+    "android"
+  ],
+  "permissions": [
+    "leaflet-device:default"
+  ]
+}

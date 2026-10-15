@@ -1,4 +1,7 @@
 import { useEffect } from "react";
+import { SheetHandle } from "../ui/SheetHandle";
+import { useBackClose } from "../../hooks/useBackClose";
+import { isAndroid } from "../../platform/device";
 import { create } from "zustand";
 import { AccountForm, type AccountFormMode } from "./AccountForm";
 import { PipSprite } from "../PipSprite";
@@ -47,6 +50,7 @@ export const markAccountOffered = () => {
 
 export const AccountDialog = ({ showToast }: { showToast: (message: string) => void }) => {
   const { open, mode, firstRun, close } = useAccountDialog();
+  useBackClose(open, close);
 
   useEffect(() => {
     if (!open) {
@@ -69,13 +73,14 @@ export const AccountDialog = ({ showToast }: { showToast: (message: string) => v
   }
 
   return (
-    <div className="fixed inset-0 z-[88] flex overflow-y-auto overscroll-contain bg-black/60 px-4 py-6">
+    <div className="sheet-backdrop fixed inset-0 z-[88] flex overflow-y-auto overscroll-contain bg-black/60 px-4 py-6">
       <div
         role="dialog"
         aria-modal="true"
         aria-label={firstRun ? "Create your Leaflet account" : "Leaflet account"}
-        className="modal-surface confirm-pop relative m-auto w-full max-w-md rounded-2xl p-6"
+        className="modal-surface confirm-pop sheet-panel relative m-auto w-full max-w-md rounded-2xl p-6"
       >
+        <SheetHandle onClose={close} />
         <button
           type="button"
           className="absolute right-4 top-4 rounded-full px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface"
@@ -96,7 +101,9 @@ export const AccountDialog = ({ showToast }: { showToast: (message: string) => v
           welcoming={firstRun}
           intro={
             firstRun
-              ? "Optional. It puts you and a Pip of your choosing on the weekly leaderboard, and your reading will carry over to the Leaflet mobile app. Everything else works without one."
+              ? isAndroid()
+                ? "Optional. It puts you and a Pip of your choosing on the weekly leaderboard, and carries your reading between this phone and your computer. Everything else works without one."
+                : "Optional. It puts you and a Pip of your choosing on the weekly leaderboard, and your reading will carry over to the Leaflet mobile app. Everything else works without one."
               : undefined
           }
           onDone={(message) => {

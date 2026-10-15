@@ -11,6 +11,8 @@ import {
 } from "./librarySearch";
 import { closeLibrarySearch, useLibrarySearchStore } from "./librarySearchStore";
 import { readPdfBook } from "./readPdfBook";
+import { SheetHandle } from "../ui/SheetHandle";
+import { useBackClose } from "../../hooks/useBackClose";
 
 /** Typing waits this long before a search starts; the search before it is stopped. */
 const DEBOUNCE_MS = 300;
@@ -89,6 +91,7 @@ export const LibrarySearchDialog = ({ onOpenInBook }: LibrarySearchDialogProps) 
   const inputRef = useRef<HTMLInputElement | null>(null);
   const open = opening !== null;
   const words = searchable(query);
+  useBackClose(open, closeLibrarySearch);
 
   useEffect(() => {
     if (!open) {
@@ -249,7 +252,7 @@ export const LibrarySearchDialog = ({ onOpenInBook }: LibrarySearchDialogProps) 
 
   return (
     <div
-      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 px-4"
+      className="sheet-backdrop fixed inset-0 z-[90] flex items-center justify-center bg-black/50 px-4"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
           closeLibrarySearch();
@@ -261,8 +264,9 @@ export const LibrarySearchDialog = ({ onOpenInBook }: LibrarySearchDialogProps) 
         aria-modal="true"
         aria-labelledby="library-search-title"
         // One height, results or none: the dialog does not jump as books arrive.
-        className="modal-surface confirm-pop flex h-[min(85vh,44rem)] w-full max-w-2xl flex-col rounded-2xl p-5"
+        className="modal-surface confirm-pop sheet-panel sheet-tall sheet-inner-scroll flex h-[min(85dvh,44rem)] w-full max-w-2xl flex-col rounded-2xl p-5"
       >
+        <SheetHandle onClose={closeLibrarySearch} />
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1">
             <p className={EYEBROW}>Your library</p>

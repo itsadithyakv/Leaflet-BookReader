@@ -3191,9 +3191,14 @@ body::before {
   will-change: width;
 }
 
-.leaflet-sidebar:hover,
-.leaflet-sidebar:focus-within {
-  width: var(--sidebar-expanded);
+/* Only where something can hover: under a finger the rail never widens
+   (a tap is not a hover, and the tapped button keeps focus); see
+   styles/touch-shell.css for its labels there. */
+@media (hover: hover) {
+  .leaflet-sidebar:hover,
+  .leaflet-sidebar:focus-within {
+    width: calc(var(--sidebar-expanded) + var(--inset-left, 0px));
+  }
 }
 
 .sidebar-stage {
@@ -3213,20 +3218,22 @@ body::before {
     transform 240ms ease;
 }
 
-.leaflet-sidebar:hover .sidebar-copy,
-.leaflet-sidebar:focus-within .sidebar-copy {
-  max-width: 160px;
-  opacity: 1;
-  transform: translateX(0);
-}
+@media (hover: hover) {
+  .leaflet-sidebar:hover .sidebar-copy,
+  .leaflet-sidebar:focus-within .sidebar-copy {
+    max-width: 160px;
+    opacity: 1;
+    transform: translateX(0);
+  }
 
-/* The gap only earns its space once there is a label to separate; reserving it
-   while collapsed clipped the icon well out of square. */
-.leaflet-sidebar:hover .sidebar-nav-item,
-.leaflet-sidebar:focus-within .sidebar-nav-item,
-.leaflet-sidebar:hover .sidebar-start-button,
-.leaflet-sidebar:focus-within .sidebar-start-button {
-  gap: 12px;
+  /* The gap only earns its space once there is a label to separate; reserving it
+     while collapsed clipped the icon well out of square. */
+  .leaflet-sidebar:hover .sidebar-nav-item,
+  .leaflet-sidebar:focus-within .sidebar-nav-item,
+  .leaflet-sidebar:hover .sidebar-start-button,
+  .leaflet-sidebar:focus-within .sidebar-start-button {
+    gap: 12px;
+  }
 }
 
 /* ---- Pip ------------------------------------------------------------------ */
@@ -6464,9 +6471,15 @@ button.pip-shop-tile:hover,
   animation: pip-tip-in 120ms ease-out;
 }
 
-.pip-hint[data-tip]:hover::after,
 .pip-hint[data-tip]:focus-visible::after {
   display: block;
+}
+
+/* Pointed at, where something can point (a finger taps it: components/pip/touch.css). */
+@media (hover: hover) {
+  .pip-hint[data-tip]:hover::after {
+    display: block;
+  }
 }
 
 @keyframes pip-tip-in {
@@ -9531,7 +9544,8 @@ button.pip-shop-tile:hover,
 }
 
 /* A short window (a phone on its side): the tools keep their icons, and
-   their names go to the screen reader only, so the room keeps the height. */
+   their names go small under them (a finger has no hover to ask them by),
+   so the room keeps the height. */
 @media (max-height: 560px) {
   .pip-rail-belt {
     padding-block: 8px 12px;
@@ -9539,15 +9553,14 @@ button.pip-shop-tile:hover,
 
   .pip-rail-key {
     min-height: 44px;
-    padding: 6px 12px;
+    flex-direction: column;
+    gap: 1px;
+    padding: 4px 6px;
   }
 
   .pip-rail-key .pip-rail-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
+    font-size: 10px;
+    line-height: 1.1;
     white-space: nowrap;
   }
 

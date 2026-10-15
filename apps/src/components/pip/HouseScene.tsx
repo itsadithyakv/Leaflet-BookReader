@@ -1029,7 +1029,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     const measure = () => {
       const width = stage.clientWidth;
       const top = stage.getBoundingClientRect().top;
-      const height = Math.max(220, window.innerHeight - Math.max(0, top) - reserveBelow);
+      // (A phone on its side has less than 220 px under the HUD: there the room is what the height allows.)
+      const height = Math.max(window.innerHeight <= 520 ? 140 : 220, window.innerHeight - Math.max(0, top) - reserveBelow);
       lastRoomBox.current = roomRef.current?.getBoundingClientRect() ?? null;
       if (width <= 0) return;
       const now = window.devicePixelRatio || 1;
@@ -5063,8 +5064,9 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
             className="pip-away-note"
             style={{ left: noteAt.x * scale, top: noteAt.y * scale }}
             onClick={() => setNoteOpen((open) => !open)}
-            onMouseEnter={() => setNoteOpen(true)}
-            onMouseLeave={() => setNoteOpen(false)}
+            // A mouse opens it by pointing; a finger by the tap above (a touch sends the hover just before the click, which would open and shut it at once).
+            onPointerEnter={(event) => event.pointerType === "mouse" && setNoteOpen(true)}
+            onPointerLeave={(event) => event.pointerType === "mouse" && setNoteOpen(false)}
             onBlur={() => setNoteOpen(false)}
             aria-label={`Pip is out. She left a note: “${noteText}”`}
             title="A note from Pip"
@@ -5112,6 +5114,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
                   if (st.current.drag) event.preventDefault();
                 }}
                 title="Poke me, hold me, stroke me, or pick me up by my leaf"
+                // A held finger is a cuddle here, not a question: the app's press-and-hold tooltip leaves her be.
+                data-long-press=""
                 aria-label={
                   spoken
                     ? `Pip says “${spoken}” ${PIP_HOW}`

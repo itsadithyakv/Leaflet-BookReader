@@ -32,6 +32,7 @@ import {
 import { WHEEL_AT_REST, WHEEL_QUIET_MS, wheelTurn, type WheelGesture } from "../readers/pageTurn";
 import {
   anchoredScroll,
+  clampZoom,
   scaleFor,
   steppedZoom,
   wheelZoom,
@@ -84,8 +85,18 @@ import { useLibraryStore } from "../store/libraryStore";
 import { useAutoHideChrome } from "../hooks/useAutoHideChrome";
 import { useReadingHeartbeat } from "../hooks/useReadingHeartbeat";
 import { PipExitGuard, useFocusLockExit } from "../hooks/useFocusLockExit";
+import { useBackFallback } from "../platform/back";
+import { android, onAndroid } from "../platform/android";
+import { isTouchInput, useTouchInput } from "../platform/device";
+import { isPhoneShape, readerShape, sidewaysPageView, useReaderDevice, useReaderShape, useRotationLock, type SidewaysView } from "../readers/touchLayout";
+import { usePageGestures } from "../readers/pageGestures";
+import { useReaderAwake } from "../readers/readerAwake";
+import { RotationChoice, SheetRow } from "../readers/text/ReaderTouchRows";
+import { AudioLines } from "lucide-react";
+import { openAmbiencePopover, useAmbienceState } from "../ambience";
 import "../readers/pdfTextLayer.css";
 import "./PageReaderView.css";
+import "../readers/touch.css";
 
 /** Which page-image kind this book is; decides the source and the wording. */
 export type PageReaderKind = "pdf" | "comic";
@@ -116,6 +127,8 @@ type PageReaderPreferences = {
   layout?: PageLayout;
   /** Where the top of the window was in the scroll, to reopen at the same line. */
   place?: StoredPlace;
+  /** A phone on its side: its own fit and layout (readers/touchLayout.ts), fit-width scrolling until chosen. */
+  sideways?: SidewaysView<PageFit, PageLayout>;
 };
 
 type PageLayout = "pages" | "scroll";
@@ -296,9 +309,13 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
   const [pageNumber, setPageNumber] = useState(1);
   // The page the canvas shows; behind `pageNumber` while the next is drawn.
   const [drawnPage, setDrawnPage] = useState(0);
+  // A phone opened on its side starts with that way's own view: fit the width,
+  // and (a PDF) one scroll of pages, unless the reader chose otherwise there.
+  const [openedSideways] = useState(() => readerShape(window.innerWidth, window.innerHeight, isTouchInput()) === "sideways");
+  const sidewaysStart = sidewaysPageView<PageFit, PageLayout>(kind, initialPreferences?.sideways, { fit: "width", pdfLayout: "scroll", comicLayout: "pages" });
   const [zoom, setZoom] = useState(initialPreferences?.zoom ?? 1.15);
   const [effectiveZoom, setEffectiveZoom] = useState(initialPreferences?.zoom ?? 1.15);
-  const [fit, setFit] = useState<PageFit>(() => storedFit(initialPreferences, kind));
+  const [fit, setFit] = useState<PageFit>(() => (openedSideways ? sidewaysStart.fit : storedFit(initialPreferences, kind)));
   const [displayMode, setDisplayMode] = useState<ReaderDisplayMode>(
     initialPreferences?.displayMode ?? "paper"
   );
@@ -306,7 +323,14 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
     kind === "comic" && initialPreferences?.direction === "rtl" ? "rtl" : "ltr"
   );
   const [twoPages, setTwoPages] = useState(kind === "comic" && initialPreferences?.twoPages === true);
-  const [layout, setLayout] = useState<PageLayout>(() => storedLayout(initialPreferences, kind));
+  const [layout, setLayout] = useState<PageLayout>(() => (openedSideways ? sidewaysStart.layout : storedLayout(initialPreferences, kind)));
+  /** The view upright (kept in the main preferences) and on its side (`sideways`), while the other is showing. */
+  const uprightViewRef = useRef<{ fit: PageFit; layout: PageLayout; zoom: number }>({
+    fit: storedFit(initialPreferences, kind),
+    layout: storedLayout(initialPreferences, kind),
+    zoom: initialPreferences?.zoom ?? 1.15
+  });
+  const sidewaysViewRef = useRef<SidewaysView<PageFit, PageLayout> | null>(initialPreferences?.sideways ?? null);
   const scrollPagesRef = useRef<ScrollPagesHandle>(null);
   // Where the scroll was last, as stored; and where the scroll opens, set when the book (or the layout) does.
   const placeRef = useRef<StoredPlace | null>(initialPreferences?.place ?? null);
@@ -360,16 +384,27 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
     []
   );
   const [links, setLinks] = useState<PageLinks>(NO_PAGE_LINKS);
-  const pageBoxRef = useRef<HTMLDivElement>(null);
   const [goToOpen, setGoToOpen] = useState(false);
+  const pageBoxRef = useRef<HTMLDivElement>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [goToEntry, setGoToEntry] = useState("");
   // Same behaviour as the text reader: the bar gets out of the way of the page.
+  // A phone (readers/touchLayout.ts): four buttons on the toolbar and sheets; sideways, a strip down the right.
+  const shape = useReaderShape();
+  const phone = isPhoneShape(shape);
+  const shapeNowRef = useRef(shape);
+  const touch = useTouchInput();
+  const [rotation, chooseRotation] = useRotationLock();
+  const sound = useAmbienceState();
   const {
     visible: chromeVisible,
     reveal: revealChrome,
-    hover: hoverChrome
-  } = useAutoHideChrome(zoomPanelOpen || bookmarkPanelOpen || morePanelOpen || soundPanelOpen || searchOpen);
+    hover: hoverChrome,
+    toggle: toggleChrome,
+    hide: hideChrome
+  } = useAutoHideChrome(
+    zoomPanelOpen || bookmarkPanelOpen || morePanelOpen || soundPanelOpen || searchOpen || goToOpen || Boolean(exitGuard.guardShown?.hold)
+  );
   const [bookmarks, setBookmarks] = useState<PageBookmark[]>(
     () => readPageBookmarks(bookmarksKey)
   );
@@ -1477,15 +1512,28 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
     try {
       window.localStorage.setItem(
         storageKey,
-        JSON.stringify({
-          displayMode,
-          fit,
-          fitWidth: fit === "width",
-          sidebarOpen,
-          zoom,
-          ...(kind === "comic" ? { direction, twoPages } : { layout }),
-          ...(placeRef.current ? { place: placeRef.current } : {})
-        })
+        JSON.stringify(
+          (() => {
+            // On its side a phone keeps its own fit and layout; the upright ones stay as they were.
+            const sideways = shapeNowRef.current === "sideways";
+            if (sideways) {
+              sidewaysViewRef.current = { fit, layout };
+            } else {
+              uprightViewRef.current = { fit, layout, zoom };
+            }
+            const upright = uprightViewRef.current;
+            return {
+              displayMode,
+              fit: upright.fit,
+              fitWidth: upright.fit === "width",
+              sidebarOpen,
+              zoom: upright.zoom,
+              ...(kind === "comic" ? { direction, twoPages } : { layout: upright.layout }),
+              ...(sidewaysViewRef.current ? { sideways: sidewaysViewRef.current } : {}),
+              ...(placeRef.current ? { place: placeRef.current } : {})
+            };
+          })()
+        )
       );
     } catch {
       // Local preferences are optional.
@@ -1809,6 +1857,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
       setBookmarkPanelOpen(true);
     },
     onShare: (text) => openQuoteCard({ text, title: book.title, author: book.author }),
+    onShareText: onAndroid() ? (text) => void android.shareText(text, book.title) : undefined,
     toast: showToast
   });
   // A PDF's bookmarks are pages, kept on this device; in the list of notes they sit beside the highlights.
@@ -1825,6 +1874,84 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
     };
   });
 
+  // ---- By finger (docs/android.md, "PDFs and comics") ----
+
+  // Taps, swipes, a pinch and a double tap on the stage (readers/pageGestures.ts).
+  const tappedByFinger = usePageGestures({
+    stageRef: scrollRef,
+    active: Boolean(source) && !loading && !error,
+    paged: !scrolling,
+    rtl: direction === "rtl",
+    fit,
+    scale: () => scaleRef.current,
+    turn: (step) => turnPage(step),
+    toggleChrome,
+    hideChrome,
+    zoomTo: (nextFit, nextScale, about) =>
+      setView(nextFit, nextFit === "free" ? clampZoom(nextScale, actualScale) : zoom, about)
+  });
+
+  // One finger moves about a page larger than the window; across a page that
+  // fits, it is a swipe (the browser would take it for a scroll that goes
+  // nowhere, and the page would never hear of it). Two are always a pinch.
+  useEffect(() => {
+    const stage = scrollRef.current;
+    if (!stage || !touch) {
+      return;
+    }
+    const wide = stage.scrollWidth > stage.clientWidth + 1;
+    stage.style.touchAction = wide || scrolling ? "pan-x pan-y" : "pan-y";
+  });
+
+  // A phone turned: the view kept for that way up (fit and layout), the place kept.
+  useEffect(() => {
+    const was = shapeNowRef.current;
+    shapeNowRef.current = shape;
+    if (was === shape || (was !== "sideways" && shape !== "sideways")) {
+      return;
+    }
+    const target =
+      shape === "sideways"
+        ? sidewaysPageView<PageFit, PageLayout>(kind, sidewaysViewRef.current, { fit: "width", pdfLayout: "scroll", comicLayout: "pages" })
+        : uprightViewRef.current;
+    if (kind === "pdf" && target.layout !== layout) {
+      chooseLayout(target.layout);
+    }
+    if (target.fit !== fit) {
+      setFit(target.fit);
+    }
+  }, [shape]);
+
+  // The screen stays on while the book is touched lately (readers/readerAwake.ts).
+  useReaderAwake(false);
+  // The rotation lock, and the system's bars away under focus lock and on a phone on its side while the chrome is.
+  useReaderDevice(exitGuard.locked || (shape === "sideways" && !chromeVisible), rotation);
+
+  // Android's Back: the nearest thing open, one a press, then the book (through the exit guard).
+  useBackFallback(() => {
+    if (shortcutsOpen) {
+      setShortcutsOpen(false);
+    } else if (goToOpen) {
+      setGoToOpen(false);
+    } else if (notes.busy) {
+      notes.clearSelection();
+      notes.close();
+    } else if (searchOpen) {
+      closeSearch();
+    } else if (zoomPanelOpen || bookmarkPanelOpen || morePanelOpen || ambiencePopoverOpen()) {
+      setZoomPanelOpen(false);
+      setNotesFocus(null);
+      setBookmarkPanelOpen(false);
+      setMorePanelOpen(false);
+      closeAmbiencePopover();
+    } else if (sidebarOpen) {
+      setSidebarOpen(false);
+    } else {
+      exitGuard.back();
+    }
+    return true;
+  });
+
   return (
     <div
       className={`reader-scope pdf-reader page-reader fixed inset-0 z-50 h-full w-full overflow-hidden reader-bg ${
@@ -1832,13 +1959,29 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
       } ${
         readerTheme === "light" ? "reader-light" : ""
       } ${displayModeClass}`}
+      data-shape={phone ? shape : undefined}
     >
       <header
         className="reader-toolbar fixed left-0 right-0 top-0 z-50 flex w-full items-center justify-between px-6 py-5 md:px-8"
-        onPointerEnter={() => hoverChrome(true)}
-        onPointerLeave={() => hoverChrome(false)}
+        onPointerEnter={(event) => hoverChrome(true, event.pointerType)}
+        onPointerLeave={(event) => hoverChrome(false, event.pointerType)}
         onFocus={revealChrome}
       >
+        {/* On a phone the panels are sheets from the foot: a tap above one closes it (and does not turn the page). */}
+        {phone && (zoomPanelOpen || morePanelOpen || soundPanelOpen || bookmarkPanelOpen) && (
+          <button
+            type="button"
+            className="reader-sheet-scrim"
+            aria-label="Close"
+            onClick={() => {
+              setZoomPanelOpen(false);
+              setMorePanelOpen(false);
+              closeAmbiencePopover();
+              setNotesFocus(null);
+              setBookmarkPanelOpen(false);
+            }}
+          />
+        )}
         <div className="relative flex items-center gap-2 md:gap-4">
           <button
             type="button"
@@ -1852,11 +1995,11 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
             <span className="material-symbols-outlined transition-transform group-hover:-translate-x-1 reader-accent" aria-hidden="true">
               arrow_back
             </span>
-            <span className="hidden text-xs uppercase tracking-widest reader-accent sm:inline">
+            <span className="reader-back-label hidden text-xs uppercase tracking-widest reader-accent sm:inline">
               Back to Library
             </span>
           </button>
-          <PipExitGuard shown={exitGuard.guardShown} onDone={exitGuard.clearGuard} />
+          <PipExitGuard shown={exitGuard.guardShown} onDone={exitGuard.clearGuard} onLeave={exitGuard.leave} />
           {/* The page list otherwise opens only from a 6px hover strip, which a
               finger cannot hit and a touch screen cannot reveal. */}
           <button
@@ -1878,7 +2021,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
           </button>
         </div>
 
-        <div className="absolute left-1/2 hidden -translate-x-1/2 flex-col items-center text-center md:flex">
+        <div className="reader-toolbar-title absolute left-1/2 hidden -translate-x-1/2 flex-col items-center text-center md:flex">
           <h1 className={toolbarTitleClass(book.title)} title={book.title}>
             {book.title}
           </h1>
@@ -1889,7 +2032,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
 
         <div className="flex items-center gap-4 md:gap-6">
           {/* A comic is pictures: there is no text in it to search. */}
-          {pdf && (
+          {pdf && !phone && (
             <button
               className="reader-icon transition-colors reader-hover-accent"
               type="button"
@@ -1958,14 +2101,45 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
                     </button>
                   ))}
                 </div>
-                <p className="mt-3 text-[10px] leading-relaxed reader-muted">
-                  Ctrl + wheel zooms about the pointer.
-                </p>
+                {!touch && (
+                  <p className="mt-3 text-[10px] leading-relaxed reader-muted">
+                    Ctrl + wheel zooms about the pointer.
+                  </p>
+                )}
+                {phone && kind === "pdf" && (
+                  <button
+                    type="button"
+                    className="mt-3 flex w-full items-center justify-between rounded-lg border px-3 py-2 text-xs uppercase tracking-widest transition reader-border reader-pill reader-icon"
+                    onClick={() => chooseLayout(scrolling ? "pages" : "scroll")}
+                    aria-pressed={scrolling}
+                  >
+                    <span>Continuous scrolling</span>
+                    <span className="reader-toggle" data-on={scrolling} />
+                  </button>
+                )}
+                {phone && (
+                  <label className="mt-3 block">
+                    <span className="text-[10px] uppercase tracking-widest reader-muted">Page finish</span>
+                    <select
+                      className="reader-select mt-1.5 w-full"
+                      value={displayMode}
+                      onChange={(event) => setDisplayMode(event.target.value as ReaderDisplayMode)}
+                    >
+                      <option value="paper">Warm paper</option>
+                      <option value="dark-paper">Dark paper</option>
+                      <option value="true-white">True white</option>
+                      <option value="true-black">True black</option>
+                      <option value="app">Match app theme</option>
+                    </select>
+                  </label>
+                )}
+                {phone && <RotationChoice value={rotation} onChoose={chooseRotation} />}
               </div>
             )}
           </div>
 
           <div className="relative">
+            {!phone && (
             <button
               className={`reader-icon transition-colors reader-hover-accent ${pageBookmarked ? "page-reader-toolbar-on" : ""}`}
               type="button"
@@ -1979,6 +2153,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
             >
               <span className="material-symbols-outlined" aria-hidden="true">bookmark</span>
             </button>
+            )}
             {bookmarkPanelOpen && kind === "pdf" && (
               <AnnotationsPanel
                 key={notesFocus ?? "notes"}
@@ -2079,14 +2254,22 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
 
           <div
             className="relative"
-            onMouseEnter={() => {
+            // Opens as a mouse reaches it. Only a mouse: a finger's tap sends
+            // the enter just before the click, which then shut it again.
+            onPointerEnter={(event) => {
+              if (event.pointerType !== "mouse") {
+                return;
+              }
               if (morePanelCloseRef.current) {
                 window.clearTimeout(morePanelCloseRef.current);
                 morePanelCloseRef.current = null;
               }
               setMorePanelOpen(true);
             }}
-            onMouseLeave={() => {
+            onPointerLeave={(event) => {
+              if (event.pointerType !== "mouse") {
+                return;
+              }
               if (morePanelCloseRef.current) {
                 window.clearTimeout(morePanelCloseRef.current);
               }
@@ -2099,13 +2282,56 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
               onClick={() => setMorePanelOpen((open) => !open)}
               title="Reader settings"
               aria-label="Reader settings"
+              aria-haspopup="dialog"
               aria-expanded={morePanelOpen}
             >
               <span className="material-symbols-outlined" aria-hidden="true">more_horiz</span>
             </button>
             {morePanelOpen && (
-              <div className="reader-menu absolute right-0 mt-3 w-72 rounded-xl border p-4 text-xs shadow-2xl reader-panel reader-border">
-                <div className="text-xs uppercase tracking-widest reader-muted">Reader</div>
+              <div className="reader-menu absolute right-0 mt-3 w-72 rounded-xl border p-4 text-xs shadow-2xl reader-panel reader-border" role="dialog" aria-label="Reader settings">
+                {phone && (
+                  <div className="reader-sheet-rows" role="group" aria-label="More">
+                    {pdf && (
+                      <SheetRow
+                        icon={<UiIcon name="search" size={20} />}
+                        label="Search in this PDF"
+                        onClick={() => {
+                          setMorePanelOpen(false);
+                          openSearch();
+                        }}
+                      />
+                    )}
+                    <SheetRow
+                      icon={<UiIcon name={kind === "pdf" ? "note" : "bookmark"} size={20} />}
+                      label={kind === "pdf" ? "Notes" : "Bookmarks"}
+                      onClick={() => {
+                        setMorePanelOpen(false);
+                        setNotesFocus(null);
+                        setBookmarkPanelOpen(true);
+                      }}
+                    />
+                    <SheetRow
+                      icon={<UiIcon name="bookmark" size={20} />}
+                      label={pageBookmarked ? "Remove this page's bookmark" : "Bookmark this page"}
+                      pressed={pageBookmarked}
+                      onClick={() => {
+                        setMorePanelOpen(false);
+                        toggleCurrentBookmark();
+                      }}
+                    />
+                    <SheetRow
+                      icon={<AudioLines size={20} strokeWidth={2} />}
+                      label="Sound"
+                      detail={sound.on ? sound.sceneName : "Off"}
+                      onClick={() => {
+                        setMorePanelOpen(false);
+                        openAmbiencePopover();
+                      }}
+                    />
+                  </div>
+                )}
+                {!phone && <div className="text-xs uppercase tracking-widest reader-muted">Reader</div>}
+                {!phone && (
                 <label className="mt-3 block">
                   <span className="text-[10px] uppercase tracking-widest reader-muted">Page finish</span>
                   <select
@@ -2120,6 +2346,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
                     <option value="app">Match app theme</option>
                   </select>
                 </label>
+                )}
                 <button
                   type="button"
                   className="mt-3 flex w-full items-center justify-between rounded-lg border px-3 py-2 text-xs uppercase tracking-widest transition reader-border reader-pill reader-icon"
@@ -2129,7 +2356,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
                   <span>Fit page width</span>
                   <span className="reader-toggle" data-on={fit === "width"} />
                 </button>
-                {kind === "pdf" && (
+                {kind === "pdf" && !phone && (
                   <button
                     type="button"
                     className="mt-3 flex w-full items-center justify-between rounded-lg border px-3 py-2 text-xs uppercase tracking-widest transition reader-border reader-pill reader-icon"
@@ -2173,7 +2400,9 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
                   <span>App theme</span>
                   <span className="reader-toggle" data-on={readerTheme === "light"} />
                 </button>
-                <ReaderAmbienceRow onOpen={() => setMorePanelOpen(false)} />
+                {!phone && <ReaderAmbienceRow onOpen={() => setMorePanelOpen(false)} />}
+                {/* A phone has no keys to list. */}
+                {!touch && (
                 <button
                   type="button"
                   className="mt-3 flex w-full items-center justify-between rounded-lg border px-3 py-2 text-xs uppercase tracking-widest transition reader-border reader-pill reader-icon reader-hover-accent"
@@ -2184,6 +2413,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
                 >
                   Keyboard shortcuts (?)
                 </button>
+                )}
               </div>
             )}
           </div>
@@ -2193,7 +2423,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
           back. The page is an iframe, so the bar cannot see the pointer
           arrive over the text; this strip can. */}
       {!chromeVisible && (
-        <div className="reader-toolbar-hot-zone" aria-hidden="true" onPointerEnter={() => hoverChrome(true)}>
+        <div className="reader-toolbar-hot-zone" aria-hidden="true" onPointerEnter={(event) => hoverChrome(true, event.pointerType)}>
           <span className="reader-toolbar-handle" />
         </div>
       )}
@@ -2407,6 +2637,10 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
                         ? (event) => {
                             // A comic has no text to select: a click on the
                             // left or right third of the page turns it.
+                            // (A finger's tap is the gestures' own: readers/pageGestures.ts.)
+                            if (tappedByFinger()) {
+                              return;
+                            }
                             const box = event.currentTarget.getBoundingClientRect();
                             const step = box.width > 0 ? clickTurn((event.clientX - box.left) / box.width, direction) : 0;
                             if (step !== 0) {
@@ -2461,7 +2695,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
                 </div>
               )}
               {source && (
-                <div className="reader-chapter-dock pointer-events-none absolute bottom-4 left-1/2 z-30 flex -translate-x-1/2 items-center">
+                <div className={`reader-chapter-dock pointer-events-none absolute bottom-4 left-1/2 z-30 flex -translate-x-1/2 items-center ${goToOpen ? "is-awake" : ""}`}>
                   <div className="pointer-events-auto flex items-center gap-2 rounded-lg border px-2 py-1.5 text-xs uppercase tracking-widest reader-pill reader-border">
                     {/* The way back after a jump, as in the text reader's dock (readers/ChapterDock.tsx). */}
                     {jumps.back.length > 0 && (

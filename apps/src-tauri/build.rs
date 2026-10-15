@@ -8,5 +8,23 @@ fn main() {
   println!("cargo:rerun-if-env-changed=LEAFLET_API_BASE");
   println!("cargo:rerun-if-env-changed=LEAFLET_STORE_BUILD");
   println!("cargo:rerun-if-env-changed=LEAFLET_CONFIG_URL");
-  tauri_build::build();
+
+  // The Android side's own plugin (src/mobile.rs, DevicePlugin.kt). Its
+  // commands are answered in Kotlin, but the page may call them only if a
+  // capability allows them, so their permissions are made here
+  // (`leaflet-device:default`, granted in capabilities/android.json).
+  let device = tauri_build::InlinedPlugin::new()
+    .commands(&[
+      "keep_awake",
+      "lock_rotation",
+      "hide_system_bars",
+      "pick_files",
+      "share_target",
+      "share_file",
+      "share_text",
+      "open_store"
+    ])
+    .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands);
+  tauri_build::try_build(tauri_build::Attributes::new().plugin("leaflet-device", device))
+    .expect("failed to run the Tauri build script");
 }

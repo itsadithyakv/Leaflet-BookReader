@@ -3,6 +3,8 @@ import type { Book } from "@shared/models/book";
 import { bookService, type CoverSet } from "../../services/bookService";
 import { titleToLookUp, type SeriesGroup } from "../../library/series";
 import { useLibraryStore } from "../../store/libraryStore";
+import { SheetHandle } from "../ui/SheetHandle";
+import { useBackClose } from "../../hooks/useBackClose";
 
 /** One cover on offer, fetched small when its row comes up. Kept for the life of the app: a set looked at twice is not fetched twice. */
 const previews = new Map<number, Promise<string>>();
@@ -60,6 +62,7 @@ export const SeriesCovers = ({ group, onClose, showToast }: Props) => {
   const [error, setError] = useState<string | null>(null);
   const [applying, setApplying] = useState<string | null>(null);
   const byId = new Map(group.members.map((member) => [member.book.id, member]));
+  useBackClose(true, onClose);
 
   useEffect(() => {
     let live = true;
@@ -111,8 +114,9 @@ export const SeriesCovers = ({ group, onClose, showToast }: Props) => {
   };
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 px-4 py-6" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div className="modal-surface flex max-h-full w-full max-w-3xl flex-col p-6" role="dialog" aria-modal="true" aria-labelledby="series-covers-title">
+    <div className="sheet-backdrop fixed inset-0 z-[80] flex items-center justify-center bg-black/55 px-4 py-6" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <div className="modal-surface sheet-panel sheet-inner-scroll flex max-h-full w-full max-w-3xl flex-col p-6" role="dialog" aria-modal="true" aria-labelledby="series-covers-title">
+        <SheetHandle onClose={onClose} />
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Covers</p>

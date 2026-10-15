@@ -41,21 +41,35 @@ export const useRoomFrame = ({ bodyRef, railRef, drawerRef, sheetKey, decorating
   useLayoutEffect(() => {
     const body = bodyRef.current;
     if (!body) return;
+    // (The room is looked for afresh each time, and watched: a floor changed, or the house shown again, may put a new
+    // one in its place, and the lift was left standing where the old one ended, off the side of a phone.)
+    const watched = new Set<Element>();
     const measure = () => {
       const room = body.querySelector<HTMLElement>(".pip-house-room");
       if (!room) return;
+      if (!watched.has(room)) {
+        watched.add(room);
+        observer?.observe(room);
+      }
       const next = offsetWithin(room, body);
       setRoomBox((current) =>
         current && current.left === next.left && current.top === next.top && current.width === next.width && current.height === next.height ? current : next
       );
     };
+    let observer: ResizeObserver | null = null;
     measure();
-    const observer = new ResizeObserver(measure);
+    observer = new ResizeObserver(measure);
     observer.observe(body);
-    body.querySelectorAll(".pip-house-stage, .pip-house-room").forEach((element) => observer.observe(element));
+    body.querySelectorAll(".pip-house-stage, .pip-house-room").forEach((element) => {
+      watched.add(element);
+      observer?.observe(element);
+    });
+    const replaced = new MutationObserver(measure);
+    replaced.observe(body, { childList: true, subtree: true });
     window.addEventListener("resize", measure);
     return () => {
-      observer.disconnect();
+      observer?.disconnect();
+      replaced.disconnect();
       window.removeEventListener("resize", measure);
     };
   }, []);
@@ -64,7 +78,9 @@ export const useRoomFrame = ({ bodyRef, railRef, drawerRef, sheetKey, decorating
   // window, so the room shrinks to sit above them rather than under them.
   useLayoutEffect(() => {
     const measure = () => {
-      const rail = railRef.current?.offsetHeight ?? 72;
+      // A phone on its side has the rail beside the room (components/pip/touch.css): nothing of it is under the room.
+      const beside = railRef.current ? getComputedStyle(railRef.current).getPropertyValue("--rail-beside").trim() === "1" : false;
+      const rail = beside ? 0 : (railRef.current?.offsetHeight ?? 72);
       const panel = drawerRef.current;
       const low = panel && getComputedStyle(panel).position === "fixed" ? panel.offsetHeight + 12 : 0;
       const next = rail + BELOW_RAIL + low;

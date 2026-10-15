@@ -1,3 +1,5 @@
+import { keyboardOverFrame, selectionDockFoot } from "../touchLayout";
+import { isTouchInput } from "../../platform/device";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EpubCFI } from "epubjs";
 import { highlightsMarkdown, useAnnotations } from "../useAnnotations";
@@ -442,7 +444,9 @@ export const useSelectionDock = (reader: WithCover) => {
       }
       const bar = dock.getBoundingClientRect();
       const within = frame.getBoundingClientRect();
-      const usualFoot = within.bottom - (dockAbovePace ? 118 : 64);
+      // (By finger the dock rests over the gesture bar, or the keyboard: readers/touch.css.)
+      const touch = isTouchInput();
+      const usualFoot = within.bottom - selectionDockFoot(touch, dockAbovePace, touch ? keyboardOverFrame() : 0);
       const foot = placeBar({
         usualFoot,
         barHeight: bar.height,

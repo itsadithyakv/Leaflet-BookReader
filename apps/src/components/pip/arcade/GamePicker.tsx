@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { BookA, Feather, Footprints, Leaf, Trophy, type LucideIcon } from "lucide-react";
 import { gameArt } from "./gameArt";
 import { GAMES, GAME_H, GAME_W, type Controls, type Game, type GameId, type GameInfo } from "./games";
+import { useTouchInput } from "../../../platform/device";
 
 /**
  * The arcade's front page: what there is to play, each as a card with a
@@ -50,21 +51,28 @@ const DEMO: Record<GameId, (controls: Controls, time: number, tick: number) => v
 const GAME_ICONS: Record<GameId, LucideIcon> = { dash: Footprints, catch: Leaf, flap: Feather };
 
 /** What each game is about, in a sentence more than its name; and how it is played, a key at a time. */
-const ABOUT: Record<GameId, { about: string; keys: ReadonlyArray<[string, string]> }> = {
+/** `touch`: the same, for a finger (a phone has no keys to name). */
+const ABOUT: Record<GameId, { about: string; keys: ReadonlyArray<[string, string]>; touch: ReadonlyArray<[string, string]> }> = {
   dash: {
     about: "An endless run along the library's shelves. The stacks get taller and the bats lower the further Pip gets.",
     keys: [
       ["Space", "jump"],
       ["↓", "duck"]
+    ],
+    touch: [
+      ["Tap", "jump"],
+      ["Swipe ↓", "duck"]
     ]
   },
   catch: {
     about: "The claw machine has come loose: leaves, seeds and letters rain down. Fill the basket, and keep it out from under the ink.",
-    keys: [["← →", "move"]]
+    keys: [["← →", "move"]],
+    touch: [["Slide", "move"]]
   },
   flap: {
     about: "Pip takes to the air on a leaf, between towers of old books. Every flap is a little lift; the gaps do not wait.",
-    keys: [["Space", "flap"]]
+    keys: [["Space", "flap"]],
+    touch: [["Tap", "flap"]]
   }
 };
 
@@ -227,7 +235,9 @@ type Props = {
   onQuiz: () => void;
 };
 
-export const GamePicker = ({ skin, outfit, bestOf, termsOf, words, onGame, onQuiz }: Props) => (
+export const GamePicker = ({ skin, outfit, bestOf, termsOf, words, onGame, onQuiz }: Props) => {
+  const touch = useTouchInput();
+  return (
   <div className="pip-arcade-cards">
     {GAMES.map((game) => (
       <Card
@@ -235,7 +245,7 @@ export const GamePicker = ({ skin, outfit, bestOf, termsOf, words, onGame, onQui
         name={game.name}
         icon={GAME_ICONS[game.id]}
         about={ABOUT[game.id].about}
-        title={`${game.controls} ${termsOf(game.id)}`}
+        title={`${touch ? game.touchControls : game.controls} ${termsOf(game.id)}`}
         facts={
           <>
             {bestOf(game.id) > 0 && (
@@ -244,7 +254,7 @@ export const GamePicker = ({ skin, outfit, bestOf, termsOf, words, onGame, onQui
                 <span className="sr-only"> is your best</span>
               </span>
             )}
-            {ABOUT[game.id].keys.map(key)}
+            {(touch ? ABOUT[game.id].touch : ABOUT[game.id].keys).map(key)}
           </>
         }
         onChoose={() => onGame(game)}
@@ -260,4 +270,5 @@ export const GamePicker = ({ skin, outfit, bestOf, termsOf, words, onGame, onQui
       picture={(live) => <QuizPreview skin={skin} outfit={outfit} live={live} />}
     />
   </div>
-);
+  );
+};

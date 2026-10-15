@@ -1,5 +1,9 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
+  // `hover:` only where something can hover. On a phone a tapped button keeps
+  // its hover look until the next tap elsewhere ("sticky hover"); this leaves
+  // hover styles to mice and trackpads, and changes nothing on a desktop.
+  future: { hoverOnlyWhenSupported: true },
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
     extend: {

@@ -1,4 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { android, onAndroid } from "../platform/android";
 
 /**
  * Keeps the screen on while the page reads itself (Dotty, auto-scroll, word
@@ -20,6 +21,11 @@ export const keepAwake = (on: boolean) => {
     return;
   }
   held = on;
+  // Android's own: the window's keep-screen-on flag.
+  if (onAndroid()) {
+    void android.keepAwake(on);
+    return;
+  }
   if (isTauri()) {
     void invoke("keep_awake", { on }).catch(() => undefined);
     return;

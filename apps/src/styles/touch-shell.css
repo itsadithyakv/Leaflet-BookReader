@@ -1,0 +1,442 @@
+/* The app around the pages, on a phone or a tablet held by a finger
+   (docs/android.md). Loaded after index.css, so a rule here at the same
+   weight wins. Keys on:
+     - the window's shape, as everywhere (a 360 px phone is a phone in any browser);
+     - (hover: none) and (pointer: coarse), a finger;
+     - html[data-platform="android"] (platform/device.ts) for what only the app needs.
+   The reader's bars are the reader's (index.css, readers/**), not here. */
+
+/* ---- The system's bars --------------------------------------------------- */
+
+:root {
+  /* The bottom bar clears the gesture bar the Android side reports. */
+  --mobile-nav-height: calc(58px + var(--inset-bottom));
+  /* The rail and what must stay clear of it. */
+  --rail-width: calc(78px + var(--inset-left));
+}
+
+/* Leaflet draws under the status bar; the header's controls do not. */
+.app-header.app-header {
+  padding-top: calc(0.75rem + var(--inset-top));
+  padding-left: max(1rem, var(--inset-left));
+  padding-right: max(1rem, var(--inset-right));
+}
+
+@media (min-width: 768px) {
+  .app-header.app-header {
+    padding-left: max(1.75rem, var(--inset-left));
+    padding-right: max(1.75rem, var(--inset-right));
+  }
+}
+
+@media (max-height: 520px) {
+  .app-header.app-header {
+    padding-top: calc(6px + var(--inset-top));
+    padding-bottom: 6px;
+  }
+}
+
+.mobile-nav.mobile-nav {
+  padding-bottom: calc(6px + var(--inset-bottom));
+  padding-left: max(4px, var(--inset-left));
+  padding-right: max(4px, var(--inset-right));
+}
+
+/* The rail, sideways: wide enough for a notch on its side as well. */
+.app-body .sidebar-stage {
+  width: var(--rail-width);
+}
+
+.leaflet-sidebar {
+  width: var(--rail-width);
+  padding-left: calc(15px + var(--inset-left));
+}
+
+/* What floats at the foot of the page (toasts, the book being read, the
+   update card) stays clear of the gesture bar and a side notch wherever the
+   bottom tab bar is not already doing it for them. */
+@media not all and (max-width: 767px) and (min-height: 521px) {
+  .app-toast,
+  .now-reading-dock,
+  .update-card {
+    margin-bottom: var(--inset-bottom);
+  }
+
+  .app-toast,
+  .update-card {
+    margin-right: var(--inset-right);
+  }
+}
+
+/* Sideways phone: the dock is centred in the page beside the rail, not in
+   the window, where it lay over the rail's foot. */
+@media (max-height: 520px) and (min-width: 520px) {
+  .now-reading-dock {
+    left: calc(50% + var(--rail-width) / 2);
+    max-width: min(36rem, calc(100vw - var(--rail-width) - var(--inset-right)));
+  }
+}
+
+/* The update card rides above the tab bar on an upright phone. */
+@media (max-width: 767px) and (min-height: 521px) {
+  .update-card {
+    right: 1rem;
+    bottom: calc(var(--mobile-nav-height) + 0.75rem);
+  }
+
+  .app-shell:has(.now-reading-dock) .update-card {
+    bottom: calc(var(--mobile-nav-height) + 104px);
+  }
+}
+
+/* ---- The rail under a finger -------------------------------------------- */
+
+/* It never widens (a tap is not a hover, and a tapped button keeps focus):
+   icons with a small label under each, as Android's own rails. */
+.sidebar-rail-label {
+  display: none;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .leaflet-sidebar,
+  .leaflet-sidebar:hover,
+  .leaflet-sidebar:focus-within {
+    width: var(--rail-width);
+    padding-right: 5px;
+    padding-left: calc(5px + var(--inset-left));
+    padding-top: 10px;
+    padding-bottom: calc(10px + var(--inset-bottom));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+    transition: none;
+    will-change: auto;
+  }
+
+  .leaflet-sidebar nav {
+    flex: 0 0 auto;
+  }
+
+  .leaflet-sidebar nav.space-y-2 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: 4px;
+  }
+
+  .leaflet-sidebar .sidebar-copy {
+    display: none;
+  }
+
+  .leaflet-sidebar .sidebar-nav-item,
+  .leaflet-sidebar .sidebar-start-button {
+    min-height: 46px;
+    flex-direction: column;
+    justify-content: center;
+    gap: 1px;
+    padding: 2px 2px 3px;
+    text-align: center;
+  }
+
+  .leaflet-sidebar .sidebar-nav-item.mb-3 {
+    margin-top: 4px;
+    margin-bottom: 8px;
+  }
+
+  .leaflet-sidebar .sidebar-icon-well,
+  .leaflet-sidebar .sidebar-start-icon {
+    width: 32px;
+    height: 28px;
+    flex-basis: auto;
+  }
+
+  .leaflet-sidebar .sidebar-start-button {
+    margin-top: auto;
+  }
+
+  /* A phone on its side has 290 px of rail: five places fit, and the book
+     being read is a tap away on the bar at the foot of the page instead. */
+  @media (max-height: 520px) {
+    .leaflet-sidebar .sidebar-reading-action {
+      display: none;
+    }
+  }
+
+  .sidebar-rail-label {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: 0.01em;
+  }
+}
+
+/* ---- Dialogs are sheets on a phone -------------------------------------- */
+
+/* The grip at a sheet's top (components/ui/SheetHandle.tsx). */
+.sheet-handle {
+  display: none;
+}
+
+@media (max-width: 639px) {
+  .sheet-backdrop.sheet-backdrop {
+    align-items: flex-end;
+    justify-content: center;
+    padding: var(--inset-top) 0 var(--inset-keyboard);
+  }
+
+  .sheet-backdrop > .sheet-panel.sheet-panel {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    border-bottom-width: 0;
+    border-radius: 22px 22px 0 0;
+    max-height: min(92dvh, calc(100dvh - var(--inset-top) - var(--inset-keyboard) - 8px));
+    padding-bottom: calc(1.25rem + max(var(--inset-bottom) - var(--inset-keyboard), 0px));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    animation: sheet-rise 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  /* Panels that hold a list of their own take the room they are given. */
+  .sheet-backdrop > .sheet-panel.sheet-tall {
+    height: min(92dvh, calc(100dvh - var(--inset-top) - var(--inset-keyboard) - 8px));
+  }
+
+  /* Panels that scroll inside themselves do not scroll as a whole too. */
+  .sheet-backdrop > .sheet-panel.sheet-inner-scroll {
+    overflow: hidden;
+  }
+
+  .sheet-handle {
+    display: flex;
+    flex: 0 0 auto;
+    justify-content: center;
+    align-items: center;
+    height: 24px;
+    margin: -12px auto 4px;
+    width: 96px;
+    touch-action: none;
+    cursor: grab;
+  }
+
+  .sheet-handle > span {
+    display: block;
+    width: 40px;
+    height: 4px;
+    border-radius: 999px;
+    background: rgb(var(--color-on-surface-variant) / 0.42);
+  }
+}
+
+/* Menus that hang from a button (a book's ⋯) are sheets by a finger on a
+   phone either way up; sideways, the sheet stands at the side of the thumb. */
+.book-menu-sheet {
+  width: 100%;
+}
+
+.book-menu-sheet [role^="menuitem"] {
+  min-height: 44px;
+}
+
+@media (hover: none) and (pointer: coarse) and (max-height: 520px) and (min-width: 640px) {
+  .sheet-backdrop-menu.sheet-backdrop-menu {
+    align-items: flex-end;
+    justify-content: flex-end;
+    padding: var(--inset-top) var(--inset-right) 0 0;
+  }
+
+  .sheet-backdrop-menu > .book-menu-sheet {
+    width: min(22rem, 60vw);
+    max-height: calc(100dvh - var(--inset-top) - 8px);
+    margin-right: 8px;
+    border-bottom-width: 0;
+    border-radius: 22px 22px 0 0;
+    padding-bottom: calc(0.75rem + var(--inset-bottom));
+    animation: sheet-rise 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+}
+
+@keyframes sheet-rise {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet-backdrop > .sheet-panel.sheet-panel,
+  .sheet-backdrop-menu > .book-menu-sheet {
+    animation: none;
+  }
+}
+
+/* The profile and backup panel, which hangs from the header on a desktop. */
+.profile-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  background: rgb(0 0 0 / 0.45);
+}
+
+/* ---- Touch targets -------------------------------------------------------- */
+
+@media (hover: none) and (pointer: coarse) {
+  /* A book's ⋯ is drawn at 32 px and hit at 44. */
+  .book-menu-trigger::after {
+    position: absolute;
+    inset: -6px;
+    content: "";
+  }
+
+  /* Long-pressed for a tooltip or a menu, titled text is not selected as well. */
+  [title]:not(input):not(textarea),
+  [data-long-press] {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+}
+
+/* ---- Tooltips by a held finger (components/TouchTipLayer.tsx) ----------------- */
+
+.touch-tip {
+  position: fixed;
+  z-index: 200;
+  display: flex;
+  width: min(260px, calc(100vw - 16px));
+  justify-content: center;
+  margin: 0;
+  transform: translate(-50%, calc(-100% - 10px));
+  pointer-events: none;
+}
+
+.touch-tip.is-under {
+  transform: translate(-50%, 10px);
+}
+
+.touch-tip > span {
+  max-width: 100%;
+  border-radius: 10px;
+  padding: 7px 11px 8px;
+  background: rgb(var(--color-on-surface) / 0.94);
+  color: rgb(var(--color-surface));
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: center;
+  overflow-wrap: anywhere;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.28);
+  animation: touch-tip-in 160ms cubic-bezier(0.3, 1.3, 0.5, 1) both;
+}
+
+@keyframes touch-tip-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.96);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .touch-tip > span {
+    animation: none;
+  }
+}
+
+/* ---- Adding books --------------------------------------------------------- */
+
+/* A round + above the tab bar on an upright phone (pages/LibraryPage.tsx);
+   sideways the header has it (App.tsx). */
+.add-books-fab,
+.header-add-books {
+  display: none;
+}
+
+@media (max-width: 767px) and (min-height: 521px) {
+  .add-books-fab {
+    position: fixed;
+    right: max(16px, calc(var(--inset-right) + 12px));
+    bottom: calc(var(--mobile-nav-height) + 14px);
+    z-index: 46;
+    display: inline-flex;
+    width: 56px;
+    height: 56px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgb(var(--color-primary) / 0.78);
+    border-radius: 999px;
+    background: linear-gradient(145deg, rgb(var(--color-primary-deep) / 0.98), rgb(var(--color-primary-container) / 0.98));
+    color: rgb(var(--color-on-primary-container));
+    box-shadow:
+      inset 1px 1px 1px rgba(255, 255, 255, 0.24),
+      0 6px 16px rgba(0, 0, 0, 0.32);
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .add-books-fab:active {
+    transform: translateY(1px) scale(0.97);
+  }
+
+  /* Over the bar of the book being read, not on it. */
+  .app-shell:has(.now-reading-dock:not(.is-small)) .add-books-fab {
+    bottom: calc(var(--mobile-nav-height) + 124px);
+  }
+}
+
+@media (max-height: 520px) {
+  .header-add-books {
+    display: inline-flex;
+  }
+}
+
+/* ---- Small screens: nothing wider than the window ------------------------- */
+
+@media (max-width: 420px) {
+  /* The Library's title row: the selects take a line of their own and share it. */
+  .library-toolbar {
+    width: 100%;
+  }
+
+  .library-toolbar > select {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: none;
+  }
+}
+
+/* The tab bar keeps its words on a 360 px phone (the commonest Android
+   width), a size smaller; only under 340 px do the icons go alone. */
+@media (max-width: 380px) {
+  .mobile-nav .mobile-nav-label {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 10px;
+    letter-spacing: 0;
+  }
+
+  .mobile-nav .mobile-nav-item {
+    min-width: 0;
+    gap: 3px;
+    padding-inline: 0;
+  }
+}
+
+@media (max-width: 340px) {
+  .mobile-nav .mobile-nav-label {
+    display: none;
+  }
+}
+
+/* The bar of the book being read, on a narrow phone: the title gets the room
+   the bookmark took (Continue and "make small" stay). */
+@media (max-width: 420px) {
+  .now-reading-actions .now-reading-action:not(.now-reading-action-primary) {
+    display: none;
+  }
+}

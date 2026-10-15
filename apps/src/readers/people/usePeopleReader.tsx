@@ -334,15 +334,24 @@ export const usePeopleReader = ({
     // The page moving, or a key, takes the peek away: it was about what was under the pointer.
     const container = rendition.manager?.container as HTMLElement | undefined;
     const dismiss = () => hover.dismiss();
+    // A window made narrower or wider (a turn of the phone) moves the words;
+    // one only shorter is the phone's keyboard coming up, and moves nothing.
+    let width = window.innerWidth;
+    const resized = () => {
+      if (Math.abs(window.innerWidth - width) > 1) {
+        width = window.innerWidth;
+        dismiss();
+      }
+    };
     container?.addEventListener("scroll", dismiss, { passive: true });
     window.addEventListener("keydown", dismiss, true);
-    window.addEventListener("resize", dismiss);
+    window.addEventListener("resize", resized);
     return () => {
       rendition.off?.("rendered", sync);
       rendition.off?.("removed", sync);
       container?.removeEventListener("scroll", dismiss);
       window.removeEventListener("keydown", dismiss, true);
-      window.removeEventListener("resize", dismiss);
+      window.removeEventListener("resize", resized);
       hover.clear();
     };
   }, [enabled, hoverOn, rendition, hover]);

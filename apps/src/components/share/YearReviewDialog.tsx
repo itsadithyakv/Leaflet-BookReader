@@ -11,6 +11,8 @@ import { closeYearReview, openYearReview, useShareStore } from "./shareStore";
 import { drawYearCard, yearFigures, yearFileName, yearLines } from "./yearCard";
 import { timeWords, yearReview, yearsRead } from "./yearReview";
 import "./share.css";
+import { SheetHandle } from "../ui/SheetHandle";
+import { useBackClose } from "../../hooks/useBackClose";
 
 const STYLE_KEY = "leaflet.share.yearStyle";
 /** Highlights are counted in this many books at most: the ones read in most lately. */
@@ -101,6 +103,7 @@ export const YearReviewDialog = () => {
   }, [review, style]);
 
   const open = year !== null;
+  useBackClose(open, closeYearReview);
   useEffect(() => {
     if (!open) {
       return undefined;
@@ -174,14 +177,15 @@ export const YearReviewDialog = () => {
 
   return (
     <div
-      className="fixed inset-0 z-[95] flex items-center justify-center bg-black/55 px-4"
+      className="sheet-backdrop fixed inset-0 z-[95] flex items-center justify-center bg-black/55 px-4"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
           closeYearReview();
         }
       }}
     >
-      <div ref={panel} role="dialog" aria-modal="true" aria-label={`Your ${year} in review`} className="modal-surface confirm-pop share-dialog rounded-2xl p-5">
+      <div ref={panel} role="dialog" aria-modal="true" aria-label={`Your ${year} in review`} className="modal-surface confirm-pop share-dialog sheet-panel rounded-2xl p-5">
+        <SheetHandle onClose={closeYearReview} />
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-1">
             <button

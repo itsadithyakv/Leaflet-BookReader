@@ -36,7 +36,7 @@ export const ReaderSessionMarks = ({ reader }: { reader: ReaderScope }) => {
       )}
 
       {checkpointOpen && checkpointLevel && (
-        <div className="fixed bottom-6 right-6 z-[70] w-full max-w-xs">
+        <div className="reader-checkpoint fixed bottom-6 right-6 z-[70] w-full max-w-xs">
           <div
             className="rounded-xl border p-4 text-left shadow-2xl reader-panel reader-border"
             onMouseEnter={() => {

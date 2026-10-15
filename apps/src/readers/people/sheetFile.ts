@@ -1,4 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { android, onAndroid } from "../../platform/android";
 
 /**
  * A character sheet as a file on the reader's own disk: saved where they
@@ -21,6 +22,16 @@ export const sheetFileName = (title: string) =>
 
 /** Saves the sheet where the reader chooses. False when they chose nowhere. */
 export const saveSheetFile = async (name: string, contents: string): Promise<boolean> => {
+  if (onAndroid()) {
+    // "Save" on a phone is the share sheet (Save to Files, Drive, a message).
+    const path = await android.shareTarget(name);
+    if (!path) {
+      throw new Error("The sheet couldn't be saved.");
+    }
+    await invoke("people_export", { path, contents });
+    await android.shareFile(path, "application/json", name);
+    return true;
+  }
   if (isTauri()) {
     const { save } = await import("@tauri-apps/plugin-dialog");
     const path = await save({ defaultPath: name, filters: [{ name: "Leaflet characters", extensions: ["json"] }] });

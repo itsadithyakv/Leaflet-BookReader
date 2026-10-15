@@ -88,7 +88,8 @@
       "devCsp": "default-src * ipc: http://ipc.localhost data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src * ipc: http://ipc.localhost ws: wss: data: blob:",
       "dangerousDisableAssetCspModification": ["style-src"],
       "capabilities": [
-        "default"
+        "default",
+        "android"
       ]
     }
   }

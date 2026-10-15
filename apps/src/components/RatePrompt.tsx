@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { STORE_WEB_URL } from "../constants/links";
+import { android, onAndroid } from "../platform/android";
 import { accountService } from "../services/accountService";
 import { getDateKey, useHabitStore } from "../store/habitStore";
 import { PipSprite } from "./PipSprite";
+import { SheetHandle } from "./ui/SheetHandle";
+import { useBackClose } from "../hooks/useBackClose";
+import { isAndroid } from "../platform/device";
 
 /**
  * Asking for a Store rating, politely.
@@ -74,6 +78,11 @@ const mayAsk = () => {
  */
 export const openStoreReview = async () => {
   writeState({ ...readState(), done: true });
+  // The phone app's ratings are on Google Play (the Play Store app, or its web page).
+  if (onAndroid()) {
+    await android.openStore();
+    return;
+  }
   if (isTauri()) {
     try {
       await invoke("open_store_review");
@@ -117,6 +126,12 @@ export const RatePrompt = () => {
     return undefined;
   }, [wrapUp]);
 
+  // Back is "Later", as a tap outside is.
+  useBackClose(open, () => {
+    writeState({ ...readState(), snoozedUntil: Date.now() + SNOOZE_MS });
+    setOpen(false);
+  });
+
   if (!open) {
     return null;
   }
@@ -136,14 +151,15 @@ export const RatePrompt = () => {
 
   return (
     <div
-      className="fixed inset-0 z-[85] flex items-center justify-center bg-black/40 px-4"
+      className="sheet-backdrop fixed inset-0 z-[85] flex items-center justify-center bg-black/40 px-4"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
           later();
         }
       }}
     >
-      <div role="dialog" aria-modal="true" aria-labelledby="rate-title" className="modal-surface confirm-pop dialog-fit w-full max-w-sm rounded-2xl p-6 text-center">
+      <div role="dialog" aria-modal="true" aria-labelledby="rate-title" className="modal-surface confirm-pop dialog-fit sheet-panel w-full max-w-sm rounded-2xl p-6 text-center">
+        <SheetHandle onClose={later} />
         <div className="mb-2 flex justify-center">
           <PipSprite move="smitten" size={80} />
         </div>
@@ -151,7 +167,7 @@ export const RatePrompt = () => {
           Enjoying Leaflet?
         </h2>
         <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">
-          A quick rating on the Microsoft Store helps other readers find it, and it makes Pip's whole week.
+          A quick rating on {isAndroid() ? "Google Play" : "the Microsoft Store"} helps other readers find it, and it makes Pip's whole week.
         </p>
         <div className="mt-6 flex flex-col gap-2">
           <button

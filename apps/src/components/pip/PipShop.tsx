@@ -7,6 +7,7 @@ import { canBeGoal } from "./goal";
 import { levelHint, levelLabel } from "./rare";
 import { shortfall } from "./shopParts";
 import "./rare.css";
+import { useBackLayer } from "../../platform/back";
 
 /** What previewing an entry on Pip changes: the look, and a move to show it off. */
 export type PreviewLook = { variant?: string; outfit?: string[]; move?: string };
@@ -108,6 +109,8 @@ const grouped = (entries: ShopEntry[]) => {
  * buttons, and Escape closes.
  */
 export const PipShop = ({ categories, balance, request, goal, onGoal, onBuy, onPreview, onClose }: PipShopProps) => {
+  // Android's Back closes it, as Escape does.
+  useBackLayer(true, onClose);
   const [tab, setTab] = useState(() => categories.find((category) => category.id === request.tab)?.id ?? categories[0]?.id);
   const [chosen, setChosen] = useState<string | null>(request.item ?? null);
   const [fits, setFits] = useState(request.fits ?? null);

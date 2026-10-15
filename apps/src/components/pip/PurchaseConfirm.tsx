@@ -1,6 +1,7 @@
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { create } from "zustand";
 import { UiIcon } from "../UiIcon";
+import { useBackLayer } from "../../platform/back";
 
 /**
  * The question before a purchase worth asking about (QUICK_BUY_UNDER seeds
@@ -51,6 +52,8 @@ const plural = (count: number, word: string) => `${count} ${word}${count === 1 ?
 export const PurchaseConfirm = () => {
   const pending = usePurchaseStore((state) => state.pending);
   const settle = usePurchaseStore((state) => state.settle);
+  // Android's Back says no, as Escape does.
+  useBackLayer(Boolean(pending), () => settle(false));
   const buyRef = useRef<HTMLButtonElement | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
 

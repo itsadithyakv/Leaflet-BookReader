@@ -93,6 +93,8 @@ export interface ReaderLater {
   readerDotEnabledRef: MutableRefObject<boolean>;
   refreshReaderDot: (now?: boolean) => void;
   moveReaderDot: (dot: HTMLElement, container: HTMLElement, top: number, left: number) => void;
+  // useReaderPlace
+  holdPlaceForRelayout: () => void;
   // useReaderOutlook
   sectionWordsRef: MutableRefObject<Map<number, number>>;
   updateOutlookRef: MutableRefObject<() => void>;
