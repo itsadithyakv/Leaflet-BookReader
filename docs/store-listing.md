@@ -43,15 +43,26 @@ name must match the reserved name exactly ("Leaflet Book Reader", as in
 > fill the rooms, dress Pip up, and grant its wish of the day.
 >
 > **Yours, privately**
-> Back up your library, progress and highlights to your own Google Drive.
-> Leaflet can see only the files it made there. An account is optional, and so
-> is the community: weekly leaderboards, kudos and friendly duels with other
+> Back up your books to your own Google Drive; Leaflet can see only the files
+> it made there. An account is optional: signed in, your places, highlights
+> and reading days are kept in step across your devices with it. So is the
+> community: weekly leaderboards, kudos and friendly duels with other
 > readers, with a profile that stays private until you choose otherwise.
 >
 > Opens EPUB, PDF, CBZ, TXT, HTML and FB2 out of the box, and 19 more formats
 > (MOBI, AZW3, DOCX and others) with the free Calibre app installed.
 
 ## What's new in this version
+
+For 1.5.3:
+
+> Signed in to a Leaflet account, your places, highlights, notes and reading
+> days now follow you to every device by themselves: there is nothing to
+> switch on. Your own Google Drive (or a sync folder) brings the book files.
+>
+> Two readers on one computer each keep a library of their own: signed in as
+> another account, Leaflet offers a fresh library for it and never mixes two
+> accounts' reading.
 
 For 1.5.0 (the version that comes with Leaflet for Android, from the
 `android` branch). If 1.4.2 has been released, use this; if 1.4.2 never

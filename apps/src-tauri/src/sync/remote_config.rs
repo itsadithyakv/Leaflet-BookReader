@@ -79,9 +79,13 @@ pub fn cached(db: &Database) -> Option<String> {
     .filter(|value| !value.is_empty())
 }
 
+/// The rows `remembered` keeps: the device's, not the reader's (they go with
+/// the reader to another library too, `libraries::DEVICE_KEYS`).
+pub const REMEMBERED_KEYS: [&str; 2] = [REMOTE_API_SETTING, ISSUED_SETTING];
+
 /// The signed address and its date, as stored, for `put_back`.
 pub fn remembered(db: &Database) -> Vec<(&'static str, String)> {
-  [REMOTE_API_SETTING, ISSUED_SETTING]
+  REMEMBERED_KEYS
     .into_iter()
     .filter_map(|key| db.get_setting(key).ok().flatten().map(|value| (key, value)))
     .collect()

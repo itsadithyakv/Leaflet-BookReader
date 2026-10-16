@@ -14,6 +14,13 @@
 //! Leaflet/state.json           the shared document
 //! Leaflet/books/<sha256>.epub  the files, fetched on demand
 //! ```
+//!
+//! `state.json` carries whose library it is twice: in the document
+//! (`SyncDoc::owner`) and in its `appProperties` (`leafletOwner`), which
+//! Drive keeps when an older Leaflet rewrites the document without it. A
+//! sync is two halves run apart (`commands::backup::run_sync`): the state
+//! (`sync_state`, through `shared_doc`, gated by owner) and the files
+//! (`sync_files`, over this library as it is here).
 
 use crate::db::Database;
 use crate::sync::folder::SyncReport;
@@ -178,7 +185,22 @@ struct DriveFile {
   #[serde(default)]
   name: String,
   #[serde(rename = "headRevisionId", default)]
-  head_revision_id: Option<String>
+  head_revision_id: Option<String>,
+  /// Private to this app: `leafletOwner` on `state.json` says whose library
+  /// it is (`OWNER_PROPERTY`).
+  #[serde(rename = "appProperties", default)]
+  app_properties: Option<std::collections::HashMap<String, String>>
+}
+
+/// The `appProperties` key that marks whose library `state.json` is.
+const OWNER_PROPERTY: &str = "leafletOwner";
+
+impl DriveFile {
+  /// The owner marked on the file, when it is a tag.
+  fn owner_mark(&self) -> Option<String> {
+    let props = self.app_properties.as_ref()?;
+    crate::sync::owner::clean(props.get(OWNER_PROPERTY).map(String::as_str))
+  }
 }
 
 #[derive(Debug, Deserialize)]
@@ -519,8 +541,12 @@ pub const ACCOUNT_SETTING: &str = "drive_account_email";
 ///
 /// The database remains the fallback: on a machine with no usable keychain,
 /// refusing to sync would be worse than the previous behaviour.
+///
+/// Each library on the device keeps its own (per-account libraries): the
+/// first under the name it always had, another account's under its tag
+/// (`slot_name`), so connecting Drive in one never signs another in or out.
 pub fn store_refresh_token(db: &Database, token: &str) -> Result<()> {
-  match keep_refresh_token(token) {
+  match keep_refresh_token(slot(db).as_deref(), token) {
     Ok(()) => {
       // Remove any copy an earlier version left in the database.
       let _ = db.set_setting(REFRESH_SETTING, "");
@@ -531,7 +557,7 @@ pub fn store_refresh_token(db: &Database, token: &str) -> Result<()> {
 }
 
 pub fn load_refresh_token(db: &Database) -> Result<Option<String>> {
-  if let Some(token) = kept_refresh_token() {
+  if let Some(token) = kept_refresh_token(slot(db).as_deref()) {
     return Ok(Some(token));
   }
   let stored = db.get_setting(REFRESH_SETTING)?.filter(|value| !value.is_empty());
@@ -542,47 +568,62 @@ pub fn load_refresh_token(db: &Database) -> Result<Option<String>> {
   Ok(stored)
 }
 
+/// Which library `db` is, for its token: `None` for the first one.
+fn slot(db: &Database) -> Option<String> {
+  crate::libraries::slot_of(db.path())
+}
+
+/// The name a library's token is kept under: `base` for the first library,
+/// `base-<tag>` for another account's.
+pub(crate) fn slot_name(base: &str, slot: Option<&str>) -> String {
+  match slot {
+    Some(tag) => format!("{base}-{tag}"),
+    None => base.to_string()
+  }
+}
+
 /// The keychain on a computer; Leaflet's private storage on a phone, where
 /// `keyring` keeps nothing at all (`device_secret`).
 #[cfg(not(target_os = "android"))]
-fn keep_refresh_token(token: &str) -> std::result::Result<(), String> {
-  keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
+fn keep_refresh_token(slot: Option<&str>, token: &str) -> std::result::Result<(), String> {
+  keyring::Entry::new(KEYRING_SERVICE, &slot_name(KEYRING_USER, slot))
     .and_then(|entry| entry.set_password(token))
     .map_err(|e| e.to_string())
 }
 
 #[cfg(target_os = "android")]
-fn keep_refresh_token(token: &str) -> std::result::Result<(), String> {
-  crate::sync::device_secret::store(crate::sync::device_secret::DRIVE_REFRESH, token).map_err(|e| e.to_string())
+fn keep_refresh_token(slot: Option<&str>, token: &str) -> std::result::Result<(), String> {
+  crate::sync::device_secret::store(&slot_name(crate::sync::device_secret::DRIVE_REFRESH, slot), token).map_err(|e| e.to_string())
 }
 
 #[cfg(not(target_os = "android"))]
-fn kept_refresh_token() -> Option<String> {
-  keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
+fn kept_refresh_token(slot: Option<&str>) -> Option<String> {
+  keyring::Entry::new(KEYRING_SERVICE, &slot_name(KEYRING_USER, slot))
     .and_then(|entry| entry.get_password())
     .ok()
     .filter(|token| !token.is_empty())
 }
 
 #[cfg(target_os = "android")]
-fn kept_refresh_token() -> Option<String> {
-  crate::sync::device_secret::load(crate::sync::device_secret::DRIVE_REFRESH)
+fn kept_refresh_token(slot: Option<&str>) -> Option<String> {
+  crate::sync::device_secret::load(&slot_name(crate::sync::device_secret::DRIVE_REFRESH, slot))
 }
 
 #[cfg(not(target_os = "android"))]
-fn forget_refresh_token() {
-  if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER) {
+fn forget_refresh_token(slot: Option<&str>) {
+  if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, &slot_name(KEYRING_USER, slot)) {
     let _ = entry.delete_credential();
   }
 }
 
 #[cfg(target_os = "android")]
-fn forget_refresh_token() {
-  crate::sync::device_secret::clear(crate::sync::device_secret::DRIVE_REFRESH);
+fn forget_refresh_token(slot: Option<&str>) {
+  crate::sync::device_secret::clear(&slot_name(crate::sync::device_secret::DRIVE_REFRESH, slot));
 }
 
+/// Disconnects Drive from this library (`db`'s) only.
 pub fn clear_tokens(db: &Database) -> Result<()> {
-  forget_refresh_token();
+  forget_refresh_token(slot(db).as_deref());
   db.set_setting(REFRESH_SETTING, "")?;
   db.set_setting(ACCESS_SETTING, "")?;
   db.set_setting(EXPIRES_SETTING, "")?;
@@ -808,13 +849,14 @@ async fn find_file(client: &reqwest::Client, token: &str, name: &str, parent: &s
 
 async fn find_files(client: &reqwest::Client, token: &str, name: &str, parent: &str) -> Result<Vec<DriveFile>> {
   let query = format!("name = '{name}' and '{parent}' in parents and trashed = false");
-  list_files(client, token, &query, "id,name,headRevisionId").await
+  list_files(client, token, &query, "id,name,headRevisionId,appProperties").await
 }
 
 /// Uploads a small body whole. `uploadType=media` takes the raw bytes, so there
 /// is no multipart envelope to get wrong — the previous code sent
 /// `multipart/form-data` where Drive requires `multipart/related`, and every
-/// upload was rejected with a 400.
+/// upload was rejected with a 400. An `existing` file is written only over
+/// the revision it names (`If-Match`).
 async fn upload_simple(
   client: &reqwest::Client,
   token: &str,
@@ -822,7 +864,7 @@ async fn upload_simple(
   name: &str,
   parent: &str,
   body: Vec<u8>,
-  if_match: Option<&str>
+  owner: Option<&str>
 ) -> Result<DriveFile> {
   let response = match existing {
     Some(file) => {
@@ -834,7 +876,7 @@ async fn upload_simple(
         .body(body);
       // Optimistic concurrency: if the other device wrote since we read, this
       // fails with 412 rather than silently discarding their work.
-      if let Some(revision) = if_match {
+      if let Some(revision) = file.head_revision_id.as_deref() {
         request = request.header(reqwest::header::IF_MATCH, revision);
       }
       request.send().await?
@@ -847,7 +889,7 @@ async fn upload_simple(
           .post(format!("{DRIVE_API}/files"))
           .bearer_auth(token)
           .query(&[("fields", "id,name,headRevisionId")])
-          .json(&serde_json::json!({ "name": name, "parents": [parent] }))
+          .json(&create_metadata(name, parent, owner))
       )
       .await?
       .json()
@@ -871,6 +913,30 @@ async fn upload_simple(
     return Err(describe_failure(response).await);
   }
   Ok(response.json().await?)
+}
+
+/// What a new small file is made with: its name and folder, and, for
+/// `state.json` with an owner, the marker.
+fn create_metadata(name: &str, parent: &str, owner: Option<&str>) -> serde_json::Value {
+  let mut metadata = serde_json::json!({ "name": name, "parents": [parent] });
+  if let Some(owner) = owner {
+    metadata["appProperties"] = serde_json::json!({ OWNER_PROPERTY: owner });
+  }
+  metadata
+}
+
+/// Marks an existing `state.json` as `owner`'s. Metadata only, so no
+/// `If-Match`: the content was just written over the copy it named.
+async fn mark_owner(client: &reqwest::Client, token: &str, file_id: &str, owner: &str) -> Result<()> {
+  send(
+    client
+      .patch(format!("{DRIVE_API}/files/{file_id}"))
+      .bearer_auth(token)
+      .query(&[("fields", "id")])
+      .json(&serde_json::json!({ "appProperties": { OWNER_PROPERTY: owner } }))
+  )
+  .await?;
+  Ok(())
 }
 
 /// Uploads a book in chunks through a resumable session.
@@ -1022,26 +1088,32 @@ impl shared_doc::DocStore for DriveDoc<'_> {
       // A corrupt document reads as absent, and this device republishes its
       // own state, which is recoverable. One a later version wrote is told
       // apart by its version first, and is not written over.
+      let owner_mark = file.owner_mark();
       Ok((
         merge::read_remote(&bytes),
-        Some(shared_doc::Held { id: file.id, revision: file.head_revision_id })
+        Some(shared_doc::Held { id: file.id, revision: file.head_revision_id, owner_mark })
       ))
     })
   }
 
-  fn write<'a>(&'a self, held: Option<&'a shared_doc::Held>, body: Vec<u8>) -> shared_doc::Pending<'a, shared_doc::Written> {
+  fn write<'a>(
+    &'a self,
+    held: Option<&'a shared_doc::Held>,
+    body: Vec<u8>,
+    owner: Option<&'a str>
+  ) -> shared_doc::Pending<'a, shared_doc::Written> {
     Box::pin(async move {
       let existing = held.map(|held| DriveFile {
         id: held.id.clone(),
         name: STATE_FILE.to_string(),
-        head_revision_id: held.revision.clone()
+        head_revision_id: held.revision.clone(),
+        app_properties: None
       });
-      let revision = held.and_then(|held| held.revision.as_deref());
-      let written = match upload_simple(self.client, self.token, existing.as_ref(), STATE_FILE, self.root, body, revision).await {
-        Ok(file) => file,
-        Err(error) if error.to_string() == "CONFLICT" => return Ok(shared_doc::Written::Conflict),
-        Err(error) => return Err(error)
-      };
+      let written = match upload_simple(self.client, self.token, existing.as_ref(), STATE_FILE, self.root, body, owner).await {
+          Ok(file) => file,
+          Err(error) if error.to_string() == "CONFLICT" => return Ok(shared_doc::Written::Conflict),
+          Err(error) => return Err(error)
+        };
       if held.is_none() {
         // Made the first copy: if another device made one at the same moment,
         // the one with the lowest id is everyone's, and ours (when it is not
@@ -1060,18 +1132,31 @@ impl shared_doc::DocStore for DriveDoc<'_> {
           }
           return Ok(shared_doc::Written::Conflict);
         }
+      } else if let Some(owner) = owner {
+        // The content PATCH keeps the marker a file has; one without it (made
+        // before owners, or by an older Leaflet) is marked now.
+        if held.and_then(|held| held.owner_mark.as_deref()) != Some(owner) {
+          mark_owner(self.client, self.token, &written.id, owner).await?;
+        }
       }
       Ok(shared_doc::Written::Kept)
     })
   }
 }
 
-/// Merges with Drive and applies the result locally.
-///
-/// Book files are *not* pulled here. The document is a few kilobytes and syncs
-/// in one round trip; the files are fetched when a book is opened, so connecting
-/// a new device is instant instead of a multi-gigabyte download.
-pub async fn sync(db_mutex: &std::sync::Mutex<Database>, now: &str) -> Result<SyncReport> {
+/// A connection to the reader's Drive for one run: the folders found or
+/// made, and whose library `state.json` is marked as (no document read yet).
+pub struct DriveCtx {
+  client: reqwest::Client,
+  token: String,
+  root: String,
+  books_folder: String,
+  pub doc_owner: Option<String>
+}
+
+/// Connects for a run: a token, the Leaflet folders, the Google account's
+/// address for Settings, and the marker on `state.json`.
+pub async fn open(db_mutex: &std::sync::Mutex<Database>) -> Result<DriveCtx> {
   let token = ensure_access_token(db_mutex).await?;
   let client = reqwest::Client::builder()
     .timeout(Duration::from_secs(120))
@@ -1085,59 +1170,72 @@ pub async fn sync(db_mutex: &std::sync::Mutex<Database>, now: &str) -> Result<Sy
       let _ = db.set_setting(ACCOUNT_SETTING, &email);
     }
   }
+  let doc_owner = find_file(&client, &token, STATE_FILE, &root).await?.and_then(|file| file.owner_mark());
+  Ok(DriveCtx { client, token, root, books_folder, doc_owner })
+}
 
-  // Read, merge, write over the copy read and no other, check it stuck
-  // (`shared_doc`); then apply here.
-  let doc_store = DriveDoc { client: &client, token: &token, root: &root };
-  let (mut report, merged) = shared_doc::sync(db_mutex, &doc_store, now).await?;
-  // A later Leaflet wrote the library: nothing of this device's goes up,
-  // files included, until it is updated.
-  let Some(merged) = merged else {
-    return Ok(report);
-  };
+/// The state half: read, merge, write over the copy read and no other, check
+/// it stuck (`shared_doc`), then apply here; or nothing at all, when the
+/// Drive holds a library that is not this device's to merge with.
+pub async fn sync_state(
+  db_mutex: &std::sync::Mutex<Database>,
+  ctx: &DriveCtx,
+  now: &str,
+  who: &shared_doc::Who
+) -> Result<shared_doc::StateRun> {
+  let doc_store = DriveDoc { client: &ctx.client, token: &ctx.token, root: &ctx.root };
+  shared_doc::sync(db_mutex, &doc_store, now, who).await
+}
 
+/// The files half, over this library as it is here. Publishes anything this
+/// device holds that Drive does not; downloads stay on demand (`fetch_book`),
+/// so connecting a new device does not pull a whole library. A large file
+/// goes only with the reader's word (`sync::large`). With `may_delete`, the
+/// files of books removed stop occupying the reader's quota; never in a
+/// Drive that holds another account's library.
+pub async fn sync_files(db_mutex: &std::sync::Mutex<Database>, ctx: &DriveCtx, may_delete: bool) -> Result<SyncReport> {
+  let (client, token) = (&ctx.client, ctx.token.as_str());
   let remote_files: std::collections::HashMap<String, String> =
-    list_files(&client, &token, &format!("'{books_folder}' in parents and trashed = false"), "id,name")
+    list_files(client, token, &format!("'{}' in parents and trashed = false", ctx.books_folder), "id,name")
       .await?
       .into_iter()
       .map(|file| (file.name, file.id))
       .collect();
+  let library = {
+    let db = db_mutex.guard();
+    store::library_files(&db)?
+  };
+  let mut report = SyncReport::default();
 
-  // A book deleted on any device should stop occupying the user's Drive quota.
-  for entry in merged.books.iter().filter(|entry| entry.is_deleted()) {
-    if let Some(file_id) = remote_files.get(&entry.remote_name()) {
-      let _ = send(
-        client
-          .delete(format!("{DRIVE_API}/files/{file_id}"))
-          .bearer_auth(&token)
-      )
-      .await;
+  if may_delete {
+    for (entry, _) in library.iter().filter(|(entry, _)| entry.is_deleted()) {
+      if let Some(file_id) = remote_files.get(&entry.remote_name()) {
+        let _ = send(client.delete(format!("{DRIVE_API}/files/{file_id}")).bearer_auth(token)).await;
+      }
     }
   }
 
-  // Publish anything this device holds that Drive does not. Downloads stay on
-  // demand, so connecting a new device does not pull a whole library. A large
-  // file goes only with the reader's word (`sync::large`).
   let mut answers = {
     let db = db_mutex.guard();
     large::Answers::load(&db)
   };
   // Whatever happens to an upload, the answers found on the way are kept.
   let mut failed = None;
-  for entry in merged.live_books() {
+  for (entry, path) in library.iter().filter(|(entry, _)| !entry.is_deleted()) {
     let name = entry.remote_name();
-    let path = store::local_path_for(entry)?;
     if !path.exists() {
+      // Fetched when it is opened.
+      report.books_pending += 1;
       continue;
     }
-    let bytes = large::file_bytes(&path);
+    let bytes = large::file_bytes(path);
     if remote_files.contains_key(&name) {
       answers.found_backed_up(&entry.id, bytes);
       continue;
     }
     match large::decide(bytes, answers.get(&entry.id)) {
       large::Decision::Send => {
-        if let Err(error) = upload_book(&client, &token, &books_folder, &path, &name).await {
+        if let Err(error) = upload_book(client, token, &ctx.books_folder, path, &name).await {
           failed = Some(error);
           break;
         }
@@ -1154,7 +1252,6 @@ pub async fn sync(db_mutex: &std::sync::Mutex<Database>, now: &str) -> Result<Sy
   if let Some(error) = failed {
     return Err(error);
   }
-
   Ok(report)
 }
 
@@ -1375,5 +1472,24 @@ mod tests {
     let error = tokens_from(r#"{"access_token":"ya29.a","expires_in":3599}"#).err().expect("an error");
     assert!(error.to_string().contains("refresh token"));
     assert!(tokens_from(r#"{"refresh_token":"1//r"}"#).is_err());
+  }
+
+  /// The marker on `state.json` is read from its `appProperties`, and only a
+  /// tag counts; a new file is made with it.
+  #[test]
+  fn the_owner_marker_is_read_from_app_properties() {
+    let tag = "a".repeat(32);
+    let listed: FilesList = serde_json::from_str(&format!(
+      r#"{{"files":[{{"id":"1","name":"state.json","headRevisionId":"r1","appProperties":{{"leafletOwner":"{tag}"}}}},{{"id":"2","name":"state.json"}},{{"id":"3","name":"state.json","appProperties":{{"leafletOwner":"someone"}}}}]}}"#
+    ))
+    .expect("a listing");
+    assert_eq!(listed.files[0].owner_mark().as_deref(), Some(tag.as_str()));
+    assert_eq!(listed.files[1].owner_mark(), None, "made before owners");
+    assert_eq!(listed.files[2].owner_mark(), None, "not a tag");
+
+    let made = create_metadata(STATE_FILE, "root-id", Some(&tag));
+    assert_eq!(made["appProperties"][OWNER_PROPERTY], serde_json::json!(tag));
+    assert_eq!(made["parents"], serde_json::json!(["root-id"]));
+    assert!(create_metadata(STATE_FILE, "root-id", None).get("appProperties").is_none());
   }
 }

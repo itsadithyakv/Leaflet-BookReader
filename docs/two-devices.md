@@ -235,3 +235,72 @@ phone. `sync/secrets.rs` was not ported (`device_secret.rs` does its job).
 larger figure and never reads the version. It loses nothing (the first
 section), but a day read on both counts once until the laptop is updated.
 Release the desktop app from this branch alongside the phone's.
+
+## One library, one owner; the account carries the state
+
+Added for 1.5.3 (design C, "hybrid"). Until 1.5.2 a signed-in reader's
+reading went to the Leaflet account only when Drive was connected or they
+had turned on "Back up reading to my Leaflet account"; Drive's `state.json`
+was the shared copy, whoever was signed in. Two people on one laptop, or two
+accounts on one Drive, merged into one library.
+
+**Signed in, the account carries the reading state**, always: there is no
+switch. `cloud::sync` runs at every sync while the library is the account's
+(or becoming it). Drive and the sync folder carry the **book files** for
+signed-in devices; the account copy's books list (`id` + `ext`) is the whole
+index of them, since a book's file name is `<sha256>.<ext>`.
+
+**A library belongs to one account.** The first account to sync it signed in
+adopts it (`library_owner`, written once). The Drive or folder copy it syncs
+with is stamped "taken by" that account (`owner` in the document, and a mark
+outside it: docs/data-model.md). What each device then does with a store
+(`sync/owner.rs`, `store_mode`):
+
+| Device | Store's owner | Does |
+| --- | --- | --- |
+| Signed in as T | none | Claim: syncs `state.json` and stamps it T |
+| Signed in as T | T | Bridge: keeps `state.json` in step too (see below) |
+| Signed in as T | another | Files only: book files, never deletes there |
+| Signed out, library unowned | any | Exchange, as before; inherits the store's owner |
+| Signed out, library L | none or L | Exchange, as before |
+| Signed out, library L | another | Refuses, and says so |
+
+Signed in as an account the library does not belong to (`other`), nothing of
+it is synced, published to the board, or spent on another reader (seeds,
+duels, stakes). The reader is asked once: start a fresh library for this
+account, or stay out of reading sync (Social keeps working). A fresh library
+lives in `libraries/<tag>/`, and the device switches between libraries by
+reloading the window; the first library is never moved.
+
+**Cloud first.** A run signed in syncs with the account, then with Drive and
+the folder, then with the account again if they brought anything new. Two
+devices of different accounts adopting one unowned Drive at once: `state.json`
+is written with `If-Match`, so the loser re-reads, finds it taken, and goes
+files only, having sent its own account nothing of the other's.
+
+**A fresh library meets an old account copy.** An account used before 1.5.3
+may hold reading from a shared laptop. A library started fresh does not merge
+it blind: its first sync reports `accountHolds` (the copy's book count) and
+asks "Use it" or "Start empty"; starting empty replaces the copy.
+
+**The bridge.** While `BRIDGE_STATE_JSON` is on (1.5.3), a signed-in device
+keeps its own account's `state.json` up to date, so a phone that is signed
+out, or a laptop still on 1.5.0–1.5.2, goes on reading the same library. A
+later release turns it off: then a signed-out device on a taken store is told
+to sign in to keep in step.
+
+**Why `DOC_VERSION` stays 1.** `owner` passes the test at the top: an old app
+that rewrites the document without it loses nothing for good, because the
+mark outside the document stays (Drive keeps `appProperties` across content
+uploads; the folder's `.leaflet-owner` is a file old apps never touch) and a
+1.5.3 device stamps the document again at its next run. Raising the version
+would stop 1.5.0–1.5.2 syncing at all. What can still lose the mark: a 1.4.2
+or older app that deletes and recreates `state.json` on Drive. The next
+signed-in 1.5.3 device then claims it again, for the same owner if it is
+theirs.
+
+**The field test** (by hand, before release): a laptop signed in as A and a
+phone signed out on one Drive (bridge: both in step); a second account B
+signed in on the same laptop (asked; a fresh library; A's untouched); B on a
+Drive A took (files only; B's reading follows B's account); and two devices
+adopting an unowned Drive at once.

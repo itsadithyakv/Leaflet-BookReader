@@ -45,6 +45,7 @@ mod power;
 mod search;
 mod fonts;
 mod tidy;
+mod libraries;
 // The community requests against a real server; ignored unless asked for.
 #[cfg(test)]
 mod e2e;
@@ -75,3 +76,4 @@ pub use power::*;
 pub use search::*;
 pub use fonts::*;
 pub use tidy::*;
+pub use libraries::*;

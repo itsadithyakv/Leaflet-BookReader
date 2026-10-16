@@ -93,6 +93,8 @@ pub async fn cover_preview(cover_id: i64) -> Result<String, String> {
 /// takes it for a cover still to be found, or writes over it.
 #[tauri::command]
 pub async fn apply_cover(book_id: String, cover_id: i64, state: State<'_, AppState>) -> Result<BookRecord, String> {
+  // Written only into the library this started in (`AppState::db_for`).
+  let epoch = state.epoch();
   let mut book = {
     let db = state.db.guard();
     db.find_by_id(&book_id)
@@ -100,6 +102,9 @@ pub async fn apply_cover(book_id: String, cover_id: i64, state: State<'_, AppSta
       .ok_or_else(|| "Book not found".to_string())?
   };
   let bytes = cover_bytes(cover_id, 'L').await?;
+  if state.epoch() != epoch {
+    return Err(crate::LIBRARY_CHANGED.to_string());
+  }
   let hash = book.file_hash.clone();
   let saved = tauri::async_runtime::spawn_blocking(move || -> anyhow::Result<std::path::PathBuf> {
     let cover = storage::store_chosen_cover(&bytes, &hash, cover_id)?;
@@ -111,7 +116,7 @@ pub async fn apply_cover(book_id: String, cover_id: i64, state: State<'_, AppSta
   .map_err(|e| format!("Cover task failed: {e}"))?
   .map_err(|e| e.to_string())?;
   book.cover_url = Some(saved.to_string_lossy().to_string());
-  let db = state.db.guard();
+  let db = state.db_for(epoch).ok_or_else(|| crate::LIBRARY_CHANGED.to_string())?;
   db.update_cover(&book.id, book.cover_url.clone()).map_err(|e| e.to_string())?;
   Ok(book)
 }

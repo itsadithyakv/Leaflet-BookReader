@@ -218,7 +218,16 @@ pub struct SyncDoc {
   /// Left out of documents without one, so they read as before and a build
   /// from before the camp travelled passes over it.
   #[serde(default, skip_serializing_if = "Option::is_none")]
-  pub camp: Option<CampEntry>
+  pub camp: Option<CampEntry>,
+  /// The account the library belongs to, as a tag (`owner::tag_for`). On
+  /// Drive and in a folder it says the library there is taken by that
+  /// account; in the account's own copy it is kept for the record. Left out
+  /// when there is none, so an unowned document is byte for byte what it was.
+  /// The version is not raised for it: 1.5.0 to 1.5.2 drop it, and the
+  /// marker kept beside the document (Drive's `appProperties`, the folder's
+  /// `.leaflet-owner`) holds it until a newer device writes it back.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub owner: Option<String>
 }
 
 impl SyncDoc {
@@ -236,7 +245,8 @@ impl SyncDoc {
       annotations: Vec::new(),
       collections: Vec::new(),
       reading_profile: None,
-      camp: None
+      camp: None,
+      owner: None
     }
   }
 
@@ -764,7 +774,8 @@ pub fn merge(local: &SyncDoc, remote: &SyncDoc, now: &str) -> SyncDoc {
     purchases: purchases.into_values().collect(),
     pip: merge_pip(&local.pip, &remote.pip),
     reading_profile: crate::sync::reading::merge(&local.reading_profile, &remote.reading_profile),
-    camp: merge_camp(&local.camp, &remote.camp)
+    camp: merge_camp(&local.camp, &remote.camp),
+    owner: crate::sync::owner::merge_owner(&local.owner, &remote.owner)
   }
 }
 
@@ -977,7 +988,8 @@ mod tests {
       annotations: Vec::new(),
       collections: Vec::new(),
       reading_profile: None,
-      camp: None
+      camp: None,
+      owner: None
     }
   }
 
@@ -2061,5 +2073,42 @@ mod tests {
     assert_eq!(merged.harvests, vec![picked]);
     assert_eq!(merged.plantings, merge(&theirs, &mine, NOW).plantings, "commutative");
     assert_eq!(merge(&mine, &merged, NOW), merge(&merged, &mine, NOW));
+  }
+
+  /// A document with no owner is written exactly as before the owner existed,
+  /// so nothing changes for a library nobody has claimed.
+  #[test]
+  fn a_document_without_an_owner_serialises_as_it_always_did() {
+    let unowned = doc(vec![entry("aaa")]);
+    let json = serde_json::to_string(&unowned).expect("json");
+    assert!(!json.contains("owner"));
+    let before = r#"{"version":1,"updatedAt":"2026-08-29T12:00:00+00:00","books":[{"id":"aaa","ext":"epub","title":"Book aaa","author":"Someone","genres":["fiction"],"metadataUpdatedAt":"2026-01-01T00:00:00+00:00","progress":0.0,"progressUpdatedAt":"2026-01-01T00:00:00+00:00","lastOpened":null,"createdAt":"2026-01-01T00:00:00+00:00","deletedAt":null}],"days":[],"sessions":[],"purchases":[],"plantings":[],"harvests":[],"pip":null,"annotations":[],"collections":[]}"#;
+    let parsed: SyncDoc = serde_json::from_str(before).expect("an old document");
+    assert_eq!(parsed.owner, None);
+    assert_eq!(parsed, unowned);
+    assert_eq!(serde_json::to_vec(&parsed).expect("json"), serde_json::to_vec(&unowned).expect("json"), "byte for byte");
+
+    // With one, it travels, and reads back as the same.
+    let owned = SyncDoc { owner: Some("a".repeat(32)), ..unowned };
+    let json = serde_json::to_string(&owned).expect("json");
+    assert!(json.contains(&format!(r#""owner":"{}""#, "a".repeat(32))));
+    assert!(matches!(read_remote(json.as_bytes()), Remote::Ours(back) if back == owned));
+  }
+
+  /// The owner merges like everything else: an owner beats none, the same
+  /// both ways and again; and a new owner is news to the store.
+  #[test]
+  fn the_owner_merges_and_counts_as_news() {
+    let (a, b) = ("a".repeat(32), "b".repeat(32));
+    let mine = SyncDoc { owner: Some(a.clone()), ..doc(vec![]) };
+    let theirs = doc(vec![]);
+    assert_eq!(merge(&mine, &theirs, NOW).owner.as_deref(), Some(a.as_str()));
+    assert_eq!(merge(&theirs, &mine, NOW), merge(&mine, &theirs, NOW));
+    let once = merge(&mine, &theirs, NOW);
+    assert_eq!(merge(&once, &theirs, NOW), once);
+    let other = SyncDoc { owner: Some(b.clone()), ..doc(vec![]) };
+    assert_eq!(merge(&other, &mine, NOW).owner, merge(&mine, &other, NOW).owner);
+    assert!(has_news(&merge(&mine, &theirs, NOW), Some(&theirs)), "a stamp is sent");
+    assert!(!has_news(&merge(&mine, &mine, NOW), Some(&mine)));
   }
 }

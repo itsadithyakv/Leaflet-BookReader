@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { create } from "zustand";
 import { PipSprite } from "./PipSprite";
 import { SheetHandle } from "./ui/SheetHandle";
@@ -85,7 +86,9 @@ export const ConfirmDialog = () => {
     return null;
   }
 
-  return (
+  // On the page itself, as the sheets that ask (sync/OwnerSheetFrame) are:
+  // inside the app's own layer it stood behind them, out of reach.
+  return createPortal(
     <div
       className="sheet-backdrop fixed inset-0 z-[90] flex items-center justify-center bg-black/50 px-4"
       {...backdropClose(() => settle(false))}
@@ -126,6 +129,7 @@ export const ConfirmDialog = () => {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

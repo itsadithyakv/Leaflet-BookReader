@@ -178,7 +178,8 @@ pub(crate) fn remember_share_library(db: &db::Database, on: bool) {
 pub(crate) async fn publish_library(state: &State<'_, AppState>) -> Result<(), String> {
   let (books, sent) = {
     let db = state.db.guard();
-    if !shares_library(&db) {
+    // Never another account's library under this one's name.
+    if !shares_library(&db) || !crate::sync::owner::may_publish(crate::sync::owner::standing(&db)) {
       return Ok(());
     }
     (

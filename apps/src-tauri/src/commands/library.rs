@@ -41,10 +41,12 @@ fn import_failure(path: &str, reason: Option<String>) -> ImportFailure {
 /// abort the whole batch after the earlier books were already saved, so the
 /// library showed "Import failed" while holding half of them.
 async fn import_each(paths: Vec<String>, state: &State<'_, AppState>, app: &AppHandle) -> ImportReport {
+  // The library this import is for: a switch meanwhile leaves the rest out.
+  let epoch = state.epoch();
   let mut books = Vec::new();
   let mut failed = Vec::new();
   for path in paths {
-    match import_one(&path, state).await {
+    match import_one(&path, state, epoch).await {
       Ok(Some(book)) => books.push(book),
       Ok(None) => failed.push(import_failure(&path, None)),
       Err(error) => {
@@ -58,7 +60,7 @@ async fn import_each(paths: Vec<String>, state: &State<'_, AppState>, app: &AppH
   // book already in the library counts too: opening it again is how one gets
   // its copy when the option was turned on later. Done after the import, in
   // the background: the books are in the library whatever happens to the copy.
-  keep_copies_later(app, books.clone());
+  keep_copies_later(app, epoch, books.clone());
   ImportReport { books, failed }
 }
 
@@ -94,7 +96,7 @@ pub async fn import_books_report(
 }
 
 /// One file: `None` for a format the reader cannot open.
-pub(crate) async fn import_one(path: &str, state: &State<'_, AppState>) -> Result<Option<BookRecord>, String> {
+pub(crate) async fn import_one(path: &str, state: &State<'_, AppState>, epoch: u64) -> Result<Option<BookRecord>, String> {
   {
     let source = std::path::PathBuf::from(path);
     // Importing a file the reader cannot open only defers the failure to the
@@ -117,7 +119,7 @@ pub(crate) async fn import_one(path: &str, state: &State<'_, AppState>) -> Resul
     // is carried over, or adding it back would un-finish it.
     let mut finished_before: Option<String> = None;
     if let Some(existing) = {
-      let db = state.db.guard();
+      let db = state.db_for(epoch).ok_or_else(|| crate::LIBRARY_CHANGED.to_string())?;
       db.find_by_hash(&hash).map_err(|e| e.to_string())?
     } {
       finished_before = existing.finished_at.clone();
@@ -147,7 +149,7 @@ pub(crate) async fn import_one(path: &str, state: &State<'_, AppState>) -> Resul
           // Only an entry that had no path at all needs writing back.
           if existing.local_path != restored {
             existing.local_path = restored;
-            let db = state.db.guard();
+            let db = state.db_for(epoch).ok_or_else(|| crate::LIBRARY_CHANGED.to_string())?;
             db.upsert_book(&existing).map_err(|e| e.to_string())?;
           }
         }
@@ -211,7 +213,7 @@ pub(crate) async fn import_one(path: &str, state: &State<'_, AppState>) -> Resul
     };
 
     {
-      let db = state.db.guard();
+      let db = state.db_for(epoch).ok_or_else(|| crate::LIBRARY_CHANGED.to_string())?;
       db.upsert_book(&book).map_err(|e| e.to_string())?;
     }
 
@@ -240,6 +242,8 @@ pub fn take_pending_open_paths(state: State<'_, AppState>) -> Vec<String> {
 
 #[tauri::command]
 pub async fn refresh_metadata(book_id: String, state: State<'_, AppState>) -> Result<BookRecord, String> {
+  // Written only into the library this started in (`AppState::db_for`).
+  let epoch = state.epoch();
   let mut book = {
     let db = state.db.guard();
     db.find_by_id(&book_id)
@@ -313,7 +317,7 @@ pub async fn refresh_metadata(book_id: String, state: State<'_, AppState>) -> Re
   }
 
   {
-    let db = state.db.guard();
+    let db = state.db_for(epoch).ok_or_else(|| crate::LIBRARY_CHANGED.to_string())?;
     // The lookup can take most of a minute on a bad connection, and the book
     // may have been given its first page for a cover meanwhile: what is in
     // the database now is kept unless this lookup found a cover itself.
@@ -337,6 +341,8 @@ pub(crate) fn lookup_was_made(answered: bool, cover_lost: bool, found_cover: boo
 
 #[tauri::command]
 pub async fn fetch_cover(book_id: String, state: State<'_, AppState>) -> Result<Option<BookRecord>, String> {
+  // Written only into the library this started in (`AppState::db_for`).
+  let epoch = state.epoch();
   let mut book = {
     let db = state.db.guard();
     db.find_by_id(&book_id)
@@ -358,7 +364,7 @@ pub async fn fetch_cover(book_id: String, state: State<'_, AppState>) -> Result<
   };
   if let Some(path) = embedded {
     book.cover_url = Some(path.to_string_lossy().to_string());
-    let db = state.db.guard();
+    let db = state.db_for(epoch).ok_or_else(|| crate::LIBRARY_CHANGED.to_string())?;
     db.update_cover(&book.id, book.cover_url.clone())
       .map_err(|e| e.to_string())?;
     return Ok(Some(book));
@@ -371,7 +377,7 @@ pub async fn fetch_cover(book_id: String, state: State<'_, AppState>) -> Result<
     if let Some(url) = meta.cover_url {
       if let Ok(path) = storage::store_cover(&url, &book.file_hash).await {
         book.cover_url = Some(path.to_string_lossy().to_string());
-        let db = state.db.guard();
+        let db = state.db_for(epoch).ok_or_else(|| crate::LIBRARY_CHANGED.to_string())?;
         db.update_cover(&book.id, book.cover_url.clone())
           .map_err(|e| e.to_string())?;
         return Ok(Some(book));
@@ -382,7 +388,7 @@ pub async fn fetch_cover(book_id: String, state: State<'_, AppState>) -> Result<
   if let Ok(Some(url)) = wikipedia::fetch_cover(&normalized.title, normalized.author.as_deref()).await {
     if let Ok(path) = storage::store_cover(&url, &book.file_hash).await {
       book.cover_url = Some(path.to_string_lossy().to_string());
-      let db = state.db.guard();
+      let db = state.db_for(epoch).ok_or_else(|| crate::LIBRARY_CHANGED.to_string())?;
       db.update_cover(&book.id, book.cover_url.clone())
         .map_err(|e| e.to_string())?;
       return Ok(Some(book));
@@ -434,6 +440,8 @@ pub fn book_file_size(book_id: String, state: State<'_, AppState>) -> Result<Opt
 /// `None` then, and for a book that is not a PDF.
 #[tauri::command]
 pub async fn save_page_cover(book_id: String, image: String, state: State<'_, AppState>) -> Result<Option<BookRecord>, String> {
+  // Written only into the library this started in (`AppState::db_for`).
+  let epoch = state.epoch();
   let mut book = {
     let db = state.db.guard();
     db.find_by_id(&book_id)
@@ -456,7 +464,7 @@ pub async fn save_page_cover(book_id: String, image: String, state: State<'_, Ap
   .await
   .map_err(|e| format!("Cover task failed: {e}"))?
   .map_err(|e| e.to_string())?;
-  let db = state.db.guard();
+  let db = state.db_for(epoch).ok_or_else(|| crate::LIBRARY_CHANGED.to_string())?;
   // A lookup may have found the real cover while the page was being saved.
   if db.find_by_id(&book.id).ok().flatten().is_some_and(|now| now.cover_url.is_some()) {
     storage::drop_page_cover(&book.file_hash);
@@ -676,47 +684,99 @@ fn remove_database_backups(database: &std::path::Path) {
   }
 }
 
+/// Delete All Data, for the library in use: its rows, books and covers, its
+/// Drive connection, and the sign-in on this device. Another account's
+/// library on this device is left as it is, and so are the device's own
+/// things it may need (fonts, the text of PDFs, the last tidy); with no other
+/// library here, those go too.
 #[tauri::command]
 pub fn clear_all_data(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
   // Pip on the desktop is switched off and her window closed.
   crate::desktop_pip::runtime::forget(&app);
-  {
+  let alone = {
     let db = state.db.guard();
     // The refresh token lives in the OS keychain now, so clearing the settings
-    // table is no longer enough to leave nothing behind.
+    // table is no longer enough to leave nothing behind. This library's only:
+    // each keeps its own (`drive::slot_name`).
     let _ = drive::clear_tokens(&db);
     // The Leaflet session token is in the keychain too. The account itself
     // stays on the server; this only signs this device out.
     cloud::clear_session(&db);
-    // Where Leaflet's server is, which is not the reader's data and is only
-    // learned at startup.
-    let server = crate::sync::remote_config::remembered(&db);
-    db.clear_all().map_err(|e| e.to_string())?;
-    crate::sync::remote_config::put_back(&db, &server);
-    remove_database_backups(db.path());
+    let alone = !crate::libraries::others_exist(&db);
+    // With the database held, so a switch cannot move the books meanwhile.
+    empty_library(&db)?;
+    alone
+  };
+
+  if alone {
+    // The reader's own fonts, which are files of theirs too.
+    crate::fonts::remove_all();
+    // And the text kept of each PDF for the library's search.
+    crate::pdf_text::remove_all();
+    // And the record of the last "tidy a folder" run, which names their files.
+    super::tidy::forget_last();
   }
 
-  if let Ok(dir) = storage::books_dir() {
+  Ok(())
+}
+
+/// Empties the library `db` is (the one in use): every row, its backups, and
+/// its folder's books and covers. Where Leaflet's server is stays, which is
+/// not the reader's data and is only learned at startup.
+pub(crate) fn empty_library(db: &db::Database) -> Result<(), String> {
+  let server = crate::sync::remote_config::remembered(db);
+  db.clear_all().map_err(|e| e.to_string())?;
+  crate::sync::remote_config::put_back(db, &server);
+  remove_database_backups(db.path());
+  for dir in [storage::books_dir(), storage::covers_dir()].into_iter().flatten() {
     let _ = fs::remove_dir_all(&dir);
     let _ = fs::create_dir_all(&dir);
   }
-  if let Ok(dir) = storage::covers_dir() {
-    let _ = fs::remove_dir_all(&dir);
-    let _ = fs::create_dir_all(&dir);
-  }
-  // The reader's own fonts, which are files of theirs too.
-  crate::fonts::remove_all();
-  // And the text kept of each PDF for the library's search.
-  crate::pdf_text::remove_all();
-  // And the record of the last "tidy a folder" run, which names their files.
-  super::tidy::forget_last();
-
   Ok(())
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// Delete All Data empties the library in use and nothing of another
+  /// account's library beside it.
+  #[test]
+  fn delete_all_data_empties_only_the_library_in_use() {
+    let root = std::env::temp_dir().join(format!("leaflet-delete-scoped-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let tag = "cccccccccccccccccccccccccccccccc";
+    let theirs = crate::libraries::dir_in(&root, Some(tag));
+    let first = db::Database::open_at(&root.join(db::DB_FILE)).expect("first");
+    first.set_setting("reader_note", "kept").expect("seed");
+    fs::create_dir_all(root.join("books")).expect("books");
+    fs::write(root.join("books").join("first.epub"), b"first").expect("book");
+    let open = db::Database::open_at(&theirs.join(db::DB_FILE)).expect("theirs");
+    crate::sync::owner::claim_if_unowned(&open, tag).expect("claimed");
+    open.set_setting("reader_note", "gone").expect("seed");
+    open.set_setting(crate::sync::remote_config::REMEMBERED_KEYS[0], "https://api.leaflet.example").expect("server");
+    for dir in ["books", "covers"] {
+      fs::create_dir_all(theirs.join(dir)).expect("dir");
+      fs::write(theirs.join(dir).join("theirs.bin"), b"theirs").expect("file");
+    }
+    storage::set_library_dir(Some(theirs.clone()));
+
+    empty_library(&open).expect("emptied");
+
+    assert_eq!(open.get_setting("reader_note").expect("read"), None);
+    assert_eq!(crate::sync::owner::get(&open), None, "unowned again");
+    assert!(open.get_setting(crate::sync::remote_config::REMEMBERED_KEYS[0]).expect("read").is_some(), "the server stays");
+    for dir in ["books", "covers"] {
+      assert!(theirs.join(dir).is_dir(), "{dir} is there, empty");
+      assert_eq!(fs::read_dir(theirs.join(dir)).expect("list").count(), 0);
+    }
+    assert!(root.join("books").join("first.epub").is_file(), "the first library's books stay");
+    assert_eq!(first.get_setting("reader_note").expect("read").as_deref(), Some("kept"));
+
+    storage::set_library_dir(None);
+    drop((first, open));
+    let _ = fs::remove_dir_all(&root);
+  }
 
   /// A file that is not added is named, without its folder, and says why.
   #[test]

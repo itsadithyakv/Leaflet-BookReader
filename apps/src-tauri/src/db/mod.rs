@@ -158,8 +158,16 @@ pub struct Database {
 }
 
 impl Database {
+  /// The library in use (`storage::library_dir`).
   pub fn new() -> Result<Self> {
-    let path = db_path()?;
+    Self::open_at(&db_path()?)
+  }
+
+  /// A library's database at `path`, made if it is not there: write-ahead
+  /// logging, a copy kept before an upgrade, today's schema. Another
+  /// account's library on this device opens this way (`libraries::switch`).
+  pub fn open_at(path: &Path) -> Result<Self> {
+    let path = path.to_path_buf();
     if let Some(parent) = path.parent() {
       fs::create_dir_all(parent)?;
     }
@@ -1235,6 +1243,12 @@ impl Database {
     })
   }
 
+  /// Empties the write-ahead log into the database file, for a library about
+  /// to be closed (`libraries::switch`). Best effort.
+  pub fn checkpoint(&self) {
+    let _ = self.conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
+  }
+
   pub fn clear_all(&self) -> Result<()> {
     self.conn.execute_batch(
       "DELETE FROM book_collections;
@@ -1565,10 +1579,14 @@ pub fn database_path() -> Result<PathBuf> {
   db_path()
 }
 
+/// The database's name inside a library's folder.
+pub const DB_FILE: &str = "library.db";
+
 fn db_path() -> Result<PathBuf> {
   // Shares `storage`'s answer rather than repeating the lookup, so the override
-  // the host installs at startup applies to the database too.
-  Ok(crate::storage::app_data_dir()?.join("library.db"))
+  // the host installs at startup applies to the database too, and so does the
+  // library chosen then (`libraries::activate_at_startup`).
+  Ok(crate::storage::library_dir()?.join(DB_FILE))
 }
 
 pub fn now_iso() -> String {

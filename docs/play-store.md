@@ -70,12 +70,13 @@ owner's statement to Google. The Microsoft Store's text is in
 > tab plays sideways, as games do.
 >
 > **One library on your phone and your computer**
-> Connect your own Google Drive on both, and your books, places, highlights
-> and streak follow you: open a book on the phone and Leaflet offers the
-> place you reached on the computer. Leaflet can see only the files it made
-> in your Drive. An account is optional, and so is the community: friends,
-> book clubs, reviews, quotes and book communities, with a profile that you
-> control.
+> Sign in to the same Leaflet account on both, and your places, highlights
+> and streak follow you; your own Google Drive brings the books. Open a book
+> on the phone and Leaflet offers the place you reached on the computer.
+> Leaflet can see only the files it made in your Drive. An account is
+> optional (without one, the same Google Drive on both keeps everything in
+> step), and so is the community: friends, book clubs, reviews, quotes and
+> book communities, with a profile that you control.
 >
 > Opens EPUB, PDF, CBZ, TXT, HTML and FB2, and most Kindle books (MOBI, AZW3)
 > without DRM.
@@ -119,12 +120,15 @@ on a duel are earned by reading and buy nothing outside the app).
 | Name (display name) | Yes, with an account | No | Yes | Account, app functionality (profile) |
 | User IDs (the `@handle`) | Yes, with an account | No | Yes | App functionality |
 | Other user-generated content (posts, reviews, quotes, threads, replies; highlights and notes inside the synced reading state) | Yes, with an account | No | Yes | App functionality |
-| App activity: other actions (reading minutes, streak, books finished, shelf titles, the book open now, level, badges, arcade scores, the camp's layout, likes, follows, reports, blocks) | Yes, with a shared profile or account sync | No | Yes | App functionality |
-| Device or other IDs (a random per-installation identifier in the synced reading state) | Yes, with account sync | No | Yes | App functionality (sync) |
+| App activity: other actions (reading places and history, reading minutes, streak, books finished, shelf titles, the book open now, level, badges, arcade scores, the camp's layout, likes, follows, reports, blocks) | Yes, with an account | No | Yes | App functionality |
+| Device or other IDs (a random per-installation identifier in the synced reading state) | Yes, with an account | No | Yes | App functionality (sync) |
 
-- **Book files, and reading state backed up to Google Drive**, go from the
-  phone to the reader's own Drive and never reach us: by Google's
-  definitions that is not data the developer collects.
+- **Book files (always), and reading state kept in Google Drive by a reader
+  who is signed out**, go from the phone to the reader's own Drive and never
+  reach us: by Google's definitions that is not data the developer collects.
+  Signed in (from 1.5.3), the reading state always goes to the Leaflet
+  account too: hence "Yes, with an account" above. It is compressed, sent
+  over HTTPS, and not read.
 - **Words looked up, names looked up on a fan wiki, titles sent to Open
   Library:** sent only when the reader asks, with no identifier; list them
   under "Other actions" only if Google's reviewer asks, since nothing is
@@ -155,3 +159,10 @@ returns, at most ~3 minutes; user-started."
 > to zoom. Pip's house and the Hollow, sideways. Reminders with a different
 > line from Pip each day. Connect the same Google Drive on your computer and
 > your phone, and your books, places, highlights and streak follow you.
+
+## Release notes for 1.5.3 (Play's "What's new", 500 characters)
+
+> Signed in, your places, highlights, notes and reading days now follow your
+> Leaflet account to every device, with nothing to switch on. Your own Google
+> Drive brings the book files. One phone, two readers: each account keeps a
+> library of its own, and Leaflet never mixes two accounts' reading.

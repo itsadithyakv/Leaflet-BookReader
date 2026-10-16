@@ -14,6 +14,7 @@ import { SheetHandle } from "./ui/SheetHandle";
 import { useBackClose } from "../hooks/useBackClose";
 import { usePhoneMenus, useSheetLayout } from "../hooks/useMediaQuery";
 import { deviceNoun, isAndroid, useTouchInput } from "../platform/device";
+import { OWNER_COPY } from "./sync/ownerCopy";
 
 /**
  * How backup is set up. There is no paid tier: backup runs against the
@@ -59,7 +60,9 @@ export const ProfileFace = ({ size }: { size: number }) => {
  * One line on the state of backup, for the button's tooltip and the menu.
  * Quiet when all is well: "Backed up 5m ago", not a badge that says so forever.
  */
-const backupLine = (mode: SyncMode, status: DriveSyncStatus, sync: SyncStatus) => {
+export const backupLine = (mode: SyncMode, status: DriveSyncStatus, sync: SyncStatus) => {
+  // Another account's library: nothing of it is synced, by design.
+  if (sync.library?.standing === "other" && status !== "syncing") return OWNER_COPY.paused;
   // Sync where several devices are kept in step, a backup where they are not (constants/features.ts).
   if (FEATURES.multiDeviceSync) {
     if (status === "syncing") return "Syncing…";
@@ -71,6 +74,13 @@ const backupLine = (mode: SyncMode, status: DriveSyncStatus, sync: SyncStatus) =
   if (status === "error") return "Backup failed";
   if (mode === "off") return "Not backed up";
   return sync.lastSyncedAt ? `Backed up ${relativeTime(sync.lastSyncedAt)}` : "Backup on, nothing sent yet";
+};
+
+/** The tooltip's words on backup: the line, and "Files only" where Drive or the folder carries only book files. */
+export const backupTitle = (mode: SyncMode, status: DriveSyncStatus, sync: SyncStatus) => {
+  const line = backupLine(mode, status, sync);
+  const filesOnly = (sync.driveConnected && sync.driveFilesOnly) || (Boolean(sync.folderPath) && sync.folderFilesOnly);
+  return filesOnly && line !== OWNER_COPY.paused ? `${line} · ${OWNER_COPY.filesOnly}` : line;
 };
 
 /**
@@ -149,10 +159,12 @@ export const ProfileButton = ({
   }, [open, onClose, sheet]);
 
   const line = backupLine(mode, status, sync);
+  const lineTitle = backupTitle(mode, status, sync);
+  const ownerPaused = sync.library?.standing === "other";
   const who = account ? account.displayName || account.email : accountsOn ? "Not signed in" : "Your Pip";
   const failed = status === "error";
   const syncing = status === "syncing";
-  const tooltip = `${account ? `${who}. ` : ""}${line}${sync.booksPending > 0 ? `. ${sync.booksPending} to download` : ""}`;
+  const tooltip = `${account ? `${who}. ` : ""}${lineTitle}${sync.booksPending > 0 ? `. ${sync.booksPending} to download` : ""}`;
   const what = touch ? "Your profile, backup and settings" : "Your profile and backup";
   // Not on the phone: a sync folder there would do nothing.
   const showFolderSync = !android && (FEATURES.multiDeviceSync || Boolean(sync.folderPath));
@@ -228,11 +240,14 @@ export const ProfileButton = ({
           {/* Backup */}
           <div className={section}>
             <div className="flex items-center justify-between gap-2">
-              <span className={`flex items-center gap-2 text-[11px] font-semibold ${failed ? "text-error" : "text-on-surface"}`}>
+              <span
+                className={`flex items-center gap-2 text-[11px] font-semibold ${failed ? "text-error" : "text-on-surface"}`}
+                title={ownerPaused ? OWNER_COPY.pausedNote : lineTitle !== line ? lineTitle : undefined}
+              >
                 <UiIcon name={syncing ? "sync" : "cloud"} size={15} className={syncing ? "animate-spin" : ""} />
                 {line}
               </span>
-              {mode !== "off" && (
+              {mode !== "off" && !ownerPaused && (
                 <button type="button" className={small} onClick={onSyncNow} disabled={syncing}>
                   {failed ? "Try again" : FEATURES.multiDeviceSync ? "Sync now" : "Back up now"}
                 </button>
@@ -264,7 +279,9 @@ export const ProfileButton = ({
             ) : (
               <>
                 <p className="mt-2 text-[11px] leading-relaxed text-on-surface-variant">
-                  {FEATURES.multiDeviceSync
+                  {FEATURES.multiDeviceSync && signedIn
+                    ? OWNER_COPY.driveSignedIn
+                    : FEATURES.multiDeviceSync
                     ? android
                       ? "Get your books from your computer: the same Google Drive on both."
                       : "Your books, places and streak in your own Google Drive, on every device."

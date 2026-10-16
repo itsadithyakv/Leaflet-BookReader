@@ -8,6 +8,7 @@ import { COPY, streakText } from "./copy";
 import type { BoardEntry, BoardScope, CommunityBoard } from "../../services/socialService";
 import { useAccountStore } from "../../store/accountStore";
 import { useHabitStore } from "../../store/habitStore";
+import { useLibraryStore } from "../../store/libraryStore";
 import "./friends.css";
 import { useCommunityStore } from "./communityStore";
 import { CountUp } from "./CountUp";
@@ -353,7 +354,9 @@ export const Leaderboard = ({
   // The reader's own row. The server's when it sent one; otherwise made here
   // from the day ledger, so nobody signed in looks at a board without them.
   const weekMinutes = useMemo(() => weekMinutesOf(days, now), [days, now]);
-  const own = ownRow({ signedIn, scope, board, weekKey: weekKeyOf(now), profile: me, account, weekMinutes, streak });
+  // In another account's library nothing read here is this reader's.
+  const paused = useLibraryStore((state) => state.sync.library?.standing === "other");
+  const own = ownRow({ signedIn, scope, board, weekKey: weekKeyOf(now), profile: me, account, weekMinutes, streak, paused });
   // The server's row for whoever is signed in now. Taken from `own`, not
   // straight from the board: a board kept from before a sign-out still names
   // the reader who left as "you".
@@ -433,8 +436,9 @@ export const Leaderboard = ({
       />
 
       {/* Where you stand, and the next step up. Only for readers on the board;
-          the card above already says how to join. */}
-      {canJoin && (
+          the card above already says how to join. Not in another account's
+          library: the reader's own row says reading sync is paused. */}
+      {canJoin && !paused && (
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-surface-container/60 px-4 py-3">
         <p className="text-sm text-on-surface">
           {!you
@@ -517,7 +521,7 @@ export const Leaderboard = ({
                 <MineRow
                   row={mine}
                   leader={leader}
-                  caption={ownCaption(mine, publishError)}
+                  caption={ownCaption(mine, publishError, paused)}
                   onShare={onShare}
                   shareBusy={shareBusy}
                   onSendAgain={mine.kind === "waiting" && mineRead && publishError ? sendAgain : null}
@@ -541,7 +545,7 @@ export const Leaderboard = ({
             <MineRow
               row={mine}
               leader={leader}
-              caption={ownCaption(mine, publishError)}
+              caption={ownCaption(mine, publishError, paused)}
               onShare={onShare}
               shareBusy={shareBusy}
               onSendAgain={mine.kind === "waiting" && mineRead && publishError ? sendAgain : null}

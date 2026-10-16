@@ -34,6 +34,10 @@ import { readSettingsSection, rememberSettingsSection, type SettingsSection } fr
 import { DesktopPipSetting } from "../desktop-pip/DesktopPipSetting";
 import { deviceNoun, isAndroid, isTouchInput } from "../platform/device";
 import { useVolumeKeysTurnPages } from "../platform/volumeKeys";
+import { syncConfigured as anywhereToSync } from "../services/syncTiming";
+import { useLibraryOwnerStore } from "../store/libraryOwnerStore";
+import { InfoTip } from "../components/ui/InfoTip";
+import { OWNER_COPY } from "../components/sync/ownerCopy";
 
 const PIP_MODES: Array<{ mode: PipMode; label: string; detail: string; preview: string }> = [
   { mode: "chatty", label: "Chatty", detail: "Pip lives out in the app: it wanders, naps, celebrates, and can be picked up and thrown. Select the logo to call it home.", preview: "look" },
@@ -59,7 +63,6 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
     clearDriveCredentials,
     syncNow,
     loadSyncStatus,
-    setAccountBackup,
     resetAll: resetLibrary
   } = useLibraryStore(
     // Only what this page shows: taking the whole store drew the page again
@@ -75,7 +78,6 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
       clearDriveCredentials: state.clearDriveCredentials,
       syncNow: state.syncNow,
       loadSyncStatus: state.loadSyncStatus,
-      setAccountBackup: state.setAccountBackup,
       resetAll: state.resetAll
     }))
   );
@@ -139,18 +141,26 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
   // With several devices kept in step it is sync, and says so; a release
   // without them still calls it a backup (constants/features.ts).
   const syncWords = FEATURES.multiDeviceSync;
+  // Signed out, and Drive or the folder holds another account's library: said
+  // in its own section, so not twice.
+  const refused = sync.library?.refused ?? null;
+  const refusedLine = refused === "drive" ? OWNER_COPY.driveRefused : refused === "folder" ? OWNER_COPY.folderRefused : null;
   const syncHelper =
     syncStatus === "syncing"
       ? syncWords ? "Syncing now…" : "Backing up now…"
-      : syncStatus === "error"
+      : syncStatus === "error" && !(refusedLine && syncError === refusedLine)
         ? syncError ?? (syncWords ? "Last sync failed. Try again." : "Last backup failed. Try again.")
         : sync.lastSyncedAt
           ? `${syncWords ? "Last synced" : "Last backed up"} ${new Date(sync.lastSyncedAt).toLocaleString()}.`
           : syncWords ? "Nothing synced yet." : "Nothing backed up yet.";
 
   const syncing = syncStatus === "syncing";
-  const syncConfigured = sync.driveConnected || Boolean(sync.folderPath) || Boolean(sync.accountBackup);
+  const syncConfigured = anywhereToSync(sync);
   const accountSignedIn = useAccountStore((state) => state.status.signedIn);
+  // Signed in as another account than this library's: its reading sync is paused.
+  const ownerPaused = sync.library?.standing === "other";
+  const libraryElsewhere = Boolean(sync.library?.elsewhere);
+  const switchBusy = useLibraryOwnerStore((state) => state.busy);
   // A folder someone already set up keeps its controls, so turning the feature
   // off can never strand a transport that is still running.
   // Never on the phone: a sync folder there silently does nothing.
@@ -475,13 +485,16 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
 
             <div className="paper-surface flex flex-wrap items-center justify-between gap-4 rounded-xl p-5">
               <div className="min-w-0 flex-1 basis-64">
-                <p className="text-xs uppercase tracking-widest text-on-surface-variant">Danger Zone</p>
-                <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
-                  Removes your library, covers, reading history, places and settings from this {deviceNoun()}, and signs
-                  it out. Left as they are:{" "}
-                  {android
-                    ? "a Drive backup and your Leaflet account on the server."
-                    : "a Drive backup, a sync folder's contents, any folder of book copies, your Leaflet account on the server, and Calibre."}
+                <p className="flex items-center gap-1.5 text-xs uppercase tracking-widest text-on-surface-variant">
+                  Danger Zone
+                  <InfoTip
+                    className="normal-case tracking-normal"
+                    text={`Removes the library in use, with its covers, reading history, places and settings, from this ${deviceNoun()}, and signs it out. Another account's library on this ${deviceNoun()} stays. Left as they are: ${
+                      android
+                        ? "a Drive backup and your Leaflet account on the server."
+                        : "a Drive backup, a sync folder's contents, any folder of book copies, your Leaflet account on the server, and Calibre."
+                    }`}
+                  />
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-3">
@@ -626,8 +639,8 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                   ? sync.accountEmail ?? "Google Drive"
                   : sync.folderPath
                     ? "Sync folder"
-                    : sync.accountBackup
-                      ? "Leaflet account"
+                    : sync.accountBackup || ownerPaused
+                      ? OWNER_COPY.accountRow
                       : syncWords ? "Not synced" : "Not backed up"}
               </p>
               <p className="mt-2 text-xs text-on-surface-variant">{syncHelper}</p>
@@ -645,9 +658,19 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                   title="Point Leaflet at a folder your Google Drive, Dropbox, OneDrive or iCloud app already keeps in step. No account, no setup."
                 >
                   Sync folder
+                  {sync.folderPath && sync.folderFilesOnly && (
+                    <span className="ml-2 inline-flex items-center gap-1 font-normal text-on-surface-variant">
+                      · {OWNER_COPY.filesOnly} <InfoTip text={OWNER_COPY.folderFilesOnlyNote} />
+                    </span>
+                  )}
                 </p>
                 {sync.folderPath && (
                   <p className="mt-2 break-all text-xs text-on-surface-variant">{sync.folderPath}</p>
+                )}
+                {refused === "folder" && sync.folderPath && (
+                  <p className="mt-2 flex items-center gap-1.5 text-xs text-error">
+                    {OWNER_COPY.folderRefused} <InfoTip text={OWNER_COPY.refusedNote} />
+                  </p>
                 )}
                 <div className="mt-3 flex flex-wrap gap-3">
                   <button
@@ -675,14 +698,26 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                   className="text-xs font-semibold text-on-surface"
                   title={
                     sync.driveAvailable
-                      ? syncWords
+                      ? accountSignedIn
+                        ? `${OWNER_COPY.driveSignedIn} Leaflet only ever sees the files it creates.`
+                        : syncWords
                         ? "Your books, places, highlights and streak are kept in a Leaflet folder in your own Drive. Connect the same Google account on your phone and computer and they stay in step. Leaflet only ever sees the files it creates."
                         : "Your books, reading progress and streak are copied to a Leaflet folder in your own Drive. Connect the same account on a new computer to restore them. Leaflet only ever sees the files it creates."
                       : driveNotSetUp
                   }
                 >
                   Google Drive
+                  {sync.driveConnected && sync.driveFilesOnly && (
+                    <span className="ml-2 inline-flex items-center gap-1 font-normal text-on-surface-variant">
+                      · {OWNER_COPY.filesOnly} <InfoTip text={OWNER_COPY.driveFilesOnlyNote} />
+                    </span>
+                  )}
                 </p>
+                {refused === "drive" && sync.driveConnected && (
+                  <p className="mt-2 flex items-center gap-1.5 text-xs text-error">
+                    {OWNER_COPY.driveRefused} <InfoTip text={OWNER_COPY.refusedNote} />
+                  </p>
+                )}
 
                 <div className="mt-3 flex flex-wrap gap-3">
                   <button
@@ -775,30 +810,39 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                 )}
               </div>
 
-              {FEATURES.accounts && accountSignedIn && (
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={Boolean(sync.accountBackup)}
-                  className="mt-5 flex w-full items-center justify-between gap-3 border-t border-outline-variant/40 pt-4 text-left"
-                  title="Keeps your progress, highlights and reading days with your Leaflet account. Never your book files."
-                  onClick={() =>
-                    setAccountBackup(!sync.accountBackup).catch((error) => showToast(reason(error, "Backup failed. Check your connection.")))
-                  }
-                >
-                  <span className="text-xs font-semibold text-on-surface">Back up reading to my Leaflet account</span>
-                  {renderToggle(Boolean(sync.accountBackup))}
-                </button>
+              {/* Signed in, the reading is the account's: there is no switch for it. */}
+              {FEATURES.accounts && accountSignedIn && (sync.accountBackup || ownerPaused) && (
+                <div className="mt-5 border-t border-outline-variant/40 pt-4">
+                  <p className="flex items-center gap-1.5 text-xs font-semibold text-on-surface">
+                    {OWNER_COPY.accountRow} · {ownerPaused ? OWNER_COPY.paused : OWNER_COPY.accountSynced}
+                    <InfoTip text={ownerPaused ? OWNER_COPY.pausedNote : OWNER_COPY.accountNote} />
+                  </p>
+                  {ownerPaused && (
+                    <div className="mt-3 flex flex-wrap gap-3">
+                      <button
+                        type="button"
+                        className="tactile-button px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={switchBusy}
+                        title={libraryElsewhere ? OWNER_COPY.openMineNote : OWNER_COPY.startFreshNote}
+                        onClick={() => void useLibraryOwnerStore.getState().switchAndReload(libraryElsewhere ? "mine" : "fresh")}
+                      >
+                        {libraryElsewhere ? OWNER_COPY.openMine : OWNER_COPY.startFreshShort}
+                      </button>
+                    </div>
+                  )}
+                </div>
               )}
 
-              <button
-                type="button"
-                className="tactile-button tactile-button-primary mt-5 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
-                onClick={handleSync}
-                disabled={!syncConfigured || syncing}
-              >
-                {syncing ? (syncWords ? "Syncing…" : "Backing up…") : syncWords ? "Sync Now" : "Back Up Now"}
-              </button>
+              {!ownerPaused && (
+                <button
+                  type="button"
+                  className="tactile-button tactile-button-primary mt-5 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
+                  onClick={handleSync}
+                  disabled={!syncConfigured || syncing}
+                >
+                  {syncing ? (syncWords ? "Syncing…" : "Backing up…") : syncWords ? "Sync Now" : "Back Up Now"}
+                </button>
+              )}
               {!FEATURES.multiDeviceSync && !android && (
                 <p className="mt-3 text-[11px] leading-relaxed text-on-surface-variant">
                   Reading across your phone and computer arrives with the Leaflet mobile app — coming
@@ -834,8 +878,8 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
  * Optional Leaflet account: sign up, sign in, and managing it once signed in.
  *
  * Only rendered when the build enables accounts and a server is configured.
- * Everything in the app works without one; an account only unlocks the
- * leaderboard and shared shelves.
+ * Everything in the app works without one; an account keeps the reading in
+ * step across devices, and unlocks the leaderboard and shared shelves.
  */
 const AccountCard = ({ showToast }: { showToast: (message: string) => void }) => {
   const status = useAccountStore((state) => state.status);
@@ -844,6 +888,8 @@ const AccountCard = ({ showToast }: { showToast: (message: string) => void }) =>
   const signOut = useAccountStore((state) => state.signOut);
   const changePassword = useAccountStore((state) => state.changePassword);
   const deleteAccount = useAccountStore((state) => state.deleteAccount);
+  const library = useLibraryStore((state) => state.sync.library);
+  const switchBusy = useLibraryOwnerStore((state) => state.busy);
 
   const [panel, setPanel] = useState<"none" | "password" | "delete">("none");
   const [current, setCurrent] = useState("");
@@ -906,6 +952,23 @@ const AccountCard = ({ showToast }: { showToast: (message: string) => void }) =>
         </div>
         {status.offline && (
           <p className="mt-2 text-[11px] text-on-surface-variant">Offline. Showing saved details.</p>
+        )}
+        {library?.standing === "other" && (
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-container-high px-3 py-1 text-[11px] font-semibold text-on-surface">
+              {OWNER_COPY.otherTitle}
+              <InfoTip text={OWNER_COPY.otherNote} />
+            </span>
+            <button
+              type="button"
+              className="tactile-button px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={switchBusy}
+              title={library.elsewhere ? OWNER_COPY.openMineNote : OWNER_COPY.startFreshNote}
+              onClick={() => void useLibraryOwnerStore.getState().switchAndReload(library.elsewhere ? "mine" : "fresh")}
+            >
+              {library.elsewhere ? OWNER_COPY.openMine : OWNER_COPY.startFreshShort}
+            </button>
+          </div>
         )}
         {panel === "none" && <AccountEmail account={account} showToast={showToast} />}
 

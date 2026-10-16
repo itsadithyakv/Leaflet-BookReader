@@ -1,21 +1,29 @@
 //! Sync through Leaflet's own API, backed by MongoDB.
 //!
-//! The third transport, and the only one with a server behind it. It exists for
-//! what the other two cannot do: compare readers to each other. A leaderboard is
-//! not a peer-to-peer problem.
+//! The transport with a server behind it, and, signed in, the one that
+//! carries a library's reading state: places, reading days, highlights,
+//! notes, collections and Pip. Always on while a reader is signed in, for a
+//! library that is the account's own (`owner::Standing::Mine`) or that it is
+//! about to claim (`Adopting`); never for another account's library, which is
+//! left as it is (`Other`). The server is also what compares readers to each
+//! other for the board, which is not a peer-to-peer problem.
 //!
-//! It carries the **state document only** — never book files. Those stay in the
-//! reader's own Drive or sync folder, where they cost the operator nothing. A
-//! year of reading compresses to roughly 15 KB, so a free 512 MB cluster holds
-//! several thousand readers; the same cluster would hold about three libraries.
+//! It carries the **state document only**, never book files. Those stay in
+//! the reader's own Drive or sync folder, and on their devices. A year of
+//! reading compresses to some tens of kilobytes, under the server's 2 MB cap.
 //!
-//! The server stores the document as an opaque blob and never looks inside it.
-//! Merging stays here, in [`crate::sync::merge`], so all three transports agree
-//! by construction rather than by three implementations happening to match.
+//! The server stores the document as an opaque blob and never looks inside
+//! it: not read, compressed, not encrypted. Merging stays here, in
+//! [`crate::sync::merge`], so every transport agrees by construction rather
+//! than by implementations happening to match. The copy carries the account's
+//! owner tag for the record; nothing checks it but a fresh library's first
+//! sync, which asks before taking in a copy from before owners
+//! ([`CloudOutcome::AccountHolds`]).
 
 use crate::db::Database;
 use crate::sync::folder::SyncReport;
 use crate::sync::merge::{self, has_news, Remote, SyncDoc};
+use crate::sync::shared_doc::Pending;
 use crate::sync::store;
 use anyhow::{anyhow, Result};
 use base64::Engine;
@@ -29,9 +37,10 @@ use crate::LockExt;
 
 pub const API_BASE_SETTING: &str = "cloud_api_base";
 pub const PROFILE_VISIBILITY_SETTING: &str = "cloud_profile_visibility";
-/// "1" when the reader chose to back their reading up to their Leaflet account
-/// by itself, with no Drive and no folder (`backs_up_alone`).
-pub const BACKUP_ALONE_SETTING: &str = "cloud_backup_alone";
+/// What 1.5.1 and 1.5.2 kept when the reader chose to back their reading up to
+/// the account by itself. The account now always carries the state while a
+/// reader is signed in; the row is only cleared at sign-out.
+const LEGACY_BACKUP_ALONE_SETTING: &str = "cloud_backup_alone";
 
 /// Retries after losing a race for the document. Each one is a fresh merge, so
 /// nothing the other device wrote is lost.
@@ -291,20 +300,46 @@ pub fn clear_session(db: &Database) {
   // Kept, it made the next account on this computer publish (or not) by the
   // last one's choice.
   forget_visibility(db);
-  // So does the choice to keep a copy of the reading with the account: the
-  // next reader to sign in here has not made it.
-  let _ = db.set_setting(BACKUP_ALONE_SETTING, "");
+  let _ = db.set_setting(LEGACY_BACKUP_ALONE_SETTING, "");
+  // The library's owner is kept: it is the library's, not the session's.
 }
 
-/// Whether this device backs its reading up to the Leaflet account by itself.
-///
-/// The account's copy of the reading state used to ride along with a Drive or
-/// folder backup and never went alone, so a reader with an account and no
-/// Drive had nothing kept but their numbers on the board. It is a choice, off
-/// until made (Settings, Backup): it sends the reader's progress, highlights
-/// and reading days to Leaflet's server, which a Drive backup does not.
-pub fn backs_up_alone(db: &Database) -> bool {
-  signed_in(db) && db.get_setting(BACKUP_ALONE_SETTING).ok().flatten().as_deref() == Some("1")
+/// The rows that say who is signed in on this library, apart from the token
+/// (which is the device's, in the keychain, and never moves).
+const SESSION_MARKERS: [&str; 3] = [ACCOUNT_API_SETTING, ACCOUNT_CACHE_SETTING, PROFILE_VISIBILITY_SETTING];
+
+/// Copies who is signed in from one library's database to another's, for a
+/// switch between libraries on this device (per-account libraries).
+pub fn copy_session_markers(from: &Database, to: &Database) -> Result<()> {
+  for key in SESSION_MARKERS {
+    let value = from.get_setting(key)?.unwrap_or_default();
+    to.set_setting(key, &value)?;
+  }
+  Ok(())
+}
+
+/// Clears who is signed in from a library's database (one switched away
+/// from), leaving the keychain's token alone.
+pub fn clear_session_markers(db: &Database) -> Result<()> {
+  for key in SESSION_MARKERS {
+    db.set_setting(key, "")?;
+  }
+  Ok(())
+}
+
+/// Both: the session's rows go with the reader to the other library. (A
+/// switch does the two halves apart, around writing the pointer, so a crash
+/// between them leaves the reader signed in: `libraries::switch_in`.)
+#[cfg(test)]
+pub fn move_session_markers(from: &Database, to: &Database) -> Result<()> {
+  copy_session_markers(from, to)?;
+  clear_session_markers(from)
+}
+
+/// The signed-in account's id, as this device last heard it. `None` when
+/// nobody is signed in on this library, or the account was never described.
+pub fn signed_in_account_id(db: &Database) -> Option<String> {
+  cached_account(db).map(|account| account.id).filter(|id| !id.trim().is_empty())
 }
 
 /// Whether the signed-in reader shares their profile, as this device last
@@ -739,6 +774,10 @@ pub async fn delete_account(db_mutex: &std::sync::Mutex<Database>, password: &st
   }
   {
     let db = db_mutex.guard();
+    // The server deleted the account's copy; the library here is nobody's now.
+    if let Some(tag) = signed_in_account_id(&db).map(|id| crate::sync::owner::tag_for(&id)) {
+      let _ = crate::sync::owner::release_if(&db, &tag);
+    }
     clear_session(&db);
   }
   status(db_mutex, false).await
@@ -746,26 +785,121 @@ pub async fn delete_account(db_mutex: &std::sync::Mutex<Database>, password: &st
 
 // ---- state ------------------------------------------------------------------
 
-/// Merges this device's state with the server's.
-///
-/// Book files are untouched: this transport moves kilobytes, and pairs with a
-/// folder or Drive for the files themselves.
-pub async fn sync(db_mutex: &std::sync::Mutex<Database>, now: &str) -> Result<SyncReport> {
-  let (base, token) = session_token(db_mutex)?;
-  let http = client()?;
+/// What the server holds: its version of the account's copy, and the copy
+/// (base64 of the gzipped document), absent for an account that never synced.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Pulled {
+  pub version: i64,
+  pub state: Option<String>
+}
 
+/// How a write of the account's copy went.
+#[derive(Debug, PartialEq)]
+pub enum Pushed {
+  Kept,
+  /// Another device wrote since the version named.
+  Conflict
+}
+
+/// Where the account's copy of the state lives: the server (`Server`), or a
+/// fake in the tests, as `shared_doc::DocStore` is for Drive.
+pub trait StateStore: Sync {
+  fn pull(&self) -> Pending<'_, Pulled>;
+  /// Writes `payload` over `version`, only if that is still the server's.
+  fn push<'a>(&'a self, version: i64, payload: &'a str) -> Pending<'a, Pushed>;
+}
+
+/// The server's `/v1/state`, for the account signed in.
+pub struct Server<'a> {
+  db_mutex: &'a std::sync::Mutex<Database>,
+  base: String,
+  token: String,
+  http: reqwest::Client
+}
+
+impl<'a> Server<'a> {
+  /// The signed-in account's copy on the configured server.
+  pub fn signed_in(db_mutex: &'a std::sync::Mutex<Database>) -> Result<Self> {
+    let (base, token) = session_token(db_mutex)?;
+    Ok(Server { db_mutex, base, token, http: client()? })
+  }
+}
+
+impl StateStore for Server<'_> {
+  fn pull(&self) -> Pending<'_, Pulled> {
+    Box::pin(async move {
+      let response = self
+        .http
+        .get(format!("{}/v1/state", self.base))
+        .bearer_auth(&self.token)
+        .send()
+        .await
+        .map_err(unreachable)?;
+      if !response.status().is_success() {
+        forget_if_unauthorised(self.db_mutex, response.status());
+        return Err(describe_failure(response).await);
+      }
+      let pulled: StateResponse = response.json().await?;
+      Ok(Pulled { version: pulled.version, state: pulled.state })
+    })
+  }
+
+  fn push<'a>(&'a self, version: i64, payload: &'a str) -> Pending<'a, Pushed> {
+    Box::pin(async move {
+      let push = self
+        .http
+        .put(format!("{}/v1/state", self.base))
+        .bearer_auth(&self.token)
+        .json(&StatePush { version, state: payload })
+        .send()
+        .await
+        .map_err(unreachable)?;
+      if push.status() == reqwest::StatusCode::CONFLICT {
+        return Ok(Pushed::Conflict);
+      }
+      if !push.status().is_success() {
+        forget_if_unauthorised(self.db_mutex, push.status());
+        return Err(describe_failure(push).await);
+      }
+      Ok(Pushed::Kept)
+    })
+  }
+}
+
+/// What an account sync came to.
+#[derive(Debug)]
+pub enum CloudOutcome {
+  Synced(SyncReport),
+  /// This library was started fresh, and the account holds a library from
+  /// before it had an owner (and so perhaps another reader's, carried along
+  /// by a device they shared): nothing was merged, and the reader is asked
+  /// whether to take it in (`commands::backup::library_fresh_answer`).
+  AccountHolds { books: usize }
+}
+
+/// Whether the account's copy is one a fresh library asks about first: it
+/// has books or reading in it, and no owner (written before owners).
+pub fn asks_before_taking(held: &SyncDoc) -> bool {
+  held.owner.is_none() && (held.live_books().next().is_some() || !held.days.is_empty())
+}
+
+/// Merges this device's state with the account's (`store_of`: the server,
+/// `Server::signed_in`, or a fake).
+///
+/// Signed in, this is where a library's reading state lives: always on, for
+/// every library that is the account's own (or that it is about to claim).
+/// Book files are untouched: this transport moves kilobytes, and Drive or a
+/// folder carries the files themselves. `stamp` is the signed-in account's
+/// tag, which the account's copy carries for the record.
+pub async fn sync_with<S: StateStore + ?Sized>(
+  db_mutex: &std::sync::Mutex<Database>,
+  store_of: &S,
+  now: &str,
+  stamp: Option<&str>
+) -> Result<CloudOutcome> {
   let mut attempt = 0;
   let merged = loop {
-    let response = http
-      .get(format!("{base}/v1/state"))
-      .bearer_auth(&token)
-      .send()
-      .await?;
-    if !response.status().is_success() {
-      forget_if_unauthorised(db_mutex, response.status());
-      return Err(describe_failure(response).await);
-    }
-    let pulled: StateResponse = response.json().await?;
+    let pulled = store_of.pull().await?;
     // What the server holds, where it holds a document that can be read. A
     // corrupt one must not take the library down: it is merged as an empty
     // one, and republishing this device's own state puts it right.
@@ -775,9 +909,16 @@ pub async fn sync(db_mutex: &std::sync::Mutex<Database>, now: &str) -> Result<Sy
       // A later Leaflet wrote it: take what this one understands, write nothing.
       Remote::Newer(doc) => {
         let db = db_mutex.guard();
-        return crate::sync::folder::take_from_newer(&db, doc, now);
+        return Ok(CloudOutcome::Synced(crate::sync::folder::take_from_newer(&db, doc, now)?));
       }
     };
+    let fresh = {
+      let db = db_mutex.guard();
+      crate::sync::owner::is_fresh(&db)
+    };
+    if let Some(held) = held.as_ref().filter(|held| fresh && asks_before_taking(held)) {
+      return Ok(CloudOutcome::AccountHolds { books: held.live_books().count() });
+    }
     let nothing;
     let remote = match &held {
       Some(remote) => remote,
@@ -791,52 +932,68 @@ pub async fn sync(db_mutex: &std::sync::Mutex<Database>, now: &str) -> Result<Sy
       let db = db_mutex.guard();
       store::snapshot(&db, now)?
     };
-    let merged = merge::merge(&local, remote, now);
+    let mut merged = merge::merge(&local, remote, now);
+    if let Some(stamp) = stamp {
+      merged.owner = Some(stamp.to_string());
+    }
     // Nothing here the server's copy lacks: it is left as it is.
     if !has_news(&merged, held.as_ref()) {
       break merged;
     }
     let payload = compress(&merged)?;
-
-    let push = http
-      .put(format!("{base}/v1/state"))
-      .bearer_auth(&token)
-      .json(&StatePush {
-        version: pulled.version,
-        state: &payload
-      })
-      .send()
-      .await?;
-
-    if push.status() == reqwest::StatusCode::CONFLICT {
-      // Another device wrote between the read and the write. Merge again over
-      // what they wrote rather than overwriting it.
-      attempt += 1;
-      if attempt > MAX_CONFLICT_RETRIES {
-        return Err(anyhow!("Another device is syncing right now. Try again shortly."));
+    match store_of.push(pulled.version, &payload).await? {
+      Pushed::Kept => break merged,
+      Pushed::Conflict => {
+        // Another device wrote between the read and the write. Merge again
+        // over what they wrote rather than overwriting it.
+        attempt += 1;
+        if attempt > MAX_CONFLICT_RETRIES {
+          return Err(anyhow!("Another device is syncing right now. Try again shortly."));
+        }
       }
-      continue;
     }
-    if !push.status().is_success() {
-      forget_if_unauthorised(db_mutex, push.status());
-      return Err(describe_failure(push).await);
-    }
-    break merged;
   };
 
   let applied = {
     let db = db_mutex.guard();
-    store::apply(&db, &merged)?
+    let applied = store::apply(&db, &merged)?;
+    // The first account sync of a fresh library is behind it.
+    crate::sync::owner::set_fresh(&db, false)?;
+    applied
   };
 
-  Ok(SyncReport {
+  Ok(CloudOutcome::Synced(SyncReport {
     entries_updated: applied.updated,
     books_removed: applied.removed.len(),
     books_pending: applied.missing.len(),
     ..SyncReport::default()
-  })
+  }))
 }
 
+/// Replaces what the account holds with an empty library, stamped as the
+/// signed-in account's: "Start empty", for a fresh library whose account
+/// held one from before. Cannot be undone.
+pub async fn replace_with_empty(db_mutex: &std::sync::Mutex<Database>, now: &str) -> Result<()> {
+  let stamp = {
+    let db = db_mutex.guard();
+    crate::sync::owner::signed_in_tag(&db)
+  }
+  .ok_or_else(|| anyhow!(SIGN_IN_FIRST))?;
+  replace_with_empty_on(&Server::signed_in(db_mutex)?, now, &stamp).await
+}
+
+/// `replace_with_empty` against any store.
+pub async fn replace_with_empty_on<S: StateStore + ?Sized>(store_of: &S, now: &str, stamp: &str) -> Result<()> {
+  let empty = SyncDoc { owner: Some(stamp.to_string()), ..SyncDoc::empty(now) };
+  let payload = compress(&empty)?;
+  for _ in 0..=MAX_CONFLICT_RETRIES {
+    let pulled = store_of.pull().await?;
+    if store_of.push(pulled.version, &payload).await? == Pushed::Kept {
+      return Ok(());
+    }
+  }
+  Err(anyhow!("Another device is syncing right now. Try again shortly."))
+}
 // ---- social ---------------------------------------------------------------
 
 /// The ISO week (`2026-W39`) containing a local date (`YYYY-MM-DD`).
@@ -1110,6 +1267,85 @@ async fn community_send(
 pub fn handle_segment(handle: &str) -> String {
   let clean = handle.trim().trim_start_matches('@').to_lowercase();
   urlencoding::encode(&clean).into_owned()
+}
+
+#[cfg(test)]
+pub(crate) mod fake {
+  use super::*;
+  use std::sync::Mutex;
+
+  /// The server's `/v1/state` without the network: a version that counts
+  /// writes, the copy, and a way to be down.
+  #[derive(Default)]
+  pub struct FakeCloud {
+    inner: Mutex<Inner>
+  }
+
+  #[derive(Default)]
+  struct Inner {
+    version: i64,
+    state: Option<String>,
+    down: bool,
+    pushes: u32,
+    /// Written by "another device" just before the next push lands.
+    interloper: Option<String>
+  }
+
+  impl FakeCloud {
+    pub fn failing() -> Self {
+      let cloud = FakeCloud::default();
+      cloud.inner.lock().unwrap().down = true;
+      cloud
+    }
+
+    pub fn doc(&self) -> Option<SyncDoc> {
+      self.inner.lock().unwrap().state.as_deref().and_then(decode)
+    }
+
+    /// Puts a copy there as another device would have.
+    pub fn put(&self, doc: &SyncDoc) {
+      let mut inner = self.inner.lock().unwrap();
+      inner.state = Some(compress(doc).expect("compress"));
+      inner.version += 1;
+    }
+
+    pub fn sneak_in(&self, doc: &SyncDoc) {
+      self.inner.lock().unwrap().interloper = Some(compress(doc).expect("compress"));
+    }
+
+    pub fn pushes(&self) -> u32 {
+      self.inner.lock().unwrap().pushes
+    }
+  }
+
+  impl StateStore for FakeCloud {
+    fn pull(&self) -> Pending<'_, Pulled> {
+      Box::pin(async move {
+        let inner = self.inner.lock().unwrap();
+        if inner.down {
+          return Err(anyhow!("Leaflet server error (503 Service Unavailable): down"));
+        }
+        Ok(Pulled { version: inner.version, state: inner.state.clone() })
+      })
+    }
+
+    fn push<'a>(&'a self, version: i64, payload: &'a str) -> Pending<'a, Pushed> {
+      Box::pin(async move {
+        let mut inner = self.inner.lock().unwrap();
+        if let Some(theirs) = inner.interloper.take() {
+          inner.state = Some(theirs);
+          inner.version += 1;
+        }
+        if version != inner.version {
+          return Ok(Pushed::Conflict);
+        }
+        inner.state = Some(payload.to_string());
+        inner.version += 1;
+        inner.pushes += 1;
+        Ok(Pushed::Kept)
+      })
+    }
+  }
 }
 
 #[cfg(test)]
@@ -1397,5 +1633,134 @@ mod tests {
     assert!(!is_health_reply(""));
     assert!(!is_health_reply(r#"{"ok":false}"#));
     assert!(!is_health_reply(r#"{"status":"up"}"#));
+  }
+
+  // ---- the account's copy ---------------------------------------------------
+
+  use super::fake::FakeCloud;
+  use std::sync::Mutex;
+  use crate::LockExt;
+
+  const A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+  fn library_with(ids: &[&str]) -> Mutex<Database> {
+    let db = memory_db();
+    for id in ids {
+      db.upsert_book(&crate::db::BookRecord {
+        finished_at: None,
+        id: id.to_string(),
+        title: format!("Book {id}"),
+        author: None,
+        genres: Vec::new(),
+        cover_url: None,
+        local_path: format!("/device/books/{id}.epub"),
+        file_hash: id.to_string(),
+        progress: 0.0,
+        position: None,
+        series: None,
+        series_index: None,
+        last_opened: None,
+        created_at: NOW.to_string(),
+        metadata_checked_at: None,
+        metadata_updated_at: Some(NOW.to_string()),
+        progress_updated_at: Some(NOW.to_string()),
+        deleted_at: None,
+        available: true
+      })
+      .expect("import");
+    }
+    Mutex::new(db)
+  }
+
+  fn ids(db: &Mutex<Database>) -> Vec<String> {
+    let mut ids: Vec<String> = db.guard().list_books().expect("list").into_iter().map(|b| b.id).collect();
+    ids.sort();
+    ids
+  }
+
+  /// A fresh library asks about a copy from before owners, and only that:
+  /// one stamped by the account's own devices, or one with nothing in it, is
+  /// merged as always, and the question is behind it.
+  #[tokio::test]
+  async fn only_a_fresh_library_asks_and_only_about_a_copy_from_before_owners() {
+    let legacy = library_with(&["old"]);
+    let cloud = FakeCloud::default();
+    cloud.put(&store::snapshot(&legacy.guard(), NOW).expect("snapshot"));
+
+    let fresh = library_with(&["new"]);
+    crate::sync::owner::set_fresh(&fresh.guard(), true).expect("fresh");
+    match sync_with(&fresh, &cloud, LATER, Some(A)).await.expect("sync") {
+      CloudOutcome::AccountHolds { books } => assert_eq!(books, 1),
+      other => panic!("asked nothing: {other:?}")
+    }
+    assert_eq!(ids(&fresh), vec!["new".to_string()], "nothing merged");
+    assert_eq!(cloud.pushes(), 0);
+
+    // "Use it": the question answered, the copy merged in.
+    crate::sync::owner::set_fresh(&fresh.guard(), false).expect("answered");
+    assert!(matches!(sync_with(&fresh, &cloud, LATER, Some(A)).await.expect("sync"), CloudOutcome::Synced(_)));
+    assert_eq!(ids(&fresh), vec!["new".to_string(), "old".to_string()]);
+    assert_eq!(cloud.doc().expect("held").owner.as_deref(), Some(A), "and stamped from now on");
+
+    // A fresh library meeting a stamped copy takes it without asking.
+    let another = library_with(&[]);
+    crate::sync::owner::set_fresh(&another.guard(), true).expect("fresh");
+    assert!(matches!(sync_with(&another, &cloud, LATER, Some(A)).await.expect("sync"), CloudOutcome::Synced(_)));
+    assert_eq!(ids(&another), vec!["new".to_string(), "old".to_string()]);
+    assert!(!crate::sync::owner::is_fresh(&another.guard()), "asked once, at most");
+
+    // Nor about one that holds nothing.
+    let empty_cloud = FakeCloud::default();
+    empty_cloud.put(&SyncDoc::empty(NOW));
+    let third = library_with(&["x"]);
+    crate::sync::owner::set_fresh(&third.guard(), true).expect("fresh");
+    assert!(matches!(sync_with(&third, &empty_cloud, LATER, Some(A)).await.expect("sync"), CloudOutcome::Synced(_)));
+  }
+
+  /// "Start empty" replaces the account's copy with an empty one, stamped,
+  /// over another device's write if one lands first.
+  #[tokio::test]
+  async fn starting_empty_replaces_what_the_account_holds() {
+    let cloud = FakeCloud::default();
+    cloud.put(&store::snapshot(&library_with(&["old"]).guard(), NOW).expect("snapshot"));
+    cloud.sneak_in(&store::snapshot(&library_with(&["old", "older"]).guard(), NOW).expect("snapshot"));
+    replace_with_empty_on(&cloud, LATER, A).await.expect("replaced");
+    let held = cloud.doc().expect("held");
+    assert!(held.books.is_empty() && held.days.is_empty());
+    assert_eq!(held.owner.as_deref(), Some(A));
+  }
+
+  /// A write that loses a race is merged again over the winner's.
+  #[tokio::test]
+  async fn a_lost_race_for_the_account_is_merged_again() {
+    let cloud = FakeCloud::default();
+    let laptop = library_with(&["aaa"]);
+    sync_with(&laptop, &cloud, NOW, Some(A)).await.expect("first");
+    let phone = library_with(&["bbb"]);
+    let theirs = merge::merge(&store::snapshot(&phone.guard(), NOW).expect("snapshot"), &cloud.doc().expect("held"), NOW);
+    cloud.sneak_in(&theirs);
+    let laptop_more = library_with(&["aaa", "ccc"]);
+    sync_with(&laptop_more, &cloud, LATER, Some(A)).await.expect("second");
+    assert_eq!(ids(&laptop_more), vec!["aaa".to_string(), "bbb".to_string(), "ccc".to_string()]);
+    let mut held: Vec<String> = cloud.doc().expect("held").books.into_iter().map(|b| b.id).collect();
+    held.sort();
+    assert_eq!(held, vec!["aaa".to_string(), "bbb".to_string(), "ccc".to_string()]);
+  }
+
+  /// Who is signed in moves with the reader between libraries; the token,
+  /// the device's, never does.
+  #[test]
+  fn the_session_markers_move_between_libraries() {
+    let (from, to) = (memory_db(), memory_db());
+    from.set_setting(ACCOUNT_API_SETTING, "https://api.example.com").expect("set");
+    from.set_setting(ACCOUNT_CACHE_SETTING, r#"{"id":"a1","email":"ada@example.com"}"#).expect("set");
+    remember_visibility(&from, "public");
+    assert_eq!(signed_in_account_id(&from).as_deref(), Some("a1"));
+    move_session_markers(&from, &to).expect("move");
+    assert_eq!(signed_in_account_id(&to).as_deref(), Some("a1"));
+    assert_eq!(to.get_setting(ACCOUNT_API_SETTING).unwrap().as_deref(), Some("https://api.example.com"));
+    assert_eq!(known_visibility(&to), Some(true));
+    assert_eq!(signed_in_account_id(&from), None);
+    assert_eq!(known_visibility(&from), None);
   }
 }

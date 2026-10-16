@@ -2,8 +2,22 @@
 
 ## SQLite
 
-One file, `<app data>/library.db`, opened through `rusqlite` with a bundled
-SQLite so there is no system dependency on any platform.
+One file per library, opened through `rusqlite` with a bundled SQLite so there
+is no system dependency on any platform.
+
+**Libraries (1.5.3).** A device holds one library per Leaflet account that
+has used it (docs/two-devices.md, "One library, one owner"). The first is
+the one every earlier version made: `<app data>/library.db`, with `books/`
+and `covers/` beside it. Any other lives in `<app data>/libraries/<tag>/`
+(`library.db`, `books/`, `covers/`), where `<tag>` is the owning account's
+tag (below). `<app data>/active-library` names the one in use: empty (or
+absent, or unreadable) for the first, `libraries/<32 hex>` for another.
+Fonts, extracted text, logs, secrets, the converter and the tidy undo file are
+the device's, shared by every library. Drive's refresh token is kept per
+library (`refresh-token` / `drive-refresh` for the first,
+`refresh-token-<tag>` / `drive-refresh-<tag>` for another). Opening another
+library swaps the database under the running app and reloads the window;
+Delete All Data removes the library in use only.
 
 **How it writes (1.3).** The database keeps a write-ahead log
 (`journal_mode = WAL`, `synchronous = NORMAL`; `write_ahead` in `db/mod.rs`),
@@ -184,6 +198,20 @@ book copies folder (`library_copy_enabled`, `library_copy_folder`,
 `library_copy_index`, `library_copy_problem`), which is this device's alone:
 never in the sync document or the backup.
 
+**Whose library (1.5.3)**, none of them in the sync document:
+`library_owner` (the owning account's tag: 32 hex of
+`sha256("leaflet.library-owner.v1\n" + account id)`; written once, when the
+library is adopted at its first sync signed in, and never by any other
+account), `library_stay_out` ("1": signed in as another account, the reader
+chose to stay out of reading sync and is not asked again), `sync_refused`
+(signed out, Drive or the folder holds another account's library: which),
+`drive_files_only` and `folder_files_only` (signed in, and that store belongs
+to another account: only book files go there), and `library_fresh` ("1": a
+library started fresh for an account, until its first account sync has asked
+whether to use what the account already held). `cloud_backup_alone` (the
+1.5.0–1.5.2 "Back up reading to my Leaflet account" switch) is no longer read:
+signed in, the reading always goes to the account.
+
 Pip's camp in the Hollow, the arcade's building game, is two rows written
 together: `pip.base` (the game's state as the app wrote it, a JSON object of
 at most 32 KB) and `pip.base.at` (when `pip_base_save` last wrote it). Both
@@ -215,7 +243,7 @@ table as the fallback where no keychain exists.
 ## Migrations
 
 The schema is versioned with SQLite's `PRAGMA user_version`
-(`SCHEMA_VERSION` in `db/mod.rs`, currently **6**). `apply_schema()` runs
+(`SCHEMA_VERSION` in `db/mod.rs`, currently **7**). `apply_schema()` runs
 `CREATE TABLE IF NOT EXISTS` for everything at the latest shape, then
 `upgrade()` brings an older file forward one step at a time, in one
 transaction:
@@ -248,6 +276,7 @@ Defined in `sync/merge.rs`. This is what crosses between devices — as
 {
   "version": 1,
   "updatedAt": "2026-09-04T12:00:00+00:00",
+  "owner": "<32 hex>",          // optional (1.5.3): the account that took this library; see below
   "books": [
     {
       "id": "<sha256>",
@@ -334,6 +363,20 @@ it is `false`. The routes are `GET /v1/raids/targets`, `POST /v1/raids`,
 What is inside each part of `readingProfile` belongs to the app
 (`readers/paceModel.ts`); Rust carries the fields as they are, so a device on an
 older build passes on what it does not know rather than dropping it.
+
+`owner` (1.5.3) is the tag of the account that took the library, as in
+`library_owner` above. On Drive and in a sync folder it means "taken by":
+a signed-out device of another owner will not sync with it, and a device
+signed in as another account puts only its book files there. In the account's
+own copy on the server it is stamped for the record and never checked. It is
+left out when there is none, so a document without an owner is byte for byte
+what 1.5.2 wrote. Because 1.5.0–1.5.2 drop fields they do not know, the mark
+is also kept outside the document: Drive's `appProperties.leafletOwner` on
+`state.json` (a content upload keeps it), and a one-line `.leaflet-owner`
+beside `state.json` in a sync folder. A store's owner is the document's, or
+else the mark's; a 1.5.3 device writes it back. Merging two owners: one that
+is set wins over none; two different ones settle on the smaller, so the
+merge stays order-free.
 
 Book files live beside it as `books/<sha256>.<ext>` and are fetched on demand.
 

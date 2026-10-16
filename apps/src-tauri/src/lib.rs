@@ -16,6 +16,7 @@ mod fonts;
 mod formats;
 mod habit;
 mod http;
+mod libraries;
 mod lookup;
 mod wiki;
 mod metadata;
@@ -96,8 +97,45 @@ pub struct AppState {
   /// Serialises `sync_now`. Async, because a run holds it across network calls.
   pub sync_lock: tokio::sync::Mutex<()>,
   /// Page entry names per open comic, so paging does not re-list the archive.
-  pub comic_pages: std::sync::Mutex<std::collections::HashMap<String, OpenComic>>
+  pub comic_pages: std::sync::Mutex<std::collections::HashMap<String, OpenComic>>,
+  /// Which library `db` is, counted: one more at each switch between
+  /// libraries (`libraries::switch`). Work that waits on the network or the
+  /// disk outside `sync_lock` notes it first and writes only into the library
+  /// it started in (`db_for`).
+  pub library_epoch: std::sync::atomic::AtomicU64
 }
+
+impl AppState {
+  /// The library open now, as `library_epoch` counts it.
+  pub fn epoch(&self) -> u64 {
+    self.library_epoch.load(std::sync::atomic::Ordering::SeqCst)
+  }
+
+  /// The database, if it is still the library that was open at `epoch`; `None`
+  /// once the reader has switched to another, when a late write is dropped.
+  /// Checked with the lock held: a switch moves the count before it swaps
+  /// the database, so a write seen here can never land in the wrong library.
+  pub fn db_for(&self, epoch: u64) -> Option<MutexGuard<'_, db::Database>> {
+    let db = self.db.guard();
+    (self.epoch() == epoch).then_some(db)
+  }
+
+  /// The state around `database`, for tests.
+  #[cfg(test)]
+  pub fn for_tests(database: db::Database) -> Self {
+    AppState {
+      db: Mutex::new(database),
+      drive: Mutex::new(sync::DriveState::default()),
+      pending_open_paths: Mutex::new(Vec::new()),
+      sync_lock: tokio::sync::Mutex::new(()),
+      comic_pages: Mutex::new(std::collections::HashMap::new()),
+      library_epoch: std::sync::atomic::AtomicU64::new(0)
+    }
+  }
+}
+
+/// What a write that arrived after a switch between libraries says.
+pub const LIBRARY_CHANGED: &str = "Another library was opened meanwhile.";
 
 /// A comic's page index and how many readers hold it. Counted, because React
 /// may open a reader, close it and open it again before the first close lands;
@@ -179,6 +217,9 @@ pub fn run() {
       }
       diag::install_panic_hook();
       diag::info(&format!("Leaflet {} starting", env!("CARGO_PKG_VERSION")));
+      // Which library opens: the one in use when Leaflet last closed (per-account
+      // libraries). Before the database, which is inside it.
+      libraries::activate_at_startup();
       let database = match open_database() {
         Ok(database) => database,
         // A phone has no message box, and a failed setup would leave a blank
@@ -205,7 +246,8 @@ pub fn run() {
         drive: std::sync::Mutex::new(sync::DriveState::default()),
         pending_open_paths: std::sync::Mutex::new(startup_paths),
         sync_lock: tokio::sync::Mutex::new(()),
-        comic_pages: std::sync::Mutex::new(std::collections::HashMap::new())
+        comic_pages: std::sync::Mutex::new(std::collections::HashMap::new()),
+        library_epoch: std::sync::atomic::AtomicU64::new(0)
       });
 
       // Learn where Leaflet's server is from the signed config, in the
@@ -276,7 +318,6 @@ pub fn run() {
       commands::set_book_finished,
       commands::finished_removed,
       commands::keep_awake,
-      commands::set_account_backup,
       commands::reading_stats,
       commands::drive_auth_start,
       commands::drive_auth_wait,
@@ -285,6 +326,11 @@ pub fn run() {
       commands::clear_drive_credentials,
       commands::sync_status,
       commands::sync_now,
+      commands::library_fresh_answer,
+      commands::library_resolve,
+      commands::library_open_mine,
+      commands::library_start_fresh,
+      commands::library_stay_out,
       commands::large_books,
       commands::set_large_book_backup,
       commands::set_sync_folder,

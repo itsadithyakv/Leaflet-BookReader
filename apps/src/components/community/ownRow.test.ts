@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BoardEntry } from "../../services/socialService";
-import { BOARD_SIZE, aheadOf, emptyBoardText, ownCaption, ownRow, weekKeyOf, weekMinutesOf, weekStartKey, type OwnInputs } from "./ownRow";
+import { BOARD_SIZE, OWN_PAUSED, aheadOf, emptyBoardText, ownCaption, ownRow, weekKeyOf, weekMinutesOf, weekStartKey, type OwnInputs } from "./ownRow";
 
 /** Saturday 3 October 2026, the day of the report: the week is Mon 28 Sep to Sun 4 Oct. */
 const SATURDAY = new Date(2026, 9, 3, 17, 0);
@@ -216,5 +216,26 @@ describe("an empty board", () => {
   it("explains Following to a reader who is not sharing", () => {
     expect(emptyBoardText({ scope: "following", signedIn: true, sharing: false })).toMatch(/^Following is for readers who share/);
     expect(emptyBoardText({ scope: "following", signedIn: true, sharing: true })).toMatch(/^Just you so far/);
+  });
+});
+
+describe("a reader in another account's library", () => {
+  it("shows none of that library's minutes as theirs, nor says they are on their way", () => {
+    const shared = reader({ profile: { handle: "bee", displayName: "Bee", visibility: "public" }, weekMinutes: 3, streak: 2 });
+    const row = ownRow({ ...shared, paused: true });
+    expect(row?.weekMinutes).toBe(0);
+    expect(row?.streak).toBe(0);
+    expect(row && ownCaption(row, null, true)).toBe(OWN_PAUSED);
+    const unpaused = ownRow(shared);
+    expect(unpaused?.weekMinutes).toBe(3);
+    expect(unpaused && ownCaption(unpaused)).toBe("Not on the board yet: your minutes are on their way.");
+  });
+
+  it("keeps the server's own row for them: those minutes are theirs", () => {
+    const sent = entry("bee", 7, 1, { isYou: true });
+    const row = ownRow({ ...reader(), board: board([sent], sent), paused: true });
+    expect(row?.kind).toBe("shared");
+    expect(row?.weekMinutes).toBe(7);
+    expect(row && ownCaption(row, null, true)).toBeNull();
   });
 });

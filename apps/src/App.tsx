@@ -27,6 +27,10 @@ import { useLibraryStore } from "./store/libraryStore";
 import { watchSyncMoments } from "./services/syncTiming";
 import { placeChecked, withPlaceHere } from "./services/placeElsewhere";
 import { useAccountStore } from "./store/accountStore";
+import { connectLibraryOwner, useLibraryOwnerStore } from "./store/libraryOwnerStore";
+import { LibraryOwnerSheet } from "./components/sync/LibraryOwnerSheet";
+import { AccountHoldsSheet } from "./components/sync/AccountHoldsSheet";
+import { OWNER_COPY } from "./components/sync/ownerCopy";
 import { FEATURES } from "./constants/features";
 import { ALIVE_EVERY_MS, AWAY_FREE_MS, flowerGrowing, useHabitStore } from "./store/habitStore";
 import { setAppFullscreen, watchForeground } from "./services/windowService";
@@ -280,14 +284,28 @@ const App = () => {
   const navBadge = useMemo(() => ({ Social: communityUnread }), [communityUnread]);
 
   // Back up on launch. The app may have been closed mid-session, and on a new
-  // computer this same pass is what restores the library from Drive.
+  // computer this same pass is what restores the library from Drive. Signed
+  // in (`accountBackup`), the reading goes to the account whatever else is set
+  // up; never for another account's library, whose sync is paused.
+  const ownerPaused = sync.library?.standing === "other";
   useEffect(() => {
-    if (sync.driveConnected || sync.accountBackup) {
+    if ((sync.driveConnected || sync.accountBackup) && !ownerPaused) {
       syncNow().catch(() => {
         // startup backup failure is fine; it is recorded and retried later
       });
     }
-  }, [sync.driveConnected, sync.accountBackup, syncNow]);
+  }, [sync.driveConnected, sync.accountBackup, ownerPaused, syncNow]);
+
+  // Signed in at launch: whose this library is decides what follows (a
+  // switch to the account's own, or the question). Signing in asks by itself
+  // (store/accountStore.ts).
+  useEffect(() => {
+    void (async () => {
+      const account = useAccountStore.getState();
+      if (!account.loaded) await account.load(false);
+      if (useAccountStore.getState().status.signedIn) await useLibraryOwnerStore.getState().resolve({ launch: true });
+    })();
+  }, []);
 
   // And as the app goes to the background (a phone may stop it any time
   // after) and comes back (services/syncTiming).
@@ -328,6 +346,10 @@ const App = () => {
       setToast(null);
     }, toastMs(message));
   }, []);
+
+  // Opening another library says why it can't with a toast, and closes the
+  // book first so its place is saved.
+  useEffect(() => connectLibraryOwner({ showToast, closeReader }), [showToast, closeReader]);
 
   const resolveErrorMessage = (error: unknown, fallback: string) => {
     if (typeof error === "string" && error.trim().length > 0) {
@@ -809,12 +831,22 @@ const App = () => {
   }, [flowerAlive]);
 
   const handleSync = () => {
+    if (ownerPaused) {
+      showToast(OWNER_COPY.pausedToast);
+      return;
+    }
     if (syncMode === "off") {
       showToast("Connect Google Drive in Settings to back up your library.");
       return;
     }
     syncNow()
-      .then(() => {
+      .then((report) => {
+        if (report.ownerPaused) {
+          showToast(OWNER_COPY.pausedToast);
+          return;
+        }
+        // The account held a library from before: the question is up instead.
+        if (typeof report.accountHolds === "number") return;
         showToast("Library backed up.");
         const beat = pickBeat("backup", Date.now());
         usePipStore.getState().react(beat.move, { loops: 1, line: beat.line });
@@ -1427,6 +1459,8 @@ const App = () => {
         onDismiss={dismissWelcome}
       />
       <AccountDialog showToast={showToast} />
+      <LibraryOwnerSheet />
+      <AccountHoldsSheet />
       {/* A held finger reads any tooltip (docs/android.md, rule 3). */}
       {touch && <TouchTips />}
 

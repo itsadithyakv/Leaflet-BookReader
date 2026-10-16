@@ -63,7 +63,8 @@ pub fn snapshot(db: &Database, now: &str) -> Result<SyncDoc> {
     annotations: db.all_annotations()?,
     collections: db.all_collections()?,
     reading_profile: crate::sync::reading::load(db)?,
-    camp: kept_camp(db)?
+    camp: kept_camp(db)?,
+    owner: crate::sync::owner::get(db)
   })
 }
 
@@ -251,7 +252,30 @@ fn write(db: &Database, doc: &SyncDoc, gone: &mut Vec<String>) -> Result<Applied
     .collect();
   db.purge_tombstones(&keep)?;
 
+  // A library nobody has claimed takes the owner of the one it was merged
+  // with; one that is somebody's keeps its owner whatever arrives.
+  if let Some(owner) = crate::sync::owner::clean(doc.owner.as_deref()) {
+    crate::sync::owner::claim_if_unowned(db, &owner)?;
+  }
+
   Ok(result)
+}
+
+/// Every book in this library as the files halves of Drive and the folder
+/// see it: its entry (tombstones included), and where its file is or would
+/// be here: the path its row keeps, else the one derived from its name. Books
+/// with an unsafe name are left out.
+pub fn library_files(db: &Database) -> Result<Vec<(BookEntry, PathBuf)>> {
+  let mut files = Vec::new();
+  for record in db.list_books_for_sync()? {
+    let entry = BookEntry::from_record(&record);
+    if !entry.is_safe_name() {
+      continue;
+    }
+    let path = if record.local_path.is_empty() { local_path_for(&entry)? } else { PathBuf::from(&record.local_path) };
+    files.push((entry, path));
+  }
+  Ok(files)
 }
 
 /// True when the book's bytes are on this machine.
@@ -381,7 +405,8 @@ mod tests {
       annotations: Vec::new(),
       collections: Vec::new(),
       reading_profile: None,
-      camp: None
+      camp: None,
+      owner: None
     };
 
     apply(&db, &doc).expect("apply");
@@ -414,7 +439,8 @@ mod tests {
       annotations: Vec::new(),
       collections: Vec::new(),
       reading_profile: None,
-      camp: None
+      camp: None,
+      owner: None
     };
     apply(&db, &doc).expect("apply");
 
@@ -448,7 +474,8 @@ mod tests {
       annotations: Vec::new(),
       collections: Vec::new(),
       reading_profile: None,
-      camp: None
+      camp: None,
+      owner: None
     };
     apply(&db, &doc).expect("apply");
 
@@ -486,7 +513,8 @@ mod tests {
       annotations: Vec::new(),
       collections: Vec::new(),
       reading_profile: None,
-      camp: None
+      camp: None,
+      owner: None
     };
     let counted = |db: &Database| db.finished_and_removed().expect("counted").into_iter().map(|book| (book.id, book.finished_at)).collect::<Vec<_>>();
     let dated = vec![("aaa".to_string(), Some("2026-08-01T00:00:00+00:00".to_string()))];
@@ -538,7 +566,8 @@ mod tests {
       annotations: Vec::new(),
       collections: Vec::new(),
       reading_profile: None,
-      camp: None
+      camp: None,
+      owner: None
     };
     let applied = apply(&db, &doc).expect("apply");
 
@@ -572,7 +601,8 @@ mod tests {
       annotations: Vec::new(),
       collections: Vec::new(),
       reading_profile: None,
-      camp: None
+      camp: None,
+      owner: None
     };
     let applied = apply(&db, &doc).expect("apply");
 
@@ -604,7 +634,8 @@ mod tests {
       annotations: Vec::new(),
       collections: Vec::new(),
       reading_profile: None,
-      camp: None
+      camp: None,
+      owner: None
     };
 
     apply(&db, &doc).expect("first");
@@ -656,7 +687,8 @@ mod tests {
       annotations: Vec::new(),
       collections: Vec::new(),
       reading_profile: None,
-      camp: None
+      camp: None,
+      owner: None
     };
 
     apply(&db, &doc).expect("apply");
@@ -884,5 +916,35 @@ mod tests {
     let arrived = reading::load(&to).expect("load").expect("present");
     assert_eq!(arrived.books.len(), 2, "both books' paces are kept");
     assert_eq!(arrived.core.updated_at, "2026-09-21T10:00:00Z", "the newer reader-wide part wins");
+  }
+
+  /// An unowned library takes the owner of what it is merged with; an owned
+  /// one keeps its own whatever arrives. And its snapshot carries it.
+  #[test]
+  fn an_owner_is_inherited_only_by_an_unowned_library() {
+    use crate::sync::owner;
+    const A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    let owned_by = |tag: &str| SyncDoc { owner: Some(tag.to_string()), ..SyncDoc::empty(NOW) };
+
+    let db = memory_db();
+    assert_eq!(snapshot(&db, NOW).expect("snapshot").owner, None);
+    apply(&db, &SyncDoc::empty(NOW)).expect("apply");
+    assert_eq!(owner::get(&db), None, "nobody's stays nobody's");
+    apply(&db, &owned_by(A)).expect("apply");
+    assert_eq!(owner::get(&db).as_deref(), Some(A));
+    apply(&db, &owned_by(B)).expect("apply");
+    assert_eq!(owner::get(&db).as_deref(), Some(A), "never changed by a document");
+    assert_eq!(snapshot(&db, NOW).expect("snapshot").owner.as_deref(), Some(A));
+
+    // Something that is not a tag is no owner.
+    let other = memory_db();
+    apply(&other, &SyncDoc { owner: Some("../../x".to_string()), ..SyncDoc::empty(NOW) }).expect("apply");
+    assert_eq!(owner::get(&other), None);
+
+    // A later version's document is taken from the same way.
+    let newer = memory_db();
+    crate::sync::folder::take_from_newer(&newer, Some(owned_by(B)), NOW).expect("taken");
+    assert_eq!(owner::get(&newer).as_deref(), Some(B));
   }
 }

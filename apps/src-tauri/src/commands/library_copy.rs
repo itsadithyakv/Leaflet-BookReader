@@ -257,8 +257,8 @@ fn copy_all(
 /// asked for that. In the background, by design: importing and reading must
 /// never wait on a folder that may be on a slow or unplugged drive, and a copy
 /// that fails must not fail them. It is written to the log and left for
-/// Settings to show.
-pub(crate) fn keep_copies_later(app: &AppHandle, books: Vec<BookRecord>) {
+/// Settings to show. Only for the library they joined (`epoch`, `AppState::db_for`).
+pub(crate) fn keep_copies_later(app: &AppHandle, epoch: u64, books: Vec<BookRecord>) {
   if books.is_empty() {
     return;
   }
@@ -266,15 +266,17 @@ pub(crate) fn keep_copies_later(app: &AppHandle, books: Vec<BookRecord>) {
   tauri::async_runtime::spawn(async move {
     let state = app.state::<AppState>();
     for book in &books {
-      keep_copy(&state, book).await;
+      keep_copy(&state, epoch, book).await;
     }
   });
 }
 
-async fn keep_copy(state: &State<'_, AppState>, book: &BookRecord) {
+async fn keep_copy(state: &State<'_, AppState>, epoch: u64, book: &BookRecord) {
   let _one_at_a_time = COPYING.lock().await;
   let plan = {
-    let db = state.db.guard();
+    let Some(db) = state.db_for(epoch) else {
+      return;
+    };
     if !still_in_library(&db, &book.id) {
       return;
     }
@@ -290,7 +292,9 @@ async fn keep_copy(state: &State<'_, AppState>, book: &BookRecord) {
     .await
     .unwrap_or_else(|error| Err(CopyError::Failed(format!("The copy was interrupted: {error}"))));
 
-  let db = state.db.guard();
+  let Some(db) = state.db_for(epoch) else {
+    return;
+  };
   if !still_copying_to(&db, &folder) {
     return;
   }
@@ -341,11 +345,13 @@ pub async fn library_copy_set(
 /// "Copy my existing library there now": every book already in the library.
 #[tauri::command]
 pub async fn library_copy_run(state: State<'_, AppState>, app: AppHandle) -> Result<LibraryCopyReport, String> {
+  // Only into the library it started in (`AppState::db_for`).
+  let epoch = state.epoch();
   let _one_at_a_time = COPYING.lock().await;
   // Read once the turn has come: a run that waited behind another one would
   // otherwise work from the folder and the names as they were before it.
   let (folder, books, index) = {
-    let db = state.db.guard();
+    let db = state.db_for(epoch).ok_or_else(|| crate::LIBRARY_CHANGED.to_string())?;
     let folder = copy_folder(&db).ok_or_else(|| "Choose a folder for the copies first.".to_string())?;
     (folder, db.list_books().map_err(|e| e.to_string())?, load_index(&db))
   };
@@ -357,7 +363,9 @@ pub async fn library_copy_run(state: State<'_, AppState>, app: AppHandle) -> Res
     }
     let keep_going = || {
       let state = app.state::<AppState>();
-      let db = state.db.guard();
+      let Some(db) = state.db_for(epoch) else {
+        return false;
+      };
       still_copying_to(&db, &into)
     };
     Ok(copy_all(&into, &books, &index, &keep_going))
@@ -366,7 +374,7 @@ pub async fn library_copy_run(state: State<'_, AppState>, app: AppHandle) -> Res
   .map_err(|error| format!("Copy task failed: {error}"))??;
 
   let status = {
-    let db = state.db.guard();
+    let db = state.db_for(epoch).ok_or_else(|| crate::LIBRARY_CHANGED.to_string())?;
     // Only while this is still the folder: names and failures from a folder
     // the reader has since left would be remembered against the new one.
     if still_copying_to(&db, &folder) {

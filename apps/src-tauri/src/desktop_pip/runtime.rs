@@ -198,6 +198,21 @@ pub fn forget<R: Runtime>(app: &AppHandle<R>) {
   }
 }
 
+/// Another library was opened (`libraries::switch`). Her page reads her look
+/// from the library (`pip_state_get`), so it is told to look again. Through
+/// her channel, like everything she hears: her window has no permission to
+/// listen for the app's events (`capabilities/default.json`).
+pub fn library_switched<R: Runtime>(app: &AppHandle<R>) {
+  #[cfg(windows)]
+  if let Some(pip) = app.try_state::<DesktopPip>() {
+    if let Some(live) = pip.0.inner.guard().live.as_ref() {
+      live.tell(HostEvent::Look);
+    }
+  }
+  #[cfg(not(windows))]
+  let _ = app;
+}
+
 /// A reminder has just gone out (`reminders::runtime::tick`). If she is out
 /// on the desktop she holds up a sign for it; if she is not, nothing is kept.
 pub fn nudge<R: Runtime>(app: &AppHandle<R>, reminder: &Reminder) {
@@ -451,7 +466,7 @@ mod host {
   }
 
   impl Live {
-    fn tell(&self, event: HostEvent) {
+    pub(super) fn tell(&self, event: HostEvent) {
       if let Some(channel) = &self.channel {
         let _ = channel.send(event);
       }

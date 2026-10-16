@@ -1,18 +1,25 @@
 # Leaflet Privacy Policy
 
-**Effective date:** 4 October 2026
+**Effective date:** [OWNER: the date Leaflet 1.5.3 is published]
 
 **Who we are:** Leaflet is made by PaperKite ("we", "us"). Contact: [adithyakrishnan.vinod@gmail.com](mailto:adithyakrishnan.vinod@gmail.com)
 
-Leaflet is a reading app. Your books and your reading history live on your own
-device. We built it so that we do not need to see them, and in most cases we
-cannot.
+Leaflet is a reading app. Your books live on your own device, and so does your
+reading history unless you sign in to a Leaflet account, which keeps it in
+step across your devices. We built it so that we do not need to see either,
+and we never see your books.
 
 ## The short version
 
 - Leaflet has no ads, no analytics and no tracking.
 - Your books never leave your device unless you turn on backup to **your own**
-  Google Drive. We cannot see what is in your Drive.
+  Google Drive (or, on a computer, a sync folder of your own). We cannot see
+  what is in your Drive.
+- An account is optional. While you are signed in to one, your reading (your
+  places, reading days, highlights, notes, bookmarks, collections and Pip) is
+  kept with your account on our server so your devices agree. It is stored
+  compressed, as your app sends it, and we do not read it. Your book files
+  are never sent to us.
 - An account is optional. If you create one, we store your email address, a
   scrambled (hashed) form of your password, and, while your profile is public,
   the reading statistics shown on it.
@@ -26,25 +33,47 @@ cannot.
 
 ## What stays on your device
 
-The following is stored only on your device (your computer, your phone or your tablet) and is never sent to us: your
-book files, your library (titles, authors, covers), your reading position and
-progress, your reading time, streaks and session history, your reading pace
-(how fast you read, book by book, so Smart Read can keep up with you), your
-highlights, notes and bookmarks, your collections, and your settings.
+Your book files and the covers Leaflet finds for them, and your settings, are
+stored only on your device (your computer, your phone or your tablet) and are
+never sent to us.
 
-There is one exception, and only while you have an account with a public
-profile: the few figures shown on that profile (this week's minutes, your
-streak, how many books you have finished, and the titles on your shared shelf)
-are sent to our server so other readers can see them. See "Your profile"
-below.
+While you are not signed in to a Leaflet account, the rest is stored only on
+your device too, and never sent to us: your library (titles and authors), your
+reading position and progress, your reading time, streaks and session history,
+your reading pace (how fast you read, book by book, so Smart Read can keep up
+with you), your highlights, notes and bookmarks, and your collections.
+
+While you are signed in, there are two exceptions:
+
+- **Your synced reading state:** that list (never the book files or covers) is
+  kept in step with your account through our server. See "Synced reading
+  state" under Leaflet accounts below.
+- **A shared profile:** while your profile is public or kept to followers, the
+  few figures shown on it (this week's minutes, your streak, how many books
+  you have finished, and the titles on your shelf) are sent to our server so
+  other readers can see them. See "Your profile" below.
 
 ## Google Drive backup (optional)
 
-If you connect Google Drive, Leaflet copies your book files and a small file of
-your reading progress and history (including your highlights, notes, bookmarks,
-collections and reading pace) into a folder called "Leaflet" in **your** Google
-Drive. A book file larger than 10 MB is copied only if you say yes when
-Leaflet asks; your place and notes in that book are backed up either way.
+If you connect Google Drive, Leaflet copies your book files into a folder called
+"Leaflet" in **your** Google Drive. A book file larger than 10 MB is copied
+only if you say yes when Leaflet asks.
+
+- **Signed out,** Leaflet also keeps a small file of your reading progress and
+  history there (including your highlights, notes, bookmarks, collections and
+  reading pace), and that file is how your devices stay in step.
+- **Signed in to a Leaflet account,** your reading is kept with the account
+  instead (see "Synced reading state" below), and Drive carries your book
+  files. Leaflet also keeps that small file up to date there for now, for a
+  device of yours that is signed out or runs an older Leaflet.
+- **One library, one account.** The first Leaflet account to sync a "Leaflet"
+  folder adopts it: Leaflet marks the progress file with a one-way scrambled
+  tag made from that account's identifier (not your email address, and not
+  readable back into the account). Signed in as a different account, Leaflet
+  puts only your book files there and leaves the other account's reading as
+  it is; signed out, it will not sync with a folder another account has
+  adopted. The same goes for a sync folder on a computer, where the tag is
+  kept in a small file beside the progress file.
 
 - Leaflet asks Google only for the `drive.file` permission. It can see only the
   files it created itself, and nothing else in your Drive.
@@ -57,7 +86,9 @@ Leaflet asks; your place and notes in that book are backed up either way.
   Keystore where the phone offers one.
 - **Using Leaflet on more than one device.** Connect the same Google account
   on each, and they share that one "Leaflet" folder: the same library, places
-  and reading history on your computer and your phone. So that a day read on
+  and reading history on your computer and your phone (signed in, the same
+  Leaflet account on each keeps the reading in step, and the folder brings
+  the book files). So that a day read on
   both adds up, each device's reading minutes are kept apart in the progress
   file under a random identifier Leaflet makes for that installation. It is
   not your phone's or computer's hardware identifier, it is not sent to us,
@@ -141,15 +172,19 @@ one, we store the following on our server:
   either camp is added to what the profile already shows. You can switch
   raids on your own camp off (in Pip's camp, under Raids, beside "Friends'
   camps"), and we keep that choice with your profile.
-- **Synced reading state** (only while you are signed in and either a Google
-  Drive backup is connected, or you have turned on "Back up reading to my
-  Leaflet account" in Settings): a compressed copy of your progress and
-  reading history, so your devices agree. It includes your highlights, notes,
-  bookmarks and collections if you have any, and never your book files. We do
-  not read it: it is stored as you send it and used only to give it back to
-  your devices. It is compressed, not encrypted. From Leaflet 1.5 it also
-  holds each device's own reading minutes for the last ninety days, under the
-  random identifier described under Google Drive above.
+- **Synced reading state** (always, while you are signed in on a device, from
+  Leaflet 1.5.3; there is no switch for it): a compressed copy of your library
+  list, progress and reading history, so your devices agree. It includes your
+  places, reading days and streak, your highlights, notes, bookmarks and
+  collections if you have any, the words you looked up, and Pip's things, and
+  never your book files or covers. We do not read it: it is stored as you send
+  it and used only to give it back to your devices. It is compressed, not
+  encrypted. It also holds each device's own reading minutes for the last
+  ninety days, under the random identifier described under Google Drive
+  above, and the scrambled account tag described there. Signing out leaves it
+  with your account, so signing in again brings it back; deleting your
+  account deletes it. A device whose library already belongs to another
+  Leaflet account sends nothing of that library to yours.
 
 We use this information only to run your account and the features you turn on.
 We do not sell it, rent it, or use it for advertising.
@@ -353,6 +388,16 @@ contact us and we will delete it.
 If this policy changes, we will update the date above and, for significant
 changes, say so in the app.
 
+- **Leaflet 1.5.3:** while you are signed in to a Leaflet account, your
+  reading state (places, reading days, highlights, notes, bookmarks,
+  collections and Pip) is always kept with the account on our server, compressed
+  and not read by us; the "Back up reading to my Leaflet account" switch is
+  gone. Your book files are still never sent to us: signed in, Google Drive
+  (or a sync folder) carries the book files, and a copy of the reading file
+  for devices that are signed out or run an older Leaflet. A library belongs to
+  the first account that syncs it, marked with a one-way scrambled tag of
+  that account; another account signed in on the same device or Drive never
+  has that library's reading mixed into its own. Signed out, nothing changed.
 - **Leaflet 1.5:** Leaflet for Android phones and tablets. What it keeps and
   sends is what the computer app keeps and sends, as described above; on the
   phone, sign-in keys are kept in Leaflet's private storage, encrypted with a

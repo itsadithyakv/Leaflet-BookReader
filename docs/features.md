@@ -4496,6 +4496,12 @@ choice and not a default because it sends the reading to Leaflet's server,
 which a Drive backup does not: making it the default is the owner's to
 decide, with the privacy policy.
 
+**Replaced in 1.5.3:** the owner decided. Signed in, the reading always goes
+to the account and the switch is gone (`cloud_backup_alone` is no longer
+read); Drive and the folder carry the book files. See
+[two-devices.md](two-devices.md), "One library, one owner; the account
+carries the state".
+
 The transports below share one set of rules.
 
 ### The document

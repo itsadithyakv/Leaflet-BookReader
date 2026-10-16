@@ -116,6 +116,11 @@ export type OwnInputs = {
   /** This device's own figures (see `weekMinutesOf`). */
   weekMinutes: number;
   streak: number;
+  /**
+   * The open library is another account's (sync/owner.rs, standing "other"):
+   * its minutes are not this reader's and never reach the board.
+   */
+  paused?: boolean;
 };
 
 /**
@@ -123,7 +128,7 @@ export type OwnInputs = {
  * have minutes this week), otherwise one made from this device's figures, so
  * a reader always finds themselves on the board. Null when signed out.
  */
-export const ownRow = ({ signedIn, scope, board, weekKey, profile, account, weekMinutes, streak }: OwnInputs): OwnRow | null => {
+export const ownRow = ({ signedIn, scope, board, weekKey, profile, account, weekMinutes, streak, paused = false }: OwnInputs): OwnRow | null => {
   if (!signedIn) {
     return null;
   }
@@ -156,7 +161,7 @@ export const ownRow = ({ signedIn, scope, board, weekKey, profile, account, week
   // accepted), never on Everyone's: there its row is this device's own.
   const shares =
     (profile?.visibility === "public" || (profile?.visibility === "followers" && scope === "following")) && Boolean(handle);
-  const minutes = Math.max(0, weekMinutes);
+  const minutes = paused ? 0 : Math.max(0, weekMinutes);
   const ahead = aheadOf(entries, { weekMinutes: minutes, streak, handle });
   // The rows are another week's than these minutes. The server answers for
   // its own week when it does not believe the one asked for (this computer's
@@ -178,14 +183,20 @@ export const ownRow = ({ signedIn, scope, board, weekKey, profile, account, week
     pipSeed: handle,
     avatar: account?.avatar ?? null,
     weekMinutes: minutes,
-    streak,
+    streak: paused ? 0 : streak,
     rank: unranked ? null : ahead + 1,
     entry: null
   };
 };
 
+/** Under a row made in another account's library: nothing read here is theirs. */
+export const OWN_PAUSED = "Reading sync is paused in this library.";
+
 /** The line under the reader's own row, when the row was made on this device. */
-export const ownCaption = (row: OwnRow, publishError: string | null = null) => {
+export const ownCaption = (row: OwnRow, publishError: string | null = null, paused = false) => {
+  if (paused && row.kind !== "shared") {
+    return OWN_PAUSED;
+  }
   const read = Math.round(row.weekMinutes) >= 1;
   switch (row.kind) {
     case "private":

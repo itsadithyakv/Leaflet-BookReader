@@ -199,6 +199,19 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) {
   });
 }
 
+/// Another library was opened (`libraries::switch`): its reminders, its goal
+/// and its days are the ones that count now. On a computer the running app's
+/// own clock reads the open library every minute and Windows holds nothing
+/// while it runs, so only the old library's delivered reminders go; the
+/// phone's alarms are planned again from the new library.
+pub fn library_switched<R: Runtime>(app: &AppHandle<R>) {
+  #[cfg(target_os = "android")]
+  super::phone::request_sync(app);
+  if cfg!(windows) {
+    toast::clear_delivered(&identifier(app));
+  }
+}
+
 /// Hands Windows whatever should arrive while Leaflet is closed. Runs when the
 /// main window is destroyed, which is how Leaflet exits.
 pub fn schedule_for_exit<R: Runtime>(app: &AppHandle<R>) {

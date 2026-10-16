@@ -28,6 +28,10 @@ pub fn diagnostics(state: State<'_, AppState>) -> Result<String, String> {
   // with the database locked, and an unreachable network share is slow to answer.
   let copies = copies_on(&db);
   let data_dir = crate::storage::app_data_dir().map(|dir| dir.display().to_string()).unwrap_or_default();
+  // Which library is open, and whose: the owner by its first six digits only.
+  let library_dir = db.path().parent().map(|dir| dir.display().to_string()).unwrap_or_default();
+  let standing = crate::sync::owner::standing(&db);
+  let owner = crate::sync::owner::get(&db).map(|tag| format!("{}…", &tag[..6])).unwrap_or_else(|| "nobody".to_string());
   drop(db);
   let lines = [
     format!("Leaflet {}", env!("CARGO_PKG_VERSION")),
@@ -35,6 +39,7 @@ pub fn diagnostics(state: State<'_, AppState>) -> Result<String, String> {
     format!("System: {} {}", std::env::consts::OS, std::env::consts::ARCH),
     format!("Packaged (Microsoft Store/MSIX): {}", crate::reminders::packaged()),
     format!("Data folder: {data_dir}"),
+    format!("Library: {library_dir} (owner {owner}, {standing:?})"),
     format!("Database schema: v{schema} (this build expects v{})", crate::db::SCHEMA_VERSION),
     format!("Books: {books}, focus sessions: {sessions}"),
     format!("Backup: Drive {}, folder {}, Leaflet account {}", on_off(drive), on_off(folder), on_off(account)),

@@ -9,6 +9,7 @@
  * minimum gap, since a window is minimised and restored far more often than a
  * library changes.
  */
+import type { SyncStatus } from "@shared/sync/types";
 import { useLibraryStore } from "../store/libraryStore";
 
 /** Going out of sight: not if a sync ran this recently (reading since then is seconds). */
@@ -46,10 +47,17 @@ export const syncDue = (moment: SyncMoment, sinceLastMs: number | null, configur
 let lastStartedAt: number | null = null;
 let watching = false;
 
-const configured = () => {
-  const { sync } = useLibraryStore.getState();
+/**
+ * Whether there is anywhere to sync to. Never while this library belongs to
+ * another Leaflet account than the one signed in: sync is paused for it, and
+ * a run would only say so.
+ */
+export const syncConfigured = (sync: SyncStatus): boolean => {
+  if (sync.library?.standing === "other") return false;
   return sync.driveConnected || Boolean(sync.folderPath) || Boolean(sync.accountBackup);
 };
+
+const configured = () => syncConfigured(useLibraryStore.getState().sync);
 
 /** Notes every sync's start, whoever asked for it. */
 const watchStarts = () => {

@@ -33,8 +33,46 @@ export type SyncStatus = {
   lastSyncedAt: string | null;
   /** Books in the library whose file is not on this device yet. */
   booksPending: number;
-  /** The reader chose to back up to their Leaflet account by itself, and is signed in. */
+  /**
+   * Account sync is on: signed in, and this library is the account's own (or
+   * becoming it). Reading state then lives with the Leaflet account; there is
+   * no switch for it. The name is kept from the old opt-in toggle.
+   */
   accountBackup?: boolean;
+  /** Whose this device's library is, as far as sync cares. Absent from older builds. */
+  library?: LibraryOwnerInfo;
+  /** Drive holds another account's library: only book files go there. */
+  driveFilesOnly?: boolean;
+  /** The sync folder holds another account's library: only book files go there. */
+  folderFilesOnly?: boolean;
+};
+
+/**
+ * This library's standing with the Leaflet account signed in.
+ *
+ * - `unowned`: signed out, and no account has adopted this library yet.
+ * - `adopting`: signed in, and the library is becoming this account's.
+ * - `mine`: the library belongs to the account signed in.
+ * - `signedOut`: the library belongs to an account, and nobody is signed in.
+ * - `other`: the library belongs to another account than the one signed in.
+ */
+export type LibraryStanding = "unowned" | "adopting" | "mine" | "signedOut" | "other";
+
+export type LibraryOwnerInfo = {
+  standing: LibraryStanding;
+  /** The reader chose to stay out of reading sync for this library. */
+  stayOut: boolean;
+  /** The account signed in already has a library of its own on this device. */
+  elsewhere: boolean;
+  /** Signed out, and a sync store holds another account's library. */
+  refused: "drive" | "folder" | null;
+};
+
+/** What `library_resolve` decided after a sign-in or at launch. */
+export type LibraryResolveAction = "stay" | "claimed" | "switch" | "offer";
+
+export type LibraryResolveResult = {
+  action: LibraryResolveAction;
 };
 
 /** What one sync run did. */
@@ -48,6 +86,13 @@ export type SyncReport = {
   booksHeld?: number;
   /** A later version of Leaflet wrote the shared library: this device read it and wrote nothing back. */
   updateNeeded?: boolean;
+  /** This library belongs to another account: nothing was synced, by design. */
+  ownerPaused?: boolean;
+  /**
+   * A fresh library met an account copy from before: nothing was merged, and
+   * the reader is asked about it. The number of books that copy holds.
+   */
+  accountHolds?: number | null;
 };
 
 /** What the reader is told then, in place of a sync error. */
@@ -77,7 +122,10 @@ export const EMPTY_SYNC_STATUS: SyncStatus = {
   apiBaseCustom: false,
   lastSyncedAt: null,
   booksPending: 0,
-  accountBackup: false
+  accountBackup: false,
+  library: { standing: "unowned", stayOut: false, elsewhere: false, refused: null },
+  driveFilesOnly: false,
+  folderFilesOnly: false
 };
 
 /** One book on a shared shelf. The spine's look derives from the seed. */

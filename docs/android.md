@@ -283,8 +283,11 @@ picks or saves a file goes through the Android side:
   12+). It would copy the sealed tokens (useless without the old phone's
   key, or plain if the Keystore had failed) and the random device id (two
   phones counting as one), and it stops anyway past 25 MB, which the books
-  pass. **A library moves to a new phone by Leaflet's sync**: Google Drive or
-  the Leaflet account; without either, a new phone starts empty.
+  pass. **A library moves to a new phone by Leaflet's sync**: signed in, the
+  Leaflet account brings the reading and Google Drive the book files; signed
+  out, Google Drive brings both; without either, a new phone starts empty.
+  A phone shared by two readers keeps a library for each account
+  (docs/two-devices.md, "One library, one owner").
 - **Google Drive's sign-in** is the laptop's own, run on the phone (see
   "Google Drive between laptop and phone" below).
 - **A broken database** shows its message on screen (today it is a Windows

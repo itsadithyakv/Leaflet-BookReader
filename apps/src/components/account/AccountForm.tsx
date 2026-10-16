@@ -16,6 +16,7 @@ import { HandleField } from "../community/HandleField";
 import { emailHint } from "./emailHint";
 import { asksForEmailCode, emailCodeReady, signUpWithProfile } from "./signUpFlow";
 import { deviceNoun, isAndroid } from "../../platform/device";
+import { InfoTip } from "../ui/InfoTip";
 
 export type AccountFormMode = "signin" | "signup" | "reset";
 
@@ -511,7 +512,7 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
         {signingUp ? (welcoming ? "Create your account" : "Create an account") : "Sign in"}
       </p>
       <div className="mt-2 text-xs leading-relaxed text-on-surface-variant">
-        {intro ?? "Optional. Everything works without one. An account lets you join the leaderboard and share your shelf."}
+        {intro ?? "Optional. Everything works without one. An account keeps your reading in step across your devices, and lets you join the leaderboard and share your shelf."}
       </div>
       <form
         onSubmit={(event) => {
@@ -651,6 +652,7 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
       </form>
       {signingUp && (PRIVACY_URL || TERMS_URL) && (
         <p className="mt-3 text-[11px] leading-relaxed text-on-surface-variant">
+          <InfoTip text="Your reading, highlights and notes are kept with your account." className="mr-1.5 align-[-2px]" />
           By creating an account you agree to the{" "}
           {TERMS_URL && (
             <button type="button" className="underline" onClick={() => void accountService.openLink(TERMS_URL)}>

@@ -99,6 +99,11 @@ pub async fn community_kudos(handle: String, state: State<'_, AppState>) -> Resu
 /// two apps settle it (`pip_stake_duel`, `pip_settle_duel`).
 #[tauri::command]
 pub async fn community_challenge(handle: String, stake: Option<i64>, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+  // A stake is seeds, and they are this library's: not one of another account's.
+  if stake.unwrap_or(0) > 0 {
+    let db = state.db.guard();
+    crate::sync::owner::check_spend(&db)?;
+  }
   let body = serde_json::json!({
     "handle": handle.trim().trim_start_matches('@').to_lowercase(),
     "weekKey": iso_week_key(&local_today()),

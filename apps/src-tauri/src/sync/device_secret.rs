@@ -329,6 +329,25 @@ mod tests {
     tidy(&dir);
   }
 
+  /// Another account's library keeps its Drive token under its own name
+  /// (`drive::slot_name`), beside the first library's.
+  #[test]
+  fn each_library_keeps_its_own_drive_token() {
+    let dir = scratch("slots");
+    let tag = "0123456789abcdef0123456789abcdef";
+    let theirs = crate::sync::drive::slot_name("drive-refresh", Some(tag));
+    assert_eq!(theirs, format!("drive-refresh-{tag}"));
+    assert_eq!(crate::sync::drive::slot_name("drive-refresh", None), "drive-refresh");
+    store_in(&dir, "drive-refresh", "first", None).expect("the first library's");
+    store_in(&dir, &theirs, "second", None).expect("a name with a tag is accepted");
+    assert_eq!(load_in(&dir, "drive-refresh", None).as_deref(), Some("first"));
+    assert_eq!(load_in(&dir, &theirs, None).as_deref(), Some("second"));
+    clear_in(&dir, &theirs);
+    assert_eq!(load_in(&dir, &theirs, None), None);
+    assert_eq!(load_in(&dir, "drive-refresh", None).as_deref(), Some("first"), "the other library's stays");
+    tidy(&dir);
+  }
+
   #[test]
   fn an_empty_secret_is_none_and_a_bad_name_is_refused() {
     let dir = scratch("odd");

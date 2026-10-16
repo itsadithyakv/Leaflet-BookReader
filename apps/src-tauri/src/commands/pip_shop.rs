@@ -1107,6 +1107,8 @@ pub(crate) fn stake_goal(db: &db::Database, seeds: i64, days: i64, today_key: &s
 #[tauri::command]
 pub fn pip_stake_duel(duel_id: String, seeds: i64, state: State<'_, AppState>) -> Result<PipOverview, String> {
   let db = state.db.guard();
+  // The seeds are this library's, and it is another account's.
+  crate::sync::owner::check_spend(&db)?;
   stake_duel(&db, &duel_id, seeds)
 }
 
@@ -1161,6 +1163,7 @@ pub fn pip_send_gift(
   if to.trim().is_empty() {
     return Err("A gift is for someone.".to_string());
   }
+  crate::sync::owner::check_spend(&db)?;
   send_gift(&db, &kind, &id, &gift_id)
 }
 

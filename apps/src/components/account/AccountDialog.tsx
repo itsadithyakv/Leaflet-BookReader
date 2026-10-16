@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import { SheetHandle } from "../ui/SheetHandle";
 import { useBackClose } from "../../hooks/useBackClose";
-import { deviceNoun, isAndroid } from "../../platform/device";
 import { create } from "zustand";
 import { AccountForm, type AccountFormMode } from "./AccountForm";
 import { PipSprite } from "../PipSprite";
@@ -101,9 +100,7 @@ export const AccountDialog = ({ showToast }: { showToast: (message: string) => v
           welcoming={firstRun}
           intro={
             firstRun
-              ? isAndroid()
-                ? `Optional. It puts you and a Pip of your choosing on the weekly leaderboard, and carries your reading between this ${deviceNoun()} and your computer. Everything else works without one.`
-                : "Optional. It puts you and a Pip of your choosing on the weekly leaderboard, and your reading will carry over to the Leaflet mobile app. Everything else works without one."
+              ? "Optional. It keeps your places, highlights and reading days in step across your devices, and puts you and a Pip on the weekly leaderboard. Everything else works without one."
               : undefined
           }
           onDone={(message) => {

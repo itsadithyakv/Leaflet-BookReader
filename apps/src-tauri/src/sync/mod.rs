@@ -2,15 +2,20 @@
 //!
 //! [`merge`] owns the rules and knows nothing about where bytes come from.
 //! [`store`] translates between those rules and this machine's database.
-//! [`folder`], [`drive`] and [`cloud`] are the three transports, and they behave
-//! identically because none of them decides anything:
+//! [`owner`] decides whose library this is, and so what each transport may
+//! carry. [`folder`], [`drive`] and [`cloud`] are the three transports, and
+//! they merge identically because none of them decides anything:
 //!
-//! * [`folder`] needs no account at all — a directory the reader's own cloud
-//!   client already syncs.
-//! * [`drive`] is for devices with no such client, and carries the book files.
-//! * [`cloud`] talks to Leaflet's own API. It carries the state document only,
-//!   and exists for the one thing the others cannot do: compare readers to each
-//!   other for the leaderboard.
+//! * [`cloud`] talks to Leaflet's own API. Signed in, it carries the reading
+//!   state, always: the account is where a library's state lives. It never
+//!   carries book files.
+//! * [`drive`] and [`folder`] carry the book files. Signed out, they carry the
+//!   state as well, as they always have. Signed in, they keep a copy of the
+//!   state for the owner's signed-out devices (the bridge), or carry files
+//!   alone when they hold another account's library.
+//!
+//! A folder needs no account at all: a directory the reader's own cloud
+//! client already syncs. Drive is for devices with no such client.
 
 pub mod cloud;
 /// Sign-in kept in a private file where there is no keychain (Android).
@@ -20,6 +25,7 @@ pub mod drive;
 pub mod folder;
 pub mod large;
 pub mod merge;
+pub mod owner;
 pub mod reading;
 pub mod remote_config;
 pub mod shared_doc;

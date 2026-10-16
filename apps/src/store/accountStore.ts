@@ -2,6 +2,15 @@ import { create } from "zustand";
 import { useCommunityStore } from "../components/community/communityStore";
 import { accountService, errorMessage, SIGNED_OUT, type AccountStatus } from "../services/accountService";
 import { socialService } from "../services/socialService";
+import { useLibraryOwnerStore } from "./libraryOwnerStore";
+
+/**
+ * Someone has just signed in: whose this device's library is decides what
+ * follows (store/libraryOwnerStore.ts). Never holds the sign-in up.
+ */
+const afterSignIn = (status: AccountStatus) => {
+  if (status.signedIn) void useLibraryOwnerStore.getState().resolve();
+};
 
 type AccountState = {
   status: AccountStatus;
@@ -42,12 +51,15 @@ type AccountState = {
  * actions reject with a readable message for the UI to show.
  */
 export const useAccountStore = create<AccountState>((set) => {
-  const run = async (action: () => Promise<AccountStatus>) => {
+  const run = async (action: () => Promise<AccountStatus>, signingIn = false) => {
+    let status: AccountStatus;
     try {
-      set({ status: await action(), loaded: true });
+      status = await action();
     } catch (cause) {
       throw new Error(errorMessage(cause));
     }
+    set({ status, loaded: true });
+    if (signingIn) afterSignIn(status);
   };
 
   return {
@@ -66,7 +78,7 @@ export const useAccountStore = create<AccountState>((set) => {
     },
 
     signUp: (email, password, displayName, avatar) =>
-      run(() => accountService.signUp(email, password, displayName, avatar)),
+      run(() => accountService.signUp(email, password, displayName, avatar), true),
 
     async createAccount(email, password, displayName, avatar) {
       try {
@@ -78,6 +90,7 @@ export const useAccountStore = create<AccountState>((set) => {
 
     adopt(status) {
       set({ status, loaded: true });
+      afterSignIn(status);
     },
 
     async setAvatar(avatar) {
@@ -99,7 +112,7 @@ export const useAccountStore = create<AccountState>((set) => {
 
     changeEmail: (password, email) => run(() => accountService.changeEmail(password, email)),
 
-    signIn: (email, password) => run(() => accountService.signIn(email, password)),
+    signIn: (email, password) => run(() => accountService.signIn(email, password), true),
 
     async requestReset(email) {
       try {
@@ -109,7 +122,7 @@ export const useAccountStore = create<AccountState>((set) => {
       }
     },
 
-    resetPassword: (email, code, password) => run(() => accountService.confirmReset(email, code, password)),
+    resetPassword: (email, code, password) => run(() => accountService.confirmReset(email, code, password), true),
 
     signOut: () => run(() => accountService.signOut()),
 

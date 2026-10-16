@@ -132,6 +132,11 @@ pub(crate) fn read_day(days: &[habit::DayRecord], today_key: &str) -> Option<Str
 /// After a sync it never fails the sync: a leaderboard that is briefly stale
 /// matters far less than reading position that did not save.
 pub(crate) async fn publish_profile(state: &State<'_, AppState>) -> Result<bool, String> {
+  // Only from a library that is the account's own: another account's
+  // library on this device never goes on this one's board.
+  if !library_may_publish(state).await {
+    return Ok(false);
+  }
   // Only for readers who chose to be seen; a private profile publishes nothing.
   //
   // Whether they chose is the server's to say. This used to go by a setting
@@ -182,6 +187,25 @@ pub(crate) async fn publish_profile(state: &State<'_, AppState>) -> Result<bool,
   Ok(true)
 }
 
+/// Whether this library's figures, shelf and books may be published for the
+/// account signed in (`owner::may_publish`). A library nobody has claimed is
+/// claimed here, as the first sync would. Signed in on a device that has not
+/// heard who, the server is asked first.
+pub(crate) async fn library_may_publish(state: &State<'_, AppState>) -> bool {
+  let unknown = {
+    let db = state.db.guard();
+    cloud::signed_in(&db) && cloud::signed_in_account_id(&db).is_none()
+  };
+  if unknown {
+    let _ = cloud::status(&state.db, true).await;
+  }
+  let db = state.db.guard();
+  if let Some(tag) = crate::sync::owner::signed_in_tag(&db) {
+    let _ = crate::sync::owner::claim_if_unowned(&db, &tag);
+  }
+  crate::sync::owner::may_publish(crate::sync::owner::standing(&db))
+}
+
 /// When the figures were last published, this run.
 static LAST_PUBLISHED: Mutex<Option<Instant>> = Mutex::new(None);
 
@@ -229,6 +253,13 @@ pub(crate) fn server_says_private(saved: &serde_json::Value) -> bool {
 
 /// Set once the server has said, this run, whether the profile is shared.
 static VISIBILITY_CONFIRMED: AtomicBool = AtomicBool::new(false);
+
+/// Forgets what this run learnt about publishing, for another library opened
+/// (`libraries::switch`): its first publish asks the server again, like a launch.
+pub(crate) fn forget_run_state() {
+  *LAST_PUBLISHED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+  VISIBILITY_CONFIRMED.store(false, Ordering::Relaxed);
+}
 
 /// Whether to publish: the server's word when it was asked and answered, else
 /// what this device remembers. With neither there is nothing to go on, and
@@ -324,7 +355,8 @@ pub async fn save_social_profile(
     ..cloud::ProfileUpdate::default()
   };
 
-  if going_public {
+  // The figures go only from the account's own library.
+  if going_public && library_may_publish(&state).await {
     let db = state.db.guard();
     let stats = build_profile_update(&db, &local_today())?;
     update.week_key = stats.week_key;

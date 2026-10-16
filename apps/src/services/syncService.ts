@@ -9,7 +9,9 @@ const EMPTY_REPORT: SyncReport = {
   booksPending: 0,
   entriesUpdated: 0,
   booksHeld: 0,
-  updateNeeded: false
+  updateNeeded: false,
+  ownerPaused: false,
+  accountHolds: null
 };
 
 /** A place in a book: how far, and exactly where (an EPUB CFI; null for page-based books). */
@@ -21,6 +23,10 @@ export type Place = { progress: number; position: string | null };
  * A folder the user's own cloud client already keeps in step needs no account,
  * no API and no Google verification; Drive is there for devices with no such
  * client. Both merge identically, so the UI does not need to care which is on.
+ *
+ * Signed in, the reading itself lives with the Leaflet account, always; Drive
+ * and the folder then carry the book files (and, for the same account, a copy
+ * of the reading too).
  */
 export const syncService = {
   async status(): Promise<SyncStatus> {
@@ -96,17 +102,6 @@ export const syncService = {
       return EMPTY_SYNC_STATUS;
     }
     return invoke<SyncStatus>("set_sync_folder", { path });
-  },
-
-  /**
-   * Whether the reading is backed up to the Leaflet account by itself, with
-   * no Drive and no folder. The reader's choice; needs them signed in.
-   */
-  async setAccountBackup(on: boolean): Promise<SyncStatus> {
-    if (!isTauri()) {
-      return EMPTY_SYNC_STATUS;
-    }
-    return invoke<SyncStatus>("set_account_backup", { on });
   },
 
   async syncNow(): Promise<SyncReport> {

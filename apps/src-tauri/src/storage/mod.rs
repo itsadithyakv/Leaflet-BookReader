@@ -80,12 +80,49 @@ pub fn app_data_dir() -> Result<PathBuf> {
   Ok(base.join("leaflet"))
 }
 
+/// The library in use, when it is not the one at the top of the data folder
+/// (per-account libraries, `crate::libraries`). `None` is the top.
+#[cfg(not(test))]
+static LIBRARY_DIR: std::sync::RwLock<Option<PathBuf>> = std::sync::RwLock::new(None);
+
+// Tests run side by side in one process: each test thread keeps its own, so a
+// test that opens another library never moves the others' books.
+#[cfg(test)]
+thread_local! {
+  static LIBRARY_DIR: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Makes `path` the library in use: its database, books and covers. `None`,
+/// or the data folder itself, is the first library (the top of the folder).
+/// The device's own things (fonts, PDF text, logs, secrets, the converter,
+/// the tidy record) stay at the top whichever library is open.
+pub fn set_library_dir(path: Option<PathBuf>) {
+  #[cfg(not(test))]
+  {
+    *LIBRARY_DIR.write().unwrap_or_else(std::sync::PoisonError::into_inner) = path;
+  }
+  #[cfg(test)]
+  LIBRARY_DIR.with(|dir| *dir.borrow_mut() = path);
+}
+
+/// The folder of the library in use: `<app data>`, or `<app data>/libraries/<tag>`.
+pub fn library_dir() -> Result<PathBuf> {
+  #[cfg(not(test))]
+  let chosen = LIBRARY_DIR.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+  #[cfg(test)]
+  let chosen = LIBRARY_DIR.with(|dir| dir.borrow().clone());
+  match chosen {
+    Some(path) => Ok(path),
+    None => app_data_dir()
+  }
+}
+
 pub fn books_dir() -> Result<PathBuf> {
-  Ok(app_data_dir()?.join("books"))
+  Ok(library_dir()?.join("books"))
 }
 
 pub fn covers_dir() -> Result<PathBuf> {
-  Ok(app_data_dir()?.join("covers"))
+  Ok(library_dir()?.join("covers"))
 }
 
 pub fn hash_file(path: &Path) -> Result<String> {

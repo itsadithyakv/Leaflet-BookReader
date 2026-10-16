@@ -9,12 +9,19 @@
 //!
 //! ```text
 //! <root>/state.json          the shared document
-//! <root>/books/<sha256>.epub the files, fetched on demand
+//! <root>/.leaflet-owner      whose library it is (a tag), when it is anyone's
+//! <root>/books/<sha256>.epub the files
 //! ```
+//!
+//! Two halves, run apart (`commands::backup::run_sync`): the state
+//! (`sync_state`), which a folder holding another account's library never
+//! gets, and the files (`sync_files`), which every library gets.
 
 use crate::db::Database;
 use crate::sync::large::{self, Decision};
 use crate::sync::merge::{self, Remote, SyncDoc};
+use crate::sync::owner::{self, StoreMode};
+use crate::sync::shared_doc::{self, StateRun, Who};
 use crate::sync::store;
 use anyhow::{anyhow, Result};
 use std::fs;
@@ -22,6 +29,7 @@ use std::path::{Path, PathBuf};
 
 const STATE_FILE: &str = "state.json";
 const BOOKS_DIR: &str = "books";
+const OWNER_FILE: &str = ".leaflet-owner";
 const LOCK_FILE: &str = ".leaflet-sync.lock";
 /// A lock older than this is assumed to belong to a process that died holding
 /// it. Long enough that a slow sync is never stolen from.
@@ -42,7 +50,14 @@ pub struct SyncReport {
   pub books_held: usize,
   /// The shared document was written by a later version of Leaflet: this
   /// device took what it understands from it and wrote nothing back.
-  pub update_needed: bool
+  pub update_needed: bool,
+  /// Nothing was synced: this library is another Leaflet account's than the
+  /// one signed in (`owner::Standing::Other`).
+  pub owner_paused: bool,
+  /// Nothing was synced: this library was started fresh, and the account
+  /// already holds a library of this many books from before. The reader is
+  /// asked (`library_fresh_answer`).
+  pub account_holds: Option<usize>
 }
 
 impl SyncReport {
@@ -58,6 +73,8 @@ impl SyncReport {
     // The same books wait on every transport: they are counted once.
     self.books_held = self.books_held.max(other.books_held);
     self.update_needed |= other.update_needed;
+    self.owner_paused |= other.owner_paused;
+    self.account_holds = self.account_holds.or(other.account_holds);
   }
 }
 
@@ -135,48 +152,115 @@ fn write_state(root: &Path, doc: &SyncDoc) -> Result<()> {
   Ok(())
 }
 
-/// Merges this device's state with the folder's and reconciles the book files.
-pub fn sync(db: &Database, root: &Path, now: &str) -> Result<SyncReport> {
+/// The owner marked beside the document: one line, a tag. Kept apart from
+/// `state.json` because Leaflet 1.5.0 to 1.5.2 rewrite that without it.
+fn read_mark(root: &Path) -> Option<String> {
+  owner::clean(fs::read_to_string(root.join(OWNER_FILE)).ok().as_deref())
+}
+
+/// Marks the folder as `owner`'s, through a temporary file like the document.
+fn write_mark(root: &Path, owner: &str) -> Result<()> {
+  let staging = root.join(format!("{OWNER_FILE}.tmp"));
+  fs::write(&staging, format!("{owner}\n"))?;
+  fs::rename(&staging, root.join(OWNER_FILE))?;
+  Ok(())
+}
+
+/// Whose library the folder holds, as far as can be told without reading
+/// the whole document's books: the document's owner, else the marker.
+pub fn store_owner(root: &Path) -> Option<String> {
+  let doc_owner = match read_state(root).ok()? {
+    Remote::Ours(doc) | Remote::Newer(Some(doc)) => doc.owner,
+    _ => None
+  };
+  shared_doc::remote_owner(doc_owner.as_deref(), read_mark(root).as_deref())
+}
+
+/// The state half: merges this device's state with the folder's, unless the
+/// folder holds a library that is not this device's to merge with
+/// (`owner::store_mode`). The folder is written every run, as it always was.
+pub fn sync_state(db: &Database, root: &Path, now: &str, who: &Who) -> Result<StateRun> {
   fs::create_dir_all(root)?;
   let _lock = FolderLock::acquire(root)?;
-  let books_root = root.join(BOOKS_DIR);
-  fs::create_dir_all(&books_root)?;
 
-  let remote = match read_state(root)? {
-    Remote::Ours(doc) => doc,
-    Remote::Absent => SyncDoc::empty(now),
-    Remote::Newer(doc) => return take_from_newer(db, doc, now)
+  let remote = read_state(root)?;
+  let mark = read_mark(root);
+  let doc_owner = match &remote {
+    Remote::Ours(doc) | Remote::Newer(Some(doc)) => doc.owner.clone(),
+    _ => None
+  };
+  let there = shared_doc::remote_owner(doc_owner.as_deref(), mark.as_deref());
+  let mode = who.mode(owner::get(db).as_deref(), there.as_deref());
+  if matches!(mode, StoreMode::FilesOnly | StoreMode::Refuse) {
+    return Ok(StateRun { refused: true, ..StateRun::default() });
+  }
+
+  let remote = match remote {
+    Remote::Ours(doc) => Some(doc),
+    Remote::Absent => None,
+    Remote::Newer(doc) => {
+      let doc = doc.map(|mut doc| {
+        doc.owner.clone_from(&there);
+        doc
+      });
+      let report = take_from_newer(db, doc, now)?;
+      let brought_news = report.entries_updated > 0 || report.books_removed > 0;
+      return Ok(StateRun { report, brought_news, newer: true, refused: false });
+    }
   };
   let local = store::snapshot(db, now)?;
-  let merged = merge::merge(&local, &remote, now);
+  let stamp = shared_doc::stamp_for(mode, who);
+  let merged = shared_doc::merged_for(&local, remote.as_ref(), &there, &stamp, now);
+  let brought_news = remote.as_ref().is_some_and(|remote| shared_doc::brings(&local, remote, now));
 
   // Publish before moving files: if the copy stage fails halfway, the other
   // device still learns what exists rather than nothing at all.
   write_state(root, &merged)?;
+  if let Some(owner) = merged.owner.as_deref() {
+    if mark.as_deref() != Some(owner) {
+      write_mark(root, owner)?;
+    }
+  }
 
   let applied = store::apply(db, &merged)?;
-  let mut report = SyncReport {
+  let report = SyncReport {
     entries_updated: applied.updated,
     books_removed: applied.removed.len(),
+    books_pending: applied.missing.len(),
     ..SyncReport::default()
   };
+  Ok(StateRun { report, brought_news, newer: false, refused: false })
+}
 
+/// The files half, over this library as it is here: publishes the books the
+/// folder lacks, fetches the ones this device lacks, and (with `may_delete`)
+/// takes away the files of books removed. A folder that holds another
+/// account's library is never cleared of anything (`may_delete` false).
+pub fn sync_files(db: &Database, root: &Path, may_delete: bool) -> Result<SyncReport> {
+  fs::create_dir_all(root)?;
+  let _lock = FolderLock::acquire(root)?;
+  let books_root = root.join(BOOKS_DIR);
+  fs::create_dir_all(&books_root)?;
+  let mut report = SyncReport::default();
+
+  let library = store::library_files(db)?;
   // A tombstoned book's bytes should not linger in the shared folder.
-  for entry in merged.books.iter().filter(|entry| entry.is_deleted()) {
-    let _ = fs::remove_file(books_root.join(entry.remote_name()));
+  if may_delete {
+    for (entry, _) in library.iter().filter(|(entry, _)| entry.is_deleted()) {
+      let _ = fs::remove_file(books_root.join(entry.remote_name()));
+    }
   }
 
   let mut answers = large::Answers::load(db);
-  for entry in merged.live_books() {
+  for (entry, local_path) in library.iter().filter(|(entry, _)| !entry.is_deleted()) {
     let shared = books_root.join(entry.remote_name());
-    let local_path = store::local_path_for(entry)?;
 
     match (local_path.exists(), shared.exists()) {
       // Ours and not theirs: publish it, once, for good. A large file only
       // with the reader's word (`sync::large`).
-      (true, false) => match large::decide(large::file_bytes(&local_path), answers.get(&entry.id)) {
+      (true, false) => match large::decide(large::file_bytes(local_path), answers.get(&entry.id)) {
         Decision::Send => {
-          if copy_atomically(&local_path, &shared).is_ok() {
+          if copy_atomically(local_path, &shared).is_ok() {
             report.books_uploaded += 1;
           }
         }
@@ -190,14 +274,14 @@ pub fn sync(db: &Database, root: &Path, now: &str) -> Result<SyncReport> {
         if let Some(parent) = local_path.parent() {
           fs::create_dir_all(parent)?;
         }
-        if copy_atomically(&shared, &local_path).is_ok() {
+        if copy_atomically(&shared, local_path).is_ok() {
           report.books_downloaded += 1;
         } else {
           report.books_pending += 1;
         }
       }
       (false, false) => report.books_pending += 1,
-      (true, true) => answers.found_backed_up(&entry.id, large::file_bytes(&local_path))
+      (true, true) => answers.found_backed_up(&entry.id, large::file_bytes(local_path))
     }
   }
   answers.save(db)?;
@@ -205,6 +289,24 @@ pub fn sync(db: &Database, root: &Path, now: &str) -> Result<SyncReport> {
   Ok(report)
 }
 
+/// Both halves as a signed-out device runs them: the state, then the files
+/// (none when a later version wrote the folder, or it is another's).
+#[cfg(test)]
+pub fn sync(db: &Database, root: &Path, now: &str) -> Result<SyncReport> {
+  let run = sync_state(db, root, now, &Who::signed_out())?;
+  if run.refused {
+    return Err(anyhow!(owner::FOLDER_REFUSED));
+  }
+  let mut report = run.report;
+  if !run.newer {
+    let files = sync_files(db, root, true)?;
+    report.books_uploaded += files.books_uploaded;
+    report.books_downloaded += files.books_downloaded;
+    report.books_held += files.books_held;
+    report.books_pending = files.books_pending;
+  }
+  Ok(report)
+}
 /// Copies via a temporary file in the destination directory, so a reader never
 /// opens a partially written book.
 fn copy_atomically(from: &Path, to: &Path) -> Result<()> {
@@ -575,5 +677,90 @@ mod tests {
     assert!(!raw.contains("localPath"));
     assert!(!raw.contains("coverUrl"));
     assert!(raw.contains("\"id\": \"aaa\""));
+  }
+
+  // ---- whose library the folder holds ---------------------------------------
+
+  const A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+  fn mark_in(root: &Path) -> Option<String> {
+    fs::read_to_string(root.join(OWNER_FILE)).ok().map(|line| line.trim().to_string())
+  }
+
+  /// Signed in, the folder is stamped (document and sidecar); another
+  /// account's device leaves it alone; an older Leaflet's rewrite drops the
+  /// document's owner and the sidecar still says it.
+  #[test]
+  fn a_folder_is_marked_and_another_accounts_library_is_left_alone() {
+    let scratch = Scratch::new("owner-gate");
+    let a = memory_db();
+    a.upsert_book(&book("aaa", 0.2, "2026-08-01T10:00:00+00:00")).expect("import");
+    let run = sync_state(&a, &scratch.path, "2026-08-01T10:00:01+00:00", &Who::signed_in(A)).expect("claim");
+    assert!(!run.refused);
+    assert_eq!(store_owner(&scratch.path).as_deref(), Some(A));
+    assert_eq!(mark_in(&scratch.path).as_deref(), Some(A));
+    assert_eq!(owner::get(&a).as_deref(), Some(A));
+    let written = fs::read(scratch.path.join(STATE_FILE)).expect("doc");
+
+    // Another account's device, signed in or out: nothing read, nothing written.
+    let b = memory_db();
+    b.upsert_book(&book("bbb", 0.2, "2026-08-01T11:00:00+00:00")).expect("import");
+    assert!(sync_state(&b, &scratch.path, "2026-08-01T11:00:01+00:00", &Who::signed_in(B)).expect("run").refused);
+    owner::claim_if_unowned(&b, B).expect("B's");
+    assert!(sync(&b, &scratch.path, "2026-08-01T11:00:02+00:00").is_err());
+    assert_eq!(fs::read(scratch.path.join(STATE_FILE)).expect("doc"), written);
+    assert_eq!(titles(&b), vec!["bbb".to_string()]);
+
+    // What 1.5.0 to 1.5.2 do: rewrite the document without the owner.
+    let path = scratch.path.join(STATE_FILE);
+    let mut doc: serde_json::Value = serde_json::from_slice(&fs::read(&path).expect("read")).expect("json");
+    doc.as_object_mut().expect("object").remove("owner");
+    fs::write(&path, serde_json::to_vec_pretty(&doc).expect("json")).expect("write");
+    assert_eq!(store_owner(&scratch.path).as_deref(), Some(A), "the sidecar says it");
+    assert!(sync_state(&b, &scratch.path, "2026-08-01T12:00:00+00:00", &Who::signed_out()).expect("run").refused);
+
+    // A signed-out library nobody claimed takes A from the sidecar, and the
+    // document has its owner back.
+    let phone = memory_db();
+    sync(&phone, &scratch.path, "2026-08-01T12:00:01+00:00").expect("exchange");
+    assert_eq!(owner::get(&phone).as_deref(), Some(A));
+    assert_eq!(titles(&phone), vec!["aaa".to_string()]);
+    let back: SyncDoc = serde_json::from_slice(&fs::read(&path).expect("read")).expect("json");
+    assert_eq!(back.owner.as_deref(), Some(A));
+  }
+
+  /// The files half works over the library here: what the folder lacks goes
+  /// up, what this device lacks comes down, and a removed book's file goes
+  /// only when the folder's library is this one's (`may_delete`).
+  #[test]
+  fn the_files_half_follows_this_library_and_deletes_only_when_it_may() {
+    let scratch = Scratch::new("files-half");
+    let shared = scratch.path.join("shared");
+    let here = scratch.path.join("here");
+    fs::create_dir_all(shared.join(BOOKS_DIR)).expect("dir");
+    fs::create_dir_all(&here).expect("dir");
+    let at = |id: &str| BookRecord { local_path: here.join(format!("{id}.epub")).to_string_lossy().to_string(), ..book(id, 0.0, "2026-08-01T10:00:00+00:00") };
+
+    let db = memory_db();
+    db.upsert_book(&at("aaa")).expect("on this device");
+    fs::write(here.join("aaa.epub"), b"aaa bytes").expect("file");
+    db.upsert_book(&at("ccc")).expect("not on this device yet");
+    fs::write(shared.join(BOOKS_DIR).join("ccc.epub"), b"ccc bytes").expect("theirs");
+    db.upsert_book(&at("zzz")).expect("removed");
+    db.delete_book("zzz", "2026-08-01T10:05:00+00:00").expect("delete");
+    fs::write(shared.join(BOOKS_DIR).join("zzz.epub"), b"zzz bytes").expect("a removed book's file");
+
+    let report = sync_files(&db, &shared, false).expect("files only");
+    assert_eq!(report.books_uploaded, 1);
+    assert_eq!(report.books_downloaded, 1);
+    assert_eq!(fs::read(shared.join(BOOKS_DIR).join("aaa.epub")).expect("uploaded"), b"aaa bytes");
+    assert_eq!(fs::read(here.join("ccc.epub")).expect("downloaded"), b"ccc bytes");
+    assert!(shared.join(BOOKS_DIR).join("zzz.epub").exists(), "not this library's to clear");
+
+    let report = sync_files(&db, &shared, true).expect("its own");
+    assert_eq!((report.books_uploaded, report.books_downloaded), (0, 0));
+    assert!(!shared.join(BOOKS_DIR).join("zzz.epub").exists());
+    assert!(!scratch.path.join("shared").join(STATE_FILE).exists(), "the files half writes no state");
   }
 }

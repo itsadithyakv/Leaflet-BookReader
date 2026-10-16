@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { Book, BookFilter } from "@shared/models/book";
-import { EMPTY_SYNC_STATUS, SYNC_UPDATE_NEEDED, type DriveSyncStatus, type SyncStatus } from "@shared/sync/types";
+import { EMPTY_SYNC_STATUS, SYNC_UPDATE_NEEDED, type DriveSyncStatus, type SyncReport, type SyncStatus } from "@shared/sync/types";
 import { bookService, type FinishedGone, type ImportOutcome } from "../services/bookService";
 import { syncService } from "../services/syncService";
 import { socialService } from "../services/socialService";
@@ -37,6 +37,14 @@ type LibraryState = {
    * (hooks/useLargeBookPrompt.ts asks, and sets this back to none).
    */
   largeHeld: number;
+  /**
+   * A fresh library met what the Leaflet account held from before: how many
+   * books that is, while the reader is asked whether to use it
+   * (components/sync/AccountHoldsSheet.tsx). Null when nothing is asked.
+   */
+  accountHolds: number | null;
+  /** The reader answered, or put the question away. */
+  dismissAccountHolds: () => void;
   metadataTotal: number;
   metadataDone: number;
   syncStatus: DriveSyncStatus;
@@ -66,7 +74,8 @@ type LibraryState = {
   clearDriveCredentials: () => Promise<void>;
   setSyncFolder: (path: string | null) => Promise<void>;
   setCloudApi: (url: string) => Promise<void>;
-  syncNow: () => Promise<void>;
+  /** What the run did; rejects with the reason it failed. */
+  syncNow: () => Promise<SyncReport>;
   /** Backs up soon, coalescing with any other change that lands meanwhile. */
   requestBackup: () => void;
   ensureBookFile: (book: Book) => Promise<Book>;
@@ -74,8 +83,6 @@ type LibraryState = {
   refreshMissingMetadata: (books?: Book[]) => Promise<void>;
   /** See `bookService.setSeries`. */
   setSeries: (id: string, series: string | null, seriesIndex: number | null) => Promise<void>;
-  /** See `syncService.setAccountBackup`. Turning it on backs up at once. */
-  setAccountBackup: (on: boolean) => Promise<void>;
   /** "Mark as finished" (true) or "Mark as not started" (false). */
   setBookFinished: (id: string, finished: boolean) => Promise<void>;
   /** `position` left undefined keeps the book's current CFI. */
@@ -119,6 +126,10 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   metadataRefreshing: false,
   lookupTried: {},
   largeHeld: 0,
+  accountHolds: null,
+  dismissAccountHolds() {
+    set({ accountHolds: null });
+  },
   metadataTotal: 0,
   metadataDone: 0,
   syncStatus: "idle",
@@ -311,12 +322,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       await get().syncNow();
     }
   },
-  async setAccountBackup(on) {
-    set({ sync: await syncService.setAccountBackup(on) });
-    if (on) {
-      await get().syncNow();
-    }
-  },
   requestBackup() {
     scheduleSync(set, get);
   },
@@ -329,12 +334,19 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       // drift apart.
       const [books, status, finishedGone] = await Promise.all([bookService.list(), syncService.status(), bookService.finishedRemoved().catch(() => get().finishedGone)]);
       set({ books, finishedGone, sync: status, syncStatus: "success", largeHeld: report.booksHeld ?? 0 });
+      // This library is another Leaflet account's: nothing ran, by design,
+      // and that is no failure (the Account card says so).
+      if (report.ownerPaused) set({ syncStatus: "idle" });
+      // A fresh library, and the account held a library from before: nothing
+      // was merged, and the reader is asked (AccountHoldsSheet).
+      if (typeof report.accountHolds === "number") set({ syncStatus: "idle", accountHolds: report.accountHolds });
       // A newer Leaflet wrote the library: what it holds has arrived, and
       // nothing of this device's went up. Said where a failed sync is said.
       if (report.updateNeeded) set({ syncStatus: "error", syncError: SYNC_UPDATE_NEEDED });
       // Books another device added arrive without covers (a cover is this
       // device's own file, never synced): they are looked up as an import's are.
       if (report.entriesUpdated > 0 && !get().metadataRefreshing) void get().refreshMissingMetadata(books.filter((book) => !book.coverUrl));
+      return report;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       set({ syncStatus: "error", syncError: message });
@@ -433,6 +445,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       metadataRefreshing: false,
       lookupTried: {},
       largeHeld: 0,
+      accountHolds: null,
       metadataTotal: 0,
       metadataDone: 0,
       syncStatus: "idle",
