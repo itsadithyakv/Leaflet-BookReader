@@ -2379,10 +2379,16 @@
           "markdownDescription": "Denies the save command without any pre-configured scope."
         },
         {
-          "description": "Default plugin permissions.\n#### This default permission set includes:\n\n- `allow-keep-awake`\n- `allow-lock-rotation`\n- `allow-hide-system-bars`\n- `allow-pick-files`\n- `allow-share-target`\n- `allow-share-file`\n- `allow-share-text`\n- `allow-open-store`\n- `allow-request-review`\n- `allow-hold-for-sign-in`\n- `allow-volume-page-turns`",
+          "description": "Default plugin permissions.\n#### This default permission set includes:\n\n- `allow-keep-awake`\n- `allow-lock-rotation`\n- `allow-hide-system-bars`\n- `allow-pick-files`\n- `allow-share-target`\n- `allow-share-file`\n- `allow-share-text`\n- `allow-open-store`\n- `allow-request-review`\n- `allow-hold-for-sign-in`\n- `allow-set-continue-shortcut`\n- `allow-clear-continue-shortcut`\n- `allow-take-continue-shortcut`\n- `allow-volume-page-turns`\n- `allow-read-aloud`\n- `allow-set-brightness`",
           "type": "string",
           "const": "leaflet-device:default",
-          "markdownDescription": "Default plugin permissions.\n#### This default permission set includes:\n\n- `allow-keep-awake`\n- `allow-lock-rotation`\n- `allow-hide-system-bars`\n- `allow-pick-files`\n- `allow-share-target`\n- `allow-share-file`\n- `allow-share-text`\n- `allow-open-store`\n- `allow-request-review`\n- `allow-hold-for-sign-in`\n- `allow-volume-page-turns`"
+          "markdownDescription": "Default plugin permissions.\n#### This default permission set includes:\n\n- `allow-keep-awake`\n- `allow-lock-rotation`\n- `allow-hide-system-bars`\n- `allow-pick-files`\n- `allow-share-target`\n- `allow-share-file`\n- `allow-share-text`\n- `allow-open-store`\n- `allow-request-review`\n- `allow-hold-for-sign-in`\n- `allow-set-continue-shortcut`\n- `allow-clear-continue-shortcut`\n- `allow-take-continue-shortcut`\n- `allow-volume-page-turns`\n- `allow-read-aloud`\n- `allow-set-brightness`"
+        },
+        {
+          "description": "Enables the clear_continue_shortcut command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:allow-clear-continue-shortcut",
+          "markdownDescription": "Enables the clear_continue_shortcut command without any pre-configured scope."
         },
         {
           "description": "Enables the hide_system_bars command without any pre-configured scope.",
@@ -2421,10 +2427,28 @@
           "markdownDescription": "Enables the pick_files command without any pre-configured scope."
         },
         {
+          "description": "Enables the read_aloud command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:allow-read-aloud",
+          "markdownDescription": "Enables the read_aloud command without any pre-configured scope."
+        },
+        {
           "description": "Enables the request_review command without any pre-configured scope.",
           "type": "string",
           "const": "leaflet-device:allow-request-review",
           "markdownDescription": "Enables the request_review command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_brightness command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:allow-set-brightness",
+          "markdownDescription": "Enables the set_brightness command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_continue_shortcut command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:allow-set-continue-shortcut",
+          "markdownDescription": "Enables the set_continue_shortcut command without any pre-configured scope."
         },
         {
           "description": "Enables the share_file command without any pre-configured scope.",
@@ -2445,10 +2469,22 @@
           "markdownDescription": "Enables the share_text command without any pre-configured scope."
         },
         {
+          "description": "Enables the take_continue_shortcut command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:allow-take-continue-shortcut",
+          "markdownDescription": "Enables the take_continue_shortcut command without any pre-configured scope."
+        },
+        {
           "description": "Enables the volume_page_turns command without any pre-configured scope.",
           "type": "string",
           "const": "leaflet-device:allow-volume-page-turns",
           "markdownDescription": "Enables the volume_page_turns command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the clear_continue_shortcut command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:deny-clear-continue-shortcut",
+          "markdownDescription": "Denies the clear_continue_shortcut command without any pre-configured scope."
         },
         {
           "description": "Denies the hide_system_bars command without any pre-configured scope.",
@@ -2487,10 +2523,28 @@
           "markdownDescription": "Denies the pick_files command without any pre-configured scope."
         },
         {
+          "description": "Denies the read_aloud command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:deny-read-aloud",
+          "markdownDescription": "Denies the read_aloud command without any pre-configured scope."
+        },
+        {
           "description": "Denies the request_review command without any pre-configured scope.",
           "type": "string",
           "const": "leaflet-device:deny-request-review",
           "markdownDescription": "Denies the request_review command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_brightness command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:deny-set-brightness",
+          "markdownDescription": "Denies the set_brightness command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_continue_shortcut command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:deny-set-continue-shortcut",
+          "markdownDescription": "Denies the set_continue_shortcut command without any pre-configured scope."
         },
         {
           "description": "Denies the share_file command without any pre-configured scope.",
@@ -2509,6 +2563,12 @@
           "type": "string",
           "const": "leaflet-device:deny-share-text",
           "markdownDescription": "Denies the share_text command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the take_continue_shortcut command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:deny-take-continue-shortcut",
+          "markdownDescription": "Denies the take_continue_shortcut command without any pre-configured scope."
         },
         {
           "description": "Denies the volume_page_turns command without any pre-configured scope.",

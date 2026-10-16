@@ -70,6 +70,29 @@ export const android = {
     await call("volume_page_turns", { on });
   },
 
+  /** The app icon's "Continue <book>" shortcut (Shortcuts.kt; `platform/continueShortcut.ts` decides it). */
+  async setContinueShortcut(shortcut: { bookId: string; shortLabel: string; longLabel: string; coverDataUrl: string | null }): Promise<void> {
+    await call("set_continue_shortcut", shortcut);
+  },
+
+  async clearContinueShortcut(): Promise<void> {
+    await call("clear_continue_shortcut");
+  },
+
+  /** The book a tapped "Continue" shortcut asked for, once; null when none. */
+  async takeContinueShortcut(): Promise<string | null> {
+    return (await call<{ bookId?: string }>("take_continue_shortcut"))?.bookId ?? null;
+  },
+
+  /**
+   * The window's brightness while a book is open (0.01 to 1), or null for the
+   * system's again (Brightness.kt). Answers the phone's own setting (0 to 1)
+   * for a swipe to start from; null off Android.
+   */
+  async setBrightness(level: number | null): Promise<{ system?: number } | null> {
+    return call<{ system?: number }>("set_brightness", { level });
+  },
+
   /** Which way up the app may be: with the phone, or held one way. */
   async lockRotation(lock: RotationLock): Promise<void> {
     await call("lock_rotation", { lock });
@@ -102,6 +125,11 @@ export const android = {
   /** The share sheet for a line of text (a quote, a link). */
   async shareText(text: string, title?: string): Promise<void> {
     await call("share_text", { text, title: title ?? null });
+  },
+
+  /** Reading aloud with Android's text-to-speech (ReadAloud.kt): one command, the step named by `op`. */
+  async readAloud<T = unknown>(op: string, args?: Record<string, unknown>): Promise<T | null> {
+    return call<T>("read_aloud", { ...args, op });
   },
 
   /** Leaflet's page in Google Play (to rate it, or update it). */

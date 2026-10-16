@@ -4,6 +4,7 @@ import { libraryOwnerService } from "../services/libraryOwnerService";
 import { errorMessage } from "../services/accountService";
 import { useHabitStore } from "./habitStore";
 import { useLibraryStore } from "./libraryStore";
+import { clearContinueShortcut } from "../platform/continueShortcut";
 
 /** Said when another library is asked for while a focus session runs. */
 export const SWITCH_REFUSED_SESSION = "Finish your session first.";
@@ -146,6 +147,8 @@ export const useLibraryOwnerStore = create<LibraryOwnerState>((set, get) => ({
       toast(errorMessage(cause, "Couldn't open that library."));
       return false;
     }
+    // The icon's "Continue" shortcut named the old library's book.
+    await clearContinueShortcut().catch(() => undefined);
     // Every store holds the old library: the app starts over on the new one.
     window.location.reload();
     return true;

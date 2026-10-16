@@ -1,8 +1,10 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import { Gamepad2, House } from "lucide-react";
+import { DoorOpen, Gamepad2 } from "lucide-react";
 import { useBaseStore } from "../../../../store/baseStore";
 import { BaseScreen, type CampGarden } from "./BaseScreen";
 import { TipLayer } from "./Tips";
+import { HollowCoach } from "../../onboarding/HollowCoach";
+import { useCoachStore } from "../../onboarding/coachStore";
 
 type HollowPlaceProps = {
   skin: string;
@@ -55,17 +57,19 @@ export const HollowPlace = ({ skin, outfit, mood, onInside, onArcade, garden, le
               </button>
               <button
                 type="button"
-                className="tactile-button tactile-button-primary flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold"
-                title="Into the burrow: Pip's rooms, her things, and the shop. Twice on the burrow does the same."
-                onClick={onInside}
+                className="pip-house-key tactile-button tactile-button-primary flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold"
+                title="Pip's rooms, her things, and the shop. A tap on the burrow's door goes in too."
+                // Pip walks in ahead, as from a tap on her door (onboarding/useBurrowDoor.ts).
+                onClick={() => useCoachStore.getState().askEnter()}
               >
-                <House size={14} aria-hidden /> Go inside
+                <DoorOpen size={14} aria-hidden /> Pip's house
               </button>
             </>
           }
         />
       </div>
       <TipLayer rootRef={rootRef} />
+      <HollowCoach rootRef={rootRef} skin={skin} outfit={outfit} />
     </div>
   );
 };

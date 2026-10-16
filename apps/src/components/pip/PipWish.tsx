@@ -11,6 +11,7 @@ import { PipSprite } from "../PipSprite";
 import { PixelImage } from "./PixelImage";
 import { shortfall } from "./shopParts";
 import { UiIcon } from "../UiIcon";
+import "./quietWish.css";
 
 /** The day whose granted wish this device has celebrated (its own record, never a claim). */
 const SEEN_KEY = "leaflet.pip.wishSeen";
@@ -76,7 +77,7 @@ export type PipWishProps = {
 export const PipWish = ({ onGrant, counter = defaultCounter, hearts = defaultHearts, compact = false, className }: PipWishProps) => {
   const overview = usePipWardrobeStore((state) => state.overview);
   const view = wishView(overview?.wish, overview?.wallet.balance ?? 0, overview?.garden);
-  const bubbleRef = useRef<HTMLDivElement | null>(null);
+  const bubbleRef = useRef<HTMLElement | null>(null);
   const live = useRef({ counter, hearts });
   live.current = { counter, hearts };
 
@@ -118,16 +119,47 @@ export const PipWish = ({ onGrant, counter = defaultCounter, hearts = defaultHea
   const lacking = shortfall(view.price, overview?.wallet.balance ?? 0);
   const blocked = view.needsPlot || lacking !== null;
   const note = view.granted
-    ? `Granted today: +${view.seeds} seeds, and a happy Pip.`
+    ? `Granted: +${view.seeds} seeds, and a happy Pip.`
     : view.needsPlot
       ? "When a plot is free: pick what's ripe first."
       : lacking
         ? `${lacking.short} more seeds: about ${lacking.minutes} minutes of focused reading.`
-        : `Grant it today: +${view.seeds} seeds, and a happy Pip.`;
+        : `Grant it: +${view.seeds} seeds, and a happy Pip.`;
+
+  // In the HUD's top bar it is a gift to notice, never a chore: the thing Pip would like, small, and what she
+  // says behind it. A tap grants it when it can be; nothing counts the days it was not (since 1.5.5).
+  if (compact) {
+    const said = `${view.granted ? grantedLine(view.day) : view.line} ${note}`;
+    return (
+      <button
+        ref={(node) => {
+          bubbleRef.current = node;
+        }}
+        type="button"
+        className={`pip-wish-quiet ${className ?? ""}`}
+        data-granted={view.granted || undefined}
+        aria-label={view.granted ? `Pip's wish, granted: ${view.name}` : `Pip's wish: ${view.name}. ${note}`}
+        aria-disabled={view.granted || blocked || !onGrant || undefined}
+        title={said}
+        onClick={() => {
+          if (!view.granted && !blocked && onGrant) onGrant(view);
+        }}
+      >
+        <WishArt wish={view} small />
+        {view.granted && (
+          <span className="pip-wish-check">
+            <UiIcon name="check" size={9} strokeWidth={3} />
+          </span>
+        )}
+      </button>
+    );
+  }
 
   return (
     <div
-      ref={bubbleRef}
+      ref={(node) => {
+        bubbleRef.current = node;
+      }}
       className={`pip-wish ${compact ? "is-compact" : ""} ${className ?? ""}`}
       data-granted={view.granted || undefined}
       role="group"
@@ -143,7 +175,7 @@ export const PipWish = ({ onGrant, counter = defaultCounter, hearts = defaultHea
         )}
       </span>
       <span className="pip-wish-text">
-        <span className="pip-wish-label">{view.granted ? "Wish granted" : "Pip's wish today"}</span>
+        <span className="pip-wish-label">{view.granted ? "Wish granted" : "Pip's wish"}</span>
         <span className="pip-wish-line">{view.granted ? grantedLine(view.day) : view.line}</span>
         <span className={compact ? "sr-only" : "pip-wish-note"}>{note}</span>
       </span>

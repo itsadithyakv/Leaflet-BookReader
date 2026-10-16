@@ -1,0 +1,169 @@
+/* Pip's guided first session (Coach.tsx) and the burrow's door (DoorIris.tsx).
+   Drawn like the rest of Pip's world: a hard ink line with notched corners,
+   her colours, and motion a whole pixel at a time. Nothing small is scaled
+   or turned for "life": the paw bobs by whole pixels and the outline only
+   glows brighter and fainter. */
+
+.pip-coach {
+  position: fixed;
+  z-index: 60;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* Over the shop and its question: it only points, and keeps nothing from them. */
+.pip-coach.is-float {
+  z-index: 95;
+  overflow: visible;
+}
+
+/* The dimming: four pieces round the hole (or one over everything). */
+.pip-coach-scrim {
+  position: absolute;
+  background: rgba(15, 17, 14, 0.5);
+}
+
+/* Its outline: butter yellow on an ink line, the corners notched; it glows in four steps. */
+.pip-coach-ring {
+  position: absolute;
+  box-shadow:
+    0 -3px 0 0 var(--whim-butter, #ffd86b),
+    0 3px 0 0 var(--whim-butter, #ffd86b),
+    -3px 0 0 0 var(--whim-butter, #ffd86b),
+    3px 0 0 0 var(--whim-butter, #ffd86b),
+    0 -5px 0 0 var(--hud-line),
+    0 5px 0 0 var(--hud-line),
+    -5px 0 0 0 var(--hud-line),
+    5px 0 0 0 var(--hud-line);
+  animation: pip-coach-glow 1.2s steps(1) infinite;
+}
+
+@keyframes pip-coach-glow {
+  0% {
+    opacity: 1;
+  }
+  25% {
+    opacity: 0.8;
+  }
+  50% {
+    opacity: 0.55;
+  }
+  75% {
+    opacity: 0.8;
+  }
+}
+
+.pip-coach-paw {
+  position: absolute;
+  line-height: 0;
+  filter: drop-shadow(0 3px 0 rgba(31, 42, 34, 0.25));
+  animation: pip-coach-bob 0.9s steps(1) infinite;
+}
+
+.pip-coach-paw.is-up {
+  animation-name: pip-coach-bob-up;
+}
+
+/* Toward what it points at and back: a pixel of its own (3 CSS pixels) at a time. */
+@keyframes pip-coach-bob {
+  0% {
+    transform: translateY(0);
+  }
+  35% {
+    transform: translateY(3px);
+  }
+  55% {
+    transform: translateY(6px);
+  }
+  75% {
+    transform: translateY(3px);
+  }
+}
+
+@keyframes pip-coach-bob-up {
+  0% {
+    transform: translateY(0);
+  }
+  35% {
+    transform: translateY(-3px);
+  }
+  55% {
+    transform: translateY(-6px);
+  }
+  75% {
+    transform: translateY(-3px);
+  }
+}
+
+.pip-coach-bubble {
+  position: absolute;
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  width: max-content;
+  max-width: min(340px, calc(100vw - 24px));
+  pointer-events: auto;
+}
+
+.pip-coach-face {
+  flex: none;
+  line-height: 0;
+}
+
+.pip-coach-bubble .pip-say {
+  max-width: 280px;
+}
+
+/* Nothing in particular to point at: no tail. */
+.pip-coach-bubble .pip-say.is-tailless::after {
+  display: none;
+}
+
+.pip-coach-keys {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.pip-coach-skip {
+  margin-left: auto;
+  padding: 2px 4px;
+  color: #55604f;
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+.pip-coach-skip:hover {
+  color: #1c261f;
+}
+
+/* While the tour runs, it is the one voice: Pip's usual bubble and the corner's way in wait. */
+.pip-hollow-place.is-coached .pip-camp-say,
+.pip-hollow-place.is-coached .pip-house-key {
+  visibility: hidden;
+}
+
+/* Through the burrow's door: the page closes to a circle and opens from it. */
+.pip-door-iris {
+  position: fixed;
+  inset: 0;
+  z-index: 96;
+  pointer-events: none;
+}
+
+@media (pointer: coarse) {
+  .pip-coach-bubble .pip-say {
+    max-width: 250px;
+    font-size: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pip-coach-ring,
+  .pip-coach-paw {
+    animation: none;
+  }
+}

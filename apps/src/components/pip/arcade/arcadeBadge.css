@@ -1,0 +1,37 @@
+/* The arcade's paid runs (GamePicker): an acorn and a number on the corner of a game's picture. */
+.pip-arcade-card-screen {
+  position: relative;
+}
+
+.pip-arcade-pays {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 6px 2px 4px;
+  background: var(--whim-butter);
+  color: #1c261f;
+  font-size: 0.75rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line);
+}
+
+/* On a phone on its side, the arcade's name keeps clear of the status bar. */
+@media (max-height: 520px) {
+  .pip-arcade .pip-arcade-head {
+    padding-top: calc(6px + var(--inset-top, 0px));
+  }
+}
+
+@media (min-height: 521px) {
+  .pip-arcade .pip-arcade-head {
+    padding-top: max(18px, calc(var(--inset-top, 0px) + 8px));
+  }
+}

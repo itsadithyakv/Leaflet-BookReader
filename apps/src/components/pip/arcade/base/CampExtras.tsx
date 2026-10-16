@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
-import { campNews, campWaits, seasonOf, type BaseState } from "../../../../pip/base/rules";
+import { campNews, campWaits, seasonOf, settle } from "../../../../pip/base/rules";
 import { getDateKey } from "../../../../services/habitService";
+import { campBegun } from "../../../../pip/base/welcome";
 import type { CampSummary } from "../../../../services/socialService";
 import { minutesRead, nowFrom, useBaseStore } from "../../../../store/baseStore";
 import { useHabitStore } from "../../../../store/habitStore";
@@ -14,8 +15,8 @@ import { lookOfSummary, paintCamp } from "./scene";
  * friend's camp on their card.
  */
 
-/** A camp the reader has done something with: one that was only ever looked at is not spoken for. */
-const begun = (base: BaseState | null): base is BaseState => Boolean(base && (base.quest > 0 || base.stats.gathered > 0 || base.jobs.length > 0 || base.levels.store > 0));
+/** A camp the reader has done something with, or been welcomed to: one that was only ever looked at is not spoken for. */
+const begun = campBegun;
 
 /** The camp, read once for whoever asks from outside the arcade. */
 const useCamp = () => {
@@ -29,8 +30,9 @@ const useCamp = () => {
 /** At the end of a session: what the reading just did for the camp. Nothing for a reader who has no camp going. */
 export const CampLine = () => {
   const base = useCamp();
-  const minutes = useHabitStore((state) => minutesRead(state.snapshot));
-  const news = begun(base) ? campNews(base, minutes) : null;
+  const snapshot = useHabitStore((state) => state.snapshot);
+  // As the camp is now, with the reading just done (a parcel it sent is on the path), though nobody has opened it since.
+  const news = useMemo(() => (begun(base) ? campNews(settle(base, nowFrom(snapshot)), minutesRead(snapshot)) : null), [base, snapshot]);
   if (!news) {
     return null;
   }
@@ -45,7 +47,11 @@ export const CampLine = () => {
 export const useCampWaits = (): boolean => {
   const base = useCamp();
   const snapshot = useHabitStore((state) => state.snapshot);
-  return useMemo(() => begun(base) && campWaits(base, nowFrom(snapshot)), [base, snapshot]);
+  return useMemo(() => {
+    if (!begun(base)) return false;
+    const now = nowFrom(snapshot);
+    return campWaits(settle(base, now), now);
+  }, [base, snapshot]);
 };
 
 /**

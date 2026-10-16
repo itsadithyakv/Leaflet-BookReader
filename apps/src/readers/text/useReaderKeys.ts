@@ -16,7 +16,7 @@ import type { Later, WithSession } from "./scope";
  * The keyboard: which key does what (readers/readerKeys.ts), and what Escape
  * closes first (readers/escapeOrder.ts).
  */
-export const useReaderKeys = (reader: WithSession & Later<"people" | "chromeBackHides" | "hideChrome">) => {
+export const useReaderKeys = (reader: WithSession & Later<"people" | "chromeBackHides" | "hideChrome" | "readAloud">) => {
   const {
     addBookmarkRef, autoScrollActive, autoScrollActiveRef, autoScrollSpeedRef, autoScrollYieldUntilRef,
     bookmarkPanelOpen, clearSelection, closeNoteRef, closeSearch, contentsOver, contentsPeekRef, exitGuard,
@@ -222,6 +222,12 @@ export const useReaderKeys = (reader: WithSession & Later<"people" | "chromeBack
             setReadingPaused((prev) => !prev);
           }
           return;
+        case "readAloud":
+          // Starts from the first sentence on screen; then pauses and carries on (readers/readAloud).
+          if (!event.repeat) {
+            reader.readAloud.toggle();
+          }
+          return;
         default:
           return;
       }
@@ -265,7 +271,8 @@ export const useReaderKeys = (reader: WithSession & Later<"people" | "chromeBack
       chapters: contentsOver,
       selection: selection !== null,
       speedRead: readingMode === "speed",
-      playing: (readingMode === "standard" && autoScrollActive) || (readingMode === "smart" && !readingPaused)
+      playing:
+        (readingMode === "standard" && autoScrollActive) || (readingMode === "smart" && !readingPaused) || Boolean(reader.readAloud?.active)
     });
 
   escapeRef.current = (event) => {
@@ -355,7 +362,10 @@ export const useReaderKeys = (reader: WithSession & Later<"people" | "chromeBack
         requestReadingMode("standard");
         break;
       case "playing":
-        if (readingMode === "standard") {
+        if (reader.readAloud?.active) {
+          // Reading aloud: Escape (or Back) stops it.
+          reader.readAloud.stop();
+        } else if (readingMode === "standard") {
           setAutoScrollActive(false);
         } else {
           setReadingPaused(true);

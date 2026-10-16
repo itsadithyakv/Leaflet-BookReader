@@ -1,0 +1,299 @@
+/* ---- The goal ladder (GoalLadder.tsx) -------------------------------------------------------
+   One chip in the camp's row, and Pip's list under it on paper: a hard ink line with notched
+   corners, the HUD's colours. Nothing in it moves on hover but what is inside a control. */
+
+.pip-ladder {
+  position: relative;
+  display: inline-flex;
+}
+
+.pip-ladder-chip {
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.pip-ladder-chip:hover .pip-ladder-next strong,
+.pip-ladder-chip[aria-expanded="true"] .pip-ladder-next strong {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}
+
+.pip-ladder-chip:focus-visible {
+  outline: 2px solid var(--hud-line);
+  outline-offset: 2px;
+}
+
+/* While Pip shows a newcomer round, the chip is there but says nothing to them. */
+.pip-ladder-chip.is-quiet {
+  cursor: default;
+  opacity: 0.55;
+}
+
+/* How far the group has got: a little bar of whole pixels. */
+.pip-ladder-pips {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.pip-ladder-pip {
+  width: 6px;
+  height: 9px;
+  background: var(--hud-face);
+  box-shadow: inset 0 0 0 1.5px var(--hud-ink-soft);
+}
+
+.pip-ladder-pip.is-done {
+  background: var(--whim-leaf);
+  box-shadow: inset 0 0 0 1.5px var(--hud-line);
+}
+
+.pip-ladder-count {
+  font-weight: 700;
+}
+
+.pip-ladder-next-word {
+  color: var(--hud-ink-soft);
+}
+
+.pip-ladder-chip.is-bad .pip-ladder-next-word {
+  color: inherit;
+}
+
+.pip-ladder-reward {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-weight: 700;
+}
+
+/* ---- Pip's list ---- */
+.pip-ladder-card {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  z-index: 8;
+  display: flex;
+  width: min(340px, calc(100vw - 24px));
+  max-height: min(420px, calc(100dvh - 90px - var(--inset-top, 0px) - var(--inset-bottom, 0px)));
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  padding: 10px 12px 12px;
+  background: var(--hud-face);
+  color: var(--hud-ink);
+  font-size: 0.8125rem;
+  white-space: normal;
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 6px 0 0 var(--hud-drop);
+  animation: pip-ladder-in 180ms steps(3, end);
+}
+
+/* It drops in by whole pixels; it never hides itself, should the animation not run. */
+@keyframes pip-ladder-in {
+  from {
+    transform: translateY(-6px);
+  }
+  to {
+    transform: none;
+  }
+}
+
+.pip-ladder-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.pip-ladder-to {
+  color: var(--hud-ink-soft);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.pip-ladder-close {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  align-self: center;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  color: var(--hud-ink);
+}
+
+.pip-ladder-close:hover {
+  background: var(--hud-face-hover);
+}
+
+.pip-ladder-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pip-ladder-step {
+  display: flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 4px;
+}
+
+/* The burrow is the spine: its step, the last of the group, stands on a line of its own. */
+.pip-ladder-step.is-raise {
+  margin-top: 4px;
+  padding-top: 7px;
+  border-top: 2px dashed var(--hud-track);
+  font-weight: 700;
+}
+
+.pip-ladder-mark {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  background: var(--hud-face);
+  box-shadow: inset 0 0 0 2px var(--hud-ink-soft);
+}
+
+.pip-ladder-step.is-done .pip-ladder-mark {
+  background: var(--whim-leaf);
+  box-shadow: inset 0 0 0 2px var(--hud-line);
+  color: #10230f;
+}
+
+.pip-ladder-step.is-now .pip-ladder-mark {
+  background: var(--whim-butter);
+  box-shadow: inset 0 0 0 2px var(--hud-line);
+}
+
+.pip-ladder-step.is-now {
+  background: var(--hud-face-hover);
+}
+
+.pip-ladder-text {
+  min-width: 0;
+  flex: 1;
+  text-align: left;
+  line-height: 1.3;
+}
+
+.pip-ladder-step.is-done .pip-ladder-text {
+  color: var(--hud-ink-soft);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.pip-ladder-go {
+  cursor: pointer;
+}
+
+.pip-ladder-go:hover,
+.pip-ladder-go:focus-visible {
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+}
+
+.pip-ladder-why {
+  display: inline-flex;
+  flex: none;
+  color: var(--hud-ink-soft);
+  cursor: help;
+}
+
+.pip-ladder-step-reward {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.pip-ladder-empty {
+  color: var(--hud-ink-soft);
+}
+
+/* What the next level brings: three named things at most, each its picture and its name. */
+.pip-ladder-brings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding-top: 8px;
+  border-top: 2px solid var(--hud-track);
+  font-size: 0.75rem;
+}
+
+.pip-ladder-brings-at {
+  width: 100%;
+  font-weight: 700;
+}
+
+.pip-ladder-brought {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: help;
+}
+
+.pip-ladder-brought-picture {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  background: var(--hud-face-hover);
+  box-shadow:
+    0 -2px 0 0 var(--hud-track),
+    0 2px 0 0 var(--hud-track),
+    -2px 0 0 0 var(--hud-track),
+    2px 0 0 0 var(--hud-track);
+}
+
+/* On a phone on its side: the chip says less (the word "next" goes), and the list keeps inside the screen. */
+@media (max-height: 520px) {
+  .pip-ladder-next-word,
+  .pip-ladder-pips {
+    display: none;
+  }
+
+  .pip-ladder-card {
+    top: calc(100% + 6px);
+    /* Clear of the row of keys at the foot of the picture. */
+    max-height: calc(100dvh - 124px - var(--inset-top, 0px) - var(--inset-bottom, 0px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pip-ladder-card {
+    animation: none;
+  }
+}
+
+/* With the next thing on the chip, Pip's bubble is often empty: then she has nothing to say, and is not shown saying it. */
+.pip-camp-say:has(> .pip-camp-say-bubble:empty) {
+  display: none;
+}
+
+/* On a phone on its side the row of chips keeps a little clear of the status bar, not flush under its clock. */
+@media (max-height: 520px) {
+  .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-head.pip-base-head {
+    top: max(6px, calc(var(--inset-top, 0px) + 4px));
+  }
+}
+
+/* Pip's list open: her bubble steps aside under it. */
+.pip-base-head-left:has(.pip-ladder-card) > .pip-camp-say {
+  visibility: hidden;
+}

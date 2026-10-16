@@ -9,6 +9,7 @@ import { WelcomeModal } from "./components/WelcomeModal";
 import { useShareStore } from "./components/share/shareStore";
 import { usePipReactions } from "./hooks/usePipReactions";
 import { useCommunityPulse } from "./hooks/useCommunityPulse";
+import { usePipTabDot } from "./hooks/usePipTabDot";
 import { PipHome } from "./components/PipHome";
 import { PipReaderPeek } from "./components/PipReaderPeek";
 import { PipWorld, type PipAction } from "./components/PipWorld";
@@ -46,6 +47,7 @@ import { ReminderOptIn } from "./components/ReminderOptIn";
 import { useLargeBookPrompt } from "./hooks/useLargeBookPrompt";
 import { usePageCovers } from "./hooks/usePageCovers";
 import { useReminders } from "./hooks/useReminders";
+import { useContinueShortcut } from "./platform/continueShortcut";
 import { useAppearanceStore, watchSystemTheme } from "./store/appearanceStore";
 import { bookService } from "./services/bookService";
 import { converterOffer, converterService, type ConverterOffer } from "./services/converterService";
@@ -281,7 +283,9 @@ const App = () => {
   // Community news (kudos, followers, duels): polled while signed in; the
   // count becomes a dot on the Social nav item.
   const communityUnread = useCommunityPulse();
-  const navBadge = useMemo(() => ({ Social: communityUnread }), [communityUnread]);
+  // Something waiting in the Hollow (a parcel, Pip's basket, the oak full): a dot on the Pip item, as on Social.
+  const pipWaits = usePipTabDot();
+  const navBadge = useMemo(() => ({ Social: communityUnread, Pip: pipWaits ? 1 : 0 }), [communityUnread, pipWaits]);
 
   // Back up on launch. The app may have been closed mid-session, and on a new
   // computer this same pass is what restores the library from Drive. Signed
@@ -895,6 +899,18 @@ const App = () => {
   // loaded (a click can be what launched the app). Never over an open book.
   const [reminderRoute, setReminderRoute] = useState<string | null>(null);
   useReminders(selected !== null, setReminderRoute);
+  // The icon's "Continue <book>" shortcut (Android): that book, at its place;
+  // the library when it is gone (an open book stays open then).
+  useContinueShortcut((book) => {
+    if (!book) {
+      if (!selectedRef.current) setActiveTab("library");
+      return;
+    }
+    if (selectedRef.current?.id === book.id) return;
+    if (selectedRef.current) closeReader();
+    setActiveTab("library");
+    handleOpenBookRef.current(book);
+  });
   const libraryLoading = useLibraryStore((state) => state.loading);
   useEffect(() => {
     if (!reminderRoute || libraryLoading) {

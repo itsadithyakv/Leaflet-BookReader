@@ -179,7 +179,7 @@ export const PipRail = ({
           </button>
         )}
         {/* The house is the burrow in the Hollow, so the way out is on every floor. */}
-        <button type="button" className="pip-rail-key" onClick={openCamp} title="Out of the burrow, to the Hollow">
+        <button type="button" className="pip-rail-key" data-walk="outside" onClick={openCamp} title="Out of the burrow, to the Hollow">
           <Tent size={22} aria-hidden />
           <span className="pip-rail-label">Outside</span>
           {campWaits && <span className="pip-hud-dot" aria-label="Something is waiting in the Hollow" />}

@@ -40,7 +40,8 @@ export type ReaderAction =
   | "chapterEnd"
   | "bookStart"
   | "bookEnd"
-  | "playPause";
+  | "playPause"
+  | "readAloud";
 
 /** As much of a keyboard event as the table reads. */
 export type KeyPress = {
@@ -255,6 +256,13 @@ export const READER_BINDINGS: Binding[] = [
     when: scrolling,
     label: ({ mode }) =>
       mode === "smart" ? "Pause Smart Read, or carry on" : mode === "speed" ? "Pause SpeedRead, or carry on" : "Start auto-scroll, or pause it",
+    group: "Reading"
+  },
+  {
+    action: "readAloud",
+    keys: ["R"],
+    matches: (press) => plain(press) && press.key.toLowerCase() === "r",
+    label: () => "Read aloud from here, or pause it",
     group: "Reading"
   },
   {

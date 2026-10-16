@@ -51,13 +51,17 @@ import {
   removeLand,
   placeWork,
   armHero,
+  SITES,
   type Place
 } from "../pip/base/rules";
 import type { Result } from "../pip/base/battle";
 import { trophyKind } from "../pip/base/trophies";
 import { learnt, noTips } from "../pip/base/tips";
+import { finishTutorial, giveWelcome, openWelcomeBasket, pawFinish, setTutorialStep } from "../pip/base/welcome";
 import { hasFinished } from "../constants/books";
 import { baseService } from "../services/baseService";
+import { syncService } from "../services/syncService";
+import { syncConfigured, syncFor } from "../services/syncTiming";
 import { getDateKey, type HabitSnapshot } from "../services/habitService";
 import { useHabitStore } from "./habitStore";
 import { useLibraryStore } from "./libraryStore";
@@ -170,9 +174,50 @@ type BaseStore = {
   sendRaid: (kind: RaidKind, slot: number) => RaidEnd | null;
   /** A finished arcade game: what it paid (and how a wager placed before wagers were put away went); null before there is a camp. */
   played: (game: PayingGame, score: number) => Pick<GameEnd, "paid" | "wager"> | null;
+
+  /**
+   * The sync guard. True once this run has pulled from wherever the library
+   * syncs to (Drive, a folder, the account), or there is nowhere: until then
+   * a camp not kept on this device is not saved (its stamp would be newer
+   * than a camp of months on another device, and win), and the welcome does
+   * not begin. A camp kept here saves as ever.
+   */
+  welcomeReady: boolean;
+  /** Pip's welcome (`pip/base/welcome.ts`): the oak shaken and the basket by the door, once a camp; nothing before `welcomeReady`. */
+  giveWelcome: () => void;
+  /** The basket's acorns, once, when the larder has room for all of them. */
+  openWelcomeBasket: () => void;
+  /** A helping paw on a site: what is going up there (built first, if nothing is) stands at once. False when no paw was spent. Never adds reading. */
+  usePaw: (target: string) => boolean;
+  /** The same as `usePaw`, by a name the app's rules-of-hooks check does not take for a hook (`testing/rulesOfHooks.test.ts`). */
+  spendPaw: (target: string) => boolean;
+  /** The guided first session: where it has got to; and its end, finished or skipped (skipped, the basket still waits, once). */
+  setTutorialStep: (step: number) => void;
+  finishTutorial: (skipped: boolean) => void;
+  /** The session again, from the (i): a demonstration, kept out of the camp; it gives nothing. Over at `finishTutorial`. */
+  replayTutorial: () => void;
+  /** The replay under way, and its step; null when none is. */
+  tutorialReplay: { step: number } | null;
 };
 
 let opening: Promise<void> | null = null;
+
+/** The camp in hand is the one kept on this device (read from it, or saved since). */
+let keptHere = false;
+/** Changes to a camp not kept here, waiting for the sync guard. */
+let heldBack = false;
+let guarding: Promise<void> | null = null;
+let listening = false;
+/** How long after the camp is first opened a pull is asked for, if nothing else has started one: the launch's own sync goes first. */
+export const GUARD_PULL_AFTER_MS = 2000;
+
+/**
+ * Whether the first pull this run has finished: a sync that ended well. A
+ * run that only said the library is another account's, or that the account
+ * holds a library still to be brought (`accountHolds`), merged nothing, and
+ * ends "idle", not "success".
+ */
+const pulled = () => useLibraryStore.getState().syncStatus === "success";
 
 export const useBaseStore = create<BaseStore>((set, get) => {
   /** Applies a change to the camp as it stands now, and keeps the result if it differs. */
@@ -184,14 +229,71 @@ export const useBaseStore = create<BaseStore>((set, get) => {
     const next = advanceList(act(settle(current, now), now), now.day);
     if (next !== current) {
       set({ base: next });
-      void baseService.save(next).catch(() => undefined);
+      keep(next);
     }
     return next;
   };
 
+  /** Saves the camp, unless it is one not kept here and the guard is still up: then it waits (`ready`). */
+  const keep = (base: BaseState) => {
+    if (!keptHere && !get().welcomeReady) {
+      heldBack = true;
+      return;
+    }
+    keptHere = true;
+    heldBack = false;
+    void baseService.save(base).catch(() => undefined);
+  };
+
+  /** The guard is down: the camp is read again (the pull may have brought one), and what waited is kept if it did not. */
+  const ready = () => {
+    if (get().welcomeReady) return;
+    set({ welcomeReady: true });
+    void get().open();
+  };
+
+  /** Puts the guard down when it can be: at once with nowhere to sync to, or when the first pull this run has finished. */
+  const guard = (): Promise<void> => {
+    if (get().welcomeReady) return Promise.resolve();
+    if (!listening) {
+      listening = true;
+      useLibraryStore.subscribe((state, previous) => {
+        // Looked at once the run has said all it will: "success" can be followed at once by "idle" (see `pulled`).
+        if (state.syncStatus === "success" && previous.syncStatus !== "success") queueMicrotask(() => void guard());
+      });
+    }
+    guarding ??= syncService
+      .status()
+      .then((status) => {
+        if (!syncConfigured(status) || pulled()) {
+          ready();
+          return;
+        }
+        // Nothing has pulled yet: a pull, as before a book opens (never two at once, and not again soon after one).
+        setTimeout(() => void syncFor("open"), GUARD_PULL_AFTER_MS);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        guarding = null;
+      });
+    return guarding;
+  };
+
+  /** A helping paw on a site (`usePaw`). Settled again at once, so the building stands now (and the list pays for it), not at the next look. */
+  const paw = (target: string): boolean => {
+    const site = SITES.find((entry) => entry === target);
+    const before = get().base?.welcome.paws ?? 0;
+    if (!site || before <= 0 || get().tutorialReplay) return false;
+    const after = change((base, now) => settle(pawFinish(base, site, now.minutes, now.mood), now));
+    return (after?.welcome.paws ?? before) < before;
+  };
+
   return {
     base: null,
+    welcomeReady: false,
+    tutorialReplay: null,
     open() {
+      void guard();
       opening ??= baseService
         .load()
         .then((kept) => {
@@ -205,10 +307,14 @@ export const useBaseStore = create<BaseStore>((set, get) => {
             .map((book) => ({ id: book.id, kind: trophyKind(book.genres) }));
           const base = settle(adopt(from, finished, now.minutes), now);
           set({ base });
+          if (kept) {
+            keptHere = true;
+            heldBack = false;
+          }
           // A new camp is not kept until something is done with it: kept at once, its date
           // would be newer than a camp of months on another computer, and the backup would
-          // take this empty one for the one to keep.
-          if (kept && base !== kept) void baseService.save(base).catch(() => undefined);
+          // take this empty one for the one to keep. And not before the first pull (`welcomeReady`).
+          if ((kept && base !== kept) || (!kept && heldBack)) keep(base);
         })
         .finally(() => {
           opening = null;
@@ -224,7 +330,39 @@ export const useBaseStore = create<BaseStore>((set, get) => {
       if (get().mood !== mood) set({ mood });
     },
     build(site, kind) {
-      change((base, now) => build(base, site, now.minutes, kind, now.mood));
+      change((base, now) => {
+        const begun = build(base, site, now.minutes, kind, now.mood);
+        // Paws left after the guided session (one skipped, say): the next builds finish at once, as the session's did.
+        const paw = begun !== base && base.welcome.paws > 0 && base.welcome.tutorial.done && !get().tutorialReplay;
+        return paw ? settle(pawFinish(begun, site, now.minutes, now.mood), now) : begun;
+      });
+    },
+    giveWelcome() {
+      if (!get().welcomeReady) return;
+      change((base, now) => giveWelcome(base, now.minutes));
+    },
+    openWelcomeBasket() {
+      change((base, now) => openWelcomeBasket(base, now.day));
+    },
+    usePaw: (target) => paw(target),
+    spendPaw: (target) => paw(target),
+    setTutorialStep(step) {
+      if (get().tutorialReplay) {
+        set({ tutorialReplay: { step: Math.max(0, Math.floor(step)) } });
+        return;
+      }
+      change((base) => setTutorialStep(base, step));
+    },
+    finishTutorial(skipped) {
+      if (get().tutorialReplay) {
+        set({ tutorialReplay: null });
+        return;
+      }
+      if (!get().welcomeReady) return;
+      change((base, now) => finishTutorial(base, skipped, now.minutes));
+    },
+    replayTutorial() {
+      set({ tutorialReplay: { step: 0 } });
     },
     clearPlot(site) {
       change((base) => clearPlot(base, site));

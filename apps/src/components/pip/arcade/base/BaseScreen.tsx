@@ -17,7 +17,6 @@ import {
   Send,
   Shield,
   ShieldAlert,
-  Signpost,
   BedDouble,
   Camera,
   DoorOpen,
@@ -26,8 +25,6 @@ import {
   Star,
   Swords,
   Tent,
-  TreePine,
-  Trees,
   UserX,
   Users,
   Volume2,
@@ -66,7 +63,10 @@ import {
   trophyWaits,
   GATE_FROM,
   gateOf,
-  parcelGives,
+  parcelsBring,
+  parcelsOpenable,
+  basketWaits,
+  prowlersCome,
   wallMoveBlocked,
   BROKEN_DOES,
   WORN_DOES,
@@ -95,7 +95,7 @@ import {
   plotOpen,
   MAX_LEVEL,
   standing as sitesStanding,
-  type Opened,
+  rewardOf,
   RAIDS_IN_HAND,
   RAID_EVERY,
   SENT_SHARE,
@@ -184,7 +184,12 @@ import { isTouchInput } from "../../../../platform/device";
 import { BattleScreen } from "./BattleScreen";
 import { drawAt, fitPicture, screenRatio, type Fit } from "./fit";
 import { PipFace, Sprite } from "./Sprite";
-import { ART_FPS, AWAKE_SECONDS, GENRE_FOE, PROWLER_NAMES, PROWL_EVERY, parcelAtPoint, prowlPlanOf, trophyAtPoint, BANNERS_SHOWN, RESIDENTS_SHOWN, TROPHIES_SHOWN, animalAt, decorAt, duskAt, gardenAt, guardAtPoint, postAtPoint, landAt, paintCamp, paintGround, paintSky, siteAt, workAt, type CampExtras, type CampLook } from "./scene";
+import { useBurrowDoor } from "../../onboarding/useBurrowDoor";
+import { ReplayTour } from "../../onboarding/ReplayTour";
+import { isGhostClick, type Press } from "./ghostClick";
+import { GoalLadder, LevelBrings } from "./GoalLadder";
+import { levelBrings } from "../../../../pip/base/ladder";
+import { ART_FPS, AWAKE_SECONDS, GENRE_FOE, PROWLER_NAMES, PROWL_EVERY, basketAtPoint, parcelAtPoint, prowlPlanOf, trophyAtPoint, BANNERS_SHOWN, RESIDENTS_SHOWN, TROPHIES_SHOWN, animalAt, decorAt, duskAt, gardenAt, guardAtPoint, postAtPoint, landAt, paintCamp, paintGround, paintSky, siteAt, workAt, type CampExtras, type CampLook } from "./scene";
 
 const prefersReducedMotion = () => {
   try {
@@ -469,6 +474,11 @@ export const BaseScreen = ({
   useEffect(() => {
     void useBaseStore.getState().open();
   }, []);
+  // Pip's welcome, once a camp, when the camp is first looked at (and not before the first pull: `welcomeReady`).
+  const welcomeReady = useBaseStore((state) => state.welcomeReady);
+  useEffect(() => {
+    if (welcomeReady && loaded) useBaseStore.getState().giveWelcome();
+  }, [welcomeReady, loaded]);
   // Reading done with the arcade open, or a day turning: the camp catches up.
   useEffect(() => {
     useBaseStore.getState().refresh();
@@ -531,11 +541,28 @@ export const BaseScreen = ({
         towerPath: base.forks.tower ?? null,
         gate: gateOf(base),
         parcels: base.parcels,
+        basket: basketWaits(base),
+        prowlers: prowlersCome(base),
         reading: readingKind
       },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [base, season, night, now, standing, area, garden?.ripe, garden?.growing, garden === undefined, minute, readingKind]
   );
+  // The burrow is the way in: a tap on its door, Pip walking in ahead (onboarding/useBurrowDoor.ts).
+  const door = useBurrowDoor({ look, onInside, canvasRef, sky: lay.sky });
+  // A finger's tap is taken on the press; the click the phone sends after it, landing on a panel the tap opened under
+  // the finger, is a ghost of it and is dropped (ghostClick.ts).
+  const fingerPress = useRef<Press | null>(null);
+  useEffect(() => {
+    const ghost = (event: MouseEvent) => {
+      if (!isGhostClick(fingerPress.current, { x: event.clientX, y: event.clientY, at: performance.now(), target: event.target })) return;
+      fingerPress.current = null;
+      event.stopPropagation();
+      event.preventDefault();
+    };
+    document.addEventListener("click", ghost, true);
+    return () => document.removeEventListener("click", ghost, true);
+  }, []);
 
   // A building that went up while the camp is on screen: a burst over it.
   const levelsSeen = useRef<string | null>(null);
@@ -560,7 +587,7 @@ export const BaseScreen = ({
     const was = listSeen.current;
     if (was && base.quest > was.quest) {
       // What the list paid: its rewards for the steps just ticked off (the oak's own acorns, gathered by the same tap, are not counted).
-      const paid = Math.min(base.acorns - was.acorns, QUESTS.slice(was.quest, base.quest).reduce((sum, quest) => sum + quest.reward, 0));
+      const paid = Math.min(base.acorns - was.acorns, QUESTS.slice(was.quest, base.quest).reduce((sum, quest) => sum + rewardOf(base, quest), 0));
       if (paid > 0) {
         setGained({ acorns: paid, at: performance.now() });
         acornsSound(paid);
@@ -837,7 +864,9 @@ export const BaseScreen = ({
         floats: floats.current.filter((entry) => time - entry.at < 1300).map((entry) => ({ x: entry.x, y: entry.y, age: (time - entry.at) / 1000, text: entry.text, bad: entry.bad })),
         petted: petted.current && time - petted.current.at < 900 ? { x: petted.current.x, y: petted.current.y, age: (time - petted.current.at) / 1000 } : null,
         burst: burst && burstFrame < BURST_FRAMES ? { site: burst.site, frame: burstFrame } : null,
-        magpies: null
+        magpies: null,
+        // The burrow's door: glowing to be found, open for Pip going in or coming out.
+        ...door.extras(seconds === null ? null : time / 1000)
       };
     };
     // The first drawing is by the camp's clock like every one after it: drawn without it, the picture was the day's for
@@ -1060,7 +1089,7 @@ export const BaseScreen = ({
   /** A finished book whose trophy can be raised now: that comes before anything else on the list. */
   const raisable = waiting.length > 0 && trophyWaits(base, now.minutes) === 0 ? waiting[0] : null;
   /** How many of the parcels waiting the larder has room for, each whole. */
-  const opensNow = Math.min(base.parcels, Math.floor(Math.max(0, room) / parcelGives(base)));
+  const opensNow = parcelsOpenable(base);
   // Where it is done: marked there until it is.
   const nudge: QuestAt | null = next.full ? null : next.at;
   const goTo = (at: QuestAt) => {
@@ -1171,6 +1200,7 @@ export const BaseScreen = ({
   const pressDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const free = !placing && !arrange;
     const at = toScene(event);
+    fingerPress.current = event.pointerType === "mouse" ? null : { x: event.clientX, y: event.clientY, at: performance.now(), target: event.currentTarget };
     const underSite = () => {
       const site = base ? siteAt(base.spots, at.x, at.y, sitesStanding(base)) : null;
       return site && base ? ({ what: "site", site, x: base.spots[site][0], y: base.spots[site][1] } as Grab) : null;
@@ -1380,7 +1410,7 @@ export const BaseScreen = ({
     if (!base || area !== "camp" || arrange || placing) return;
     const at = toScene(event);
     const found = siteAt(base.spots, at.x, at.y, sitesStanding(base));
-    if (found === "burrow") onInside?.();
+    if (found === "burrow") door.go();
     else if (!found && garden && gardenAt(base.spots, at.x, at.y)) garden.onOpen();
   };
   pickRef.current = (event) => pick(event);
@@ -1469,6 +1499,20 @@ export const BaseScreen = ({
       pointer.current = null;
       return;
     }
+    // Pip's welcome basket: a tap opens it, when the larder has room for all of it.
+    if (basketAtPoint(look, at.x, at.y)) {
+      const before = base.acorns;
+      store.openWelcomeBasket();
+      const got = (useBaseStore.getState().base?.acorns ?? before) - before;
+      playSound(got > 0 ? "pop" : "womp", { volume: 0.6 });
+      if (got > 0) {
+        const at0 = performance.now();
+        flights.current = Array.from({ length: 6 }, (_, index) => at0 + index * 90);
+        float(at.x, at.y, `+${got}`);
+        acornsSound(got);
+      } else float(at.x, at.y, "Larder full", true);
+      return;
+    }
     // A parcel that came up the path from the reading: a tap opens it.
     if (parcelAtPoint(look, at.x, at.y)) {
       openParcels(at);
@@ -1510,6 +1554,11 @@ export const BaseScreen = ({
       setChosenLand(-1);
       setChosenGuard(guard);
       setPanel("guard");
+      playSound("click");
+      return;
+    }
+    // The burrow's door: one tap and in, Pip ahead. (The rest of the burrow chooses it.)
+    if (door.tap(at)) {
       playSound("click");
       return;
     }
@@ -1646,6 +1695,7 @@ export const BaseScreen = ({
         key={site}
         type="button"
         className={`pip-base-tile ${chosen ? "is-chosen" : ""}`}
+        data-site={site}
         aria-pressed={chosen}
         aria-label={`${siteName(base, site)}, ${level === 0 ? "not built" : `level ${level}`}${jobOn(base, site) ? ", being built" : ""}`}
         title={`${siteName(base, site)}${level === 0 ? "" : `, level ${level}`}`}
@@ -1674,32 +1724,6 @@ export const BaseScreen = ({
       </span>
     </button>
   );
-  /** A picture for a thing a level opens. */
-  const openPicture = (entry: Opened) =>
-    entry.kind === "ground" ? (
-      <Trees size={15} aria-hidden />
-    ) : entry.kind === "plot" ? (
-      <Sprite name="workshop" variant={0} box={22} />
-    ) : entry.kind === "decor" ? (
-      <Sprite name="decor" variant={0} box={22} />
-    ) : entry.kind === "meadow" ? (
-      <TreePine size={15} aria-hidden />
-    ) : entry.kind === "guards" ? (
-      <Sprite name="guardian" variant={0} box={22} />
-    ) : entry.kind === "paths" ? (
-      <Signpost size={15} aria-hidden />
-    ) : entry.kind === "work" ? (
-      <Sprite name="work" variant={entry.which ?? 0} box={22} />
-    ) : entry.kind === "foe" ? (
-      <ShieldAlert size={15} aria-hidden />
-    ) : entry.kind === "fence" ? (
-      <Sprite name="fencepiece" variant={1} box={22} />
-    ) : entry.kind === "postcard" ? (
-      <Camera size={15} aria-hidden />
-    ) : (
-      <Star size={15} aria-hidden />
-    );
-
   const campShelf = () => {
     const level = base.levels.burrow;
     const next = level < MAX_LEVEL ? campOpens(level + 1) : [];
@@ -1711,16 +1735,8 @@ export const BaseScreen = ({
           </h3>
           <p className="pip-base-level">Level {level}</p>
         </div>
-        {next.length > 0 && (
-          <p className="pip-base-opens">
-            <span className="pip-base-opens-at">Level {level + 1} brings</span>
-            {next.map((entry) => (
-              <span key={entry.name} className={`pip-base-open ${entry.kind === "foe" ? "is-foe" : ""}`} role="img" aria-label={entry.name} title={`${entry.name}. ${entry.says}.`}>
-                {openPicture(entry)}
-              </span>
-            ))}
-          </p>
-        )}
+        {/* Three named things at most, in plain words: nothing is named before its level (ladder.ts). */}
+        {next.length > 0 && <LevelBrings level={level + 1} brings={levelBrings(level + 1)} />}
         <div className="pip-base-shelf-row" role="group" aria-label="Buildings">
           {/* What stands, and of what is still to come only the next: nothing else stands about locked. */}
           {SHELF_SITES.camp
@@ -1756,7 +1772,7 @@ export const BaseScreen = ({
     const nextWork = WORKS.map((work, kind) => ({ work, kind }))
       .filter((entry) => base.levels.burrow < entry.work.burrow)
       .sort((a, b) => a.work.burrow - b.work.burrow || a.work.cost - b.work.cost)[0];
-    const shown = WORKS.map((work, kind) => ({ work, kind })).filter((entry) => base.levels.burrow >= entry.work.burrow || entry.kind === nextWork?.kind);
+    const shown = WORKS.map((work, kind) => ({ work, kind })).filter((entry) => base.levels.burrow >= entry.work.burrow || (entry.kind === nextWork?.kind && base.levels.burrow >= PROWLERS_FROM)); // a first camp is not told of constructs before it has anything to defend
     return (
       <section className="pip-base-card pip-base-shelf" aria-label="Defence">
         <h3 className="pip-base-title" title="What sees the prowlers off. Where each thing stands decides who gets through: Arrange shows how far everything reaches.">
@@ -1935,6 +1951,8 @@ export const BaseScreen = ({
       <button
         key={kind ?? "next"}
         type="button"
+        data-coach="build"
+        data-site={selected}
         className="tactile-button tactile-button-primary px-3 py-1.5 text-xs font-semibold disabled:opacity-60"
         disabled={blocked(base, selected, kind) !== null}
         title={`${kind ? `${yardDoes(kind, 1)}. ` : ""}${costOf(selected, next)} acorns to begin, and ${minutesOf(base, selected, next, now.mood)} minutes of reading to finish${
@@ -1972,6 +1990,11 @@ export const BaseScreen = ({
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <h3 className="pip-base-title">{siteName(base, selected)}</h3>
               <p className="pip-base-level">{level === 0 ? "Not built" : `Level ${level}`}</p>
+              {selected === "burrow" && onInside && (
+                <button type="button" className="tactile-button flex items-center gap-1.5 px-3 py-1.5 text-xs" title="Pip's rooms, her things and the shop. A tap on the burrow's door goes in too." onClick={door.go}>
+                  <DoorOpen size={13} aria-hidden /> Pip's house
+                </button>
+              )}
             </div>
             <p className="text-sm text-on-surface">{says}</p>
           </div>
@@ -2021,11 +2044,6 @@ export const BaseScreen = ({
               <span className="flex items-center gap-2">
                 {isBroken(base, selected) ? "Broken: fix" : "Fix"} {acorns(fixCost(base, selected, now.day))}
               </span>
-            </button>
-          )}
-          {selected === "burrow" && onInside && (
-            <button type="button" className="tactile-button flex items-center gap-1.5 px-3 py-1.5 text-xs" title="The burrow is Pip's house: her rooms, her things and the shop are inside" onClick={onInside}>
-              <House size={13} aria-hidden /> Go inside
             </button>
           )}
           {selected === "fence" && level > 0 && (
@@ -2386,10 +2404,12 @@ export const BaseScreen = ({
         <div className="pip-base-head-left">
         <p className="pip-base-stats">
           {lead}
-          <span
-            className="pip-base-chip"
-            title={[
-              `The camp's level: the burrow's. ${base.levels.burrow < MAX_LEVEL ? `Level ${base.levels.burrow + 1} brings ${campOpens(base.levels.burrow + 1).map((entry) => entry.name.toLowerCase()).join(", ")}.` : "It is as high as it goes."}`,
+          {/* The goal ladder (GoalLadder.tsx): the camp's level, the burrow's, and the next thing on Pip's list. */}
+          <GoalLadder
+            base={base}
+            minutes={now.minutes}
+            onGo={goTo}
+            note={[
               `${SEASONS[season].name}: ${SEASONS[season].does.toLowerCase()}.`,
               streak > 0 ? `A ${streak}-day reading streak${streakAdds(streak) > 0 ? `: ${Math.round(streakAdds(streak) * 100)}% more from the oak` : ""}.` : "",
               base.levels.burrow >= PROWLERS_FROM && readingNow && readingKind !== null && GENRE_FOE[readingKind] !== null && GENRE_FOE[readingKind] !== undefined
@@ -2398,9 +2418,7 @@ export const BaseScreen = ({
             ]
               .filter(Boolean)
               .join(" ")}
-          >
-            <House size={13} aria-hidden /> Level <strong>{base.levels.burrow}</strong>
-          </span>
+          />
           <span
             className="pip-base-chip"
             title={`Acorns. The larder holds ${holds(base)}.${base.levels.oak > 0 ? ` Ten minutes of reading drops ${Math.round(oakDrops(base) * (1 + streakAdds(streak)))} from the oak.` : ""}`}
@@ -2522,6 +2540,8 @@ export const BaseScreen = ({
                   </button>
                 </p>
               ) : (
+                // Pip's list is the goal ladder's chip now; once the list is done, what to do next is said here.
+                base.quest >= QUESTS.length &&
                 <p className="pip-camp-say-line">
                   <ListChecks size={14} className="shrink-0" aria-hidden />
                   <button type="button" className="pip-camp-say-go min-w-0 flex-1" title="The next thing to do. Tap to be shown where." onClick={() => goTo(next.at)}>
@@ -2561,7 +2581,7 @@ export const BaseScreen = ({
                       title={opensNow === 0 ? "The larder is full: a parcel waits until it has room for the whole of it" : opensNow < base.parcels ? `The larder has room for ${opensNow} of them` : undefined}
                       onClick={() => openParcels()}
                     >
-                      {opensNow === 0 ? "Larder full" : <>{opensNow > 1 ? "Open all" : "Open"} {acorns(`+${opensNow * parcelGives(base)}`)}</>}
+                      {opensNow === 0 ? "Larder full" : <>{opensNow > 1 ? "Open all" : "Open"} {acorns(`+${parcelsBring(base)}`)}</>}
                     </button>
                   </p>
                 )
@@ -2637,6 +2657,9 @@ export const BaseScreen = ({
               // A cut sky is above the page's top edge: the canvas keeps the whole clearing, and where a touch lands is read from it.
               style={{ width: GAME_W * fit.css, height: (GAME_H + lay.sky + lay.ground) * fit.css, marginTop: lay.crop ? -lay.crop * fit.css : undefined }}
               aria-hidden="true"
+              // For the guided session to find things in the picture by (onboarding/geometry.ts): the sky above the clearing.
+              data-sky={lay.sky}
+              data-area={area}
               onPointerDown={pressDown}
               onPointerUp={pressUp}
               onPointerCancel={() => {
@@ -3034,6 +3057,7 @@ export const BaseScreen = ({
           <button type="button" className="pip-base-round pip-base-sheet-close" aria-label="Back to the camp" title="Back to the camp" onClick={() => setTab("camp")}>
             <X size={16} aria-hidden />
           </button>
+          <ReplayTour onStart={() => setTab("camp")} />
           <ul className="pip-base-how mt-3">
             <li>
               <BookOpen size={14} aria-hidden />

@@ -7,6 +7,7 @@ import { toolbarTitleClass } from "../titleFit";
 import { ReaderAmbience, closeAmbiencePopover } from "../../ambience";
 import { ReaderMoreMenu } from "./ReaderMoreMenu";
 import { ReaderLookRows, RotationChoice } from "./ReaderTouchRows";
+import { ReadingLightRows } from "../ReaderLight";
 import { isPhoneShape } from "../touchLayout";
 import type { ReaderScope } from "./scope";
 
@@ -116,6 +117,7 @@ export const ReaderToolbar = ({ reader }: { reader: ReaderScope }) => {
               {phone && <ReaderLookRows reader={reader} />}
               {/* A tablet turns too: its lock, under the type (the layout and finish are in ···). */}
               {shape === "tablet" && <RotationChoice value={reader.rotation} onChoose={reader.chooseRotation} />}
+              <ReadingLightRows />
             </TypePanel>
           )}
         </div>

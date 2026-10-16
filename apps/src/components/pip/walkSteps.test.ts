@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { WALK, WALK_KEY, markWalkSeen, nextStep, walkSeen } from "./walkSteps";
+import { FIRST_WALK, WALK, WALK_KEY, firstWalk, markWalkSeen, nextStep, walkSeen } from "./walkSteps";
 
 describe("the walkthrough's steps", () => {
   it("points at seeds and mood, Pip herself, Play, the shop, decorating and a plot, in that order", () => {
@@ -50,5 +50,23 @@ describe("showing it once", () => {
     };
     expect(walkSeen(blocked)).toBe(true);
     expect(() => markWalkSeen(blocked)).not.toThrow();
+  });
+});
+
+describe("the first visit indoors", () => {
+  it("shows the shop alone; the rest waits for Show me around", () => {
+    expect(FIRST_WALK.map((step) => step.target)).toEqual(["shop"]);
+    expect(WALK.length).toBeGreaterThan(FIRST_WALK.length);
+  });
+
+  it("waits while Pip's guided first session runs, and adds nothing after one that was finished", () => {
+    expect(firstWalk({ step: 3, done: false, skipped: false })).toBeNull();
+    expect(firstWalk({ step: 8, done: true, skipped: false })).toEqual([]);
+  });
+
+  it("shows the shop after a skipped session, and to a camp from before there was one", () => {
+    expect(firstWalk({ step: 2, done: true, skipped: true })).toBe(FIRST_WALK);
+    expect(firstWalk({ step: 0, done: true, skipped: false })).toBe(FIRST_WALK);
+    expect(firstWalk(undefined)).toBe(FIRST_WALK);
   });
 });

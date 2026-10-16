@@ -181,6 +181,26 @@ gets (CSS px):
 - The reader's tour says "tap", not "press Space"; −, + and C keycaps are
   shown only with a keyboard attached.
 
+### Brightness and warmth
+
+- **A swipe up or down that starts in the left strip of the page** (12% of
+  its width) sets the brightness, **one in the right strip** the warmth
+  (`readers/readingLight.ts`, `edgeLight.ts`). The first 12 px decide: up or
+  down is the light's, across still turns the page, a finger that rests
+  first is a press and hold (selection). Not from the bookmark corner or the
+  footer, nor while something is selected or open over the page. Text, PDFs
+  and comics alike; touch only.
+- **Brightness** is the window's own (`set_brightness`, `Brightness.kt`):
+  the top 80% of the scale is the window's least to full, the foot darkens a
+  black veil over the page (to 0.6) below what the screen can do. Leaving
+  the reader gives the window back to the system. Elsewhere (a computer) the
+  veil alone.
+- **Warmth** is an amber wash multiplied over the page (to 0.35), everywhere.
+- A small pill shows the level while it is set and fades a second after.
+  Double-tap it to follow the system again (or no warmth); Text settings has
+  both as sliders and an "Auto" for the brightness. Kept per device
+  (`leaflet.reader.light`).
+
 ### Focus lock
 
 Sessions run **full screen**: the status and gesture bars hide (they come

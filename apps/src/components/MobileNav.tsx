@@ -55,6 +55,7 @@ export const MobileNav = ({ activeItem, onNavigate, badge }: MobileNavProps) => 
             type="button"
             className="mobile-nav-item"
             data-active={active || undefined}
+            data-tour={item.label === "Pip" ? "hollow" : undefined}
             aria-current={active ? "page" : undefined}
             onClick={() => onNavigate(item.label)}
           >

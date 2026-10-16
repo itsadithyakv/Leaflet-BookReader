@@ -3,6 +3,9 @@ import { BookA, Feather, Footprints, Leaf, Trophy, type LucideIcon } from "lucid
 import { gameArt } from "./gameArt";
 import { GAMES, GAME_H, GAME_W, type Controls, type Game, type GameId, type GameInfo } from "./games";
 import { useTouchInput } from "../../../platform/device";
+import { Sprite } from "./base/Sprite";
+import { usePaidRuns } from "./paidRuns";
+import "./arcadeBadge.css";
 
 /**
  * The arcade's front page: what there is to play, each as a card with a
@@ -186,11 +189,13 @@ type CardProps = {
   /** What is said about it in a chip or two: a best score, a key and what it does. */
   facts: ReactNode;
   title?: string;
+  /** Laid on the corner of its picture: the runs in hand that pay the camp acorns. */
+  badge?: ReactNode;
   onChoose: () => void;
   picture: (live: boolean) => ReactNode;
 };
 
-const Card = ({ name, about, icon: Icon, facts, title, onChoose, picture }: CardProps) => {
+const Card = ({ name, about, icon: Icon, facts, title, badge, onChoose, picture }: CardProps) => {
   // Its game plays while the pointer is on it, or the keyboard is.
   const [live, setLive] = useState(false);
   return (
@@ -204,7 +209,10 @@ const Card = ({ name, about, icon: Icon, facts, title, onChoose, picture }: Card
       onFocus={() => setLive(true)}
       onBlur={() => setLive(false)}
     >
-      <span className="pip-arcade-card-screen">{picture(live)}</span>
+      <span className="pip-arcade-card-screen">
+        {picture(live)}
+        {badge}
+      </span>
       <span className="pip-arcade-card-name">
         <span className="pip-arcade-card-icon" aria-hidden="true">
           <Icon size={16} />
@@ -237,6 +245,16 @@ type Props = {
 
 export const GamePicker = ({ skin, outfit, bestOf, termsOf, words, onGame, onQuiz }: Props) => {
   const touch = useTouchInput();
+  const runsOf = usePaidRuns();
+  /** An acorn and the paid runs in hand (a new camp has two): the arcade's games pay the camp. */
+  const pays = (id: string) => {
+    const runs = runsOf(id);
+    return runs ? (
+      <span className="pip-arcade-pays" role="img" aria-label={`${runs} ${runs === 1 ? "run pays" : "runs pay"} the camp acorns`} title={`${runs} ${runs === 1 ? "run" : "runs"} in hand that pay the camp acorns`}>
+        <Sprite name="acorn" box={14} />×{runs}
+      </span>
+    ) : null;
+  };
   return (
   <div className="pip-arcade-cards">
     {GAMES.map((game) => (
@@ -246,6 +264,7 @@ export const GamePicker = ({ skin, outfit, bestOf, termsOf, words, onGame, onQui
         icon={GAME_ICONS[game.id]}
         about={ABOUT[game.id].about}
         title={`${touch ? game.touchControls : game.controls} ${termsOf(game.id)}`}
+        badge={pays(game.id)}
         facts={
           <>
             {bestOf(game.id) > 0 && (

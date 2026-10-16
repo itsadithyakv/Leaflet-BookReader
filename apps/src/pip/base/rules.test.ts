@@ -8,7 +8,9 @@ import {
   PURSE_MOST,
   QUESTS,
   LIST_MARK,
+  WELCOMED,
   advanceList,
+  rewardOf,
   nextStep,
   openParcel,
   parcelGives,
@@ -888,8 +890,11 @@ describe("Pip's list", () => {
     expect(claimQuest(gathered, DAY).quest).toBe(1);
   });
 
-  it("follows the order the camp opens: a first camp is the oak, the larder, the hut, the lookout and the burrow's level 2", () => {
-    expect(QUESTS.slice(0, 5).map((quest) => quest.at)).toEqual(["oak", "store", "hut", "tower", "burrow"]);
+  it("follows the burrow: a first camp is the oak, the larder, the welcome basket and the burrow's level 2, then the hut and the lookout", () => {
+    expect(QUESTS.slice(0, 6).map((quest) => quest.id)).toEqual(["oak", "larder", "basket", "burrow2", "hut", "lookout"]);
+    // Raising the burrow closes each group, and the levels come in order.
+    expect(QUESTS.filter((quest) => quest.raise !== undefined).map((quest) => quest.raise)).toEqual([2, 3, 4, 5]);
+    expect(new Set(QUESTS.map((quest) => quest.id)).size).toBe(QUESTS.length);
     // Nothing on it asks for what is gone: the night, the paths, wagers, the King.
     for (const quest of QUESTS) expect(quest.text).not.toMatch(/night|path|wager|King/);
   });
@@ -903,7 +908,8 @@ describe("Pip's list", () => {
       stats: { gathered: 5, raids: 25, stars: 60, nights: 3, wagers: 2 },
       guards: [3, 1, 1, 1, 1, 1, 1],
       animals: [0, 1, 2, 3, 4, 5],
-      works: [{ kind: 4, x: 100, y: 100 }]
+      works: [{ kind: 4, x: 100, y: 100 }],
+      welcome: WELCOMED
     }, { burrow: 5, oak: 3, store: 5, fence: 1, tower: 1, hut: 1 });
     done = placeWall(placeWall(placeWall(done, 100, 64), 110, 64), 120, 64);
     // The goat brought two more pieces, and they are down too.
@@ -921,13 +927,50 @@ describe("Pip's list", () => {
     const old = { ...camp({ acorns: 0, quest: 4, stats: { gathered: 50, raids: 0, stars: 0, nights: 0, wagers: 0 } }, { oak: 1, store: 1, hut: 1, tower: 1 }), taught: [] };
     const moved = advanceList(old, DAY);
     expect(moved.taught).toContain(LIST_MARK);
-    // Index 4 of the new list is the burrow's level 2, not done: it stays there, and nothing is paid.
-    expect(moved.quest).toBe(4);
+    // From index 4 of the list now (the hut, done; the lookout, done), it stops at the fence, not done, and nothing is paid.
+    expect(moved.quest).toBe(6);
     expect(moved.acorns).toBe(0);
     // Past the end of the new list, it is done with it.
     expect(advanceList({ ...old, quest: 22 }, DAY).quest).toBe(QUESTS.length);
     // An index past the end is read back as it was kept.
     expect(readBase(JSON.parse(JSON.stringify({ ...old, quest: 22 })))!.quest).toBe(22);
+  });
+
+  it("moves a camp from the list before 1.5.5 to the first thing it was not paid for, and never pays twice", () => {
+    // On the old list it had been paid for the oak, the larder, the hut and the lookout (index 4: the burrow's level 2 next).
+    const old = { ...camp({ acorns: 0, quest: 4, stats: { gathered: 50, raids: 0, stars: 0, nights: 0, wagers: 0 } }, { oak: 1, store: 1, hut: 1, tower: 1 }), taught: ["list2"], welcome: WELCOMED };
+    const moved = advanceList(old, DAY);
+    expect(moved.taught).toContain(`${LIST_MARK}:4`);
+    // The basket (none for an old camp) is next, then the burrow's level 2.
+    expect(QUESTS[moved.quest].id).toBe("basket");
+    expect(moved.acorns).toBe(0);
+    const settled = advanceList(moved, DAY);
+    expect(QUESTS[settled.quest].id).toBe("burrow2");
+    expect(settled.acorns).toBe(0);
+    // The burrow raised: its 25 are paid, and the hut and the lookout, paid for before, are ticked off for nothing.
+    const raised = advanceList({ ...settled, levels: { ...settled.levels, burrow: 2 } }, DAY);
+    expect(QUESTS[raised.quest].id).toBe("fence");
+    expect(raised.acorns).toBe(QUESTS.find((quest) => quest.id === "burrow2")!.reward);
+    expect(rewardOf(raised, QUESTS.find((quest) => quest.id === "hut")!)).toBe(0);
+    expect(raised.events.map((event) => event.text)).toContain("Done: build a scouts' hut.");
+    // A camp that was further on: paid for everything to the yard (index 9), the burrow's level 3 next.
+    const far = advanceList({ ...old, quest: 9 }, DAY);
+    expect(QUESTS[far.quest].id).toBe("basket");
+    expect(rewardOf(far, QUESTS.find((quest) => quest.id === "yard")!)).toBe(30 - 30);
+    expect(rewardOf(far, QUESTS.find((quest) => quest.id === "guardian")!)).toBe(60);
+    // A new camp is paid for everything.
+    expect(rewardOf(camp(), QUESTS[4])).toBe(QUESTS[4].reward);
+  });
+
+  it("waits at the welcome basket until it is opened, and pays nothing for it", () => {
+    const base = camp({ acorns: 0, stats: { gathered: 5, raids: 0, stars: 0, nights: 0, wagers: 0 } }, { store: 1 });
+    const waiting = { ...base, welcome: { given: true, basketOpened: false } } as BaseState;
+    const at = advanceList(waiting, DAY);
+    expect(QUESTS[at.quest].id).toBe("basket");
+    const opened = advanceList({ ...at, welcome: { given: true, basketOpened: true } } as BaseState, DAY);
+    expect(QUESTS[opened.quest].id).toBe("burrow2");
+    expect(opened.acorns).toBe(at.acorns);
+    expect(opened.events[0].text).toBe("Done: open Pip's welcome basket.");
   });
 });
 

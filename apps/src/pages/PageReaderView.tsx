@@ -91,6 +91,8 @@ import { android, onAndroid } from "../platform/android";
 import { isTouchInput, useTouchInput } from "../platform/device";
 import { isPhoneShape, readerShape, sidewaysPageView, systemBarsHidden, useReaderDevice, useReaderShape, useRotationLock, type SidewaysView } from "../readers/touchLayout";
 import { usePageGestures } from "../readers/pageGestures";
+import { useStageLightSwipes } from "../readers/useStageLightSwipes";
+import { ReadingLight, ReadingLightRows } from "../readers/ReaderLight";
 import { useReaderAwake } from "../readers/readerAwake";
 import { RotationChoice, SheetRow } from "../readers/text/ReaderTouchRows";
 import { AudioLines } from "lucide-react";
@@ -1899,6 +1901,8 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
     zoomTo: (nextFit, nextScale, about) =>
       setView(nextFit, nextFit === "free" ? clampZoom(nextScale, actualScale) : zoom, about)
   });
+  // Brightness and warmth by a swipe up or down the stage's edges (readers/readingLight.ts).
+  useStageLightSwipes(scrollRef, Boolean(source) && !loading && !error && shape !== "desktop");
 
   // One finger moves about a page larger than the window; across a page that
   // fits, it is a swipe (the browser would take it for a scroll that goes
@@ -2146,6 +2150,9 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
                   </label>
                 )}
                 {(phone || shape === "tablet") && <RotationChoice value={rotation} onChoose={chooseRotation} />}
+                <div className="reading-light-rows mt-3">
+                  <ReadingLightRows />
+                </div>
               </div>
             )}
           </div>
@@ -2823,6 +2830,8 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
           </div>
         </div>
       )}
+
+      <ReadingLight />
     </div>
   );
 };

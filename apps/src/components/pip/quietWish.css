@@ -1,0 +1,45 @@
+/* Pip's wish in the house's top bar, quietly (PipWish compact): the wished-for thing on a small plaque,
+   what she says behind its title. No label, no "today", no button: a gift to notice, never a chore. */
+.pip-wish-quiet {
+  position: relative;
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  background: var(--hud-face, #fffbf0);
+  box-shadow:
+    0 -2px 0 0 var(--hud-track, #d9cfb6),
+    0 2px 0 0 var(--hud-track, #d9cfb6),
+    -2px 0 0 0 var(--hud-track, #d9cfb6),
+    2px 0 0 0 var(--hud-track, #d9cfb6);
+  cursor: pointer;
+}
+
+.pip-wish-quiet[aria-disabled="true"] {
+  cursor: help;
+}
+
+.pip-wish-quiet[aria-disabled="true"]:not([data-granted]) > :first-child {
+  opacity: 0.75;
+}
+
+/* What is inside moves, never the plaque: a little hop of the picture on hover. */
+.pip-wish-quiet:not([aria-disabled="true"]):hover > :first-child {
+  transform: translateY(-2px);
+}
+
+.pip-wish-quiet:focus-visible {
+  outline: 2px solid var(--hud-line, #1f2a22);
+  outline-offset: 3px;
+}
+
+.pip-wish-quiet .pip-wish-check {
+  right: -5px;
+  bottom: -5px;
+  width: 14px;
+  height: 14px;
+  border-width: 1.5px;
+}

@@ -1,0 +1,97 @@
+/* The reader's light (readers/ReaderLight.tsx): a warm wash and a dark veil
+   over everything the reader draws, and the pill that shows a level while it
+   is set. They take no touches: the page under them is the reader's. */
+
+.reading-light-warm,
+.reading-light-veil {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Amber, multiplied: white paper turns candle-warm, black stays black. */
+.reading-light-warm {
+  z-index: 1000;
+  background: rgb(255, 147, 41);
+  mix-blend-mode: multiply;
+}
+
+.reading-light-veil {
+  z-index: 1001;
+  background: #000;
+}
+
+.reading-light-pill {
+  position: fixed;
+  z-index: 1002;
+  top: calc(env(safe-area-inset-top, 0px) + 18%);
+  left: 0;
+  right: 0;
+  margin-inline: auto;
+  width: fit-content;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px 0 10px;
+  border-width: 1px;
+  border-style: solid;
+  border-radius: 999px;
+  font-size: 13px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  opacity: 1;
+  transition: opacity 240ms ease;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.reading-light-pill.is-fading {
+  opacity: 0;
+}
+
+/* Wide enough for "100%", so the pill does not change size as the level moves. */
+.reading-light-pill-value {
+  min-width: 4ch;
+  text-align: right;
+}
+
+.reading-light-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  max-width: 200px;
+  margin-left: auto;
+}
+
+.reading-light-control input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  height: 4px;
+  cursor: pointer;
+  accent-color: currentColor;
+}
+
+.reading-light-auto {
+  flex: none;
+  width: 52px;
+  text-align: center;
+}
+
+span.reading-light-auto {
+  visibility: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reading-light-pill {
+    transition: none;
+  }
+}
+
+/* The rows on their own (a PDF's Page size panel), spaced as Text settings'. */
+.reading-light-rows {
+  display: grid;
+  gap: 12px;
+}

@@ -91,12 +91,18 @@ class DevicePlugin(private val activity: Activity) : Plugin(activity) {
   override fun load(webView: WebView) {
     super.load(webView)
     receive(activity.intent)
+    // Read aloud's news (a sentence started) goes to this page (ReadAloud.kt).
+    ReadAloud.attach(webView)
+    // The icon's "Continue" shortcut (Shortcuts.kt).
+    Shortcuts.attach(webView)
+    if (Shortcuts.receive(activity, activity.intent)) Shortcuts.nudge()
     // Handled once: a later re-creation of the activity must not import it again.
     activity.intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
   }
 
   override fun onNewIntent(intent: Intent) {
     receive(intent)
+    if (Shortcuts.receive(activity, intent)) Shortcuts.nudge()
   }
 
   @Command
@@ -126,6 +132,19 @@ class DevicePlugin(private val activity: Activity) : Plugin(activity) {
     val args = invoke.parseArgs(KeepAwakeArgs::class.java)
     MainActivity.volumePageTurns = args.on
     invoke.resolve()
+  }
+
+  /** Reading aloud with the phone's text-to-speech: every step of it, by `op` (`ReadAloud.kt`). */
+  @Command
+  fun readAloud(invoke: Invoke) {
+    ReadAloud.command(activity, invoke)
+  }
+
+  /** The reader's own brightness for this window, or (null) the system's again (`Brightness.kt`). */
+  @Command
+  fun setBrightness(invoke: Invoke) {
+    val args = invoke.parseArgs(BrightnessArgs::class.java)
+    Brightness.set(activity, args.level) { invoke.resolve(it) }
   }
 
   @Command
@@ -307,6 +326,28 @@ class DevicePlugin(private val activity: Activity) : Plugin(activity) {
 
   override fun onPause() {
     pausedSinceReview = true
+  }
+
+  /** The icon's "Continue <book>" shortcut, set (the cover is decoded off the main thread). */
+  @Command
+  fun setContinueShortcut(invoke: Invoke) {
+    val args = invoke.parseArgs(ContinueShortcutArgs::class.java)
+    Thread {
+      Shortcuts.set(activity, args)
+      invoke.resolve()
+    }.start()
+  }
+
+  @Command
+  fun clearContinueShortcut(invoke: Invoke) {
+    Shortcuts.clear(activity)
+    invoke.resolve()
+  }
+
+  /** The book a tapped "Continue" shortcut asked for, once (none: no `bookId`). */
+  @Command
+  fun takeContinueShortcut(invoke: Invoke) {
+    invoke.resolve(JSObject().put("bookId", Shortcuts.take()))
   }
 
   /** Asked by the Rust side after each page load: the page may have missed the first insets. */

@@ -24,9 +24,15 @@ import { PurchaseConfirm } from "../components/pip/PurchaseConfirm";
 import { UndoToast } from "../components/pip/UndoToast";
 import { PacketPicker } from "../components/pip/PacketPicker";
 import { Walkthrough } from "../components/pip/Walkthrough";
-import { WALK, markWalkSeen, walkSeen, type WalkStep, type WalkTarget } from "../components/pip/walkSteps";
+import { WALK, firstWalk, markWalkSeen, walkSeen, type WalkStep, type WalkTarget } from "../components/pip/walkSteps";
+import { useBaseStore } from "../store/baseStore";
 import { ArcadeOverlay, type ArcadePage } from "../components/pip/arcade/ArcadeOverlay";
 import { HollowPlace } from "../components/pip/arcade/base/HollowPlace";
+import { DoorIris, throughDoor } from "../components/pip/onboarding/DoorIris";
+import { HouseCoach } from "../components/pip/onboarding/HouseCoach";
+import { ShopHint } from "../components/pip/onboarding/ShopHint";
+import { comingOut } from "../components/pip/onboarding/useBurrowDoor";
+import { useCoachStore } from "../components/pip/onboarding/coachStore";
 import type { GameId } from "../components/pip/arcade/games";
 import { MOOD_LOW, aOrAn, errorText, moodWord, pickOne, priceOf, storage, wait, type Drawer, type FinishPanel } from "./pip/common";
 import { usePipActs } from "./pip/usePipActs";
@@ -169,6 +175,15 @@ export const PipPage = ({ showToast, openSocial, onNavigate, onOpenProfile }: Pi
   };
   const [busy, setBusy] = useState(false);
   const [walking, setWalking] = useState(false);
+  // All of it from "Show me around"; the first visit, the shop alone (walkSteps.ts `firstWalk`).
+  const [walkSteps, setWalkSteps] = useState<WalkStep[]>(WALK);
+  // The first visit's pointer at the shop, while it is up: its line. It goes with the reader going back out.
+  const [shopHint, setShopHint] = useState<string | null>(null);
+  const closeShopHint = useCallback(() => setShopHint(null), []);
+  useEffect(() => {
+    if (place !== "home") setShopHint(null);
+  }, [place]);
+  const firstSession = useBaseStore((state) => state.base?.welcome?.tutorial);
   // What a quick purchase shows before it is made (purchaseFlow.ts).
   const standIns = useStandIns();
   const sceneRef = useRef<HouseSceneHandle | null>(null);
@@ -567,6 +582,7 @@ export const PipPage = ({ showToast, openSocial, onNavigate, onOpenProfile }: Pi
     setPickerPlot(null);
     setPreview(null);
     setPlaying(false);
+    setWalkSteps(WALK);
     setWalking(true);
   };
 
@@ -579,13 +595,26 @@ export const PipPage = ({ showToast, openSocial, onNavigate, onOpenProfile }: Pi
   const loaded = overview !== null;
   useEffect(() => {
     if (place !== "home" || !loaded || walking || tour !== null || suspended || walkSeen(storage())) return;
+    // Pip's guided first session shows the shop itself: wait for it, and after it there is nothing to add.
+    const first = firstWalk(firstSession);
+    if (first === null) return;
+    if (first.length === 0) {
+      markWalkSeen(storage());
+      return;
+    }
     const timer = window.setTimeout(() => {
       markWalkSeen(storage());
+      // The shop alone is a light pointer that keeps nothing from the house (onboarding/ShopHint.tsx), not a walk.
+      if (first.length === 1 && first[0].target === "shop") {
+        setShopHint(first[0].line);
+        return;
+      }
+      setWalkSteps(first);
       setWalking(true);
     }, 700);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, tour, suspended, place]);
+  }, [loaded, tour, suspended, place, firstSession?.done]);
 
   const findWalk = (target: WalkTarget): Element | null =>
     target === "plot"
@@ -819,7 +848,8 @@ export const PipPage = ({ showToast, openSocial, onNavigate, onOpenProfile }: Pi
           skin={shownVariant}
           outfit={shownOutfit}
           mood={overview ? shownMood : undefined}
-          onInside={() => setPlace("home")}
+          // In through the burrow's door: Pip has walked in ahead (useBurrowDoor), and the page closes on the door.
+          onInside={() => throughDoor("in", () => setPlace("home"), useCoachStore.getState().doorAt)}
           onArcade={() => openArcade()}
           lead={menu("pip-base-chip")}
           garden={
@@ -988,7 +1018,15 @@ export const PipPage = ({ showToast, openSocial, onNavigate, onOpenProfile }: Pi
             setDrawer(null);
             setPickerPlot(null);
             setPlaying(false);
-            setPlace("hollow");
+            // Out by the burrow's door: the page opens on it, and Pip steps out of it (useBurrowDoor).
+            throughDoor(
+              "out",
+              () => {
+                comingOut();
+                setPlace("hollow");
+              },
+              useCoachStore.getState().doorAt
+            );
           }}
           playing={playing}
           startPlaying={() => {
@@ -1068,7 +1106,11 @@ export const PipPage = ({ showToast, openSocial, onNavigate, onOpenProfile }: Pi
       )}
 
       <PurchaseConfirm />
-      {walking && <Walkthrough steps={WALK} find={findWalk} prepare={prepareWalk} onClose={() => setWalking(false)} />}
+      {/* Pip's guided first session, its step indoors; and the circle the page goes through the door by. */}
+      <HouseCoach place={place} skin={shownVariant} outfit={shownOutfit} owns={(id) => owns("accessory", id)} seeds={spendable} />
+      {shopHint !== null && place === "home" && !walking && <ShopHint line={shopHint} skin={shownVariant} outfit={shownOutfit} onDone={closeShopHint} />}
+      <DoorIris />
+      {walking && <Walkthrough steps={walkSteps} find={findWalk} prepare={prepareWalk} onClose={() => setWalking(false)} />}
     </div>
   );
 };

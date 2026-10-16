@@ -28,6 +28,7 @@ import type { useReaderKeys } from "./useReaderKeys";
 import type { useReaderChrome } from "./useReaderChrome";
 import type { useReaderCover } from "./useReaderCover";
 import type { usePhoneReading } from "./usePhoneReading";
+import type { ReadAloudControls, useReadAloud } from "../readAloud/useReadAloud";
 
 /** What the page hands the reader. */
 export type ReaderProps = {
@@ -66,8 +67,10 @@ export type WithCover = WithAnnotations & ReturnType<typeof useReaderCover>;
 export type WithSelectionDock = WithCover & ReturnType<typeof useSelectionDock>;
 export type WithPhoneReading = WithSelectionDock & ReturnType<typeof usePhoneReading>;
 
+export type WithReadAloud = WithPhoneReading & ReturnType<typeof useReadAloud>;
+
 /** The whole scope, once every hook has run: what the components draw from. */
-export type ReaderScope = WithPhoneReading;
+export type ReaderScope = WithReadAloud;
 
 /**
  * What a hook reaches that a hook called after it adds. It is there by the
@@ -119,6 +122,8 @@ export interface ReaderLater {
   // useBookAnnotations
   annotations: ReturnType<typeof useAnnotations>;
   orderedHighlights: ReturnType<typeof useAnnotations>["highlights"];
+  // useReadAloud
+  readAloud: ReadAloudControls;
 }
 
 export type Later<Name extends keyof ReaderLater> = Pick<ReaderLater, Name>;

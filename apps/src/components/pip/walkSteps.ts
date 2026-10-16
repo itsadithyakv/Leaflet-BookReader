@@ -1,9 +1,9 @@
 /**
- * The Pip tab's first-visit walkthrough: Pip points out the things to know,
- * in the scene itself, a short line each: the seeds and her mood, herself
- * (she can be poked, stroked and picked up), Play, the shop, decorating and
- * a plot. Shown once (a preference of this device); "Show me around" in the
- * HUD plays it again.
+ * The house's walkthrough: Pip points out the things to know, in the scene
+ * itself, a short line each: the seeds and her mood, herself (she can be
+ * poked, stroked and picked up), Play, the shop, decorating and a plot.
+ * "Show me around" in the HUD plays it all; the first visit shows the shop
+ * alone (`firstWalk`), once (a preference of this device).
  */
 export const WALK_KEY = "leaflet.pip.houseTour";
 
@@ -25,6 +25,28 @@ export const WALK: WalkStep[] = [
   { target: "decorate", line: "decorate to move things about. make it cosy!", side: "above" },
   { target: "plot", line: "plant a seed in a plot up here. your reading waters it; pick it when it's ripe.", side: "above" }
 ];
+
+/**
+ * The first visit indoors shows the shop alone (since 1.5.5): Pip's guided
+ * first session outside teaches the rest, and "Show me around" still plays
+ * all of `WALK`.
+ */
+export const FIRST_WALK: WalkStep[] = WALK.filter((step) => step.target === "shop");
+
+/** The camp's guided first session, as far as the first visit indoors cares (`CampWelcome.tutorial`). */
+export type FirstSession = { step: number; done: boolean; skipped: boolean } | null | undefined;
+
+/**
+ * What the first visit indoors shows: null while the guided first session
+ * is still running (it takes the reader through the shop itself; wait), none
+ * when that session was finished (it showed the shop: only mark it seen),
+ * and the shop's step otherwise (the session skipped, or a camp from before it).
+ */
+export const firstWalk = (session: FirstSession): WalkStep[] | null => {
+  if (session && !session.done) return null;
+  if (session && session.done && !session.skipped && session.step > 0) return [];
+  return FIRST_WALK;
+};
 
 /** The next step after `from` whose target can be shown, or null when there is none. */
 export const nextStep = (from: number, available: (step: WalkStep) => boolean, steps: readonly WalkStep[] = WALK) => {

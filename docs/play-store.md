@@ -150,6 +150,19 @@ reader back). If the Play Console's foreground-service form asks about it
 anyway: "Short service: finishing Google Drive sign-in; ends when the browser
 returns, at most ~3 minutes; user-started."
 
+`FOREGROUND_SERVICE_MEDIA_PLAYBACK` (Read aloud, `ReadAloudService.kt`) **does
+need a declaration**: Play Console → App content → Foreground service
+permissions → Media playback. Suggested wording: "Read aloud: when the user
+starts Read aloud in a book, the phone's text-to-speech reads the book to
+them, and keeps reading with the screen off or another app in front, as an
+audiobook would. A media notification and the lock screen show play/pause,
+next/previous sentence and stop. The service starts only from the user's tap
+and ends when they stop it or the book ends." Play also asks for a short video
+of the feature: start Read aloud from the ··· menu, lock the phone, and show
+the lock-screen controls. The manifest also declares a `<queries>` entry for
+the text-to-speech service (`android.intent.action.TTS_SERVICE`), which needs
+no declaration.
+
 **News app:** no. **Government app:** no. **Financial features:** none.
 **Health:** none.
 

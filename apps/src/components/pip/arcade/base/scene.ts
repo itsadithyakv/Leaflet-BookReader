@@ -1,6 +1,6 @@
 import { BUILDINGS, DEFAULT_SPOTS, MAX_LEVEL, PLACED, PROWLERS_FROM, YARD_MAX, plotOpenAt, postSpotOf, woodAt, lodgers as campLodgers, gateOf, seasonOf, type BaseState, type BuildingId, type Decor, type Placed, type Site, type Spot, type Yard } from "../../../../pip/base/rules";
 import { GUARDIANS, SCENERY } from "../../../../pip/base/guards";
-import { findWay, onWalk, planWalk, shuffled, type Block, type Plan, type Stop } from "./walks";
+import { findWay, onWalk, planWalk, shuffled, wayRound, type Block, type Plan, type Stop } from "./walks";
 import type { GameArt } from "../gameArt";
 import { GAME_H, GAME_W } from "../games";
 
@@ -44,6 +44,10 @@ export type CampLook = {
   gate?: Spot | null;
   /** Parcels from the reading, waiting by the burrow to be opened. */
   parcels?: number;
+  /** Pip's welcome basket waits on the path by the door (`pip/base/welcome.ts`). */
+  basket?: boolean;
+  /** False while prowlers are held off (a new camp, until the reader has read after the welcome). */
+  prowlers?: boolean;
   /** The kind of book being read (a trophy's kind), where one is: it has a say in who comes out of the wood. */
   reading?: number | null;
   /** Sites with work going on: scaffolding over them. */
@@ -337,6 +341,12 @@ export type CampExtras = {
   burst?: { site: Site; frame: number } | null;
   /** Magpies crossing, for the morning after: how far along, 0 to 1. */
   magpies?: number | null;
+  /** Pip on her way in at the burrow's door: the `time` she set off at (see `pipEntry`). */
+  entering?: number | null;
+  /** Pip has just come out of the burrow with the reader: the `time` she came out at (see `pipExit`). */
+  cameOut?: number | null;
+  /** The burrow's door glows, to be found (its first visit, and the tour's step for it): how bright, 0 to 1. */
+  doorGlow?: number;
 };
 
 /** Places to a grid of so many to the art pixel. */
@@ -963,6 +973,98 @@ const walksOf = (look: CampLook): Walks => {
   WALKS.set(look, made);
   return made;
 };
+/** Seconds Pip takes going in at her door, and coming out of it (as on her rounds), and the most her walk to it may take. */
+const DOOR_IN = 0.45;
+const ENTER_MOST = 2;
+/**
+ * Pip going in at the burrow's door when the reader goes in: from wherever
+ * her round has her at `since`, round what is in the way to her door, at a
+ * brisk walk (never a slide: the walk is capped in time, not sped up past a
+ * trot: from the far side of the clearing she runs, her steps as quick as
+ * her pace), then in. `total` is how long all of it takes, in seconds.
+ */
+const ENTRIES = new WeakMap<CampLook, Map<string, unknown>>();
+/** Worked out once for a camp and a moment: the picture asks many times a second. */
+const once = <T>(look: CampLook, key: string, make: () => T): T => {
+  let kept = ENTRIES.get(look);
+  if (!kept) ENTRIES.set(look, (kept = new Map()));
+  if (!kept.has(key)) kept.set(key, make());
+  return kept.get(key) as T;
+};
+export const pipEntry = (look: CampLook, since: number) => once(look, `in${since}`, () => entryOf(look, since));
+const entryOf = (look: CampLook, since: number) => {
+  const walks = walksOf(look);
+  const from = onWalk(walks.pip, since, PIP_SPEED);
+  const door = onGrass(look.spots.burrow[0], look.spots.burrow[1] + 3);
+  // Already in (or on her way in): there is only the door to see open.
+  const path: Array<[number, number]> = from.shown < 0.5 ? [door] : wayRound([from.x, from.y], door, walks.blocks);
+  let long = 0;
+  for (let point = 1; point < path.length; point++) long += Math.hypot(path[point][0] - path[point - 1][0], path[point][1] - path[point - 1][1]);
+  const walk = long <= 0 ? 0 : Math.min(ENTER_MOST, Math.max(0.35, long / (PIP_SPEED * 1.8)));
+  return { path, long, walk, inside: from.shown < 0.5, total: walk + DOOR_IN };
+};
+
+/** Where Pip is on her way in, `age` seconds after she set off; and how far open the door is (0 shut, 1 ajar, 2 open). */
+export const pipEntering = (entry: ReturnType<typeof pipEntry>, age: number) => {
+  const end = entry.path[entry.path.length - 1];
+  const door = age >= entry.walk - 0.25 ? (age >= entry.walk - 0.08 && age < entry.total - 0.05 ? 2 : 1) : 0;
+  if (age < entry.walk && entry.long > 0) {
+    let gone = (age / entry.walk) * entry.long;
+    for (let point = 1; point < entry.path.length; point++) {
+      const from = entry.path[point - 1];
+      const to = entry.path[point];
+      const long = Math.hypot(to[0] - from[0], to[1] - from[1]);
+      if (gone <= long || point === entry.path.length - 1) {
+        const along = long > 0 ? Math.min(1, gone / long) : 1;
+        // Her steps keep up with her pace: quicker feet, not a glide.
+        const pace = Math.max(1, entry.long / entry.walk / PIP_SPEED);
+        return { x: from[0] + (to[0] - from[0]) * along, y: from[1] + (to[1] - from[1]) * along, move: "walk", faceLeft: to[0] < from[0], age: age * pace, shown: 1, door };
+      }
+      gone -= long;
+    }
+  }
+  const inFor = age - entry.walk;
+  return { x: end[0], y: end[1], move: "idle", faceLeft: false, age: inFor, shown: entry.inside ? 0 : Math.max(0, 1 - inFor / DOOR_IN), door };
+};
+
+/**
+ * Pip coming out of her door when the reader comes out: in the open
+ * doorway over a moment, then a walk to wherever her round has her by the
+ * time she gets there, so that she goes on with it from there without a
+ * jump.
+ */
+export const pipExit = (look: CampLook, since: number) => once(look, `out${since}`, () => exitOf(look, since));
+const exitOf = (look: CampLook, since: number) => {
+  const walks = walksOf(look);
+  const door = onGrass(look.spots.burrow[0], look.spots.burrow[1] + 3);
+  const guess = onWalk(walks.pip, since + DOOR_IN + 1, PIP_SPEED);
+  const walk = Math.min(ENTER_MOST, Math.max(0.35, Math.hypot(guess.x - door[0], guess.y - door[1]) / (PIP_SPEED * 1.8)));
+  const there = onWalk(walks.pip, since + DOOR_IN + walk, PIP_SPEED);
+  const path = wayRound(door, [there.x, there.y], walks.blocks);
+  let long = 0;
+  for (let point = 1; point < path.length; point++) long += Math.hypot(path[point][0] - path[point - 1][0], path[point][1] - path[point - 1][1]);
+  return { path, long, walk, there, total: DOOR_IN + walk };
+};
+
+/** Where Pip is on her way out, `age` seconds after the camp came up; and how far open the door is. */
+export const pipExiting = (exit: ReturnType<typeof pipExit>, age: number) => {
+  const door = age < DOOR_IN ? 2 : age < DOOR_IN + 0.15 ? 1 : 0;
+  const start = exit.path[0];
+  if (age < DOOR_IN) return { x: start[0], y: start[1], move: "idle", faceLeft: false, age, shown: Math.max(0, age / DOOR_IN), door };
+  let gone = Math.min(1, (age - DOOR_IN) / Math.max(0.01, exit.walk)) * exit.long;
+  for (let point = 1; point < exit.path.length; point++) {
+    const from = exit.path[point - 1];
+    const to = exit.path[point];
+    const long = Math.hypot(to[0] - from[0], to[1] - from[1]);
+    if (gone <= long || point === exit.path.length - 1) {
+      const along = long > 0 ? Math.min(1, gone / long) : 1;
+      return { x: from[0] + (to[0] - from[0]) * along, y: from[1] + (to[1] - from[1]) * along, move: "walk", faceLeft: to[0] < from[0], age: age - DOOR_IN, shown: Math.min(1, exit.there.shown + 1 - Math.min(1, (age - DOOR_IN) / exit.walk)), door };
+    }
+    gone -= long;
+  }
+  return { x: start[0], y: start[1], move: "idle", faceLeft: false, age, shown: 1, door };
+};
+
 /** One of the camp's people on a round of their own: the same places as Pip has, but not her door, and in an order nobody else has. */
 const folkWalk = (look: CampLook, hero: number, index: number): Plan => {
   const walks = walksOf(look);
@@ -1449,6 +1551,17 @@ export const parcelSpots = (look: CampLook): Array<[number, number]> => {
 };
 /** Whether there is a parcel at a point of the scene. */
 export const parcelAtPoint = (look: CampLook, x: number, y: number) => parcelSpots(look).some(([px, py]) => Math.abs(x - px) <= 5 && y >= py - 8 && y <= py + 3);
+/** Where Pip's welcome basket stands: on the path before the door, to the right of the parcels. The middle of its foot. */
+export const basketSpot = (look: Pick<CampLook, "spots">): [number, number] => {
+  const [bx, by] = look.spots.burrow;
+  return [Math.max(8, Math.min(GAME_W - 8, bx + 16)), Math.min(GAME_H - 2, by + 11)];
+};
+/** Whether the welcome basket is at a point of the scene (generous: it is the thing a new reader is asked to tap). */
+export const basketAtPoint = (look: CampLook, x: number, y: number) => {
+  if (!look.basket) return false;
+  const [px, py] = basketSpot(look);
+  return Math.abs(x - px) <= 8 && y >= py - 12 && y <= py + 3;
+};
 /** The trophy at a point of the scene: which of those standing, or -1. */
 export const trophyAtPoint = (look: CampLook, x: number, y: number) =>
   look.trophies.slice(0, TROPHIES_SHOWN).findIndex((_, index) => Math.abs(x - TROPHY_SPOTS[index][0]) <= 5 && y >= TROPHY_SPOTS[index][1] - 12 && y <= TROPHY_SPOTS[index][1] + 3);
@@ -1527,7 +1640,7 @@ const PROWLS = new WeakMap<CampLook, Map<number, ProwlPlan & { site: Placed }>>(
 /** The prowler who sets out in a slot of the camp's clock, his whole walk worked out; null when nobody does. */
 export const prowlPlanOf = (look: CampLook, watch: readonly Ring[], slot: number): (ProwlPlan & { site: Placed }) | null => {
   // In winter the nights are long and the wood is hungry: more of them come.
-  if (look.levels.burrow < PROWLERS_FROM || slot < 0 || !prowlSets(slot, look.season % 4 === 2)) return null;
+  if (look.prowlers === false || look.levels.burrow < PROWLERS_FROM || slot < 0 || !prowlSets(slot, look.season % 4 === 2)) return null;
   // The cat: one in ten thinks better of it and stays in the wood.
   if ((look.animals ?? []).includes(1) && scatter(slot * 3.31 + 9.1) < 0.1) return null;
   let plans = PROWLS.get(look);
@@ -2308,6 +2421,52 @@ const ghost = (on: CanvasRenderingContext2D, art: GameArt, setting: NonNullable<
 };
 
 /** Paints a camp. */
+/** The burrow's door in its picture, by the burrow's level (as `base-art.js` draws it): how wide either side of the middle, and how tall. */
+const DOOR_RX = [4, 4, 5, 5, 5];
+const DOOR_RY = [7, 7, 8, 9, 9];
+/**
+ * Over the burrow's own picture (in its pixels, where it is drawn): its
+ * door ajar or open, dark inside with the lamplight on the floor, and the
+ * glow round it that says it can be gone in at. The glow is a ring of
+ * whole pixels that only grows brighter and fainter; nothing moves.
+ */
+const burrowDoor = (on: CanvasRenderingContext2D, spot: Spot, level: number, open: number, glow: number) => {
+  if (open <= 0 && glow <= 0) return;
+  const n = Math.max(1, Math.min(5, level));
+  const rx = DOOR_RX[n - 1];
+  const ry = DOOR_RY[n - 1];
+  const cx = Math.round(spot[0] - 24) + 24;
+  const foot = Math.round(spot[1] - 40) + 38;
+  const half = (row: number) => (row >= ry ? 0 : Math.max(1, Math.round(rx * Math.sqrt(1 - ((row + 0.5) / ry) ** 2))));
+  if (open > 0) {
+    for (let row = 0; row < ry; row++) {
+      const wide = half(row);
+      // Ajar, the door has swung in on its left-hand hinge: the dark is the right of it.
+      const from = open >= 2 ? -wide : 0;
+      on.fillStyle = row === 0 ? "#8a5a2c" : "#24160c";
+      on.fillRect(cx + from, foot - row, wide - from, 1);
+    }
+    if (open === 1) {
+      on.fillStyle = "#c8955a";
+      // The door's own edge, turned to us.
+      on.fillRect(cx - 1, foot - ry + 2, 1, ry - 2);
+    }
+  }
+  if (glow > 0) {
+    const ring = (by: number, alpha: number) => {
+      on.fillStyle = `rgba(255, 210, 63, ${alpha.toFixed(3)})`;
+      for (let row = 0; row < ry; row++) {
+        const wide = half(row);
+        on.fillRect(cx - wide - by, foot - row, 1, 1);
+        on.fillRect(cx + wide - 1 + by, foot - row, 1, 1);
+      }
+      on.fillRect(cx - half(ry - 1) - by + 1, foot - ry + 1 - by, half(ry - 1) * 2 + by * 2 - 2, 1);
+    };
+    ring(1, glow);
+    ring(2, glow * 0.4);
+  }
+};
+
 export const paintCamp = (ctx: CanvasRenderingContext2D, art: GameArt, look: CampLook, frame: number, extras: CampExtras = {}) => {
   ctx.clearRect(0, 0, GAME_W, GAME_H);
   if (look.area === "meadow") {
@@ -2542,6 +2701,51 @@ export const paintCamp = (ctx: CanvasRenderingContext2D, art: GameArt, look: Cam
         }
       });
     });
+    // Pip's welcome basket: a wicker basket brimming with acorns, a checked cloth tucked in, a handle over it.
+    if (look.basket && (look.area ?? "camp") === "camp") {
+      const [x, y] = basketSpot(look);
+      things.push({
+        y,
+        x,
+        shade: 4,
+        draw: () => {
+          const left = Math.round(x) - 5;
+          const foot = Math.round(y);
+          // The handle, an arch of whole pixels.
+          on.fillStyle = "#5e3a1f";
+          on.fillRect(left + 2, foot - 11, 1, 3);
+          on.fillRect(left + 3, foot - 12, 5, 1);
+          on.fillRect(left + 8, foot - 11, 1, 3);
+          // Acorns heaped over the rim.
+          on.fillStyle = "#8a5a2b";
+          on.fillRect(left + 2, foot - 8, 2, 2);
+          on.fillRect(left + 5, foot - 9, 2, 3);
+          on.fillRect(left + 7, foot - 8, 2, 2);
+          on.fillStyle = "#4a3018";
+          on.fillRect(left + 2, foot - 9, 2, 1);
+          on.fillRect(left + 5, foot - 10, 2, 1);
+          on.fillRect(left + 7, foot - 9, 2, 1);
+          // The cloth, red and cream, hanging over one side.
+          on.fillStyle = "#e0564a";
+          on.fillRect(left, foot - 7, 3, 2);
+          on.fillStyle = "#f4ead0";
+          on.fillRect(left + 1, foot - 7, 1, 1);
+          on.fillRect(left, foot - 6, 1, 1);
+          // The basket: an ink rim, then wicker in two weaves.
+          on.fillStyle = "#5e3a1f";
+          on.fillRect(left, foot - 6, 11, 1);
+          on.fillRect(left + 1, foot - 1, 9, 1);
+          on.fillStyle = "#d8a95e";
+          on.fillRect(left + 1, foot - 5, 9, 4);
+          on.fillStyle = "#b9853f";
+          for (let col = 0; col < 9; col += 2) on.fillRect(left + 1 + col, foot - 5 + (col % 4 === 0 ? 0 : 1), 1, 1);
+          for (let col = 1; col < 9; col += 2) on.fillRect(left + 1 + col, foot - 3 + (col % 4 === 1 ? 0 : 1), 1, 1);
+          on.fillStyle = "#5e3a1f";
+          on.fillRect(left, foot - 5, 1, 4);
+          on.fillRect(left + 10, foot - 5, 1, 4);
+        }
+      });
+    }
     if (look.garden !== undefined && look.garden !== null) {
       const [gx, gy] = gardenSpot(look.spots);
       const state = look.garden;
@@ -2584,6 +2788,28 @@ export const paintCamp = (ctx: CanvasRenderingContext2D, art: GameArt, look: Cam
             }
           }
           on.globalAlpha = 1;
+          if (site === "burrow" && level > 0 && !carried) {
+            const open =
+              extras.entering !== undefined && extras.entering !== null && time !== null
+                ? pipEntering(pipEntry(look, extras.entering), time - extras.entering).door
+                : extras.cameOut !== undefined && extras.cameOut !== null && time !== null
+                  ? pipExiting(pipExit(look, extras.cameOut), time - extras.cameOut).door
+                  : 0;
+            burrowDoor(on, spot, level, open, 0);
+            // The glow is a light: drawn over the night's shade (as the windows are), so it is seen on a first night too.
+            const glow = extras.doorGlow ?? 0;
+            if (glow > 0)
+              lights.push(() => {
+                const fx = snap(spot[0]);
+                const fy = snap(spot[1]);
+                ctx.save();
+                ctx.translate(fx, fy);
+                ctx.scale(small, small);
+                ctx.translate(-fx, -fy);
+                burrowDoor(ctx, spot, level, 0, glow);
+                ctx.restore();
+              });
+          }
           for (let bit = 0; bit < wear * 2; bit++) {
             // What came off it: a few stones on the grass at its foot.
             on.fillStyle = bit % 2 === 0 ? "#8d8a80" : "#6f6c64";
@@ -2632,7 +2858,32 @@ export const paintCamp = (ctx: CanvasRenderingContext2D, art: GameArt, look: Cam
         const left = spot[0] > GAME_W / 2 + 20 ? spot[0] - (size.w * THINGS) / 2 - 24 : spot[0] + (size.w * THINGS) / 2 - 9;
         return [Math.min(GAME_W - 32, Math.max(0, left)) + 16, Math.min(GAME_H - 4, spot[1] + 2)];
       };
-      if (working || time === null) {
+      const coming = extras.cameOut !== undefined && extras.cameOut !== null && time !== null && time - extras.cameOut < pipExit(look, extras.cameOut).total;
+      if ((extras.entering !== undefined && extras.entering !== null && time !== null) || coming) {
+        // On her way in at her own door, the reader following her; or out of it again with them.
+        const now =
+          extras.entering !== undefined && extras.entering !== null && time !== null
+            ? pipEntering(pipEntry(look, extras.entering), time - extras.entering)
+            : pipExiting(pipExit(look, extras.cameOut as number), (time as number) - (extras.cameOut as number));
+        const hop = now.move === "walk" ? -Math.round(Math.abs(Math.sin(now.age * 9)) * 1.4) : 0;
+        if (now.shown > 0.02)
+          things.push({
+            y: now.y,
+            x: now.x,
+            small: PIP_SMALL * (0.82 + 0.18 * now.shown),
+            shade: now.shown > 0.6 ? 7 : 0,
+            draw: () => {
+              const sprite = art.pip(now.move, Math.floor(now.age * ART_FPS));
+              const left = snap(now.x - sprite.w / 2);
+              const top = snap(now.y - 30 + hop);
+              const before = on.globalAlpha;
+              on.globalAlpha = before * now.shown;
+              if (now.faceLeft) turned(on, sprite.image, sprite.w, left, top);
+              else on.drawImage(sprite.image, left, top);
+              on.globalAlpha = before;
+            }
+          });
+      } else if (working || time === null) {
         // Building: beside the work, cheering it on. In a still picture: at home, and asleep there by night.
         const [x, feet] = beside(working ?? "burrow");
         const move = look.jobs.length > 0 ? "cheer" : night ? "sleep" : "idle";

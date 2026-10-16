@@ -19,7 +19,7 @@
  * and moving it; the second level of the camp brings the prowlers, the
  * postcard and the fence, a tip each.
  */
-import { BUILDINGS, GATE_FROM, GUARDS_FROM, POSTCARD_FROM, PROWLERS_FROM, bedsOf, gateOf, residents, type BaseState } from "./rules";
+import { BUILDINGS, GATE_FROM, GUARDS_FROM, POSTCARD_FROM, bedsOf, gateOf, prowlersCome, residents, type BaseState } from "./rules";
 
 export type Tip = {
   id: string;
@@ -65,7 +65,7 @@ export const TIPS: readonly Tip[] = [
   {
     id: "prowler",
     text: "Prowlers come out of the wood now, while you watch. What throws sees them off; one who gets through knocks a building about, or takes a few acorns.",
-    when: (state) => state.levels.burrow >= PROWLERS_FROM
+    when: (state) => prowlersCome(state)
   },
   {
     id: "postcard",
@@ -113,7 +113,8 @@ const NONE = "none";
 
 /** The tip Pip has for the reader just now: the first that has come to matter and has not been seen to; null when there is none. */
 export const tipNow = (state: BaseState): Tip | null =>
-  state.taught.includes(NONE) ? null : (TIPS.find((tip) => !state.taught.includes(tip.id) && tip.when(state) && !(tip.did?.(state) ?? false)) ?? null);
+  // While Pip walks a new reader through the camp (`welcome.ts`), she is saying all there is to say.
+  state.taught.includes(NONE) || (state.welcome?.given && !state.welcome.tutorial.done) ? null : (TIPS.find((tip) => !state.taught.includes(tip.id) && tip.when(state) && !(tip.did?.(state) ?? false)) ?? null);
 
 /** A tip has been seen to: by the reader saying so, or by their doing the thing. */
 export const learnt = (state: BaseState, id: string): BaseState =>

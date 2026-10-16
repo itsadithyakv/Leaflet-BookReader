@@ -36,6 +36,10 @@ import { ReaderPaceControls } from "../readers/text/ReaderPaceControls";
 import { usePhoneReading } from "../readers/text/usePhoneReading";
 import type { ReaderScope } from "../readers/text/scope";
 import { isKindlePlace } from "../library/kindleClippings";
+import { useReadAloud } from "../readers/readAloud/useReadAloud";
+import { ReadAloudPill } from "../readers/readAloud/ReadAloudPill";
+import { useReadingLightSwipes } from "../readers/text/useReadingLightSwipes";
+import { ReadingLight } from "../readers/ReaderLight";
 
 type ReaderViewProps = {
   book: Book;
@@ -104,11 +108,15 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
   useAwakeWhileReading(reader);
   Object.assign(reader, useSelectionDock(reader));
   useScrollTaps(reader);
+  // Brightness and warmth by a swipe at the page's edges (readers/readingLight.ts).
+  useReadingLightSwipes(reader);
   useSelectionHidesChrome(reader);
   // Last: it waits for the book to be up, and nothing waits on it.
   useKindlePlacing(reader);
   // A phone's footer, bookmark corner and way back after a jump (readers/phoneReading.ts).
   Object.assign(reader, usePhoneReading(reader));
+  // Read aloud, lit and followed on the page (readers/readAloud).
+  Object.assign(reader, useReadAloud(reader));
 
   const { chromeVisible, displayMode, exitGuard, focusToast, hoverChrome, isLight, pageStyle, readingMode, rotation, shape } = reader;
   // The system's bars hide for a focus-lock session, on a phone held upright, and on one on its side while the chrome is away.
@@ -154,6 +162,8 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
 
       <ReaderPaceControls reader={reader} />
 
+      <ReadAloudPill reader={reader} />
+
       {focusToast && (
         <div className="reader-toast fixed bottom-6 right-6 z-[60]" role="status">
           <div className="rounded-full border px-4 py-2 text-[10px] uppercase tracking-widest shadow-xl reader-panel reader-border reader-muted">
@@ -162,6 +172,7 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
         </div>
       )}
 
+      <ReadingLight />
     </div>
   );
 };

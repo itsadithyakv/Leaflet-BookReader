@@ -38,6 +38,7 @@ export const Sidebar = ({ activeItem, onNavigate, onStartReading, startDisabled,
             className="sidebar-nav-item"
             type="button"
             onClick={() => onNavigate(item.label)}
+            data-tour={item.label === "Pip" ? "hollow" : undefined}
             aria-current={item.label === activeItem ? "page" : undefined}
           >
             <span className="sidebar-icon-well relative">

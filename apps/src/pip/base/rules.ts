@@ -236,6 +236,39 @@ export type BaseState = {
   wreck: { by: string; stars: number; from: number; needs: number } | null;
   /** A thing carried off on a lost night (when there were nights), and where it stood: brought home by the next raid won. */
   stolen: Decor | null;
+  /** Pip's welcome basket and the guided first session (see `welcome.ts`). */
+  welcome: CampWelcome;
+};
+
+/**
+ * Pip's welcome to a new camp (1.5.5): the oak shaken, a basket by the
+ * door, two helping paws, and one parcel after the first reading. Kept with
+ * the camp, so it syncs with it: a second device or a reinstall with sync
+ * gets the camp back with all of this already spent, and never a second
+ * gift. None of it is reading: no minute, no trophy, nothing a server counts.
+ */
+export type CampWelcome = {
+  /** The basket and the oak's shake were given (once a camp). */
+  given: boolean;
+  /** Helping paws left: each finishes a build at once (`welcome.ts` `pawFinish`). */
+  paws: number;
+  /** The basket by the door was opened. */
+  basketOpened: boolean;
+  /**
+   * The one parcel the first reading after the welcome sends: "waiting" for
+   * those minutes, "sent" up the path (one of `parcels`, the next opened),
+   * "opened"; null where there is none to come (a camp from before 1.5.5, or
+   * before the welcome).
+   */
+  firstReadParcel: "waiting" | "sent" | "opened" | null;
+  /** The guided first session: how far it got, and how it ended. */
+  tutorial: { step: number; done: boolean; skipped: boolean };
+  /** Prowlers are held off until the reader has read after the welcome. */
+  prowlersAfterRead: boolean;
+  /** Acorns Pip shook onto the oak, still on it: gathered with the oak's own, and no reading behind them. */
+  windfall: number;
+  /** Minutes read in all when the welcome was given, or when its session ended: the parcel and the prowlers count from here. */
+  from: number;
 };
 
 /** What the rules are told that they cannot know. */
@@ -506,8 +539,59 @@ export const newBase = (minutesRead: number, day: string): BaseState => ({
   harm: {},
   rivals: { day: "", raided: [] },
   wreck: null,
-  stolen: null
+  stolen: null,
+  welcome: freshWelcome(minutesRead)
 });
+
+/** The welcome as a new camp has it: nothing given yet (`welcome.ts` `giveWelcome`). */
+export const freshWelcome = (minutesRead: number): CampWelcome => ({
+  given: false,
+  paws: 0,
+  basketOpened: false,
+  firstReadParcel: null,
+  tutorial: { step: 0, done: false, skipped: false },
+  prowlersAfterRead: false,
+  windfall: 0,
+  from: Math.max(0, Math.floor(minutesRead))
+});
+
+/** A camp from before the welcome: welcomed already, with nothing to give and no session to sit through. */
+export const WELCOMED: CampWelcome = {
+  given: true,
+  paws: 0,
+  basketOpened: true,
+  firstReadParcel: null,
+  tutorial: { step: 0, done: true, skipped: false },
+  prowlersAfterRead: false,
+  windfall: 0,
+  from: 0
+};
+
+/** What the welcome gives: acorns shaken onto the oak, the basket, the paws; and the first reading's parcel, after so many minutes. */
+export const WELCOME_WINDFALL = 20;
+export const WELCOME_BASKET = 80;
+export const WELCOME_PAWS = 2;
+export const FIRST_READ_PARCEL = 40;
+export const FIRST_READ_MINUTES = 5;
+const TUTORIAL_STEPS_MOST = 20;
+
+/** The welcome as kept: anything missing is a camp from before it (`WELCOMED`); what is there is held to what it can be. */
+const readWelcome = (raw: unknown): CampWelcome => {
+  if (typeof raw !== "object" || raw === null) return { ...WELCOMED, tutorial: { ...WELCOMED.tutorial } };
+  const kept = record(raw);
+  const tutorial = record(kept.tutorial);
+  const parcel = kept.firstReadParcel;
+  return {
+    given: kept.given === true,
+    paws: wholeOr(kept.paws, 0, WELCOME_PAWS, 0),
+    basketOpened: kept.basketOpened === true,
+    firstReadParcel: parcel === "waiting" || parcel === "sent" || parcel === "opened" ? parcel : null,
+    tutorial: { step: wholeOr(tutorial.step, 0, TUTORIAL_STEPS_MOST, 0), done: tutorial.done === true, skipped: tutorial.skipped === true },
+    prowlersAfterRead: kept.prowlersAfterRead === true,
+    windfall: wholeOr(kept.windfall, 0, WELCOME_WINDFALL, 0),
+    from: wholeOr(kept.from, 0, Number.MAX_SAFE_INTEGER, 0)
+  };
+};
 
 const whole = (value: unknown, least: number, most: number): number | null =>
   typeof value === "number" && Number.isFinite(value) ? Math.min(most, Math.max(least, Math.floor(value))) : null;
@@ -719,7 +803,8 @@ export const readBase = (raw: unknown): BaseState | null => {
       typeof record(from.wreck).by === "string" && whole(record(from.wreck).stars, 1, 3) !== null && whole(record(from.wreck).from, 0, 1e9) !== null && whole(record(from.wreck).needs, 1, MEND_MOST) !== null
         ? { by: (record(from.wreck).by as string).slice(0, 40), stars: whole(record(from.wreck).stars, 1, 3)!, from: whole(record(from.wreck).from, 0, 1e9)!, needs: whole(record(from.wreck).needs, 1, MEND_MOST)! }
         : null,
-    stolen: readDecor([from.stolen])[0] ?? null
+    stolen: readDecor([from.stolen])[0] ?? null,
+    welcome: readWelcome(from.welcome)
   };
 };
 
@@ -844,7 +929,7 @@ export const does = (building: BuildingId, level: number): string => {
     case "fence":
       return level === 0 ? "Pieces of fence to put in the prowlers' way" : `${level * PIECES_A_LEVEL} pieces of fence, each holding them longer`;
     case "tower":
-      return level === 0 ? "Throws at prowlers" : `Throws ${towerThrows(level).range} far, ${level === 1 ? "lightly" : level < 4 ? "hard" : "very hard"}; its lantern is lit on a day your reading goal is met`;
+      return level === 0 ? "Keeps watch, and throws at whoever comes" : `Throws ${towerThrows(level).range} far, ${level === 1 ? "lightly" : level < 4 ? "hard" : "very hard"}; its lantern is lit on a day your reading goal is met`;
     case "hut":
       return level === 0
         ? "Scouts to raid with"
@@ -1020,10 +1105,14 @@ export const siteName = (state: BaseState, site: Site) => {
 // ---- the oak ----------------------------------------------------------------------
 
 /** Acorns on the oak to gather now. */
-export const oakReady = (state: BaseState, minutesRead: number) => {
+export const oakReady = (state: BaseState, minutesRead: number) => Math.min(oakHolds(state), oakRead(state, minutesRead) + windfallOf(state));
+/** What the reading has put on the oak, without what Pip shook onto it. */
+const oakRead = (state: BaseState, minutesRead: number) => {
   const read = Math.max(0, Math.floor(minutesRead) - state.oakFrom);
   return Math.min(oakHolds(state), Math.floor((read / OAK_EVERY) * oakDrops(state)));
 };
+/** The welcome's shake still on the oak (a camp read before there was a welcome has none). */
+export const windfallOf = (state: BaseState) => state.welcome?.windfall ?? 0;
 
 /**
  * Gathers what the oak has, as far as the larder has room. What does not fit
@@ -1031,7 +1120,17 @@ export const oakReady = (state: BaseState, minutesRead: number) => {
  * reading those acorns took, however long the tree stood full.
  */
 export const gather = (state: BaseState, minutesRead: number, streak = 0, day: string | null = null): BaseState => {
-  const ready = oakReady(state, minutesRead);
+  // What Pip shook onto the oak comes first, and as it is: no streak or season on it, and the oak's clock untouched,
+  // since no reading stands behind it.
+  const shaken = Math.min(windfallOf(state), room(state));
+  if (shaken > 0) {
+    const shook = { ...state, acorns: state.acorns + shaken, stats: { ...state.stats, gathered: state.stats.gathered + shaken }, welcome: { ...state.welcome, windfall: state.welcome.windfall - shaken } };
+    return oakRead(shook, minutesRead) > 0 ? gatherRead(shook, minutesRead, streak, day) : shook;
+  }
+  return gatherRead(state, minutesRead, streak, day);
+};
+const gatherRead = (state: BaseState, minutesRead: number, streak: number, day: string | null): BaseState => {
+  const ready = oakRead(state, minutesRead);
   const taken = Math.min(ready, room(state));
   if (taken <= 0) return state;
   const now = Math.floor(minutesRead);
@@ -1460,6 +1559,7 @@ export const settle = (state: BaseState, now: Now): BaseState => {
     // A new oak starts dropping from the day it stands, not from the reading that built it.
     if (job.site === "oak" && job.to === 1) next = { ...next, oakFrom: read };
   }
+  next = settleWelcome(next, read, day);
   if (next.night !== day) {
     // A day has turned. The calendar night used to be fought here, out of sight (`nightOutcome`): since 2026-10-15
     // it is not, and the prowlers the picture shows are the only thing that comes at the camp. The night is still
@@ -1473,6 +1573,29 @@ export const settle = (state: BaseState, now: Now): BaseState => {
   }
   return advanceList(next, day);
 };
+
+/**
+ * The welcome, brought up to now: the first reading after it sends its one
+ * parcel up the path (as one of the parcels, the first opened, with
+ * `FIRST_READ_PARCEL` in it), and once the session is over and the reader
+ * has read since, the prowlers come. Only real reading moves either.
+ */
+const settleWelcome = (state: BaseState, read: number, day: string): BaseState => {
+  let welcome = state.welcome;
+  if (!welcome?.given) return state;
+  let next = state;
+  // A library restored from before the welcome: it counts from here.
+  if (welcome.from > read) welcome = { ...welcome, from: read };
+  if (welcome.firstReadParcel === "waiting" && read - welcome.from >= FIRST_READ_MINUTES && next.parcels < PARCELS_MOST) {
+    welcome = { ...welcome, firstReadParcel: "sent" };
+    next = { ...next, parcels: next.parcels + 1, events: noted(next, day, "A big parcel came up the path, from your first reading.") };
+  }
+  if (welcome.prowlersAfterRead && read > welcome.from && (welcome.tutorial.done || welcome.firstReadParcel !== "waiting")) welcome = { ...welcome, prowlersAfterRead: false };
+  return welcome === state.welcome ? next : { ...next, welcome };
+};
+
+/** Whether prowlers come out of the wood at this camp: from the second level, once a new camp's reader has read after the welcome. */
+export const prowlersCome = (state: BaseState) => state.levels.burrow >= PROWLERS_FROM && !state.welcome?.prowlersAfterRead;
 
 /** The night has been looked at. */
 export const seenReport = (state: BaseState): BaseState => (state.report ? { ...state, report: null } : state);
@@ -2580,10 +2703,31 @@ export const storyRead = (state: BaseState, bookId: string, stretch: number, min
  * for later: nothing in a parcel is lost to a full larder.
  */
 export const openParcel = (state: BaseState): BaseState => {
-  if (state.parcels <= 0 || room(state) < parcelGives(state)) return state;
+  if (state.parcels <= 0 || room(state) < parcelNext(state)) return state;
+  // The first reading's parcel is the first opened: it has its own acorns in it, and nothing else.
+  if (state.welcome?.firstReadParcel === "sent") return { ...state, parcels: state.parcels - 1, acorns: state.acorns + FIRST_READ_PARCEL, welcome: { ...state.welcome, firstReadParcel: "opened" } };
   const opened = { ...state, parcels: state.parcels - 1, acorns: state.acorns + parcelGives(state) };
   const tale = parcelTale(state);
   return tale === null ? opened : { ...opened, tales: [...state.tales, tale] };
+};
+/** What the next parcel opened has in it: the first reading's, while it waits, or an ordinary one. */
+export const parcelNext = (state: BaseState) => (state.welcome?.firstReadParcel === "sent" ? FIRST_READ_PARCEL : parcelGives(state));
+/** How many of the parcels waiting the larder has room for, each whole. */
+export const parcelsOpenable = (state: BaseState) => {
+  let left = room(state);
+  let count = 0;
+  for (let at = 0; at < state.parcels; at++) {
+    const gives = at === 0 ? parcelNext(state) : parcelGives(state);
+    if (left < gives) break;
+    left -= gives;
+    count++;
+  }
+  return count;
+};
+/** The acorns in the parcels the larder has room for: what "Open all" brings. */
+export const parcelsBring = (state: BaseState) => {
+  const count = parcelsOpenable(state);
+  return count === 0 ? 0 : parcelNext(state) + (count - 1) * parcelGives(state);
 };
 /** The tale the next parcel opened has in it, if it has one: every other parcel, while there are tales not yet told. */
 export const parcelTale = (state: BaseState): number | null => {
@@ -2863,47 +3007,67 @@ export const welcomeBack = (state: BaseState, minutesRead: number, day: string):
 
 /** Where a thing on the list is done: a plot of the camp, the raids, or the meadow. */
 export type QuestAt = Site | "raids" | "meadow";
-export type Quest = { text: string; reward: number; done: (state: BaseState) => boolean; at: QuestAt };
+/**
+ * A thing on Pip's list: `id` names it across rewrites of the list, `short`
+ * is what the goal chip says of it ("Lookout"), and `raise` marks the step
+ * that raises the burrow to that level, the last of its group (`ladder.ts`).
+ */
+export type Quest = { id: string; text: string; short: string; reward: number; done: (state: BaseState) => boolean; at: QuestAt; raise?: number };
+
+/** The welcome basket is opened, or there is none to open (a camp from before it is kept as opened). */
+const basketDone = (state: BaseState) => state.welcome?.basketOpened !== false;
 
 /**
- * In order, and in the order the camp opens: the first five are a first
- * camp (the oak, the larder, the hut, the lookout, the burrow's second
- * level), and the rest walk through what each level brings. Each is a thing
+ * In order, grouped by the burrow, which is the spine: each group is what a
+ * level has to do, and raising the burrow is the last of it. Each is a thing
  * the camp can show it has done, and each says where it is done, so the
- * reader can be shown. Rewritten on 2026-10-15, when the list was made the
- * one "next thing" the camp shows; the old list's steps for the night, the
- * paths, the arcade's wagers and the King are gone with them.
+ * reader can be shown. Nothing on it asks for what its level has not
+ * brought yet. Regrouped on 2026-10-16 (1.5.5): the hut and the lookout went
+ * after the burrow's level 2, and the welcome basket joined the first group.
  */
 export const QUESTS: readonly Quest[] = [
-  { text: "Read 10 minutes, then tap the oak", reward: 10, done: (state) => state.stats.gathered > 0, at: "oak" },
-  { text: "Build a larder", reward: 10, done: (state) => state.levels.store >= 1, at: "store" },
-  { text: "Build a scouts' hut", reward: 15, done: (state) => state.levels.hut >= 1, at: "hut" },
-  { text: "Build a lookout", reward: 15, done: (state) => state.levels.tower >= 1, at: "tower" },
-  { text: "Raise the burrow to level 2", reward: 25, done: (state) => state.levels.burrow >= 2, at: "burrow" },
-  { text: "Build a fence, and lay three pieces of it", reward: 15, done: (state) => state.levels.fence >= 1 && state.walls.length >= Math.min(3, fencePieces(state)), at: "fence" },
-  { text: "Win a raid", reward: 20, done: (state) => state.stats.raids >= 1 || state.camps >= 1, at: "raids" },
-  { text: "Set down a construct", reward: 20, done: (state) => state.works.length > 0, at: "fence" },
-  { text: "Build something in the yard", reward: 30, done: (state) => state.yard.some((slot) => slot.level > 0), at: "yard0" },
-  { text: "Raise the burrow to level 3", reward: 40, done: (state) => state.levels.burrow >= 3, at: "burrow" },
-  { text: "Post a guardian at a building", reward: 60, done: (state) => state.guards.some((rank) => rank > 0), at: "tower" },
-  { text: "Take 5 strongholds", reward: 40, done: (state) => state.camps >= 5, at: "raids" },
-  { text: "Raise the burrow to level 4", reward: 60, done: (state) => state.levels.burrow >= 4, at: "burrow" },
-  { text: "Make the camp charming enough for an animal to come", reward: 50, done: (state) => state.animals.length > 0, at: "meadow" },
-  { text: "Raise the burrow to level 5", reward: 100, done: (state) => state.levels.burrow >= 5, at: "burrow" },
-  { text: "Take 10 strongholds", reward: 60, done: (state) => state.camps >= 10, at: "raids" },
-  { text: "Train a guardian to the top rank", reward: 150, done: (state) => state.guards.some((rank) => rank >= GUARD_MOST), at: "tower" },
-  { text: "Have all seven guardians at their posts", reward: 300, done: (state) => state.guards.every((rank) => rank > 0), at: "burrow" },
-  { text: "Give all six animals a home", reward: 300, done: (state) => state.animals.length >= ANIMALS.length, at: "meadow" }
+  { id: "oak", text: "Read 10 minutes, then tap the oak", short: "Tap the oak", reward: 10, done: (state) => state.stats.gathered > 0, at: "oak" },
+  { id: "larder", text: "Build a larder", short: "Larder", reward: 10, done: (state) => state.levels.store >= 1, at: "store" },
+  { id: "basket", text: "Open Pip's welcome basket", short: "Basket", reward: 0, done: basketDone, at: "burrow" },
+  { id: "burrow2", text: "Raise the burrow to level 2", short: "Burrow 2", reward: 25, done: (state) => state.levels.burrow >= 2, at: "burrow", raise: 2 },
+  { id: "hut", text: "Build a scouts' hut", short: "Scouts' hut", reward: 15, done: (state) => state.levels.hut >= 1, at: "hut" },
+  { id: "lookout", text: "Build a lookout", short: "Lookout", reward: 15, done: (state) => state.levels.tower >= 1, at: "tower" },
+  { id: "fence", text: "Build a fence, and lay three pieces of it", short: "Fence", reward: 15, done: (state) => state.levels.fence >= 1 && state.walls.length >= Math.min(3, fencePieces(state)), at: "fence" },
+  { id: "raid", text: "Win a raid", short: "A raid", reward: 20, done: (state) => state.stats.raids >= 1 || state.camps >= 1, at: "raids" },
+  { id: "burrow3", text: "Raise the burrow to level 3", short: "Burrow 3", reward: 40, done: (state) => state.levels.burrow >= 3, at: "burrow", raise: 3 },
+  { id: "construct", text: "Set down a construct", short: "A construct", reward: 20, done: (state) => state.works.length > 0, at: "fence" },
+  { id: "yard", text: "Build something in the yard", short: "The yard", reward: 30, done: (state) => state.yard.some((slot) => slot.level > 0), at: "yard0" },
+  { id: "guardian", text: "Post a guardian at a building", short: "A guardian", reward: 60, done: (state) => state.guards.some((rank) => rank > 0), at: "tower" },
+  { id: "strongholds5", text: "Take 5 strongholds", short: "5 strongholds", reward: 40, done: (state) => state.camps >= 5, at: "raids" },
+  { id: "burrow4", text: "Raise the burrow to level 4", short: "Burrow 4", reward: 60, done: (state) => state.levels.burrow >= 4, at: "burrow", raise: 4 },
+  { id: "animal", text: "Make the camp charming enough for an animal to come", short: "An animal", reward: 50, done: (state) => state.animals.length > 0, at: "meadow" },
+  { id: "strongholds10", text: "Take 10 strongholds", short: "10 strongholds", reward: 60, done: (state) => state.camps >= 10, at: "raids" },
+  { id: "burrow5", text: "Raise the burrow to level 5", short: "Burrow 5", reward: 100, done: (state) => state.levels.burrow >= 5, at: "burrow", raise: 5 },
+  { id: "guardianTop", text: "Train a guardian to the top rank", short: "A top guardian", reward: 150, done: (state) => state.guards.some((rank) => rank >= GUARD_MOST), at: "tower" },
+  { id: "guardians7", text: "Have all seven guardians at their posts", short: "Seven guardians", reward: 300, done: (state) => state.guards.every((rank) => rank > 0), at: "burrow" },
+  { id: "animals6", text: "Give all six animals a home", short: "Six animals", reward: 300, done: (state) => state.animals.length >= ANIMALS.length, at: "meadow" }
 ];
+
+/** The list as it was from 2026-10-15 to 1.5.5 ("list2"), by id: what a camp on it had been paid for. */
+const LIST2 = ["oak", "larder", "hut", "lookout", "burrow2", "fence", "raid", "construct", "yard", "burrow3", "guardian", "strongholds5", "burrow4", "animal", "burrow5", "strongholds10", "guardianTop", "guardians7", "animals6"];
+const LIST2_MARK = "list2";
 
 /**
  * Kept in `taught` (a list of names, and older builds keep names they do
  * not know): this camp has been brought onto the list above. A camp from
- * before it has its `quest` pointing into the old list; the first time it
- * is settled, whatever it has already done of the new one is passed over
- * without a reward, so nobody is paid twice for one larder.
+ * the list before ("list2") is put at the first thing it was not paid for,
+ * and keeps how far it had got there ("list3:9"): what it was paid for then
+ * is ticked off again without acorns, so nobody is paid twice for one hut.
+ * A camp from before that has whatever it has done passed over unpaid.
  */
-export const LIST_MARK = "list2";
+export const LIST_MARK = "list3";
+const listMark = (state: BaseState) => state.taught.find((mark) => mark === LIST_MARK || mark.startsWith(`${LIST_MARK}:`));
+/** What a thing on the list pays this camp: nothing for what it was paid for on the list before. */
+export const rewardOf = (state: BaseState, quest: Quest) => {
+  const mark = listMark(state);
+  const had = mark && mark !== LIST_MARK ? Number(mark.slice(LIST_MARK.length + 1)) : 0;
+  return LIST2.slice(0, Number.isFinite(had) ? had : 0).includes(quest.id) ? 0 : quest.reward;
+};
 
 /** The thing on Pip's list now, and whether it is done; null when the list is. */
 export const questNow = (state: BaseState): { quest: Quest; done: boolean; index: number } | null => {
@@ -2918,14 +3082,15 @@ export const questAt = (state: BaseState): QuestAt | null => questNow(state)?.qu
 export const claimQuest = (state: BaseState, day: string): BaseState => {
   const now = questNow(state);
   if (!now || !now.done) return state;
-  const reward = give(state, now.quest.reward);
+  const reward = give(state, rewardOf(state, now.quest));
   return {
     ...state,
     acorns: state.acorns + reward,
     quest: state.quest + 1,
-    events: noted(state, day, `Done: ${now.quest.text[0].toLowerCase()}${now.quest.text.slice(1)}. ${reward} acorns.`)
+    events: noted(state, day, doneLine(now.quest, reward))
   };
 };
+const doneLine = (quest: Quest, paid: number) => `Done: ${quest.text[0].toLowerCase()}${quest.text.slice(1)}.${paid > 0 ? ` ${paid} acorns.` : ""}`;
 
 /**
  * The list moves on by itself: a thing done is ticked off and its acorns go
@@ -2935,19 +3100,28 @@ export const claimQuest = (state: BaseState, day: string): BaseState => {
  */
 export const advanceList = (state: BaseState, day: string): BaseState => {
   let next = state;
-  if (!next.taught.includes(LIST_MARK)) {
+  if (!listMark(next)) {
+    if (next.taught.includes(LIST2_MARK)) {
+      // From the list before: on at the first thing it was not paid for there, and what it was paid for is kept.
+      const had = Math.min(next.quest, LIST2.length);
+      const paid = new Set(LIST2.slice(0, had));
+      let at = 0;
+      while (at < QUESTS.length && paid.has(QUESTS[at].id)) at++;
+      return { ...next, quest: at, taught: [...next.taught, `${LIST_MARK}:${had}`] };
+    }
     let at = Math.min(next.quest, QUESTS.length);
     while (QUESTS[at]?.done(next)) at++;
     return { ...next, quest: at, taught: [...next.taught, LIST_MARK] };
   }
   for (let step = 0; step < QUESTS.length; step++) {
     const quest = QUESTS[next.quest];
-    if (!quest || !quest.done(next) || room(next) < quest.reward) break;
+    const reward = quest ? rewardOf(next, quest) : 0;
+    if (!quest || !quest.done(next) || room(next) < reward) break;
     next = {
       ...next,
-      acorns: next.acorns + quest.reward,
+      acorns: next.acorns + reward,
       quest: next.quest + 1,
-      events: noted(next, day, `Done: ${quest.text[0].toLowerCase()}${quest.text.slice(1)}. ${quest.reward} acorns.`)
+      events: noted(next, day, doneLine(quest, reward))
     };
   }
   return next;
@@ -2970,10 +3144,11 @@ export const nextStep = (state: BaseState, minutesRead: number): NextStep => {
     return left > 0 ? `Read ${left} more ${left === 1 ? "minute" : "minutes"}: the ${siteName(state, site).toLowerCase()} is finished` : null;
   };
   if (quest) {
-    if (quest.done(state)) return { text: `Done: ${quest.text[0].toLowerCase()}${quest.text.slice(1)}. The larder is full`, at: "store", reward: quest.reward, full: true };
-    if (state.quest === 0 && oakReady(state, minutesRead) > 0) return { text: "Tap the oak to take in its acorns", at: "oak", reward: quest.reward, full: false };
+    const paid = rewardOf(state, quest) || null;
+    if (quest.done(state)) return { text: `Done: ${quest.text[0].toLowerCase()}${quest.text.slice(1)}. The larder is full`, at: "store", reward: paid, full: true };
+    if (state.quest === 0 && oakReady(state, minutesRead) > 0) return { text: "Tap the oak to take in its acorns", at: "oak", reward: paid, full: false };
     const building = quest.at !== "raids" && quest.at !== "meadow" ? reading(quest.at) : null;
-    return { text: building ?? quest.text, at: quest.at, reward: quest.reward, full: false };
+    return { text: building ?? quest.text, at: quest.at, reward: paid, full: false };
   }
   const going = state.jobs.map((job) => job.site).find((site) => reading(site) !== null);
   if (going) return { text: reading(going)!, at: going, reward: null, full: false };
@@ -2997,6 +3172,8 @@ export const campNews = (state: BaseState, minutesRead: number): string | null =
   const ready = oakReady(state, minutesRead);
   const parts: string[] = [];
   if (finished.length > 0) parts.push(`the ${finished.join(" and the ")} ${finished.length > 1 ? "are" : "is"} finished`);
+  if (state.parcels > 0) parts.push(state.parcels === 1 ? "a parcel is waiting" : `${state.parcels} parcels are waiting`);
+  if (basketWaits(state)) parts.push("Pip's basket is waiting");
   if (ready > 0) parts.push(`${ready} ${ready === 1 ? "acorn" : "acorns"} on the oak`);
   if (parts.length === 0) return null;
   const line = parts.join(", ");
@@ -3009,4 +3186,11 @@ export const campWaits = (state: BaseState, now: Now): boolean =>
   // (since 2026-10-15), so the dot on the way in is never a nudge to come back for its own sake.
   state.jobs.some((job) => jobLeft(job, now.minutes) === 0) ||
   (state.levels.oak > 0 && oakReady(state, now.minutes) >= oakHolds(state)) ||
-  (state.parcels > 0 && room(state) >= parcelGives(state));
+  (state.parcels > 0 && room(state) >= parcelNext(state)) ||
+  // And what Pip gave in welcome, while it waits: the oak she shook, the basket by the door.
+  (windfallOf(state) > 0 && room(state) > 0) ||
+  basketOpens(state);
+
+/** Pip's basket waits by the door until it is opened; it opens when the larder has room for the whole of it. */
+export const basketWaits = (state: BaseState) => Boolean(state.welcome?.given && !state.welcome.basketOpened);
+export const basketOpens = (state: BaseState) => basketWaits(state) && room(state) >= WELCOME_BASKET;

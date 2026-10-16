@@ -35,7 +35,12 @@ fn main() {
       "open_store",
       "request_review",
       "hold_for_sign_in",
-      "volume_page_turns"
+      "set_continue_shortcut",
+      "clear_continue_shortcut",
+      "take_continue_shortcut",
+      "volume_page_turns",
+      "read_aloud",
+      "set_brightness"
     ])
     .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands);
   tauri_build::try_build(tauri_build::Attributes::new().plugin("leaflet-device", device))

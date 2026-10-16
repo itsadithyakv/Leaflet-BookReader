@@ -131,6 +131,20 @@ export const ReaderMoreMenu = ({ reader }: { reader: ReaderScope }) => {
               </option>
             </select>
           </label>
+          {/* Read aloud, from the first sentence on screen (readers/readAloud). */}
+          <button
+            type="button"
+            className="mt-3 flex w-full items-center justify-between rounded-lg border px-3 py-2 text-xs uppercase tracking-widest transition reader-border reader-pill reader-icon"
+            onClick={() => {
+              setMorePanelOpen(false);
+              if (reader.readAloud.active) reader.readAloud.stop();
+              else reader.readAloud.start();
+            }}
+            title={touch ? undefined : "Read aloud (R)"}
+          >
+            <span>Read aloud</span>
+            <span className="reader-toggle" data-on={reader.readAloud.active} />
+          </button>
           <button
             type="button"
             className="mt-3 flex w-full items-center justify-between rounded-lg border px-3 py-2 text-xs uppercase tracking-widest transition reader-border reader-pill reader-icon"

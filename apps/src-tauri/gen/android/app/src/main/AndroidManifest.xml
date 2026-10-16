@@ -7,6 +7,17 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- SignInKeeper: Leaflet kept awake while Drive's sign-in is in the browser. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- Read aloud (ReadAloud.kt): the voice reads on with the screen off, in a
+         media-playback service with its notification. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+
+    <!-- Read aloud speaks with the phone's text-to-speech engine, which has to
+         be visible to Leaflet to be bound (Android 11 and on). -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
@@ -150,5 +161,12 @@
           android:name=".SignInKeeper"
           android:exported="false"
           android:foregroundServiceType="shortService" />
+
+        <!-- Read aloud with the screen off or Leaflet out of sight, with the
+             media notification and the lock screen's controls (ReadAloudService.kt). -->
+        <service
+          android:name=".ReadAloudService"
+          android:exported="false"
+          android:foregroundServiceType="mediaPlayback" />
     </application>
 </manifest>

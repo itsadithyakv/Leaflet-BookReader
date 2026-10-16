@@ -1,0 +1,203 @@
+/* Reading aloud's controls (ReadAloudPill.tsx): a pill at the foot of the
+   page, centred, over the chapter dock on a computer and above the footer on
+   a phone while the chrome is up. The voice sheet, the "Follow" button and a
+   notice stack above it. */
+
+.read-aloud-dock {
+  position: fixed;
+  left: 50%;
+  bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  z-index: 46;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.read-aloud-dock > * {
+  pointer-events: auto;
+}
+
+.read-aloud-pill,
+.read-aloud-follow,
+.read-aloud-notice,
+.read-aloud-sheet {
+  border: 1px solid var(--reader-border);
+  background: color-mix(in srgb, var(--reader-panel) 90%, transparent);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16);
+}
+
+.read-aloud-pill {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 999px;
+}
+
+.read-aloud-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 36px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  transition: background-color 0.15s ease;
+}
+
+.read-aloud-button:hover,
+.read-aloud-button.is-open {
+  background: color-mix(in srgb, var(--reader-accent) 12%, transparent);
+}
+
+.read-aloud-button.is-main {
+  background: color-mix(in srgb, var(--reader-accent) 16%, transparent);
+}
+
+.read-aloud-button.is-rate {
+  min-width: 48px;
+}
+
+.read-aloud-follow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.read-aloud-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  max-width: 340px;
+  padding: 6px 6px 6px 14px;
+  border-radius: 16px;
+  font-size: 12px;
+  color: var(--reader-text);
+}
+
+.read-aloud-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+}
+
+.read-aloud-info {
+  flex-basis: 100%;
+  padding: 0 8px 6px 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.read-aloud-link {
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.read-aloud-sheet {
+  width: min(320px, calc(100vw - 32px));
+  max-height: min(50vh, 420px);
+  overflow-y: auto;
+  padding: 12px;
+  border-radius: 16px;
+  font-size: 12px;
+}
+
+.read-aloud-rates {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.read-aloud-voices {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+}
+
+.read-aloud-voice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 32px;
+  padding: 4px 10px;
+  border-radius: 10px;
+  text-align: left;
+}
+
+.read-aloud-voice:hover,
+.read-aloud-voice.is-active {
+  background: color-mix(in srgb, var(--reader-accent) 12%, transparent);
+}
+
+.read-aloud-tag {
+  flex-shrink: 0;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* By finger: 44 px targets, above the footer while the chrome is up. */
+html[data-input="touch"] .read-aloud-dock {
+  bottom: calc(var(--inset-bottom, 0px) + 12px);
+}
+
+/* With the chrome up a phone shows the footer and, above it, the chapter dock: the pill goes over both. */
+html[data-input="touch"] .reader-scope:not(.reader-chrome-hidden) .read-aloud-dock {
+  bottom: calc(var(--inset-bottom, 0px) + 152px);
+}
+
+html[data-input="touch"] .read-aloud-button {
+  min-width: 44px;
+  height: 44px;
+}
+
+html[data-input="touch"] .read-aloud-follow {
+  height: 40px;
+}
+
+html[data-input="touch"] .read-aloud-icon {
+  width: 40px;
+  height: 40px;
+}
+
+html[data-input="touch"] .read-aloud-voice {
+  min-height: 44px;
+}
+
+html[data-input="touch"] .read-aloud-rates button {
+  min-height: 40px;
+}
+
+/* On its side the chrome is a strip down the right: the pill keeps clear of it. */
+.reader-scope[data-shape="sideways"]:not(.reader-chrome-hidden) .read-aloud-dock {
+  left: calc((100vw - var(--reader-strip-width, 0px)) / 2);
+  bottom: calc(var(--inset-bottom, 0px) + 12px);
+}
+
+/* Smart Read's or auto-scroll's pill cannot be up with this one (each stops
+   the other), but a toast is: it goes above the pill. */
+.reader-scope:has(.read-aloud-pill) .reader-toast {
+  bottom: calc(132px + env(safe-area-inset-bottom, 0px));
+}
