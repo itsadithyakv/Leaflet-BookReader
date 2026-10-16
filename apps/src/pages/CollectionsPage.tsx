@@ -361,7 +361,7 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
       </div>
 
       <section aria-labelledby="series-title" className="flex flex-col gap-4">
-        <SectionHeader eyebrow="Found in your library" title="Series" id="series-title" />
+        <SectionHeader eyebrow="Found in your library" eyebrowOnPhone={false} title="Series" id="series-title" />
         {series.groups.length === 0 ? (
           <p className="paper-surface rounded-xl p-5 text-sm text-on-surface-variant">
             No series yet. When you have two books of one (Harry Potter, The Expanse, Discworld…), they gather here
@@ -384,7 +384,7 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
       </section>
 
       <section aria-labelledby="shelves-title" className="flex flex-col gap-4">
-        <SectionHeader eyebrow="Kept up to date for you" title="Shelves" id="shelves-title" />
+        <SectionHeader eyebrow="Kept up to date for you" eyebrowOnPhone={false} title="Shelves" id="shelves-title" />
         {shelves.length === 0 ? (
           <p className="paper-surface rounded-xl p-5 text-sm text-on-surface-variant">Import a few books to fill these.</p>
         ) : (
@@ -403,7 +403,7 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
       </section>
 
       <section aria-labelledby="yours-title" className="flex flex-col gap-4">
-        <SectionHeader eyebrow="Made by you" title="Your collections" id="yours-title" />
+        <SectionHeader eyebrow="Made by you" eyebrowOnPhone={false} title="Your collections" id="yours-title" />
         {collections.length === 0 ? (
           <p className="paper-surface rounded-xl p-5 text-sm text-on-surface-variant">
             None yet. Make one with <strong className="text-on-surface">New collection</strong>, or from any book's ⋯ menu.
@@ -429,7 +429,7 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
       {genres.length > 0 && (
         <section aria-labelledby="genres-title" className="flex flex-col gap-4">
           <SectionHeader
-            eyebrow="Your library by kind"
+            eyebrow="Your library by kind" eyebrowOnPhone={false}
             title="Genres"
             id="genres-title"
             actions={
@@ -457,7 +457,7 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
 
       <section aria-labelledby="browse-title" className="paper-surface flex flex-col gap-6 rounded-xl p-5">
         <SectionHeader
-          eyebrow="Opens the library, filtered"
+          eyebrow="Opens the library, filtered" eyebrowOnPhone={false}
           title="Browse by"
           id="browse-title"
           actions={

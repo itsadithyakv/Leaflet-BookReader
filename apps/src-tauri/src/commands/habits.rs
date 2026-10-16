@@ -237,7 +237,7 @@ pub(crate) fn build_snapshot(db: &db::Database, today_key: &str) -> Result<Habit
 /// Evaluates the streak and returns everything the habit UI needs. Lazy by
 /// design: the app may be closed for days, so a break is discovered on open
 /// rather than by a timer that was never running.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn habit_snapshot(today_key: String, state: State<'_, AppState>) -> Result<HabitSnapshot, String> {
   let db = state.db.guard();
   build_snapshot(&db, &today_key)

@@ -4213,11 +4213,12 @@ textarea:focus-visible,
   justify-content: space-around;
   gap: 2px;
   padding: 6px 4px calc(6px + env(safe-area-inset-bottom, 0px));
+  /* Near enough opaque that the shelf scrolling under it does not show. It
+     had a backdrop blur too, which at 97% cover changed nothing on screen
+     but had the phone blur the strip under the bar again on every frame of
+     a scroll. */
   background-color: rgb(var(--color-surface-container) / 0.97);
   border-top: 1px solid rgb(var(--color-outline-variant) / 0.5);
-  /* Sits above the page rather than in it, so the blur keeps text legible
-     while the library scrolls underneath. */
-  backdrop-filter: blur(14px);
   box-shadow: 0 -6px 20px rgb(0 0 0 / 0.22);
 }
 

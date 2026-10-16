@@ -7,7 +7,7 @@ import { useHabitStore } from "../store/habitStore";
 import { pickBeat } from "../pip/moments";
 import { loadNods, nodsNow } from "../pip/nods";
 import { hasMove } from "../pip/core";
-import { TOUR, tourLine, type TourStop } from "../pip/tour";
+import { TOUR, tourLine, tourTarget, type TourStop } from "../pip/tour";
 import { useBackLayer } from "../platform/back";
 import { isTouchInput, useTouchInput } from "../platform/device";
 import { usePipPresence } from "../pip/usePipPresence";
@@ -321,7 +321,23 @@ const readInsets = () => {
   return { right: px("--inset-right"), bottom: px("--inset-bottom") };
 };
 
-/** Card tops Pip can stand on: any paper card in the page, or anything marked. */
+/**
+ * Whether standing on this top would put Pip over something that must stay readable
+ * (`data-pip-keep-clear`: on a phone, the Library's heading and its count, just over the first row).
+ */
+const crowded = (r: DOMRect) => {
+  const marked = document.querySelectorAll("[data-pip-keep-clear]");
+  if (marked.length === 0) return false;
+  // Her height, and a little more for a hat or the bed she naps in.
+  const tall = pipCssSize(SPRITE) + 8;
+  for (const el of Array.from(marked)) {
+    const c = el.getBoundingClientRect();
+    if (c.height > 0 && c.bottom > r.top - tall && c.top < r.top && c.right > r.left && c.left < r.right) return true;
+  }
+  return false;
+};
+
+/** Card tops Pip can stand on: any paper card in the page, or anything marked, with room over them. */
 const readLedges = (b: Bounds) =>
   Array.from(document.querySelectorAll(".app-main-scroll .paper-surface, [data-pip-ledge]"))
     .map((el) => ({ el, r: el.getBoundingClientRect() }))
@@ -331,7 +347,8 @@ const readLedges = (b: Bounds) =>
         r.top > b.top + HEIGHT &&
         r.top < b.floor - 12 &&
         r.right > b.left &&
-        r.left < b.right
+        r.left < b.right &&
+        !crowded(r)
     );
 
 /**
@@ -374,7 +391,7 @@ const perchFor = (stop: TourStop, b: Bounds, size: number): Perch | null => {
   if (!stop.target) {
     return { x: (b.left + b.right) / 2, y: b.floor, pose: "backflip", facing: 1, rect: null };
   }
-  const el = document.querySelector(stop.target);
+  const el = tourTarget(stop.target);
   const r = el?.getBoundingClientRect();
   if (!el || !r || r.width === 0 || r.height === 0) {
     return null;
@@ -978,7 +995,7 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
     const s = st.current;
     const stop = TOUR[index];
     const b = readBounds();
-    const el = stop.target ? document.querySelector(stop.target) : null;
+    const el = stop.target ? tourTarget(stop.target) : null;
     const perch = perchFor(stop, b, cssSize.current);
     if (!perch) {
       // Not on screen here (a narrow window hides the search box): skip it.
@@ -1193,7 +1210,7 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
     let maxX = b.right - HALF_W - 8;
     if (s.ground?.kind === "ledge") {
       const r = s.ground.el.getBoundingClientRect();
-      if (!s.ground.el.isConnected || r.top < b.top + HEIGHT || r.top > b.floor - 4 || s.x < r.left || s.x > r.right) {
+      if (!s.ground.el.isConnected || r.top < b.top + HEIGHT || r.top > b.floor - 4 || s.x < r.left || s.x > r.right || crowded(r)) {
         startFall();
         return;
       }

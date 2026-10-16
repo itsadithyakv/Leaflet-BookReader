@@ -3,6 +3,7 @@ import { EyeOff, Flag, Globe2, Quote, Star, Trash2, Users } from "lucide-react";
 import { friendsService, type BookPost } from "../../services/friendsService";
 import { discussService, type Audience, type NewPost } from "../../services/discussService";
 import { useLibraryStore } from "../../store/libraryStore";
+import type { Book } from "@shared/models/book";
 import { askConfirm } from "../ConfirmDialog";
 import { useDiscussStore } from "../discuss/discussStore";
 import { Reactions } from "../discuss/Reactions";
@@ -21,6 +22,7 @@ import { backdropClose } from "../ui/backdrop";
 const LINE_MAX = 280;
 const REVIEW_MAX = 3000;
 const QUOTE_MAX = 500;
+const NO_BOOKS: Book[] = [];
 /** A review longer than this is folded, with "More". */
 const FOLD_AT = 420;
 
@@ -177,7 +179,9 @@ type Kind = "finished" | "review" | "quote";
 export const PostDialog = ({ showToast }: { showToast: (message: string) => void }) => {
   const open = usePostStore((state) => state.open);
   const close = usePostStore((state) => state.close);
-  const books = useLibraryStore((state) => state.books);
+  // Watched only while the dialog is open: it is always mounted, and the
+  // library changes every few pages while a book is being read.
+  const books = useLibraryStore((state) => (open ? state.books : NO_BOOKS));
   const ensureRules = useDiscussStore((state) => state.ensureRules);
   const choices = useMemo(
     () =>

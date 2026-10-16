@@ -36,6 +36,8 @@ type PipHudProps = {
   /** The floor on screen. */
   floorName: string;
   startWalk: () => void;
+  /** First in the bar: the way to the rest of the app, where Pip's tab fills the screen. */
+  lead?: ReactNode;
 };
 
 /**
@@ -60,11 +62,13 @@ export const PipHud = ({
   artFor,
   grantWish,
   floorName,
-  startWalk
+  startWalk,
+  lead
 }: PipHudProps) => {
   const { goal, goalEntry, goalItem, goalLock, progress, openGoal, setGoal } = pinned;
   return (
     <div className="pip-hud-top">
+      {lead}
       {/* Seeds and mood, the house's resources. The cluster takes more (a goals widget) as another .pip-resource. */}
       <div className="pip-resources" data-walk="resources" role="group" aria-label="Seeds and mood">
         <button

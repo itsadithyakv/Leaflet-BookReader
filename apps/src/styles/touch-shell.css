@@ -92,7 +92,9 @@
 /* ---- The rail under a finger -------------------------------------------- */
 
 /* It never widens (a tap is not a hover, and a tapped button keeps focus):
-   icons with a small label under each, as Android's own rails. */
+   icons with a small label under each, as Android's own rails. Under a finger
+   it holds the four places only (Settings is behind the profile button, and
+   the book being read has its own bar): components/Sidebar.tsx. */
 .sidebar-rail-label {
   display: none;
 }
@@ -102,8 +104,9 @@
   .leaflet-sidebar:hover,
   .leaflet-sidebar:focus-within {
     width: var(--rail-width);
-    padding-right: 5px;
-    padding-left: calc(5px + var(--inset-left));
+    /* The keys stay inside the stitching (2 px, 9 px in from the edge: index.css). */
+    padding-right: 13px;
+    padding-left: calc(3px + var(--inset-left));
     padding-top: 10px;
     padding-bottom: calc(10px + var(--inset-bottom));
     overflow-y: auto;
@@ -125,38 +128,19 @@
     display: none;
   }
 
-  .leaflet-sidebar .sidebar-nav-item,
-  .leaflet-sidebar .sidebar-start-button {
+  .leaflet-sidebar .sidebar-nav-item {
     min-height: 46px;
     flex-direction: column;
     justify-content: center;
     gap: 1px;
-    padding: 2px 2px 3px;
+    padding: 2px 1px 3px;
     text-align: center;
   }
 
-  .leaflet-sidebar .sidebar-nav-item.mb-3 {
-    margin-top: 4px;
-    margin-bottom: 8px;
-  }
-
-  .leaflet-sidebar .sidebar-icon-well,
-  .leaflet-sidebar .sidebar-start-icon {
+  .leaflet-sidebar .sidebar-icon-well {
     width: 32px;
     height: 28px;
     flex-basis: auto;
-  }
-
-  .leaflet-sidebar .sidebar-start-button {
-    margin-top: auto;
-  }
-
-  /* A phone on its side has 290 px of rail: five places fit, and the book
-     being read is a tap away on the bar at the foot of the page instead. */
-  @media (max-height: 520px) {
-    .leaflet-sidebar .sidebar-reading-action {
-      display: none;
-    }
   }
 
   .sidebar-rail-label {
@@ -165,10 +149,10 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 10px;
+    font-size: 9.5px;
     font-weight: 700;
     line-height: 1.1;
-    letter-spacing: 0.01em;
+    letter-spacing: -0.01em;
   }
 }
 
@@ -259,8 +243,12 @@
     padding: var(--inset-top) var(--inset-right) 0 0;
   }
 
-  .sheet-backdrop-menu > .book-menu-sheet {
+  .sheet-backdrop-menu > .book-menu-sheet,
+  .sheet-backdrop-menu > .profile-sheet,
+  .sheet-backdrop-menu > .phone-sheet {
     width: min(22rem, 60vw);
+    overflow-y: auto;
+    overscroll-behavior: contain;
     max-height: calc(100dvh - var(--inset-top) - 8px);
     margin-right: 8px;
     border-bottom-width: 0;
@@ -281,8 +269,36 @@
 
 @media (prefers-reduced-motion: reduce) {
   .sheet-backdrop > .sheet-panel.sheet-panel,
-  .sheet-backdrop-menu > .book-menu-sheet {
+  .sheet-backdrop-menu > .book-menu-sheet,
+  .sheet-backdrop-menu > .profile-sheet,
+  .sheet-backdrop-menu > .phone-sheet {
     animation: none;
+  }
+}
+
+/* Settings in the profile sheet, by a finger: a key a thumb wide, since it is the only way there
+   (components/ProfileButton.tsx). */
+.profile-settings-row {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+/* Left out on a phone, by a finger: the header's light and dark key (Settings has the theme, and
+   following the system's), and a heading's eyebrow where it only explains the heading
+   (components/ui/SectionHeader.tsx, `eyebrowOnPhone`). */
+@media (hover: none) and (pointer: coarse) and (max-width: 767px), (hover: none) and (pointer: coarse) and (max-height: 520px) {
+  .header-theme-key.header-theme-key,
+  .phone-hidden.phone-hidden {
+    display: none;
+  }
+
+  .phone-flush.phone-flush {
+    margin-top: 0;
   }
 }
 
@@ -424,8 +440,8 @@
 
 /* ---- Adding books --------------------------------------------------------- */
 
-/* A round + above the tab bar on an upright phone (pages/LibraryPage.tsx);
-   sideways the header has it (App.tsx). */
+/* A round + above the foot of the page in a narrow window (pages/LibraryPage.tsx); in the header
+   in a short one, and on a phone by a finger either way up (App.tsx). */
 .add-books-fab,
 .header-add-books {
   display: none;
@@ -466,6 +482,111 @@
   .header-add-books {
     display: inline-flex;
   }
+}
+
+/* By a finger on a phone, upright too: the + is in the header, and nothing floats over the shelf
+   (the round + lay over the Library's controls and a book's ⋯). */
+@media (hover: none) and (pointer: coarse) and (max-width: 767px) {
+  .header-add-books.header-add-books {
+    display: inline-flex;
+  }
+
+  .add-books-fab.add-books-fab {
+    display: none;
+  }
+}
+
+/* ---- The Library on a phone (pages/library/PhoneLibrary.tsx) -------------- */
+
+/* The streak and the focus session, one slim card. */
+.phone-focus-strip {
+  display: flex;
+  min-height: 60px;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px 8px 16px;
+}
+
+.phone-focus-key,
+.phone-shelf-key {
+  display: inline-flex;
+  min-height: 44px;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px;
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.phone-focus-bar {
+  display: block;
+  height: 4px;
+  margin-top: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgb(var(--color-on-surface-variant) / 0.18);
+}
+
+.phone-focus-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: rgb(var(--color-primary));
+}
+
+/* A sheet's choices (components/ui/PhoneSheet.tsx): a row of keys a thumb high, and labelled selects. */
+.sheet-choices {
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  gap: 8px;
+}
+
+.sheet-choice {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid rgb(var(--color-outline-variant) / 0.6);
+  border-radius: 12px;
+  background: rgb(var(--color-surface-container));
+  color: rgb(var(--color-on-surface-variant));
+  font-size: 0.875rem;
+  font-weight: 700;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sheet-choice[aria-pressed="true"] {
+  border-color: transparent;
+  background: rgb(var(--color-primary));
+  color: rgb(var(--color-on-primary));
+}
+
+.sheet-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+  color: rgb(var(--color-on-surface-variant));
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.sheet-field > select {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  color: rgb(var(--color-on-surface));
+  font-size: 0.9375rem;
+  font-weight: 500;
+}
+
+.sheet-action {
+  min-height: 48px;
+  font-size: 0.9375rem;
+  font-weight: 700;
 }
 
 /* ---- Small screens: nothing wider than the window ------------------------- */

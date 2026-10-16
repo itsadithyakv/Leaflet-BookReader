@@ -33,7 +33,9 @@ fn main() {
       "share_file",
       "share_text",
       "open_store",
-      "request_review"
+      "request_review",
+      "hold_for_sign_in",
+      "volume_page_turns"
     ])
     .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands);
   tauri_build::try_build(tauri_build::Attributes::new().plugin("leaflet-device", device))

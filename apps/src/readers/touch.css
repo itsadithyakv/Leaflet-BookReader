@@ -611,3 +611,224 @@ html[data-input="touch"] .reader-scope :is(.reader-mini-control, .reader-notes-a
 html[data-input="touch"] .reader-scope .reader-people-link {
   min-height: 34px;
 }
+
+/* ---- A phone: the chrome comes for a tap in the middle of the page ----
+   The book opens with the page alone (hooks/useAutoHideChrome.ts,
+   `immersive`); the bars come and go quickly, so a tap is answered at once,
+   and not at all under reduced motion. */
+
+html .reader-scope[data-shape] .reader-toolbar {
+  transition:
+    transform 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.16s ease;
+}
+
+html .reader-scope[data-shape] .reader-chapter-dock,
+html .reader-scope[data-shape] .reader-contents-handle {
+  transition: opacity 0.16s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html .reader-scope[data-shape] .reader-toolbar,
+  html .reader-scope[data-shape] .reader-chapter-dock,
+  html .reader-scope[data-shape] .reader-contents-handle,
+  html .reader-scope[data-shape] .reader-progress {
+    transition: none;
+  }
+}
+
+/* ---- By finger: nothing blurred over the text ----
+   The pace pill and the chapter dock sit over the page while it scrolls. A
+   blur of what is behind them is drawn again at every frame of the
+   scrolling, more than a low-end phone's graphics keep up with. The
+   panel's own colour, solid, stands in for it (text showing through
+   unblurred read as clutter, so the pill is no longer faded either). */
+html[data-input="touch"] .reader-scope :is(.reader-autoscroll-pill, .reader-chapter-dock > div) {
+  background: var(--reader-panel);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+html[data-input="touch"] .reader-scope .reader-autoscroll-pill:not(.is-held) {
+  opacity: 1;
+}
+
+/* ---- A phone: the footer, the bookmark corner, the way back ----
+   (readers/phoneReading.ts, drawn by readers/text/PhoneReadingMarks.tsx.)
+   The footer has a strip of its own under the text, so it never sits over a
+   line; it says its piece only while the chrome is away (the dock says it
+   then). */
+
+.reader-scope[data-shape] {
+  --reader-footer-height: 28px;
+}
+
+.reader-scope[data-shape] .reader-page-frame {
+  padding-bottom: var(--reader-footer-height);
+}
+
+/* Scrolling, the strip is the scroller's own: a swipe that starts at the
+   foot of the page scrolls the text (it used to land on the frame, which
+   does not scroll, or on the footer). The text runs on under the strip,
+   which is the page's colour as before; the footer's words take no touch,
+   and a tap on them is passed on (readers/text/useTouchReading.ts). */
+.reader-scope[data-shape] .reader-page-frame.is-scrolling {
+  padding-bottom: 0;
+}
+
+.reader-scope[data-shape] .reader-page-frame.is-scrolling .epub-container {
+  box-sizing: border-box;
+  padding-bottom: var(--reader-footer-height);
+}
+
+.reader-scope[data-shape] .reader-page-frame.is-scrolling::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 1;
+  height: var(--reader-footer-height);
+  /* The frame's own page colour (it follows the page's finish, not the app's theme). */
+  background: inherit;
+  content: "";
+  pointer-events: none;
+}
+
+.reader-scope[data-shape] .reader-page-frame.is-scrolling .reader-phone-footer {
+  pointer-events: none;
+}
+
+.reader-phone-footer {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  z-index: 20;
+  display: block;
+  width: max-content;
+  max-width: calc(100% - 32px);
+  height: var(--reader-footer-height);
+  margin: 0;
+  padding: 0 16px;
+  transform: translateX(-50%);
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: var(--reader-page-ink, var(--reader-text));
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.03em;
+  line-height: var(--reader-footer-height);
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.42;
+  transition: opacity 0.16s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.reader-scope:not(.reader-chrome-hidden) .reader-phone-footer {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* A bookmarked place: a ribbon hanging into the top right corner, the corner a tap there bookmarks. */
+.reader-bookmark-ribbon {
+  position: absolute;
+  top: 0;
+  right: 18px;
+  z-index: 20;
+  width: 14px;
+  height: 22px;
+  background: var(--reader-accent);
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 74%, 0 100%);
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+/* After a jump, for a few seconds: the way back, over the foot of the page. */
+.reader-back-chip {
+  position: absolute;
+  bottom: calc(var(--reader-footer-height) + 10px);
+  left: 50%;
+  z-index: 33;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 48px);
+  min-height: 40px;
+  padding: 0 16px 0 12px;
+  border-width: 1px;
+  border-radius: 999px;
+  font-size: 13px;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+  animation: reader-back-chip-in 0.16s ease both;
+}
+
+.reader-back-chip .material-symbols-outlined {
+  font-size: 18px;
+}
+
+.reader-back-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@keyframes reader-back-chip-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* ---- An upright phone: the controls at the foot, in reach of a thumb ----
+   Back, the chapter list, Aa and ··· sit in a bar along the bottom, with
+   the dock and the progress bar just above it; the sheets rise over it. The
+   page reader (PDFs, comics) keeps its bar at the top. */
+
+.reader-scope:not(.page-reader)[data-shape="upright"] {
+  --reader-toolbar-height: 0px;
+  --reader-bottom-bar: calc(56px + var(--inset-bottom));
+}
+
+.reader-scope:not(.page-reader)[data-shape="upright"] .reader-toolbar {
+  top: auto;
+  bottom: 0;
+  height: var(--reader-bottom-bar);
+  min-height: 0;
+  padding-top: 0;
+  padding-bottom: var(--inset-bottom);
+  border-top: 1px solid var(--reader-border);
+  border-bottom: 0;
+  box-shadow: 0 -7px 20px rgba(0, 0, 0, 0.32);
+}
+
+.reader-scope:not(.page-reader)[data-shape="upright"].reader-chrome-hidden .reader-toolbar {
+  transform: translateY(100%);
+}
+
+/* (In the page's frame, whose foot is the gesture bar's top: the bar is 56px over it.) */
+html .reader-scope:not(.page-reader)[data-shape="upright"]:not(.reader-chrome-hidden) .reader-progress {
+  bottom: 56px;
+}
+
+html .reader-scope:not(.page-reader)[data-shape="upright"]:not(.reader-chrome-hidden) .reader-chapter-dock {
+  bottom: calc(56px + 30px);
+}
+
+.reader-scope:not(.page-reader)[data-shape="upright"] .reader-shell .reader-sidebar,
+.reader-scope:not(.page-reader)[data-shape="upright"] .reader-sidebar-hot-zone {
+  top: 0;
+}
+
+.reader-scope:not(.page-reader)[data-shape="upright"]:not(.reader-chrome-hidden) .reader-shell .reader-sidebar {
+  bottom: 56px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reader-phone-footer,
+  .reader-back-chip {
+    transition: none;
+    animation: none;
+  }
+}

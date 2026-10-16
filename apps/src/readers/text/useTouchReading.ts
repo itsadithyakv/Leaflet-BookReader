@@ -1,27 +1,30 @@
 import { useEffect, useRef } from "react";
 import { TAP_SLACK_PX, pressIsClick } from "../pageTurn";
-import { readLayoutFor, spreadFor, useTabletSideways } from "../touchLayout";
+import { isPhoneShape, readLayoutFor, spreadFor, tapAction, tapZone, useTabletSideways, type TapAction } from "../touchLayout";
+import { inBookmarkCorner } from "../phoneReading";
 import { OWN_CLICK, textAt, within } from "./usePageTurning";
-import type { WithCover } from "./scope";
+import type { Later, WithCover } from "./scope";
 
 /**
  * The text reader by finger (docs/android.md, "The reader"). With pages, the
  * taps are the page's own (usePageInput): the sides turn, the middle brings
- * the chrome. Scrolling has no page to turn, so a plain tap anywhere on the
- * text shows the toolbar and the dock, or sends them away; one on a link, a
- * note, a name or a highlight is that thing's, and a scroll is reading.
+ * the chrome. Scrolling has no page to turn, so a plain tap on the text shows
+ * the toolbar and the dock, or sends them away: anywhere on a tablet, only in
+ * the middle third on a phone (a tap at a side there only sends them away;
+ * readers/touchLayout.ts, `tapAction`). One on a link, a note, a name or a
+ * highlight is that thing's, and a scroll is reading.
  *
  * While something reads on by itself (docs/mobile.md, "Dotty on a phone") a
  * tap is its pause instead: SpeedRead pauses and carries on, Smart Read and
  * auto-scroll pause (the pace pill's play carries on, and the chrome comes
  * with the next tap).
  */
-export const useScrollTaps = (reader: WithCover) => {
-  const { book, interruptedRef, layout, loading, renditionRef, selectionRef, toggleChrome, viewerRef } = reader;
-  const toggleRef = useRef(toggleChrome);
-  toggleRef.current = toggleChrome;
-  const tapRef = useRef(() => undefined as void);
-  tapRef.current = () => {
+export const useScrollTaps = (reader: WithCover & Later<"cornerBookmarkRef">) => {
+  const { book, hideChrome, interruptedRef, layout, loading, renditionRef, selectionRef, shape, toggleChrome, viewerRef } = reader;
+  const chromeRef = useRef({ toggle: toggleChrome, hide: hideChrome, immersive: isPhoneShape(shape) });
+  chromeRef.current = { toggle: toggleChrome, hide: hideChrome, immersive: isPhoneShape(shape) };
+  const tapRef = useRef((_action: TapAction) => undefined as void);
+  tapRef.current = (action: TapAction) => {
     if (reader.readingModeRef.current === "speed") {
       reader.setReadingPaused((paused) => !paused);
       return;
@@ -35,7 +38,13 @@ export const useScrollTaps = (reader: WithCover) => {
       reader.setAutoScrollActive(false);
       return;
     }
-    toggleRef.current();
+    if (action.kind === "bookmark") {
+      reader.cornerBookmarkRef.current();
+    } else if (action.kind === "chrome") {
+      chromeRef.current.toggle();
+    } else if (action.kind === "hide") {
+      chromeRef.current.hide();
+    }
   };
   useEffect(() => {
     const rendition = renditionRef.current;
@@ -87,7 +96,21 @@ export const useScrollTaps = (reader: WithCover) => {
         slack: TAP_SLACK_PX
       });
       if (plain) {
-        tapRef.current();
+        // The footer's words (a phone): the strip they sit in is the
+        // scroller's, so that a swipe from the foot of the page scrolls, and
+        // a tap on them comes here (readers/touch.css).
+        const footer = viewer?.parentElement?.querySelector<HTMLElement>(".reader-phone-footer");
+        const footBox = footer && chromeRef.current.immersive && footer.closest(".reader-chrome-hidden") ? footer.getBoundingClientRect() : null;
+        if (footer && footBox && footBox.width > 0 && x >= footBox.left && x <= footBox.right && y >= footBox.top - 4 && y <= footBox.bottom) {
+          footer.click();
+          return;
+        }
+        // Which third of the page the tap fell in, measured across the scrolling frame.
+        const frame = ((rendition.manager as any)?.container as HTMLElement | undefined)?.getBoundingClientRect();
+        const zone = frame ? tapZone(x, frame.left, frame.width) : 0;
+        const pageBox = viewer?.parentElement?.getBoundingClientRect();
+        const corner = chromeRef.current.immersive && pageBox ? inBookmarkCorner(x, y, pageBox) : false;
+        tapRef.current(tapAction(zone, "scroll", chromeRef.current.immersive, corner));
       }
     };
     const bound = new WeakSet<Document>();

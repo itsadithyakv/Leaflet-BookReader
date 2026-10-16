@@ -1,5 +1,6 @@
 import { useEffect, useRef, type MutableRefObject, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { ChevronRight } from "lucide-react";
 import type { DriveSyncStatus, SyncStatus } from "@shared/sync/types";
 import { FEATURES } from "../constants/features";
 import { useAccountStore } from "../store/accountStore";
@@ -11,8 +12,8 @@ import { UiIcon } from "./UiIcon";
 import { useAccountDialog } from "./account/AccountDialog";
 import { SheetHandle } from "./ui/SheetHandle";
 import { useBackClose } from "../hooks/useBackClose";
-import { useSheetLayout } from "../hooks/useMediaQuery";
-import { deviceNoun, isAndroid } from "../platform/device";
+import { usePhoneMenus, useSheetLayout } from "../hooks/useMediaQuery";
+import { deviceNoun, isAndroid, useTouchInput } from "../platform/device";
 
 /**
  * How backup is set up. There is no paid tier: backup runs against the
@@ -41,7 +42,7 @@ type Props = {
  * The reader's face in the header: their account's Pip, or the Pip they dress
  * on the Pip tab. A portrait either way: Pip fills the round frame.
  */
-const Face = ({ size }: { size: number }) => {
+export const ProfileFace = ({ size }: { size: number }) => {
   const account = useAccountStore((state) => (state.status.signedIn ? state.status.account : null));
   const equipped = useEquippedPip();
   if (account?.avatar) {
@@ -104,9 +105,14 @@ export const ProfileButton = ({
   const account = signedIn ? accountStatus.account : null;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
-  // On a phone the panel is a sheet from the bottom, drawn at the top of the page:
-  // inside the header (which slides away on scroll) a fixed sheet would hang from it.
-  const sheet = useSheetLayout();
+  // On a phone the panel is a sheet from the bottom (at the side, held sideways), drawn
+  // at the top of the page: inside the header (which slides away on scroll, and is not
+  // there at all on Pip's tab sideways) a fixed sheet would hang from it.
+  const narrow = useSheetLayout();
+  const phoneMenus = usePhoneMenus();
+  const sheet = narrow || phoneMenus;
+  // By a finger (a phone, a tablet) Settings is here and nowhere else: the tab bar and the rail do not have it.
+  const touch = useTouchInput();
   const android = isAndroid();
   useBackClose(open, onClose);
 
@@ -147,6 +153,7 @@ export const ProfileButton = ({
   const failed = status === "error";
   const syncing = status === "syncing";
   const tooltip = `${account ? `${who}. ` : ""}${line}${sync.booksPending > 0 ? `. ${sync.booksPending} to download` : ""}`;
+  const what = touch ? "Your profile, backup and settings" : "Your profile and backup";
   // Not on the phone: a sync folder there would do nothing.
   const showFolderSync = !android && (FEATURES.multiDeviceSync || Boolean(sync.folderPath));
   const section = "border-t border-outline-variant/40 pt-3 mt-3";
@@ -159,21 +166,21 @@ export const ProfileButton = ({
         className={`profile-button ${syncing ? "profile-button-syncing" : ""} ${open ? "profile-button-open" : ""}`}
         onClick={onToggle}
         title={tooltip}
-        aria-label={`Your profile and backup. ${tooltip}`}
+        aria-label={`${what}. ${tooltip}`}
         aria-haspopup="dialog"
         aria-expanded={open}
       >
         {/* The whole button inside its 1px border (46px in index.css). */}
-        <Face size={44} />
+        <ProfileFace size={44} />
         {failed && <span className="profile-button-alert" aria-hidden="true" />}
       </button>
 
       {open && (
-        <PanelFrame sheet={sheet} panelRef={panelRef} onClose={onClose}>
+        <PanelFrame sheet={sheet} panelRef={panelRef} onClose={onClose} label={what}>
           {/* Who */}
           <div className="flex items-center gap-3">
             <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-primary/10">
-              <Face size={52} />
+              <ProfileFace size={52} />
             </div>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold text-on-surface" title={who}>
@@ -293,15 +300,24 @@ export const ProfileButton = ({
             </div>
           )}
 
-          {/* Where to next */}
-          <div className={`${section} flex items-center justify-between`}>
-            <button type="button" className="flex items-center gap-1.5 py-1 text-[11px] font-semibold text-on-surface-variant hover:text-on-surface" onClick={onOpenSettings}>
-              <UiIcon name="settings" size={14} /> Settings
+          {/* Where to next. By a finger Settings is a key of its own: this is the only way there. */}
+          {touch && (
+            <button type="button" className="profile-settings-row tactile-button mt-3 w-full" onClick={onOpenSettings}>
+              <UiIcon name="settings" size={18} />
+              <span className="flex-1 text-left">Settings</span>
+              <ChevronRight size={16} className="text-on-surface-variant" aria-hidden />
             </button>
+          )}
+          <div className={`${section} flex items-center justify-between ${touch && !account ? "hidden" : ""}`}>
+            {!touch && (
+              <button type="button" className="flex items-center gap-1.5 py-1 text-[11px] font-semibold text-on-surface-variant hover:text-on-surface" onClick={onOpenSettings}>
+                <UiIcon name="settings" size={14} /> Settings
+              </button>
+            )}
             {account && (
               <button
                 type="button"
-                className="text-[11px] font-semibold text-on-surface-variant hover:text-on-surface"
+                className="touch-hit text-[11px] font-semibold text-on-surface-variant hover:text-on-surface"
                 onClick={() => {
                   onClose();
                   void signOut();
@@ -322,11 +338,13 @@ const PanelFrame = ({
   sheet,
   panelRef,
   onClose,
+  label,
   children
 }: {
   sheet: boolean;
   panelRef: MutableRefObject<HTMLDivElement | null>;
   onClose: () => void;
+  label: string;
   children: ReactNode;
 }) => {
   if (!sheet) {
@@ -334,7 +352,7 @@ const PanelFrame = ({
       <div
         ref={panelRef}
         role="dialog"
-        aria-label="Your profile and backup"
+        aria-label={label}
         className="anchored-panel modal-surface absolute right-0 mt-3 w-80 rounded-xl p-4 text-xs text-on-surface"
       >
         {children}
@@ -343,14 +361,14 @@ const PanelFrame = ({
   }
   return createPortal(
     <div
-      className="sheet-backdrop fixed inset-0 z-[80] flex items-end justify-center bg-black/45"
+      className="sheet-backdrop sheet-backdrop-menu fixed inset-0 z-[80] flex items-end justify-center bg-black/45"
       onClick={(event) => {
         if (event.target === event.currentTarget) {
           onClose();
         }
       }}
     >
-      <div ref={panelRef} role="dialog" aria-label="Your profile and backup" className="modal-surface sheet-panel w-full p-4 text-xs text-on-surface">
+      <div ref={panelRef} role="dialog" aria-label={label} className="modal-surface sheet-panel profile-sheet w-full p-4 text-xs text-on-surface">
         <SheetHandle onClose={onClose} />
         {children}
       </div>

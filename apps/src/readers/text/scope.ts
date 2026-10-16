@@ -27,6 +27,7 @@ import type { useReaderSession } from "./useReaderSession";
 import type { useReaderKeys } from "./useReaderKeys";
 import type { useReaderChrome } from "./useReaderChrome";
 import type { useReaderCover } from "./useReaderCover";
+import type { usePhoneReading } from "./usePhoneReading";
 
 /** What the page hands the reader. */
 export type ReaderProps = {
@@ -63,9 +64,10 @@ export type WithHold = WithChrome & ReturnType<typeof useReadingHold>;
 export type WithAnnotations = WithHold & ReturnType<typeof useBookAnnotations>;
 export type WithCover = WithAnnotations & ReturnType<typeof useReaderCover>;
 export type WithSelectionDock = WithCover & ReturnType<typeof useSelectionDock>;
+export type WithPhoneReading = WithSelectionDock & ReturnType<typeof usePhoneReading>;
 
 /** The whole scope, once every hook has run: what the components draw from. */
-export type ReaderScope = WithSelectionDock;
+export type ReaderScope = WithPhoneReading;
 
 /**
  * What a hook reaches that a hook called after it adds. It is there by the
@@ -110,6 +112,10 @@ export interface ReaderLater {
   markReadingActivity: ReturnType<typeof useReadingHeartbeat>;
   // useReaderChrome
   people: ReturnType<typeof usePeopleReader>;
+  chromeBackHides: boolean;
+  hideChrome: () => void;
+  // usePhoneReading
+  cornerBookmarkRef: MutableRefObject<() => boolean>;
   // useBookAnnotations
   annotations: ReturnType<typeof useAnnotations>;
   orderedHighlights: ReturnType<typeof useAnnotations>["highlights"];

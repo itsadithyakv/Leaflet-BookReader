@@ -474,26 +474,137 @@
 }
 
 /* ---- Pip's tab on a phone on its side ---------------------------------------------------
-   On Android the tab holds the screen sideways (PipPage), and there it is the whole window
-   but the rail: the app's header steps away (the rail has the way to Settings), and the page
-   keeps only the system's bars clear (by a finger: a short desktop window keeps its header).
-   Everything below is laid out for 640-915 x 360-412. */
+   On Android the tab holds the screen sideways (PipPage), and there it is the whole window: the
+   app's header and its rail step away, and a menu key at the start of Pip's own row of chips is
+   the way to the rest of the app (pages/pip/PipMenu.tsx, PIP_FULL_SCREEN_QUERY: the same query).
+   The page keeps only the system's bars clear (by a finger: a short desktop window keeps its
+   header and rail). Everything below is laid out for 640-915 x 360-412. */
 @media (orientation: landscape) and (max-height: 520px) and (pointer: coarse) {
-  .app-shell:has(.pip-house-page) .app-header {
+  .app-shell:has(.pip-house-page) .app-header,
+  .app-shell:has(.pip-house-page) .sidebar-stage {
     display: none;
   }
 
   .app-shell:has(.pip-house-page) .app-main-scroll {
-    padding: max(6px, var(--inset-top, 0px)) max(8px, var(--inset-right, 0px)) max(6px, var(--inset-bottom, 0px)) 8px;
-  }
-
-  .app-shell:has(.pip-house-page) .leaflet-sidebar {
-    padding-top: calc(10px + var(--inset-top, 0px));
+    padding: max(6px, var(--inset-top, 0px)) max(8px, var(--inset-right, 0px)) max(6px, var(--inset-bottom, 0px)) max(8px, var(--inset-left, 0px));
   }
 
   .app-shell .pip-house-page.pip-house-page {
     min-height: 100%;
     margin: 0;
+  }
+
+  /* Out in the Hollow the picture goes to the screen's edges (BaseScreen fills the width); what is
+     laid over it keeps clear of the system's bars and a notch (the rules below). */
+  .app-shell:has(.pip-house-page[data-place="hollow"]) .app-main-scroll {
+    padding: 0;
+  }
+}
+
+/* The menu key: in the Hollow a chip like the level and the acorns beside it, in the house a key
+   like the walkthrough's. Drawn small, hit at a thumb's size. */
+.pip-menu-key {
+  position: relative;
+  cursor: pointer;
+}
+
+.pip-menu-key::after {
+  position: absolute;
+  inset: min(-4px, calc((100% - 44px) / 2)) min(-2px, calc((100% - 44px) / 2));
+  content: "";
+}
+
+.pip-base-chip.pip-menu-key {
+  min-height: 28px;
+  padding: 2px 11px 3px;
+}
+
+.pip-base-chip.pip-menu-key[aria-expanded="true"],
+.pip-hud-help.pip-menu-key[aria-expanded="true"] {
+  background: #ffd86b;
+  color: #1c261f;
+}
+
+/* Its card of places: Pip's paper, with a hard ink line and notched corners, hanging under the key. */
+.pip-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 85;
+}
+
+.pip-menu {
+  position: fixed;
+  display: flex;
+  width: 13.5rem;
+  max-width: calc(100vw - 16px - var(--inset-left, 0px) - var(--inset-right, 0px));
+  flex-direction: column;
+  padding: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--hud-face);
+  color: var(--hud-ink);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 6px 0 0 var(--hud-drop);
+  transform-origin: 14px 0;
+  animation: pip-menu-in 220ms cubic-bezier(0.3, 1.5, 0.5, 1) both;
+}
+
+.pip-menu-item {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  color: var(--hud-ink);
+  font-size: 0.9375rem;
+  font-weight: 800;
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.pip-menu-item > svg {
+  flex: none;
+  color: var(--hud-ink-soft);
+}
+
+/* The reader's face, a little larger than an icon, in the icons' column. */
+.pip-menu-face {
+  display: inline-flex;
+  flex: none;
+  margin: -4px;
+}
+
+.pip-menu-item:hover,
+.pip-menu-item:focus-visible {
+  background: var(--hud-face-hover);
+  outline: none;
+}
+
+.pip-menu-item:active {
+  background: #ffd86b;
+  color: #1c261f;
+}
+
+.pip-menu-rule {
+  margin: 4px 6px;
+  border-top: 2px dashed var(--hud-track);
+}
+
+/* It lands once and rests: no bob, no wiggle while it is open. */
+@keyframes pip-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.94);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pip-menu {
+    animation: none;
   }
 }
 
@@ -501,9 +612,9 @@
    laid over it is smaller and closer to its edges than on a large screen. */
 @media (max-height: 520px) {
   .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-head {
-    top: 6px;
-    right: 8px;
-    left: 8px;
+    top: max(6px, var(--inset-top, 0px));
+    right: max(8px, var(--inset-right, 0px));
+    left: max(8px, var(--inset-left, 0px));
   }
 
   /* What the camp has and the keys share the top line; Pip's word goes under them, as wide as it reads well. */
@@ -545,34 +656,42 @@
   }
 
   .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-under {
-    bottom: 6px;
+    bottom: max(6px, var(--inset-bottom, 0px));
     padding: 4px 6px 5px;
   }
 
   .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-side {
-    top: 52px;
-    right: 8px;
-    bottom: 64px;
+    top: calc(46px + max(6px, var(--inset-top, 0px)));
+    right: max(8px, var(--inset-right, 0px));
+    bottom: calc(58px + max(6px, var(--inset-bottom, 0px)));
     width: min(320px, 50%);
   }
 
   .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-sheet {
-    top: 52px;
-    right: 8px;
-    bottom: 8px;
-    left: 8px;
+    top: calc(46px + max(6px, var(--inset-top, 0px)));
+    right: max(8px, var(--inset-right, 0px));
+    bottom: max(8px, var(--inset-bottom, 0px));
+    left: max(8px, var(--inset-left, 0px));
     padding: 8px 12px 12px;
   }
 
   .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-how {
-    top: 52px;
-    right: 8px;
-    bottom: 8px;
+    top: calc(46px + max(6px, var(--inset-top, 0px)));
+    right: max(8px, var(--inset-right, 0px));
+    bottom: max(8px, var(--inset-bottom, 0px));
     overflow-y: auto;
   }
 
   .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-edge {
     top: 40%;
+  }
+
+  .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-edge.is-right {
+    right: max(10px, var(--inset-right, 0px));
+  }
+
+  .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-edge.is-left {
+    left: max(10px, var(--inset-left, 0px));
   }
 }
 
@@ -704,8 +823,8 @@
 }
 
 /* A card from a thing in the room (the diary, the album, the radio) on a phone on its side: as tall
-   as the screen allows (70 % of 360 px left the album a strip), and beside the app's rail, not over it
-   (RoomCard keeps it there). */
+   as the screen allows (70 % of 360 px left the album a strip), and inside the side insets (the app's
+   rail is not on Pip's tab there). */
 @media (orientation: landscape) and (max-height: 520px) {
   .pip-room-card.pip-room-card,
   .pip-room-card.pip-room-card[data-size="wide"] {
@@ -713,7 +832,7 @@
   }
 
   .pip-room-card.pip-room-card[data-size="wide"] {
-    width: min(560px, calc(100vw - var(--rail-width, 78px) - 22px));
+    width: min(560px, calc(100vw - var(--inset-left, 0px) - var(--inset-right, 0px) - 22px));
   }
 }
 
@@ -721,5 +840,28 @@
   /* The postcard's close, a thumb's size. */
   .hollow-postcard-head .pip-key.pip-key-small {
     min-width: var(--touch-target, 44px);
+  }
+}
+
+/* ---- Pip's rail of tools on a phone ---------------------------------------------------------
+   Not the app's leather: a strip of Pip's paper with her hard ink line and notched corners, as her
+   other panels are, so the keys on it read as hers. No stitching. */
+@media (hover: none) and (pointer: coarse) and (max-width: 767px), (hover: none) and (pointer: coarse) and (max-height: 520px) {
+  .pip-house .pip-rail-belt.pip-rail-belt,
+  :root[data-theme="dark"] .pip-house .pip-rail-belt.pip-rail-belt {
+    border-radius: 0;
+    background: var(--hud-face-low);
+    background-image: radial-gradient(rgb(31 42 34 / 0.09) 1px, transparent 1.2px);
+    background-size: 8px 8px;
+    box-shadow:
+      0 -2px 0 0 var(--hud-line),
+      0 2px 0 0 var(--hud-line),
+      -2px 0 0 0 var(--hud-line),
+      2px 0 0 0 var(--hud-line),
+      0 6px 0 0 var(--hud-drop);
+  }
+
+  .pip-house .pip-rail-belt.pip-rail-belt::after {
+    display: none;
   }
 }

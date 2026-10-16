@@ -41,7 +41,7 @@ fn made_at(given: Option<&str>, now: &str) -> Option<String> {
 }
 
 /// A book's bookmarks and highlights, oldest first.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn annotations_list(book_id: String, state: State<'_, AppState>) -> Result<Vec<Annotation>, String> {
   let db = state.db.guard();
   db.annotations_for_book(&book_id).map_err(|e| e.to_string())
@@ -49,7 +49,7 @@ pub fn annotations_list(book_id: String, state: State<'_, AppState>) -> Result<V
 
 /// How many highlights each book has, so the library can list the books with
 /// highlights without opening any of them.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn annotations_highlight_counts(state: State<'_, AppState>) -> Result<Vec<HighlightCount>, String> {
   let db = state.db.guard();
   db.highlight_counts().map_err(|e| e.to_string())

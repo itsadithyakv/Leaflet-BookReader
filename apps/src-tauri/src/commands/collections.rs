@@ -35,7 +35,7 @@ fn clip(value: &str, max: usize) -> String {
   value.trim().chars().take(max).collect::<String>().trim().to_string()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn collections_list(state: State<'_, AppState>) -> Result<Vec<Collection>, String> {
   let db = state.db.guard();
   db.collections().map_err(|e| e.to_string())

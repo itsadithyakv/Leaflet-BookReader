@@ -5,6 +5,8 @@
          turned on), and setting the alarms again after a restart. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- SignInKeeper: Leaflet kept awake while Drive's sign-in is in the browser. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
@@ -140,5 +142,13 @@
             <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
           </intent-filter>
         </receiver>
+
+        <!-- Drive's sign-in comes back to Leaflet on this phone; this keeps it
+             from being paused meanwhile (SignInKeeper.kt). A short service:
+             no type permission, and Android ends it after about 3 minutes. -->
+        <service
+          android:name=".SignInKeeper"
+          android:exported="false"
+          android:foregroundServiceType="shortService" />
     </application>
 </manifest>

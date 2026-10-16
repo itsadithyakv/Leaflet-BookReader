@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Gamepad2, House } from "lucide-react";
 import { useBaseStore } from "../../../../store/baseStore";
 import { BaseScreen, type CampGarden } from "./BaseScreen";
@@ -15,6 +15,8 @@ type HollowPlaceProps = {
   onArcade: () => void;
   /** The garden: its bed lies by the burrow, and this is the way to it. */
   garden?: CampGarden;
+  /** First in the row of chips: the way to the rest of the app, where the tab fills the screen. */
+  lead?: ReactNode;
 };
 
 /**
@@ -28,7 +30,7 @@ type HollowPlaceProps = {
  * corner), the garden through its bed beside it, and the cabinet keeps the
  * games that are games.
  */
-export const HollowPlace = ({ skin, outfit, mood, onInside, onArcade, garden }: HollowPlaceProps) => {
+export const HollowPlace = ({ skin, outfit, mood, onInside, onArcade, garden, lead }: HollowPlaceProps) => {
   const rootRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     void useBaseStore.getState().open();
@@ -45,6 +47,7 @@ export const HollowPlace = ({ skin, outfit, mood, onInside, onArcade, garden }: 
           onInside={onInside}
           onArcade={onArcade}
           garden={garden}
+          lead={lead}
           corner={
             <>
               <button type="button" className="tactile-button flex items-center gap-1.5 px-3 py-1.5 text-xs" title="The cabinet in Pip's attic: three games and the word quiz" onClick={onArcade}>

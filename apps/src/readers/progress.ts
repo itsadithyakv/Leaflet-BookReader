@@ -335,3 +335,143 @@ export const onLastPage = (section: number, lastSection: number, page: number, t
  */
 export const endReached = (endBottom: number | null, windowHeight: number, wasBelow: boolean) =>
   endInView(endBottom, windowHeight) || (wasBelow && endBottom !== null && endBottom <= windowHeight + 1);
+
+/**
+ * Whether the contents' chapter-like entries (`isChapterLike`) can measure
+ * the book when its section sizes are unknown: two or more of them, the
+ * first in the first half of the sections.
+ *
+ * A Kindle book made into an EPUB (The Well of Ascension) had contents of
+ * parts ("PART ONE", "PART TWO: Ghosts in the Mist", …) whose only chapter-like
+ * entries were the epilogue and the appendix after it ("1. Metals
+ * Quick-Reference Chart"), the 142nd and 143rd of 148 sections. Everything
+ * before the epilogue read as front matter, so a reader in chapter twenty
+ * saved 0% and the book stayed unread.
+ */
+export const chaptersFrameBook = (chapterSpines: readonly number[], spineCount: number) =>
+  chapterSpines.length >= 2 && spineCount > 0 && chapterSpines[0] < spineCount / 2;
+
+/** What a place in the book means for its progress (`readingAt`). */
+export type PlaceReading =
+  /** Before the story (a map, the contents): `outsideStory("front", …)`. */
+  | { kind: "front" }
+  /** After it (notes, an appendix): `outsideStory("back", …)`. */
+  | { kind: "back" }
+  /** Between two stories of a set, looked at from elsewhere: nothing changes. */
+  | { kind: "between" }
+  /** Reading: the progress to save, and what it was measured by. */
+  | { kind: "read"; progress: number; by: "sizes" | "chapters" | "locations" | "spine"; chapter?: { index: number; total: number } };
+
+/**
+ * The progress of a place in an EPUB, by the best measure there is:
+ *
+ * 1. the sections' sizes (`buildSectionWeights`), which frame the story;
+ * 2. else the contents' chapters, when they frame the book (`chaptersFrameBook`);
+ * 3. else epub.js's index of the book (`located`), once it has made one;
+ * 4. else the section's place among the sections and how far into it the
+ *    reader is: rough, but never 0 past the first section.
+ *
+ * Null when the place is not known at all (save nothing rather than a 0).
+ *
+ * The chapters' idea of where the story starts used to be asked before the
+ * sizes were, and overruled them: a book whose only chapter-like entries
+ * were near its end read as front matter, at 0%, up to there.
+ */
+export const readingAt = (at: {
+  /** The section the place is in. */
+  spineIndex: number | undefined;
+  /** How far through that section, 0..1. */
+  within: number;
+  /** How many sections the book has. */
+  spineCount: number;
+  weights: SectionWeights | null;
+  /** The sections the contents' chapter-like entries open, ascending. */
+  chapterSpines: readonly number[];
+  /** The chapter the place is in, when its section opens one. */
+  chapterIndex?: number;
+  /** epub.js's percentage from its locations; null until it has them. */
+  located?: number | null;
+  /** Scrolling: the story's last line is in the window. */
+  endInView?: boolean;
+  /** With pages: the page shown in its section, and the section's pages. */
+  page?: { page: number; total: number } | null;
+  /** Whether a section lies between two stories of a set and is only being looked at. */
+  between?: (section: number) => boolean;
+  /** The book was finished before (`progressToSave`). */
+  wasFinished?: boolean;
+}): PlaceReading | null => {
+  const { spineIndex, weights, chapterSpines, spineCount } = at;
+  const within = Math.min(1, Math.max(0, Number.isFinite(at.within) ? at.within : 0));
+  const wasFinished = at.wasFinished ?? false;
+  const known = typeof spineIndex === "number" && Number.isFinite(spineIndex) && spineIndex >= 0;
+
+  if (weights && known && spineIndex < weights.bytes.length) {
+    // The story's last line on screen: read, however short its last chapter.
+    if (at.endInView) {
+      return { kind: "read", progress: 1, by: "sizes" };
+    }
+    if (spineIndex < weights.lo) {
+      return { kind: "front" };
+    }
+    // Past the story is back matter: a footnote link into it is not finishing the book.
+    if (spineIndex > weights.hi) {
+      return { kind: "back" };
+    }
+    if (at.between?.(spineIndex)) {
+      return { kind: "between" };
+    }
+    const atEnd = at.page ? onLastPage(spineIndex, weights.last, at.page.page, at.page.total) : false;
+    const span = weights.prefix[weights.hi + 1] - weights.prefix[weights.lo];
+    const read = weights.prefix[spineIndex] - weights.prefix[weights.lo] + within * weights.bytes[spineIndex];
+    return { kind: "read", progress: progressToSave(read / span, atEnd, wasFinished), by: "sizes" };
+  }
+
+  if (known && chaptersFrameBook(chapterSpines, spineCount)) {
+    const total = chapterSpines.length;
+    if (spineIndex < chapterSpines[0]) {
+      return { kind: "front" };
+    }
+    let chapterIndex = at.chapterIndex;
+    if (chapterIndex === undefined) {
+      for (let i = 0; i < total; i += 1) {
+        if (spineIndex >= chapterSpines[i]) {
+          chapterIndex = i;
+        } else {
+          break;
+        }
+      }
+    }
+    if (typeof chapterIndex === "number") {
+      // Past the last chapter is back matter: endnotes, acknowledgements.
+      if (spineIndex > chapterSpines[total - 1]) {
+        return { kind: "back" };
+      }
+      const chapter = { index: chapterIndex, total };
+      if (chapterIndex >= total - 1 && within >= 0.98) {
+        return { kind: "read", progress: 1, by: "chapters", chapter };
+      }
+      return { kind: "read", progress: progressToSave((chapterIndex + within) / total, false, wasFinished), by: "chapters", chapter };
+    }
+  }
+
+  if (typeof at.located === "number" && Number.isFinite(at.located)) {
+    return { kind: "read", progress: Math.min(1, Math.max(0, at.located)), by: "locations" };
+  }
+
+  if (known && spineCount > 0 && spineIndex < spineCount) {
+    return { kind: "read", progress: progressToSave((spineIndex + within) / spineCount, false, wasFinished), by: "spine" };
+  }
+  return null;
+};
+
+/** How long after a book's saved place is put back that the open is still settling (`dropsToStartAtOpen`). */
+export const OPEN_SETTLE_MS = 4000;
+
+/**
+ * Whether a save would take a book's progress from past its start back to it
+ * while the book is still opening, before the reader has done anything.
+ * Opening a book never moves its progress by itself; such a save is skipped
+ * (the progress is saved as soon as the reader moves).
+ */
+export const dropsToStartAtOpen = (saved: number, next: number, settling: boolean) =>
+  settling && Number.isFinite(saved) && saved > AT_AN_END && next <= AT_AN_END;

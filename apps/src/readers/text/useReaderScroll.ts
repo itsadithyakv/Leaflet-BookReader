@@ -4,6 +4,7 @@ import { handsFreeCounts } from "../pacing";
 import { isScrollCorrection } from "../smartScroll";
 import { glideFrame, glideSet, startGlide } from "../glide";
 import { NOT_HELD, STILL_MS, isOnScrollbar, letGo, pageScrolled, pressOn, type ScrollbarHold } from "../scrollbarHold";
+import { readerScroll } from "../scrollQuiet";
 import type { Later, WithCover, WithLook } from "./scope";
 import { GHOST_ATTR } from "./renditionGhost";
 
@@ -306,6 +307,8 @@ export const useScrollWatch = (reader: WithCover) => {
       if (!target) {
         return;
       }
+      // Work that can wait for the page to be still waits (readers/scrollQuiet.ts).
+      readerScroll.note();
       const now = Date.now();
       if (handsFreeCounts(now - lastHandsOnAtRef.current)) {
         markReadingActivity();

@@ -25,7 +25,7 @@ import { useReaderCover } from "../readers/text/useReaderCover";
 import { useBookOpening } from "../readers/text/useBookOpening";
 import { useKindlePlacing } from "../readers/text/useKindlePlacing";
 import { useScrollTaps, useSelectionHidesChrome, useShapeLayout } from "../readers/text/useTouchReading";
-import { isPhoneShape, useReaderDevice } from "../readers/touchLayout";
+import { isPhoneShape, systemBarsHidden, useReaderDevice } from "../readers/touchLayout";
 import "../readers/touch.css";
 import { ReaderToolbar } from "../readers/text/ReaderToolbar";
 import { ReaderContentsPanel } from "../readers/text/ReaderContentsPanel";
@@ -33,6 +33,7 @@ import { ReaderPage } from "../readers/text/ReaderPage";
 import { ReaderDialogs } from "../readers/text/ReaderDialogs";
 import { ReaderSessionMarks } from "../readers/text/ReaderSessionMarks";
 import { ReaderPaceControls } from "../readers/text/ReaderPaceControls";
+import { usePhoneReading } from "../readers/text/usePhoneReading";
 import type { ReaderScope } from "../readers/text/scope";
 import { isKindlePlace } from "../library/kindleClippings";
 
@@ -106,10 +107,12 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
   useSelectionHidesChrome(reader);
   // Last: it waits for the book to be up, and nothing waits on it.
   useKindlePlacing(reader);
+  // A phone's footer, bookmark corner and way back after a jump (readers/phoneReading.ts).
+  Object.assign(reader, usePhoneReading(reader));
 
   const { chromeVisible, displayMode, exitGuard, focusToast, hoverChrome, isLight, pageStyle, readingMode, rotation, shape } = reader;
-  // The system's bars hide for a focus-lock session, and on a phone on its side while the chrome is away.
-  useReaderDevice(exitGuard.locked || (shape === "sideways" && !chromeVisible), rotation);
+  // The system's bars hide for a focus-lock session, on a phone held upright, and on one on its side while the chrome is away.
+  useReaderDevice(systemBarsHidden(shape, chromeVisible, exitGuard.locked), rotation);
 
   return (
     <div

@@ -219,7 +219,13 @@ pub(crate) async fn import_one(path: &str, state: &State<'_, AppState>) -> Resul
   }
 }
 
-#[tauri::command]
+/// `async`: on Tauri's thread pool rather than the main thread, which carries
+/// the window and every other command's request; a large library's list (or
+/// a wait for the database while a sync holds it) no longer stalls them. The
+/// same for the other reads the app makes at start and on each refresh
+/// (`habit_snapshot`, `sync_status`, `pip_state_get` and so on). Writes stay on
+/// the main thread, which keeps them in the order they were sent.
+#[tauri::command(async)]
 pub fn list_books(state: State<'_, AppState>) -> Result<Vec<BookRecord>, String> {
   let db = state.db.guard();
   db.list_books().map_err(|e| e.to_string())
@@ -606,7 +612,7 @@ pub struct FinishedGone {
 /// The books finished and since removed from the library
 /// (`Database::finished_and_removed`): they are not in the library's list,
 /// and still count as finished in the stats, the goal and the year in review.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn finished_removed(state: State<'_, AppState>) -> Result<Vec<FinishedGone>, String> {
   let db = state.db.guard();
   Ok(

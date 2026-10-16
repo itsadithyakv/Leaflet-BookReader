@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { easeInOutCubic } from "../smartScroll";
-import { tapAction, tapZone } from "../touchLayout";
+import { isPhoneShape, tapAction, tapZone } from "../touchLayout";
+import { inBookmarkCorner } from "../phoneReading";
 import { DOUBLE_CLICK_MS, TAP_SLACK_PX, WHEEL_AT_REST, clickZone, pageAt, pageCount, pageTurnDuration, pageTurnTarget, pressIsClick, strayPageTarget, swipeTurn, wheelTurn } from "../pageTurn";
 import { MARK_NAME } from "../people/marks";
 import { chapterPageRange } from "../chapterSpan";
@@ -444,12 +445,15 @@ export const usePageTurning = (reader: WithContentsList & Later<"markReadingActi
  * The pages layout's own input: a frame the browser moved put back on a whole
  * page, and the clicks, drags and wheel that turn pages.
  */
-export const usePageInput = (reader: WithAnnotations) => {
+export const usePageInput = (reader: WithAnnotations & Later<"cornerBookmarkRef">) => {
   const {
     book, chapterTurnUntilRef, hideChrome, interruptedRef, layout, layoutRef, loading, morePanelOpen, navigatingUntilRef,
-    pageFrame, pageSlideRef, pictureRef, renditionRef, selectionRef, shortcutsOpenRef, soundPanelOpen, toggleChrome,
+    pageFrame, pageSlideRef, pictureRef, renditionRef, selectionRef, shape, shortcutsOpenRef, soundPanelOpen, toggleChrome,
     turnPageRef, viewerRef
   } = reader;
+  // A phone: its top right corner bookmarks (readers/phoneReading.ts).
+  const phoneRef = useRef(isPhoneShape(shape));
+  phoneRef.current = isPhoneShape(shape);
   // For the listeners bound once a book: a finger's page turn sends the chrome away, a tap in the middle toggles it.
   const chromeRef = useRef({ hide: hideChrome, toggle: toggleChrome });
   chromeRef.current = { hide: hideChrome, toggle: toggleChrome };
@@ -621,7 +625,9 @@ export const usePageInput = (reader: WithAnnotations) => {
       }
       const under = inBook ? textAt(doc, event.clientX, event.clientY) : { text: false, name: false };
       const highlight = viewer ? within(x, y, Array.from(viewer.querySelectorAll(".leaflet-highlight rect"), (mark) => mark.getBoundingClientRect()), 0) : false;
-      return { turn, doc, inBook, onText: under.text, claimed: Boolean(target?.closest?.(OWN_CLICK)) || under.name || highlight };
+      const frameBox = viewer?.parentElement?.getBoundingClientRect();
+      const corner = touch && phoneRef.current && frameBox ? inBookmarkCorner(x, y, frameBox) : false;
+      return { turn, corner, doc, inBook, onText: under.text, claimed: Boolean(target?.closest?.(OWN_CLICK)) || under.name || highlight };
     };
     const onClick = (event: MouseEvent) => {
       const from = press;
@@ -646,7 +652,7 @@ export const usePageInput = (reader: WithAnnotations) => {
       if (!plain) {
         return;
       }
-      const action = tapAction(place.turn, "pages");
+      const action = tapAction(place.turn, "pages", phoneRef.current, place.corner);
       const turn = () => {
         clickTimer = 0;
         if (renditionRef.current !== rendition || layoutRef.current !== "pages" || covered() || selecting(place.doc)) {
@@ -654,6 +660,8 @@ export const usePageInput = (reader: WithAnnotations) => {
         }
         if (action.kind === "chrome") {
           chromeRef.current.toggle();
+        } else if (action.kind === "bookmark") {
+          reader.cornerBookmarkRef.current();
         } else if (action.kind === "turn") {
           if (touch) {
             chromeRef.current.hide();

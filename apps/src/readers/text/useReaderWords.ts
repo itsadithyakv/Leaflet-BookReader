@@ -6,6 +6,7 @@ import { noveltyHolds, MAX_WORD_HOLD, READER_WORD_PATTERN, READER_BLOCK_SELECTOR
 import { estimateTextDifficulty } from "../paceModel";
 import { firstTextFrom } from "../lineAt";
 import { indexOfPlace, wordPlace, type WordPlace } from "../wordPlace";
+import { settleDelay } from "../scrollQuiet";
 import type { Later, WithScroll } from "./scope";
 
 /** The most words indexed at once: the chapters on screen, and a neighbour or two. */
@@ -483,14 +484,24 @@ export const useReaderWords = (reader: WithScroll & WordsLater) => {
     if (wordIndexTimerRef.current) {
       window.clearTimeout(wordIndexTimerRef.current);
     }
-    wordIndexTimerRef.current = window.setTimeout(() => {
+    // Counting every word on the page is the heaviest thing the reader does
+    // after a chapter arrives: not in the middle of a fling, which needs the
+    // frames (readers/scrollQuiet.ts). It waits for the page to be still.
+    const askedAt = performance.now();
+    const count = () => {
+      const wait = settleDelay(askedAt);
+      if (wait > 0) {
+        wordIndexTimerRef.current = window.setTimeout(count, wait);
+        return;
+      }
       wordIndexTimerRef.current = null;
       try {
         prepareReaderWords(startAtViewport);
       } catch {
         readerWordsRef.current = [];
       }
-    }, delay);
+    };
+    wordIndexTimerRef.current = window.setTimeout(count, delay);
   };
 
   return {

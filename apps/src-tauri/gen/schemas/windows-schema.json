@@ -2379,16 +2379,22 @@
           "markdownDescription": "Denies the save command without any pre-configured scope."
         },
         {
-          "description": "Default plugin permissions.\n#### This default permission set includes:\n\n- `allow-keep-awake`\n- `allow-lock-rotation`\n- `allow-hide-system-bars`\n- `allow-pick-files`\n- `allow-share-target`\n- `allow-share-file`\n- `allow-share-text`\n- `allow-open-store`\n- `allow-request-review`",
+          "description": "Default plugin permissions.\n#### This default permission set includes:\n\n- `allow-keep-awake`\n- `allow-lock-rotation`\n- `allow-hide-system-bars`\n- `allow-pick-files`\n- `allow-share-target`\n- `allow-share-file`\n- `allow-share-text`\n- `allow-open-store`\n- `allow-request-review`\n- `allow-hold-for-sign-in`\n- `allow-volume-page-turns`",
           "type": "string",
           "const": "leaflet-device:default",
-          "markdownDescription": "Default plugin permissions.\n#### This default permission set includes:\n\n- `allow-keep-awake`\n- `allow-lock-rotation`\n- `allow-hide-system-bars`\n- `allow-pick-files`\n- `allow-share-target`\n- `allow-share-file`\n- `allow-share-text`\n- `allow-open-store`\n- `allow-request-review`"
+          "markdownDescription": "Default plugin permissions.\n#### This default permission set includes:\n\n- `allow-keep-awake`\n- `allow-lock-rotation`\n- `allow-hide-system-bars`\n- `allow-pick-files`\n- `allow-share-target`\n- `allow-share-file`\n- `allow-share-text`\n- `allow-open-store`\n- `allow-request-review`\n- `allow-hold-for-sign-in`\n- `allow-volume-page-turns`"
         },
         {
           "description": "Enables the hide_system_bars command without any pre-configured scope.",
           "type": "string",
           "const": "leaflet-device:allow-hide-system-bars",
           "markdownDescription": "Enables the hide_system_bars command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the hold_for_sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:allow-hold-for-sign-in",
+          "markdownDescription": "Enables the hold_for_sign_in command without any pre-configured scope."
         },
         {
           "description": "Enables the keep_awake command without any pre-configured scope.",
@@ -2439,10 +2445,22 @@
           "markdownDescription": "Enables the share_text command without any pre-configured scope."
         },
         {
+          "description": "Enables the volume_page_turns command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:allow-volume-page-turns",
+          "markdownDescription": "Enables the volume_page_turns command without any pre-configured scope."
+        },
+        {
           "description": "Denies the hide_system_bars command without any pre-configured scope.",
           "type": "string",
           "const": "leaflet-device:deny-hide-system-bars",
           "markdownDescription": "Denies the hide_system_bars command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the hold_for_sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:deny-hold-for-sign-in",
+          "markdownDescription": "Denies the hold_for_sign_in command without any pre-configured scope."
         },
         {
           "description": "Denies the keep_awake command without any pre-configured scope.",
@@ -2491,6 +2509,12 @@
           "type": "string",
           "const": "leaflet-device:deny-share-text",
           "markdownDescription": "Denies the share_text command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the volume_page_turns command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:deny-volume-page-turns",
+          "markdownDescription": "Denies the volume_page_turns command without any pre-configured scope."
         },
         {
           "description": "This permission set allows opening `mailto:`, `tel:`, `https://` and `http://` urls using their default application\nas well as reveal file in directories using default file explorer\n#### This default permission set includes:\n\n- `allow-open-url`\n- `allow-reveal-item-in-dir`\n- `allow-default-urls`",

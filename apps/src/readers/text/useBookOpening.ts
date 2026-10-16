@@ -6,7 +6,7 @@ import { bookService } from "../../services/bookService";
 import { accountService } from "../../services/accountService";
 import ztNatureBoldWoff2 from "../../assets/fonts/ZTNature-Bold.woff2";
 import { formatSummary, getBookExtension, isReadableExtension } from "../../constants/bookFormats";
-import { buildSectionWeights, isChapterLike, onLastPage, outsideStory, progressToSave, spineIndexForProgress } from "../progress";
+import { buildSectionWeights, chaptersFrameBook, dropsToStartAtOpen, isChapterLike, OPEN_SETTLE_MS, outsideStory, readingAt, spineIndexForProgress } from "../progress";
 import { isFinished } from "../../constants/books";
 import { FALLBACK_FACE, MEASURE_PADDING, applyTypeChoice, type TocItem } from "../readerTypes";
 import { applyCustomFont } from "../customFonts";
@@ -22,6 +22,7 @@ import { sectionsFromArchive } from "../archiveSections";
 import { holdsFetching } from "../scrollbarHold";
 import { isOutsideLink } from "../bookLinks";
 import { markViewable, pictureAt } from "../pictures";
+import { RELOCATE_AFTER_SCROLL_MS, afterScrollSettles, fetchAheadPx, readerScroll, reportWhileScrolling } from "../scrollQuiet";
 import { fractionAt } from "../seek";
 import { fullerToc, tocFromNcx } from "../ncx";
 import { CONTENTS_KEY_PREFIX, decideContents, keepContents, placeKey, readKept, type KeptContents } from "../autoContents";
@@ -193,7 +194,13 @@ export const useBookOpening = (reader: WithCover) => {
         const rendition = epub.renderTo(viewerRef.current, {
           width: "100%",
           height: "100%",
-          ...(layoutRef.current === "pages" ? (phone ? { gap: PHONE_PAGE_GAP } : {}) : { manager: "continuous", flow: "scrolled" })
+          ...(layoutRef.current === "pages"
+            ? phone
+              ? { gap: PHONE_PAGE_GAP }
+              : {}
+            : // Where the page is, worked out once the scrolling pauses
+              // rather than at every hitch of it (readers/scrollQuiet.ts).
+              { manager: "continuous", flow: "scrolled", afterScrolledTimeout: RELOCATE_AFTER_SCROLL_MS })
         });
         renditionRef.current = rendition;
         // epub.js decides which chapters to fetch from a scroll position it
@@ -219,8 +226,55 @@ export const useBookOpening = (reader: WithCover) => {
               manager.q?.enqueue?.(() => manager.update?.());
               return Promise.resolve(false);
             }
-            return check(...args);
+            // Scrolling down through a chapter, the next is fetched two
+            // windows ahead (readers/scrollQuiet.ts: fetchAheadPx).
+            const ahead = args.length === 0 && manager.container ? fetchAheadPx(manager.container.scrollTop, manager.container.clientHeight) : null;
+            return ahead !== null ? check(undefined, ahead) : check(...args);
           };
+          // Where the page is, said at least once a second while it never
+          // rests, moving slowly (readers/scrollQuiet.ts: reportWhileScrolling).
+          if (manager.container && typeof (rendition as any).reportLocation === "function") {
+            const container = manager.container as HTMLElement;
+            let reportedAt = performance.now();
+            let reportedTop = container.scrollTop;
+            rendition.on("relocated", () => {
+              reportedAt = performance.now();
+              reportedTop = container.scrollTop;
+            });
+            container.addEventListener(
+              "scroll",
+              () => {
+                const now = performance.now();
+                if (reportWhileScrolling(now - reportedAt, container.scrollTop - reportedTop)) {
+                  reportedAt = now;
+                  reportedTop = container.scrollTop;
+                  (rendition as any).reportLocation();
+                }
+              },
+              { passive: true }
+            );
+          }
+          // Asked where the page is, epub.js first sets every chapter on the
+          // page out again and measures it (a layout of each, forced), then
+          // walks the text on screen. While the page is being scrolled and
+          // the window has not changed size, the chapters have not changed
+          // either (a chapter whose text moves measures itself again, by its
+          // own resize watch): only the walk is done.
+          if (typeof manager.currentLocation === "function" && typeof manager.scrolledLocation === "function" && manager.stage) {
+            const currentLocation = manager.currentLocation.bind(manager);
+            manager.currentLocation = () => {
+              const was = manager._stageSize as { width: number; height: number } | undefined;
+              const scrolling = performance.now() - readerScroll.lastAt() < 1000;
+              if (scrolling && was && !manager.isPaginated) {
+                const size = manager.stage.size();
+                if (size && size.width === was.width && size.height === was.height) {
+                  manager.location = manager.scrolledLocation();
+                  return manager.location;
+                }
+              }
+              return currentLocation();
+            };
+          }
           // Nor is a chapter above taken away under a held scrollbar: that
           // moves the scroll position, and the thumb with it. It goes once
           // the thumb is let go (every look at the page asks again).
@@ -516,7 +570,8 @@ export const useBookOpening = (reader: WithCover) => {
           // The lines of a flattened contents page that lead to a contents entry.
           markListedLines(doc, tocLabelsRef.current);
           markInkImages(doc);
-          markViewable(doc);
+          // (Which pictures open the viewer is looked at once the chapter is
+          // laid out, below: measured here, each chapter was laid out twice.)
           doc.documentElement.style.backgroundColor = finish.background;
           doc.body.style.backgroundColor = finish.background;
           doc.documentElement.style.backgroundImage = finishBackground;
@@ -994,6 +1049,9 @@ export const useBookOpening = (reader: WithCover) => {
           window.setTimeout(() => void findContents(), 8000);
         }
 
+        /** When the saved place was put back (0: not yet, or there was none), and the last input then. */
+        let restoredAt = 0;
+        let handsOnAtRestore = 0;
         const onRelocated = (location: any) => {
           // A look at the map or the notes from the middle of the story
           // (readers/progress.ts: outsideStory): the progress and the saved
@@ -1022,28 +1080,6 @@ export const useBookOpening = (reader: WithCover) => {
                     ? spineIndexByHrefRef.current[href]
                     : undefined;
 
-            const chapterSpineIndices = chapterSpineIndicesRef.current;
-            const chapterTotal = chapterSpineIndices.length;
-            const firstChapterSpine = chapterTotal > 0 ? chapterSpineIndices[0] : undefined;
-            const lastChapterSpine = chapterTotal > 0 ? chapterSpineIndices[chapterTotal - 1] : undefined;
-
-            if (chapterTotal > 0 && typeof spineIndex === "number" && typeof firstChapterSpine === "number") {
-              if (spineIndex < firstChapterSpine) {
-                return outside("front");
-              }
-            }
-
-            let chapterIndex = href && indexMap[href] !== undefined ? indexMap[href] : undefined;
-            if (chapterIndex === undefined && typeof spineIndex === "number" && chapterTotal > 0) {
-              for (let i = 0; i < chapterSpineIndices.length; i += 1) {
-                if (spineIndex >= chapterSpineIndices[i]) {
-                  chapterIndex = i;
-                } else {
-                  break;
-                }
-              }
-            }
-
             const sectionProgress = () => {
               if (line) {
                 return line.within;
@@ -1061,73 +1097,61 @@ export const useBookOpening = (reader: WithCover) => {
               return 0;
             };
 
-            const weights = sectionWeightsRef.current;
-            if (weights && typeof spineIndex === "number" && spineIndex < weights.bytes.length) {
-              // The story's last line on screen: read, however short its last chapter.
-              if (line && storyEndInView()) {
-                return 1;
+            // epub.js's own index of the book, when it has made one (null until then).
+            const located = (() => {
+              const cfi = location?.start?.cfi ?? location?.end?.cfi;
+              const locations = bookRef.current?.locations;
+              if (cfi && locations?.percentageFromCfi) {
+                try {
+                  const percent = locations.percentageFromCfi(cfi);
+                  if (typeof percent === "number" && Number.isFinite(percent)) {
+                    return percent;
+                  }
+                } catch {
+                  // Not indexed yet.
+                }
               }
-              if (spineIndex < weights.lo) {
-                return outside("front");
-              }
-              // Past the story is back matter: a footnote link into it is not
-              // finishing the book, so progress stays where the reading was.
-              if (spineIndex > weights.hi) {
-                return outside("back");
-              }
-              // Between two stories of a set, looked at from elsewhere: as front and back matter are.
-              if (lookingBetweenStories(spineIndex)) {
-                lookingOutside = true;
-                return null;
-              }
-              const within = sectionProgress();
-              // Finished at the end of the story's last section and not
-              // before (readers/progress.ts): scrolling, that was settled
-              // above; with pages it is the section's last page. Until then
-              // the progress stops just short, however little is left. (It
-              // used to be finished from 98% of the way through that section,
-              // or as soon as the weights rounded past 99%.)
-              const displayed = location?.start?.displayed ?? location?.end?.displayed;
-              const atEnd = !line && onLastPage(spineIndex, weights.last, Number(displayed?.page) || 0, Number(displayed?.total) || 0);
-              const span = weights.prefix[weights.hi + 1] - weights.prefix[weights.lo];
-              const read = weights.prefix[spineIndex] - weights.prefix[weights.lo] + within * weights.bytes[spineIndex];
-              return progressToSave(read / span, atEnd, isFinished(lastProgressRef.current));
-            }
+              const direct = location?.start?.percentage ?? location?.end?.percentage;
+              return typeof direct === "number" && Number.isFinite(direct) ? direct : null;
+            })();
 
-            if (chapterTotal > 0 && typeof chapterIndex === "number") {
-              // Past the last chapter is back matter: endnotes, acknowledgements.
-              // A footnote link into it is not finishing the book, so the
-              // progress stays where the reading was.
-              if (typeof spineIndex === "number" && typeof lastChapterSpine === "number" && spineIndex > lastChapterSpine) {
-                return outside("back");
-              }
-              // The camp goes by chapters where a book has them (see pip/base/storyFeed).
-              noteChapter(book.id, chapterIndex, chapterTotal);
-              const within = sectionProgress();
-              if (chapterIndex >= chapterTotal - 1 && within >= 0.98) {
-                return 1;
-              }
-              const progress = (chapterIndex + within) / chapterTotal;
-              return progressToSave(progress, false, isFinished(lastProgressRef.current));
+            // By the sections' sizes, else the chapters, else epub.js's index,
+            // else the section's place in the book (readers/progress.ts:
+            // readingAt). Never 0 past the first section: the chapters' idea
+            // of where the story starts used to come first, and a book whose
+            // only chapter-like entries were its epilogue and an appendix
+            // saved 0% from anywhere before them.
+            const displayed = location?.start?.displayed ?? location?.end?.displayed;
+            const reading = readingAt({
+              spineIndex,
+              within: sectionProgress(),
+              spineCount: spineItems.length,
+              weights: sectionWeightsRef.current,
+              chapterSpines: chapterSpineIndicesRef.current,
+              chapterIndex: href && indexMap[href] !== undefined ? indexMap[href] : undefined,
+              located,
+              endInView: line ? storyEndInView() : false,
+              // Finished with pages on the story's last page; scrolling, by its last line (above).
+              page: line ? null : { page: Number(displayed?.page) || 0, total: Number(displayed?.total) || 0 },
+              between: lookingBetweenStories,
+              wasFinished: isFinished(lastProgressRef.current)
+            });
+            if (!reading) {
+              // Unknown: better to save nothing than a 0 that overwrites real progress.
+              return null;
             }
-
-            const cfi = location?.start?.cfi ?? location?.end?.cfi;
-            const locations = bookRef.current?.locations;
-            if (cfi && locations?.percentageFromCfi) {
-              const percent = locations.percentageFromCfi(cfi);
-              if (typeof percent === "number" && Number.isFinite(percent)) {
-                return Math.min(1, Math.max(0, percent));
-              }
+            if (reading.kind === "front" || reading.kind === "back") {
+              return outside(reading.kind);
             }
-
-            const direct = location?.start?.percentage ?? location?.end?.percentage;
-            if (typeof direct === "number" && Number.isFinite(direct)) {
-              return Math.min(1, Math.max(0, direct));
+            if (reading.kind === "between") {
+              lookingOutside = true;
+              return null;
             }
-
-            // Unknown (epub.js is still indexing the book): better to save
-            // nothing than a 0 that overwrites real progress.
-            return null;
+            // The camp goes by chapters where a book has them (see pip/base/storyFeed).
+            if (reading.chapter) {
+              noteChapter(book.id, reading.chapter.index, reading.chapter.total);
+            }
+            return reading.progress;
           };
 
           const percentage = resolveProgress();
@@ -1185,6 +1209,12 @@ export const useBookOpening = (reader: WithCover) => {
             percentage !== null &&
             progressArmedRef.current &&
             placeFollowsNow() &&
+            // Opening the book is not reading it back to the start (readers/progress.ts).
+            !dropsToStartAtOpen(
+              lastProgressRef.current,
+              percentage,
+              lastHandsOnAtRef.current <= handsOnAtRestore && now - restoredAt < OPEN_SETTLE_MS
+            ) &&
             (Math.abs(percentage - lastProgressRef.current) >= 0.005 || now - lastProgressAtRef.current >= 10000);
 
           if (shouldUpdateProgress && percentage !== null) {
@@ -1372,8 +1402,18 @@ export const useBookOpening = (reader: WithCover) => {
           (rendition.getContents?.() ?? []).forEach((contents: any) => {
             if (contents?.document) {
               markInkImages(contents.document);
-              markViewable(contents.document);
             }
+          });
+          // Measuring the pictures lays the chapters out: once the page is still.
+          afterScrollSettles(() => {
+            if (renditionRef.current !== rendition) {
+              return;
+            }
+            (rendition.getContents?.() ?? []).forEach((contents: any) => {
+              if (contents?.document) {
+                markViewable(contents.document);
+              }
+            });
           });
         });
 
@@ -1411,6 +1451,8 @@ export const useBookOpening = (reader: WithCover) => {
         }
         if (restored) {
           progressArmedRef.current = true;
+          restoredAt = Date.now();
+          handsOnAtRestore = lastHandsOnAtRef.current;
           // epub.js puts the saved line at the very top, under the toolbar:
           // it goes back to the reading line, as far below it as it was.
           clearToolbar(lastCfiRef.current, Math.min(lastCfiBelowRef.current, (ensureScrollContainer()?.clientHeight ?? 0) / 2));
@@ -1428,7 +1470,7 @@ export const useBookOpening = (reader: WithCover) => {
           const spineIndex =
             midway && weights
               ? spineIndexForProgress(weights, progress)
-              : midway && chapters.length > 1
+              : midway && chaptersFrameBook(chapters, spineItems.length)
                 ? chapters[Math.min(chapters.length - 1, Math.floor(progress * chapters.length))]
                 : null;
           const href = spineIndex !== null ? epub.spine?.items?.[spineIndex]?.href : null;

@@ -55,6 +55,8 @@ type GestureOptions = {
   turn: (step: 1 | -1) => void;
   toggleChrome: () => void;
   hideChrome: () => void;
+  /** A phone: scrolling, only a tap in the middle brings the chrome (readers/touchLayout.ts, `tapAction`). */
+  immersive?: boolean;
   /** A new size about a point of the window: a pinch ("free"), a double tap (a fit). */
   zoomTo: (fit: PageFit, scale: number, about: Point) => void;
 };
@@ -164,7 +166,7 @@ export const usePageGestures = (options: GestureOptions) => {
       tappedAtRef.current = Date.now();
       const box = stage.getBoundingClientRect();
       const zone = tapZone(event.clientX, box.left, box.width, options.rtl);
-      const action = tapAction(zone, options.paged ? "pages" : "scroll");
+      const action = tapAction(zone, options.paged ? "pages" : "scroll", options.immersive ?? false);
       const here = { at: performance.now(), x: event.clientX, y: event.clientY };
       if (isDoubleTap(lastTap, here)) {
         window.clearTimeout(tapTimer);
@@ -177,6 +179,16 @@ export const usePageGestures = (options: GestureOptions) => {
         lastTap = null;
         options.hideChrome();
         options.turn(action.step);
+        return;
+      }
+      if (action.kind === "hide") {
+        // Scrolling on a phone, at a side: the chrome goes (after the wait for a double tap, which still zooms).
+        lastTap = here;
+        window.clearTimeout(tapTimer);
+        tapTimer = window.setTimeout(() => {
+          lastTap = null;
+          latest.current.hideChrome();
+        }, DOUBLE_TAP_MS);
         return;
       }
       // In the middle it waits a moment, for a second tap.

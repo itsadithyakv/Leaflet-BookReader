@@ -180,6 +180,7 @@ import { askConfirm } from "../../../ConfirmDialog";
 import { playSound, useSoundOn } from "../../../../pip/sound";
 import { gameArt } from "../gameArt";
 import { GAME_H, GAME_W } from "../games";
+import { isTouchInput } from "../../../../platform/device";
 import { BattleScreen } from "./BattleScreen";
 import { drawAt, fitPicture, screenRatio, type Fit } from "./fit";
 import { PipFace, Sprite } from "./Sprite";
@@ -295,6 +296,8 @@ const sidewaysRoom = (root: HTMLElement): { wide: number; tall: number } | null 
 };
 /** Art pixels of sky there may be above the clearing: more than this is not a sky but a gap. */
 const SKY_MOST = 90;
+/** Art pixels of the clearing's own sky, at its top, that may be cut so the picture fills a phone held sideways edge to edge. */
+const CROP_MOST = 20;
 /** Screen pixels the row of keys takes at the foot of the picture: that much more ground is laid for it to stand on, where the page is tall enough. */
 const DOCK_TALL = 88;
 
@@ -377,6 +380,7 @@ export const BaseScreen = ({
   onInside,
   onArcade,
   corner,
+  lead,
   garden
 }: {
   skin: string;
@@ -387,6 +391,8 @@ export const BaseScreen = ({
   onArcade?: () => void;
   /** Keys for the top corner of the picture: the ways out of the clearing. */
   corner?: React.ReactNode;
+  /** First in the row of what the camp has: the way to the rest of the app, where Pip's tab fills the screen. */
+  lead?: React.ReactNode;
   /** The garden, where there is one: it has a bed by the burrow. */
   garden?: CampGarden;
 }) => {
@@ -414,7 +420,8 @@ export const BaseScreen = ({
    * (`stack`: a small window, an upright phone); or it fills the height and the rest goes down its right (`side`: a
    * phone turned sideways, where hung at the top it was 175 px of camp).
    */
-  const [lay, setLay] = useState<{ mode: "stage" | "stack" | "side"; sky: number; ground: number }>({ mode: "stack", sky: 0, ground: 0 });
+  // `crop`: art pixels cut from the top of the clearing (its sky), where the picture fills the width of a phone on its side.
+  const [lay, setLay] = useState<{ mode: "stage" | "stack" | "side"; sky: number; ground: number; crop: number }>({ mode: "stack", sky: 0, ground: 0, crop: 0 });
   /** Which clearing the picture shows: the camp, or the meadow beyond it. */
   const [area, setArea] = useState<Place>("camp");
   /** What the list just paid, for a moment, over the acorns. */
@@ -575,25 +582,33 @@ export const BaseScreen = ({
       const phone = window.innerHeight <= PHONE_TALL && wide >= PHONE_WIDE && tall >= PHONE_MIN_TALL && wide >= tall * 1.3;
       if ((wide >= STAGE_WIDE && tall >= STAGE_TALL) || phone) {
         // The picture is the page: as large as the page lets it be, and what height is left over the clearing is sky.
-        const next = fitPicture(GAME_W, GAME_H, wide, tall, screenRatio(), 0);
+        // On a phone on its side it is as wide as the screen, edge to edge (no strips of paper beside it): if that
+        // makes it taller than the screen, the top of the clearing's sky is cut, up to CROP_MOST.
+        // (By a finger only: a short desktop window keeps the whole picture.)
+        const cover = phone && isTouchInput();
+        const next = fitPicture(GAME_W, cover ? GAME_H - CROP_MOST : GAME_H, wide, tall, screenRatio(), 0);
         // To the canvas pixel. The first of it is ground at the foot, for the row of keys to stand on; the rest is sky.
-        const spare = Math.max(0, Math.floor((tall / next.css - GAME_H) * next.backing) / next.backing);
+        const over = Math.floor((tall / next.css - GAME_H) * next.backing) / next.backing;
+        const spare = Math.max(0, over);
+        const crop = cover && over < 0 ? Math.min(CROP_MOST, Math.ceil(-over * next.backing) / next.backing) : 0;
         const ground = Math.min(spare, Math.ceil((DOCK_TALL / next.css) * next.backing) / next.backing);
         const sky = Math.min(SKY_MOST, spare - ground);
         setFit((was) => (was.css === next.css && was.backing === next.backing ? was : next));
-        setLay((was) => (was.mode === "stage" && was.sky === sky && was.ground === ground ? was : { mode: "stage", sky, ground }));
+        setLay((was) =>
+          was.mode === "stage" && was.sky === sky && was.ground === ground && was.crop === crop ? was : { mode: "stage", sky, ground, crop }
+        );
         return;
       }
       // Not on show (another page of a small window): there is nothing to measure.
       const root = rootRef.current;
       const side = root ? sidewaysRoom(root) : null;
       if (side) {
-        setLay((was) => (was.mode === "side" ? was : { mode: "side", sky: 0, ground: 0 }));
+        setLay((was) => (was.mode === "side" ? was : { mode: "side", sky: 0, ground: 0, crop: 0 }));
         const next = fitPicture(GAME_W, GAME_H, side.wide, side.tall, screenRatio(), 0.08);
         setFit((was) => (was.css === next.css && was.backing === next.backing ? was : next));
         return;
       }
-      setLay((was) => (was.mode === "stack" ? was : { mode: "stack", sky: 0, ground: 0 }));
+      setLay((was) => (was.mode === "stack" ? was : { mode: "stack", sky: 0, ground: 0, crop: 0 }));
       if (wrap.clientWidth === 0) return;
       // The picture hangs in a frame: the room for it is the wrap's, less the frame on each side.
       const room = Math.max(window.innerHeight * 0.45, window.innerHeight - 440);
@@ -2365,11 +2380,12 @@ export const BaseScreen = ({
       data-mode={lay.mode}
       data-tab={tab}
       // Laid over the picture, the page is the picture's size exactly: nothing hangs off its edge.
-      style={lay.mode === "stage" ? { width: GAME_W * fit.css, height: (GAME_H + lay.sky + lay.ground) * fit.css } : undefined}
+      style={lay.mode === "stage" ? { width: GAME_W * fit.css, height: (GAME_H + lay.sky + lay.ground - lay.crop) * fit.css } : undefined}
     >
       <div className="pip-base-head">
         <div className="pip-base-head-left">
         <p className="pip-base-stats">
+          {lead}
           <span
             className="pip-base-chip"
             title={[
@@ -2618,7 +2634,8 @@ export const BaseScreen = ({
               width={GAME_W * fit.backing}
               height={Math.round((GAME_H + lay.sky + lay.ground) * fit.backing)}
               className={`${fit.crisp ? "pip-sprite " : ""}pip-arcade-canvas${placing || arrange ? " is-placing" : ""}`}
-              style={{ width: GAME_W * fit.css, height: (GAME_H + lay.sky + lay.ground) * fit.css }}
+              // A cut sky is above the page's top edge: the canvas keeps the whole clearing, and where a touch lands is read from it.
+              style={{ width: GAME_W * fit.css, height: (GAME_H + lay.sky + lay.ground) * fit.css, marginTop: lay.crop ? -lay.crop * fit.css : undefined }}
               aria-hidden="true"
               onPointerDown={pressDown}
               onPointerUp={pressUp}

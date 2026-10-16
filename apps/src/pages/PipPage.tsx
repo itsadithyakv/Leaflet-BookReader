@@ -49,6 +49,7 @@ import { pipThingsTabs } from "./pip/thingsTabs";
 import { useResourceBumps } from "./pip/useResourceBumps";
 import { useRoomFrame } from "./pip/useRoomFrame";
 import { PipHud } from "./pip/PipHud";
+import { PipMenu, type PipMenuPlace } from "./pip/PipMenu";
 import { PreviewBar } from "./pip/PreviewBar";
 import { PipRail } from "./pip/PipRail";
 import { GardenPanel } from "./pip/GardenPanel";
@@ -84,6 +85,10 @@ export type PipPageProps = {
   showToast: (message: string) => void;
   /** Shows the Social page (a visitor's card has a way to their profile). Left out, the card has no such button. */
   openSocial?: () => void;
+  /** To another tab, from Pip's menu where her tab fills a phone on its side (the app's rail is not there). */
+  onNavigate?: (place: PipMenuPlace) => void;
+  /** The profile sheet (and Settings through it), from the same menu. */
+  onOpenProfile?: () => void;
 };
 
 /**
@@ -110,7 +115,7 @@ export type PipPageProps = {
  * each thing does, the shop's entries, the tabs of Pip's things, the HUD, the
  * rail and the drawers.
  */
-export const PipPage = ({ showToast, openSocial }: PipPageProps) => {
+export const PipPage = ({ showToast, openSocial, onNavigate, onOpenProfile }: PipPageProps) => {
   const { overview, load, buy, setLook, feed, plant, harvest, gamePlayed, played, fridgeBare } = usePipWardrobeStore(
     useShallow((state) => ({
       overview: state.overview,
@@ -796,6 +801,10 @@ export const PipPage = ({ showToast, openSocial }: PipPageProps) => {
   const plots = level.garden ? scenePlots : undefined;
   const pickerAnchor = () => (pickerPlot === null ? null : sceneRef.current?.plotBox(pickerPlot) ?? null);
 
+  // The way out to the rest of the app, at the start of the row of chips in the Hollow and in the house.
+  const menu = (className: string) =>
+    onNavigate && onOpenProfile ? <PipMenu className={className} onNavigate={onNavigate} onOpenProfile={onOpenProfile} /> : null;
+
   return (
     <div
       className="pip-house-page"
@@ -812,6 +821,7 @@ export const PipPage = ({ showToast, openSocial }: PipPageProps) => {
           mood={overview ? shownMood : undefined}
           onInside={() => setPlace("home")}
           onArcade={() => openArcade()}
+          lead={menu("pip-base-chip")}
           garden={
             garden
               ? {
@@ -842,6 +852,7 @@ export const PipPage = ({ showToast, openSocial }: PipPageProps) => {
         data-small-room={(roomBox && roomBox.width < 420) || undefined}
       >
         <PipHud
+          lead={place === "home" ? menu("pip-hud-help") : null}
           seedChipRef={seedChipRef}
           heartsRef={heartsRef}
           heartRefs={heartRefs}

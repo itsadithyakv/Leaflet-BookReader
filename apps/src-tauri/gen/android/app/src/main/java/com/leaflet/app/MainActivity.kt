@@ -1,6 +1,7 @@
 package com.leaflet.app
 
 import android.os.Bundle
+import android.view.KeyEvent
 import android.view.View
 import android.webkit.WebView
 import androidx.activity.OnBackPressedCallback
@@ -29,7 +30,31 @@ class MainActivity : TauriActivity() {
     } catch (error: UnsatisfiedLinkError) {
       app.tauri.Logger.error("SecretBox.attach: ${error.message}")
     }
+    // A new page sets it again once it has a book open.
+    volumePageTurns = false
     super.onCreate(savedInstanceState)
+  }
+
+  /**
+   * While a book is open (and the setting is on), the volume keys turn its
+   * pages: down goes on, up goes back (`platform/volumeKeys.ts`). They are
+   * Leaflet's then, so the volume stays where it was and no volume panel
+   * shows. One page a press: a held key's repeats, and its letting go, are
+   * swallowed too. Otherwise they change the volume as ever.
+   */
+  override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+    val code = event.keyCode
+    if (code == KeyEvent.KEYCODE_VOLUME_DOWN || code == KeyEvent.KEYCODE_VOLUME_UP) {
+      val view = webView
+      if (volumePageTurns && view != null) {
+        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+          val script = if (code == KeyEvent.KEYCODE_VOLUME_DOWN) NEXT_PAGE_SCRIPT else PREV_PAGE_SCRIPT
+          view.evaluateJavascript(script, null)
+        }
+        return true
+      }
+    }
+    return super.dispatchKeyEvent(event)
   }
 
   override fun onWebViewCreate(webView: WebView) {
@@ -116,6 +141,15 @@ class MainActivity : TauriActivity() {
   }
 
   companion object {
+    /** Set by the page (`DevicePlugin.volumePageTurns`): a book is open and the volume keys turn its pages. */
+    @Volatile
+    @JvmStatic
+    var volumePageTurns = false
+
+    private const val NEXT_PAGE_SCRIPT =
+      "(function(){try{window.__leafletPageKey&&window.__leafletPageKey('next');}catch(e){}})()"
+    private const val PREV_PAGE_SCRIPT =
+      "(function(){try{window.__leafletPageKey&&window.__leafletPageKey('prev');}catch(e){}})()"
     private const val BACK_SCRIPT =
       "(function(){try{return !!(window.__leafletBack&&window.__leafletBack());}catch(e){return false;}})()"
   }

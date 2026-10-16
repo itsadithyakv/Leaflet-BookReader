@@ -14,14 +14,16 @@ type SectionHeaderProps = {
   /** Anything that sits to the right: tabs, a countdown, a button. */
   actions?: ReactNode;
   className?: string;
+  /** False where the eyebrow only explains the heading: a phone, short of room, leaves it out. */
+  eyebrowOnPhone?: boolean;
 };
 
 /** A card's heading: eyebrow, title and, optionally, controls on the right. */
-export const SectionHeader = ({ eyebrow, title, id, actions, className = "" }: SectionHeaderProps) => (
+export const SectionHeader = ({ eyebrow, title, id, actions, className = "", eyebrowOnPhone = true }: SectionHeaderProps) => (
   <div className={`flex flex-wrap items-end justify-between gap-3 ${className}`}>
     <div className="min-w-0">
-      <p className={EYEBROW}>{eyebrow}</p>
-      <h2 id={id} className="page-title mt-2 text-2xl">
+      <p className={`${EYEBROW} ${eyebrowOnPhone ? "" : "phone-hidden"}`}>{eyebrow}</p>
+      <h2 id={id} className={`page-title text-2xl ${eyebrowOnPhone ? "mt-2" : "phone-flush mt-2"}`}>
         {title}
       </h2>
     </div>

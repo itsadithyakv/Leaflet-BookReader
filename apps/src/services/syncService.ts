@@ -1,4 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { android } from "../platform/android";
 import { EMPTY_SYNC_STATUS, type LargeBook, type SyncReport, type SyncStatus } from "@shared/sync/types";
 
 const EMPTY_REPORT: SyncReport = {
@@ -39,7 +40,15 @@ export const syncService = {
     if (!isTauri()) {
       throw new Error("Drive sync needs the Leaflet app.");
     }
-    await invoke<string>("drive_auth_start");
+    // On a phone the browser comes back to Leaflet itself, which Android
+    // would otherwise pause while the browser is in front.
+    await android.holdForSignIn(true);
+    try {
+      await invoke<string>("drive_auth_start");
+    } catch (error) {
+      await android.holdForSignIn(false);
+      throw error;
+    }
   },
 
   /** Resolves when the browser comes back, or rejects saying why it did not. */
@@ -47,7 +56,11 @@ export const syncService = {
     if (!isTauri()) {
       return;
     }
-    await invoke("drive_auth_wait");
+    try {
+      await invoke("drive_auth_wait");
+    } finally {
+      await android.holdForSignIn(false);
+    }
   },
 
   /**

@@ -16,7 +16,7 @@ import type { Later, WithSession } from "./scope";
  * The keyboard: which key does what (readers/readerKeys.ts), and what Escape
  * closes first (readers/escapeOrder.ts).
  */
-export const useReaderKeys = (reader: WithSession & Later<"people">) => {
+export const useReaderKeys = (reader: WithSession & Later<"people" | "chromeBackHides" | "hideChrome">) => {
   const {
     addBookmarkRef, autoScrollActive, autoScrollActiveRef, autoScrollSpeedRef, autoScrollYieldUntilRef,
     bookmarkPanelOpen, clearSelection, closeNoteRef, closeSearch, contentsOver, contentsPeekRef, exitGuard,
@@ -371,7 +371,10 @@ export const useReaderKeys = (reader: WithSession & Later<"people">) => {
   // (under focus lock, Pip and her "Hold to leave").
   useBackFallback(() => {
     const layer = nearestLayer();
-    if (layer === "exit") {
+    if (layer === "exit" && reader.chromeBackHides) {
+      // A phone: the chrome a middle tap brought goes before the book does (hooks/useAutoHideChrome.ts).
+      reader.hideChrome();
+    } else if (layer === "exit") {
       exitGuard.back();
     } else {
       closeLayer(layer);

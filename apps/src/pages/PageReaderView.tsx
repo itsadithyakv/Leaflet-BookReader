@@ -89,7 +89,7 @@ import { PipExitGuard, useFocusLockExit } from "../hooks/useFocusLockExit";
 import { useBackFallback } from "../platform/back";
 import { android, onAndroid } from "../platform/android";
 import { isTouchInput, useTouchInput } from "../platform/device";
-import { isPhoneShape, readerShape, sidewaysPageView, useReaderDevice, useReaderShape, useRotationLock, type SidewaysView } from "../readers/touchLayout";
+import { isPhoneShape, readerShape, sidewaysPageView, systemBarsHidden, useReaderDevice, useReaderShape, useRotationLock, type SidewaysView } from "../readers/touchLayout";
 import { usePageGestures } from "../readers/pageGestures";
 import { useReaderAwake } from "../readers/readerAwake";
 import { RotationChoice, SheetRow } from "../readers/text/ReaderTouchRows";
@@ -406,9 +406,12 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
     reveal: revealChrome,
     hover: hoverChrome,
     toggle: toggleChrome,
-    hide: hideChrome
+    hide: hideChrome,
+    backHides: chromeBackHides
   } = useAutoHideChrome(
-    zoomPanelOpen || bookmarkPanelOpen || morePanelOpen || soundPanelOpen || searchOpen || goToOpen || Boolean(exitGuard.guardShown?.hold)
+    zoomPanelOpen || bookmarkPanelOpen || morePanelOpen || soundPanelOpen || searchOpen || goToOpen || Boolean(exitGuard.guardShown?.hold),
+    // A phone: no chrome until a tap in the middle of the page asks for it.
+    phone
   );
   const [bookmarks, setBookmarks] = useState<PageBookmark[]>(
     () => readPageBookmarks(bookmarksKey)
@@ -1892,6 +1895,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
     turn: (step) => turnPage(step),
     toggleChrome,
     hideChrome,
+    immersive: phone,
     zoomTo: (nextFit, nextScale, about) =>
       setView(nextFit, nextFit === "free" ? clampZoom(nextScale, actualScale) : zoom, about)
   });
@@ -1930,7 +1934,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
   // The screen stays on while the book is touched lately (readers/readerAwake.ts).
   useReaderAwake(false);
   // The rotation lock, and the system's bars away under focus lock and on a phone on its side while the chrome is.
-  useReaderDevice(exitGuard.locked || (shape === "sideways" && !chromeVisible), rotation);
+  useReaderDevice(systemBarsHidden(shape, chromeVisible, exitGuard.locked), rotation);
 
   // Android's Back: the nearest thing open, one a press, then the book (through the exit guard).
   useBackFallback(() => {
@@ -1951,6 +1955,9 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
       closeAmbiencePopover();
     } else if (sidebarOpen) {
       setSidebarOpen(false);
+    } else if (chromeBackHides) {
+      // A phone: the chrome a middle tap brought goes before the book does.
+      hideChrome();
     } else {
       exitGuard.back();
     }

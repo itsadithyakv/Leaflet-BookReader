@@ -1,5 +1,6 @@
 import { UiIcon, type UiIconName } from "./UiIcon";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import { useTouchInput } from "../platform/device";
 
 /** Where the rail is shown (App.tsx: `md:block short:block`); elsewhere the bottom bar is the tour's "nav". */
 export const RAIL_QUERY = "(min-width: 768px), (max-height: 520px)";
@@ -22,6 +23,9 @@ type SidebarProps = {
 
 export const Sidebar = ({ activeItem, onNavigate, onStartReading, startDisabled, badge }: SidebarProps) => {
   const shown = useMediaQuery(RAIL_QUERY);
+  // Under a finger (a phone or a tablet) the rail is the four places only: Settings is behind the
+  // profile button in the header, and the book being read has its own bar with Continue on it.
+  const touch = useTouchInput();
   return (
     <aside
       className="leather-surface leaflet-sidebar absolute inset-y-0 left-0 z-40 flex h-full flex-col border-r border-black/60 py-5"
@@ -54,38 +58,36 @@ export const Sidebar = ({ activeItem, onNavigate, onStartReading, startDisabled,
         ))}
       </nav>
 
-      <button
-        className="sidebar-nav-item mb-3 text-sm"
-        type="button"
-        onClick={() => onNavigate("Settings")}
-        aria-current={activeItem === "Settings" ? "page" : undefined}
-      >
-        <span className="sidebar-icon-well">
-          <UiIcon name="settings" size={20} />
-        </span>
-        <span className="sidebar-copy font-semibold">Settings</span>
-        <span className="sidebar-rail-label" aria-hidden="true">
-          Settings
-        </span>
-      </button>
+      {!touch && (
+        <>
+          <button
+            className="sidebar-nav-item mb-3 text-sm"
+            type="button"
+            onClick={() => onNavigate("Settings")}
+            aria-current={activeItem === "Settings" ? "page" : undefined}
+          >
+            <span className="sidebar-icon-well">
+              <UiIcon name="settings" size={20} />
+            </span>
+            <span className="sidebar-copy font-semibold">Settings</span>
+          </button>
 
-      <div className="sidebar-reading-action mt-auto">
-        <button
-          className="sidebar-start-button disabled:cursor-not-allowed disabled:opacity-50"
-          type="button"
-          onClick={onStartReading}
-          disabled={startDisabled}
-          title="Start reading"
-        >
-          <span className="sidebar-start-icon">
-            <UiIcon name="book-open" size={22} strokeWidth={2.1} />
-          </span>
-          <span className="sidebar-copy font-bold">Start Reading</span>
-          <span className="sidebar-rail-label" aria-hidden="true">
-            Read
-          </span>
-        </button>
-      </div>
+          <div className="sidebar-reading-action mt-auto">
+            <button
+              className="sidebar-start-button disabled:cursor-not-allowed disabled:opacity-50"
+              type="button"
+              onClick={onStartReading}
+              disabled={startDisabled}
+              title="Start reading"
+            >
+              <span className="sidebar-start-icon">
+                <UiIcon name="book-open" size={22} strokeWidth={2.1} />
+              </span>
+              <span className="sidebar-copy font-bold">Start Reading</span>
+            </button>
+          </div>
+        </>
+      )}
     </aside>
   );
 };

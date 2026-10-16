@@ -60,6 +60,16 @@ export const android = {
     await call("keep_awake", { on });
   },
 
+  /** Keeps Leaflet from being paused while Drive's sign-in is out in the browser (SignInKeeper.kt). */
+  async holdForSignIn(on: boolean): Promise<void> {
+    await call("hold_for_sign_in", { on });
+  },
+
+  /** While true, the volume keys are Leaflet's and turn the open book's pages (`platform/volumeKeys.ts`). */
+  async volumePageTurns(on: boolean): Promise<void> {
+    await call("volume_page_turns", { on });
+  },
+
   /** Which way up the app may be: with the phone, or held one way. */
   async lockRotation(lock: RotationLock): Promise<void> {
     await call("lock_rotation", { lock });

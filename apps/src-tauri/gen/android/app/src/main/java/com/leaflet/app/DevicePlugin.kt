@@ -112,6 +112,22 @@ class DevicePlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
+  /** Leaflet kept awake while Drive's sign-in is out in the browser (`SignInKeeper`). */
+  @Command
+  fun holdForSignIn(invoke: Invoke) {
+    val args = invoke.parseArgs(KeepAwakeArgs::class.java)
+    SignInKeeper.hold(activity.applicationContext, args.on)
+    invoke.resolve()
+  }
+
+  /** While on (a book open, and the setting on), the volume keys turn its pages (`MainActivity.dispatchKeyEvent`). */
+  @Command
+  fun volumePageTurns(invoke: Invoke) {
+    val args = invoke.parseArgs(KeepAwakeArgs::class.java)
+    MainActivity.volumePageTurns = args.on
+    invoke.resolve()
+  }
+
   @Command
   fun lockRotation(invoke: Invoke) {
     val args = invoke.parseArgs(LockRotationArgs::class.java)

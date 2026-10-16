@@ -33,6 +33,7 @@ import { SegmentedTabs, panelId, tabId, type SegmentedTab } from "../components/
 import { readSettingsSection, rememberSettingsSection, type SettingsSection } from "./settingsSection";
 import { DesktopPipSetting } from "../desktop-pip/DesktopPipSetting";
 import { deviceNoun, isAndroid, isTouchInput } from "../platform/device";
+import { useVolumeKeysTurnPages } from "../platform/volumeKeys";
 
 const PIP_MODES: Array<{ mode: PipMode; label: string; detail: string; preview: string }> = [
   { mode: "chatty", label: "Chatty", detail: "Pip lives out in the app: it wanders, naps, celebrates, and can be picked up and thrown. Select the logo to call it home.", preview: "look" },
@@ -101,6 +102,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
   const pipMode = usePipStore((state) => state.mode);
   const setPipMode = usePipStore((state) => state.setMode);
   const [pipSounds, setPipSounds] = useSoundOn();
+  const [volumeKeys, setVolumeKeys] = useVolumeKeysTurnPages();
   const togglePipSounds = () => {
     setPipSounds(!pipSounds);
     // A taste of what was switched on.
@@ -592,6 +594,22 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
             <ReadingPaceCard key={wiped} showToast={showToast} renderToggle={renderToggle} />
           </div>
           <div className={column}>
+            {android && (
+              <div className="paper-surface rounded-xl p-5">
+                <p className="text-xs uppercase tracking-widest text-on-surface-variant">Turning pages</p>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={volumeKeys}
+                  className="inset-field mt-3 flex w-full items-center justify-between px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
+                  onClick={() => setVolumeKeys(!volumeKeys)}
+                  title="In a book, volume down turns to the next page and volume up to the one before. A page-turner remote works the same way."
+                >
+                  <span>Volume keys turn pages</span>
+                  {renderToggle(volumeKeys)}
+                </button>
+              </div>
+            )}
             <CharactersSetting key={`characters-${wiped}`} renderToggle={renderToggle} />
             <WordsSetting key={`words-${wiped}`} renderToggle={renderToggle} />
           </div>

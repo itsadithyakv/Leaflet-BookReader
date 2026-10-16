@@ -1,6 +1,7 @@
 import type { Book } from "@shared/models/book";
 import { isFinished } from "../constants/books";
 import { KNOWN_SERIES, type KnownExtra, type KnownPart, type KnownSeries } from "./knownSeries";
+import { memoText } from "./memoText";
 
 /**
  * Series, worked out from the library.
@@ -76,7 +77,7 @@ export type LibrarySeries = {
 // ---- normalising ------------------------------------------------------------------
 
 /** Lower case, no accents, apostrophes or punctuation, no leading article. */
-export const normalizeTitle = (text: string) =>
+export const normalizeTitle = memoText((text: string) =>
   text
     .normalize("NFKD")
     .replace(/[̀-ͯ]/g, "")
@@ -85,9 +86,10 @@ export const normalizeTitle = (text: string) =>
     .replace(/&/g, " and ")
     .replace(/[^a-z0-9]+/g, " ")
     .trim()
-    .replace(/^(the|a|an) /, "");
+    .replace(/^(the|a|an) /, "")
+);
 
-const stripBrackets = (text: string) => text.replace(/\s*[([{][^)\]}]*[)\]}]\s*/g, " ").replace(/\s+/g, " ").trim();
+const stripBrackets = memoText((text: string) => text.replace(/\s*[([{][^)\]}]*[)\]}]\s*/g, " ").replace(/\s+/g, " ").trim());
 
 /**
  * A file's name cannot hold a colon, and the sites that name files write " _ "
@@ -137,10 +139,11 @@ const KNOWN_ALIAS = new Map<string, string>();
 /** A part's own names: a file that says "Wax and Wayne, #1" means the fourth book of Mistborn. */
 const KNOWN_PART = new Map<string, KnownPart>();
 
-const rawSeriesKey = (name: string) =>
+const rawSeriesKey = memoText((name: string) =>
   normalizeTitle(stripBrackets(name))
     .replace(/\s+(series|saga|trilogy|sequence|cycle|quartet|books|novels)$/, "")
-    .trim();
+    .trim()
+);
 
 for (const known of KNOWN_SERIES) {
   const key = rawSeriesKey(known.name);
@@ -322,11 +325,28 @@ export const guessSeries = (book: Book): Guess | "none" | null => {
   if (book.series) {
     return { name: book.series, index: book.seriesIndex ?? null, strength: "stated" };
   }
-  const fromTitle = seriesFromTitle(book.title);
-  if (fromTitle?.strength === "strong") {
-    return fromTitle;
+  return titleGuess(book.title, book.author);
+};
+
+/**
+ * What a title and author alone say, remembered: the same few thousand books
+ * are guessed again on every change to the library, and their titles almost
+ * never change. Read-only to callers.
+ */
+const titleGuesses = new Map<string, Guess | null>();
+const titleGuess = (title: string, author: string | null | undefined): Guess | null => {
+  const key = `${title}\u0000${author ?? ""}`;
+  const hit = titleGuesses.get(key);
+  if (hit !== undefined) {
+    return hit;
   }
-  return knownSeriesFor(book.title, book.author) ?? fromTitle;
+  const fromTitle = seriesFromTitle(title);
+  const guess = fromTitle?.strength === "strong" ? fromTitle : knownSeriesFor(title, author) ?? fromTitle;
+  if (titleGuesses.size >= 20_000) {
+    titleGuesses.clear();
+  }
+  titleGuesses.set(key, guess);
+  return guess;
 };
 
 const mostCommon = <T,>(values: T[]): T | null => {
@@ -552,10 +572,25 @@ export const seriesNumberLabel = (index: number | null) => (index === null ? nul
 
 let cached: { books: Book[]; result: LibrarySeries } | null = null;
 
-/** `buildSeries`, worked out once per library change and shared by every card. */
+/**
+ * `buildSeries`, worked out once per library change and shared by every card.
+ * A book's entry in `byBook` stays the same object while what it says does,
+ * so a card that watches only its own entry is not redrawn when another book
+ * moves (the reader moves its book's progress every few pages).
+ */
 export const librarySeries = (books: Book[]): LibrarySeries => {
   if (cached?.books !== books) {
-    cached = { books, result: buildSeries(books) };
+    const result = buildSeries(books);
+    const before = cached?.result.byBook;
+    if (before) {
+      for (const [id, info] of result.byBook) {
+        const was = before.get(id);
+        if (was && was.key === info.key && was.name === info.name && was.index === info.index) {
+          result.byBook.set(id, was);
+        }
+      }
+    }
+    cached = { books, result };
   }
   return cached.result;
 };

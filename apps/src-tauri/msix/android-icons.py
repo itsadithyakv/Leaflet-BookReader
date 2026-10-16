@@ -9,12 +9,15 @@ the book changes. Writes into src-tauri/gen/android/app/src/main/res:
 
 - mipmap-{m,h,xh,xxh,xxxh}dpi/ic_launcher.png: the book on nothing, as on
   Windows, for launchers older than Android 8 (48 dp).
-- mipmap-*/ic_launcher_round.png: the book on a paper disc, outlined like the
-  book and on its grid, for the few of those that ask for a round icon.
+- mipmap-*/ic_launcher_round.png: the same, for the few of those that ask for
+  a round icon.
 - mipmap-*/ic_launcher_foreground.png and ic_launcher_monochrome.png, and
   values/ic_launcher_background.xml: the adaptive icon (Android 8 and later;
   mipmap-anydpi-v26/ic_launcher.xml and ic_launcher_round.xml put them
-  together). The background is the paper of the book's pages; the monochrome
+  together). The background is the cover's own deep green, so the icon reads
+  as one green mark. Not transparent: Android puts every icon on a plate of the
+  launcher's shape, and the Pixel launcher fills an empty one with black. The
+  monochrome
   layer, which Android 13 tints for themed icons, is the book with its leaf
   and pages cut out of it.
 and brand/store-logos/leaflet-play-512.png, the icon Google Play asks for.
@@ -40,8 +43,10 @@ DRAWINGS = [Image.open(assets / f"app-icon-{side}.png").convert("RGBA") for side
 # The paper of the pages (windows-icons.py's "P"), and the outline ("o").
 PAPER = DRAWINGS[0].getpixel((14, 3))
 OUTLINE = DRAWINGS[0].getpixel((0, 1))
-if PAPER[:3] != (255, 251, 240) or OUTLINE[:3] != (31, 42, 34):
-    raise ValueError("the drawings have changed under this script: check PAPER and OUTLINE")
+# The cover's deep green, its shadowed spine: the plate behind the adaptive icon.
+FOREST = DRAWINGS[0].getpixel((1, 1))
+if PAPER[:3] != (255, 251, 240) or OUTLINE[:3] != (31, 42, 34) or FOREST[:3] != (46, 97, 54):
+    raise ValueError("the drawings have changed under this script: check PAPER, OUTLINE and FOREST")
 
 # Pixels per dp at each density.
 DENSITIES = {"mdpi": 1, "hdpi": 1.5, "xhdpi": 2, "xxhdpi": 3, "xxxhdpi": 4}
@@ -84,62 +89,22 @@ def monochrome(art: Image.Image) -> Image.Image:
     return out
 
 
-def fits_in_disc(art: Image.Image, cells: int) -> bool:
-    """Whether `art`, centred in a disc `cells` across, keeps clear of its outline."""
-    centre = cells / 2
-    room = cells / 2 - 1  # inside the outline
-    offset = (cells - art.width) // 2
-    for y in range(art.height):
-        for x in range(art.width):
-            if art.getpixel((x, y))[3] == 0:
-                continue
-            for cx in (x, x + 1):
-                for cy in (y, y + 1):
-                    if ((offset + cx - centre) ** 2 + (offset + cy - centre) ** 2) ** 0.5 > room:
-                        return False
-    return True
-
-
-def disc(cells: int) -> Image.Image:
-    """A paper disc `cells` across, outlined, drawn on the art's own grid."""
-    image = Image.new("RGBA", (cells, cells), (0, 0, 0, 0))
-    inside = {(x, y) for y in range(cells) for x in range(cells)
-              if (x + 0.5 - cells / 2) ** 2 + (y + 0.5 - cells / 2) ** 2 <= (cells / 2) ** 2}
-    for x, y in inside:
-        edge = any(n not in inside for n in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)))
-        image.putpixel((x, y), OUTLINE if edge else PAPER)
-    return image
-
-
-def round_icon(size: int) -> Image.Image:
-    """The book on a paper disc, both at the same whole-number scale."""
-    for scale in range(size // 16, 0, -1):
-        for art in sorted(DRAWINGS, key=lambda art: -art.width):
-            cells = size // scale
-            cells -= (cells - art.width) % 2  # an even margin, so the book sits dead centre
-            if fits_in_disc(art, cells):
-                plate = disc(cells)
-                plate.alpha_composite(art, ((cells - art.width) // 2, (cells - art.height) // 2))
-                return centred(scaled(plate, scale), size)
-    raise ValueError(f"no book fits a {size} px round icon")
-
-
 for density, px in DENSITIES.items():
     folder = res / f"mipmap-{density}"
     folder.mkdir(parents=True, exist_ok=True)
     legacy = round(LEGACY_DP * px)
     book(legacy, round(LEGACY_ART_DP * px)).save(folder / "ic_launcher.png", optimize=True)
-    round_icon(legacy).save(folder / "ic_launcher_round.png", optimize=True)
+    book(legacy, round(LEGACY_ART_DP * px)).save(folder / "ic_launcher_round.png", optimize=True)
 
     layer = round(ADAPTIVE_DP * px)
     art, scale = largest(round(ADAPTIVE_ART_DP * px))
     centred(scaled(art, scale), layer).save(folder / "ic_launcher_foreground.png", optimize=True)
     centred(scaled(monochrome(art), scale), layer).save(folder / "ic_launcher_monochrome.png", optimize=True)
 
-background = "#{:02X}{:02X}{:02X}".format(*PAPER[:3])
+background = "#{:02X}{:02X}{:02X}".format(*FOREST[:3])
 (res / "values" / "ic_launcher_background.xml").write_text(f"""<?xml version="1.0" encoding="utf-8"?>
 <resources>
-  <!-- The paper of the book's pages: made by src-tauri/msix/android-icons.py. -->
+  <!-- The cover's deep green: made by src-tauri/msix/android-icons.py. -->
   <color name="ic_launcher_background">{background}</color>
 </resources>
 """, encoding="utf-8")
@@ -157,9 +122,9 @@ anydpi.mkdir(parents=True, exist_ok=True)
 for name in ("ic_launcher.xml", "ic_launcher_round.xml"):
     (anydpi / name).write_text(adaptive, encoding="utf-8")
 
-# Google Play's 512 px icon: full bleed (Play rounds its corners), on paper.
+# Google Play's 512 px icon: full bleed (Play rounds its corners), on the same green as the launcher.
 store.mkdir(parents=True, exist_ok=True)
 art, scale = largest(384)
-centred(scaled(art, scale), 512, Image.new("RGBA", (512, 512), PAPER)).save(store / "leaflet-play-512.png", optimize=True)
+centred(scaled(art, scale), 512, Image.new("RGBA", (512, 512), FOREST)).save(store / "leaflet-play-512.png", optimize=True)
 
 print(f"Wrote the Android launcher icons to {res} and the Play icon to {store}")

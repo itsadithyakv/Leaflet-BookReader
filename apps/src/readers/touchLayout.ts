@@ -68,15 +68,26 @@ export const tapZone = (x: number, pageLeft: number, pageWidth: number, rtl = fa
   return side === 0 ? 0 : ((rtl ? -side : side) as 1 | -1);
 };
 
-export type TapAction = { kind: "turn"; step: 1 | -1 } | { kind: "chrome" } | { kind: "none" };
+export type TapAction = { kind: "turn"; step: 1 | -1 } | { kind: "chrome" } | { kind: "hide" } | { kind: "bookmark" } | { kind: "none" };
 
 /**
  * What a plain tap does. With pages, the sides turn and the middle shows or
- * hides the chrome; scrolling there is no page to turn, so any tap does.
+ * hides the chrome. Scrolling there is no page to turn: on a tablet any tap
+ * shows or hides the chrome; on a phone (`immersive`) only one in the middle
+ * does, and one at a side only sends the chrome away, so the reader's options
+ * come where they are asked for and nowhere else.
  */
-export const tapAction = (zone: 1 | -1 | 0, layout: ReaderLayout): TapAction => {
-  if (layout === "scroll" || zone === 0) {
+export const tapAction = (zone: 1 | -1 | 0, layout: ReaderLayout, immersive = false, corner = false): TapAction => {
+  // A phone's top right corner (readers/phoneReading.ts, `inBookmarkCorner`)
+  // bookmarks the place, before the side it is in turns the page.
+  if (immersive && corner) {
+    return { kind: "bookmark" };
+  }
+  if (zone === 0) {
     return { kind: "chrome" };
+  }
+  if (layout === "scroll") {
+    return immersive ? { kind: "hide" } : { kind: "chrome" };
   }
   return { kind: "turn", step: zone };
 };
@@ -196,6 +207,17 @@ export const canLockRotation = () => isAndroid() && typeof document !== "undefin
  * focus-lock session, and on a phone on its side while the chrome is away).
  * Both are let go when the book closes. No-ops anywhere but the Android app.
  */
+/**
+ * Whether the system's status and gesture bars are away while a book is open:
+ * for a focus-lock session; on a phone held upright, for as long as the book
+ * is open (the page is all there is, and the chrome comes over it; were the
+ * bars to come and go with the chrome, the text would move under the finger
+ * at every tap, since the page keeps clear of them); on a phone on its side,
+ * while the chrome is away. A swipe in from the edge shows them for a moment.
+ */
+export const systemBarsHidden = (shape: ReaderShape, chromeVisible: boolean, locked: boolean) =>
+  locked || shape === "upright" || (shape === "sideways" && !chromeVisible);
+
 export const useReaderDevice = (barsHidden: boolean, rotation: RotationLock) => {
   // Held while the book is open, and let go when it closes, so the screen goes
   // back to whatever held it before (Pip's tab holds it sideways).

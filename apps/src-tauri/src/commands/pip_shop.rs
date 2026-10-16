@@ -568,7 +568,7 @@ fn record_purchase(db: &db::Database, ledger: &PipLedger, purchase: &pip::Purcha
 }
 
 /// Seeds: the balance and where it came from.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pip_wallet(state: State<'_, AppState>) -> Result<PipWallet, String> {
   let db = state.db.guard();
   let ledger = pip_ledger(&db)?;
@@ -579,7 +579,7 @@ pub fn pip_wallet(state: State<'_, AppState>) -> Result<PipWallet, String> {
   })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pip_state_get(state: State<'_, AppState>) -> Result<PipOverview, String> {
   let db = state.db.guard();
   pip_overview(&db)

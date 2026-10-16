@@ -378,8 +378,22 @@ version.
 
 ## Google Drive between laptop and phone
 
-Built 2026-10-15; not yet tried on a real phone or with a real Google
-sign-in. The rules for two devices are in [two-devices.md](two-devices.md).
+Built 2026-10-15. The rules for two devices are in [two-devices.md](two-devices.md).
+
+**First try on a real phone (2026-10-15) failed twice, both fixed:**
+1. The browser's return to `127.0.0.1` "took too long to respond": the
+   phone had paused Leaflet behind the browser. Leaflet now runs a
+   foreground service of the short kind while the sign-in is out
+   (`SignInKeeper.kt`, started and stopped by `syncService` through
+   `hold_for_sign_in`): a silent "Connecting Google Drive…" notification,
+   ended when the browser comes back, and by Android after about 3 minutes.
+2. Then "Google rejected the sign-in: Request failed": the code exchange went
+   through `oauth2`'s own HTTP client (an older `reqwest` with its own TLS),
+   which never reached Google from Android. It is now posted by hand through
+   the app's `reqwest`, like the token refresh (`drive::exchange_code`), and
+   `oauth2` builds URLs only. Checked on the emulator with a fake code:
+   Google's own `invalid_grant` comes back, where it said "Request failed".
+   A full sign-in with a real account is still to be tried on the phone.
 
 **One OAuth client for both.** The phone runs the laptop's own sign-in: the
 Desktop client compiled in (`LEAFLET_GOOGLE_CLIENT_ID` / `_SECRET`, from

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -7,7 +7,6 @@ import { ProfileButton, type SyncMode } from "./components/ProfileButton";
 import { AccountDialog, accountOffered, markAccountOffered, useAccountDialog } from "./components/account/AccountDialog";
 import { WelcomeModal } from "./components/WelcomeModal";
 import { useShareStore } from "./components/share/shareStore";
-import { SessionWrapUp } from "./components/SessionWrapUp";
 import { usePipReactions } from "./hooks/usePipReactions";
 import { useCommunityPulse } from "./hooks/useCommunityPulse";
 import { PipHome } from "./components/PipHome";
@@ -51,6 +50,7 @@ import { getPlatform, pickSyncFolder } from "./platform";
 import type { Book } from "@shared/models/book";
 import { requestSettingsSection } from "./pages/settingsSection";
 import { useBackFallback } from "./platform/back";
+import { useVolumePageTurns } from "./platform/volumeKeys";
 import { useTouchInput } from "./platform/device";
 import { useBackClose } from "./hooks/useBackClose";
 import { TouchTips } from "./components/TouchTipLayer";
@@ -65,12 +65,15 @@ import {
 
 type Tab = "library" | "collections" | "social" | "pip" | "settings";
 
+// Memoised: the open book, `closeReader` and `openAt` hold still while it is
+// open, so the rest of the app changing (a progress save, a sync, Pip) no
+// longer draws the whole reader again.
 const ReaderView = lazy(() =>
-  import("./pages/ReaderView").then((module) => ({ default: module.ReaderView }))
+  import("./pages/ReaderView").then((module) => ({ default: memo(module.ReaderView) }))
 );
 
 const PageReaderView = lazy(() =>
-  import("./pages/PageReaderView").then((module) => ({ default: module.PageReaderView }))
+  import("./pages/PageReaderView").then((module) => ({ default: memo(module.PageReaderView) }))
 );
 
 // The Library is the start screen; the other tabs load the first time they
@@ -98,6 +101,11 @@ const HighlightsDialog = lazy(() =>
 // "Search inside books", from the library's search box.
 const LibrarySearchDialog = lazy(() =>
   import("./components/search/LibrarySearchDialog").then((module) => ({ default: module.LibrarySearchDialog }))
+);
+// The card after a focus session: it draws the camp and her finds, so it brings
+// most of the Hollow's art with it. Fetched when a session ends, not at start.
+const SessionWrapUp = lazy(() =>
+  import("./components/SessionWrapUp").then((module) => ({ default: module.SessionWrapUp }))
 );
 
 /** Books whose scene Pip has already shown once (see showBookNod). */
@@ -236,6 +244,7 @@ const App = () => {
   const highlightsOpen = useHighlightsStore((state) => state.view !== null);
   const librarySearchOpen = useLibrarySearchStore((state) => state.query !== null);
   const quoteOpen = useShareStore((state) => state.quote !== null);
+  const wrapUpOpen = useHabitStore((state) => state.wrapUp !== null);
   const yearOpen = useShareStore((state) => state.year !== null);
   const toggleTheme = useAppearanceStore((state) => state.toggleTheme);
 
@@ -261,6 +270,8 @@ const App = () => {
   useEffect(() => watchSystemTheme(), []);
 
   usePipReactions(selected !== null);
+  // On Android, the volume keys turn the open book's pages (platform/volumeKeys.ts).
+  useVolumePageTurns(selected !== null);
   usePageCovers(selected?.id ?? null);
   useLargeBookPrompt(selected !== null);
   // Community news (kudos, followers, duels): polled while signed in; the
@@ -1016,11 +1027,13 @@ const App = () => {
           </div>
         </div>
         <div className="flex items-center gap-2 md:gap-4">
-          {/* Sideways on a phone the Library's + is up here (upright, it floats over the tab bar). */}
+          {/* On a phone by a finger the Library's + is up here, either way up (a + floating over the
+              shelf lay over its controls); and in a window short of height. */}
           {activeTab === "library" && (
             <button
               type="button"
               className="key-button header-add-books"
+              data-tour="import"
               onClick={requestAddBooks}
               title="Add books"
               aria-label="Add books"
@@ -1028,9 +1041,10 @@ const App = () => {
               <UiIcon name="plus" size={20} />
             </button>
           )}
+          {/* Not on a phone: Settings has the theme (and following the system's), and the header has less in it. */}
           <button
             type="button"
-            className="key-button"
+            className="key-button header-theme-key"
             onClick={toggleTheme}
             title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
             aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
@@ -1119,7 +1133,14 @@ const App = () => {
                 }}
               />
             )}
-            {activeTab === "pip" && <PipPage showToast={showToast} openSocial={() => setActiveTab("social")} />}
+            {activeTab === "pip" && (
+              <PipPage
+                showToast={showToast}
+                openSocial={() => setActiveTab("social")}
+                onNavigate={setActiveTab}
+                onOpenProfile={() => setAccountPanelOpen(true)}
+              />
+            )}
             {activeTab === "settings" && <SettingsPage showToast={showToast} />}
           </Suspense>
         </main>
@@ -1357,7 +1378,11 @@ const App = () => {
       {selected && <PipReaderPeek />}
 
       {/* After the reader, so a session that ends mid-book wraps up on top. */}
-      <SessionWrapUp />
+      {wrapUpOpen && (
+        <Suspense fallback={null}>
+          <SessionWrapUp />
+        </Suspense>
+      )}
       <PostDialog showToast={showToast} />
       <DiscussDialogs showToast={showToast} />
       <ConfirmDialog />
@@ -1386,13 +1411,7 @@ const App = () => {
       <UpdateBanner />
       <ReminderOptIn />
 
-      <MobileNav
-        activeItem={tabLabels[activeTab]}
-        onNavigate={handleSidebarNavigate}
-        onStartReading={() => nowReading && handleOpenBook(nowReading)}
-        startDisabled={!nowReading}
-        badge={navBadge}
-      />
+      <MobileNav activeItem={tabLabels[activeTab]} onNavigate={handleSidebarNavigate} badge={navBadge} />
 
       <WelcomeModal
         open={welcomeShowing}

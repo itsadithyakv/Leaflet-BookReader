@@ -7,19 +7,22 @@ export type MobileNavItem = {
   icon: UiIconName;
 };
 
-const navItems: MobileNavItem[] = [
+/**
+ * The four places. Settings is not one of them on a phone: it is behind the
+ * profile button in the header, with the reader's account and backup. And
+ * there is no "Read" key: the book being read has its own bar at the foot of
+ * the page, with Continue on it.
+ */
+export const MOBILE_NAV_ITEMS: readonly MobileNavItem[] = [
   { label: "Library", icon: "library" },
   { label: "Collections", icon: "collections" },
   { label: "Social", icon: "analytics" },
-  { label: "Pip", icon: "pip" },
-  { label: "Settings", icon: "settings" }
+  { label: "Pip", icon: "pip" }
 ];
 
 type MobileNavProps = {
   activeItem: string;
   onNavigate: (label: string) => void;
-  onStartReading: () => void;
-  startDisabled?: boolean;
   /** Unread counts by nav label (e.g. community news on Social). Shown as a dot. */
   badge?: Partial<Record<string, number>>;
 };
@@ -28,20 +31,14 @@ type MobileNavProps = {
  * Primary navigation on a phone held upright.
  *
  * The leather sidebar is `hidden md:block`, which left a phone with no way to
- * reach Collections, Social or Settings at all — the app opened on the
- * Library and stayed there. This is the same destinations within thumb reach.
+ * reach Collections or Social at all — the app opened on the Library and
+ * stayed there. This is the same destinations within thumb reach.
  *
  * It is deliberately *not* shown in landscape: a bar across the bottom costs
  * height, which is the scarce dimension there, so the sidebar rail takes over
  * instead. See the `short` breakpoint.
  */
-export const MobileNav = ({
-  activeItem,
-  onNavigate,
-  onStartReading,
-  startDisabled,
-  badge
-}: MobileNavProps) => {
+export const MobileNav = ({ activeItem, onNavigate, badge }: MobileNavProps) => {
   // The tour points at whichever of this and the rail is on screen.
   const railShown = useMediaQuery(RAIL_QUERY);
   return (
@@ -50,7 +47,7 @@ export const MobileNav = ({
       aria-label="Primary navigation"
       data-tour={railShown ? undefined : "nav"}
     >
-      {navItems.map((item) => {
+      {MOBILE_NAV_ITEMS.map((item) => {
         const active = item.label === activeItem;
         return (
           <button
@@ -74,17 +71,6 @@ export const MobileNav = ({
           </button>
         );
       })}
-
-      <button
-        type="button"
-        className="mobile-nav-item mobile-nav-read"
-        onClick={onStartReading}
-        disabled={startDisabled}
-        aria-label="Resume reading"
-      >
-        <UiIcon name="book-open" size={21} strokeWidth={2.1} />
-        <span className="mobile-nav-label">Read</span>
-      </button>
     </nav>
   );
 };

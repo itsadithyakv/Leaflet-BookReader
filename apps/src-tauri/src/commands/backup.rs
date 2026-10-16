@@ -85,13 +85,13 @@ pub fn set_account_backup(on: bool, state: State<'_, AppState>) -> Result<SyncSt
   read_sync_status(&db)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sync_status(state: State<'_, AppState>) -> Result<SyncStatus, String> {
   let db = state.db.guard();
   read_sync_status(&db)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn reading_stats(state: State<'_, AppState>) -> Result<db::ReadingStats, String> {
   let db = state.db.guard();
   db.reading_stats().map_err(|e| e.to_string())

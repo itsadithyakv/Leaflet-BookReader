@@ -26,7 +26,7 @@ use crate::sync::DriveState;
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use oauth2::basic::BasicClient;
-use oauth2::{AuthUrl, AuthorizationCode, ClientId, ClientSecret, RedirectUrl, TokenResponse, TokenUrl};
+use oauth2::{AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenUrl};
 use oauth2::{CsrfToken, PkceCodeChallenge};
 use serde::{Deserialize, Serialize};
 use std::io::Read;
@@ -428,32 +428,78 @@ pub async fn auth_wait(pending: PendingAuth, credentials: &DriveCredentials) -> 
     .await
     .map_err(|_| anyhow!("Drive connection was cancelled."))??;
 
-  let client = oauth_client(credentials)?;
-  let token = client
-    .set_redirect_uri(RedirectUrl::new(pending.redirect_uri)?)
-    .exchange_code(AuthorizationCode::new(code))
-    .set_pkce_verifier(pending.pkce_verifier)
-    .request_async(oauth2::reqwest::async_http_client)
-    .await
-    .map_err(|error| anyhow!("Google rejected the sign-in: {error}"))?;
+  exchange_code(&code, &pending.redirect_uri, pending.pkce_verifier.secret(), credentials).await
+}
 
-  let access_token = token.access_token().secret().to_string();
-  let refresh_token = token
-    .refresh_token()
-    .map(|value| value.secret().to_string())
+/// Trades the code from the browser for tokens, through the same HTTP client
+/// as everything else in Leaflet (`refresh_access_token` too).
+///
+/// It used to go through `oauth2`'s own client, an older `reqwest` with its
+/// own TLS stack, which on Android never reached Google at all: every phone
+/// sign-in got as far as "Leaflet is connected" and then failed here.
+async fn exchange_code(
+  code: &str,
+  redirect_uri: &str,
+  pkce_verifier: &str,
+  credentials: &DriveCredentials
+) -> Result<AuthTokens> {
+  let params = [
+    ("client_id", credentials.client_id.as_str()),
+    ("client_secret", credentials.client_secret.as_str()),
+    ("code", code),
+    ("code_verifier", pkce_verifier),
+    ("redirect_uri", redirect_uri),
+    ("grant_type", "authorization_code")
+  ];
+  let response = reqwest::Client::builder()
+    .timeout(Duration::from_secs(30))
+    .build()?
+    .post("https://oauth2.googleapis.com/token")
+    .form(&params)
+    .send()
+    .await
+    .map_err(|error| anyhow!("Could not reach Google to finish connecting Drive ({error}). Check the connection and try again."))?;
+  let status = response.status();
+  let body = response.text().await.unwrap_or_default();
+  if !status.is_success() {
+    return Err(anyhow!("Google rejected the sign-in: {}", google_error(&body).unwrap_or_else(|| status.to_string())));
+  }
+  tokens_from(&body)
+}
+
+/// Google's own words for a refused request: `error_description`, else `error`.
+/// A code that expired or was used already (a page reloaded) says only "Bad
+/// Request", so that one is put in words that say what to do.
+fn google_error(body: &str) -> Option<String> {
+  let json: serde_json::Value = serde_json::from_str(body).ok()?;
+  if json.get("error").and_then(|value| value.as_str()) == Some("invalid_grant") {
+    return Some("that sign-in expired or was used already. Connect Drive again.".to_string());
+  }
+  json
+    .get("error_description")
+    .or_else(|| json.get("error"))
+    .and_then(|value| value.as_str())
+    .map(str::to_string)
+}
+
+fn tokens_from(body: &str) -> Result<AuthTokens> {
+  let json: serde_json::Value = serde_json::from_str(body)?;
+  let text = |key: &str| json.get(key).and_then(|value| value.as_str()).filter(|value| !value.is_empty());
+  let access_token = text("access_token")
+    .ok_or_else(|| anyhow!("Google returned no access token."))?
+    .to_string();
+  // Google only sends one with access_type=offline and prompt=consent, both
+  // asked for in `auth_start`; without it Drive would need reconnecting hourly.
+  let refresh_token = text("refresh_token")
     .ok_or_else(|| {
       anyhow!("Google did not return a refresh token. Remove Leaflet from your Google account permissions and try again.")
-    })?;
-  let expires_at = token
-    .expires_in()
-    .and_then(|duration| chrono::Duration::from_std(duration).ok())
-    .map(|duration| (Utc::now() + duration).to_rfc3339())
-    .unwrap_or_else(|| (Utc::now() + chrono::Duration::hours(1)).to_rfc3339());
-
+    })?
+    .to_string();
+  let expires_in = json.get("expires_in").and_then(|value| value.as_i64()).unwrap_or(3600);
   Ok(AuthTokens {
     access_token,
     refresh_token,
-    expires_at
+    expires_at: (Utc::now() + chrono::Duration::seconds(expires_in)).to_rfc3339()
   })
 }
 
@@ -1301,5 +1347,33 @@ mod tests {
     let loaded = load_credentials(&db).expect("credentials");
     assert_eq!(loaded.client_id, "abc.apps.googleusercontent.com");
     assert_eq!(loaded.client_secret, "shh");
+  }
+
+  #[test]
+  fn google_refusals_are_read_in_googles_words() {
+    let body = r#"{"error":"invalid_request","error_description":"Missing code verifier."}"#;
+    assert_eq!(google_error(body).as_deref(), Some("Missing code verifier."));
+    let used = r#"{"error":"invalid_grant","error_description":"Bad Request"}"#;
+    assert!(google_error(used).expect("words").contains("Connect Drive again"));
+    assert_eq!(google_error(r#"{"error":"invalid_client"}"#).as_deref(), Some("invalid_client"));
+    assert_eq!(google_error("<html>bad gateway</html>"), None);
+  }
+
+  #[test]
+  fn tokens_are_read_from_googles_answer() {
+    let body = r#"{"access_token":"ya29.a","expires_in":3599,"refresh_token":"1//r","scope":"x","token_type":"Bearer"}"#;
+    let tokens = tokens_from(body).expect("tokens");
+    assert_eq!(tokens.access_token, "ya29.a");
+    assert_eq!(tokens.refresh_token, "1//r");
+    let expires = chrono::DateTime::parse_from_rfc3339(&tokens.expires_at).expect("a time");
+    let left = expires.with_timezone(&Utc) - Utc::now();
+    assert!(left > chrono::Duration::minutes(58) && left <= chrono::Duration::minutes(60));
+  }
+
+  #[test]
+  fn an_answer_without_a_refresh_token_is_refused() {
+    let error = tokens_from(r#"{"access_token":"ya29.a","expires_in":3599}"#).err().expect("an error");
+    assert!(error.to_string().contains("refresh token"));
+    assert!(tokens_from(r#"{"refresh_token":"1//r"}"#).is_err());
   }
 }

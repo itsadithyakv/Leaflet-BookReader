@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { useAutoHideChrome } from "../../hooks/useAutoHideChrome";
 import { guessSeries } from "../../library/series";
 import { usePeopleReader } from "../people/usePeopleReader";
+import { isPhoneShape } from "../touchLayout";
 import type { Book } from "@shared/models/book";
 import type { WithKeys } from "./scope";
 
@@ -25,6 +26,9 @@ export const useReaderChrome = (reader: WithKeys) => {
   // the screen, where the chapter dock would be: selecting does not hold the
   // chrome up there.
   const finger = shape !== "desktop";
+  // A phone: the book opens with no chrome, and only a tap in the middle of
+  // the page brings it (hooks/useAutoHideChrome.ts, `immersive`).
+  const immersive = isPhoneShape(shape);
   // Characters (readers/people): who is who, as far as the reader has got.
   // Everything it is handed is asked for when needed, so it can sit up here.
   const people = usePeopleReader({
@@ -68,7 +72,8 @@ export const useReaderChrome = (reader: WithKeys) => {
     reveal: revealChrome,
     hover: hoverChrome,
     toggle: toggleChrome,
-    hide: hideChrome
+    hide: hideChrome,
+    backHides: chromeBackHides
   } = useAutoHideChrome(
     fontPanelOpen ||
       bookmarkPanelOpen ||
@@ -82,8 +87,10 @@ export const useReaderChrome = (reader: WithKeys) => {
       (selection !== null && !finger) ||
       // Pip at the door with her "Hold to leave", which is under the Back button.
       Boolean(exitGuard.guardShown?.hold) ||
-      loading ||
-      loadError !== null
+      // (On a phone the page is all there is from the start, the opening included.)
+      (loading && !immersive) ||
+      loadError !== null,
+    immersive
   );
   // The page renders inside an epub.js iframe, and events there do not reach
   // this document — so without binding into it, a tap on the text could never
@@ -91,5 +98,5 @@ export const useReaderChrome = (reader: WithKeys) => {
   const revealChromeRef = useRef(revealChrome);
   revealChromeRef.current = revealChrome;
 
-  return { people, peopleMarkedRef, chromeVisible, revealChrome, hoverChrome, toggleChrome, hideChrome, revealChromeRef };
+  return { people, peopleMarkedRef, chromeVisible, revealChrome, hoverChrome, toggleChrome, hideChrome, chromeBackHides, revealChromeRef };
 };

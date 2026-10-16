@@ -139,7 +139,12 @@ on a duel are earned by reading and buy nothing outside the app).
 **Permissions** the app asks for, and why (Play asks for no declaration for
 these): `INTERNET` (the account, sync, look-ups), `POST_NOTIFICATIONS`
 (reading reminders, asked when one is turned on), `RECEIVE_BOOT_COMPLETED`
-(to set reminders again after a restart).
+(to set reminders again after a restart), `FOREGROUND_SERVICE` (a short
+service, type `shortService`, only while Google Drive's sign-in is open in
+the browser, so Android does not pause Leaflet before Google sends the
+reader back). If the Play Console's foreground-service form asks about it
+anyway: "Short service: finishing Google Drive sign-in; ends when the browser
+returns, at most ~3 minutes; user-started."
 
 **News app:** no. **Government app:** no. **Financial features:** none.
 **Health:** none.

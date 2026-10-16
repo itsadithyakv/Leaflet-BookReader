@@ -31,6 +31,7 @@ import { searchable } from "../components/search/librarySearch";
 import { librarySeries, type LibrarySeries } from "../library/series";
 import { describeImport } from "../library/importSummary";
 import { genreChoices, genreKey, inGenre } from "../library/genres";
+import { PhoneFocusStrip, PhoneShelfTools } from "./library/PhoneLibrary";
 
 const byTitle = (a: Book, b: Book) => a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: "base" });
 
@@ -323,6 +324,9 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
   // sideways), so once there are books the big import box gives its screen to them.
   const phoneShape = useMediaQuery("(max-width: 767px) and (min-height: 521px), (max-height: 520px)");
   const importBox = libraryEmpty || !phoneShape;
+  // A phone by a finger: the streak and session in a slim card, the shelf's filters behind one key
+  // (pages/library/PhoneLibrary.tsx). A small desktop window keeps the full ones.
+  const phone = touch && phoneShape;
 
   /** A book's ⋯ menu removed it (the menu asks first, and has no toast of its own). */
   const sayRemoved = useCallback((title: string) => showToast(`Removed ${title}.`), [showToast]);
@@ -459,7 +463,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
   }, [books, fetchCover]);
 
   return (
-    <div className="library-page dock-clear mx-auto flex min-h-full w-full max-w-[2240px] flex-col gap-10">
+    <div className={`library-page dock-clear mx-auto flex min-h-full w-full max-w-[2240px] flex-col ${phone ? "gap-5" : "gap-10"}`}>
       <div className="md:hidden">
         <div className="relative">
           <UiIcon
@@ -484,12 +488,28 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
       {/* News about the phone app can wait until there is a library to carry over. */}
       {!libraryEmpty && !isAndroid() && <MobileComingSoonBanner />}
 
+      {phone && (
+        <PhoneFocusStrip
+          streakTitle={streakTitle}
+          session={activeSession}
+          reading={sessionReading}
+          duration={sessionDuration}
+          setDuration={setSessionDuration}
+          fullScreen={fullScreen}
+          toggleFullScreen={() => setFocusSettings({ kioskMode: !fullScreen })}
+          onStart={handleStartSession}
+          onEnd={() => void handleEndSession()}
+        />
+      )}
+
       {/* Side by side wherever the rail is: stacked, the pair is 456 px tall and
           pushes the first row of covers off a laptop's first screen. */}
+      {(!phone || importBox) && (
       <section className="grid min-w-0 gap-6 md:grid-cols-12">
         {/* clip, not hidden: the resting and running layers are stacked, and an
             overflow-hidden box is still scrollable, so focusing Pip's button
             scrolled the card to reveal the taller hidden layer. */}
+        {!phone && (
         <div
           className={`paper-surface relative min-w-0 overflow-clip rounded-xl p-6 ${libraryEmpty ? "order-2 md:col-span-5 xl:col-span-4" : "md:col-span-7 xl:col-span-8"}`}
         >
@@ -587,6 +607,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
             </div>
           </div>
         </div>
+        )}
 
         {importBox && (
         <button
@@ -629,6 +650,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
         </button>
         )}
       </section>
+      )}
 
       <UpNextStrip onOpen={onOpenBook} onSeeAll={() => onNavigate("collections")} />
 
@@ -636,6 +658,29 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
       {!libraryEmpty && <DailyHighlight />}
 
       <section className="flex flex-1 flex-col gap-6">
+        {phone ? (
+          // Pip does not perch on the first row of books under this: on a phone it is too close, and she covered the count.
+          <div className="flex items-center justify-between gap-3" data-pip-keep-clear>
+            <div className="min-w-0">
+              <h2 className="page-title text-3xl">Library</h2>
+              <p className="mt-1 truncate text-xs text-on-surface-variant">
+                {totalBooks} {totalBooks === 1 ? "book" : "books"} · {finishedBooks} finished
+              </p>
+            </div>
+            {!libraryEmpty && (
+              <PhoneShelfTools
+                filters={filters}
+                setFilter={setFilter}
+                authors={authors}
+                genres={genres}
+                genreValue={filters.genre === "all" ? "all" : genreKey(filters.genre)}
+                sortOptions={sortOptions}
+                highlightTotal={highlightTotal}
+                openHighlights={openHighlightsList}
+              />
+            )}
+          </div>
+        ) : (
         <div className="flex flex-wrap items-end justify-between gap-6">
           <div>
             <h2 className="page-title text-4xl">Library</h2>
@@ -726,6 +771,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
             </select>
           </div>
         </div>
+        )}
 
         {/* The search box finds books by title and author; this looks for the
             same words inside them. In the app only: the browser preview has no
@@ -779,7 +825,8 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
         </div>
       </section>
 
-      {/* Upright on a phone: a round + over the tab bar, in reach of the thumb wherever the shelf is scrolled to. */}
+      {/* Upright in a narrow desktop window: a round + over the foot of the page. On a phone by a finger
+          the + is in the header instead (App.tsx), where nothing on the shelf can sit under it. */}
       <button
         type="button"
         className="add-books-fab"

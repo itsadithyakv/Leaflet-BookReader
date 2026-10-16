@@ -11,7 +11,9 @@ import { selectedTextBox } from "../lookupPlacement";
 import { SpeedReadStage } from "./SpeedReadStage";
 import type { ReaderScope } from "./scope";
 import { android, onAndroid } from "../../platform/android";
+import { isPhoneShape } from "../touchLayout";
 import { FurtherOnOffer } from "../../components/sync/FurtherOnOffer";
+import { PhoneReadingMarks } from "./PhoneReadingMarks";
 
 /** The page: the book itself, and what sits over its foot (the selection bar, a note, the dock). */
 export const ReaderPage = ({ reader }: { reader: ReaderScope }) => {
@@ -62,7 +64,7 @@ export const ReaderPage = ({ reader }: { reader: ReaderScope }) => {
         </div>
       )}
       {!loadError && (
-        <div className="reader-page-frame relative h-full overflow-hidden">
+        <div className={`reader-page-frame relative h-full overflow-hidden ${paged ? "" : "is-scrolling"}`}>
           {/* (Not while the book is laid out anew: the page that was stays until the new one is up.) */}
           {loading && !reader.relayingRef.current && (
             <div className="absolute inset-0 z-10 flex items-center justify-center text-sm reader-panel-soft reader-muted">
@@ -80,6 +82,7 @@ export const ReaderPage = ({ reader }: { reader: ReaderScope }) => {
             }
           />
           <SpeedReadStage reader={reader} />
+          <PhoneReadingMarks reader={reader} />
           {(selection || people.card) && (
             <div
               ref={selectionDockRef}
@@ -210,7 +213,7 @@ export const ReaderPage = ({ reader }: { reader: ReaderScope }) => {
               marks={bookMarks}
               onSeek={seekTo}
               // By finger the bar shows with the chrome (a tap in the middle of the page), at a thumb's size.
-              shown={dockNear || dockAwake || (reader.shape !== "desktop" && reader.chromeVisible)}
+              shown={((dockNear || dockAwake) && !isPhoneShape(reader.shape)) || (reader.shape !== "desktop" && reader.chromeVisible)}
               holdRef={seekHoldRef}
             />
           )}
@@ -232,7 +235,8 @@ export const ReaderPage = ({ reader }: { reader: ReaderScope }) => {
             canGoForward={jumps.forward > 0}
             onBack={goBack}
             onForward={goForward}
-            awake={dockAwake}
+            // On a phone the dock comes only with the chrome (a tap in the middle of the page), never by itself.
+            awake={dockAwake && !isPhoneShape(reader.shape)}
             onNearChange={setDockNear}
           />
         </div>
