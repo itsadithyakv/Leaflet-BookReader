@@ -38,6 +38,17 @@ $appsDir = Split-Path -Parent $tauriDir
 # is the names, never the values.
 $fromFile = @("LEAFLET_GOOGLE_CLIENT_ID", "LEAFLET_GOOGLE_CLIENT_SECRET", "VITE_ENABLE_ACCOUNTS", "VITE_ENABLE_COMMUNITY", "LEAFLET_API_BASE")
 $envFile = Join-Path $here "build.env"
+if (-not (Test-Path $envFile)) {
+  # Git ignores build.env, so a worktree has none: use the main checkout's.
+  $common = git -C $here rev-parse --path-format=absolute --git-common-dir 2>$null
+  if ($LASTEXITCODE -eq 0 -and $common) {
+    $mainFile = Join-Path (Split-Path -Parent $common) "apps\src-tauri\msix\build.env"
+    if (Test-Path $mainFile) {
+      $envFile = $mainFile
+      Write-Host "Using the main checkout's build.env."
+    }
+  }
+}
 if (Test-Path $envFile) {
   $taken = @()
   foreach ($line in Get-Content $envFile) {

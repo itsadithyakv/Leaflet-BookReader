@@ -54,6 +54,29 @@ name must match the reserved name exactly ("Leaflet Book Reader", as in
 
 ## What's new in this version
 
+For 1.5.5 (the first Windows release after 1.4.2, so it covers 1.5.0 to
+1.5.5; written on 2026-10-16). Phone-only things (the reading light's swipes,
+volume keys, the icon's Continue shortcut) are left out:
+
+> Leaflet is on Android now. Sign in with the same Leaflet account on your
+> computer and your phone, and your places, highlights, notes, reading days
+> and Pip follow you by themselves. Your own Google Drive, or a sync folder,
+> brings the book files.
+>
+> Two readers on one computer each keep a library of their own, and Leaflet
+> never mixes two accounts' reading.
+>
+> Read aloud: Leaflet can read the open book to you.
+>
+> Pip's first visit: a welcome basket of acorns, so you can play before you
+> have read a page, a short tour of the burrow and the house, and the next
+> goal always in sight.
+>
+> Reminders say something different each day, in Pip's voice.
+>
+> Fixed: a book could show 0% in the library after you had read part of it.
+> Scrolling through a book is smoother on slower computers.
+
 For 1.5.3:
 
 > Signed in to a Leaflet account, your places, highlights, notes and reading
