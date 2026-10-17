@@ -163,8 +163,9 @@ html[data-input="touch"] .read-aloud-dock {
   bottom: calc(var(--inset-bottom, 0px) + 12px);
 }
 
-/* With the chrome up a phone shows the footer and, above it, the chapter dock: the pill goes over both. */
-html[data-input="touch"] .reader-scope:not(.reader-chrome-hidden) .read-aloud-dock {
+/* With the chrome up a tablet shows the chapter dock: the pill goes over it. (A phone stacks
+   it in the foot's column: readers/touch.css.) */
+html[data-input="touch"] .reader-scope:not([data-shape]):not(.reader-chrome-hidden) .read-aloud-dock {
   bottom: calc(var(--inset-bottom, 0px) + 152px);
 }
 
@@ -188,12 +189,6 @@ html[data-input="touch"] .read-aloud-voice {
 
 html[data-input="touch"] .read-aloud-rates button {
   min-height: 40px;
-}
-
-/* On its side the chrome is a strip down the right: the pill keeps clear of it. */
-.reader-scope[data-shape="sideways"]:not(.reader-chrome-hidden) .read-aloud-dock {
-  left: calc((100vw - var(--reader-strip-width, 0px)) / 2);
-  bottom: calc(var(--inset-bottom, 0px) + 12px);
 }
 
 /* Smart Read's or auto-scroll's pill cannot be up with this one (each stops

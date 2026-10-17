@@ -34,6 +34,32 @@ export type Graph = { nodes: GraphNode[]; edges: GraphEdge[]; width: number; hei
 
 export const NODE_W = 128;
 export const NODE_H = 36;
+/** As many letters as a line of a node holds. */
+export const NODE_LINE = 16;
+
+/**
+ * A name as it is written in its node: one line when it fits, else two,
+ * broken between words, and only past that cut short with an ellipsis
+ * ("Lady Valette" / "Renoux", not "Lady Valette Ren…"). On a phone there is
+ * no pointer to rest on a node and read the rest.
+ */
+export const nodeLines = (name: string, room = NODE_LINE): string[] => {
+  const text = name.replace(/\s+/g, " ").trim();
+  const cut = (line: string) => (line.length > room ? `${line.slice(0, room - 1)}…` : line);
+  if (text.length <= room) {
+    return [text];
+  }
+  // The last space that leaves the first line within its room; failing one, the first space.
+  const head = text.slice(0, room + 1);
+  let at = head.lastIndexOf(" ");
+  if (at <= 0) {
+    at = text.indexOf(" ");
+  }
+  if (at <= 0) {
+    return [cut(text)];
+  }
+  return [cut(text.slice(0, at)), cut(text.slice(at + 1))];
+};
 const GAP_X = 28;
 const GAP_Y = 56;
 const PAD = 24;

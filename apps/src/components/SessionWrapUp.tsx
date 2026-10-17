@@ -16,22 +16,12 @@ import { coldAfterSession } from "../pip/cold";
 import { CampLine } from "./pip/arcade/base/CampExtras";
 import "./pip/album/album.css";
 import { SheetHandle } from "./ui/SheetHandle";
+import { FocusDouble } from "./focus/FocusDouble";
 import { useBackClose } from "../hooks/useBackClose";
 
 // The find's picture is drawn with the house's art, which loads with the Pip
 // tab and not with the app: it is fetched when a wrap-up has one to show.
 const FindSprite = lazy(() => import("./pip/album/FindSprite"));
-
-/** Set once Pip has explained the garden (water, ripe plants, seeds), so it says it once. */
-const SEEDS_EXPLAINED_KEY = "leaflet.pip.seedsExplained";
-
-const seedsExplained = () => {
-  try {
-    return localStorage.getItem(SEEDS_EXPLAINED_KEY) === "1";
-  } catch {
-    return true;
-  }
-};
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
@@ -191,9 +181,6 @@ export const SessionWrapUp = () => {
   // Water and seeds count up from zero a beat after the card appears.
   const [waterShown, setWaterShown] = useState(0);
   const [seedsShown, setSeedsShown] = useState(0);
-  // Decided when the card opens, so the explanation does not vanish mid-read
-  // once it has been marked as seen.
-  const [explainSeeds, setExplainSeeds] = useState(false);
 
   useEffect(() => {
     setNote("");
@@ -203,17 +190,7 @@ export const SessionWrapUp = () => {
     const water = wrapUp?.water ?? 0;
     const seeds = wrapUp?.seeds ?? 0;
     if (water <= 0 && seeds <= 0) {
-      setExplainSeeds(false);
       return;
-    }
-    const first = !seedsExplained();
-    setExplainSeeds(first);
-    if (first) {
-      try {
-        localStorage.setItem(SEEDS_EXPLAINED_KEY, "1");
-      } catch {
-        // Explained again next time; harmless.
-      }
     }
     const timer = window.setTimeout(() => {
       setWaterShown(water);
@@ -358,12 +335,13 @@ export const SessionWrapUp = () => {
             <div className="mt-3 flex flex-col items-center gap-1.5 text-center">
               <p className="flex flex-wrap items-center justify-center gap-2">
                 {wrapUp.water > 0 && (
-                  <span className="seed-chip seed-chip-earned water-chip" aria-label={`${wrapUp.water} water for Pip's garden`}>
+                  <span className="seed-chip seed-chip-earned water-chip" aria-label={`${wrapUp.water} water for Pip's garden, doubled by Focus`}>
                     <UiIcon name="water" size={15} />
                     <span className="tabular-nums" aria-hidden="true">
                       +<CountUp value={waterShown} />
                     </span>
                     <span aria-hidden="true">water</span>
+                    <FocusDouble />
                   </span>
                 )}
                 {wrapUp.seeds > 0 && (
@@ -382,13 +360,6 @@ export const SessionWrapUp = () => {
                     ? `${plural(wrapUp.newlyRipe, "plant")} just ripened!`
                     : `${plural(wrapUp.ripe, "plant")} ripe in the garden.`}{" "}
                   <span className="font-normal text-on-surface-variant">Pick {wrapUp.ripe === 1 ? "it" : "them"} on the Pip tab.</span>
-                </p>
-              )}
-              {explainSeeds && (
-                <p className={showPip ? "pip-line text-sm" : "text-xs text-on-surface-variant"}>
-                  {showPip
-                    ? "psst: reading waters my garden. when a plant ripens, pick it for seeds, then spend them on me."
-                    : "Reading in focus waters Pip's garden. Ripe plants are picked for seeds, to spend on Pip."}
                 </p>
               )}
             </div>

@@ -25,6 +25,7 @@ import { useReaderCover } from "../readers/text/useReaderCover";
 import { useBookOpening } from "../readers/text/useBookOpening";
 import { useKindlePlacing } from "../readers/text/useKindlePlacing";
 import { useScrollTaps, useSelectionHidesChrome, useShapeLayout } from "../readers/text/useTouchReading";
+import { useWordDoubleTap } from "../readers/text/useWordDoubleTap";
 import { isPhoneShape, systemBarsHidden, useReaderDevice } from "../readers/touchLayout";
 import "../readers/touch.css";
 import { ReaderToolbar } from "../readers/text/ReaderToolbar";
@@ -108,6 +109,7 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
   useAwakeWhileReading(reader);
   Object.assign(reader, useSelectionDock(reader));
   useScrollTaps(reader);
+  useWordDoubleTap(reader);
   // Brightness and warmth by a swipe at the page's edges (readers/readingLight.ts).
   useReadingLightSwipes(reader);
   useSelectionHidesChrome(reader);

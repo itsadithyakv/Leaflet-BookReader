@@ -3344,10 +3344,18 @@ body::before {
   will-change: transform;
 }
 
-.pip-body:active,
-.pip-dragging,
-.pip-dragging * {
+.pip-body:active {
   cursor: grabbing !important;
+}
+
+/* The hand over the whole page while Pip is carried, for a pointer only: the
+   rule touches every element, and a finger, which has no cursor, paid for a
+   restyle of the whole app the moment it picked Pip up. */
+@media (hover: hover) {
+  .pip-dragging,
+  .pip-dragging * {
+    cursor: grabbing !important;
+  }
 }
 
 .pip-dragging {

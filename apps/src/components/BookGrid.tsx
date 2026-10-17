@@ -5,6 +5,7 @@ import type { BookMenuAction } from "./BookMenu";
 import { VirtualRows } from "./VirtualRows";
 import { getPlatform } from "../platform";
 import { gridColumns } from "../library/gridColumns";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 
 /** Libraries up to this size render in full; larger ones draw only what is on screen. */
 export const VIRTUALIZE_FROM = 60;
@@ -47,7 +48,9 @@ const useColumns = (gap: number) => {
 };
 
 export const BookGrid = ({ books, onRefresh, onOpen, menuActions, onRemoved }: Props) => {
-  const gap = getPlatform() === "mobile" ? 24 : 32;
+  // An upright phone by a finger has two covers to a row (360 to 430 px): a narrow gutter gives the room to the covers.
+  const phone = useMediaQuery("(hover: none) and (pointer: coarse) and (max-width: 767px)");
+  const gap = phone ? 14 : getPlatform() === "mobile" ? 24 : 32;
   const [ref, columns] = useColumns(gap);
   const columnStyle = { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` };
 

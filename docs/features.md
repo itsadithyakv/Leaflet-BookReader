@@ -2278,8 +2278,8 @@ Rules worth knowing:
   entry, so a day read with no session looked like nothing had happened. Each
   day's free reading (`habit::free_reads`: the day's ledger minutes less its
   sessions', a minute or more) is now an entry of its own, derived and never
-  stored, so past days appear too. It earns the goal and streak bonuses but
-  no water: only focus sessions water the garden.
+  stored, so past days appear too. It earns the goal and streak bonuses, and
+  0.75 water a minute for the garden (a focus minute is 1.5).
 - **Time counted between flushes is kept** in localStorage
   (`leaflet.habit.pendingReading`) with its day, so closing Leaflet mid-read
   credits the last minute on the next launch, to the day it was read. It is
@@ -2343,6 +2343,17 @@ Rules worth knowing:
   session's `awayMs` and the session clock (`sessionElapsedMs`) skips it,
   including a stint still in progress, so a session never completes while the
   reader is elsewhere. On return, Pip reacts.
+
+### Starting a session
+
+**One tap.** The Focus key (phone), Start Session (the desktop Library card)
+and Pip's menu start a session at once, at the usual length (the one last
+chosen, kept in `leaflet.focus.minutes`, else the daily goal), on the book
+being read (the board's "keep reading" target), which opens. With no book it
+starts on none, in the Library, as before. The length is changed with the
+desktop card's select, or by holding (or right-clicking) the phone's Focus key,
+which opens the old sheet (`components/focus/focusDeal.ts`). Each carries a
+"2×" badge whose tooltip is the deal: "Reading in Focus earns double seeds".
 
 ### Focus lock
 
@@ -2454,8 +2465,8 @@ five minutes past its time; that day's reminder is then simply missed.
 `components/pip/`, `store/pipWardrobeStore.ts`, `pip/shop.js` (the catalogue
 and prices), `pip/home.js` (the house)
 
-A reason to actually use focus mode. Reading in a focus session waters Pip's
-**garden**; ripe plants are picked for **seeds**; seeds buy things for Pip,
+All reading waters Pip's **garden**, and reading in a focus session waters it
+twice as much (the "2×" on every Focus key); ripe plants are picked for **seeds**; seeds buy things for Pip,
 Talking Tom style: variants (robot, president, skater...), a wardrobe of
 accessories, floors of a house with furniture, wallpapers and floors, book
 nods, food and toys, and the showier moves. The Pip tab is a main tab (the
@@ -2465,16 +2476,26 @@ sprout icon), and the whole tab is Pip's house.
 
 Minutes do not pay seeds directly (that made everything too easy). Instead:
 
-- **Water.** Each whole minute of a focus session is one water, half as much
-  again for a session completed without leaving the book. Session minutes
-  count only up to the reading the **heartbeat** recorded on the day the
-  session ended, then the day it started (read across midnight, or left
-  running and ended the next day), plus a minute of slack for a flush in
-  flight, so a timer left running waters nothing, as it earns nothing towards
-  the goal. Each day's minutes are handed out once, in the order sessions
-  ended. Known limit: after a sync the counted minutes never fall, but water
-  can, since sessions from two devices share one day's merged minutes and an
-  earlier unclean session can take a later clean one's bonus.
+- **Water.** Every whole minute the **heartbeat** recorded waters: a minute a
+  focus session counted is 1.5 water (poured when it ended; what a clean,
+  completed minute poured before), a minute read with no session running is
+  0.75 (each day's, poured at the day's end, UTC). No bonus for finishing.
+  Every drop is a whole number of quarter-waters, exact in an `f64`, so water
+  accrues exactly in any order and no day is rounded. Session minutes count only up to the reading the
+  heartbeat recorded on the day the session ended, then the day it started
+  (read across midnight, or left running and ended the next day), plus a
+  minute of slack for a flush in flight, so a timer left running waters
+  nothing more than was read. Each day's minutes are handed out once, in the
+  order sessions ended, and what is left of the day is its plain reading, so
+  no minute is counted for a session and as plain. It is all replayed from
+  the records, so a restart or a sync never pours twice.
+- **The switch-over.** A device takes up this rule on the local day it first
+  works the garden out after the update (the setting
+  `garden_plain_water_since`). Days before it keep the water they were
+  poured: focus sessions only, a water a minute, half again for one completed
+  without leaving the book; their plain reading is never paid. Known limit:
+  the day is per device, so two devices that updated on different days can
+  disagree about the days between.
 - **Plots.** Three to start; a fourth, fifth and sixth for 200, 350 and 500
   seeds, each after the one before.
 - **Planting** costs a seed packet (a few seeds). Water flows to the growing
@@ -2494,7 +2515,7 @@ Minutes do not pay seeds directly (that made everything too easy). Instead:
   every half hour). It is a pure function of the clock, redrawn only when
   something moved, and a still picture under reduced motion.
 
-| Plant | Water (minutes) | Seeds | Packet |
+| Plant | Water | Seeds | Packet |
 | --- | --- | --- | --- |
 | Radish | 15 | 4 | 1 |
 | Strawberry | 30 | 9 | 2 |
@@ -2509,7 +2530,7 @@ reading done on another device reaches the garden when it syncs.
 
 **Event-sourced, so it cannot be faked.** Plantings and harvests are records,
 like purchases. How far a plant has grown is never stored: `habit::seeds::grow`
-replays the water (the sessions) against the plantings in time order every
+replays the water (the sessions and each day's plain reading) against the plantings in time order every
 time. A harvest counts only if that replay shows the plant ripe, never for
 more than the plant gives, and once per planting. More reading (a sync that
 brings in another device's sessions) can only bring plants closer to ripe.
@@ -2564,9 +2585,10 @@ cold. **Before the garden** (local days before `GARDEN_SINCE`,
 day, a streak bonus up to 40); what readers earned then is kept, as if already
 harvested.
 
-**Pacing**, for a reader doing a 20-minute goal most days (about 30 water a
-day): the garden gives 10 to 12 seeds a day, the goal and streak bonuses about
-10, so roughly 150 a week. Prices are set for that (`PACING` in `shop.js`).
+**Pacing**, for a reader doing a 20-minute goal most days (30 water a day in
+Focus, 15 without): the garden gives 10 to 12 seeds a day in Focus (half that
+without), the goal and streak bonuses about 10, so roughly 150 a week in Focus
+and 110 without. Prices are set for that (`PACING` in `shop.js`).
 The first days are gentler: the welcome gift, the chest and the first steps
 come to 180, and the first variant (the gardener) costs 80, so a reader's
 first evening can buy a cap, the floor lamp, an apple and the gardener.
@@ -4013,9 +4035,9 @@ It changes no number here.
 
 ### Earning feedback
 
-The session wrap-up counts up "+N water" (what the session poured) and any
-bonus seeds, and says "2 plants just ripened!" when it ripened some. The first
-time, Pip explains the garden. It also says what Pip found on her expedition
+The session wrap-up counts up "+N water 2×" (what the session poured, at the
+focus rate) and any bonus seeds, and says "2 plants just ripened!" when it
+ripened some. It also says what Pip found on her expedition
 (see Expeditions), and when the session's reading cured Pip's cold, or how
 many minutes more today would. The card's foot (Done) stays in view while its
 body scrolls.

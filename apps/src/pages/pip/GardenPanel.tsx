@@ -29,8 +29,8 @@ export const GardenPanel = ({ garden, level, gardenLevel, goToFloor, plotCount, 
   return (
     <>
       <Hints>
-        <Hint icon="water" more="Reading in focus is water: a minute each, half as much again when a session runs to the end.">
-          1 focus minute = 1 water
+        <Hint icon="water" more="Every minute you read waters the garden. A minute in Focus is 1.5 water, twice a plain one.">
+          Focus waters 2×
         </Hint>
         <Hint icon="garden" more="Water flows to the oldest planting first.">
           Oldest plant drinks first

@@ -712,7 +712,9 @@ mod tests {
   /// account never had it.
   #[test]
   fn a_book_with_no_file_says_what_to_do_about_it() {
-    assert!(no_file_message(true).contains("Add the same file again"));
+    assert!(no_file_message(true).contains("Connect the Google Drive"));
+    assert!(no_file_message(true).contains("add the same file again"));
+    assert!(!no_file_message(true).contains("computer"), "a phone is not a computer");
     assert!(no_file_message(false).contains("sync is not set up"));
   }
 
@@ -1096,10 +1098,14 @@ mod tests {
 }
 
 /// Why a book with no file here cannot be fetched. An account's backup holds
-/// the reading, never the files, so there the way on is the file itself.
+/// the reading, never the files: the files come by the Google Drive (or the
+/// folder) the other device backs up to, so that is the way on, or the file
+/// itself added again. (The app offers to connect Drive before it gets here;
+/// this is what is said where it cannot, and it says "device": it was
+/// "computer" on a phone too.)
 pub(crate) fn no_file_message(account_backup: bool) -> &'static str {
   if account_backup {
-    "That book's file is not on this computer. Add the same file again and your place will be waiting."
+    "That book's file isn't on this device yet. Connect the Google Drive your other device backs up to, or add the same file again, and your place will be waiting."
   } else {
     "That book is not on this device, and sync is not set up."
   }

@@ -1572,9 +1572,47 @@ mod tests {
       last_evaluated_day: Some("2026-10-03".to_string()),
       ..Default::default()
     };
-    let result = crate::habit::evaluate(&ledger, "2026-10-03", &previous);
+    let result = crate::habit::evaluate(&ledger, &[], "2026-10-03", &previous);
     assert_eq!(result.streak, 2);
     assert_eq!(result.broke_from, None);
+  }
+
+  /// Each device walks the merged ledger to the same streak: what one spent
+  /// on a missed day is spent on the other, and a stamp one made with a bank
+  /// of its own (the phone that showed 16) counts on neither.
+  #[test]
+  fn both_devices_walk_the_merged_ledger_to_one_streak() {
+    let walk = |doc: &SyncDoc, previous: &crate::habit::StreakState| {
+      let ledger = doc.days.iter().map(|d| (d.date_key.clone(), d.to_record())).collect();
+      crate::habit::evaluate(&ledger, &[], "2026-10-08", previous)
+    };
+    // Five days met earn a freeze; the 6th is grace's, the 7th the freeze's.
+    let read: Vec<DayEntry> = (1..=5).map(|d| day(&format!("2026-10-{d:02}"), 30.0)).collect();
+    let mut here = SyncDoc { days: read.clone(), ..doc(vec![]) };
+    here.days.push(day("2026-10-08", 30.0));
+    let walked = walk(&here, &crate::habit::StreakState::default());
+    assert_eq!(walked.streak, 8);
+    for (key, kind) in &walked.covers {
+      let mut covered = day(key, 0.0);
+      match kind {
+        crate::habit::CoverKind::Grace => covered.grace_used = true,
+        crate::habit::CoverKind::Freeze => covered.freeze_used = true
+      }
+      here.days.push(covered);
+    }
+    // The other device read the 8th too, and once stamped a freeze on the 1st
+    // it never had.
+    let mut there = SyncDoc { days: read, ..doc(vec![]) };
+    there.days[0].freeze_used = true;
+    there.days.push(day("2026-10-08", 31.0));
+
+    let merged = merge(&here, &there, NOW);
+    assert_eq!(merged, merge(&there, &here, NOW));
+    let a = walk(&merged, &walked.state);
+    let b = walk(&merged, &crate::habit::StreakState { freezes: 2, grace_available: true, ..Default::default() });
+    assert_eq!((a.streak, a.state.freezes, a.state.grace_available), (8, 0, false));
+    assert_eq!((b.streak, b.state.freezes, b.state.grace_available), (8, 0, false));
+    assert!(a.covers.is_empty() && b.covers.is_empty(), "nothing paid for twice");
   }
 
   #[test]

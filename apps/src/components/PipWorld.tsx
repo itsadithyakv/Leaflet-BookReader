@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useShallow } from "zustand/react/shallow";
 import { usePipStore } from "../store/pipStore";
@@ -43,7 +43,7 @@ import "./pip/touch.css";
  *   it), and above everything while Pip is carried, flying, or giving the tour.
  */
 
-export type PipAction = { id: string; label: string; run: () => void };
+export type PipAction = { id: string; label: string; run: () => void; /** A mark after the label (Focus's "2×"). */ badge?: ReactNode };
 
 const SPRITE = 64;
 const GRAVITY = 2600;
@@ -248,7 +248,8 @@ const readPerch = () => {
  * box around the wordmark alone, and a drop on the logo missed it entirely.
  */
 const overPerch = (x: number, y: number) => {
-  const perch = readPerch();
+  // Asked on every move of the pointer while Pip is carried: the perch is measured a few times a second, not each time.
+  const perch = keptLayout("perch", readPerch);
   if (!perch) {
     return false;
   }
@@ -281,7 +282,35 @@ const FLINGABLE = new Set<Phase>([
 const OUCH = ["ow.", "i'm okay!", "totally meant to do that.", "ten out of ten landing.", "the floor came out of nowhere."];
 const WHEE = ["wheee!", "put me down!", "whoa whoa whoa.", "i can see my house from here."];
 
-const readBounds = (): Bounds => {
+/**
+ * What the page's frame measures (the header, the rail, the tab bar, the dock,
+ * the logo), kept for a moment. These were measured on every frame and on
+ * every move of a finger, each straight after Pip's transform was written, so
+ * every one made the browser lay the whole app out again: a drag on a phone
+ * spent most of each frame on it and lagged behind the finger. None of them
+ * moves while Pip is carried, and a resize or a scroll forgets them at once.
+ */
+const LAYOUT_KEPT_MS = 250;
+const layoutKept = new Map<string, { at: number; value: unknown }>();
+const keptLayout = <T,>(key: string, read: () => T): T => {
+  const now = performance.now();
+  const kept = layoutKept.get(key);
+  if (kept && now - kept.at < LAYOUT_KEPT_MS) {
+    return kept.value as T;
+  }
+  const value = read();
+  layoutKept.set(key, { at: now, value });
+  return value;
+};
+if (typeof window !== "undefined") {
+  const forget = () => layoutKept.clear();
+  window.addEventListener("resize", forget);
+  window.addEventListener("scroll", forget, { capture: true, passive: true });
+}
+
+const readBounds = (): Bounds => keptLayout("bounds", measureBounds);
+
+const measureBounds = (): Bounds => {
   const header = document.querySelector(".app-header")?.getBoundingClientRect();
   const main = document.querySelector<HTMLElement>(".app-main-scroll");
   const mainRect = main?.getBoundingClientRect();
@@ -337,9 +366,18 @@ const crowded = (r: DOMRect) => {
   return false;
 };
 
-/** Card tops Pip can stand on: any paper card in the page, or anything marked, with room over them. */
+/**
+ * A phone by a finger: Pip keeps to her lane at the foot of the page, along the top of the book being
+ * read or of the tab bar. On the cards she stood over the search field, the covers and their ⋯, where a
+ * thumb was about to go. (The same phone selectors as styles/touch-shell.css.)
+ */
+const PHONE_LANE =
+  "(hover: none) and (pointer: coarse) and (max-width: 767px), (hover: none) and (pointer: coarse) and (max-height: 520px)";
+const inPhoneLane = () => typeof window.matchMedia === "function" && window.matchMedia(PHONE_LANE).matches;
+
+/** Card tops Pip can stand on: any paper card in the page, or anything marked, with room over them (none on a phone). */
 const readLedges = (b: Bounds) =>
-  Array.from(document.querySelectorAll(".app-main-scroll .paper-surface, [data-pip-ledge]"))
+  (inPhoneLane() ? [] : Array.from(document.querySelectorAll(".app-main-scroll .paper-surface, [data-pip-ledge]")))
     .map((el) => ({ el, r: el.getBoundingClientRect() }))
     .filter(
       ({ el, r }) =>
@@ -1054,8 +1092,10 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
 
     // The sidebar opens over the app on hover. Pip under it would be stuck
     // behind the leather, so it gets flung clear, once per opening.
-    const sidebar = document.querySelector<HTMLElement>(".leaflet-sidebar");
-    const sidebarRect = sidebar && sidebar.offsetParent !== null ? sidebar.getBoundingClientRect() : null;
+    const sidebarRect = keptLayout("sidebar", () => {
+      const sidebar = document.querySelector<HTMLElement>(".leaflet-sidebar");
+      return sidebar && sidebar.offsetParent !== null ? sidebar.getBoundingClientRect() : null;
+    });
     if (!sidebarRect || sidebarRect.width < SIDEBAR_COLLAPSED + 60) {
       s.sidebarFling = false;
     } else if (!s.sidebarFling && s.x - HALF_W < sidebarRect.right && FLINGABLE.has(s.phase)) {
@@ -1540,13 +1580,24 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
       s.phase === "held" || s.phase === "flying" || s.phase === "emerging" || s.phase === "going-home" ||
       s.phase === "traveling" || s.phase === "guiding" || s.phase === "clinging" || s.phase === "webbing" ||
       s.phase === "perched" || s.bubble === "side";
+
+    // Everything measured first, then everything written: a measurement taken
+    // after a write made the browser lay the page out again for it, on every
+    // frame (and a frame on a phone has little time to spare).
+    const body = bodyRef.current;
+    const bubble = sayRef.current;
+    const bodyOffset = body ? layerOffset(body) : null;
+    const bubbleBox = bubble ? { w: bubble.offsetWidth, h: bubble.offsetHeight, o: layerOffset(bubble) } : null;
+
     if (worldRef.current) {
-      worldRef.current.style.zIndex = raised ? "57" : "35";
+      const z = raised ? "57" : "35";
+      if (worldRef.current.style.zIndex !== z) {
+        worldRef.current.style.zIndex = z;
+      }
     }
 
-    const body = bodyRef.current;
-    if (body) {
-      const o = layerOffset(body);
+    if (body && bodyOffset) {
+      const o = bodyOffset;
       const originY = s.origin === "pivot" ? (size * 31) / 32 - HOLD_DROP : size * 0.55;
       body.style.transformOrigin = `${size / 2}px ${originY}px`;
       body.style.transform = `translate3d(${s.x - size / 2 - o.x}px, ${s.y - (size * 31) / 32 - o.y}px, 0) rotate(${s.angle}rad)`;
@@ -1573,10 +1624,9 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
         web.style.display = "none";
       }
     }
-    const bubble = sayRef.current;
-    if (bubble) {
-      const bw = bubble.offsetWidth;
-      const bh = bubble.offsetHeight;
+    if (bubble && bubbleBox) {
+      const bw = bubbleBox.w;
+      const bh = bubbleBox.h;
       let left: number;
       let top: number;
       let tail: PipSayTail;
@@ -1604,7 +1654,7 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
         }
         tailAt = Math.max(12, Math.min(88, ((s.x - left) / bw) * 100));
       }
-      const o = layerOffset(bubble);
+      const o = bubbleBox.o;
       bubble.style.transform = `translate3d(${left - o.x}px, ${top - o.y}px, 0)`;
       bubble.dataset.tail = tail;
       bubble.style.setProperty("--tail-at", `${tailAt}%`);
@@ -2103,6 +2153,7 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
                     }}
                   >
                     {item.label}
+                    {item.badge}
                   </button>
                 ))
               : null}

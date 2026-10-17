@@ -1,0 +1,25 @@
+/* The "2×" on a Focus key and on the wrap-up's water: a small stamp. */
+.focus-double {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 6px;
+  padding: 0 5px;
+  min-width: 20px;
+  height: 16px;
+  border-radius: 999px;
+  background: rgb(var(--pip-accent) / 0.18);
+  color: rgb(var(--pip-accent));
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  vertical-align: middle;
+  cursor: help;
+}
+
+.tactile-button-primary .focus-double {
+  background: rgb(255 255 255 / 0.24);
+  color: inherit;
+}

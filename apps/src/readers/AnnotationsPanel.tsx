@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Image as ImageIcon } from "lucide-react";
 import { UiIcon } from "../components/UiIcon";
+import { useBackLayer } from "../platform/back";
 import type { Annotation } from "../services/annotationService";
 import { groupByChapter } from "../components/highlights/highlightsView";
 import { KINDLE_TAG_ABOUT, isKindlePlace } from "../library/kindleClippings";
 import { noteDate } from "./HighlightCard";
 import { HIGHLIGHT_COLORS, HIGHLIGHT_COLOR_IDS } from "./highlightColors";
+import { useKeyboardOpen } from "./keyboardOpen";
 import "./notes.css";
 
 type Tab = "highlights" | "bookmarks";
@@ -78,16 +80,70 @@ export const AnnotationsPanel = ({
     [highlights, colour, notedOnly]
   );
 
+  // What is being written, for the ways out that are not Save: another note
+  // opened, the panel closed, the app sent away. Only Cancel lets it go.
+  const writingRef = useRef({ editing, draft, highlights, onSaveNote });
+  writingRef.current = { editing, draft, highlights, onSaveNote };
+  const keepDraft = () => {
+    const now = writingRef.current;
+    if (!now.editing) {
+      return;
+    }
+    const before = now.highlights.find((item) => item.id === now.editing)?.note ?? "";
+    if (now.draft.trim() !== before.trim()) {
+      now.onSaveNote(now.editing, now.draft.trim());
+    }
+  };
+  useEffect(() => {
+    const away = () => {
+      if (document.visibilityState === "hidden") keepDraft();
+    };
+    document.addEventListener("visibilitychange", away);
+    return () => {
+      document.removeEventListener("visibilitychange", away);
+      keepDraft();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const field = useRef<HTMLTextAreaElement | null>(null);
+  const keyboard = useKeyboardOpen();
+  // Back, while a note has the keyboard, puts the keyboard away; the note and the panel stay.
+  useBackLayer(editing !== null && keyboard, () => field.current?.blur());
+  // With the keyboard up the sheet ends at it: the note being written is kept in sight in the list.
+  useEffect(() => {
+    if (!editing) {
+      return undefined;
+    }
+    const inSight = () => {
+      const box = field.current?.closest(".reader-notes-edit")?.getBoundingClientRect();
+      const room = list.current?.getBoundingClientRect();
+      if (!box || !room || !list.current) return;
+      if (box.bottom > room.bottom) list.current.scrollTop += Math.ceil(box.bottom - room.bottom) + 8;
+      else if (box.top < room.top) list.current.scrollTop -= Math.ceil(room.top - box.top) + 8;
+    };
+    const soon = () => window.requestAnimationFrame(inSight);
+    soon();
+    window.addEventListener("resize", soon);
+    window.visualViewport?.addEventListener("resize", soon);
+    // (A resize is not always heard as one: the list's own height says it too.)
+    const sized = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(soon);
+    if (list.current) sized?.observe(list.current);
+    return () => {
+      sized?.disconnect();
+      window.removeEventListener("resize", soon);
+      window.visualViewport?.removeEventListener("resize", soon);
+    };
+  }, [editing, keyboard]);
+
   const startEditing = (item: Annotation) => {
+    keepDraft();
     setEditing(item.id);
     setDraft(item.note ?? "");
   };
   const stopEditing = (save: boolean) => {
-    if (save && editing) {
-      const before = highlights.find((item) => item.id === editing)?.note ?? "";
-      if (draft.trim() !== before.trim()) {
-        onSaveNote(editing, draft.trim());
-      }
+    if (save) {
+      keepDraft();
     }
     setEditing(null);
   };
@@ -207,6 +263,7 @@ export const AnnotationsPanel = ({
                     {editing === item.id ? (
                       <div className="reader-notes-edit">
                         <textarea
+                          ref={field}
                           className="reader-note-field"
                           rows={3}
                           value={draft}

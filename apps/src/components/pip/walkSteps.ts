@@ -18,7 +18,7 @@ export type WalkStep = {
 };
 
 export const WALK: WalkStep[] = [
-  { target: "resources", line: "these are your seeds. reading in focus grows them. the hearts are my mood: select them to see why.", side: "below" },
+  { target: "resources", line: "my seeds: reading grows them, focus doubles it. the hearts are my mood: select them to see why.", side: "below" },
   { target: "pip", line: "this is me! poke me, stroke me, or pick me up by my leaf and let go.", side: "above" },
   { target: "play", line: "play has more: a ball to fetch, a tickle, a dance. it cheers me up.", side: "above" },
   { target: "shop", line: "spend seeds in the shop: looks, decor, treats, moves.", side: "above" },

@@ -109,7 +109,7 @@ export type PipPageProps = {
  * the garden are free; each floor above opens after the one below and some
  * focus sessions, for seeds.
  *
- * Seeds grow in the garden: reading in focus is water, plants ripen on it,
+ * Seeds grow in the garden: reading is water (twice as much in focus), plants ripen on it,
  * ripe plants are picked for seeds (habit/seeds.rs). So this page is the other
  * half of focus mode, a reason to start the timer. It rewards and never
  * guilts: nothing withers, prices say how much reading they are, Pip's mood

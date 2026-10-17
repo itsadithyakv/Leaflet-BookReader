@@ -1,4 +1,4 @@
-import { memo, useRef } from "react";
+import { memo, useRef, type CSSProperties } from "react";
 import type { Book } from "@shared/models/book";
 import { useCoverSrc } from "../hooks/useCoverSrc";
 import { isFinished } from "../constants/books";
@@ -6,6 +6,7 @@ import { useSeriesInfo } from "../library/useSeries";
 import { seriesNumberLabel } from "../library/series";
 import { BookMenu, type BookMenuAction } from "./BookMenu";
 import { useLongPress } from "../hooks/useLongPress";
+import { clothStyle } from "./shelf/spine";
 
 type Props = {
   book: Book;
@@ -45,7 +46,7 @@ const BookCardComponent = ({ book, onRefresh, onOpen, menuActions, onRemoved }: 
           onOpen(book);
         }
       }}
-      className="group flex h-full w-full cursor-pointer flex-col text-left transition-transform duration-200 hover:-translate-y-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
+      className="book-card group flex h-full w-full cursor-pointer flex-col text-left transition-transform duration-200 hover:-translate-y-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
     >
       {/* Pip can stand on a cover, and hops between them (PipWorld). */}
       <div
@@ -60,8 +61,21 @@ const BookCardComponent = ({ book, onRefresh, onOpen, menuActions, onRemoved }: 
             onError={handleCoverError}
           />
         ) : (
-          <div className="flex h-full items-center justify-center bg-surface-container-high text-xs text-on-surface-variant">
-            No cover yet
+          <div
+            // With no cover, a phone draws one in the book's own cloth (shelf/spine), lettered with its
+            // title; a desktop keeps "No cover yet" (styles/phone-polish.css).
+            className="book-cover-blank flex h-full items-center justify-center bg-surface-container-high text-xs text-on-surface-variant"
+            style={clothStyle(book.id || book.title) as CSSProperties}
+          >
+            <span className="book-cover-blank-note">No cover yet</span>
+            <span className="book-cover-blank-title" aria-hidden="true">
+              {book.title}
+            </span>
+            {book.author && (
+              <span className="book-cover-blank-author" aria-hidden="true">
+                {book.author}
+              </span>
+            )}
           </div>
         )}
         {needsDownload && (
@@ -72,8 +86,8 @@ const BookCardComponent = ({ book, onRefresh, onOpen, menuActions, onRemoved }: 
             Cloud
           </div>
         )}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/25 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
-        <div className="absolute inset-0 flex items-end p-4 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+        <div className="book-card-hover absolute inset-0 bg-gradient-to-t from-black/80 via-black/25 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+        <div className="book-card-hover absolute inset-0 flex items-end p-4 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
           <button
             type="button"
             className="tactile-button tactile-button-primary w-full py-2 text-sm font-bold"
@@ -86,7 +100,7 @@ const BookCardComponent = ({ book, onRefresh, onOpen, menuActions, onRemoved }: 
           </button>
         </div>
       </div>
-      <div className="flex flex-1 items-start gap-1 pt-4">
+      <div className="book-card-meta flex flex-1 items-start gap-1 pt-4">
         <div className="min-w-0 flex-1">
           <p className="book-title truncate text-lg text-on-surface" title={book.title}>
             {book.title}
@@ -101,7 +115,7 @@ const BookCardComponent = ({ book, onRefresh, onOpen, menuActions, onRemoved }: 
         </div>
         <BookMenu book={book} actions={menuActions} onRemoved={onRemoved} className="-mr-1 -mt-1 shrink-0" />
       </div>
-      <div>
+      <div className="book-card-progress">
         <div className="h-1.5 w-full rounded-full bg-surface-container-highest">
           <div
             className={`h-1.5 rounded-full ${finished ? "bg-tertiary" : "bg-primary"}`}

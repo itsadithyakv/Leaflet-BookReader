@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { UiIcon } from "../../components/UiIcon";
 import { getDateKey } from "../../services/habitService";
-import { goalPrize, seedExtras, seedService } from "../../services/seedService";
+import { freezeRefusal, goalPrize, seedExtras, seedService } from "../../services/seedService";
 import { useHabitStore } from "../../store/habitStore";
 import { usePipWardrobeStore } from "../../store/pipWardrobeStore";
 
@@ -39,15 +39,7 @@ export const SeedUses = () => {
 
   const share = level && level.next > level.floor ? Math.min(1, (level.earned - level.floor) / (level.next - level.floor)) : 0;
 
-  const freezeWhyNot = !freezes
-    ? null
-    : freezes.held >= freezes.cap
-      ? `You hold ${freezes.held}, the most there is room for`
-      : freezes.boughtThisMonth >= freezes.perMonth
-        ? `${freezes.perMonth} a month, and this month's are bought`
-        : balance < freezes.price
-          ? `${freezes.price - balance} more seeds needed`
-          : null;
+  const freezeWhyNot = freezes ? freezeRefusal(freezes, balance) : null;
 
   const stakes = stakeRules ? STAKES.filter((amount) => amount >= stakeRules.minSeeds && amount <= stakeRules.maxSeeds) : [];
   const dayChoices = stakeRules ? Array.from({ length: stakeRules.maxDays - stakeRules.minDays + 1 }, (_, at) => stakeRules.minDays + at) : [];

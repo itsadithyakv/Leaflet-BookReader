@@ -9,7 +9,8 @@ import {
   type KeyboardEvent as ReactKeyboardEvent
 } from "react";
 import { UiIcon } from "../../components/UiIcon";
-import { CARD_GAP, CARD_HEIGHT, placeCard, type Box, type CardPlace } from "../lookupPlacement";
+import { CARD_GAP, CARD_HEIGHT, cardCeiling, insetTopNow, placeCard, type Box, type CardPlace } from "../lookupPlacement";
+import { keepFieldInView, keyboardOpen, onRoomChange } from "./fit";
 import "../lookupCard.css";
 import "./people.css";
 import type { MentionSearch } from "./bookText";
@@ -115,7 +116,10 @@ export const CharacterCard = ({
   }, [targetKey]);
 
   // Where it goes: above the bar, off the selected words, inside the window.
+  // Again whenever the window's room changes: on a phone the keyboard makes
+  // it shorter (and the bar rides up over it), and the card fits what is left.
   useLayoutEffect(() => {
+    let frame = 0;
     const measure = () => {
       const node = card.current;
       const dock = node?.parentElement;
@@ -124,21 +128,34 @@ export const CharacterCard = ({
       }
       const bar = dock.getBoundingClientRect();
       const toolbar = node.closest(".reader-scope")?.querySelector(".reader-toolbar")?.getBoundingClientRect();
+      // Typing: the field matters more than the words selected, which the keyboard has likely hidden anyway.
+      const typing = keyboardOpen();
+      const ceiling = cardCeiling(toolbar, window.innerWidth, insetTopNow());
       setPlace((before) => {
-        const next = placeCard({
+        const placed = placeCard({
           barTop: bar.top,
           barCentre: bar.left + bar.width / 2,
-          ceiling: Math.max(toolbar?.bottom ?? 0, 0) + CARD_GAP,
+          ceiling,
           cardWidth: node.offsetWidth,
           windowWidth: window.innerWidth,
-          selection: avoidRef.current?.() ?? null
+          selection: typing ? null : avoidRef.current?.() ?? null
         });
+        // Never past the ceiling, however short the window (a phone on its
+        // side with the keyboard up): what does not fit scrolls in the card.
+        const room = Math.floor(bar.top - placed.lift - ceiling);
+        const next = room > 0 && room < placed.height ? { ...placed, height: room } : placed;
         return next.height === before.height && next.lift === before.lift && next.shift === before.shift ? before : next;
       });
+      // Once it has its new height: the field being typed in, in sight.
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => keepFieldInView(card.current));
     };
     measure();
-    window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
+    const detach = onRoomChange(measure);
+    return () => {
+      detach();
+      window.cancelAnimationFrame(frame);
+    };
   }, []);
 
   // Focus comes in, and goes back to where it was on the way out.

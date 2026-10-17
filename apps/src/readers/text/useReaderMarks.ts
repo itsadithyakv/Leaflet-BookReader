@@ -1,4 +1,4 @@
-import { isPhoneShape, keyboardOverFrame, selectionDockFoot } from "../touchLayout";
+import { isPhoneShape, keyboardOverFrame, lengthIn, selectionDockFoot } from "../touchLayout";
 import { isTouchInput } from "../../platform/device";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EpubCFI } from "epubjs";
@@ -6,6 +6,7 @@ import { highlightsMarkdown, useAnnotations } from "../useAnnotations";
 import type { SearchHit } from "../searchBook";
 import { HIGHLIGHT_COLORS } from "../highlightColors";
 import { BAR_GAP, placeBar, selectedTextBox } from "../lookupPlacement";
+import { coverFromTop } from "../smartScroll";
 import { planHighlightDraws } from "../highlightDraws";
 import { highlightsUnder, joinNotes, type Under } from "../highlightOverlap";
 import { orderHighlights } from "../../components/highlights/highlightsView";
@@ -452,13 +453,18 @@ export const useSelectionDock = (reader: WithCover) => {
       const within = frame.getBoundingClientRect();
       // (By finger the dock rests over the gesture bar, or the keyboard: readers/touch.css.)
       const touch = isTouchInput();
-      const usualFoot = within.bottom - selectionDockFoot(touch, dockAbovePace, touch ? keyboardOverFrame() : 0);
+      const keyboard = touch ? keyboardOverFrame() : 0;
+      // A phone stacks it in the foot's column (readers/touch.css, `--reader-stack-foot`).
+      const phone = keyboard === 0 && frame.closest(".reader-scope[data-shape]") !== null;
+      const usualFoot =
+        within.bottom - (phone ? lengthIn(frame, "var(--reader-stack-foot, 8px)") : selectionDockFoot(touch, dockAbovePace, keyboard));
       const foot = placeBar({
         usualFoot,
         barHeight: bar.height,
         barLeft: bar.left,
         barRight: bar.right,
-        ceiling: (toolbarRef.current?.getBoundingClientRect().bottom ?? 0) + BAR_GAP,
+        // (Only a bar along the top: an upright phone's text reader has its bar at the foot.)
+        ceiling: coverFromTop({ top: 0, bottom: window.innerHeight }, toolbarRef.current?.getBoundingClientRect()) + BAR_GAP,
         selection: selectedTextBox(renditionRef.current?.getContents?.() ?? [])
       });
       setSelectionDockBottom(foot === usualFoot ? null : Math.round(within.bottom - foot));

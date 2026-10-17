@@ -1,9 +1,10 @@
-import { memo, useRef } from "react";
+import { memo, useRef, type CSSProperties } from "react";
 import type { Book } from "@shared/models/book";
 import { useCoverSrc } from "../hooks/useCoverSrc";
 import { useSeriesInfo } from "../library/useSeries";
 import { BookMenu } from "./BookMenu";
 import { useLongPress } from "../hooks/useLongPress";
+import { clothStyle } from "./shelf/spine";
 
 type Props = {
   book: Book;
@@ -44,8 +45,8 @@ const BookRowComponent = ({ book, onRefresh, onOpen, onRemoved }: Props) => {
         {resolvedCover ? (
           <img src={resolvedCover} alt={book.title} className="h-full w-full object-cover" onError={handleCoverError} />
         ) : (
-          <div className="flex h-full items-center justify-center text-[10px] text-on-surface-variant">
-            No cover
+          <div className="cloth-cover flex h-full items-center justify-center text-[10px] text-on-surface-variant" style={clothStyle(book.id || book.title) as CSSProperties}>
+            <span className="cloth-cover-note">No cover</span>
           </div>
         )}
       </div>

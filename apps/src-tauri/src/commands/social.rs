@@ -501,6 +501,51 @@ pub(crate) fn bare_handle(typed: &str) -> String {
 mod tests {
   use super::*;
 
+  /// The streak a profile publishes is the one the reader is shown, and two
+  /// devices holding the same synced ledger publish the same one, whatever
+  /// each device's own streak state said before (the server keeps whichever
+  /// arrives last).
+  #[test]
+  fn the_published_streak_is_the_local_one_and_the_same_on_every_device() {
+    let met = |key: &str| crate::habit::DayRecord { date_key: key.into(), minutes: 40.0, goal_minutes: 20, freeze_used: false, grace_used: false };
+    let short = |key: &str, minutes: f64, grace: bool, freeze: bool| crate::habit::DayRecord {
+      date_key: key.into(),
+      minutes,
+      goal_minutes: 20,
+      freeze_used: freeze,
+      grace_used: grace
+    };
+    let ledger = vec![
+      met("2026-03-12"),
+      met("2026-03-13"),
+      met("2026-03-14"),
+      short("2026-03-15", 6.0, true, false),
+      met("2026-03-16"),
+      short("2026-03-17", 1.0, false, true),
+      short("2026-03-18", 2.0, false, false),
+      met("2026-03-19"),
+      met("2026-03-20"),
+      short("2026-03-21", 11.0, false, false)
+    ];
+    let desktop = crate::db::tests::memory_db();
+    let phone = crate::db::tests::memory_db();
+    for day in &ledger {
+      desktop.put_day(day).expect("day");
+      phone.put_day(day).expect("day");
+    }
+    // The phone walked the ledger with a bank of its own once, and stamped
+    // the 18th: it held 16.
+    phone.put_day(&short("2026-03-18", 2.0, true, false)).expect("day");
+    let held = crate::habit::StreakState { current_streak: 16, longest_streak: 16, freezes: 2, grace_available: false, ..Default::default() };
+    write_streak_state(&phone, &held).expect("state");
+
+    for db in [&desktop, &phone] {
+      let shown = build_snapshot(db, "2026-03-21").expect("snapshot").streak;
+      let published = build_profile_update(db, "2026-03-21").expect("update").streak;
+      assert_eq!((shown, published), (2, Some(2)));
+    }
+  }
+
   /// The publish that follows a sync waits its turn; the first of a run never does.
   #[test]
   fn a_publish_nobody_asked_for_is_due_once_the_last_is_long_enough_ago() {

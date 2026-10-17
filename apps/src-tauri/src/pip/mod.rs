@@ -65,7 +65,8 @@ pub struct Item {
   /// Focus sessions the reader must have done first.
   #[serde(default)]
   pub sessions: i64,
-  /// A plant: the water (minutes of focus) it needs to ripen...
+  /// A plant: the water it needs to ripen (a focus minute is 1.5, a plain
+  /// minute 0.75)...
   #[serde(default)]
   pub water: f64,
   /// ...and the seeds a harvest gives.
@@ -294,7 +295,7 @@ impl fmt::Display for ShopError {
         write!(f, "That opens after {left} more focus session{}.", if *left == 1 { "" } else { "s" })
       }
       ShopError::NotOwned => write!(f, "Pip doesn't have that yet."),
-      ShopError::CannotAfford { short } => write!(f, "{short} more seeds needed. Read in focus to earn them."),
+      ShopError::CannotAfford { short } => write!(f, "{short} more seeds needed. Read to earn them; Focus earns double."),
       ShopError::ComesWithFloor => write!(f, "That one comes free with its floor of the house."),
       ShopError::NeedsLevel { level } => write!(f, "That opens at level {level}. Seeds you earn count, spent or not."),
       ShopError::NotAGift => write!(f, "That one can't be given as a gift.")

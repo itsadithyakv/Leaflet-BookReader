@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { graphOf, layoutGraph, neighbourhood, NODE_H, NODE_W, type GraphLink, type GraphPerson } from "./graphLayout";
+import { graphOf, layoutGraph, neighbourhood, nodeLines, NODE_H, NODE_W, type GraphLink, type GraphPerson } from "./graphLayout";
 import { castAt, type Entry, type LinkType } from "./model";
 
 const person = (id: string, name = id): GraphPerson => ({ id, name, color: null });
@@ -176,5 +176,23 @@ describe("the drawing is made from the cast as seen from a place", () => {
     expect(people).toHaveLength(3);
     expect(links.map((item) => item.id).sort()).toEqual(["l1", "l2", "l3"]);
     expect(links.find((item) => item.id === "l1")?.over).toBe(true);
+  });
+});
+
+describe("nodeLines", () => {
+  it("keeps a name that fits on one line", () => {
+    expect(nodeLines("Vin")).toEqual(["Vin"]);
+    expect(nodeLines("Elend  Venture")).toEqual(["Elend Venture"]);
+  });
+
+  it("breaks a longer name between words rather than cutting it short", () => {
+    expect(nodeLines("Lady Valette Renoux")).toEqual(["Lady Valette", "Renoux"]);
+    expect(nodeLines("Tindwyl of Terris")).toEqual(["Tindwyl of", "Terris"]);
+  });
+
+  it("cuts short only what two lines cannot hold", () => {
+    expect(nodeLines("Supercalifragilisticexpialidocious")).toEqual(["Supercalifragil…"]);
+    expect(nodeLines("Lord Straff Venture the Elder of Luthadel")).toEqual(["Lord Straff", "Venture the Eld…"]);
+    expect(nodeLines("Kelsier-the-Survivor-of-Hathsin Lord")).toEqual(["Kelsier-the-Sur…", "Lord"]);
   });
 });

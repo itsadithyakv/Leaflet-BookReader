@@ -3,10 +3,10 @@
 //! Pure, like the streak engine next door. There is no balance column
 //! anywhere: everything is recomputed from records every time it is asked for.
 //!
-//! * Reading in a focus session is **water** (one per minute, half as much
-//!   again for a session completed without leaving the book). Water flows to
-//!   the plants growing in the garden, oldest planting first; water with
-//!   nothing to grow waits in the rain barrel, up to a cap.
+//! * All reading is **water**: three quarters of a water a minute, and one and
+//!   a half for a minute read in a focus session (focus doubles it). Water flows to the
+//!   plants growing in the garden, oldest planting first; water with nothing
+//!   to grow waits in the rain barrel, up to a cap.
 //! * A plant **ripens** once it has had its minutes of water since it was
 //!   planted, and a ripe plant is **harvested** for seeds. A harvest counts only
 //!   if this same computation shows the plant ripe, so it cannot be faked by
@@ -17,7 +17,10 @@
 //!   and a granted wish (`pip::rewards`, worked out from the same records).
 //!
 //! Seeds earned before the garden existed (`GARDEN_SINCE`) were paid straight
-//! from minutes; they are kept, as if already harvested.
+//! from minutes; they are kept, as if already harvested. Water poured before
+//! a device took up the rule above (`water_drops`' `plain_since`) stays as it
+//! was poured: focus sessions only, half as much again for one completed
+//! without leaving the book.
 //!
 //! A session's minutes count only up to the reading the heartbeat recorded on
 //! the days it spans: the day it ended, then the day it started (a session
@@ -43,7 +46,18 @@ pub const WELCOME_GIFT: i64 = 50;
 pub const GOAL_DAY_BONUS: i64 = 4;
 pub const STREAK_BONUS_PER_DAY: i64 = 1;
 pub const STREAK_BONUS_CAP: i64 = 6;
-/// Water a completed, clean session adds on top of its minutes, as a fraction.
+/// Water a minute read in a focus session pours: twice a plain minute's, and
+/// what a clean, completed minute poured before, so finishing loses nothing.
+pub const FOCUS_WATER_PER_MINUTE: f64 = 1.5;
+/// Water a minute read with no focus session running pours.
+///
+/// Both rates are whole quarters and are applied to whole minutes, so every
+/// drop is a whole number of quarter-waters. Those are exact in an `f64` (a
+/// dyadic fraction), and so is every sum of them a garden could reach: water
+/// accrues exactly, in any order, and no day is rounded.
+pub const PLAIN_WATER_PER_MINUTE: f64 = 0.75;
+/// Before `plain_since`: what a completed, clean session added on top of its
+/// minutes, as a fraction. Kept for the days it was poured on.
 pub const CLEAN_WATER_BONUS: f64 = 0.5;
 /// The rain barrel: water read while nothing grows, waiting for a planting.
 pub const BARREL_CAP: f64 = 120.0;
@@ -165,11 +179,27 @@ pub fn streak_bonus_for(streak: i64) -> i64 {
 ///
 /// Sessions from before the garden keep the rule they were paid under, the
 /// day they ended on alone, so what they earned does not change.
+///
+/// A session listed twice (one id) counts once.
 fn counted_minutes<'a>(days: &HashMap<String, DayRecord>, sessions: &'a [SessionSeeds<'a>]) -> Vec<(&'a SessionSeeds<'a>, f64)> {
+  count_minutes(days, sessions).0
+}
+
+/// What is left of a day's reading once its sessions have counted theirs:
+/// the minutes read with no session running.
+type LeftOver<'a> = HashMap<&'a str, (f64, f64)>;
+
+/// `counted_minutes`, and what each day has left after it (read, slack).
+fn count_minutes<'a>(
+  days: &HashMap<String, DayRecord>,
+  sessions: &'a [SessionSeeds<'a>]
+) -> (Vec<(&'a SessionSeeds<'a>, f64)>, LeftOver<'a>) {
   let mut ordered: Vec<&SessionSeeds<'_>> = sessions.iter().collect();
   ordered.sort_by(|a, b| a.ended_at.cmp(b.ended_at).then_with(|| a.id.cmp(b.id)));
+  let mut seen: HashSet<&str> = HashSet::new();
+  ordered.retain(|session| seen.insert(session.id));
   // What is left of each day: the minutes read, and the slack.
-  let mut left: HashMap<&str, (f64, f64)> = HashMap::new();
+  let mut left: LeftOver<'a> = HashMap::new();
   let mut out = Vec::with_capacity(ordered.len());
   for session in ordered {
     let mut owed = session.minutes.max(0.0);
@@ -192,7 +222,7 @@ fn counted_minutes<'a>(days: &HashMap<String, DayRecord>, sessions: &'a [Session
     take(session.date_key, true);
     out.push((session, counted));
   }
-  out
+  (out, left)
 }
 
 /// The most minutes any one focus session counted: its own, up to what the
@@ -204,19 +234,50 @@ pub fn longest_focus(days: &HashMap<String, DayRecord>, sessions: &[SessionSeeds
     .fold(0.0, f64::max)
 }
 
-/// The water each session poured, in the order it poured: `(ended_at_ms, water)`.
+/// When a day's plain reading pours: the last moment of its date, read as
+/// UTC so every device puts it at the same instant, whatever its time zone.
+fn day_end_ms(date_key: &str) -> Option<i64> {
+  let next = parse_day(date_key)?.succ_opt()?;
+  Some(next.and_hms_opt(0, 0, 0)?.and_utc().timestamp_millis() - 1)
+}
+
+/// The water reading poured, in the order it poured: `(at_ms, water)`.
+///
+/// From `plain_since` (the local day this device took up the rule; never
+/// before the garden), every whole minute the heartbeat recorded waters:
+/// a minute a focus session counted pours `FOCUS_WATER_PER_MINUTE` when the
+/// session ended, and each day's minutes left over, read with no session
+/// running, pour `PLAIN_WATER_PER_MINUTE` at the day's end. A minute is
+/// counted once, for a session or as plain, never both (`counted_minutes`).
+/// Days before it keep the rule they were poured under: sessions alone, a
+/// whole minute each, half as much again for a completed, clean one.
 /// Sessions from before the garden paid seeds instead and pour nothing.
-pub fn water_drops(days: &HashMap<String, DayRecord>, sessions: &[SessionSeeds<'_>]) -> Vec<(i64, f64)> {
-  let mut drops: Vec<(i64, f64)> = counted_minutes(days, sessions)
+///
+/// Everything is worked out again from the records each time: a restart or a
+/// sync pours nothing twice, and gives the same water for the same records.
+pub fn water_drops(days: &HashMap<String, DayRecord>, sessions: &[SessionSeeds<'_>], plain_since: &str) -> Vec<(i64, f64)> {
+  let since = plain_since.max(GARDEN_SINCE);
+  let (counted, left) = count_minutes(days, sessions);
+  let mut drops: Vec<(i64, f64)> = counted
     .into_iter()
     .filter(|(session, counted)| in_garden_era(session.date_key) && *counted > 0.0)
     .map(|(session, counted)| {
       let whole = counted.floor();
+      if session.date_key >= since {
+        return (session.ended_at_ms, whole * FOCUS_WATER_PER_MINUTE);
+      }
       let bonus = if session.completed_clean { (whole * CLEAN_WATER_BONUS).floor() } else { 0.0 };
       (session.ended_at_ms, whole + bonus)
     })
-    .filter(|(_, water)| *water > 0.0)
     .collect();
+  for day in days.values().filter(|day| day.date_key.as_str() >= since) {
+    let plain = left.get(day.date_key.as_str()).map(|(read, _)| *read).unwrap_or(day.minutes);
+    let water = plain.max(0.0).floor() * PLAIN_WATER_PER_MINUTE;
+    if let Some(at) = day_end_ms(&day.date_key) {
+      drops.push((at, water));
+    }
+  }
+  drops.retain(|(_, water)| *water > 0.0);
   drops.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)));
   drops
 }
@@ -484,6 +545,9 @@ mod tests {
   use super::*;
 
   const DAY_MS: i64 = 86_400_000;
+  /// A device that took up today's water rule after every day in a test: the
+  /// rule those days were poured under (focus only, the clean bonus).
+  const BEFORE: &str = "9999-12-31";
 
   fn day(key: &str, minutes: f64, goal: i64) -> DayRecord {
     DayRecord {
@@ -635,22 +699,22 @@ mod tests {
   #[test]
   fn a_clean_session_waters_half_again() {
     let days = ledger(vec![day("2026-10-01", 40.0, 60)]);
-    let drops = water_drops(&days, &[session("a", "2026-10-01", 5, 20.0, true), session("b", "2026-10-01", 9, 10.0, false)]);
+    let drops = water_drops(&days, &[session("a", "2026-10-01", 5, 20.0, true), session("b", "2026-10-01", 9, 10.0, false)], BEFORE);
     assert_eq!(drops, vec![(5, 30.0), (9, 10.0)]);
   }
 
   #[test]
   fn a_timer_nobody_read_through_waters_nothing() {
     let days = ledger(vec![day("2026-10-01", 10.0, 60)]);
-    let drops = water_drops(&days, &[session("a", "2026-10-01", 5, 45.0, false)]);
+    let drops = water_drops(&days, &[session("a", "2026-10-01", 5, 45.0, false)], BEFORE);
     assert_eq!(drops, vec![(5, 11.0)], "10 read, plus the minute of flush slack");
-    assert!(water_drops(&HashMap::new(), &[session("b", "2026-10-02", 5, 30.0, false)]).is_empty());
+    assert!(water_drops(&HashMap::new(), &[session("b", "2026-10-02", 5, 30.0, false)], BEFORE).is_empty());
   }
 
   #[test]
   fn reading_before_the_garden_waters_nothing() {
     let days = ledger(vec![day("2026-09-20", 30.0, 60)]);
-    assert!(water_drops(&days, &[session("a", "2026-09-20", 5, 25.0, false)]).is_empty());
+    assert!(water_drops(&days, &[session("a", "2026-09-20", 5, 25.0, false)], BEFORE).is_empty());
   }
 
   #[test]
@@ -658,7 +722,7 @@ mod tests {
     // Thirty minutes read on the 1st with the timer on; Leaflet was closed and
     // the session ended when it next opened, on the 2nd.
     let days = ledger(vec![day("2026-10-01", 30.0, 20)]);
-    let drops = water_drops(&days, &[spanning("a", "2026-10-01", "2026-10-02", 5, 30.0, false)]);
+    let drops = water_drops(&days, &[spanning("a", "2026-10-01", "2026-10-02", 5, 30.0, false)], BEFORE);
     assert_eq!(drops, vec![(5, 30.0)]);
   }
 
@@ -667,7 +731,7 @@ mod tests {
     // Fifteen minutes before midnight and ten after, finished cleanly.
     let days = ledger(vec![day("2026-10-01", 15.0, 20), day("2026-10-02", 10.0, 20)]);
     let sessions = [spanning("a", "2026-10-01", "2026-10-02", 5, 25.0, true)];
-    let drops = water_drops(&days, &sessions);
+    let drops = water_drops(&days, &sessions, BEFORE);
     assert_eq!(drops, vec![(5, 37.0)], "25 minutes and half again, not the 10 read after midnight");
     assert_eq!(longest_focus(&days, &sessions), 25.0);
   }
@@ -737,6 +801,126 @@ mod tests {
     assert!(total(&more_read, &both) >= total(&days, &both));
   }
 
+  // ---- all reading waters (from `plain_since`) -------------------------------
+
+  /// The rule taken up on the 1st of October, in these tests.
+  const SINCE: &str = "2026-10-01";
+
+  fn end_of(date_key: &str) -> i64 {
+    day_end_ms(date_key).expect("a day")
+  }
+
+  #[test]
+  fn plain_reading_waters_half_a_water_a_minute() {
+    let days = ledger(vec![day("2026-10-01", 30.0, 20)]);
+    assert_eq!(water_drops(&days, &[], SINCE), vec![(end_of("2026-10-01"), 22.5)]);
+    // Whole minutes, as for a session: the part of a minute waits for the rest of it.
+    let days = ledger(vec![day("2026-10-01", 7.9, 20)]);
+    assert_eq!(water_drops(&days, &[], SINCE), vec![(end_of("2026-10-01"), 5.25)], "fractional water accrues");
+  }
+
+  #[test]
+  fn a_focus_minute_is_a_water_and_a_half_and_finishing_adds_nothing() {
+    let days = ledger(vec![day("2026-10-01", 20.0, 20)]);
+    let clean = water_drops(&days, &[session("a", "2026-10-01", 5, 20.0, true)], SINCE);
+    let left = water_drops(&days, &[session("a", "2026-10-01", 5, 20.0, false)], SINCE);
+    assert_eq!(clean, vec![(5, 30.0)], "no completion bonus: a clean minute pours what it did before");
+    assert_eq!(clean, left);
+  }
+
+  #[test]
+  fn a_minute_is_counted_for_a_session_or_as_plain_never_both() {
+    // Thirty minutes read: twenty in a session, ten with none running.
+    let days = ledger(vec![day("2026-10-01", 30.0, 20)]);
+    let drops = water_drops(&days, &[session("a", "2026-10-01", 5, 20.0, true)], SINCE);
+    assert_eq!(drops, vec![(5, 30.0), (end_of("2026-10-01"), 7.5)]);
+    // Focus doubles it: the same thirty minutes, all in focus, against none.
+    let all_focus = water_drops(&days, &[session("a", "2026-10-01", 5, 30.0, false)], SINCE);
+    let total = |drops: &[(i64, f64)]| drops.iter().map(|(_, water)| water).sum::<f64>();
+    assert_eq!(total(&all_focus), 2.0 * total(&water_drops(&days, &[], SINCE)));
+    // A session read across midnight takes its minutes from both days first.
+    let days = ledger(vec![day("2026-10-01", 15.0, 20), day("2026-10-02", 12.0, 20)]);
+    let drops = water_drops(&days, &[spanning("b", "2026-10-01", "2026-10-02", 9, 25.0, false)], SINCE);
+    assert_eq!(drops, vec![(9, 37.5), (end_of("2026-10-01"), 1.5)], "12 + 15 read, 25 in the session, 2 plain before midnight");
+    // A timer nobody read through pours only what was read, and takes no plain minute twice.
+    let days = ledger(vec![day("2026-10-01", 10.0, 20)]);
+    assert_eq!(water_drops(&days, &[session("c", "2026-10-01", 5, 45.0, false)], SINCE), vec![(5, 16.5)]);
+  }
+
+  #[test]
+  fn the_rule_starts_on_the_day_it_was_taken_up() {
+    let days = ledger(vec![day("2026-09-30", 30.0, 20), day("2026-10-01", 30.0, 20)]);
+    let sessions = [session("a", "2026-09-30", 5, 20.0, true), session("b", "2026-10-01", 9, 20.0, true)];
+    let drops = water_drops(&days, &sessions, SINCE);
+    assert_eq!(
+      drops,
+      vec![(5, 30.0), (9, 30.0), (end_of("2026-10-01"), 7.5)],
+      "the day before keeps its water (the clean bonus) and its plain minutes pay nothing"
+    );
+    // Never before the garden, whatever the day says.
+    let early = ledger(vec![day("2026-09-20", 30.0, 20)]);
+    assert!(water_drops(&early, &[], "2026-01-01").is_empty());
+  }
+
+  #[test]
+  fn working_it_out_again_pours_the_same_water() {
+    let days = ledger(vec![day("2026-10-01", 45.0, 20), day("2026-10-02", 18.0, 20)]);
+    let listed = vec![
+      session("a", "2026-10-01", 10, 12.0, true),
+      spanning("b", "2026-10-01", "2026-10-02", 20, 25.0, true),
+      session("c", "2026-10-02", 30, 4.0, false)
+    ];
+    let once = water_drops(&days, &listed, SINCE);
+    let mut shuffled = listed.clone();
+    shuffled.reverse();
+    assert_eq!(once, water_drops(&days, &listed, SINCE), "a restart");
+    assert_eq!(once, water_drops(&days, &shuffled, SINCE), "however the shelf was listed");
+    // A sync that brings the same sessions again (a union by id) pours nothing more.
+    let mut twice = listed.clone();
+    twice.extend(listed.iter().cloned());
+    assert_eq!(once, water_drops(&days, &twice, SINCE));
+    let total: f64 = once.iter().map(|(_, water)| water).sum();
+    // 63 read: 12 + 25 in focus, and the last session finds its day read out
+    // (a minute of slack); 26 plain, at half the rate.
+    assert_eq!(total, 38.0 * 1.5 + 26.0 * 0.75);
+  }
+
+  #[test]
+  fn a_session_recorded_later_moves_its_minutes_from_plain_to_focus() {
+    // Mid-session the heartbeat's minutes look like plain reading; once the
+    // session is on the shelf they are its, at the focus rate, and only once.
+    let days = ledger(vec![day("2026-10-01", 20.0, 20)]);
+    let during: f64 = water_drops(&days, &[], SINCE).iter().map(|(_, water)| water).sum();
+    let after: f64 = water_drops(&days, &[session("a", "2026-10-01", 5, 20.0, true)], SINCE).iter().map(|(_, water)| water).sum();
+    assert_eq!((during, after), (15.0, 30.0));
+  }
+
+  #[test]
+  fn quarter_waters_accrue_exactly_however_they_are_poured() {
+    // A minute of plain reading a day for twenty days is 15 water exactly:
+    // a radish (15) ripens on the twentieth, not a hair short of it.
+    let keys: Vec<String> = (1..=20).map(|d| format!("2026-10-{d:02}")).collect();
+    let days = ledger(keys.iter().map(|key| day(key, 1.4, 20)).collect());
+    let drops = water_drops(&days, &[], SINCE);
+    assert_eq!(drops.len(), 20);
+    assert!(drops.iter().all(|(_, water)| *water == 0.75));
+    let radish = [planting("p", 1, 0, 15.0, 4)];
+    let garden = grow(&drops, &radish, &[]);
+    assert_eq!(garden.plants[0].water, 15.0);
+    assert!(garden.plants[0].ripe);
+    assert!(!grow(&drops[..19], &radish, &[]).plants[0].ripe, "nineteen days is 14.25");
+    // Thousands of drops of mixed sizes, summed in any order, give the same
+    // whole number of quarters.
+    let many: Vec<(i64, f64)> = (0..5000).map(|i| (i, (i % 7) as f64 * 0.75 + (i % 3) as f64 * 1.5)).collect();
+    let quarters: i64 = (0..5000).map(|i| (i % 7) * 3 + (i % 3) * 6).sum();
+    let forward = grow(&many, &[], &[]).water;
+    let mut backward = many.clone();
+    backward.reverse();
+    let summed_back: f64 = backward.iter().map(|(_, water)| water).sum();
+    assert_eq!(forward, quarters as f64 / 4.0);
+    assert_eq!(summed_back, forward);
+  }
+
   // ---- growing --------------------------------------------------------------
 
   #[test]
@@ -801,9 +985,9 @@ mod tests {
     let mut shuffled = listed.clone();
     shuffled.reverse();
     let plants = [planting("p", 1, 0, 30.0, 9), planting("q", 2, 15, 60.0, 20)];
-    let once = grow(&water_drops(&days, &listed), &plants, &[]);
-    assert_eq!(once, grow(&water_drops(&days, &listed), &plants, &[]), "the same records, the same garden");
-    assert_eq!(once, grow(&water_drops(&days, &shuffled), &plants, &[]), "however the shelf was listed");
+    let once = grow(&water_drops(&days, &listed, BEFORE), &plants, &[]);
+    assert_eq!(once, grow(&water_drops(&days, &listed, BEFORE), &plants, &[]), "the same records, the same garden");
+    assert_eq!(once, grow(&water_drops(&days, &shuffled, BEFORE), &plants, &[]), "however the shelf was listed");
   }
 
   #[test]

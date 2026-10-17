@@ -4975,7 +4975,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
           <div
             className="pip-barrel"
             role="img"
-            aria-label={`Rain barrel: ${barrelWater} of ${barrelCap} water, for the next planting. Reading in focus fills it while nothing is growing.`}
+            aria-label={`Rain barrel: ${barrelWater} of ${barrelCap} water, for the next planting. Reading fills it while nothing is growing.`}
             title={`Rain barrel: ${barrelWater} / ${barrelCap} water`}
             style={{ left: barrel.x * scale, top: barrel.y * scale }}
           >

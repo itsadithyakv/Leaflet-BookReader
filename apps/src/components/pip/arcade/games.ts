@@ -8,7 +8,7 @@ import type { GameArt, GameSprite } from "./gameArt";
  *
  * Difficulty ramps with play time on a fixed curve, and obstacles come from a
  * seeded generator, so a run feels fair and learnable rather than random.
- * None of this mints seeds: seeds grow only from reading in focus.
+ * None of this mints seeds: seeds grow only from reading.
  *
  * The art is games-art.js (Pip's poses and the games' sprites, with hit
  * boxes); where a sprite is missing the game draws a plain stand-in.

@@ -34,7 +34,16 @@ export const PipHome = () => {
   const label = inside ? "Leaflet. Let Pip out" : "Leaflet. Call Pip home";
 
   return (
-    <button type="button" className="leaflet-logo-pip pip-home" data-pip-home onClick={() => setHome(!inside)} aria-label={label} title={inside ? "Let Pip out" : "Call Pip home"}>
+    <button
+      type="button"
+      className="leaflet-logo-pip pip-home"
+      data-pip-home
+      // Out in the app: on a phone the spot is drawn as her open door (styles/phone-polish.css).
+      data-out={present ? undefined : ""}
+      onClick={() => setHome(!inside)}
+      aria-label={label}
+      title={inside ? "Let Pip out" : "Call Pip home"}
+    >
       {/* Held still: at home she is the logo, and a logo that fidgets beside the page being read pulls the eye. */}
       <PipSprite move={move} size={44} snap="nearest" still />
     </button>

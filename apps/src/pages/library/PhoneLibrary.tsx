@@ -4,14 +4,18 @@ import type { BookFilter } from "@shared/models/book";
 import { UiIcon } from "../../components/UiIcon";
 import { PhoneSheet, SheetChoice } from "../../components/ui/PhoneSheet";
 import { getSessionProgress, sessionElapsedMs, type ActiveSession } from "../../store/habitStore";
+import { useLongPress } from "../../hooks/useLongPress";
+import { FocusDouble } from "../../components/focus/FocusDouble";
+import { FOCUS_LENGTHS, focusLengthsWith } from "../../components/focus/focusDeal";
 
 /**
- * The Library's top on a phone: the streak and the focus session in one slim card (its choices in a
- * sheet), and the shelf's filters behind one key (in a sheet too), so the first screen shows books.
+ * The Library's top on a phone: the focus session as one key beside the search (a tap starts it at the
+ * usual length; held, or right-clicked, its choices in a sheet; a running session is a slim card), and the shelf's filters behind one key (in a sheet too), so the
+ * first screen shows books.
  * The desktop keeps its large card and its row of selects (LibraryPage).
  */
 
-export const SESSION_LENGTHS = [10, 20, 30, 45] as const;
+export const SESSION_LENGTHS = FOCUS_LENGTHS;
 
 type FocusStripProps = {
   streakTitle: string;
@@ -51,6 +55,7 @@ export const PhoneFocusStrip = ({
   onEnd
 }: FocusStripProps) => {
   const [open, setOpen] = useState(false);
+  const hold = useLongPress(() => setOpen(true));
   const left = useMinutesLeft(session);
   const progress = session ? Math.min(100, Math.round(getSessionProgress(session) * 100)) : 0;
 
@@ -76,23 +81,28 @@ export const PhoneFocusStrip = ({
 
   return (
     <>
-      <div className="phone-focus-strip paper-surface rounded-xl">
-        <p className="min-w-0 flex-1 truncate text-lg font-bold text-on-surface">{streakTitle}</p>
-        <button
-          type="button"
-          className="tactile-button tactile-button-primary phone-focus-key"
-          data-tour="session"
-          onClick={() => setOpen(true)}
-          title="A focus session: Pip counts your minutes, and each one earns seeds"
-        >
-          <Timer size={16} aria-hidden />
-          Focus
-        </button>
-      </div>
+      {/* At rest, one key at the end of the search row: the streak is said under the Library's heading.
+          A tap starts the session; held (or right-clicked), the sheet picks its length. */}
+      <button
+        type="button"
+        className="tactile-button phone-focus-key"
+        data-tour="session"
+        {...hold}
+        onClick={onStart}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          setOpen(true);
+        }}
+        title={`${streakTitle} Focus for ${duration} min. Hold to change.`}
+      >
+        <Timer size={16} aria-hidden />
+        Focus
+        <FocusDouble />
+      </button>
       {open && (
         <PhoneSheet title="Focus session" onClose={() => setOpen(false)}>
           <div className="sheet-choices" role="group" aria-label="Session length">
-            {SESSION_LENGTHS.map((minutes) => (
+            {focusLengthsWith(duration).map((minutes) => (
               <SheetChoice key={minutes} chosen={duration === minutes} onClick={() => setDuration(minutes)}>
                 {minutes} min
               </SheetChoice>
@@ -118,6 +128,7 @@ export const PhoneFocusStrip = ({
             }}
           >
             Start {duration}-minute session
+            <FocusDouble />
           </button>
         </PhoneSheet>
       )}

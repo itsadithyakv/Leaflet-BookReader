@@ -203,7 +203,7 @@ fn goal_done(catalogue: &Catalogue, id: &str, facts: &Facts<'_>) -> bool {
   };
   match id {
     "plant" => facts.plantings > 0,
-    // Water reached a plant: reading in focus after planting, or before it
+    // Water reached a plant: reading after planting, or before it
     // (the barrel pours into the new planting). More reading or more
     // plantings only ever bring more water to the plants.
     "water" => facts.garden.plants.iter().any(|plant| plant.water >= 1.0),

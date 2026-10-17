@@ -35,7 +35,7 @@ export const SeedsPanel = ({ spendable, earned, spent, ahead, water, onMood, onW
       <CountUp value={spendable} />
     </p>
     <Hints>
-      <Hint icon="garden" more="Reading in focus waters Pip's garden; ripe plants are picked for seeds.">
+      <Hint icon="garden" more="Reading waters Pip's garden, twice as much in Focus; ripe plants are picked for seeds.">
         Seeds grow in the garden
       </Hint>
       <Hint icon="sparkle" more="Goal days add a few more seeds, and a few more still on a streak.">

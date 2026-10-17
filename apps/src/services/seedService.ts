@@ -58,6 +58,19 @@ export const seedExtras = (overview: PipOverview | null): SeedExtras => (overvie
 export const goalPrize = (seeds: number, days: number, rules: Pick<StakeRules, "gainPerDay">): number =>
   seeds + Math.max(1, Math.floor((seeds * (days - 2) * rules.gainPerDay) / 100));
 
+/**
+ * Why a freeze cannot be bought now, or null when it can: one rule for every
+ * place that sells one (Pip's Seeds drawer, the streak's own panel). The
+ * limits are Rust's (`pip/freezes.rs`); this only says them before asking.
+ */
+export const freezeRefusal = (shop: FreezeShop | undefined, balance: number): string | null => {
+  if (!shop || shop.price <= 0) return "Freezes are bought in the app";
+  if (shop.held >= shop.cap) return `You hold ${shop.held}, the most there is room for`;
+  if (shop.boughtThisMonth >= shop.perMonth) return `${shop.perMonth} a month, and this month's are bought`;
+  if (balance < shop.price) return `${shop.price - balance} more seeds needed`;
+  return null;
+};
+
 const NEEDS_APP = "This needs the desktop app.";
 
 /** Runs a command that answers with the overview, and puts the answer in the store. */

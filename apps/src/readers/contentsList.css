@@ -284,23 +284,29 @@
 }
 
 /* The list's own close button, for a list left open beside the page. */
+/* A quiet mark at the end of the "Chapters" caption, in the caption's own ink:
+   no box or border (it read as a stray button), a soft round wash under a
+   pointer or a press. */
 .reader-contents-close {
+  position: relative;
   display: inline-flex;
   flex: none;
   width: 28px;
   height: 28px;
   /* No taller than the caption beside it: the list starts where it always did. */
-  margin: -6px 2px -6px 0;
+  margin: -6px -4px -6px 0;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--contents-rule);
-  border-radius: 8px;
-  background: var(--contents-band);
-  color: var(--reader-icon);
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--reader-muted);
+  transition: background-color 120ms ease, color 120ms ease;
 }
 
 .reader-contents-close:hover,
-.reader-contents-close:focus-visible {
+.reader-contents-close:focus-visible,
+.reader-contents-close:active {
   color: var(--reader-text);
   background: var(--chapter-hover-bg);
 }
@@ -569,10 +575,12 @@
     content: "";
   }
 
-  .reader-contents-close {
-    width: 44px;
-    height: 44px;
-    margin: -14px -6px -14px 0;
+  /* Drawn the same size as anywhere else, hit at 44 px: a 44 px bordered box
+     here stood out over the list's top and its scrollbar, and looked bolted on. */
+  .reader-contents-close::after {
+    position: absolute;
+    inset: -8px;
+    content: "";
   }
 }
 

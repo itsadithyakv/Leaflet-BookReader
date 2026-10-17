@@ -1,0 +1,435 @@
+/* The app's pages under a finger, calmer (docs/android.md). Loaded after touch-shell.css, so a rule
+   here at the same weight wins. A desktop is untouched: every rule is under a finger's media
+   query, `(hover: none) and (pointer: coarse)`, or under the phone's shape as well. Pip's arcade
+   keeps its own pixel-paper keys (index.css, `.pip-arcade .tactile-button`). */
+
+/* ---- Buttons: flat and tonal under a finger -------------------------------------------------- */
+
+/* On a desktop a key is raised, lifts under the pointer and sinks when pressed. A finger has no
+   hover (a tapped key kept its lift and glow until the next tap), and every key on a phone screen
+   raised at once made the screen loud. Here: a tonal face, a hairline, at most a 1 px shadow;
+   pressed, it darkens and gives a little, without moving anything around it. */
+@media (hover: none) and (pointer: coarse) {
+  :is(.tactile-button, .key-button):not(.pip-arcade *) {
+    border: 1px solid rgb(var(--color-outline-variant) / 0.3);
+    border-radius: 12px;
+    background: rgb(var(--color-surface-high));
+    color: rgb(var(--color-on-surface));
+    box-shadow: 0 1px 1px rgb(0 0 0 / 0.06);
+    transition:
+      transform 90ms ease,
+      filter 90ms ease,
+      background-color 140ms ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  :is(.tactile-button, .key-button):not(.pip-arcade *):hover {
+    border-color: rgb(var(--color-outline-variant) / 0.3);
+    color: rgb(var(--color-on-surface));
+    box-shadow: 0 1px 1px rgb(0 0 0 / 0.06);
+    transform: none;
+  }
+
+  :is(.tactile-button, .key-button):not(.pip-arcade *):active:not(:disabled) {
+    box-shadow: none;
+    filter: brightness(0.93);
+    transform: scale(0.97);
+  }
+
+  /* Chosen (grid or list, a toggle): a green tint, not pressed into the page. */
+  :is(.tactile-button, .key-button):not(.pip-arcade *)[aria-pressed="true"] {
+    border-color: transparent;
+    background: rgb(var(--color-primary) / 0.18);
+    color: rgb(var(--color-primary-container));
+    box-shadow: none;
+    transform: none;
+  }
+
+  /* The one thing to do on a screen: solid green, no gradient, no glow. */
+  .tactile-button-primary:not(.pip-arcade *),
+  .tactile-button-primary:not(.pip-arcade *):hover {
+    border-color: transparent;
+    background: rgb(var(--color-primary-container));
+    color: rgb(var(--color-on-primary-container));
+    box-shadow: none;
+    filter: none;
+  }
+
+  .tactile-button-primary:not(.pip-arcade *):active:not(:disabled) {
+    filter: brightness(0.9);
+  }
+
+  :root[data-theme="dark"] :is(.tactile-button, .key-button):not(.pip-arcade *)[aria-pressed="true"] {
+    color: rgb(var(--color-primary));
+  }
+
+  :root[data-theme="dark"] :is(.tactile-button, .key-button):not(.pip-arcade *) {
+    box-shadow: none;
+  }
+
+  /* The profile face in the header: a plain ring, not a raised disc that glows once tapped. */
+  .profile-button,
+  .profile-button:hover,
+  .profile-button-open {
+    border-color: rgb(var(--color-outline-variant) / 0.4);
+    box-shadow: none;
+    transform: none;
+  }
+}
+
+/* ---- Pip's home in the header, while she is out ------------------------------------------------ */
+
+/* The logo is Pip's spot. With her out in the app it drew her grey silhouette, which read as a
+   picture that failed to load. On a phone it is her door instead, left open: a pixel arch in green. */
+@media (hover: none) and (pointer: coarse) {
+  .pip-home[data-out] {
+    position: relative;
+  }
+
+  .pip-home[data-out] .pip-sprite {
+    opacity: 0;
+  }
+
+  .pip-home[data-out]::before {
+    position: absolute;
+    left: 50%;
+    bottom: 8px;
+    width: 24px;
+    height: 28px;
+    transform: translateX(-50%);
+    background: rgb(var(--color-primary) / 0.7);
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 14' shape-rendering='crispEdges'%3E%3Cpath d='M4 0h4v1H4zM2 1h2v1H2zM8 1h2v1H8zM1 2h1v11H1zM10 2h1v11h-1zM0 13h12v1H0zM8 8h1v1H8z'/%3E%3C/svg%3E")
+      center / 100% 100% no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 14' shape-rendering='crispEdges'%3E%3Cpath d='M4 0h4v1H4zM2 1h2v1H2zM8 1h2v1H8zM1 2h1v11H1zM10 2h1v11h-1zM0 13h12v1H0zM8 8h1v1H8z'/%3E%3C/svg%3E")
+      center / 100% 100% no-repeat;
+    content: "";
+    pointer-events: none;
+  }
+}
+
+/* ---- The Library's covers ----------------------------------------------------------------------- */
+
+/* A book with no cover: "No cover yet" on a desktop, as it was; under a finger, a cover drawn in the
+   book's own bookcloth (components/shelf/spine.ts), lettered with its title and author. */
+.book-cover-blank-title,
+.book-cover-blank-author {
+  display: none;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .book-cover-blank.book-cover-blank {
+    position: relative;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 8px;
+    padding: 20% 11% 11% 17%;
+    background:
+      linear-gradient(90deg, rgb(0 0 0 / 0.26), rgb(0 0 0 / 0.08) 8%, rgb(255 255 255 / 0.1) 9.5%, transparent 13%),
+      linear-gradient(160deg, rgb(255 255 255 / 0.08), transparent 45%, rgb(0 0 0 / 0.14)),
+      var(--cloth);
+    color: var(--ink);
+    text-align: left;
+  }
+
+  .book-cover-blank-note {
+    display: none;
+  }
+
+  /* Small covers (a list row, a shelf's stack): the cloth, and the stack's title in its ink. */
+  .cloth-cover.cloth-cover {
+    background:
+      linear-gradient(90deg, rgb(0 0 0 / 0.26), rgb(0 0 0 / 0.08) 9%, rgb(255 255 255 / 0.1) 11%, transparent 15%),
+      var(--cloth);
+    color: var(--ink);
+    font-weight: 700;
+  }
+
+  .cloth-cover-note {
+    display: none;
+  }
+
+  .book-cover-blank-title {
+    display: -webkit-box;
+    overflow: hidden;
+    font-family: "ZT Nature", "Segoe UI", system-ui, sans-serif;
+    font-size: clamp(14px, 4.6vw, 20px);
+    font-weight: 700;
+    line-height: 1.12;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+  }
+
+  .book-cover-blank-author {
+    display: block;
+    margin-top: auto;
+    overflow: hidden;
+    border-top: 1px solid color-mix(in srgb, var(--ink) 35%, transparent);
+    padding-top: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.25;
+    opacity: 0.85;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* A tap is not a hover: the card does not lift, and "Resume Reading" does not stay over the
+     cover after a tap (the card opens the book itself). */
+  .book-card.book-card:hover {
+    transform: none;
+  }
+
+  .book-card-hover.book-card-hover {
+    display: none;
+  }
+}
+
+/* Two covers to a row on an upright phone (components/BookGrid.tsx), the words under them compact:
+   a 15 px title, the author, a thin line for how far, the percent small beside nothing else. */
+@media (hover: none) and (pointer: coarse) and (max-width: 767px) {
+  .book-card .book-card-meta {
+    padding-top: 8px;
+  }
+
+  .book-card .book-title {
+    font-size: 15px;
+    line-height: 1.3;
+  }
+
+  .book-card .book-card-progress {
+    margin-top: 2px;
+  }
+
+  .book-card .book-card-progress div {
+    height: 3px;
+  }
+
+  .book-card .book-card-progress > p {
+    margin-top: 3px;
+    font-size: 10px;
+  }
+}
+
+/* ---- The Library's top on a phone (pages/library/PhoneLibrary.tsx) -------------------------- */
+
+/* Search and the focus session's key share one row: the first screen is books, not a card that
+   said "Start Your Streak" (the streak is in the line under the heading once there is one). */
+.phone-search-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.phone-search-row > .phone-focus-key {
+  min-height: 44px;
+  padding: 0 12px;
+}
+
+.phone-search-row .inset-field {
+  min-height: 44px;
+}
+
+/* ---- The book being read, on a phone ------------------------------------------------------------- */
+
+/* One slim line, 56 px (it was 84, and lay over the page's last row and Social's numbers): a small
+   cover, the title and author, a hairline of progress, and a tonal play key. */
+@media (hover: none) and (pointer: coarse) and (max-width: 767px),
+  (hover: none) and (pointer: coarse) and (max-height: 520px) {
+  .now-reading-bar:not(.is-small) {
+    grid-template-columns: 30px minmax(0, 1fr) auto;
+    gap: 10px;
+    min-height: 56px;
+    border-color: rgb(var(--color-outline-variant) / 0.3);
+    border-radius: 16px;
+    padding: 5px 6px 5px 8px;
+    background: rgb(var(--color-surface-high) / 0.98);
+    box-shadow: 0 6px 16px rgb(0 0 0 / 0.16);
+  }
+
+  .now-reading-bar::after {
+    content: none;
+  }
+
+  .now-reading-bar:not(.is-small) .now-reading-cover {
+    width: 30px;
+    height: 42px;
+    border-radius: 3px 6px 6px 3px;
+    box-shadow: 1px 2px 4px rgb(0 0 0 / 0.22);
+  }
+
+  .now-reading-bar:not(.is-small) .now-reading-details h5 {
+    font-size: 14px;
+    line-height: 1.25;
+  }
+
+  .now-reading-bar:not(.is-small) .now-reading-details p {
+    font-size: 11.5px;
+    line-height: 1.3;
+  }
+
+  .now-reading-bar:not(.is-small) .now-reading-progress {
+    height: 3px;
+    margin-top: 4px;
+    box-shadow: none;
+  }
+
+  .now-reading-progress > span {
+    box-shadow: none;
+  }
+
+  .now-reading-bar .now-reading-actions {
+    gap: 2px;
+  }
+
+  .now-reading-bar:not(.is-small) .now-reading-action {
+    width: 44px;
+    height: 44px;
+  }
+
+  .now-reading-action,
+  .now-reading-action:hover {
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+    transform: none;
+  }
+
+  .now-reading-action-primary,
+  .now-reading-action-primary:hover {
+    border-radius: 999px;
+    background: rgb(var(--color-primary) / 0.2);
+    color: rgb(var(--color-primary-container));
+  }
+
+  :root[data-theme="dark"] .now-reading-action-primary {
+    color: rgb(var(--color-primary));
+  }
+
+  .now-reading-action:active {
+    box-shadow: none;
+    filter: brightness(0.92);
+    transform: scale(0.94);
+  }
+}
+
+/* ---- Room at the foot of a page ------------------------------------------------------------------ */
+
+/* A page that scrolls ends clear of what floats over its foot: the book being read and, while Pip is
+   out, her lane along its top (components/PipWorld.tsx). `--dock-room` is the bar and its gap; the tab
+   bar is the page's own padding already (index.css). The last row and Social's numbers used to end
+   under the bar. */
+@media (hover: none) and (pointer: coarse) and (max-width: 767px) and (min-height: 521px) {
+  .app-shell {
+    --dock-room: 0px;
+    --pip-lane: 0px;
+  }
+
+  .app-shell:has(.now-reading-dock) {
+    /* The bar's 56 px and its 8 px over the tab bar. */
+    --dock-room: 64px;
+  }
+
+  .app-shell:has(.now-reading-dock.is-small) {
+    --dock-room: 58px;
+  }
+
+  .app-shell:has(.pip-home[data-out]) {
+    --pip-lane: 56px;
+  }
+
+  html .app-shell .dock-clear.dock-clear {
+    padding-bottom: calc(var(--dock-room) + var(--pip-lane));
+  }
+
+  .now-reading-dock {
+    bottom: calc(var(--mobile-nav-height) + 8px);
+  }
+
+  .app-shell:has(.now-reading-dock) .app-toast,
+  .app-shell:has(.now-reading-dock) .update-card {
+    bottom: calc(var(--mobile-nav-height) + var(--dock-room) + 10px);
+  }
+}
+
+/* A phone on its side: no tab bar; the bar is 24 px over the gesture bar. */
+@media (hover: none) and (pointer: coarse) and (max-height: 520px) {
+  .app-shell {
+    --dock-room: 0px;
+    --pip-lane: 0px;
+  }
+
+  .app-shell:has(.now-reading-dock) {
+    --dock-room: calc(56px + var(--inset-bottom));
+  }
+
+  .app-shell:has(.pip-home[data-out]) {
+    --pip-lane: 56px;
+  }
+
+  html .app-shell .dock-clear.dock-clear {
+    padding-bottom: calc(var(--dock-room) + var(--pip-lane));
+  }
+}
+
+/* ---- Social on a phone (pages/SocialPage.tsx) ----------------------------------------------------- */
+
+/* Tabs as one row of chips that scrolls sideways (components/ui/SegmentedTabs.tsx brings the chosen
+   one into view), never two lines; and the six numbers as a compact 3 x 2. */
+@media (hover: none) and (pointer: coarse) and (max-width: 767px) {
+  .segmented-tabs.segmented-tabs {
+    flex-wrap: nowrap;
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    border-radius: 999px;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .segmented-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .segmented-tabs > .segmented-tab {
+    flex: none;
+    white-space: nowrap;
+  }
+
+  /* The heading and its tabs, one over the other: the row has the page's width to scroll in. */
+  .social-head.social-head {
+    gap: 12px;
+  }
+
+  .social-head > [role="tablist"] {
+    width: 100%;
+  }
+
+  .stat-tiles.stat-tiles {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  /* A label that takes two lines ("Books finished") keeps its number on the row's line. */
+  .stat-tile.stat-tile {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 10px 10px 11px;
+    border-radius: 14px;
+  }
+
+  .stat-tile > p:first-child {
+    font-size: 9.5px;
+    line-height: 1.25;
+    letter-spacing: 0.08em;
+  }
+
+  .stat-tile-value.stat-tile-value {
+    margin-top: 4px;
+    font-size: 1.25rem;
+    line-height: 1.6rem;
+  }
+}

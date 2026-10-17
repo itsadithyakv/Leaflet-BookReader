@@ -1935,7 +1935,7 @@ export const BaseScreen = ({
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <h3 className="pip-base-title" title="Seeds grow here, watered by reading in focus. Seeds are what Pip's shop takes: her looks, her things, her rooms.">
+              <h3 className="pip-base-title" title="Seeds grow here, watered by reading (twice as much in Focus). Seeds are what Pip's shop takes: her looks, her things, her rooms.">
                 The garden
               </h3>
               <p className="pip-base-level" title="Beds planted, of the beds there are">

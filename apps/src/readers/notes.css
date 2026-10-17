@@ -414,10 +414,28 @@
   gap: 6px;
 }
 
+/* Between the head and the foot, which always show: the words, the colours
+   and the note, scrolling when the card has less room than they take (they
+   were cut off at the foot, and Done with them). Room round them for a
+   focus ring. */
+.reader-note-card-body {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 10px;
+  margin: -3px -4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 3px 4px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--reader-border) transparent;
+}
+
 /* The words highlighted, on their colour; a long passage scrolls here. */
 .reader-note-quote {
   min-height: 1.55em;
-  flex: 0 1 auto;
+  flex: none;
   margin: 0;
   overflow-y: auto;
   overscroll-behavior: contain;

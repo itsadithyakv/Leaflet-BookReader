@@ -448,7 +448,7 @@ export const popOff = (image: ImageData | null, box: Box, style: "pick" | "lift"
 };
 
 /**
- * Rain over a box, falling onto its soil line: what reading in focus poured
+ * Rain over a box, falling onto its soil line: what reading poured
  * into a plot while the garden was out of sight. Resolves as the last drop lands.
  */
 export const rain = (box: Box, soilY: number, { px, count = 12, spread = 700 }: { px: number; count?: number; spread?: number }): Promise<void> => {

@@ -1,5 +1,5 @@
 import { useMemo, useRef, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
-import { graphOf, layoutGraph, neighbourhood, NODE_H, NODE_W, type GraphEdge } from "./graphLayout";
+import { graphOf, layoutGraph, neighbourhood, nodeLines, NODE_H, NODE_LINE, NODE_W, type GraphEdge } from "./graphLayout";
 import type { CastView } from "./model";
 import { linkWords } from "./relations";
 
@@ -14,6 +14,12 @@ type RelationsGraphProps = {
 export const WHOLE_CAST = 24;
 
 const path = (points: GraphEdge["points"]) => points.map(([x, y], index) => `${index === 0 ? "M" : "L"}${x} ${y}`).join(" ");
+/** Where an edge's words go: over the middle of its line. */
+const labelAt = (points: GraphEdge["points"]): [number, number] => {
+  const mid = points[Math.floor((points.length - 1) / 2)];
+  const next = points[Math.floor((points.length - 1) / 2) + 1] ?? mid;
+  return [(mid[0] + next[0]) / 2, (mid[1] + next[1]) / 2 - 4];
+};
 const short = (name: string) => (name.length > 16 ? `${name.slice(0, 15)}…` : name);
 
 /**
@@ -94,6 +100,8 @@ export const RelationsGraph = ({ cast, focus, onOpen }: RelationsGraphProps) => 
       ref={frame}
       className="reader-people-graph reader-border"
       tabIndex={0}
+      // Dragged to look round it: not a pull on the sheet it is in (components/ui/sheetSwipe.ts).
+      data-no-sheet-drag=""
       role="group"
       aria-label="Relations, drawn. Arrow keys scroll; each person opens their card."
       onPointerDown={onPointerDown}
@@ -106,17 +114,10 @@ export const RelationsGraph = ({ cast, focus, onOpen }: RelationsGraphProps) => 
           {graph.edges.map((edge) => {
             const tie = edge.type === "other" && edge.label ? `(${edge.label})` : linkWords(edge.type, true, edge.label);
             const words = `${nameOf(edge.from)} ${tie} ${nameOf(edge.to)}${edge.over ? " (ended)" : ""}`;
-            const mid = edge.points[Math.floor((edge.points.length - 1) / 2)];
-            const next = edge.points[Math.floor((edge.points.length - 1) / 2) + 1] ?? mid;
             return (
               <g key={edge.id} className={`reader-people-edge is-${edge.kind}${edge.over ? " is-over" : ""}`}>
                 <title>{words}</title>
                 <path d={path(edge.points)} />
-                {edge.kind === "other" && (
-                  <text x={(mid[0] + next[0]) / 2} y={(mid[1] + next[1]) / 2 - 4} textAnchor="middle">
-                    {short(edge.label ?? linkWords(edge.type, true, null))}
-                  </text>
-                )}
               </g>
             );
           })}
@@ -135,11 +136,31 @@ export const RelationsGraph = ({ cast, focus, onOpen }: RelationsGraphProps) => 
           >
             <title>{node.name}</title>
             <rect width={NODE_W} height={NODE_H} rx={9} />
-            <text x={NODE_W / 2} y={NODE_H / 2} textAnchor="middle" dominantBaseline="central">
-              {short(node.name)}
+            <text x={NODE_W / 2} y={NODE_H / 2} textAnchor="middle" dominantBaseline="central" className={node.name.length > NODE_LINE ? "is-two" : undefined}>
+              {nodeLines(node.name).map((line, index, lines) => (
+                <tspan key={index} x={NODE_W / 2} y={NODE_H / 2 + (index - (lines.length - 1) / 2) * 12} dominantBaseline="central">
+                  {line}
+                </tspan>
+              ))}
             </text>
           </g>
         ))}
+        {/* The words on the lines, over the people: two people side by side
+            left too little line between them, and the word went under a box. */}
+        <g aria-hidden="true">
+          {graph.edges
+            .filter((edge) => edge.kind === "other")
+            .map((edge) => {
+              const [x, y] = labelAt(edge.points);
+              return (
+                <g key={edge.id} className={`reader-people-edge is-other${edge.over ? " is-over" : ""}`}>
+                  <text x={x} y={y} textAnchor="middle">
+                    {short(edge.label ?? linkWords(edge.type, true, null))}
+                  </text>
+                </g>
+              );
+            })}
+        </g>
       </svg>
     </div>
   );

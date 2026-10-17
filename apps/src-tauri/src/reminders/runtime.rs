@@ -78,6 +78,7 @@ pub(super) fn habit_view(db: &db::Database, settings: &ReminderSettings, now: Na
   let key = today_key(now);
   let days = db.reading_days().map_err(|e| e.to_string())?;
   let previous = crate::commands::read_streak_state(db);
+  let bought = crate::pip::freezes::bought_days(&db.pip_purchases().map_err(|e| e.to_string())?);
   let goal = crate::commands::read_goal(db);
   // Only the close nudge cares about sessions; the rest skip the query.
   let last_session_end = if settings.close_nudge {
@@ -91,7 +92,7 @@ pub(super) fn habit_view(db: &db::Database, settings: &ReminderSettings, now: Na
   } else {
     None
   };
-  Ok((HabitView::from_ledger(&days, &previous, goal, &key, last_session_end), goal))
+  Ok((HabitView::from_ledger(&days, &bought, &previous, goal, &key, last_session_end), goal))
 }
 
 /// The end of a reminder's day, when its toast leaves the notification centre.

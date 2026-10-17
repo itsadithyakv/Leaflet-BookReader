@@ -9,6 +9,7 @@ import { ReaderMoreMenu } from "./ReaderMoreMenu";
 import { ReaderLookRows, RotationChoice } from "./ReaderTouchRows";
 import { ReadingLightRows } from "../ReaderLight";
 import { isPhoneShape } from "../touchLayout";
+import { useReaderSheetSwipe } from "../readerSheets";
 import type { ReaderScope } from "./scope";
 
 /** The bar across the top: back to the library, the title, and the panels' buttons. */
@@ -20,9 +21,18 @@ export const ReaderToolbar = ({ reader }: { reader: ReaderScope }) => {
     setBookmarkPanelOpen, setFontPanelOpen, setFontSize, setNotesFocus, setSearchOpen, shape, sidebarOpen, sidebarPinned,
     spacing, toggleContents, toolbarRef, typeface
   } = reader;
-  // A phone has room for four (Back, Contents, Aa, ···): search, characters
-  // and notes are rows of the ··· sheet there, and their panels open from it.
+  // A phone upright has room for four (Back, Contents, Aa, ···): search, characters and notes are
+  // rows of the ··· sheet there. On its side the strip has room for search and notes too.
   const phone = isPhoneShape(shape);
+  const closeSheets = () => {
+    setFontPanelOpen(false);
+    reader.setMorePanelOpen(false);
+    closeAmbiencePopover();
+    setNotesFocus(null);
+    setBookmarkPanelOpen(false);
+  };
+  // A swipe down a sheet closes it, as a tap above it does (readers/readerSheets.ts).
+  useReaderSheetSwipe(shape === "upright", (panel) => (panel.matches(".reader-search") ? closeSearch() : closeSheets()));
   return (
     <header
       ref={toolbarRef}
@@ -37,13 +47,7 @@ export const ReaderToolbar = ({ reader }: { reader: ReaderScope }) => {
           type="button"
           className="reader-sheet-scrim"
           aria-label="Close"
-          onClick={() => {
-            setFontPanelOpen(false);
-            reader.setMorePanelOpen(false);
-            closeAmbiencePopover();
-            setNotesFocus(null);
-            setBookmarkPanelOpen(false);
-          }}
+          onClick={closeSheets}
         />
       )}
       <div className="relative flex items-center gap-2 md:gap-4">
@@ -121,7 +125,8 @@ export const ReaderToolbar = ({ reader }: { reader: ReaderScope }) => {
             </TypePanel>
           )}
         </div>
-        {!phone && (
+        {/* Upright, search and notes are rows of the ··· sheet; on its side the strip has room for them. */}
+        {shape !== "upright" && (
         <button
           className="reader-icon transition-colors reader-hover-accent"
           type="button"
@@ -154,7 +159,7 @@ export const ReaderToolbar = ({ reader }: { reader: ReaderScope }) => {
           </button>
         )}
         <div className="relative">
-          {!phone && (
+          {shape !== "upright" && (
           <button
             className="reader-icon transition-colors reader-hover-accent"
             type="button"

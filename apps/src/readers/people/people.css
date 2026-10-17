@@ -494,6 +494,11 @@ button.reader-people-note-where:hover {
   user-select: none;
 }
 
+/* A name on two lines. */
+.reader-people-node text.is-two {
+  font-size: 11px;
+}
+
 .reader-people-edge path {
   fill: none;
   stroke: var(--reader-muted);
@@ -678,4 +683,144 @@ button.reader-people-note-where:hover {
   flex: 1 1 100%;
   align-items: center;
   gap: 6px;
+}
+
+/* The panel takes focus itself (by finger, so the keyboard stays down). */
+.reader-people-panel:focus {
+  outline: none;
+}
+
+/* ---- On a phone (readers/touch.css): the panel is a sheet ----
+   Upright it rises from the foot, with a grip, and a swipe down or a tap
+   above closes it (PeoplePanel.tsx); on its side it stands beside the strip,
+   as the reader's other sheets do. Its height is the window's, less the
+   status bar: the keyboard makes the window shorter (platform/device.ts),
+   and the sheet with it. A fixed height, so the list filtering as a name is
+   typed does not move the sheet under the finger. */
+
+.reader-people-scrim {
+  display: none;
+}
+
+.reader-scope[data-shape] .reader-people-scrim {
+  display: block;
+  z-index: 59;
+}
+
+.reader-scope[data-shape="upright"] .reader-people-panel {
+  top: auto;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: auto;
+  max-width: none;
+  height: min(80dvh, calc(100dvh - var(--inset-top) - 24px));
+  max-height: none;
+  border-radius: 18px 18px 0 0;
+  padding: 0 max(14px, var(--inset-right)) calc(10px + var(--inset-bottom)) max(14px, var(--inset-left));
+  box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.28);
+  animation: reader-sheet-rise 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.reader-scope[data-shape="upright"] .reader-people-panel::before {
+  display: block;
+  flex: none;
+  width: 40px;
+  height: 4px;
+  margin: 8px auto -2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--reader-text) 24%, transparent);
+  content: "";
+}
+
+.reader-scope[data-shape="sideways"] .reader-people-panel {
+  top: calc(var(--inset-top) + 8px);
+  right: calc(var(--reader-strip-width) + 8px);
+  bottom: calc(var(--inset-bottom) + 8px);
+  left: auto;
+  width: min(24rem, calc(100vw - var(--reader-strip-width) - var(--inset-left) - 24px));
+  max-width: none;
+  max-height: none;
+  border-radius: 16px;
+}
+
+/* The drawing wants the room the strip leaves. */
+.reader-scope[data-shape="sideways"] .reader-people-panel.is-wide {
+  width: min(46rem, calc(100vw - var(--reader-strip-width) - var(--inset-left) - 24px));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reader-scope[data-shape="upright"] .reader-people-panel {
+    animation: none;
+  }
+}
+
+/* Someone's card, opened from the list: the sheet steps aside for it, and
+   is back as it was (its search, its tab, where its list was) when the card
+   closes. */
+.reader-scope[data-shape] .reader-people-panel.is-under {
+  visibility: hidden;
+}
+
+/* The drawing gives way first when the window is short (on its side). */
+.reader-scope[data-shape] .reader-people-graph {
+  min-height: 7rem;
+}
+
+/* Typing in the search: the list has the room, not "Import", "Export" and
+   the wiki (unless the wiki's own field is the one being typed in). */
+html[data-keyboard="open"] .reader-scope[data-shape] .reader-people-panel-foot:not(:focus-within) {
+  display: none;
+}
+
+/* The wiki's field and its buttons wrap, the field on a line of its own. */
+.reader-scope[data-shape] .reader-people-wiki {
+  flex-wrap: wrap;
+}
+
+.reader-scope[data-shape] .reader-people-wiki .reader-people-input {
+  flex: 1 1 100%;
+}
+
+/* ---- By finger: room to hit each thing ---- */
+html[data-input="touch"] .reader-scope .reader-people-panel .reader-notes-tab {
+  min-height: 40px;
+  padding-inline: 14px;
+}
+
+html[data-input="touch"] .reader-scope .reader-people-person {
+  display: flex;
+  min-height: 44px;
+  flex-direction: column;
+  justify-content: center;
+}
+
+html[data-input="touch"] .reader-scope :is(.reader-people-panel, .reader-people-card) :is(input.reader-notes-input, select.reader-notes-input) {
+  min-height: 40px;
+}
+
+html[data-input="touch"] .reader-scope :is(.reader-people-panel, .reader-people-card) .reader-notes-remove {
+  display: inline-flex;
+  min-width: 40px;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+}
+
+html[data-input="touch"] .reader-scope .reader-people-check {
+  min-height: 40px;
+}
+
+html[data-input="touch"] .reader-scope .reader-people-swatches {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+html[data-input="touch"] .reader-scope .reader-people-swatch {
+  width: 28px;
+  height: 28px;
+}
+
+html[data-input="touch"] .reader-scope .reader-people-note-where {
+  min-height: 32px;
 }

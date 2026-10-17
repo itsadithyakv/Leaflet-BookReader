@@ -85,7 +85,7 @@ export const DEFAULT_VARIANT = "sprout";
 export const FIRST_VARIANT = { id: "gardener", price: 80 };
 
 /**
- * The garden's seed packets. A plant ripens on its minutes of focus (water),
+ * The garden's seed packets. A plant ripens on its water (reading; Focus doubles it),
  * then is picked for seeds. Longer plants pay better per minute, so planting
  * an oak is a small promise to read this fortnight.
  */
@@ -296,7 +296,7 @@ export const STARTER_CHEST = { seeds: 30, minutes: 5 };
  */
 export const GOALS = [
   { id: "plant", name: "Plant a seed", hint: "Choose a seed packet for an empty plot in the garden.", seeds: 10 },
-  { id: "water", name: "Water it by reading", hint: "Read in a focus session: every minute is water for the garden.", seeds: 10 },
+  { id: "water", name: "Water it by reading", hint: "Every minute you read waters the garden, twice over in Focus.", seeds: 10 },
   { id: "read", name: "Meet your reading goal", hint: "Read your daily minutes, any way you like.", seeds: 15 },
   { id: "pick", name: "Pick a plant", hint: "Once it's ripe, select it in the garden.", seeds: 15 },
   { id: "treat", name: "Give Pip a treat", hint: "A snack from Treats costs a few seeds.", seeds: 5 },

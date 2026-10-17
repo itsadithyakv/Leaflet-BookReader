@@ -130,7 +130,7 @@ export const SocialPage = ({ showToast, nowReading, onReadNow, onNavigate }: Soc
 
   return (
     <div className="dock-clear mx-auto flex min-h-full w-full max-w-[1480px] flex-col gap-8">
-      <header className="flex flex-wrap items-end justify-between gap-4">
+      <header className="social-head flex flex-wrap items-end justify-between gap-4">
         {/* What each tab holds is its tooltip (`hint`), not a sentence standing under the title. */}
         <h1 className="page-title text-4xl text-on-surface">Social</h1>
         <SegmentedTabs
@@ -175,11 +175,11 @@ export const SocialPage = ({ showToast, nowReading, onReadNow, onNavigate }: Soc
         </div>
       ) : (
         <div role="tabpanel" id={panelId(ID, "stats")} aria-labelledby={tabId(ID, "stats")} className="flex flex-col gap-8">
-          <section className="grid grid-cols-2 gap-4 md:grid-cols-3" aria-label="Your numbers">
+          <section className="stat-tiles grid grid-cols-2 gap-4 md:grid-cols-3" aria-label="Your numbers">
             {tiles.map((tile) => (
-              <div key={tile.label} className="paper-surface rounded-xl p-5">
+              <div key={tile.label} className="stat-tile paper-surface rounded-xl p-5">
                 <p className={EYEBROW}>{tile.label}</p>
-                <p className="mt-3 text-3xl font-semibold tabular-nums text-on-surface">
+                <p className="stat-tile-value mt-3 text-3xl font-semibold tabular-nums text-on-surface">
                   <CountUp value={Math.round(tile.value)} format={tile.format} />
                 </p>
               </div>

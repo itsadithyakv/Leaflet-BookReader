@@ -2,7 +2,7 @@
  * The Hollow: Pip's camp in the clearing, the arcade's building game.
  *
  * Its money is acorns, and they are its own: never seeds (those come only
- * from reading in focus, and buy Pip's things), never anything a server
+ * from reading, and buy Pip's things), never anything a server
  * counts. The camp is built by reading. A building is paid for in acorns and
  * finished by so many minutes read after it was begun; the oak drops acorns
  * for every ten minutes read; a chapter read sends a parcel up the path.

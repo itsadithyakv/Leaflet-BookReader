@@ -21,7 +21,7 @@ type PacketPickerProps = {
 
 /**
  * Seed packets, right there over the empty plot that was selected: what each
- * takes (minutes of focus) and gives (seeds), and its price. It follows the
+ * takes (water) and gives (seeds), and its price. It follows the
  * plot as the page scrolls, and closes on Escape, on a click elsewhere, or
  * once a packet is chosen. Packets are bought as they are planted, so every
  * one is here; those out of reach say how many seeds they want.
@@ -122,7 +122,7 @@ export const PacketPicker = ({ plot, packets, balance, priceOf, anchor, art, onP
               type="button"
               className="pip-packet"
               aria-disabled={lacking ? "true" : undefined}
-              aria-label={`${packet.name}: ripe after ${packet.water} minutes of focus, gives ${packet.yield} seeds. Packet ${price} seeds.${lacking ? ` ${lacking.short} more seeds needed.` : ""}`}
+              aria-label={`${packet.name}: ripe after ${packet.water} water, gives ${packet.yield} seeds. Packet ${price} seeds.${lacking ? ` ${lacking.short} more seeds needed.` : ""}`}
               title={lacking ? `${lacking.short} more seeds: about ${lacking.minutes} minutes of focused reading` : packet.blurb}
               onClick={() => {
                 if (!lacking) onPick(packet.id);

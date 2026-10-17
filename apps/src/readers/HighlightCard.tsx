@@ -1,9 +1,12 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Image as ImageIcon } from "lucide-react";
 import { UiIcon } from "../components/UiIcon";
+import { useBackLayer } from "../platform/back";
+import { isTouchInput } from "../platform/device";
 import type { Annotation } from "../services/annotationService";
 import { HIGHLIGHT_COLORS, HIGHLIGHT_COLOR_IDS } from "./highlightColors";
-import { CARD_GAP, placeCard, type Box } from "./lookupPlacement";
+import { keyboardIsOpen } from "./keyboardOpen";
+import { CARD_GAP, cardCeiling, insetTopNow, placeNoteCard, type Box } from "./lookupPlacement";
 import "./lookupCard.css";
 import "./notes.css";
 
@@ -24,8 +27,11 @@ type HighlightCardProps = {
   avoid?: () => Box | null;
 };
 
-/** The tallest the card gets before the quote scrolls. */
+/** The tallest the card gets before what is in it scrolls; by finger, a little taller. */
 const MAX_HEIGHT = 380;
+const TOUCH_MAX_HEIGHT = 440;
+/** A pause this long in the typing keeps what is typed (the app can be sent away, and closed, at any moment). */
+export const NOTE_AUTOSAVE_MS = 700;
 
 export const noteDate = (iso: string) => {
   const date = new Date(iso);
@@ -43,8 +49,14 @@ export const noteDate = (iso: string) => {
  * what it was, a field added to a list.
  *
  * What is typed is kept however the card goes (Done, Escape, a click
- * elsewhere, another highlight tapped): nothing typed is ever thrown away.
- * Emptying the note removes it.
+ * elsewhere, another highlight tapped), and as it is typed, at each pause:
+ * nothing typed is ever thrown away. Emptying the note removes it.
+ *
+ * Its words, colours and note scroll between its head and its foot, so Done
+ * is always in reach. By finger it opens to read (the keyboard comes when
+ * the note is tapped, or when it was opened to write); with the keyboard up
+ * it sits on the keyboard in all the room there is, the note in sight, and
+ * Back first puts the keyboard away.
  */
 export const HighlightCard = ({
   highlight,
@@ -59,8 +71,13 @@ export const HighlightCard = ({
   avoid
 }: HighlightCardProps) => {
   const [draft, setDraft] = useState(highlight.note ?? "");
-  const [place, setPlace] = useState({ height: MAX_HEIGHT, lift: CARD_GAP, shift: 0 });
+  const [touch] = useState(isTouchInput);
+  const tallest = touch ? TOUCH_MAX_HEIGHT : MAX_HEIGHT;
+  const [place, setPlace] = useState({ height: tallest, lift: CARD_GAP, shift: 0 });
+  /** The note has the keyboard (a phone's, up). */
+  const [typing, setTyping] = useState(false);
   const card = useRef<HTMLDivElement | null>(null);
+  const body = useRef<HTMLDivElement | null>(null);
   const field = useRef<HTMLTextAreaElement | null>(null);
   const titleId = useId();
   const fieldId = useId();
@@ -86,50 +103,157 @@ export const HighlightCard = ({
   };
   // Kept on the way out, whichever way that is.
   useEffect(() => keep, []);
+  // And at each pause in the typing, and when the app is sent away.
+  useEffect(() => {
+    const timer = window.setTimeout(keep, NOTE_AUTOSAVE_MS);
+    return () => window.clearTimeout(timer);
+  }, [draft]);
+  useEffect(() => {
+    const away = () => {
+      if (document.visibilityState === "hidden") keep();
+    };
+    document.addEventListener("visibilitychange", away);
+    window.addEventListener("pagehide", keep);
+    return () => {
+      document.removeEventListener("visibilitychange", away);
+      window.removeEventListener("pagehide", keep);
+    };
+  }, []);
+
+  // Back, while the note has the keyboard, puts the keyboard away; the card stays.
+  useBackLayer(typing, () => field.current?.blur());
+
+  /** The note in sight in the card's scrolling middle (the caret is at its end, or in its own scroll). */
+  const keepFieldInView = () => {
+    const middle = body.current;
+    const note = field.current;
+    if (!middle || !note || document.activeElement !== note) {
+      return;
+    }
+    const room = middle.getBoundingClientRect();
+    const box = note.getBoundingClientRect();
+    if (box.bottom > room.bottom) {
+      middle.scrollTop += Math.ceil(box.bottom - room.bottom) + 2;
+    } else if (box.top < room.top && box.height <= room.height) {
+      middle.scrollTop -= Math.ceil(room.top - box.top) + 2;
+    }
+  };
+  const keepFieldInViewRef = useRef(keepFieldInView);
+  keepFieldInViewRef.current = keepFieldInView;
 
   const colour = HIGHLIGHT_COLORS[highlight.color ?? "yellow"] ?? HIGHLIGHT_COLORS.yellow;
 
-  // Where it goes: above the dock, off the highlighted words, inside the window.
+  // Where it goes: above the dock, off the highlighted words, inside the
+  // window and under the status bar. Again whenever the room changes: the
+  // window (a phone's keyboard resizes it), the keyboard, the chrome.
   useLayoutEffect(() => {
+    const scope = card.current?.closest(".reader-scope") ?? null;
+    // What the page was scrolled to as the note was given the keyboard: a
+    // browser brings a field into view by scrolling whatever holds it, and
+    // the page behind is not to move.
+    let held: { node: Element; top: number; left: number }[] = [];
+    const holdPage = () => {
+      held = [];
+      for (let at = card.current?.parentElement ?? null; at; at = at.parentElement) {
+        held.push({ node: at, top: at.scrollTop, left: at.scrollLeft });
+      }
+    };
+    const putPageBack = () => {
+      for (const one of held) {
+        if (one.node.scrollTop !== one.top) one.node.scrollTop = one.top;
+        if (one.node.scrollLeft !== one.left) one.node.scrollLeft = one.left;
+      }
+    };
+    let frame = 0;
     const measure = () => {
       const node = card.current;
       const dock = node?.parentElement;
       if (!node || !dock) {
         return;
       }
+      putPageBack();
+      const nowTyping = keyboardIsOpen() && document.activeElement === field.current;
+      setTyping(nowTyping);
       const bar = dock.getBoundingClientRect();
-      const toolbar = node.closest(".reader-scope")?.querySelector(".reader-toolbar")?.getBoundingClientRect();
+      const toolbar = scope?.querySelector(".reader-toolbar")?.getBoundingClientRect();
       setPlace((before) => {
-        const next = placeCard({
+        const next = placeNoteCard({
           barTop: bar.top,
           barCentre: bar.left + bar.width / 2,
-          ceiling: Math.max(toolbar?.bottom ?? 0, 0) + CARD_GAP,
+          ceiling: cardCeiling(toolbar, window.innerWidth, insetTopNow()),
           cardWidth: node.offsetWidth,
           windowWidth: window.innerWidth,
-          selection: avoidRef.current?.() ?? null
+          selection: avoidRef.current?.() ?? null,
+          tallest,
+          typing: nowTyping
         });
         return next.height === before.height && next.lift === before.lift && next.shift === before.shift ? before : next;
       });
     };
+    const soon = () => {
+      measure();
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        measure();
+        keepFieldInViewRef.current();
+      });
+    };
+    let keyboardWas = keyboardIsOpen();
+    const watched = new MutationObserver(() => {
+      const keyboard = keyboardIsOpen();
+      // The keyboard put away (Back, or its own key): the note lets it go, and the card stays.
+      if (keyboardWas && !keyboard && document.activeElement === field.current) {
+        field.current?.blur();
+      }
+      keyboardWas = keyboard;
+      soon();
+    });
+    watched.observe(document.documentElement, { attributes: true, attributeFilter: ["data-keyboard"] });
+    if (scope) watched.observe(scope, { attributes: true, attributeFilter: ["class"] });
+    const onFocus = () => {
+      holdPage();
+      soon();
+    };
+    const note = field.current;
+    note?.addEventListener("focus", onFocus);
+    note?.addEventListener("blur", soon);
     measure();
-    window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
+    window.addEventListener("resize", soon);
+    window.visualViewport?.addEventListener("resize", soon);
+    // (A resize is not always heard as one: the reader's own frame says it too.)
+    const sized = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(soon);
+    if (scope) sized?.observe(scope);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      watched.disconnect();
+      sized?.disconnect();
+      note?.removeEventListener("focus", onFocus);
+      note?.removeEventListener("blur", soon);
+      window.removeEventListener("resize", soon);
+      window.visualViewport?.removeEventListener("resize", soon);
+    };
+    // Once, as it opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // The note grows with what is written, up to a point.
+  // The note grows with what is written, up to a point: by the keyboard, no
+  // taller than the card's middle, so that it is all in sight.
   useLayoutEffect(() => {
     const node = field.current;
     if (node) {
+      const room = typing && body.current ? Math.max(44, body.current.clientHeight - 6) : 150;
       node.style.height = "auto";
-      node.style.height = `${Math.min(150, Math.max(62, node.scrollHeight + 2))}px`;
+      node.style.height = `${Math.min(150, room, Math.max(typing ? 44 : 62, node.scrollHeight + 2))}px`;
     }
-  }, [draft]);
+    keepFieldInViewRef.current();
+  }, [draft, typing, place.height]);
 
   // Focus comes in, and goes back to where it was on the way out.
   useLayoutEffect(() => {
     const node = card.current;
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    if (writing || !highlight.note) {
+    // (By finger, only when opened to write: a tap to look at a highlight does not bring the keyboard.)
+    if (writing || (!highlight.note && !touch)) {
       field.current?.focus({ preventScroll: true });
       const end = field.current?.value.length ?? 0;
       field.current?.setSelectionRange(end, end);
@@ -189,13 +313,13 @@ export const HighlightCard = ({
   return (
     <div
       ref={card}
-      className="reader-lookup reader-note-card reader-panel reader-border pointer-events-auto"
+      className={`reader-lookup reader-note-card reader-panel reader-border pointer-events-auto ${typing ? "is-typing" : ""}`}
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
       tabIndex={-1}
       style={{
-        maxHeight: Math.min(place.height, MAX_HEIGHT),
+        maxHeight: Math.min(place.height, tallest),
         bottom: `calc(100% + ${place.lift}px)`,
         transform: `translateX(calc(-50% + ${place.shift}px))`,
         ["--note-colour" as string]: colour.swatch
@@ -233,41 +357,43 @@ export const HighlightCard = ({
         </span>
       </div>
 
-      <blockquote className="reader-note-quote" tabIndex={0}>
-        {highlight.text}
-      </blockquote>
+      <div ref={body} className="reader-note-card-body">
+        <blockquote className="reader-note-quote" tabIndex={0}>
+          {highlight.text}
+        </blockquote>
 
-      <div className="reader-note-card-row">
-        <span className="flex items-center gap-1.5" role="group" aria-label="Colour">
-          {HIGHLIGHT_COLOR_IDS.map((id) => (
-            <button
-              key={id}
-              type="button"
-              className={`reader-selection-swatch reader-note-swatch ${(highlight.color ?? "yellow") === id ? "is-current" : ""}`}
-              style={{ background: HIGHLIGHT_COLORS[id].swatch }}
-              onClick={() => onRecolor(id)}
-              title={HIGHLIGHT_COLORS[id].name}
-              aria-label={HIGHLIGHT_COLORS[id].name}
-              aria-pressed={(highlight.color ?? "yellow") === id}
-            />
-          ))}
-        </span>
-        <span className="reader-note-date reader-muted">{noteDate(highlight.createdAt)}</span>
+        <div className="reader-note-card-row">
+          <span className="flex items-center gap-1.5" role="group" aria-label="Colour">
+            {HIGHLIGHT_COLOR_IDS.map((id) => (
+              <button
+                key={id}
+                type="button"
+                className={`reader-selection-swatch reader-note-swatch ${(highlight.color ?? "yellow") === id ? "is-current" : ""}`}
+                style={{ background: HIGHLIGHT_COLORS[id].swatch }}
+                onClick={() => onRecolor(id)}
+                title={HIGHLIGHT_COLORS[id].name}
+                aria-label={HIGHLIGHT_COLORS[id].name}
+                aria-pressed={(highlight.color ?? "yellow") === id}
+              />
+            ))}
+          </span>
+          <span className="reader-note-date reader-muted">{noteDate(highlight.createdAt)}</span>
+        </div>
+
+        <label className="reader-lookup-visually-hidden" htmlFor={fieldId}>
+          Your note on this highlight
+        </label>
+        <textarea
+          ref={field}
+          id={fieldId}
+          className="reader-note-field"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          placeholder="Write a note…"
+          maxLength={8000}
+          rows={2}
+        />
       </div>
-
-      <label className="reader-lookup-visually-hidden" htmlFor={fieldId}>
-        Your note on this highlight
-      </label>
-      <textarea
-        ref={field}
-        id={fieldId}
-        className="reader-note-field"
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-        placeholder="Write a note…"
-        maxLength={8000}
-        rows={2}
-      />
 
       <div className="reader-note-card-foot">
         <button type="button" className="reader-lookup-inline" onClick={onShowAll}>

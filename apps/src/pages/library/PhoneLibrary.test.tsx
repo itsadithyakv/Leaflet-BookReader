@@ -35,9 +35,10 @@ const tools = (patch: Partial<{ author: string; genre: string; highlights: numbe
   );
 
 describe("the Library's top on a phone", () => {
-  it("is one slim card at rest: the streak and a Focus key, the session's choices kept for its sheet", () => {
+  it("is one Focus key at rest (for the search row), the streak in its tooltip, the session's choices kept for its sheet", () => {
     const markup = strip(null);
-    expect(markup).toContain("3 Day Streak!");
+    expect(markup).not.toContain("phone-focus-strip");
+    expect(markup).toMatch(/title="3 Day Streak! [^"]*"/);
     expect(markup).toContain('data-tour="session"');
     expect(markup).toContain("Focus");
     // The length, full screen and Start are in the sheet, not on the page.

@@ -63,5 +63,14 @@ export const getReaderFinishBackground = (finish: ReturnType<typeof getReaderFin
     ? `linear-gradient(${finish.background}${finish.textureOpacity}, ${finish.background}${finish.textureOpacity}), ${finish.texture}`
     : "none";
 
+/**
+ * Whether the reader's own bars, dock and sheets are drawn light: as the app's
+ * theme has it, except over a dark page, where they are dark too. A light
+ * app's pale bars over a black page glared at night on an OLED phone; a light
+ * page under a dark app keeps the app's dark bars, as it always had.
+ */
+export const readerChromeLight = (displayMode: ReaderDisplayMode, theme: ThemeMode) =>
+  theme === "light" && getReaderFinish(displayMode, theme).themeName !== "leaflet-dark";
+
 /** The book's text starts this far down, below the floating toolbar. */
 export const PAGE_TOP_PAD = 80;

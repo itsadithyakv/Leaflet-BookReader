@@ -14,6 +14,12 @@
 html[data-input="touch"] .reader-scope .reader-main {
   box-sizing: border-box;
   padding: var(--inset-top) var(--inset-right) var(--inset-bottom) var(--inset-left);
+  /* The room kept for the bars is the page's colour, not the app's: a black
+     page under a light app theme had a cream band under the status bar (and
+     the camera's cutout), down both sides and along the gesture bar, which
+     glared on an OLED screen at night. */
+  background: var(--reader-page-bg, var(--reader-shell-bg));
+  background-image: var(--reader-page-texture, none);
 }
 
 /* No pointer to rest on the top edge: the middle tap brings the bar. */
@@ -126,16 +132,24 @@ html[data-input="touch"] .reader-toolbar-hot-zone {
   padding-bottom: var(--inset-bottom);
 }
 
-/* A handle on each sheet: it is a sheet, and goes down. */
+/* A handle on each sheet: it is a sheet, and a swipe down closes it
+   (readers/readerSheets.ts). */
 .reader-scope[data-shape="upright"] .reader-toolbar .reader-menu::before,
-.reader-scope[data-shape="upright"] .reader-toolbar .ambience-popover::before {
+.reader-scope[data-shape="upright"] .reader-toolbar .ambience-popover::before,
+.reader-scope[data-shape="upright"] .reader-notes-panel::before,
+.reader-scope[data-shape="upright"] .reader-search::before {
   display: block;
+  flex: none;
   width: 40px;
   height: 4px;
   margin: -6px auto 12px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--reader-text) 24%, transparent);
   content: "";
+}
+
+.reader-scope[data-shape="upright"] .reader-notes-panel::before {
+  margin: 8px auto 4px;
 }
 
 /* Search keeps its field over the keyboard. */
@@ -168,18 +182,7 @@ html[data-keyboard="open"] .reader-scope[data-shape] .reader-search {
   overflow: hidden;
 }
 
-/* The characters panel: a sheet too. */
-.reader-scope[data-shape="upright"] .reader-people-panel {
-  top: auto !important;
-  right: 0 !important;
-  bottom: 0 !important;
-  left: 0 !important;
-  width: auto !important;
-  max-width: none !important;
-  max-height: 85dvh !important;
-  border-radius: 18px 18px 0 0 !important;
-  padding-bottom: var(--inset-bottom);
-}
+/* The characters panel is a sheet too: readers/people/people.css, "On a phone". */
 
 @keyframes reader-sheet-rise {
   from {
@@ -338,8 +341,10 @@ html[data-input="touch"] .reader-scope .reader-progress:not(.is-shown) {
   pointer-events: none;
 }
 
-.reader-scope[data-shape="sideways"]:not(.reader-chrome-hidden) .reader-progress {
-  right: 56px;
+/* Clear of the strip, chrome or not: it is out of sight with the chrome away,
+   and its width no longer changes as it fades. */
+.reader-scope[data-shape="sideways"] .reader-progress {
+  right: var(--reader-strip-width);
 }
 
 /* ---- The selection's bar and the cards: at the foot, over the gesture bar ---- */
@@ -352,8 +357,19 @@ html[data-input="touch"] .reader-scope .reader-selection-dock.is-above-pace {
   bottom: 68px;
 }
 
+/* A phone: above whatever holds the foot of the page (one column, see "The
+   foot of a phone's page" below). */
+html[data-input="touch"] .reader-scope[data-shape] .reader-selection-dock,
+html[data-input="touch"] .reader-scope[data-shape] .reader-selection-dock.is-above-pace {
+  bottom: var(--reader-stack-foot);
+}
+
 html[data-input="touch"] .pdf-notes-dock {
   bottom: calc(var(--inset-bottom) + 8px);
+}
+
+html[data-input="touch"] .reader-scope[data-shape] .pdf-notes-dock {
+  bottom: calc(var(--inset-bottom) + var(--reader-stack-foot));
 }
 
 /* A note being typed rides over the keyboard (the page's frame ends at the
@@ -364,6 +380,15 @@ html[data-keyboard="open"] .reader-scope .reader-selection-dock {
 
 html[data-keyboard="open"] .pdf-notes-dock {
   bottom: calc(var(--inset-keyboard) + 8px) !important;
+}
+
+/* An upright phone's bar is fixed to the foot of the window, and the
+   keyboard makes the window shorter: it rode up on the keyboard over the
+   card being typed in (who someone is, a note), field and all. It steps down
+   out of sight until the keyboard goes; not while one of its own sheets is
+   up, which it holds in place (and which covers it anyway). */
+html[data-keyboard="open"] .reader-scope:not(.page-reader)[data-shape="upright"] .reader-toolbar:not(:has(.reader-menu, .ambience-popover, .reader-notes-panel)) {
+  transform: translateY(100%);
 }
 
 .reader-selection-bar.is-touch {
@@ -386,6 +411,20 @@ html[data-keyboard="open"] .pdf-notes-dock {
   flex-wrap: wrap;
   border-bottom: 1px solid var(--reader-border);
   padding-bottom: 6px;
+}
+
+/* A phone on its side: everything in one row, the colours first. */
+.reader-selection-bar.is-touch.is-wide {
+  flex-direction: row;
+  align-items: center;
+  max-width: calc(100vw - 24px - var(--inset-left) - var(--inset-right) - var(--reader-side-room, 0px));
+}
+
+.reader-selection-bar.is-wide .reader-selection-more {
+  flex-wrap: nowrap;
+  border-bottom: 0;
+  border-right: 1px solid var(--reader-border);
+  padding: 0 6px 0 0;
 }
 
 .reader-selection-bar.is-touch .reader-mini-control {
@@ -436,18 +475,10 @@ html[data-input="touch"] .reader-autoscroll-pill {
   transform: none;
 }
 
-html[data-input="touch"] .reader-scope:not(.reader-chrome-hidden) .reader-autoscroll-pill {
+html[data-input="touch"] .reader-scope:not([data-shape]):not(.reader-chrome-hidden) .reader-autoscroll-pill {
   bottom: calc(var(--inset-bottom) + 84px);
 }
 
-.reader-scope[data-shape="sideways"] .reader-autoscroll-pill {
-  right: calc(var(--inset-right) + 12px);
-}
-
-.reader-scope[data-shape="sideways"]:not(.reader-chrome-hidden) .reader-autoscroll-pill {
-  right: calc(var(--reader-strip-width) + 12px);
-  bottom: calc(var(--inset-bottom) + 12px);
-}
 
 html[data-input="touch"] .reader-autoscroll-pill:not(.is-held) {
   opacity: 0.9;
@@ -482,6 +513,13 @@ html[data-input="touch"] .reader-scope .reader-checkpoint {
   bottom: calc(var(--inset-bottom) + 16px);
   right: calc(var(--inset-right) + 12px);
   max-width: min(20rem, calc(100vw - 24px));
+}
+
+/* A phone: both at the top of the foot's column (below). */
+html[data-input="touch"] .reader-scope[data-shape] :is(.reader-toast, .reader-checkpoint) {
+  bottom: calc(var(--inset-bottom) + var(--reader-stack-foot));
+  right: calc(var(--inset-right) + var(--reader-side-room) + 12px);
+  max-width: min(20rem, calc(100vw - 24px - var(--inset-left) - var(--inset-right) - var(--reader-side-room)));
 }
 
 /* ---- Focus lock: Pip at the door with "Hold to leave" (Back, on a phone) ---- */
@@ -552,6 +590,14 @@ html[data-input="touch"] .reader-scope.reader-chrome-hidden .reader-contents-han
   pointer-events: none;
 }
 
+/* On a phone the list has one way in, the ≡ on the bar (the strip's, held
+   sideways), and the chapter's name in the dock: the tab on the left edge
+   showed with the bar, so there were two buttons for one list, and the tab
+   sat in the margin a thumb scrolls in. A larger window keeps the tab. */
+.reader-scope[data-shape] .reader-contents-handle {
+  display: none;
+}
+
 /* The page reader's go-to-page field rides over the keyboard with its dock. */
 html[data-keyboard="open"] .page-reader .reader-chapter-dock.is-awake {
   bottom: calc(var(--inset-keyboard) - var(--inset-bottom) + 8px);
@@ -561,7 +607,9 @@ html[data-keyboard="open"] .page-reader .reader-chapter-dock.is-awake {
    pace pill: on a phone it is small, top right, under the toolbar's place. */
 .reader-scope[data-shape] .leaflet-mug,
 .reader-scope[data-shape] .leaflet-flower {
-  top: calc(var(--reader-toolbar-height) + 8px);
+  /* Under the bar at the top, or the status bar where the bar is at the foot,
+     and under the bookmark's ribbon. */
+  top: calc(max(var(--reader-toolbar-height), var(--inset-top)) + 28px);
   right: calc(var(--inset-right) + 8px);
   bottom: auto;
   transform: scale(0.6);
@@ -580,8 +628,8 @@ html[data-input="touch"] .page-reader .further-on-offer {
   bottom: calc(var(--inset-bottom) + 100px);
 }
 
-.reader-scope[data-shape="sideways"] .further-on-offer {
-  bottom: calc(var(--inset-bottom) + 72px);
+html[data-input="touch"] .reader-scope[data-shape] .further-on-offer {
+  bottom: calc(var(--inset-bottom) + var(--reader-stack-foot));
 }
 
 /* The chapter list keeps its last rows clear of the gesture bar, and its
@@ -624,6 +672,12 @@ html .reader-scope[data-shape] .reader-toolbar {
 }
 
 html .reader-scope[data-shape] .reader-chapter-dock,
+html .reader-scope[data-shape] .reader-progress {
+  transition:
+    transform 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.16s ease;
+}
+
 html .reader-scope[data-shape] .reader-contents-handle {
   transition: opacity 0.16s ease;
 }
@@ -663,8 +717,12 @@ html[data-input="touch"] .reader-scope .reader-autoscroll-pill:not(.is-held) {
   --reader-footer-height: 28px;
 }
 
+/* The text stops above the footer, and above the pace or read-aloud pill
+   while one is up (`--reader-float-room`, below): the last line is never
+   under either. The chrome coming and going changes none of this, so the
+   text never moves for it. */
 .reader-scope[data-shape] .reader-page-frame {
-  padding-bottom: var(--reader-footer-height);
+  padding-bottom: var(--reader-text-foot);
 }
 
 /* Scrolling, the strip is the scroller's own: a swipe that starts at the
@@ -678,7 +736,7 @@ html[data-input="touch"] .reader-scope .reader-autoscroll-pill:not(.is-held) {
 
 .reader-scope[data-shape] .reader-page-frame.is-scrolling .epub-container {
   box-sizing: border-box;
-  padding-bottom: var(--reader-footer-height);
+  padding-bottom: var(--reader-text-foot);
 }
 
 .reader-scope[data-shape] .reader-page-frame.is-scrolling::after {
@@ -687,7 +745,7 @@ html[data-input="touch"] .reader-scope .reader-autoscroll-pill:not(.is-held) {
   bottom: 0;
   left: 0;
   z-index: 1;
-  height: var(--reader-footer-height);
+  height: var(--reader-text-foot);
   /* The frame's own page colour (it follows the page's finish, not the app's theme). */
   background: inherit;
   content: "";
@@ -748,7 +806,7 @@ html[data-input="touch"] .reader-scope .reader-autoscroll-pill:not(.is-held) {
 /* After a jump, for a few seconds: the way back, over the foot of the page. */
 .reader-back-chip {
   position: absolute;
-  bottom: calc(var(--reader-footer-height) + 10px);
+  bottom: var(--reader-stack-foot, calc(var(--reader-footer-height) + 10px));
   left: 50%;
   z-index: 33;
   display: flex;
@@ -807,13 +865,23 @@ html[data-input="touch"] .reader-scope .reader-autoscroll-pill:not(.is-held) {
   transform: translateY(100%);
 }
 
-/* (In the page's frame, whose foot is the gesture bar's top: the bar is 56px over it.) */
-html .reader-scope:not(.page-reader)[data-shape="upright"]:not(.reader-chrome-hidden) .reader-progress {
+/* (In the page's frame, whose foot is the gesture bar's top: the bar is 56px over it.)
+   They stay there, and go down and come up with the bar by a transform: they
+   used to jump 56px as the chrome went, in full view while fading out. */
+html .reader-scope:not(.page-reader)[data-shape="upright"] .reader-progress {
   bottom: 56px;
 }
 
-html .reader-scope:not(.page-reader)[data-shape="upright"]:not(.reader-chrome-hidden) .reader-chapter-dock {
+html .reader-scope:not(.page-reader)[data-shape="upright"] .reader-chapter-dock {
   bottom: calc(56px + 30px);
+}
+
+html .reader-scope:not(.page-reader)[data-shape="upright"].reader-chrome-hidden .reader-progress {
+  transform: translateY(56px);
+}
+
+html .reader-scope:not(.page-reader)[data-shape="upright"].reader-chrome-hidden .reader-chapter-dock:not(.is-awake) {
+  transform: translate(-50%, 56px);
 }
 
 .reader-scope:not(.page-reader)[data-shape="upright"] .reader-shell .reader-sidebar,
@@ -831,4 +899,148 @@ html .reader-scope:not(.page-reader)[data-shape="upright"]:not(.reader-chrome-hi
     transition: none;
     animation: none;
   }
+}
+
+/* ---- The foot of a phone's page: one column ----
+   Everything that floats at the foot stacks in one column, each above what
+   is under it, from these heights (px up from the page frame's foot, which
+   is the gesture bar's top):
+
+   --reader-foot-chrome  what the chrome holds there: the footer's strip with
+                         it away; with it up, the chapter dock (30 + 58) and,
+                         on an upright phone's text reader, the bar (56).
+   --reader-float-room   the pace (Smart Read, auto-scroll) or read-aloud
+                         pill's row, while one is up.
+   --reader-stack-foot   where the next thing up rests: the selection's bar,
+                         a toast, the way back after a jump, "further on".
+   --reader-text-foot    where the text stops: the footer and the pill's row.
+   --reader-side-room    a sideways phone's strip, while it shows. */
+
+.reader-scope[data-shape] {
+  --reader-foot-chrome: var(--reader-footer-height);
+  --reader-float-room: 0px;
+  --reader-side-room: 0px;
+  --reader-stack-foot: calc(var(--reader-foot-chrome) + var(--reader-float-room) + 8px);
+  --reader-text-foot: calc(var(--reader-footer-height) + var(--reader-float-room));
+}
+
+.reader-scope[data-shape]:not(.reader-chrome-hidden) {
+  --reader-foot-chrome: 88px;
+}
+
+.reader-scope:not(.page-reader)[data-shape="upright"]:not(.reader-chrome-hidden) {
+  --reader-foot-chrome: 144px;
+}
+
+.reader-scope[data-shape="sideways"]:not(.reader-chrome-hidden) {
+  --reader-side-room: var(--reader-strip-width);
+}
+
+.reader-scope[data-shape]:has(.reader-autoscroll-pill:not(.is-held), .reader-autoscroll-pill.is-awake, .read-aloud-pill) {
+  --reader-float-room: 64px;
+}
+
+/* The pills: centred in what the strip leaves, just over the footer, and
+   lifted (by a transform, with the chrome's own timing) over the dock and the
+   bar while they show. Never wider than the window less its edges. */
+html .reader-scope[data-shape] .reader-autoscroll-pill,
+html .reader-scope[data-shape] .read-aloud-dock {
+  top: auto;
+  right: auto;
+  bottom: calc(var(--inset-bottom) + var(--reader-footer-height) + 8px);
+  left: calc(50% + (var(--inset-left) - var(--inset-right)) / 2);
+  max-width: calc(100vw - 24px - var(--inset-left) - var(--inset-right) - var(--reader-side-room));
+  transform: translate(
+    calc(-50% - var(--reader-side-room) / 2),
+    calc(var(--reader-footer-height) - var(--reader-foot-chrome))
+  );
+  transition:
+    transform 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.16s ease;
+}
+
+html .reader-scope[data-shape] .reader-autoscroll-pill .reader-autoscroll-main {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html .reader-scope[data-shape] .reader-autoscroll-pill,
+  html .reader-scope[data-shape] .read-aloud-dock {
+    transition: none;
+  }
+}
+
+/* ---- The highlight card by finger (readers/HighlightCard.tsx) ----
+   Inside the insets and the sideways strip; flat icon keys in its head, 44 px
+   apart; colours and Done at a thumb's size. Its height and place are
+   worked out above the bottom stack (readers/lookupPlacement.ts,
+   `placeNoteCard`); with the keyboard up it rests on the keyboard (the
+   dock's rule above) and the words make way for the note. */
+html[data-input="touch"] .reader-scope .reader-note-card {
+  width: min(26rem, calc(100vw - 16px - var(--inset-left) - var(--inset-right) - var(--reader-side-room, 0px)));
+}
+
+html[data-input="touch"] .reader-scope .reader-note-card-head {
+  margin-block: -6px;
+}
+
+html[data-input="touch"] .reader-scope .reader-note-card-tools {
+  gap: 4px;
+  margin-right: -8px;
+}
+
+html[data-input="touch"] .reader-scope .reader-note-card-tools .reader-mini-control {
+  min-width: 40px;
+  height: 40px;
+  border-color: transparent;
+  border-radius: 999px;
+  background: transparent;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html[data-input="touch"] .reader-scope .reader-note-card-tools .reader-mini-control:active {
+  background: color-mix(in srgb, var(--reader-text) 10%, transparent);
+  color: var(--reader-accent);
+}
+
+html[data-input="touch"] .reader-scope .reader-note-quote {
+  max-height: calc(4 * 1.55em + 16px);
+}
+
+html[data-input="touch"] .reader-scope .reader-note-card-row [role="group"] {
+  gap: 16px;
+}
+
+html[data-input="touch"] .reader-scope .reader-note-card .reader-note-swatch {
+  width: 28px;
+  height: 28px;
+}
+
+html[data-input="touch"] .reader-scope .reader-note-card .reader-note-swatch::after {
+  width: 44px;
+  height: 44px;
+}
+
+html[data-input="touch"] .reader-scope .reader-note-card-foot :is(.reader-notes-action, .reader-lookup-inline) {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+}
+
+html[data-input="touch"] .reader-scope .reader-note-card-foot .reader-notes-action {
+  border-radius: 999px;
+  padding-inline: 18px;
+  font-size: 11px;
+}
+
+html[data-input="touch"] .reader-scope .reader-note-card.is-typing {
+  gap: 8px;
+  padding-block: 10px;
+}
+
+html[data-input="touch"] .reader-scope .reader-note-card.is-typing .reader-note-quote {
+  max-height: calc(2 * 1.55em + 16px);
 }

@@ -3,8 +3,9 @@
 //! The streak engine banks a freeze for every few days of streak
 //! (`habit::evaluate`); this is the other way to come by one. A freeze bought
 //! is a purchase record like a snack: charged every time, never owned. The
-//! record is what is counted (so many a month); the freeze itself goes into
-//! the streak's bank on the device that bought it (`commands::pip_buy_freeze`).
+//! record is what is counted (so many a month), and what the streak's bank
+//! is replayed from (`bought_days`): the record syncs, so a freeze bought on
+//! one device is in the bank on every device, and spent once.
 
 use super::rewards::record_day;
 use super::{Catalogue, Item, Purchase, ShopError};
@@ -32,6 +33,16 @@ pub fn bought_in_month(purchases: &[Purchase], month: &str) -> i64 {
     .filter(|purchase| purchase.item_kind == KIND_FREEZE)
     .filter(|purchase| record_day(&purchase.bought_at).and_then(|day| day.get(..7)) == Some(month))
     .count() as i64
+}
+
+/// The local day of each freeze bought, on any device, for the streak walk
+/// (`habit::evaluate`) to put in the bank on that day.
+pub fn bought_days(purchases: &[Purchase]) -> Vec<String> {
+  purchases
+    .iter()
+    .filter(|purchase| purchase.item_kind == KIND_FREEZE)
+    .filter_map(|purchase| record_day(&purchase.bought_at).map(str::to_string))
+    .collect()
 }
 
 /// Whether a freeze can be bought today, and at what price. `held` is how
@@ -113,6 +124,16 @@ mod tests {
       Purchase { id: "c".into(), item_kind: "treat".into(), item_id: "apple".into(), price: 5, bought_at: "2026-10-03T09:00:00+05:30".into() }
     ];
     assert_eq!(bought_in_month(&mixed, "2026-10"), 1);
+  }
+
+  #[test]
+  fn the_bank_hears_of_each_freeze_on_its_own_local_day() {
+    let mixed = [
+      freeze("a", "2026-10-31T23:30:00+05:30"),
+      freeze("b", "never"),
+      Purchase { id: "c".into(), item_kind: "treat".into(), item_id: "apple".into(), price: 5, bought_at: "2026-10-03T09:00:00+05:30".into() }
+    ];
+    assert_eq!(bought_days(&mixed), vec!["2026-10-31".to_string()]);
   }
 
   #[test]

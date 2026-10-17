@@ -100,7 +100,8 @@ describe("the reader's own row", () => {
   it("is the server's row once the profile is shared", () => {
     const you = entry("adi", 135, 2, { isYou: true, displayName: "Adi" });
     const row = ownRow(reader({ board: board([entry("maya", 300, 1), you], you) }));
-    expect(row).toMatchObject({ kind: "shared", rank: 2, weekMinutes: 135, entry: you });
+    // The server's row, with this device's streak (see below).
+    expect(row).toMatchObject({ kind: "shared", rank: 2, weekMinutes: 135, entry: { ...you, streak: 4 } });
     expect(ownCaption(row!)).toBeNull();
     // An older server marks the row in the list without a separate `you`.
     expect(ownRow(reader({ board: board([you]) }))?.kind).toBe("shared");
@@ -114,7 +115,7 @@ describe("the reader's own row", () => {
       reader({ board: board([entry("maya", 300, 1), unmarked]), profile: { handle: "adi", displayName: "Adi", visibility: "public" } })
     );
     // One row, the server's: not a second "on its way" row beside it.
-    expect(row).toMatchObject({ kind: "shared", rank: 2, entry: unmarked });
+    expect(row).toMatchObject({ kind: "shared", rank: 2, entry: { ...unmarked, streak: 4 } });
     // Somebody else's handle is somebody else's row.
     expect(ownRow(reader({ board: board([unmarked]), profile: { handle: "ada", displayName: null, visibility: "public" } }))?.kind).toBe("waiting");
     expect(ownRow(reader({ board: board([unmarked]) }))?.kind).toBe("private");
@@ -219,6 +220,17 @@ describe("an empty board", () => {
   });
 });
 
+describe("the reader's own streak on the board", () => {
+  it("is this device's, not whichever device sent the server its figure last", () => {
+    // The server says 16 (another device, before its streak was put right);
+    // the ledger here says 3. Every device works out the same 3.
+    const sent = entry("bee", 300, 2, { isYou: true, streak: 16 });
+    const row = ownRow(reader({ profile: { handle: "bee", displayName: "Bee", visibility: "public" }, board: board([sent], sent), streak: 3 }));
+    expect(row).toMatchObject({ kind: "shared", weekMinutes: 300, rank: 2, streak: 3 });
+    expect(row?.entry?.streak).toBe(3);
+  });
+});
+
 describe("a reader in another account's library", () => {
   it("shows none of that library's minutes as theirs, nor says they are on their way", () => {
     const shared = reader({ profile: { handle: "bee", displayName: "Bee", visibility: "public" }, weekMinutes: 3, streak: 2 });
@@ -229,6 +241,12 @@ describe("a reader in another account's library", () => {
     const unpaused = ownRow(shared);
     expect(unpaused?.weekMinutes).toBe(3);
     expect(unpaused && ownCaption(unpaused)).toBe("Not on the board yet: your minutes are on their way.");
+  });
+
+  it("keeps the server's streak for them too", () => {
+    const sent = entry("bee", 7, 1, { isYou: true, streak: 16 });
+    const row = ownRow({ ...reader(), board: board([sent], sent), paused: true });
+    expect(row?.streak).toBe(16);
   });
 
   it("keeps the server's own row for them: those minutes are theirs", () => {

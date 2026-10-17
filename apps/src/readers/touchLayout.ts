@@ -251,6 +251,16 @@ export const insetPx = (name: "top" | "right" | "bottom" | "left" | "keyboard"):
   return Number.isFinite(px) ? px : 0;
 };
 
+/** A CSS length (a `var()` or `calc()` of the reader's) as laid out in `host` now, in px. */
+export const lengthIn = (host: Element, value: string): number => {
+  const probe = document.createElement("div");
+  probe.style.cssText = `position:absolute;visibility:hidden;pointer-events:none;top:0;left:0;width:0;height:${value}`;
+  host.appendChild(probe);
+  const px = probe.getBoundingClientRect().height;
+  probe.remove();
+  return Number.isFinite(px) ? px : 0;
+};
+
 /**
  * Where a card or the selection's bar rests at the foot of the page, as px
  * up from the frame's foot. A mouse: above the chapter dock (and above the

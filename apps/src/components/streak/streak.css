@@ -1,0 +1,468 @@
+/* The streak: a flame chip in the header, its panel (a popover on a desktop, a sheet on a phone),
+   and the moments it shows once (components/streak). The art is Pip's pixel style: flat colours
+   in a hard outline. Every animation starts from its own first frame and rests on its last, and
+   under prefers-reduced-motion only the last is drawn. Nothing at rest moves. */
+
+:root {
+  --flame-o: #5a2208;
+  --flame-r: #f2671f;
+  --flame-a: #ffae2b;
+  --flame-y: #ffe680;
+  --flame-ink: #b4470b;
+  --ash-o: #6b625a;
+  --ash-r: #b9b0a5;
+  --ash-a: #d3cbbf;
+  --ash-y: #e9e3d8;
+  --ember: #ff8a2a;
+  --risk: #d9822b;
+  --ice-o: #1d4a6b;
+  --ice-w: #ffffff;
+  --ice-i: #a8dcf5;
+  --ice-j: #6cb8e0;
+  --ice-face: #e3f4fc;
+  --grace-face: #f6eedb;
+}
+
+:root[data-theme="dark"] {
+  --flame-o: #2a1206;
+  --flame-ink: #ffb04a;
+  --ash-o: #0e0f12;
+  --ash-r: #4a4e57;
+  --ash-a: #5d626c;
+  --ash-y: #737884;
+  --risk: #f0a046;
+  --ice-o: #08131c;
+  --ice-face: #1f3a4b;
+  --grace-face: #3a3426;
+}
+
+/* ---- Sprites ---------------------------------------------------------------------------------- */
+
+.streak-flame,
+.streak-ice {
+  display: block;
+  flex: none;
+  overflow: visible;
+}
+
+.streak-flame .streak-px-o { fill: var(--flame-o); }
+.streak-flame .streak-px-r { fill: var(--flame-r); }
+.streak-flame .streak-px-a { fill: var(--flame-a); }
+.streak-flame .streak-px-y { fill: var(--flame-y); }
+
+.streak-flame:is(.streak-flame-embers, .streak-flame-risk, .streak-flame-out) .streak-px-o { fill: var(--ash-o); }
+.streak-flame:is(.streak-flame-embers, .streak-flame-risk, .streak-flame-out) .streak-px-r { fill: var(--ash-r); }
+.streak-flame:is(.streak-flame-embers, .streak-flame-risk, .streak-flame-out) .streak-px-a { fill: var(--ash-a); }
+.streak-flame:is(.streak-flame-embers, .streak-flame-risk, .streak-flame-out) .streak-px-y { fill: var(--ash-y); }
+.streak-flame-out { opacity: 0.75; }
+.streak-embers rect { fill: var(--ember); }
+
+/* A grace day: the flame drawn in outline only. */
+.streak-flame.streak-flame-ghost path { fill: transparent; }
+.streak-flame.streak-flame-ghost .streak-px-o { fill: var(--flame-a); }
+
+.streak-ice .streak-px-o { fill: var(--ice-o); }
+.streak-ice .streak-px-w { fill: var(--ice-w); }
+.streak-ice .streak-px-i { fill: var(--ice-i); }
+.streak-ice .streak-px-j { fill: var(--ice-j); }
+
+/* ---- The chip --------------------------------------------------------------------------------- */
+
+.streak-chip {
+  position: relative;
+  display: inline-flex;
+  height: 46px;
+  min-width: 46px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px 0 10px;
+  border-radius: 9999px;
+  border: 1px solid rgb(var(--color-outline-variant) / 0.34);
+  background: rgb(var(--color-surface-high));
+  box-shadow: var(--shadow-raised-small);
+  color: rgb(var(--color-on-surface-variant));
+  font-size: 15px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.streak-chip:hover { border-color: rgb(var(--color-outline-variant) / 0.6); }
+.streak-chip:active { transform: scale(0.97); }
+.streak-chip[aria-expanded="true"] { border-color: rgb(var(--color-primary) / 0.5); }
+.streak-chip[data-state="lit"] { color: var(--flame-ink); }
+
+/* At risk: an amber ring that breathes slowly round the chip; the sprite inside stays still. */
+.streak-chip[data-state="risk"] {
+  border-color: var(--risk);
+  color: var(--risk);
+}
+
+.streak-chip[data-state="risk"]::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+  border: 2px solid var(--risk);
+  opacity: 0;
+  pointer-events: none;
+  animation: streak-breathe 2.8s ease-in-out infinite;
+}
+
+@keyframes streak-breathe {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 0.55; }
+}
+
+@media (max-width: 767px) {
+  .streak-chip { height: 40px; min-width: 40px; padding: 0 10px 0 8px; font-size: 14px; }
+}
+
+/* ---- Lighting up: the flame grows with a small burst, the count ticks over ------------------ */
+
+.streak-ignite { animation: streak-ignite 760ms cubic-bezier(0.3, 1.4, 0.5, 1) both; transform-origin: 50% 85%; }
+
+@keyframes streak-ignite {
+  0% { transform: scale(0.7); filter: grayscale(1) brightness(1.1); }
+  45% { transform: scale(1.28); filter: none; }
+  72% { transform: scale(0.94); }
+  100% { transform: scale(1); }
+}
+
+.streak-burst {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.streak-burst > i {
+  position: absolute;
+  left: -2px;
+  top: -2px;
+  width: 4px;
+  height: 4px;
+  background: var(--c, var(--flame-a));
+  box-shadow: 0 0 0 1px var(--flame-o);
+  opacity: 0;
+  animation: streak-spark var(--t, 700ms) ease-out var(--d, 120ms) both;
+}
+
+@keyframes streak-spark {
+  0% { opacity: 1; transform: translate(0, 0) rotate(0deg); }
+  70% { opacity: 1; }
+  100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--r, 0deg)); }
+}
+
+.streak-tick {
+  display: inline-block;
+  height: 1em;
+  overflow: hidden;
+  vertical-align: bottom;
+  line-height: 1;
+}
+
+.streak-tick > span {
+  display: flex;
+  flex-direction: column;
+  transform: translateY(-50%);
+  animation: streak-tick 420ms cubic-bezier(0.3, 1.3, 0.5, 1) 380ms both;
+}
+
+.streak-tick > span > span { height: 1em; }
+
+@keyframes streak-tick {
+  from { transform: translateY(0); }
+  to { transform: translateY(-50%); }
+}
+
+/* ---- The panel -------------------------------------------------------------------------------- */
+
+.streak-panel { width: 22rem; }
+.sheet-panel.streak-panel { width: 100%; }
+
+.streak-hero {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 4px 4px 12px;
+}
+
+.streak-hero-count {
+  font-size: 44px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: rgb(var(--color-on-surface));
+}
+
+.streak-hero[data-state="lit"] .streak-hero-count { color: var(--flame-ink); }
+
+.streak-hero-big { transform-origin: 50% 85%; }
+.streak-hero[data-state="lit"] .streak-hero-big { animation: streak-glow 3.2s ease-in-out infinite; }
+
+/* The big flame alone: a slow, soft warmth, never a flicker. */
+@keyframes streak-glow {
+  0%, 100% { filter: drop-shadow(0 0 0 rgb(255 174 43 / 0)); }
+  50% { filter: drop-shadow(0 0 6px rgb(255 174 43 / 0.45)); }
+}
+
+.streak-week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.streak-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: rgb(var(--color-on-surface-variant));
+}
+
+.streak-day[data-today="true"] { color: rgb(var(--color-on-surface)); }
+
+.streak-bubble {
+  position: relative;
+  display: flex;
+  width: 38px;
+  height: 38px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  border: 2px solid rgb(var(--color-outline-variant) / 0.4);
+  background: rgb(var(--color-surface-high));
+}
+
+.streak-bubble[data-kind="met"] { border-color: var(--flame-o); background: var(--flame-a); }
+:root[data-theme="dark"] .streak-bubble[data-kind="met"] { border-color: var(--flame-r); background: #5a2a10; }
+.streak-bubble[data-kind="frozen"] { border-color: var(--ice-j); background: var(--ice-face); }
+.streak-bubble[data-kind="grace"] { border-style: dashed; border-color: var(--flame-a); background: var(--grace-face); }
+.streak-bubble[data-kind="missed"] { background: transparent; }
+.streak-bubble[data-kind="future"] { border-style: dashed; border-color: rgb(var(--color-outline-variant) / 0.3); background: transparent; }
+.streak-bubble[data-kind="today"] { border-color: transparent; }
+
+.streak-ring {
+  position: absolute;
+  inset: -2px;
+  transform: rotate(-90deg);
+}
+
+.streak-ring circle { fill: none; stroke-width: 3; }
+.streak-ring .streak-ring-track { stroke: rgb(var(--color-outline-variant) / 0.35); }
+.streak-ring .streak-ring-fill { stroke: var(--flame-r); stroke-linecap: round; transition: stroke-dasharray 600ms ease; }
+
+.streak-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: rgb(var(--color-on-surface-variant));
+  font-variant-numeric: tabular-nums;
+}
+
+.streak-line strong { color: rgb(var(--color-on-surface)); font-weight: 700; }
+
+.streak-meter {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: rgb(var(--color-surface-highest, var(--color-surface-high)));
+}
+
+.streak-meter > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--flame-a);
+}
+
+.streak-tray {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.streak-slot {
+  display: flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed rgb(var(--color-outline-variant) / 0.45);
+  border-radius: 6px;
+}
+
+.streak-slot[data-full="true"] { border-style: solid; border-color: var(--ice-j); background: var(--ice-face); }
+
+/* A cube bought (or earned) drops into its slot and settles. */
+.streak-ice-drop { animation: streak-drop 640ms cubic-bezier(0.3, 1.2, 0.5, 1) both; }
+
+@keyframes streak-drop {
+  0% { transform: translateY(-34px); opacity: 0; }
+  55% { transform: translateY(2px); opacity: 1; }
+  75% { transform: translateY(-4px); }
+  100% { transform: translateY(0); }
+}
+
+.streak-seeds {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: rgb(var(--color-on-surface-variant));
+}
+
+/* ---- Moments ---------------------------------------------------------------------------------- */
+
+.streak-moment {
+  position: fixed;
+  z-index: 70;
+  top: calc(76px + var(--inset-top, 0px));
+  right: max(16px, var(--inset-right, 0px));
+  display: flex;
+  width: min(20rem, calc(100vw - 32px));
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  background: var(--hud-face);
+  color: var(--hud-ink);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 6px 0 0 var(--hud-lip),
+    0 10px 24px var(--hud-drop);
+  animation: streak-arrive 240ms ease-out both;
+}
+
+@media (max-width: 767px) {
+  .streak-moment {
+    top: calc(68px + var(--inset-top, 0px));
+    left: 50%;
+    right: auto;
+    translate: -50% 0;
+  }
+}
+
+@keyframes streak-arrive {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: none; }
+}
+
+.streak-moment-art {
+  position: relative;
+  display: flex;
+  width: 64px;
+  height: 64px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+}
+
+.streak-moment-title { font-size: 15px; font-weight: 800; line-height: 1.2; }
+.streak-moment-sub { margin-top: 2px; font-size: 12px; color: var(--hud-ink-soft); }
+
+/* Saved: the missed day turns to ice, a crack runs through it and a shield settles on it. */
+.streak-saving {
+  width: 52px;
+  height: 52px;
+  animation: streak-freeze 900ms ease-out both;
+}
+
+@keyframes streak-freeze {
+  0% { background: transparent; border-color: rgb(var(--color-outline-variant) / 0.4); }
+  45% { background: var(--ice-face); border-color: var(--ice-j); transform: scale(1.08); }
+  100% { background: var(--ice-face); border-color: var(--ice-j); transform: scale(1); }
+}
+
+.streak-crack {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.streak-crack path {
+  fill: none;
+  stroke: var(--ice-o);
+  stroke-width: 1.6;
+  stroke-linecap: square;
+  stroke-dasharray: 40;
+  stroke-dashoffset: 0;
+  animation: streak-crack 420ms steps(6, end) 420ms both;
+}
+
+@keyframes streak-crack {
+  from { stroke-dashoffset: 40; }
+  to { stroke-dashoffset: 0; }
+}
+
+.streak-shield {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  animation: streak-pop 360ms cubic-bezier(0.3, 1.5, 0.5, 1) 820ms both;
+}
+
+@keyframes streak-pop {
+  from { transform: scale(0); }
+  to { transform: scale(1); }
+}
+
+/* Lost: the lit flame fades to ash while three embers drift up and go out. */
+.streak-fading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  animation: streak-fade 1400ms ease-in 200ms both;
+}
+
+@keyframes streak-fade {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+.streak-rising > i {
+  position: absolute;
+  left: calc(50% + var(--x));
+  bottom: 18px;
+  width: 4px;
+  height: 4px;
+  background: var(--ember);
+  opacity: 0;
+  animation: streak-rise 1500ms ease-out var(--d) both;
+}
+
+@keyframes streak-rise {
+  0% { opacity: 0; transform: translateY(0); }
+  15% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-34px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .streak-anim,
+  .streak-anim *,
+  .streak-chip::after,
+  .streak-hero-big,
+  .streak-ice-drop,
+  .streak-ignite {
+    animation: none !important;
+    transition: none !important;
+  }
+}

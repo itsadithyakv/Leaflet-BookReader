@@ -37,7 +37,7 @@ export type ShopItem = {
   sessions?: number;
   /** The reader's level first (a rare thing): see RARE_LEVELS. */
   level?: number;
-  /** A plant: minutes of focus to ripen, and the seeds it gives. */
+  /** A plant: the water to ripen (a focus minute is 1.5, a plain minute 0.75), and the seeds it gives. */
   water?: number;
   yield?: number;
   /** The book a house item nods to. */

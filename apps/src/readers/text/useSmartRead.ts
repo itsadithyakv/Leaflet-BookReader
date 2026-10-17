@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { type ReaderWord, type SmartSession } from "../readerTypes";
 import { paceLimits, plainFromWpm, setBookPace, wpmFromPlain } from "../paceModel";
 import { judgeCatchUp } from "../paceTracker";
-import { easeInOutCubic, lineInArea, pastPictureGap, planScrollStep, readingBand, stepDuration, type ReadingArea } from "../smartScroll";
+import { coverFromBottom, coverFromTop, easeInOutCubic, lineInArea, pastPictureGap, planScrollStep, readingBand, stepDuration, type ReadingArea } from "../smartScroll";
 import { glideFrame, glideSet, startGlide } from "../glide";
 import type { Later, WithAuto, WithKeys } from "./scope";
 
@@ -77,13 +77,25 @@ export const useSmartRead = (reader: WithAuto & SmartLater) => {
    */
   const readingArea = (container: HTMLElement): ReadingArea => {
     const box = container.getBoundingClientRect();
+    const scope = container.closest<HTMLElement>(".reader-scope");
+    // What lies over the foot of the text and can be seen: a faded-out dock
+    // (a phone's, with the chrome away) is not in the way.
+    const shown = (element: Element | null | undefined) =>
+      element && Number(getComputedStyle(element).opacity) > 0.05 ? element.getBoundingClientRect() : null;
     const toolbar = toolbarRef.current?.getBoundingClientRect();
-    const controls = (pacePillRef.current ?? chapterDockRef.current)?.getBoundingClientRect();
+    const covers = [
+      shown(pacePillRef.current),
+      shown(chapterDockRef.current),
+      // An upright phone's bar is at the foot; the footer's strip is the page's own.
+      toolbar ?? null,
+      scope?.querySelector(".reader-phone-footer")?.getBoundingClientRect()
+    ];
     return {
       height: container.clientHeight,
       lineHeight: linePx(),
-      topInset: Math.max(8, toolbar ? toolbar.bottom - box.top : 0),
-      bottomInset: Math.max(12, controls ? box.bottom - controls.top + 8 : 0)
+      topInset: Math.max(8, coverFromTop(box, toolbar)),
+      bottomInset: Math.max(12, coverFromBottom(box, covers) + 8),
+      phone: Boolean(scope?.dataset.shape)
     };
   };
 

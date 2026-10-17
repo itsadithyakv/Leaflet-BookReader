@@ -18,6 +18,39 @@ export type ReadingArea = {
   topInset: number;
   /** Covered at the bottom (Smart Read's controls, the chapter bar). */
   bottomInset: number;
+  /**
+   * A phone: Dotty walks down to about two thirds of the way and the page
+   * glides up a third or so, its line landing about a third from the top. A
+   * whole-screen turn on a small screen was a jolt the eye lost the line in.
+   */
+  phone?: boolean;
+};
+
+type Box = { top: number; bottom: number };
+
+/**
+ * How much of a box (the scrolling text) a bar covers from the top: only a
+ * bar along its top edge and on screen. An upright phone's text reader has
+ * its bar at the foot, and a hidden bar is moved off the window: taken for a
+ * bar at the top, either put the reading area below the window, so Smart
+ * Read scrolled at every word with Dotty off the foot of the screen.
+ */
+export const coverFromTop = (box: Box, bar: Box | null | undefined) =>
+  bar && bar.top <= box.top + 1 && bar.bottom > box.top ? Math.min(box.bottom - box.top, bar.bottom - box.top) : 0;
+
+/**
+ * How much of a box the lowest-reaching of some things over its foot covers
+ * (the pace pill, the chapter dock, an upright phone's bar, the footer
+ * strip): only those in its lower half and on screen count.
+ */
+export const coverFromBottom = (box: Box, covers: Array<Box | null | undefined>) => {
+  const middle = (box.top + box.bottom) / 2;
+  let covered = 0;
+  for (const cover of covers) {
+    if (!cover || cover.top >= box.bottom || cover.bottom <= middle || cover.top < middle) continue;
+    covered = Math.max(covered, box.bottom - cover.top);
+  }
+  return covered;
 };
 
 export type ReadingBand = {
@@ -32,6 +65,13 @@ export const readingBand = (area: ReadingArea): ReadingBand => {
   const visibleTop = Math.max(0, area.topInset);
   const visibleBottom = Math.max(visibleTop + line, area.height - Math.max(0, area.bottomInset));
   const usable = visibleBottom - visibleTop;
+  if (area.phone) {
+    const top = visibleTop + Math.max(line * 1.5, usable * 0.3);
+    const turn = visibleTop + Math.min(usable - line * 1.2, usable * 0.7);
+    if (turn - top >= line * 3) {
+      return { top, turn };
+    }
+  }
   // A line and a half of what was just read stays above Dotty after a step,
   // so the eye can pick up the sentence; more on a tall screen.
   const top = visibleTop + Math.max(line * 1.5, usable * 0.08);

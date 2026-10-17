@@ -10,6 +10,15 @@ import { isLook, placeAtOpen, placeFollows } from "../openAt";
 import { decodeFindPlace } from "../findPlace";
 import type { WithCover, WithDot } from "./scope";
 import { isFrozen } from "./renditionGhost";
+import { isTouchInput } from "../../platform/device";
+import { keyboardIsOpen } from "../keyboardOpen";
+
+/** By finger, a keyboard is up (or coming) for a field outside the book. */
+const keyboardOverPage = () => {
+  if (!isTouchInput()) return false;
+  const active = document.activeElement;
+  return keyboardIsOpen() || Boolean(active?.matches?.("input, textarea, [contenteditable=''], [contenteditable='true']"));
+};
 
 /**
  * Where the reader is: the reading line, the place saved with the book, a
@@ -603,6 +612,21 @@ export const useResizeRelayout = (reader: WithCover) => {
     // scrollbar narrower, so the two never agreed) with no place yet known to
     // put back: the book opened blank.
     let laidOut = { width: Math.round(viewer.clientWidth), height: Math.round(viewer.clientHeight) };
+    // epub.js hears the window's resize itself, and lays the book out again
+    // at any new size: not for a keyboard over the page (below).
+    const stage = (rendition as any).manager?.stage;
+    const ownResize = stage?.resizeFunc as ((...args: unknown[]) => void) | undefined;
+    const heldResize = (...args: unknown[]) => {
+      if (Math.round(viewer.clientWidth) === laidOut.width && Math.round(viewer.clientHeight) < laidOut.height && keyboardOverPage()) {
+        return;
+      }
+      ownResize?.(...args);
+    };
+    if (ownResize) {
+      window.removeEventListener("resize", ownResize);
+      stage.resizeFunc = heldResize;
+      window.addEventListener("resize", heldResize);
+    }
     const syncViewport = () => {
       window.cancelAnimationFrame(frame);
       frame = window.requestAnimationFrame(() => {
@@ -613,6 +637,13 @@ export const useResizeRelayout = (reader: WithCover) => {
         const width = Math.max(1, Math.round(viewer.clientWidth));
         const height = Math.max(1, Math.round(viewer.clientHeight));
         if (width === laidOut.width && height === laidOut.height) {
+          return;
+        }
+        // A phone's keyboard, come up for a note or a search, makes the page
+        // shorter (Android resizes it to end at the keyboard): the book stays
+        // laid out as it was, under the keyboard, and is just as it was when
+        // the keyboard goes.
+        if (width === laidOut.width && height < laidOut.height && keyboardOverPage()) {
           return;
         }
         laidOut = { width, height };
@@ -647,6 +678,11 @@ export const useResizeRelayout = (reader: WithCover) => {
     return () => {
       window.cancelAnimationFrame(frame);
       observer.disconnect();
+      if (ownResize && stage.resizeFunc === heldResize) {
+        window.removeEventListener("resize", heldResize);
+        stage.resizeFunc = ownResize;
+        if (!isFrozen(rendition)) window.addEventListener("resize", ownResize);
+      }
     };
   }, [book.id, loading]);
 };

@@ -41,17 +41,21 @@ const icon = (name: UiIconName) => <UiIcon name={name} size={20} />;
 /** The ··· sheet's first rows on a phone: what the desktop's toolbar has as buttons. */
 export const ReaderMoreRows = ({ reader, close }: { reader: ReaderScope; close: () => void }) => {
   const { addBookmark, closeSearch, people, setBookmarkPanelOpen, setNotesFocus, setSearchOpen } = reader;
+  const sideways = reader.shape === "sideways";
   const sound = useAmbienceState();
   return (
     <div className="reader-sheet-rows" role="group" aria-label="More">
-      <SheetRow
-        icon={icon("search")}
-        label="Search in this book"
-        onClick={() => {
-          close();
-          setSearchOpen(true);
-        }}
-      />
+      {/* On its side the strip has search and notes of its own (ReaderToolbar.tsx). */}
+      {!sideways && (
+        <SheetRow
+          icon={icon("search")}
+          label="Search in this book"
+          onClick={() => {
+            close();
+            setSearchOpen(true);
+          }}
+        />
+      )}
       {people.enabled && (
         <SheetRow
           icon={icon("people")}
@@ -63,15 +67,17 @@ export const ReaderMoreRows = ({ reader, close }: { reader: ReaderScope; close: 
           }}
         />
       )}
-      <SheetRow
-        icon={icon("note")}
-        label="Notes"
-        onClick={() => {
-          close();
-          setNotesFocus(null);
-          setBookmarkPanelOpen(true);
-        }}
-      />
+      {!sideways && (
+        <SheetRow
+          icon={icon("note")}
+          label="Notes"
+          onClick={() => {
+            close();
+            setNotesFocus(null);
+            setBookmarkPanelOpen(true);
+          }}
+        />
+      )}
       <SheetRow
         icon={icon("bookmark")}
         label="Bookmark this place"

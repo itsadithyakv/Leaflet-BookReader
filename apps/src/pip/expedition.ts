@@ -13,7 +13,7 @@
  *
  * - A session of under five minutes read finds nothing, however it ended.
  * - How far she gets is the minutes read, half as far again for a session
- *   completed without leaving the book (the garden's own bonus for water).
+ *   completed without leaving the book.
  *   A session ended early counts its minutes as they are.
  * - How far she got names a place, and each place has its own odds for the
  *   five rarities: the further, the rarer. Which rarity, and which thing of
@@ -122,7 +122,7 @@ export const findsOf = (rarity: Rarity): readonly Find[] => BY_RARITY[rarity];
 
 /** Under this many minutes read she is not out long enough to find anything. */
 export const MIN_FIND_MINUTES = 5;
-/** A session completed without leaving the book takes her this much further (the water bonus, habit/seeds.rs). */
+/** A session completed without leaving the book takes her this much further. */
 export const CLEAN_REACH = 1.5;
 
 /** How far she got: a place, and its odds for each rarity (percent, in RARITIES' order). */
@@ -154,7 +154,7 @@ export const PLACES: readonly Place[] = [
 export type ExpeditionSession = Pick<FocusSessionRecord, "id" | "minutes" | "endedReason" | "clean"> &
   Partial<Pick<FocusSessionRecord, "styleSeed" | "startedAt" | "endedAt" | "title" | "bookId" | "burnedAt">>;
 
-/** Ran to its planned end without leaving the book: the shelf's gold band, the garden's bonus. */
+/** Ran to its planned end without leaving the book: the shelf's gold band. */
 const completedClean = (session: ExpeditionSession) => session.endedReason === "completed" && Boolean(session.clean);
 
 /**

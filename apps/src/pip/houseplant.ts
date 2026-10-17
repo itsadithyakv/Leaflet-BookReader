@@ -1,8 +1,8 @@
 /**
  * The houseplant on Pip's fridge, which only free reading waters: reading
  * with no focus session running (the habit snapshot's `freeReads`, worked out
- * from the ledger; nothing is stored for the plant). Focus sessions water
- * the garden; this is what the other kind of reading does.
+ * from the ledger; nothing is stored for the plant). All reading waters the
+ * garden (focus twice over); this is what plain reading does besides.
  *
  * The rule, pure (houseplant.test.ts). Each minute of free reading is a
  * minute of water, and water drains by two fifths a day, over a week. From
@@ -126,7 +126,7 @@ export const plantReport = (plant: Plant): string[] => {
           ? "A little thirsty."
           : "Drooping a little. It will pick up, or settle by itself: it never dies.";
   const watered = plant.resting
-    ? "Only reading outside a focus session waters it (focus sessions water the garden)."
+    ? "Only reading outside a focus session waters it."
     : `Watered by reading outside a focus session: ${minutes(plant.today)} today, ${minutes(plant.week)} this week.`;
   const leaf = plant.nextLeaf === null ? `All ${plant.leaves} of its leaves are out.` : `${plant.leaves} leaves; the next after ${stretch(plant.nextLeaf)} more.`;
   const flower =

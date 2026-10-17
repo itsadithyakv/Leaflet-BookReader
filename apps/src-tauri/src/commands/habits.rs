@@ -176,15 +176,22 @@ impl ReadNames {
   }
 }
 
+/// The streak as of `today_key`, walked from the records every device holds
+/// alike (the day ledger, and the freezes bought). Writes nothing: reading
+/// it neither spends a freeze nor uses up the news of a break.
+pub(crate) fn walk_streak(db: &db::Database, today_key: &str) -> Result<habit::Evaluation, String> {
+  let days = db.reading_days().map_err(|e| e.to_string())?;
+  let bought = crate::pip::freezes::bought_days(&db.pip_purchases().map_err(|e| e.to_string())?);
+  Ok(habit::evaluate(&days, &bought, today_key, &read_streak_state(db)))
+}
+
 pub(crate) fn build_snapshot(db: &db::Database, today_key: &str) -> Result<HabitSnapshot, String> {
   let goal_minutes = read_goal(db);
-  let previous = read_streak_state(db);
-  let days = db.reading_days().map_err(|e| e.to_string())?;
+  let evaluation = walk_streak(db, today_key)?;
 
-  let evaluation = habit::evaluate(&days, today_key, &previous);
-
-  // Persist the covers the walk decided to spend, so the same gap is never
-  // charged twice.
+  // Stamp the covers the walk decided on. The walk does not need them (it
+  // decides afresh every time, and the same on every device), but an earlier
+  // version reading the synced ledger counts a stamped day, as it always has.
   for (date_key, kind) in &evaluation.covers {
     db.apply_cover(date_key, *kind, goal_minutes)
       .map_err(|e| e.to_string())?;
@@ -199,6 +206,10 @@ pub(crate) fn build_snapshot(db: &db::Database, today_key: &str) -> Result<Habit
   write_streak_state(db, &state)?;
 
   let day_map = db.reading_days().map_err(|e| e.to_string())?;
+  // Covers as the walk judged them: a stamp it could not pay for (one from a
+  // device that walked with a bank of its own) is no cover in the calendar,
+  // nor to Pip's cold.
+  let judged = habit::judged(&day_map, &evaluation.kept);
   let mut sessions = db.focus_sessions().map_err(|e| e.to_string())?;
   let (garden, seeds_earned) = garden_totals(db, &day_map, &sessions)?;
   let mut free_reads = free_reads_from(&day_map, &sessions);
@@ -207,10 +218,10 @@ pub(crate) fn build_snapshot(db: &db::Database, today_key: &str) -> Result<Habit
   let names = ReadNames::load(db)?;
   sessions.iter_mut().for_each(|session| names.name_session(session));
   free_reads.iter_mut().for_each(|free| names.name_free_read(free));
-  // Read from the ledger as it stands with this walk's covers stamped on it:
-  // a miss that grace or a freeze paid for is no break.
-  let cold = habit::cold(&day_map, today_key, goal_minutes);
-  let mut day_list: Vec<habit::DayRecord> = day_map.into_values().collect();
+  // Read from the ledger as the walk judged it: a miss that grace or a
+  // freeze paid for is no break.
+  let cold = habit::cold(&judged, today_key, goal_minutes);
+  let mut day_list: Vec<habit::DayRecord> = judged.into_values().collect();
   day_list.sort_by(|a, b| a.date_key.cmp(&b.date_key));
 
   Ok(HabitSnapshot {
@@ -843,23 +854,22 @@ mod tests {
     (now.date_naive() - chrono::Duration::days(back)).format("%Y-%m-%d").to_string()
   }
 
-  /// Three days met, the last of them the day before yesterday, a session on
-  /// each; yesterday missed; and a streak state with nothing left to cover it.
-  fn a_streak_broken_yesterday(db: &db::Database, now: &chrono::DateTime<chrono::Local>) {
-    for back in 2..=4 {
+  /// Days met, a session on each, from `back` days ago to the day before
+  /// yesterday, but for `missed` days.
+  fn read_on(db: &db::Database, now: &chrono::DateTime<chrono::Local>, back: i64, missed: &[i64]) {
+    for back in (2..=back).filter(|back| !missed.contains(back)) {
       let key = day_before(now, back);
       db.credit_minutes(&key, 25.0, 20).expect("a day");
       db.insert_focus_session(&session(&format!("s{back}"), &key, now, 25.0)).expect("a session");
     }
-    let state = habit::StreakState {
-      current_streak: 3,
-      longest_streak: 3,
-      freezes: 0,
-      grace_available: false,
-      last_evaluated_day: Some(day_before(now, 1)),
-      peak_shelf: 3,
-      broke_on: None
-    };
+  }
+
+  /// A streak of four (three days met, and grace for the one missed among
+  /// them) to the day before yesterday; yesterday missed, with nothing left
+  /// to cover it; and a device that last looked yesterday.
+  fn a_streak_broken_yesterday(db: &db::Database, now: &chrono::DateTime<chrono::Local>) {
+    read_on(db, now, 5, &[4]);
+    let state = habit::StreakState { last_evaluated_day: Some(day_before(now, 1)), peak_shelf: 3, ..Default::default() };
     write_streak_state(db, &state).expect("streak state");
   }
 
@@ -870,14 +880,14 @@ mod tests {
     a_streak_broken_yesterday(&db, &now);
 
     let snapshot = build_snapshot(&db, &today).expect("snapshot");
-    assert_eq!(snapshot.broke_from, Some(3), "the break is still found, and said once");
+    assert_eq!(snapshot.broke_from, Some(4), "the break is still found, and said once");
     assert_eq!(snapshot.streak, 0);
     assert_eq!(snapshot.shelf_count, 3, "every book still stands");
     assert!(snapshot.sessions.iter().all(|session| session.burned_at.is_none()));
     assert_eq!(db.unburned_session_count().expect("count"), 3);
     assert_eq!(
       snapshot.cold,
-      Some(habit::Cold { since: yesterday, broke_from: 3, cure: 0.0, minutes_left_today: 20, days_left: 3 })
+      Some(habit::Cold { since: yesterday, broke_from: 4, cure: 0.0, minutes_left_today: 20, days_left: 3 })
     );
 
     // Asked again, the break is not announced twice, the streak does not
@@ -911,11 +921,9 @@ mod tests {
   fn a_miss_covered_by_grace_is_no_break_and_no_cold() {
     let db = memory_db();
     let (now, today, yesterday) = clock();
-    a_streak_broken_yesterday(&db, &now);
-    // The same ledger, with grace still in hand.
-    let mut state = read_streak_state(&db);
-    state.grace_available = true;
-    write_streak_state(&db, &state).expect("streak state");
+    // Three days met, grace still in hand, and yesterday missed.
+    read_on(&db, &now, 4, &[]);
+    write_streak_state(&db, &habit::StreakState { last_evaluated_day: Some(yesterday.clone()), ..Default::default() }).expect("streak state");
 
     let snapshot = build_snapshot(&db, &today).expect("snapshot");
     assert_eq!(snapshot.broke_from, None);
@@ -979,43 +987,50 @@ mod tests {
     let sent = serde_json::to_string(&doc).expect("encodes");
     assert!(!sent.to_lowercase().contains("cold"), "the cold is in the sync document");
 
-    // A device that never held the streak, with nothing to cover the miss
-    // either: its own state says nothing broke, and the ledger still says
-    // she has a cold.
+    // A device that never held the streak: it has no news of a break, and
+    // the ledger still says she has a cold.
     let to = memory_db();
     crate::sync::store::apply(&to, &doc).expect("apply");
-    write_streak_state(&to, &habit::StreakState { grace_available: false, ..Default::default() }).expect("streak state");
     let there = build_snapshot(&to, &today).expect("snapshot");
     assert_eq!(there.broke_from, None);
     assert_eq!(there.cold, Some(here));
   }
 
-  /// The streak's bank is each device's own, so a device with grace in hand
-  /// pays for a miss another could not. The cover travels (spent on one
-  /// device, spent everywhere), and with it the cold goes from both.
+  /// The bank is the ledger's, not each device's: a device new to the
+  /// ledger finds the same break, the same streak and the same cold, and a
+  /// stamp an earlier version put on the missed day with a bank of its own
+  /// (synced back here) pays for nothing on either.
   #[test]
-  fn a_cover_from_another_device_cures_the_cold_here_too() {
+  fn a_device_new_to_the_ledger_finds_the_same_break_and_its_stamps_pay_for_nothing() {
     let from = memory_db();
     let (now, today, yesterday) = clock();
     a_streak_broken_yesterday(&from, &now);
-    assert!(build_snapshot(&from, &today).expect("snapshot").cold.is_some());
+    let here = build_snapshot(&from, &today).expect("snapshot");
+    assert_eq!(here.streak, 0);
 
-    // The other device: the same ledger, and a new device's grace.
     let other = memory_db();
     crate::sync::store::apply(&other, &crate::sync::store::snapshot(&from, &db::now_iso()).expect("snapshot")).expect("apply");
     let there = build_snapshot(&other, &today).expect("snapshot");
-    assert_eq!(there.cold, None);
-    assert!(there.days.iter().any(|day| day.date_key == yesterday && day.grace_used));
+    assert_eq!((there.streak, there.longest_streak, there.freezes), (here.streak, here.longest_streak, here.freezes));
+    assert_eq!(there.cold, here.cold);
+    assert!(!there.days.iter().any(|day| day.date_key == yesterday && (day.grace_used || day.freeze_used)));
 
-    // Back here by sync: the day is paid for, so it was no break after all.
+    // An earlier version there stamps yesterday as grace's; it syncs back.
+    other.apply_cover(&yesterday, habit::CoverKind::Grace, 20).expect("stamp");
     let stamp = db::now_iso();
     let merged = crate::sync::merge::merge(
       &crate::sync::store::snapshot(&from, &stamp).expect("here"),
       &crate::sync::store::snapshot(&other, &stamp).expect("there"),
       &stamp
     );
-    crate::sync::store::apply(&from, &merged).expect("apply");
-    assert_eq!(build_snapshot(&from, &today).expect("snapshot").cold, None);
+    for db in [&from, &other] {
+      crate::sync::store::apply(db, &merged).expect("apply");
+      let after = build_snapshot(db, &today).expect("snapshot");
+      assert_eq!(after.streak, 0);
+      assert_eq!(after.cold, here.cold);
+      let shown = after.days.iter().find(|day| day.date_key == yesterday).expect("yesterday");
+      assert!(!shown.grace_used, "a stamp the bank could not pay for is not shown as a cover");
+    }
   }
 
   /// How far Pip's mood is above where a new Pip's starts. (A few

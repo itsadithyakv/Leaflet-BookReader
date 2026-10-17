@@ -32,6 +32,8 @@ import { librarySeries, type LibrarySeries } from "../library/series";
 import { describeImport } from "../library/importSummary";
 import { genreChoices, genreKey, inGenre } from "../library/genres";
 import { PhoneFocusStrip, PhoneShelfTools } from "./library/PhoneLibrary";
+import { FocusDouble } from "../components/focus/FocusDouble";
+import { focusLengthsWith, rememberFocusMinutes, usualFocusMinutes } from "../components/focus/focusDeal";
 
 const byTitle = (a: Book, b: Book) => a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: "base" });
 
@@ -80,6 +82,8 @@ export type LibraryPageProps = {
   onOpenBook: (book: Book) => void;
   onNavigate: (tab: "library" | "collections" | "social" | "settings") => void;
   showToast: (message: string) => void;
+  /** Starts a focus session of this many minutes on the book being read (App's one-tap Focus). */
+  onStartFocus?: (minutes: number) => void;
 };
 
 const resolveErrorMessage = (error: unknown, fallback: string) => {
@@ -202,7 +206,7 @@ const SessionRing = ({ session, sessionDuration }: { session: ActiveSession | nu
   );
 };
 
-export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPageProps) => {
+export const LibraryPage = ({ onOpenBook, onNavigate, showToast, onStartFocus }: LibraryPageProps) => {
   const { books, filters, loading, importing, importBooks, importFiles, refreshMetadata, fetchCover, setFilter } =
     useLibraryStore(
       useShallow((state) => ({
@@ -232,7 +236,13 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
   // where a session starts, since it is what plants a focus flower.
   const fullScreen = useHabitStore((state) => state.focusSettings.kioskMode);
   const setFocusSettings = useHabitStore((state) => state.setFocusSettings);
-  const [sessionDuration, setSessionDuration] = useState(20);
+  // The usual length (the last chosen, else the goal), so Start is one tap.
+  const [chosenDuration, setChosenDuration] = useState<number | null>(null);
+  const sessionDuration = chosenDuration ?? usualFocusMinutes(snapshot.goalMinutes);
+  const setSessionDuration = (minutes: number) => {
+    setChosenDuration(minutes);
+    rememberFocusMinutes(minutes);
+  };
   const todayMinutes = snapshot.todayMinutes;
   const goalMet = snapshot.todayMet;
   const goalPercent =
@@ -295,6 +305,9 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
   // day). This used to count days a book was opened, by UTC day, and read
   // "Start Your Streak" until a book was opened today.
   const streakTitle = snapshot.streak > 0 ? `${snapshot.streak} Day Streak!` : "Start Your Streak";
+  // The streak itself is the header's flame chip (components/streak); this card says where today stands.
+  const minutesLeft = Math.max(0, Math.ceil(snapshot.goalMinutes - todayMinutes));
+  const todayTitle = goalMet ? "Today's goal met" : todayMinutes > 0 ? `${minutesLeft} min to go today` : "Read today";
 
   const handleImport = () => {
     // What the library held before, so a book it already had is not called added.
@@ -420,6 +433,10 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
     if (activeSession) {
       return;
     }
+    if (onStartFocus) {
+      onStartFocus(sessionDuration);
+      return;
+    }
     startSession({
       startedAt: new Date().toISOString(),
       durationMinutes: sessionDuration
@@ -462,10 +479,26 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
     });
   }, [books, fetchCover]);
 
+  // On a phone: one key in the search row at rest, a slim card while a session runs (PhoneLibrary).
+  const focusStrip = (
+    <PhoneFocusStrip
+      streakTitle={streakTitle}
+      session={activeSession}
+      reading={sessionReading}
+      duration={sessionDuration}
+      setDuration={setSessionDuration}
+      fullScreen={fullScreen}
+      toggleFullScreen={() => setFocusSettings({ kioskMode: !fullScreen })}
+      onStart={handleStartSession}
+      onEnd={() => void handleEndSession()}
+    />
+  );
+
   return (
     <div className={`library-page dock-clear mx-auto flex min-h-full w-full max-w-[2240px] flex-col ${phone ? "gap-5" : "gap-10"}`}>
-      <div className="md:hidden">
-        <div className="relative">
+      {/* From md the header carries search: a phone on its side keeps only the Focus key here. */}
+      <div className={phone ? "phone-search-row" : "md:hidden"}>
+        <div className="relative min-w-0 flex-1 md:hidden">
           <UiIcon
             name="search"
             size={19}
@@ -483,24 +516,14 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
             onChange={(event) => setFilter({ query: event.target.value })}
           />
         </div>
+        {phone && !activeSession && focusStrip}
       </div>
 
       {/* News about the phone app can wait until there is a library to carry over. */}
       {!libraryEmpty && !isAndroid() && <MobileComingSoonBanner />}
 
-      {phone && (
-        <PhoneFocusStrip
-          streakTitle={streakTitle}
-          session={activeSession}
-          reading={sessionReading}
-          duration={sessionDuration}
-          setDuration={setSessionDuration}
-          fullScreen={fullScreen}
-          toggleFullScreen={() => setFocusSettings({ kioskMode: !fullScreen })}
-          onStart={handleStartSession}
-          onEnd={() => void handleEndSession()}
-        />
-      )}
+      {/* A running session is a slim card under the search; at rest the key is in the search row. */}
+      {phone && activeSession && focusStrip}
 
       {/* Side by side wherever the rail is: stacked, the pair is 456 px tall and
           pushes the first row of covers off a laptop's first screen. */}
@@ -525,7 +548,14 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
               >
                 <div className="min-w-0">
                   <div>
-                    <h1 className="page-title library-hero-title text-4xl md:text-5xl">{streakTitle}</h1>
+                    <h1 className="page-title library-hero-title text-4xl md:text-5xl">{todayTitle}</h1>
+                    <div
+                      className="mt-3 h-1.5 w-full max-w-sm overflow-hidden rounded-full bg-surface-container-highest"
+                      title={`${Math.round(todayMinutes)} of ${snapshot.goalMinutes} minutes today`}
+                      aria-hidden="true"
+                    >
+                      <div className="h-full rounded-full bg-primary/80 transition-[width] duration-500" style={{ width: `${goalPercent}%` }} />
+                    </div>
                   </div>
                 </div>
                 <div className="mt-3 grid gap-3">
@@ -539,10 +569,11 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
                         onChange={(event) => setSessionDuration(Number(event.target.value))}
                         disabled={Boolean(activeSession)}
                       >
-                        <option value={10}>10 min</option>
-                        <option value={20}>20 min</option>
-                        <option value={30}>30 min</option>
-                        <option value={45}>45 min</option>
+                        {focusLengthsWith(sessionDuration).map((minutes) => (
+                          <option key={minutes} value={minutes}>
+                            {minutes} min
+                          </option>
+                        ))}
                       </select>
                       <button
                         type="button"
@@ -561,6 +592,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
                         onClick={handleStartSession}
                       >
                         Start Session
+                        <FocusDouble />
                       </button>
                     </div>
                   </div>
@@ -665,6 +697,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast }: LibraryPagePr
               <h2 className="page-title text-3xl">Library</h2>
               <p className="mt-1 truncate text-xs text-on-surface-variant">
                 {totalBooks} {totalBooks === 1 ? "book" : "books"} · {finishedBooks} finished
+
               </p>
             </div>
             {!libraryEmpty && (

@@ -5,6 +5,7 @@ import type { GardenView, PlantState } from "../../services/pipService";
 import type { HouseSceneHandle, ScenePlot } from "../../components/pip/HouseScene";
 import { bump, centerOf, collect, floatText, puff, reducedMotion, seedPixel, type Box, type Captured } from "../../components/pip/fx";
 import type { PendingPlant, purchaseFlow } from "./purchaseFlow";
+import { FOCUS_WATER_PER_MINUTE } from "../../components/focus/focusDeal";
 import { aOrAn, errorText, pickOne, plantInfo, plural, priceOf, type Drawer } from "./common";
 
 const ORDINALS = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth"];
@@ -115,7 +116,8 @@ export const usePipGarden = ({
     }),
     ...(nextPlot ? [{ plot: plotCount + 1, plant: null, progress: 0, ripe: false, locked: true, price: priceOf("plot", nextPlot.id) }] : [])
   ];
-  const minutesLeft = (here: PlantState) => Math.max(1, Math.ceil(here.need - here.water));
+  // Shown as minutes of focus: a focus minute is a water and a half.
+  const minutesLeft = (here: PlantState) => Math.max(1, Math.ceil((here.need - here.water) / FOCUS_WATER_PER_MINUTE));
   const plotLabel = (plot: ScenePlot) => {
     if (plot.locked) return `Dig a new plot: ${nextPlot ? priceOf("plot", nextPlot.id) : 0} seeds`;
     const here = growing(plot.plot);
@@ -229,7 +231,7 @@ export const usePipGarden = ({
       {
         title: `Plant ${aOrAn(info.name)}?`,
         verb: "Plant",
-        note: `${info.water} minutes of focus to ripen, then ${info.yield} seeds.`,
+        note: `${info.water} water to ripen, then ${info.yield} seeds.`,
         pay: () => plant(plot, plantId),
         before: (from) => sceneRef.current?.expectSprout(plot, Boolean(from?.canvas)),
         after: (from) => {

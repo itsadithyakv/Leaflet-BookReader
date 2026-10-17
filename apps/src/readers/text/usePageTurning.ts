@@ -5,6 +5,7 @@ import { inBookmarkCorner } from "../phoneReading";
 import { DOUBLE_CLICK_MS, TAP_SLACK_PX, WHEEL_AT_REST, clickZone, pageAt, pageCount, pageTurnDuration, pageTurnTarget, pressIsClick, strayPageTarget, swipeTurn, wheelTurn } from "../pageTurn";
 import { MARK_NAME } from "../people/marks";
 import { chapterPageRange } from "../chapterSpan";
+import { holdForSecondTap } from "../wordTap";
 import type { Later, WithAnnotations, WithContentsList } from "./scope";
 
 /**
@@ -596,8 +597,8 @@ export const usePageInput = (reader: WithAnnotations & Later<"cornerBookmarkRef"
     // double-click, which selects a word.
     //
     // A finger's tap (readers/touchLayout.ts, `tapZone`): the outer thirds
-    // turn, the middle brings the toolbar and the dock or sends them away. It
-    // does not wait: a phone selects by a press and hold, not a double tap.
+    // turn, the middle brings the toolbar and the dock or sends them away. On
+    // a word it waits a moment, for a double tap, which selects the word.
     /** Which way a click at this point of the page turns it (0, the middle: a finger's tap there is for the chrome); and the facts of where it landed. */
     const clickPlace = (event: MouseEvent, touch: boolean) => {
       const frameNow = (rendition.manager as any)?.container === container ? container : null;
@@ -672,6 +673,9 @@ export const usePageInput = (reader: WithAnnotations & Later<"cornerBookmarkRef"
       window.clearTimeout(clickTimer);
       if (place.onText && !touch) {
         clickTimer = window.setTimeout(turn, DOUBLE_CLICK_MS);
+      } else if (place.onText) {
+        // A finger's on a word waits a moment too: a second tap selects the word (useWordDoubleTap.ts).
+        holdForSecondTap(rendition, turn);
       } else {
         turn();
       }

@@ -4,7 +4,7 @@ import { useAppearanceStore } from "../../store/appearanceStore";
 import { ALIGN_KEY, LINE_HEIGHT, MEASURE_KEY, MEASURE_PADDING, SPACING_KEY, TYPEFACE_KEY, applyTypeChoice, lineHeightPx, measureCss, readAlign, readMeasure, readSpacing, readTypeface, type ReaderAlign, type ReaderLayout, type ReaderMeasure, type ReaderSpacing, type ReaderTypeface, type ReaderDisplayMode } from "../readerTypes";
 import { applyCustomFont, customFontFaceCss, customFontId, type CustomFontFace } from "../customFonts";
 import { fontService } from "../../services/fontService";
-import { getReaderFinish, getReaderFinishBackground, PAGE_TOP_PAD } from "../finish";
+import { getReaderFinish, getReaderFinishBackground, PAGE_TOP_PAD, readerChromeLight } from "../finish";
 import { readLayoutFor, saveLayoutFor, spreadFor, useReaderShape, useRotationLock } from "../touchLayout";
 import type { Later, WithCover, WithPace } from "./scope";
 
@@ -243,13 +243,12 @@ export const useReaderLook = (reader: WithPace & Later<"setAutoScrollActive" | "
     });
   };
 
-  const isLight = readerTheme === "light";
-
   // RSVP takes its colours from the page, not the app: a true-black page gets
   // a dark stage even when the rest of Leaflet is light, and the paper finish
   // stays paper when the app is dark.
   const rsvpFinish = getReaderFinish(displayMode, readerTheme);
   const rsvpDark = rsvpFinish.themeName === "leaflet-dark";
+  const isLight = readerChromeLight(displayMode, readerTheme);
   // The page's own colours, for everything around the book text (its gutters,
   // the scrollbar, the frame), which otherwise followed the app's theme and
   // showed as pale strips beside a dark page.

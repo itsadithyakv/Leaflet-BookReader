@@ -58,3 +58,12 @@ export const inkFor = (hex: string) => {
 /** Height and width grow with the minutes a spine stands for. */
 export const spineHeight = (minutes: number) => Math.round(clamp(56 + minutes * 1.4, 64, 132));
 export const spineWidth = (minutes: number) => Math.round(clamp(14 + minutes * 0.34, 18, 34));
+
+/**
+ * A cover drawn in a book's cloth where it has no picture (`--cloth` and `--ink` for
+ * styles/phone-polish.css: a phone by a finger draws it; a desktop keeps its plain placeholder).
+ */
+export const clothStyle = (key: string) => {
+  const cloth = clothFor(key);
+  return { "--cloth": cloth, "--ink": inkFor(cloth) } as Record<string, string>;
+};

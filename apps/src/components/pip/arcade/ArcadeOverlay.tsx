@@ -60,7 +60,7 @@ const acornTerms = (game: GameId) =>
  * (the game pauses), and when the tab is hidden. Keys are captured while the
  * overlay is open, so Space and the arrows never page a book underneath.
  *
- * Games never earn seeds (those come only from reading in focus). A finished
+ * Games never earn seeds (those come only from reading). A finished
  * game cheers Pip up a little, up to a daily cap, and keeps a best score.
  *
  * The word quiz (quiz/) is the fourth game: questions, not a canvas, made
@@ -211,7 +211,7 @@ export const ArcadeOverlay = ({ initial = null, skin, outfit, best, mood, moodTo
           <p className="mt-4 flex">
             <span
               className="pip-base-chip"
-              title={`Games don't earn seeds: those come only from reading in focus. Playing cheers Pip up a little${
+              title={`Games don't earn seeds: those come only from reading. Playing cheers Pip up a little${
                 moodToday >= moodCap ? " (that's all the cheering games and play can do today)." : ` (games and play together, up to +${moodCap} mood a day).`
               }${page ? " The word quiz earns neither." : ""}`}
             >

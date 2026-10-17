@@ -161,7 +161,7 @@ const icons: Record<UiIconName, LucideIcon> = {
   play: Play,
   plus: Plus,
   search: Search,
-  // Seeds, the currency earned by reading in focus.
+  // Seeds, the currency earned by reading.
   seed: Bean,
   // A series: books stacked in order.
   series: Layers,
@@ -173,7 +173,7 @@ const icons: Record<UiIconName, LucideIcon> = {
   trash: Trash2,
   treat: Cookie,
   upload: Upload,
-  // Garden water: minutes of focus.
+  // Garden water: from minutes read (a Focus minute twice over).
   water: Droplet,
   garden: Shovel,
   game: Gamepad2,

@@ -4,6 +4,8 @@ import { isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Sidebar } from "./components/Sidebar";
 import { ProfileButton, type SyncMode } from "./components/ProfileButton";
+import { StreakButton } from "./components/streak/StreakButton";
+import { StreakMoments } from "./components/streak/StreakMoments";
 import { AccountDialog, accountOffered, markAccountOffered, useAccountDialog } from "./components/account/AccountDialog";
 import { WelcomeModal } from "./components/WelcomeModal";
 import { useShareStore } from "./components/share/shareStore";
@@ -13,6 +15,8 @@ import { usePipTabDot } from "./hooks/usePipTabDot";
 import { PipHome } from "./components/PipHome";
 import { PipReaderPeek } from "./components/PipReaderPeek";
 import { PipWorld, type PipAction } from "./components/PipWorld";
+import { FocusDouble } from "./components/focus/FocusDouble";
+import { usualFocusMinutes } from "./components/focus/focusDeal";
 import { usePipStore } from "./store/pipStore";
 import { usePipWardrobeStore } from "./store/pipWardrobeStore";
 import { pickBeat } from "./pip/moments";
@@ -35,7 +39,7 @@ import { OWNER_COPY } from "./components/sync/ownerCopy";
 import { FEATURES } from "./constants/features";
 import { ALIVE_EVERY_MS, AWAY_FREE_MS, flowerGrowing, useHabitStore } from "./store/habitStore";
 import { setAppFullscreen, watchForeground } from "./services/windowService";
-import { ConfirmDialog } from "./components/ConfirmDialog";
+import { ConfirmDialog, askConfirm } from "./components/ConfirmDialog";
 import { PostDialog } from "./components/community/Posts";
 import { DiscussDialogs } from "./components/discuss/DiscussDialogs";
 import { SeriesEditorDialog } from "./components/SeriesEditor";
@@ -458,6 +462,25 @@ const App = () => {
     // another device's place offered, never taken silently (services/placeElsewhere).
     if (at === null && !placeChecked(book)) {
       void withPlaceHere(book).then((ready) => handleOpenBookRef.current(ready, null));
+      return;
+    }
+    // Listed here (the account brought it) but with nowhere to fetch its file
+    // from: the way on is the Drive the other device backs up to, so that is
+    // offered, and the book opens once it is connected. It used to say only
+    // that the book was "not on this computer", on a phone too.
+    if (book.available === false && !sync.driveConnected && !sync.folderPath && sync.driveAvailable) {
+      void askConfirm({
+        title: `${book.title} isn't on this device yet`,
+        body: "Its file is with your other device. Connect the Google Drive that device backs up to, and the book comes down when you open it.",
+        confirmLabel: "Connect Google Drive",
+        cancelLabel: "Not now"
+      }).then((ok) => {
+        if (!ok) return;
+        showToast("Finish signing in to Google in your browser.");
+        startDriveAuth()
+          .then(() => handleOpenBookRef.current(book, at))
+          .catch((error) => showToast(resolveErrorMessage(error, "Drive connection failed. Please retry.")));
+      });
       return;
     }
     // Sync carries the library index everywhere but leaves the files where they
@@ -895,6 +918,19 @@ const App = () => {
     [nowReading, startSession]
   );
 
+  // One-tap Focus (the Library's key and card, Pip's menu): a session at the
+  // usual length on the book being read; with no book, on none, in the library.
+  const startFocus = (minutes: number = usualFocusMinutes(goalMinutes)) => {
+    if (nowReading) {
+      readNow(minutes);
+      return;
+    }
+    setActiveTab("library");
+    if (!useHabitStore.getState().activeSession) {
+      startSession({ startedAt: new Date().toISOString(), durationMinutes: minutes });
+    }
+  };
+
   // A clicked reading reminder: pick up the last book, once the library has
   // loaded (a click can be what launched the app). Never over an open book.
   const [reminderRoute, setReminderRoute] = useState<string | null>(null);
@@ -1007,6 +1043,29 @@ const App = () => {
     ? findBookFormat(getBookExtension(selected.localPath))?.delivery
     : undefined;
 
+  // The streak's "read today": the book being read, with a session on it, or a session from the Library.
+  const streakRead = () => {
+    const minutes = goalMinutes > 0 ? goalMinutes : 20;
+    if (nowReading) {
+      readNow(minutes);
+      return;
+    }
+    setActiveTab("library");
+    if (!useHabitStore.getState().activeSession) {
+      startSession({ startedAt: new Date().toISOString(), durationMinutes: minutes });
+    }
+  };
+  const streakReadLabel = nowReading ? "Read now" : "Start a session";
+  // The month's calendar is on Social's Stats tab.
+  const openStreakCalendar = () => {
+    try {
+      localStorage.setItem("leaflet.social.view", "stats");
+    } catch {
+      // The tab opens on whichever view it kept.
+    }
+    setActiveTab("social");
+  };
+
   // Pip's right-click menu: the few things worth a shortcut from anywhere.
   const pipActions: PipAction[] = [];
   if (nowReading) {
@@ -1019,14 +1078,12 @@ const App = () => {
       run: () => void stopSession({ reason: "manual_end", cleanSession: false })
     });
   } else {
-    const minutes = goalMinutes > 0 ? goalMinutes : 20;
+    const minutes = usualFocusMinutes(goalMinutes);
     pipActions.push({
       id: "start-session",
       label: `Start a ${minutes}-minute session`,
-      run: () => {
-        setActiveTab("library");
-        startSession({ startedAt: new Date().toISOString(), durationMinutes: minutes });
-      }
+      badge: <FocusDouble />,
+      run: () => startFocus(minutes)
     });
   }
   if (sync.driveConnected) {
@@ -1099,6 +1156,7 @@ const App = () => {
           >
             <UiIcon name={theme === "dark" ? "sun" : "moon"} size={19} />
           </button>
+          <StreakButton onRead={streakRead} readLabel={streakReadLabel} onOpenCalendar={openStreakCalendar} />
           <ProfileButton
             open={accountPanelOpen}
             onToggle={() => setAccountPanelOpen((prev) => !prev)}
@@ -1161,6 +1219,7 @@ const App = () => {
               onOpenBook={openBookFromLibrary}
               onNavigate={setActiveTab}
               showToast={showToast}
+              onStartFocus={startFocus}
             />
           )}
           <Suspense fallback={null}>
@@ -1424,6 +1483,9 @@ const App = () => {
           celebrations come through the reader peek instead. */}
       <PipWorld actions={pipActions} />
       {selected && <PipReaderPeek />}
+
+      {/* The streak's moments (a goal met, a day saved, a milestone, a streak lost), once each, never over a book. */}
+      <StreakMoments paused={selected !== null || wrapUpOpen} onRead={streakRead} />
 
       {/* After the reader, so a session that ends mid-book wraps up on top. */}
       {wrapUpOpen && (

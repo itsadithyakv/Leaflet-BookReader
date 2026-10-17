@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { TAP_SLACK_PX, pressIsClick } from "../pageTurn";
 import { isPhoneShape, readLayoutFor, spreadFor, tapAction, tapZone, useTabletSideways, type TapAction } from "../touchLayout";
 import { inBookmarkCorner } from "../phoneReading";
+import { holdForSecondTap } from "../wordTap";
 import { OWN_CLICK, textAt, within } from "./usePageTurning";
 import type { Later, WithCover } from "./scope";
 
@@ -82,7 +83,8 @@ export const useScrollTaps = (reader: WithCover & Later<"cornerBookmarkRef">) =>
       const x = event.clientX + (held?.left ?? 0);
       const y = event.clientY + (held?.top ?? 0);
       const viewer = viewerRef.current;
-      const name = doc !== document && textAt(doc, event.clientX, event.clientY).name;
+      const under = doc !== document ? textAt(doc, event.clientX, event.clientY) : { text: false, name: false };
+      const name = under.name;
       const highlight = viewer ? within(x, y, Array.from(viewer.querySelectorAll(".leaflet-highlight rect"), (mark) => mark.getBoundingClientRect()), 0) : false;
       const plain = pressIsClick({
         button: event.button,
@@ -110,7 +112,17 @@ export const useScrollTaps = (reader: WithCover & Later<"cornerBookmarkRef">) =>
         const zone = frame ? tapZone(x, frame.left, frame.width) : 0;
         const pageBox = viewer?.parentElement?.getBoundingClientRect();
         const corner = chromeRef.current.immersive && pageBox ? inBookmarkCorner(x, y, pageBox) : false;
-        tapRef.current(tapAction(zone, "scroll", chromeRef.current.immersive, corner));
+        const action = tapAction(zone, "scroll", chromeRef.current.immersive, corner);
+        if (!under.text) {
+          tapRef.current(action);
+          return;
+        }
+        // On a word it waits a moment: a second tap selects the word instead (useWordDoubleTap.ts).
+        holdForSecondTap(rendition, () => {
+          if (renditionRef.current === rendition && selectionRef.current === null && !selecting(doc)) {
+            tapRef.current(action);
+          }
+        });
       }
     };
     const bound = new WeakSet<Document>();

@@ -3,6 +3,7 @@ import { Share2 } from "lucide-react";
 import { UiIcon } from "../components/UiIcon";
 import { useTouchInput } from "../platform/device";
 import { HIGHLIGHT_COLORS, HIGHLIGHT_COLOR_IDS } from "./highlightColors";
+import { useReaderShape } from "./touchLayout";
 
 type SelectionBarProps = {
   text: string;
@@ -169,11 +170,15 @@ const TouchSelectionBar = ({
   onShare,
   onReadFromHere
 }: SelectionBarProps) => {
-  const [more, setMore] = useState(false);
+  const [moreOpen, setMore] = useState(false);
+  // A phone on its side has the width for all of it in one row: the colours,
+  // share and the rest are out, not behind "More".
+  const wide = useReaderShape() === "sideways";
+  const more = moreOpen || wide;
   const color = lastHighlightColor();
   const colorName = HIGHLIGHT_COLORS[color as keyof typeof HIGHLIGHT_COLORS]?.name.toLowerCase() ?? "yellow";
   return (
-    <div className="reader-selection-bar is-touch pointer-events-auto" role="toolbar" aria-label="Selected text">
+    <div className={`reader-selection-bar is-touch pointer-events-auto ${wide ? "is-wide" : ""}`} role="toolbar" aria-label="Selected text">
       {more && (
         <div className="reader-selection-more" role="group" aria-label="More for the selection">
           <span className="reader-selection-swatches" aria-label="Highlight">
@@ -226,6 +231,7 @@ const TouchSelectionBar = ({
             <UiIcon name="dictionary" size={19} />
           </button>
         )}
+        {!wide && (
         <button
           type="button"
           className="reader-mini-control reader-selection-quick"
@@ -236,6 +242,7 @@ const TouchSelectionBar = ({
           <UiIcon name="highlight" size={19} />
           <span className="reader-selection-quick-dot" style={{ background: HIGHLIGHT_COLORS[color as keyof typeof HIGHLIGHT_COLORS]?.swatch }} aria-hidden="true" />
         </button>
+        )}
         <button type="button" className="reader-mini-control" onClick={onNote} title="Highlight and add a note" aria-label="Highlight and add a note">
           <UiIcon name="note" size={19} />
         </button>
@@ -256,6 +263,7 @@ const TouchSelectionBar = ({
         <button type="button" className="reader-mini-control" onClick={onCopy} title="Copy" aria-label="Copy">
           <UiIcon name="copy" size={18} />
         </button>
+        {!wide && (
         <button
           type="button"
           className="reader-mini-control"
@@ -267,6 +275,7 @@ const TouchSelectionBar = ({
         >
           <UiIcon name="more" size={19} />
         </button>
+        )}
       </div>
     </div>
   );

@@ -528,7 +528,7 @@ export const Leaderboard = ({
                 />
               )}
               <Row
-                entry={entry}
+                entry={you && entry.handle === you.handle ? you : entry}
                 leader={leader}
                 delta={deltaFor(entry)}
                 onOpen={openReader}

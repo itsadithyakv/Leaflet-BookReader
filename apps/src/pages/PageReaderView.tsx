@@ -9,6 +9,7 @@ import {
   isRenderCancelled,
   type PageSource
 } from "../readers/pageSources";
+import { readerChromeLight } from "../readers/finish";
 import { pageToneFor, toneCss } from "../readers/pageTone";
 import { toolbarTitleClass } from "../readers/titleFit";
 import {
@@ -65,6 +66,7 @@ import { NO_JUMPS, noteJump, stepBack, stepForward, type JumpHistory } from "../
 import { PdfLinkAreas, bindLinkPointer } from "../readers/PdfLinkAreas";
 import type { PageLink } from "../readers/pdfLinks";
 import { PdfSearchPanel } from "../readers/PdfSearchPanel";
+import { useReaderSheetSwipe } from "../readers/readerSheets";
 import type { PdfSearchHit } from "../readers/pdfSearch";
 import { currentMark, findMatches, pageMarks, snippetAt, type MeasureText, type PageRect } from "../readers/pdfText";
 import { decodePdfFindPlace, matchToShow } from "../readers/pdfFindPlace";
@@ -904,6 +906,16 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
     setSearchSeed("");
     setActiveHit(null);
   }, []);
+
+  /** On a phone: what a tap above a sheet does, and a swipe down it (readers/readerSheets.ts). */
+  const closeSheets = () => {
+    setZoomPanelOpen(false);
+    setMorePanelOpen(false);
+    closeAmbiencePopover();
+    setNotesFocus(null);
+    setBookmarkPanelOpen(false);
+  };
+  useReaderSheetSwipe(shape === "upright", (panel) => (panel.matches(".reader-search") ? closeSearch() : closeSheets()));
 
   const openHit = useCallback(
     (hit: PdfSearchHit) => {
@@ -1973,7 +1985,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
       className={`reader-scope pdf-reader page-reader fixed inset-0 z-50 h-full w-full overflow-hidden reader-bg ${
         chromeVisible ? "" : "reader-chrome-hidden"
       } ${
-        readerTheme === "light" ? "reader-light" : ""
+        readerChromeLight(displayMode, readerTheme) ? "reader-light" : ""
       } ${displayModeClass}`}
       data-shape={phone ? shape : undefined}
     >
@@ -1989,13 +2001,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
             type="button"
             className="reader-sheet-scrim"
             aria-label="Close"
-            onClick={() => {
-              setZoomPanelOpen(false);
-              setMorePanelOpen(false);
-              closeAmbiencePopover();
-              setNotesFocus(null);
-              setBookmarkPanelOpen(false);
-            }}
+            onClick={closeSheets}
           />
         )}
         <div className="relative flex items-center gap-2 md:gap-4">
@@ -2048,7 +2054,8 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
 
         <div className="flex items-center gap-4 md:gap-6">
           {/* A comic is pictures: there is no text in it to search. */}
-          {pdf && !phone && (
+          {/* Upright, search and notes are rows of the ··· sheet; on its side the strip has room for them. */}
+          {pdf && shape !== "upright" && (
             <button
               className="reader-icon transition-colors reader-hover-accent"
               type="button"
@@ -2158,7 +2165,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
           </div>
 
           <div className="relative">
-            {!phone && (
+            {shape !== "upright" && (
             <button
               className={`reader-icon transition-colors reader-hover-accent ${pageBookmarked ? "page-reader-toolbar-on" : ""}`}
               type="button"
@@ -2310,7 +2317,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
               <div className="reader-menu absolute right-0 mt-3 w-72 rounded-xl border p-4 text-xs shadow-2xl reader-panel reader-border" role="dialog" aria-label="Reader settings">
                 {phone && (
                   <div className="reader-sheet-rows" role="group" aria-label="More">
-                    {pdf && (
+                    {pdf && shape === "upright" && (
                       <SheetRow
                         icon={<UiIcon name="search" size={20} />}
                         label="Search in this PDF"
@@ -2320,15 +2327,17 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
                         }}
                       />
                     )}
-                    <SheetRow
-                      icon={<UiIcon name={kind === "pdf" ? "note" : "bookmark"} size={20} />}
-                      label={kind === "pdf" ? "Notes" : "Bookmarks"}
-                      onClick={() => {
-                        setMorePanelOpen(false);
-                        setNotesFocus(null);
-                        setBookmarkPanelOpen(true);
-                      }}
-                    />
+                    {shape === "upright" && (
+                      <SheetRow
+                        icon={<UiIcon name={kind === "pdf" ? "note" : "bookmark"} size={20} />}
+                        label={kind === "pdf" ? "Notes" : "Bookmarks"}
+                        onClick={() => {
+                          setMorePanelOpen(false);
+                          setNotesFocus(null);
+                          setBookmarkPanelOpen(true);
+                        }}
+                      />
+                    )}
                     <SheetRow
                       icon={<UiIcon name="bookmark" size={20} />}
                       label={pageBookmarked ? "Remove this page's bookmark" : "Bookmark this page"}

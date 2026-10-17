@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planScrollStep, readingBand, stepDuration, type ReadingArea, screenStep, chapterEndTop, isPictureGap, pastPictureGap, isScrollCorrection, lineInArea } from "./smartScroll";
+import { coverFromBottom, coverFromTop, planScrollStep, readingBand, stepDuration, type ReadingArea, screenStep, chapterEndTop, isPictureGap, pastPictureGap, isScrollCorrection, lineInArea } from "./smartScroll";
 
 // 18px type at 1.8 line height.
 const LINE = 32.4;
@@ -154,5 +154,86 @@ describe("where Dotty's line is against the reading area", () => {
     const band = readingBand(screen);
     expect(lineInArea(band.top, screen)).toBe("in");
     expect(lineInArea(band.turn - screen.lineHeight, screen)).toBe("in");
+  });
+});
+
+describe("Smart Read on a phone", () => {
+  // An upright phone: 844 px of text at 18 px type, the footer's strip and the pace pill at its foot.
+  const phone: ReadingArea = { height: 844, lineHeight: LINE, topInset: 8, bottomInset: 100, phone: true };
+
+  it("lets Dotty walk down to about two thirds, and lands its line about a third down", () => {
+    const band = readingBand(phone);
+    const usable = phone.height - phone.topInset - phone.bottomInset;
+    expect((band.top - phone.topInset) / usable).toBeCloseTo(0.3, 2);
+    expect((band.turn - phone.topInset) / usable).toBeCloseTo(0.7, 2);
+  });
+
+  it("never moves for a line or two: a step is several lines, and nothing until the turn", () => {
+    const band = readingBand(phone);
+    for (let top = band.top; top + LINE <= band.turn; top += LINE) {
+      expect(planScrollStep(top, top + LINE, phone)).toBeNull();
+    }
+    const step = planScrollStep(band.turn, band.turn + LINE, phone)!;
+    expect(step).toBeGreaterThan(LINE * 8);
+    // The line lands about a third down, in one move.
+    expect(band.turn - step).toBeCloseTo(band.top, 5);
+  });
+
+  it("steps far less often than once a line over a chapter", () => {
+    // Dotty reads 200 lines; count the steps and where each lands its line.
+    let lineTop = readingBand(phone).top;
+    let steps = 0;
+    for (let line = 0; line < 200; line += 1) {
+      lineTop += LINE;
+      const step = planScrollStep(lineTop, lineTop + LINE, phone);
+      if (step !== null) {
+        steps += 1;
+        lineTop -= step;
+      }
+      // Dotty is always on screen, above the pill.
+      expect(lineTop + LINE).toBeLessThanOrEqual(phone.height - phone.bottomInset);
+      expect(lineTop).toBeGreaterThanOrEqual(phone.topInset);
+    }
+    expect(steps).toBeLessThan(200 / 8);
+  });
+
+  it("keeps the whole-page turn on a computer", () => {
+    const desk = { ...phone, phone: false };
+    expect(readingBand(desk).turn).toBeGreaterThan(readingBand(phone).turn);
+    expect(readingBand(desk).top).toBeLessThan(readingBand(phone).top);
+  });
+
+  it("falls back to the whole room when the type is very large", () => {
+    const tiny: ReadingArea = { height: 300, lineHeight: 60, topInset: 8, bottomInset: 100, phone: true };
+    const band = readingBand(tiny);
+    expect(band.turn).toBeGreaterThan(band.top);
+    expect(band.turn).toBeLessThanOrEqual(tiny.height - tiny.bottomInset);
+  });
+});
+
+describe("What covers the text", () => {
+  const box = { top: 32, bottom: 876 };
+
+  it("counts a bar along the top only", () => {
+    expect(coverFromTop(box, { top: 0, bottom: 88 })).toBe(56);
+    // An upright phone's text reader: the bar at the foot, shown or slid away below the window.
+    expect(coverFromTop(box, { top: 820, bottom: 900 })).toBe(0);
+    expect(coverFromTop(box, { top: 900, bottom: 980 })).toBe(0);
+    // A top bar slid away above the window.
+    expect(coverFromTop(box, { top: -88, bottom: 0 })).toBe(0);
+    expect(coverFromTop(box, null)).toBe(0);
+  });
+
+  it("counts the lowest-reaching thing over the foot", () => {
+    expect(
+      coverFromBottom(box, [
+        { top: 787, bottom: 840 }, // the pace pill
+        { top: 848, bottom: 876 }, // the footer
+        { top: 900, bottom: 980 }, // a bar slid away
+        { top: 0, bottom: 88 } // a bar at the top
+      ])
+    ).toBe(89);
+    expect(coverFromBottom(box, [{ top: 820, bottom: 900 }])).toBe(56);
+    expect(coverFromBottom(box, [])).toBe(0);
   });
 });

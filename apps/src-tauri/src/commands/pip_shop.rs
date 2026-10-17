@@ -70,11 +70,12 @@ pub(crate) fn grow_garden(
   days: &std::collections::HashMap<String, habit::DayRecord>,
   sessions: &[FocusSessionRecord],
   plantings: &[pip::Planting],
-  harvests: &[pip::Harvest]
+  harvests: &[pip::Harvest],
+  plain_since: &str
 ) -> habit::seeds::Garden {
   let catalogue = pip::Catalogue::bundled();
   let inputs = session_inputs(sessions);
-  let drops = habit::seeds::water_drops(days, &inputs);
+  let drops = habit::seeds::water_drops(days, &inputs, plain_since);
   let plants: Vec<habit::seeds::PlantingIn<'_>> = plantings
     .iter()
     .map(|planting| {
@@ -98,6 +99,24 @@ pub(crate) fn grow_garden(
   habit::seeds::grow(&drops, &plants, &picked)
 }
 
+/// The setting that holds the local day this device took up the water rule
+/// where all reading waters (`habit::seeds::water_drops`).
+const PLAIN_WATER_SINCE_KEY: &str = "garden_plain_water_since";
+
+/// The day this device took up the rule that all reading waters the garden:
+/// written the first time it is asked for, so earlier days keep the water
+/// they were poured under and plain reading before it is never paid.
+pub(crate) fn plain_water_since(db: &db::Database) -> Result<String, String> {
+  if let Some(day) = db.get_setting(PLAIN_WATER_SINCE_KEY).map_err(|e| e.to_string())? {
+    if chrono::NaiveDate::parse_from_str(&day, "%Y-%m-%d").is_ok() {
+      return Ok(day);
+    }
+  }
+  let today = local_today();
+  db.set_setting(PLAIN_WATER_SINCE_KEY, &today).map_err(|e| e.to_string())?;
+  Ok(today)
+}
+
 /// The whole economy from its records: the garden replayed, what the reading
 /// earned, Pip's rewards, what is owned. Pure, so the same records (one
 /// device's, or a merged sync document's) always give the same answer.
@@ -106,10 +125,11 @@ pub(crate) fn ledger_from(
   sessions: &[FocusSessionRecord],
   plantings: &[pip::Planting],
   harvests: &[pip::Harvest],
-  purchases: Vec<pip::Purchase>
+  purchases: Vec<pip::Purchase>,
+  plain_since: &str
 ) -> PipLedger {
   let catalogue = pip::Catalogue::bundled();
-  let garden = grow_garden(days, sessions, plantings, harvests);
+  let garden = grow_garden(days, sessions, plantings, harvests, plain_since);
   let inputs = session_inputs(sessions);
   let owned = pip::owned(catalogue, &purchases);
   let facts = pip::rewards::Facts {
@@ -143,7 +163,8 @@ fn ledger_and_days(db: &db::Database) -> Result<(PipLedger, std::collections::Ha
   let plantings = db.pip_plantings().map_err(|e| e.to_string())?;
   let harvests = db.pip_harvests().map_err(|e| e.to_string())?;
   let purchases = db.pip_purchases().map_err(|e| e.to_string())?;
-  let ledger = ledger_from(&days, &sessions, &plantings, &harvests, purchases);
+  let since = plain_water_since(db)?;
+  let ledger = ledger_from(&days, &sessions, &plantings, &harvests, purchases, &since);
   Ok((ledger, days))
 }
 
@@ -158,7 +179,8 @@ pub(crate) fn garden_totals(
   let plantings = db.pip_plantings().map_err(|e| e.to_string())?;
   let harvests = db.pip_harvests().map_err(|e| e.to_string())?;
   let purchases = db.pip_purchases().map_err(|e| e.to_string())?;
-  let ledger = ledger_from(days, sessions, &plantings, &harvests, purchases);
+  let since = plain_water_since(db)?;
+  let ledger = ledger_from(days, sessions, &plantings, &harvests, purchases, &since);
   Ok((ledger.garden, ledger.earned.total))
 }
 
@@ -296,7 +318,9 @@ fn freeze_shop(db: &db::Database, catalogue: &pip::Catalogue, purchases: &[pip::
       .map(|month| pip::freezes::bought_in_month(purchases, month))
       .unwrap_or(0),
     per_month: if item.is_some() { pip::freezes::FREEZES_PER_MONTH } else { 0 },
-    held: read_streak_state(db).freezes,
+    // The bank as the records say it stands today, not as last walked: a
+    // freeze bought on another device is in it as soon as its record is.
+    held: walk_streak(db, today).map(|walk| walk.state.freezes).unwrap_or_else(|_| read_streak_state(db).freezes),
     cap: habit::MAX_FREEZES
   }
 }
@@ -1059,13 +1083,12 @@ fn record_of(kind: &str, item_id: String, price: i64) -> pip::Purchase {
 /// and only while the streak's bank has room for it.
 ///
 /// Across devices. The purchase is a record and syncs: every device charges
-/// it and counts it towards the month. The freeze itself goes into the
-/// streak's bank, and that bank is each device's own (a settings row, never
-/// in the sync document), so it is held where it was bought and covers a
-/// missed day when that device walks the streak; the day it covers then
-/// travels with the ledger. Two devices that each buy one before they sync
-/// are both charged and each holds its own, even where that makes a third in
-/// the month: nothing is undone after the fact.
+/// it, counts it towards the month, and puts it in the streak's bank from
+/// the day it was bought (the bank is replayed from the records, see
+/// `habit::evaluate`), so it covers one missed day, the same one, on every
+/// device. Two devices that each buy one before they sync are both charged,
+/// even where that makes a third in the month: nothing is undone after the
+/// fact. The bank still holds no more than `habit::MAX_FREEZES`.
 #[tauri::command]
 pub fn pip_buy_freeze(today_key: String, state: State<'_, AppState>) -> Result<PipOverview, String> {
   let db = state.db.guard();
@@ -1075,12 +1098,14 @@ pub fn pip_buy_freeze(today_key: String, state: State<'_, AppState>) -> Result<P
 
 pub(crate) fn buy_freeze(db: &db::Database, catalogue: &pip::Catalogue, today_key: &str) -> Result<PipOverview, String> {
   let ledger = pip_ledger(db)?;
-  let mut streak = read_streak_state(db);
-  let item = pip::freezes::check_buy(catalogue, &ledger.purchases, ledger.balance(), streak.freezes, today_key)?;
+  let held = walk_streak(db, today_key)?.state.freezes;
+  let item = pip::freezes::check_buy(catalogue, &ledger.purchases, ledger.balance(), held, today_key)?;
+  // The record is the freeze: the streak walk puts it in the bank from today.
   record_purchase(db, &ledger, &record_of(pip::freezes::KIND_FREEZE, item.id.clone(), item.price))?;
-  // Paid for first: if the second write fails, a freeze is owed, which is
-  // better than one handed out for nothing.
-  streak.freezes = (streak.freezes + 1).clamp(0, habit::MAX_FREEZES);
+  // The bank as kept for what reads it without walking; nothing else of the
+  // last walk is touched, so a break not yet announced still is.
+  let mut streak = read_streak_state(db);
+  streak.freezes = walk_streak(db, today_key)?.state.freezes;
   write_streak_state(db, &streak)?;
   pip_overview_on(db, today_key)
 }
@@ -1633,11 +1658,77 @@ mod tests {
     assert_eq!(odd["camps"], 0);
   }
 
-  /// The economy a device holding this document works out.
+  /// The economy a device holding this document works out, on a device that
+  /// took up the rule that all reading waters after every day here.
   fn ledger_of(doc: &SyncDoc) -> PipLedger {
+    ledger_since(doc, "9999-12-31")
+  }
+
+  /// The economy worked out on a device that took up that rule on `since`.
+  fn ledger_since(doc: &SyncDoc, since: &str) -> PipLedger {
     let days = doc.days.iter().map(|day| (day.date_key.clone(), day.to_record())).collect();
     let sessions: Vec<FocusSessionRecord> = doc.sessions.iter().map(SessionEntry::to_record).collect();
-    ledger_from(&days, &sessions, &doc.plantings, &doc.harvests, doc.purchases.clone())
+    ledger_from(&days, &sessions, &doc.plantings, &doc.harvests, doc.purchases.clone(), since)
+  }
+
+  /// One device's reading of a day: its own minutes, in `by_device`.
+  fn read_on(doc: &mut SyncDoc, device: &str, day: &str, minutes: f64) {
+    doc.days.push(DayEntry {
+      date_key: day.into(),
+      minutes,
+      goal_minutes: 20,
+      freeze_used: false,
+      grace_used: false,
+      by_device: std::collections::BTreeMap::from([(device.to_string(), minutes)])
+    });
+  }
+
+  /// Both devices read on the same day, one in focus and one not. Merged
+  /// either way round, and merged again, the garden has the same water: a
+  /// focus minute is a water, a plain one half, and nothing is poured twice.
+  #[test]
+  fn water_from_two_devices_is_poured_once_however_they_sync() {
+    let day = "2026-10-20";
+    let mut laptop = SyncDoc::empty(NOW);
+    // 30 minutes read, 20 of them in a completed, clean session.
+    read_on(&mut laptop, "laptop", day, 30.0);
+    read(&mut laptop, "s-a", day, &format!("{day}T09:00:00+00:00"), 20.0);
+    laptop.days.retain(|entry| !entry.by_device.is_empty());
+    let mut phone = SyncDoc::empty(NOW);
+    // 12 minutes read, none in a session.
+    read_on(&mut phone, "phone", day, 12.0);
+
+    let since = "2026-10-17";
+    let alone = ledger_since(&laptop, since);
+    assert_eq!(alone.garden.water, 20.0 * 1.5 + 10.0 * 0.75, "20 in focus, no completion bonus; 10 plain at half the rate");
+    assert_eq!(ledger_since(&phone, since).garden.water, 9.0);
+
+    let merged = merge(&laptop, &phone, NOW);
+    let both = ledger_since(&merged, since);
+    assert_eq!(both.garden.water, 20.0 * 1.5 + 22.0 * 0.75, "the phone's plain minutes join the laptop's");
+    assert_eq!(ledger_since(&merge(&phone, &laptop, NOW), since).garden.water, both.garden.water);
+    assert_eq!(ledger_since(&merge(&laptop, &merged, NOW), since).garden.water, both.garden.water);
+    assert_eq!(ledger_since(&merge(&merged, &merged, NOW), since).garden.water, both.garden.water);
+
+    // The same day on a device that took up the rule later keeps the old
+    // water: the session alone, half again for its clean finish.
+    assert_eq!(ledger_since(&merged, "2026-10-21").garden.water, 30.0);
+  }
+
+  /// The day the rule is taken up is written once, and kept.
+  #[test]
+  fn the_day_all_reading_waters_is_written_once() {
+    let root = std::env::temp_dir().join(format!("leaflet-water-rule-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let db = db::Database::open_at(&root.join(db::DB_FILE)).expect("db");
+    let first = plain_water_since(&db).expect("since");
+    assert_eq!(first, local_today());
+    db.set_setting(PLAIN_WATER_SINCE_KEY, "2026-10-01").expect("set");
+    assert_eq!(plain_water_since(&db).expect("since"), "2026-10-01", "kept, not moved to today");
+    db.set_setting(PLAIN_WATER_SINCE_KEY, "garbage").expect("set");
+    assert_eq!(plain_water_since(&db).expect("since"), local_today(), "a value that is no day is written again");
+    drop(db);
+    let _ = std::fs::remove_dir_all(&root);
   }
 
   fn purchase(id: &str, kind: &str, item: &str, price: i64, at: &str) -> pip::Purchase {
@@ -1870,12 +1961,13 @@ mod tests {
     assert_eq!((after.freezes.held, after.freezes.bought_this_month), (2, 2));
     let full = buy_freeze(&db, &freeze_catalogue(), &today).err().expect("the bank is full");
     assert!(full.contains("room"), "{full}");
-    // With room in the bank again, the month is what stops a third.
+    // The bank is the records': a state saying otherwise opens no room.
+    // (The month's limit is `pip::freezes`'s, tested there.)
     write_streak_state(&db, &habit::StreakState { freezes: 0, ..read_streak_state(&db) }).expect("streak state");
-    let month = buy_freeze(&db, &freeze_catalogue(), &today).err().expect("the month is used up");
-    assert!(month.contains("month"), "{month}");
+    let still = buy_freeze(&db, &freeze_catalogue(), &today).err().expect("still full");
+    assert!(still.contains("room"), "{still}");
     assert_eq!(freezes_on_record(&db).len(), 2);
-    assert_eq!(read_streak_state(&db).freezes, 0, "a refusal banks nothing");
+    assert_eq!(pip_overview_on(&db, &today).expect("overview").freezes.held, 2);
   }
 
   #[test]

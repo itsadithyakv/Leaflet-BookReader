@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { UiIcon, type UiIconName } from "../UiIcon";
 import { isComplete, tallyLabel, tallyText, type Tally } from "./collection";
+import { FOCUS_WATER_PER_MINUTE } from "../focus/focusDeal";
 
 /**
  * The small pieces the Pip tab's drawers are built from: a grid of tiles, a
@@ -9,11 +10,12 @@ import { isComplete, tallyLabel, tallyText, type Tally } from "./collection";
  */
 
 /**
- * Seeds a minute of focused reading grows, roughly: a clean minute is 1.5
- * water, and the garden's best plants give about a third of a seed per water.
- * Used only to say "about N minutes of reading"; habit/seeds.rs is the truth.
+ * Seeds a minute of focused reading grows, roughly: a focus minute is 1.5
+ * water (a plain one half that), and the garden's best plants give about a
+ * third of a seed per water. Used only to say "about N minutes of focused
+ * reading"; habit/seeds.rs is the truth.
  */
-export const SEEDS_PER_MINUTE = 0.5;
+export const SEEDS_PER_MINUTE = FOCUS_WATER_PER_MINUTE / 3;
 
 /** What an item still costs in reading, for a can't-afford tile. */
 export const shortfall = (price: number, balance: number) => {

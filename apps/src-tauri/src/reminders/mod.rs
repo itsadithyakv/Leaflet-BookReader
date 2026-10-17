@@ -170,12 +170,13 @@ impl HabitView {
   /// a freeze or announce a break, which is `build_snapshot`'s job.
   pub fn from_ledger(
     days: &HashMap<String, DayRecord>,
+    freezes_bought: &[String],
     previous: &StreakState,
     goal_setting: i64,
     today_key: &str,
     last_session_end: Option<NaiveDateTime>
   ) -> Self {
-    let evaluation = habit::evaluate(days, today_key, previous);
+    let evaluation = habit::evaluate(days, freezes_bought, today_key, previous);
     // Today's row carries the goal it was credited against; before any
     // reading today there is no row, so the current setting applies.
     let goal = if evaluation.today_goal > 0 { evaluation.today_goal } else { goal_setting };
@@ -924,14 +925,14 @@ mod tests {
       DayRecord { date_key: "2026-03-03".into(), minutes: 7.0, goal_minutes: 25, freeze_used: false, grace_used: false }
     );
     let previous = StreakState { current_streak: 1, ..StreakState::default() };
-    let habit = HabitView::from_ledger(&days, &previous, 30, "2026-03-03", None);
+    let habit = HabitView::from_ledger(&days, &[], &previous, 30, "2026-03-03", None);
     assert_eq!(habit.streak, 1, "yesterday counts, today is in progress");
     assert!(!habit.met);
     assert_eq!(habit.goal, 25, "today's row keeps the goal it was credited against");
     assert_eq!(habit.remaining(), 18);
 
     // No row today yet: the setting applies.
-    let fresh = HabitView::from_ledger(&days, &previous, 30, "2026-03-04", None);
+    let fresh = HabitView::from_ledger(&days, &[], &previous, 30, "2026-03-04", None);
     assert_eq!(fresh.goal, 30);
     assert_eq!(fresh.minutes, 0.0);
   }

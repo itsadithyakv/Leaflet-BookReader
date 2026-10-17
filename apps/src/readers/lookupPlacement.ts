@@ -34,6 +34,8 @@ type Room = {
   windowWidth: number;
   /** The selected text, when it is known and on screen. */
   selection?: Box | null;
+  /** The tallest the card may be (`CARD_HEIGHT`, the lookup card's). */
+  tallest?: number;
 };
 
 /**
@@ -42,9 +44,9 @@ type Room = {
  * moves above the text; and if neither leaves it room to be read, it stays
  * where it was (a long selection near the foot of the page cannot be cleared).
  */
-export const placeCard = ({ barTop, barCentre, ceiling, cardWidth, windowWidth, selection }: Room): CardPlace => {
+export const placeCard = ({ barTop, barCentre, ceiling, cardWidth, windowWidth, selection, tallest = CARD_HEIGHT }: Room): CardPlace => {
   const foot = barTop - CARD_GAP;
-  const fit = (room: number) => Math.round(Math.max(Math.min(CARD_HEIGHT, room), Math.min(CARD_MIN_HEIGHT, CARD_HEIGHT)));
+  const fit = (room: number) => Math.round(Math.max(Math.min(tallest, room), Math.min(CARD_MIN_HEIGHT, tallest)));
 
   const centred = barCentre - cardWidth / 2;
   const leftmost = CARD_GAP;
@@ -71,6 +73,42 @@ export const placeCard = ({ barTop, barCentre, ceiling, cardWidth, windowWidth, 
     return { height: fit(over), lift: Math.round(barTop - (selection.top - CARD_GAP)), shift };
   }
   return usual;
+};
+
+/**
+ * The highest a card's top may go (`placeCard`'s `ceiling`): under the
+ * reader's toolbar when the toolbar runs across the top of the window, else
+ * under the status bar (`insetTop`). An upright phone's bar is at the foot
+ * and a sideways phone's is a strip down the side: taking their bottom edge
+ * for a ceiling put it below the card's own foot, and every card was
+ * squeezed to its least height (190 px, a 60 px body on a 740 px phone).
+ */
+export const cardCeiling = (toolbar: Box | null | undefined, windowWidth: number, insetTop = 0) => {
+  const across = Boolean(toolbar && toolbar.top <= 1 && toolbar.bottom > 0 && toolbar.right - toolbar.left > windowWidth / 2);
+  return Math.round(Math.max(across && toolbar ? toolbar.bottom : 0, insetTop, 0)) + CARD_GAP;
+};
+
+/** The status bar's height (`--inset-top`, platform/device.css), in px; 0 where there is none. */
+export const insetTopNow = () => {
+  if (typeof document === "undefined") {
+    return 0;
+  }
+  const value = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--inset-top"));
+  return Number.isFinite(value) ? value : 0;
+};
+
+/**
+ * Where the highlight card goes (readers/HighlightCard.tsx): as the lookup
+ * card, but never taller than the room there is between the bar and the
+ * toolbar (what does not fit scrolls inside it; it used to be cut off at its
+ * foot, the note's Done out of reach). While its note is typed with the
+ * keyboard up, it takes all that room over the bar, the note in sight: the
+ * words it is about are in it already.
+ */
+export const placeNoteCard = (room: Room & { typing: boolean }): CardPlace => {
+  const free = (lift: number) => Math.max(0, Math.floor(room.barTop - lift - room.ceiling));
+  const usual = placeCard(room.typing ? { ...room, selection: null } : room);
+  return { ...usual, height: Math.min(usual.height, free(usual.lift)) };
 };
 
 /** How near the selection bar may come to the selected words. */

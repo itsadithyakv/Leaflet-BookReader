@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { UiIcon } from "../../components/UiIcon";
+import { useSheetSwipe } from "../../components/ui/sheetSwipe";
+import { isTouchInput } from "../../platform/device";
 import "../lookupCard.css";
 import "./people.css";
 import type { MentionSearch } from "./bookText";
 import { addPerson, type Change, type Writing } from "./edits";
 import { castAt, nameKey, type Entry, type Order, type PersonView, type Place } from "./model";
 import { namesOf } from "./names";
+import { keepFieldInView, onRoomChange } from "./fit";
 import { RelationsGraph, WHOLE_CAST } from "./RelationsGraph";
 import type { NameSuggestion } from "./suggest";
 import { newId } from "./usePeople";
@@ -27,6 +30,12 @@ type PeoplePanelProps = {
   onToast: (message: string) => void;
   /** More to do with the sheet (bring in, send out), at the foot. */
   actions?: ReactNode;
+  /**
+   * Someone's card is open over it. On a phone the panel is a sheet the card
+   * would open under: it steps out of sight (keeping its search, tab and
+   * scroll) until the card closes.
+   */
+  under?: boolean;
 };
 
 const count = (n: number, one: string, many: string) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
@@ -50,7 +59,8 @@ export const PeoplePanel = ({
   onOpenPerson,
   onClose,
   onToast,
-  actions
+  actions,
+  under = false
 }: PeoplePanelProps) => {
   const [tab, setTab] = useState<Tab>("people");
   const [query, setQuery] = useState("");
@@ -66,10 +76,12 @@ export const PeoplePanel = ({
   const names = useMemo(() => namesOf(cast), [cast]);
   const writing: Writing = useMemo(() => ({ bookId, place: at, newId }), [bookId, at]);
 
-  // Focus comes in, and goes back to the button that opened the panel.
+  // Focus comes in, and goes back to the button that opened the panel. By
+  // finger, to the panel and not the search: a field with focus brings up
+  // the keyboard, over half the sheet, before anything was asked.
   useEffect(() => {
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    input.current?.focus({ preventScroll: true });
+    (isTouchInput() ? panel.current : input.current)?.focus({ preventScroll: true });
     return () => {
       const active = document.activeElement;
       if (opener?.isConnected && (active === document.body || active === null || panel.current?.contains(active))) {
@@ -77,6 +89,28 @@ export const PeoplePanel = ({
       }
     };
   }, []);
+
+  // On a phone the keyboard makes the window shorter and the sheet with it:
+  // the field being typed in stays in sight in its list.
+  useEffect(() => {
+    let frame = 0;
+    const detach = onRoomChange(() => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => keepFieldInView(panel.current));
+    });
+    return () => {
+      detach();
+      window.cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  // A sheet on an upright phone (readers/touch.css): a swipe down closes it, as
+  // the reader's other sheets do (readers/readerSheets.ts). The drawing of
+  // relations keeps its own drags (`data-no-sheet-drag`).
+  useSheetSwipe(() => panel.current, {
+    panelFor: () => (panel.current?.closest('.reader-scope[data-shape="upright"]') ? panel.current : null),
+    onClose: () => onClose()
+  });
 
   // "People so far", worked out once the list is looked at, and again (from
   // what was already counted) when someone is added.
@@ -165,11 +199,16 @@ export const PeoplePanel = ({
   );
 
   return (
+    <>
+    {/* On a phone a tap above the sheet closes it, and does not turn the page (shown by readers/people/people.css). */}
+    {!under && <button type="button" className="reader-sheet-scrim reader-people-scrim" aria-label="Close characters" tabIndex={-1} onClick={onClose} />}
     <div
       ref={panel}
-      className={`reader-people-panel reader-panel reader-border${tab === "relations" ? " is-wide" : ""}`}
+      className={`reader-people-panel reader-panel reader-border${tab === "relations" ? " is-wide" : ""}${under ? " is-under" : ""}`}
       role="dialog"
       aria-label="Characters"
+      aria-hidden={under || undefined}
+      tabIndex={-1}
       onKeyDown={(event) => {
         // The reader turns pages on Space and the arrows; in here they type and scroll.
         event.stopPropagation();
@@ -310,5 +349,6 @@ export const PeoplePanel = ({
 
       {actions && <div className="reader-people-panel-foot reader-border">{actions}</div>}
     </div>
+    </>
   );
 };

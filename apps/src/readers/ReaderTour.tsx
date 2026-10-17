@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { UiIcon } from "../components/UiIcon";
 import { useTouchInput } from "../platform/device";
+import { onAndroid } from "../platform/android";
 
 /**
  * The reader's first-open walkthrough: what Dotty is, setting up Smart Read,
@@ -36,14 +37,22 @@ export const setReaderTourSeen = (seen: boolean) => {
 export type StartMode = "standard" | "smart";
 
 /**
- * How books open. Smart Read unless the reader turned it off: it opens paused
- * at their line, so nothing moves until Space sets Dotty off.
+ * How books open, where the reader has not chosen. On a computer, Smart Read:
+ * it opens paused at their line, so nothing moves until Space sets Dotty off.
+ * On a phone, plain scrolling by finger (the owner, 2026-10-17: "on phone,
+ * have it manual scroll as default"): a thumb is already on the page, and the
+ * pace pill sat over the text there.
  */
+export const defaultStartMode = (phone: boolean): StartMode => (phone ? "standard" : "smart");
+
+/** How books open: as the reader chose, or `defaultStartMode` for this device. */
 export const readStartMode = (): StartMode => {
+  const fallback = defaultStartMode(onAndroid());
   try {
-    return localStorage.getItem(START_MODE_KEY) === "standard" ? "standard" : "smart";
+    const kept = localStorage.getItem(START_MODE_KEY);
+    return kept === "standard" || kept === "smart" ? kept : fallback;
   } catch {
-    return "smart";
+    return fallback;
   }
 };
 

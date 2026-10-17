@@ -1,4 +1,4 @@
-import { useRef, type KeyboardEvent } from "react";
+import { useEffect, useRef, type KeyboardEvent } from "react";
 
 export type SegmentedTab<T extends string> = {
   id: T;
@@ -50,15 +50,30 @@ export const SegmentedTabs = <T extends string>({ label, idPrefix, tabs, value, 
     buttons.current[next]?.focus();
   };
 
+  // On a phone the row scrolls sideways rather than wrapping (styles/phone-polish.css): the chosen tab is
+  // brought into view in the row, without moving the page.
+  const list = useRef<HTMLDivElement | null>(null);
+  const chosen = tabs.findIndex((tab) => tab.id === value);
+  useEffect(() => {
+    const row = list.current;
+    const tab = buttons.current[chosen];
+    if (!row || !tab || row.scrollWidth <= row.clientWidth) return;
+    const left = tab.getBoundingClientRect().left - row.getBoundingClientRect().left + row.scrollLeft;
+    if (left < row.scrollLeft + 8 || left + tab.offsetWidth > row.scrollLeft + row.clientWidth - 8) {
+      row.scrollTo?.({ left: Math.max(0, left - (row.clientWidth - tab.offsetWidth) / 2), behavior: "smooth" });
+    }
+  }, [chosen]);
+
   const pad = size === "md" ? "px-4 py-2 text-sm" : "px-3.5 py-1.5 text-xs";
   return (
     // Wraps rather than runs out of its box: in a narrow window (Settings has
     // five tabs) the last ones used to be off the edge with nothing to say so.
     // The radius is a pill's at one row and a rounded box's at two.
     <div
+      ref={list}
       role="tablist"
       aria-label={label}
-      className="flex max-w-full flex-wrap gap-1 rounded-[1.4rem] bg-surface-container p-1"
+      className="segmented-tabs flex max-w-full flex-wrap gap-1 rounded-[1.4rem] bg-surface-container p-1"
       onKeyDown={onKeyDown}
     >
       {tabs.map((tab, index) => {

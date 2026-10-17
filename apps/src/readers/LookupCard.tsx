@@ -22,7 +22,7 @@ import {
   type LookupSummary
 } from "../services/lookupService";
 import { wordService } from "../services/wordService";
-import { CARD_GAP, CARD_HEIGHT, placeCard, type Box, type CardPlace } from "./lookupPlacement";
+import { CARD_GAP, CARD_HEIGHT, cardCeiling, insetTopNow, placeCard, type Box, type CardPlace } from "./lookupPlacement";
 import { keepLookup, type LookupPlace } from "./words/keep";
 import type { SavedWord } from "./words/rows";
 import "./lookupCard.css";
@@ -157,7 +157,7 @@ export const LookupCard = ({ term, language, onClose, avoid, place: wordPlace, i
         const next = placeCard({
           barTop: bar.top,
           barCentre: bar.left + bar.width / 2,
-          ceiling: Math.max(toolbar?.bottom ?? 0, 0) + CARD_GAP,
+          ceiling: cardCeiling(toolbar, window.innerWidth, insetTopNow()),
           cardWidth: node.offsetWidth,
           windowWidth: window.innerWidth,
           selection: avoidRef.current?.() ?? null

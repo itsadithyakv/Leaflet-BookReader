@@ -13,6 +13,8 @@ import "./platform/device.css";
 import "./index.css";
 // The app around the pages by a finger, on a phone or a tablet: after index.css, so it wins at equal weight.
 import "./styles/touch-shell.css";
+// The pages by a finger, calmer: flat keys, compact covers and tiles, room under the bar (after touch-shell).
+import "./styles/phone-polish.css";
 
 // Only the packaged app: `tauri dev` keeps F5 and the inspector, and a plain
 // browser tab keeps its own behaviour.

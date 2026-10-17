@@ -144,16 +144,21 @@ export const ownRow = ({ signedIn, scope, board, weekKey, profile, account, week
     (handle ? entries.find((entry) => entry.handle === handle) : undefined) ??
     null;
   if (sent) {
+    // The streak is this device's: worked out from the synced ledger, it is
+    // the same on every device, and newer than the server's, which is
+    // whichever device sent last. In another account's library nothing here
+    // is theirs, so the server's stands.
+    const own = paused ? sent : { ...sent, streak };
     return {
       kind: "shared",
-      handle: sent.handle,
-      displayName: sent.displayName,
-      pipSeed: sent.pipSeed,
-      avatar: sent.avatar ?? null,
-      weekMinutes: sent.weekMinutes,
-      streak: sent.streak,
-      rank: sent.rank,
-      entry: sent
+      handle: own.handle,
+      displayName: own.displayName,
+      pipSeed: own.pipSeed,
+      avatar: own.avatar ?? null,
+      weekMinutes: own.weekMinutes,
+      streak: own.streak,
+      rank: own.rank,
+      entry: own
     };
   }
 

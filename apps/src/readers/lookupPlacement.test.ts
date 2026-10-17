@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CARD_GAP, CARD_HEIGHT, CARD_MIN_HEIGHT, placeCard, selectedTextBox, type Box, BAR_GAP, placeBar } from "./lookupPlacement";
+import { CARD_GAP, CARD_HEIGHT, CARD_MIN_HEIGHT, cardCeiling, placeCard, placeNoteCard, selectedTextBox, type Box, BAR_GAP, placeBar } from "./lookupPlacement";
 
 /** A 1280x800 window: toolbar to 76, the selection bar's top at 700, centred. */
 const room = { barTop: 700, barCentre: 640, ceiling: 84, cardWidth: 400, windowWidth: 1280 };
@@ -155,5 +155,66 @@ describe("the selection bar and the words it is for", () => {
 
   it("keeps its place when the selection fills the page and there is nowhere above it", () => {
     expect(placeBar({ ...room, selection: { top: 100, bottom: 700, left: 150, right: 820 } })).toBe(704);
+  });
+});
+
+describe("cardCeiling", () => {
+  const bar = (top: number, bottom: number, left = 0, right = 360): Box => ({ top, bottom, left, right });
+
+  it("is under a toolbar across the top of the window", () => {
+    expect(cardCeiling(bar(0, 76, 0, 1280), 1280)).toBe(76 + CARD_GAP);
+  });
+
+  it("ignores an upright phone's bar at the foot, and keeps under the status bar", () => {
+    // The bar along the bottom of a 360x740 phone: its foot was taken for the ceiling, and the card squeezed to 190.
+    expect(cardCeiling(bar(660, 740), 360, 32)).toBe(32 + CARD_GAP);
+    const place = placeCard({ barTop: 564, barCentre: 180, ceiling: cardCeiling(bar(660, 740), 360, 32), cardWidth: 344, windowWidth: 360 });
+    expect(place.height).toBe(CARD_HEIGHT);
+  });
+
+  it("ignores a sideways phone's strip down the right edge", () => {
+    expect(cardCeiling(bar(0, 390, 788, 844), 844, 0)).toBe(CARD_GAP);
+  });
+
+  it("ignores a toolbar slid away above the window", () => {
+    expect(cardCeiling(bar(-76, 0, 0, 1280), 1280)).toBe(CARD_GAP);
+    expect(cardCeiling(null, 1280, 24)).toBe(24 + CARD_GAP);
+  });
+});
+
+describe("placing the highlight card", () => {
+  /** An upright phone, 412 x 900: the status bar's 32 px, the bar's top at 820. */
+  const phone = { barTop: 820, barCentre: 206, ceiling: 40, cardWidth: 396, windowWidth: 412, tallest: 440 };
+
+  it("is as tall as it may be where there is room", () => {
+    expect(placeNoteCard({ ...phone, typing: false })).toEqual({ height: 440, lift: CARD_GAP, shift: 0 });
+  });
+
+  it("is never taller than the room between the bar and the ceiling", () => {
+    // Sideways, 915 x 412, the chrome up: 300 px over the bar.
+    const sideways = { ...phone, barTop: 330, ceiling: 22, cardWidth: 416, barCentre: 457, windowWidth: 915 };
+    const place = placeNoteCard({ ...sideways, typing: false });
+    expect(place.height).toBe(330 - CARD_GAP - 22);
+    // Less room than a lookup card's least: still inside it, not over the top.
+    const tight = placeNoteCard({ ...sideways, barTop: 170, typing: true });
+    expect(tight.height).toBe(170 - CARD_GAP - 22);
+    expect(tight.height).toBeLessThan(CARD_MIN_HEIGHT);
+  });
+
+  it("keeps off the highlighted words, but not while its note is typed", () => {
+    const words = line(600, 40, 380);
+    const reading = placeNoteCard({ ...phone, selection: words, typing: false });
+    expect(reading.lift).toBeGreaterThan(CARD_GAP);
+    expect(cardBox(reading, phone).top).toBeGreaterThanOrEqual(phone.ceiling);
+    expect(overlaps(cardBox(reading, phone), words)).toBe(false);
+    // The keyboard up, 412 x 560: all the room over the bar, at the bar.
+    const typing = placeNoteCard({ ...phone, barTop: 552, selection: words, typing: true });
+    expect(typing).toEqual({ height: 440, lift: CARD_GAP, shift: 0 });
+    const short = placeNoteCard({ ...phone, barTop: 400, selection: words, typing: true });
+    expect(short).toEqual({ height: 400 - CARD_GAP - 40, lift: CARD_GAP, shift: 0 });
+  });
+
+  it("leaves the lookup card's own height as it was", () => {
+    expect(placeCard(room).height).toBe(CARD_HEIGHT);
   });
 });

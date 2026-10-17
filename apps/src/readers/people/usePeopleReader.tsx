@@ -436,6 +436,7 @@ export const usePeopleReader = ({
         onOpenPerson={(id) => openPerson(id)}
         onClose={closePanel}
         onToast={toast}
+        under={Boolean(open)}
         actions={
           <>
             <SheetActions bookId={bookId} entries={entries} commit={commit} onToast={toast} />
