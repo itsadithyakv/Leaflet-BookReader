@@ -185,6 +185,7 @@ import { BattleScreen } from "./BattleScreen";
 import { drawAt, fitPicture, screenRatio, type Fit } from "./fit";
 import { PipFace, Sprite } from "./Sprite";
 import { useBurrowDoor } from "../../onboarding/useBurrowDoor";
+import { frameGate, runWhileShown } from "../frameGate";
 import { ReplayTour } from "../../onboarding/ReplayTour";
 import { isGhostClick, type Press } from "./ghostClick";
 import { GoalLadder, LevelBrings } from "./GoalLadder";
@@ -343,6 +344,8 @@ const WIDE = 1040;
 const FLIGHT_MS = 650;
 const ARRIVE_MS = 1500;
 const BOUNCE_MS = 600;
+/** How long after the pointer last moved on the picture it is still painted at every frame. */
+const STIRRED_MS = 400;
 
 /*
  * (There was a three-bubble introduction here, and a hedgehog with a daily
@@ -707,6 +710,8 @@ export const BaseScreen = ({
   const opened = useRef(performance.now());
   const flights = useRef<number[]>([]);
   const bounced = useRef<{ site: Placed; at: number } | null>(null);
+  /** When the pointer last did anything on the picture: it is painted at every frame for a moment after (frameGate.ts). */
+  const stirred = useRef(-Infinity);
   /** When each building was last knocked by a prowler, and which the pointer is resting on: their health is shown on a bar for a moment, and while pointed at. */
   const knockedAt = useRef<Partial<Record<Placed, number>>>({});
   const hovered = useRef<Placed | null>(null);
@@ -876,23 +881,41 @@ export const BaseScreen = ({
       return;
     }
     draw(Math.floor(((performance.now() - opened.current) / 1000) * ART_FPS), (performance.now() - opened.current) / 1000);
-    let raf = 0;
     // From when the camp was opened, not from when this picture was last begun again (which is whenever anything in
     // it changes): or everything that turns over would start from its first frame at every tap.
     const started = opened.current;
     // Only this picture's own loop paints it: one begun for an earlier size of the picture stops at once, and cannot
     // go on painting a small one into the corner of this one.
     let live = true;
+    // Thirty paints a second (frameGate.ts); every frame while the picture is touched or something in it has just happened.
+    const gate = frameGate();
+    const busy = (time: number) =>
+      time - stirred.current < STIRRED_MS ||
+      time - started < ARRIVE_MS ||
+      Boolean(press.current?.dragging) ||
+      (bounced.current !== null && time - bounced.current.at < BOUNCE_MS) ||
+      flights.current.some((from) => time - from < FLIGHT_MS) ||
+      floats.current.some((entry) => time - entry.at < 1300) ||
+      (petted.current !== null && time - petted.current.at < 900) ||
+      (burst !== null && time - burst.at < (BURST_FRAMES / ART_FPS) * 1000);
     const tick = (time: number) => {
-      if (!live) return;
-      // Every frame the screen gives: what moves across the picture moves by the clock, not by the art's twelve a second.
+      if (!live || !gate.due(time, busy(time))) return;
+      // What moves across the picture moves by the clock, not by the art's twelve a second.
       draw(Math.floor(((time - started) / 1000) * ART_FPS), (time - started) / 1000);
-      raf = requestAnimationFrame(tick);
     };
-    raf = requestAnimationFrame(tick);
+    const canvas = canvasRef.current;
+    const stir = () => {
+      stirred.current = performance.now();
+    };
+    canvas?.addEventListener("pointermove", stir, { passive: true });
+    canvas?.addEventListener("pointerdown", stir, { passive: true });
+    // Stopped while the window is hidden or the picture is not on the page; drawn at once when it is back.
+    const stop = runWhileShown(canvas, tick, gate.reset);
     return () => {
       live = false;
-      cancelAnimationFrame(raf);
+      stop();
+      canvas?.removeEventListener("pointermove", stir);
+      canvas?.removeEventListener("pointerdown", stir);
     };
     // `base` and `now` reach the picture through `look`, which changes when they do.
     // eslint-disable-next-line react-hooks/exhaustive-deps

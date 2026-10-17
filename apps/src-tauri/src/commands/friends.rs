@@ -158,40 +158,53 @@ pub(crate) fn reading_now(books: &[BookRecord], now: chrono::DateTime<chrono::Ut
     })
 }
 
+/// A fingerprint of a body exactly as it is sent: what lets a publish that
+/// would hand the server what it already has be left out (the library here,
+/// the profile's figures in `social::publish_profile`).
+pub(crate) fn fingerprint(body: &[u8]) -> String {
+  format!("{:x}", Sha256::digest(body))
+}
+
 pub(crate) fn shares_library(db: &db::Database) -> bool {
   db.get_setting(SHARE_LIBRARY_SETTING).ok().flatten().as_deref() == Some("1")
 }
 
 /// Remembers whether the library is shared, as the server (or the reader, a
 /// moment ago) says. Turning it off forgets what was sent, so turning it on
-/// again sends the list afresh.
+/// again sends the list afresh. The profile's figures too: this is also how a
+/// profile made private is forgotten, and the server keeps nothing of one.
 pub(crate) fn remember_share_library(db: &db::Database, on: bool) {
   let _ = db.set_setting(SHARE_LIBRARY_SETTING, if on { "1" } else { "" });
   if !on {
     let _ = db.set_setting(LIBRARY_SENT_SETTING, "");
+    cloud::forget_profile_sent(db);
   }
+}
+
+/// The library as it would be sent, and its fingerprint, when it is shared
+/// and has changed since it was last sent; nothing otherwise.
+pub(crate) fn library_due(db: &db::Database) -> Result<Option<(serde_json::Value, String)>, String> {
+  // Never another account's library under this one's name.
+  if !shares_library(db) || !crate::sync::owner::may_publish(crate::sync::owner::standing(db)) {
+    return Ok(None);
+  }
+  let body = serde_json::json!({ "books": shared_library(&db.list_books().map_err(|e| e.to_string())?) });
+  let print = fingerprint(body.to_string().as_bytes());
+  let sent = db.get_setting(LIBRARY_SENT_SETTING).ok().flatten().unwrap_or_default();
+  Ok((print != sent).then_some((body, print)))
 }
 
 /// Sends the library to the server if it is shared and has changed since it
 /// was last sent. Quiet when there is nothing to do. Called after the
 /// profile's own figures are published, which is at most once a minute.
 pub(crate) async fn publish_library(state: &State<'_, AppState>) -> Result<(), String> {
-  let (books, sent) = {
+  let due = {
     let db = state.db.guard();
-    // Never another account's library under this one's name.
-    if !shares_library(&db) || !crate::sync::owner::may_publish(crate::sync::owner::standing(&db)) {
-      return Ok(());
-    }
-    (
-      shared_library(&db.list_books().map_err(|e| e.to_string())?),
-      db.get_setting(LIBRARY_SENT_SETTING).ok().flatten().unwrap_or_default()
-    )
+    library_due(&db)?
   };
-  let body = serde_json::json!({ "books": books });
-  let print = format!("{:x}", Sha256::digest(body.to_string().as_bytes()));
-  if print == sent {
+  let Some((body, print)) = due else {
     return Ok(());
-  }
+  };
   community(state, Method::PUT, "/v1/library/me".into(), vec![], Some(body), CommunityAuth::Required).await?;
   let db = state.db.guard();
   db.set_setting(LIBRARY_SENT_SETTING, &print).map_err(|e| e.to_string())

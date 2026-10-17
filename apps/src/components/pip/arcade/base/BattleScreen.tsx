@@ -24,6 +24,7 @@ import { gameArt, type GameArt } from "../gameArt";
 import { drawAt, fitPicture, screenRatio, type Fit } from "./fit";
 import { ART_FPS, inLight } from "./scene";
 import { Sprite } from "./Sprite";
+import { frameGate, runWhileShown } from "../frameGate";
 import { useTouchInput } from "../../../../platform/device";
 import { useBackLayer } from "../../../../platform/back";
 
@@ -40,6 +41,8 @@ const KIND_SAYS: Record<UnitKind, string> = {
 const MAX_FRAME = 1 / 10;
 /** How long a refused spot stays marked. */
 const REFUSED_MS = 500;
+/** How long after a tap or a key the field is painted at every frame. */
+const STIRRED_MS = 400;
 
 /** What is being fought over: a magpie camp the reader raids, or the reader's own camp on a night being watched. */
 type Field = { raid: Raid | null; season: number; night: boolean };
@@ -585,7 +588,6 @@ export const BattleScreen = (props: Props) => {
     const limit = battle.setup.seconds ?? RAID_SECONDS;
     // A night is not played: the magpies are put down by rule, as they will be when it comes.
     const drive = raid ? null : autoPilot(battle, side);
-    let raf = 0;
     let last = 0;
     let acc = 0;
     let elapsed = 0;
@@ -631,16 +633,23 @@ export const BattleScreen = (props: Props) => {
       view.blend = battle.over ? 1 : Math.min(1, acc / BATTLE_TICK);
       notice(dt, battle.result().stars);
       const mark = refused.current && performance.now() - refused.current.at < REFUSED_MS ? refused.current : null;
-      show(Math.floor(elapsed * ART_FPS), cursor.current, mark);
+      // Every frame while the fight is on, or the dust and the confetti are flying; thirty a second before the first
+      // scout is down and once it is all over (frameGate.ts).
+      const fighting = Boolean(drive || battle.units.length > 0) && !battle.over;
+      if (gate.due(time, fighting || view.bits.length > 0 || mark !== null)) show(Math.floor(elapsed * ART_FPS), cursor.current, mark);
       sync();
-      raf = requestAnimationFrame(frame);
     };
-    raf = requestAnimationFrame(frame);
+    const gate = frameGate();
+    // Stopped while the window is hidden or the field is not on the page; the time away is not played.
+    const stop = runWhileShown(canvas, frame, () => {
+      last = 0;
+      gate.reset();
+    });
     // Drawn at once too: a window in the background gets few frames.
     show(0, null, null);
     if (!raid && battle.time === 0) playSound("caw", { volume: 0.7 });
 
-    if (!raid) return () => cancelAnimationFrame(raf);
+    if (!raid) return stop;
 
     const put = (x: number, y: number) => {
       if (!battle.deploy(kindRef.current, x, y)) {
@@ -657,11 +666,13 @@ export const BattleScreen = (props: Props) => {
     };
     const pointerDown = (event: PointerEvent) => {
       event.preventDefault();
+      gate.wake(performance.now() + STIRRED_MS);
       const rect = canvas.getBoundingClientRect();
       cursor.current = null;
       put(((event.clientX - rect.left) / rect.width) * FIELD_W, ((event.clientY - rect.top) / rect.height) * FIELD_H);
     };
     const keyDown = (event: KeyboardEvent) => {
+      gate.wake(performance.now() + STIRRED_MS);
       const index = ["1", "2", "3", "4"].indexOf(event.key);
       if (index >= 0 && kinds[index]) {
         setKind(kinds[index]);
@@ -686,7 +697,7 @@ export const BattleScreen = (props: Props) => {
     window.addEventListener("keydown", keyDown, true);
     canvas.focus();
     return () => {
-      cancelAnimationFrame(raf);
+      stop();
       canvas.removeEventListener("pointerdown", pointerDown);
       window.removeEventListener("keydown", keyDown, true);
     };

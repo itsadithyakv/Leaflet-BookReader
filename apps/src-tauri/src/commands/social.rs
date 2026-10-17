@@ -127,11 +127,69 @@ pub(crate) fn read_day(days: &[habit::DayRecord], today_key: &str) -> Option<Str
     .then(|| today_key.to_string())
 }
 
-/// Pushes the ranked numbers. Resolves `true` when something was published.
+/// How long figures that have not moved may go unsent: six hours. The server
+/// is the record, and this device's word that it already has them is only a
+/// memory (a server put back from a backup has older ones).
+const PROFILE_RESEND_SECS: i64 = 6 * 60 * 60;
+
+/// Whether the figures fingerprinted `print` are to be sent to `account`:
+/// when asked to (`force`), or unless they are exactly what that account was
+/// last sent, and recently.
+pub(crate) fn profile_needs_sending(sent: Option<&cloud::ProfileSent>, account: &str, print: &str, now: i64, force: bool) -> bool {
+  force
+    || !sent.is_some_and(|sent| sent.account == account && sent.print == print && (0..PROFILE_RESEND_SECS).contains(&(now - sent.at)))
+}
+
+/// Sends the profile's figures with `send` (`cloud::put_profile`), unless
+/// they are byte for byte what this account last sent (`profile_needs_sending`).
+/// The server's answer, or `None` when nothing needed sending.
+///
+/// The figures went up every few minutes of reading and every ten minutes
+/// of the pulse, a few kilobytes each (the camp is most of it), though most
+/// of the time not one number had moved. What was sent is remembered only
+/// once the server has taken it, for the account it went to, and not when
+/// the server answers that the profile is private (nothing was published).
+pub(crate) async fn send_profile<F, Fut>(
+  db_mutex: &std::sync::Mutex<db::Database>,
+  update: &cloud::ProfileUpdate,
+  force: bool,
+  now: i64,
+  send: F
+) -> Result<Option<serde_json::Value>, String>
+where
+  F: FnOnce() -> Fut,
+  Fut: std::future::Future<Output = anyhow::Result<serde_json::Value>>
+{
+  // The body exactly as `put_profile` sends it.
+  let print = fingerprint(&serde_json::to_vec(update).map_err(|e| e.to_string())?);
+  let (account, sent) = {
+    let db = db_mutex.guard();
+    (cloud::signed_in_account_id(&db), cloud::profile_sent(&db))
+  };
+  if let Some(account) = account.as_deref() {
+    if !profile_needs_sending(sent.as_ref(), account, &print, now, force) {
+      return Ok(None);
+    }
+  }
+  let saved = send().await.map_err(|e| e.to_string())?;
+  let db = db_mutex.guard();
+  match account {
+    // Still the account it went to (not signed out, or into another, meanwhile).
+    Some(account) if !server_says_private(&saved) && cloud::signed_in_account_id(&db).as_deref() == Some(account.as_str()) => {
+      cloud::remember_profile_sent(&db, &cloud::ProfileSent { account, print, at: now });
+    }
+    _ => cloud::forget_profile_sent(&db)
+  }
+  Ok(Some(saved))
+}
+
+/// Pushes the ranked numbers. Resolves `true` when something was published,
+/// or when exactly these figures already were (`send_profile`). `force`, the
+/// app's when a session ends or the board opens, sends them whatever.
 ///
 /// After a sync it never fails the sync: a leaderboard that is briefly stale
 /// matters far less than reading position that did not save.
-pub(crate) async fn publish_profile(state: &State<'_, AppState>) -> Result<bool, String> {
+pub(crate) async fn publish_profile(state: &State<'_, AppState>, force: bool) -> Result<bool, String> {
   // Only from a library that is the account's own: another account's
   // library on this device never goes on this one's board.
   if !library_may_publish(state).await {
@@ -167,13 +225,21 @@ pub(crate) async fn publish_profile(state: &State<'_, AppState>) -> Result<bool,
     let db = state.db.guard();
     build_profile_update(&db, &local_today())?
   };
-  let saved = cloud::put_profile(&state.db, &update).await.map_err(|e| e.to_string())?;
+  // A library that has changed goes up behind the figures, and only behind
+  // figures the server has just answered for: its answer is what says the
+  // profile was not made private elsewhere. So they are sent then, moved or not.
+  let library_waits = {
+    let db = state.db.guard();
+    library_due(&db).ok().flatten().is_some()
+  };
+  let now = chrono::Utc::now().timestamp();
+  let sent = send_profile(&state.db, &update, force || library_waits, now, || cloud::put_profile(&state.db, &update)).await?;
   // The answer is the profile as the server now has it. If it says private,
   // the profile was un-shared somewhere else since this run last asked (on
   // another computer, say), and until the app was restarted every publish
   // kept sending a private reader's minutes. Nothing is published, and the
   // next time round the server is asked again before anything is sent.
-  if server_says_private(&saved) {
+  if sent.as_ref().is_some_and(server_says_private) {
     VISIBILITY_CONFIRMED.store(false, Ordering::Relaxed);
     return Ok(false);
   }
@@ -242,7 +308,7 @@ pub(crate) async fn publish_profile_after_sync(state: &State<'_, AppState>) -> R
   if known.is_some() && VISIBILITY_CONFIRMED.load(Ordering::Relaxed) && !publish_due(last, Instant::now()) {
     return Ok(false);
   }
-  publish_profile(state).await
+  publish_profile(state, false).await
 }
 
 /// Whether the server's answer to a profile save says the profile is private.
@@ -280,9 +346,11 @@ pub(crate) fn shared_now(known: Option<bool>, asked: Option<Result<bool, String>
 /// a public reader without Drive stayed frozen on the board at whatever they
 /// had when they went public, and their duels with them. The app now calls
 /// this when a session ends, when the Social page opens and when the window
-/// comes back. Signed out or private, it does nothing.
+/// comes back. Signed out or private, it does nothing. Figures exactly as
+/// they were last sent are not sent again (`send_profile`) unless `force`d:
+/// the app's when a session ends and when the board opens.
 #[tauri::command]
-pub async fn publish_social_stats(state: State<'_, AppState>) -> Result<bool, String> {
+pub async fn publish_social_stats(force: Option<bool>, state: State<'_, AppState>) -> Result<bool, String> {
   let signed_in = {
     let db = state.db.guard();
     crate::sync::cloud::signed_in(&db)
@@ -290,7 +358,7 @@ pub async fn publish_social_stats(state: State<'_, AppState>) -> Result<bool, St
   if !signed_in {
     return Ok(false);
   }
-  publish_profile(&state).await
+  publish_profile(&state, force.unwrap_or(false)).await
 }
 
 pub(crate) fn iso_week_key(today_key: &str) -> String {
@@ -373,6 +441,12 @@ pub async fn save_social_profile(
   }
 
   cloud::put_profile(&state.db, &update).await.map_err(|e| e.to_string())?;
+  // The profile has just been saved with other things in it, or made
+  // private: the next publish sends the figures afresh, whatever they are.
+  {
+    let db = state.db.guard();
+    cloud::forget_profile_sent(&db);
+  }
 
   // The library follows its switch at once: sent when it is turned on, taken
   // away when it is turned off or the profile is made private (the server
@@ -659,5 +733,98 @@ mod tests {
     assert_eq!(serde_json::to_string(&cleared).expect("json"), r#"{"displayName":""}"#);
     let untouched = cloud::ProfileUpdate { visibility: Some("public".to_string()), ..cloud::ProfileUpdate::default() };
     assert_eq!(serde_json::to_string(&untouched).expect("json"), r#"{"visibility":"public"}"#);
+  }
+
+  /// A library with `account` signed in, as far as publishing can tell (the
+  /// account's cached description; no token, so nothing is sent anywhere).
+  fn signed_in_as(account: &str) -> std::sync::Mutex<db::Database> {
+    let db = crate::db::tests::memory_db();
+    db.set_setting(cloud::ACCOUNT_CACHE_SETTING, &format!(r#"{{"id":"{account}","email":"{account}@example.com"}}"#)).expect("set");
+    std::sync::Mutex::new(db)
+  }
+
+  /// Sends `update` as `publish_profile` would, through a stand-in for the
+  /// server that counts what reaches it and answers `answer`.
+  async fn publish(
+    db: &std::sync::Mutex<db::Database>,
+    update: &cloud::ProfileUpdate,
+    force: bool,
+    now: i64,
+    calls: &std::sync::atomic::AtomicUsize,
+    answer: anyhow::Result<serde_json::Value>
+  ) -> Result<Option<serde_json::Value>, String> {
+    send_profile(db, update, force, now, || async {
+      calls.fetch_add(1, Ordering::Relaxed);
+      answer
+    })
+    .await
+  }
+
+  fn figures(minutes: f64) -> cloud::ProfileUpdate {
+    cloud::ProfileUpdate { week_key: Some("2026-W42".to_string()), week_minutes: Some(minutes), streak: Some(3), ..cloud::ProfileUpdate::default() }
+  }
+
+  /// The same figures twice go up once; changed ones, forced ones, ones last
+  /// sent six hours ago and ones for another account go up again; a send that
+  /// failed, or that the server answered "private" to, is not remembered.
+  #[tokio::test]
+  async fn unchanged_figures_are_sent_once() {
+    use std::sync::atomic::AtomicUsize;
+    let ok = || Ok(serde_json::json!({ "visibility": "public" }));
+    let calls = AtomicUsize::new(0);
+    let db = signed_in_as("a1");
+    const T: i64 = 1_790_000_000;
+
+    assert!(publish(&db, &figures(30.0), false, T, &calls, ok()).await.expect("sent").is_some());
+    assert!(publish(&db, &figures(30.0), false, T + 60, &calls, ok()).await.expect("skipped").is_none());
+    assert_eq!(calls.load(Ordering::Relaxed), 1, "the same body twice: once");
+
+    // Changed: sent, and remembered in its turn.
+    publish(&db, &figures(31.0), false, T + 120, &calls, ok()).await.expect("sent");
+    assert_eq!(calls.load(Ordering::Relaxed), 2);
+    publish(&db, &figures(31.0), false, T + 180, &calls, ok()).await.expect("skipped");
+    assert_eq!(calls.load(Ordering::Relaxed), 2);
+
+    // Forced: sent whatever.
+    publish(&db, &figures(31.0), true, T + 240, &calls, ok()).await.expect("sent");
+    assert_eq!(calls.load(Ordering::Relaxed), 3);
+
+    // Six hours after the last send, sent again as a safety net.
+    publish(&db, &figures(31.0), false, T + 240 + PROFILE_RESEND_SECS - 1, &calls, ok()).await.expect("skipped");
+    assert_eq!(calls.load(Ordering::Relaxed), 3);
+    publish(&db, &figures(31.0), false, T + 240 + PROFILE_RESEND_SECS, &calls, ok()).await.expect("sent");
+    assert_eq!(calls.load(Ordering::Relaxed), 4);
+
+    // A failure is not remembered: the next goes.
+    let failed = publish(&db, &figures(32.0), false, T + 30_000, &calls, Err(anyhow::anyhow!("offline"))).await;
+    assert!(failed.is_err());
+    publish(&db, &figures(32.0), false, T + 30_060, &calls, ok()).await.expect("sent");
+    assert_eq!(calls.load(Ordering::Relaxed), 6);
+
+    // Nor one the server answered "private" to: nothing was published.
+    let private = || Ok(serde_json::json!({ "visibility": "private" }));
+    publish(&db, &figures(33.0), false, T + 30_120, &calls, private()).await.expect("sent");
+    publish(&db, &figures(33.0), false, T + 30_180, &calls, ok()).await.expect("sent");
+    assert_eq!(calls.load(Ordering::Relaxed), 8);
+
+    // Another account on this library: sent, though the body is the same.
+    db.guard().set_setting(cloud::ACCOUNT_CACHE_SETTING, r#"{"id":"b2","email":"b2@example.com"}"#).expect("set");
+    publish(&db, &figures(33.0), false, T + 30_240, &calls, ok()).await.expect("sent");
+    assert_eq!(calls.load(Ordering::Relaxed), 9);
+
+    // Forgotten (sign-out, a profile saved or made private): sent again.
+    cloud::forget_profile_sent(&db.guard());
+    publish(&db, &figures(33.0), false, T + 30_300, &calls, ok()).await.expect("sent");
+    assert_eq!(calls.load(Ordering::Relaxed), 10);
+  }
+
+  /// A clock set back makes the last send look like the future: not trusted.
+  #[test]
+  fn a_send_from_the_future_is_not_trusted() {
+    let sent = cloud::ProfileSent { account: "a1".to_string(), print: "p".to_string(), at: 1_000 };
+    assert!(!profile_needs_sending(Some(&sent), "a1", "p", 1_000, false));
+    assert!(profile_needs_sending(Some(&sent), "a1", "p", 999, false));
+    assert!(profile_needs_sending(Some(&sent), "a1", "q", 1_000, false));
+    assert!(profile_needs_sending(None, "a1", "p", 1_000, false));
   }
 }

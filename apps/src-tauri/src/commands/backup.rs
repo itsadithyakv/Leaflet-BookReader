@@ -1032,7 +1032,7 @@ mod tests {
 
     // "Start empty": the account's copy is replaced, and the next run sends
     // this library alone.
-    crate::sync::cloud::replace_with_empty_on(&cloud, "2026-10-14T09:01:00+00:00", A).await.expect("replaced");
+    crate::sync::cloud::replace_with_empty_on(&fresh.db, &cloud, "2026-10-14T09:01:00+00:00", A).await.expect("replaced");
     owner::set_fresh(&fresh.db.guard(), false).expect("answered");
     fresh.run("2026-10-14T09:02:00+00:00", Some(A), Some(&cloud), &[]).await.expect("sync");
     let held = cloud.doc().expect("held");

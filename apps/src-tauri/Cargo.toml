@@ -1,6 +1,6 @@
 [package]
 name = "leaflet"
-version = "1.5.5"
+version = "1.5.6"
 edition = "2021"
 build = "build.rs"
 
@@ -48,7 +48,12 @@ hex = "0.4"
 flate2 = "1"
 oauth2 = { version = "4.4", default-features = false }
 quick-xml = "0.31"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart", "stream"] }
+# `gzip`: asks for gzip and unpacks it, so the Leaflet server's answers (the
+# board, profiles, the sync document's base64) come compressed, as its Caddy
+# offers. Bodies are the same bytes once unpacked; only `content_length()`
+# goes (None for a gzipped answer), and nothing leans on it but the wiki's
+# early check, which reads under its limit anyway (`wiki::ask`).
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart", "stream", "gzip"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

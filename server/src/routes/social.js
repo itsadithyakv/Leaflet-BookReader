@@ -101,6 +101,50 @@ const NO_FIGURES = {
   camp: null
 };
 
+/**
+ * What of a profile `ownView` reads, and nothing else: the reads answered
+ * with it ask for only this. A reader's own profile is fetched on every save
+ * of their figures, which an open app makes every minute or few, so it was
+ * the largest part of what the server took from the database. Left out are
+ * what the view does not show (when it was saved, the avatar's copy, the
+ * day last read) and the two lists of readers behind the kudos counts, which
+ * come back as their lengths: two numbers where there were twenty ids.
+ */
+const OWN_VIEW = {
+  _id: 0,
+  handle: 1,
+  displayName: 1,
+  visibility: 1,
+  weekKey: 1,
+  weekMinutes: 1,
+  streak: 1,
+  booksFinished: 1,
+  shelf: 1,
+  reading: 1,
+  level: 1,
+  badges: 1,
+  arcade: 1,
+  camp: 1,
+  shareLibrary: 1,
+  raidable: 1,
+  rulesAcceptedAt: 1,
+  role: 1,
+  suspendedUntil: 1,
+  kudosFrom: { $size: { $ifNull: ["$kudosFrom", []] } },
+  kudosTo: { $size: { $ifNull: ["$kudosTo", []] } }
+};
+
+/**
+ * The same, but for the fields named: a save's `$set` says what they now
+ * are, so the profile read back after it need not carry them as well.
+ */
+function ownViewWithout(names) {
+  return Object.fromEntries(Object.entries(OWN_VIEW).filter(([name]) => !names.includes(name)));
+}
+
+/** A list of readers' ids as `OWN_VIEW` reads it (its length), or as it is stored. */
+const howMany = (ids) => (typeof ids === "number" ? ids : ids?.length ?? 0);
+
 function ownView(profile) {
   return {
     handle: profile?.handle ?? null,
@@ -119,8 +163,8 @@ function ownView(profile) {
     // How many different readers have sent this one kudos, and how many this
     // one has sent kudos to, up to KUDOS_BADGE_AT: how near the two kudos
     // badges are. The counts only; the ids they are counted from stay here.
-    kudosFrom: profile?.kudosFrom?.length ?? 0,
-    kudosTo: profile?.kudosTo?.length ?? 0,
+    kudosFrom: howMany(profile?.kudosFrom),
+    kudosTo: howMany(profile?.kudosTo),
     sharesLibrary: profile?.shareLibrary === true,
     // Whether friends may raid the camp (`routes/raids.js`): yes, until the
     // reader says no.
@@ -400,7 +444,7 @@ export function socialRoutes(db, limits = defaultLimits()) {
     "/profile/me",
     auth,
     asyncHandler(async (request, response) => {
-      response.json(ownView(await profiles(db).findOne({ _id: request.account.id })));
+      response.json(ownView(await profiles(db).findOne({ _id: request.account.id }, { projection: OWN_VIEW })));
     })
   );
 
@@ -506,10 +550,14 @@ export function socialRoutes(db, limits = defaultLimits()) {
       // The avatar belongs to the account (it is picked at signup, before any
       // profile exists); the profile keeps a copy for the board to show.
       // With it, when the save does not choose who sees the profile, the
-      // profile as it is held: see "says nothing new" below.
+      // profile as it is held: see "says nothing new" below. As much of it
+      // as the answer shows, and the two parts a save can say that it does
+      // not (the avatar's copy, the day last read), to tell whether it does.
       const [account, held] = await Promise.all([
         accounts(db).findOne({ _id: request.account.id }, { projection: { avatar: 1, suspendedUntil: 1 } }),
-        update.visibility === undefined ? profiles(db).findOne({ _id: request.account.id }) : null
+        update.visibility === undefined
+          ? profiles(db).findOne({ _id: request.account.id }, { projection: { ...OWN_VIEW, avatar: 1, readDay: 1 } })
+          : null
       ]);
       update.avatar = avatarView(account?.avatar);
       // A suspension is kept on the account as well, so that deleting the
@@ -550,14 +598,18 @@ export function socialRoutes(db, limits = defaultLimits()) {
       // profile, then the figures if it was still shared, then a read of the
       // result.) Still only if the profile is shared at that moment; one
       // made private in between is no match, and is saved the long way below,
-      // without its figures.
+      // without its figures. What comes back is only what the save did not
+      // just set (the visibility, the kudos counts, the standing, and
+      // whatever the app left out): what it set is in `changes`, as it now
+      // stands, and sending the camp back as well doubled what a save cost.
       if (held && SOCIAL.includes(held.visibility)) {
+        const changes = { ...update, ...figures };
         let saved;
         try {
           saved = await profiles(db).findOneAndUpdate(
             { _id: request.account.id, visibility: { $in: SOCIAL } },
-            { $set: { ...update, ...figures } },
-            { returnDocument: "after" }
+            { $set: changes },
+            { returnDocument: "after", projection: ownViewWithout(Object.keys(changes)) }
           );
         } catch (error) {
           if (error?.code === 11000) {
@@ -572,7 +624,7 @@ export function socialRoutes(db, limits = defaultLimits()) {
           if (figures.weekKey !== undefined && (figures.weekKey !== held.weekKey || figures.weekMinutes !== held.weekMinutes)) {
             await recordDuelMinutes(db, request.account.id, figures.weekKey, figures.weekMinutes);
           }
-          response.json(ownView(saved));
+          response.json(ownView({ ...changes, ...saved }));
           return;
         }
       }
@@ -628,7 +680,7 @@ export function socialRoutes(db, limits = defaultLimits()) {
       if (figuresSaved && figures.weekKey !== undefined) {
         await recordDuelMinutes(db, request.account.id, figures.weekKey, figures.weekMinutes);
       }
-      response.json(ownView(await profiles(db).findOne({ _id: request.account.id })));
+      response.json(ownView(await profiles(db).findOne({ _id: request.account.id }, { projection: OWN_VIEW })));
     })
   );
 

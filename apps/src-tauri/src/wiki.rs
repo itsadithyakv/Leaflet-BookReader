@@ -168,7 +168,7 @@ pub async fn ask(host: &str, params: &[(String, String)]) -> Result<String, Wiki
   let Some(api) = api_of(&host) else {
     return Err(WikiError::new(WikiErrorKind::Refused));
   };
-  let response = client()?
+  let mut response = client()?
     .get(format!("https://{host}{api}"))
     .query(&query)
     .send()
@@ -182,11 +182,17 @@ pub async fn ask(host: &str, params: &[(String, String)]) -> Result<String, Wiki
   if response.content_length().is_some_and(|length| length as usize > MAX_BYTES) {
     return Err(WikiError::new(WikiErrorKind::Unavailable));
   }
-  let body = response.bytes().await.map_err(|_| WikiError::new(WikiErrorKind::Unavailable))?;
-  if body.len() > MAX_BYTES {
-    return Err(WikiError::new(WikiErrorKind::Unavailable));
+  // Read a piece at a time and stopped at the limit. A gzipped answer has no
+  // length to go by (it is unpacked as it comes), and a few kilobytes of gzip
+  // can unpack to far more than the limit.
+  let mut body = Vec::new();
+  while let Some(piece) = response.chunk().await.map_err(|_| WikiError::new(WikiErrorKind::Unavailable))? {
+    if body.len() + piece.len() > MAX_BYTES {
+      return Err(WikiError::new(WikiErrorKind::Unavailable));
+    }
+    body.extend_from_slice(&piece);
   }
-  let text = String::from_utf8(body.to_vec()).map_err(|_| WikiError::new(WikiErrorKind::Unavailable))?;
+  let text = String::from_utf8(body).map_err(|_| WikiError::new(WikiErrorKind::Unavailable))?;
   // A page that is not JSON is a challenge or an error page, not an answer.
   if !text.trim_start().starts_with(['{', '[']) {
     return Err(WikiError::new(WikiErrorKind::Unavailable));

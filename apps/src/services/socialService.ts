@@ -289,7 +289,7 @@ export const socialService = {
     }
     lastPublish = Date.now();
     const epoch = publishEpoch;
-    publishing = call<boolean>("publish_social_stats")
+    publishing = call<boolean>("publish_social_stats", { force: options.force === true })
       .then((published) => {
         if (epoch === publishEpoch) {
           publishError = null;

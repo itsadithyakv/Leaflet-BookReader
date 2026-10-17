@@ -41,6 +41,15 @@ pub const PROFILE_VISIBILITY_SETTING: &str = "cloud_profile_visibility";
 /// the account by itself. The account now always carries the state while a
 /// reader is signed in; the row is only cleared at sign-out.
 const LEGACY_BACKUP_ALONE_SETTING: &str = "cloud_backup_alone";
+/// The profile's figures as they were last sent, and by whom and when
+/// (`commands::social::publish_profile`), so that the same few kilobytes do
+/// not go up every few minutes of reading when nothing in them has moved.
+pub const PROFILE_SENT_SETTING: &str = "cloud_profile_sent";
+/// The account's copy of the state as this device last saw it: the document
+/// exactly as the server holds it, its version, and whose it is. With it a
+/// sync asks the server only whether the copy has moved on (`?have=`), and
+/// the document itself (up to 2 MB, every sync) is not sent for nothing.
+const STATE_COPY_SETTING: &str = "cloud_state_copy";
 
 /// Retries after losing a race for the document. Each one is a fresh merge, so
 /// nothing the other device wrote is lost.
@@ -49,8 +58,22 @@ const MAX_CONFLICT_RETRIES: u32 = 3;
 #[derive(Debug, Deserialize)]
 struct StateResponse {
   version: i64,
-  /// Base64 of the gzipped document. Absent for a reader who has never synced.
-  state: Option<String>
+  /// Base64 of the gzipped document. Absent for a reader who has never synced,
+  /// and when `unchanged`.
+  state: Option<String>,
+  /// The server still holds the version the pull named (`?have=`). Never
+  /// said by a server from before `have`, nor to a pull that named none.
+  #[serde(default)]
+  unchanged: bool
+}
+
+/// The server's answer as a pull's. "Unchanged" with a copy beside it is
+/// taken at the copy's word: the document is what to merge with.
+fn fetched_from(response: StateResponse) -> Fetched {
+  match response {
+    StateResponse { version, state: None, unchanged: true } => Fetched::Unchanged { version },
+    StateResponse { version, state, .. } => Fetched::Full(Pulled { version, state })
+  }
 }
 
 #[derive(Debug, Serialize)]
@@ -301,7 +324,38 @@ pub fn clear_session(db: &Database) {
   // last one's choice.
   forget_visibility(db);
   let _ = db.set_setting(LEGACY_BACKUP_ALONE_SETTING, "");
+  // What was last sent of the profile, and the account's copy of the state
+  // as last seen, were that session's: the next sign-in, whoever's, sends
+  // and fetches afresh.
+  forget_profile_sent(db);
+  forget_state_copy(db);
   // The library's owner is kept: it is the library's, not the session's.
+}
+
+/// What was last sent of the profile (`PROFILE_SENT_SETTING`): the account it
+/// went to, a fingerprint of the body, and when (Unix seconds).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProfileSent {
+  pub account: String,
+  pub print: String,
+  pub at: i64
+}
+
+/// What was last sent of the profile, if it can be read.
+pub fn profile_sent(db: &Database) -> Option<ProfileSent> {
+  let value = db.get_setting(PROFILE_SENT_SETTING).ok().flatten()?;
+  serde_json::from_str(&value).ok()
+}
+
+pub fn remember_profile_sent(db: &Database, sent: &ProfileSent) {
+  if let Ok(value) = serde_json::to_string(sent) {
+    let _ = db.set_setting(PROFILE_SENT_SETTING, &value);
+  }
+}
+
+/// Forgets what was last sent of the profile, so the next publish sends.
+pub fn forget_profile_sent(db: &Database) {
+  let _ = db.set_setting(PROFILE_SENT_SETTING, "");
 }
 
 /// The rows that say who is signed in on this library, apart from the token
@@ -793,6 +847,14 @@ pub struct Pulled {
   pub state: Option<String>
 }
 
+/// What a pull brought: the copy, or word that the server still holds the
+/// version this device said it had (`have`), and so nothing more.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Fetched {
+  Full(Pulled),
+  Unchanged { version: i64 }
+}
+
 /// How a write of the account's copy went.
 #[derive(Debug, PartialEq)]
 pub enum Pushed {
@@ -804,7 +866,11 @@ pub enum Pushed {
 /// Where the account's copy of the state lives: the server (`Server`), or a
 /// fake in the tests, as `shared_doc::DocStore` is for Drive.
 pub trait StateStore: Sync {
-  fn pull(&self) -> Pending<'_, Pulled>;
+  /// The account's copy. `have` names a version this device already holds a
+  /// copy of: a store that still holds that version may answer `Unchanged`
+  /// instead of sending it again; one that does not (a server from before
+  /// `have`) sends the copy, as it always did.
+  fn pull(&self, have: Option<i64>) -> Pending<'_, Fetched>;
   /// Writes `payload` over `version`, only if that is still the server's.
   fn push<'a>(&'a self, version: i64, payload: &'a str) -> Pending<'a, Pushed>;
 }
@@ -826,21 +892,19 @@ impl<'a> Server<'a> {
 }
 
 impl StateStore for Server<'_> {
-  fn pull(&self) -> Pending<'_, Pulled> {
+  fn pull(&self, have: Option<i64>) -> Pending<'_, Fetched> {
     Box::pin(async move {
-      let response = self
-        .http
-        .get(format!("{}/v1/state", self.base))
-        .bearer_auth(&self.token)
-        .send()
-        .await
-        .map_err(unreachable)?;
+      let mut request = self.http.get(format!("{}/v1/state", self.base)).bearer_auth(&self.token);
+      if let Some(have) = have.filter(|have| *have > 0) {
+        request = request.query(&[("have", have.to_string())]);
+      }
+      let response = request.send().await.map_err(unreachable)?;
       if !response.status().is_success() {
         forget_if_unauthorised(self.db_mutex, response.status());
         return Err(describe_failure(response).await);
       }
       let pulled: StateResponse = response.json().await?;
-      Ok(Pulled { version: pulled.version, state: pulled.state })
+      Ok(fetched_from(pulled))
     })
   }
 
@@ -897,13 +961,14 @@ pub async fn sync_with<S: StateStore + ?Sized>(
   now: &str,
   stamp: Option<&str>
 ) -> Result<CloudOutcome> {
+  let at = unix_seconds(now);
   let mut attempt = 0;
   let merged = loop {
-    let pulled = store_of.pull().await?;
+    let (version, read) = pull_held(db_mutex, store_of, stamp, at).await?;
     // What the server holds, where it holds a document that can be read. A
     // corrupt one must not take the library down: it is merged as an empty
     // one, and republishing this device's own state puts it right.
-    let held = match pulled.state.as_deref().map(decode_remote).unwrap_or(Remote::Absent) {
+    let held = match read {
       Remote::Ours(doc) => Some(doc),
       Remote::Absent => None,
       // A later Leaflet wrote it: take what this one understands, write nothing.
@@ -941,11 +1006,17 @@ pub async fn sync_with<S: StateStore + ?Sized>(
       break merged;
     }
     let payload = compress(&merged)?;
-    match store_of.push(pulled.version, &payload).await? {
-      Pushed::Kept => break merged,
+    match store_of.push(version, &payload).await? {
+      Pushed::Kept => {
+        // What was sent is now the account's copy, at the version after.
+        keep_state_copy(&db_mutex.guard(), stamp, version + 1, Some(&payload), at);
+        break merged;
+      }
       Pushed::Conflict => {
         // Another device wrote between the read and the write. Merge again
-        // over what they wrote rather than overwriting it.
+        // over what they wrote rather than overwriting it, fetched whole:
+        // the copy kept here is not the server's any more.
+        forget_state_copy(&db_mutex.guard());
         attempt += 1;
         if attempt > MAX_CONFLICT_RETRIES {
           return Err(anyhow!("Another device is syncing right now. Try again shortly."));
@@ -979,20 +1050,148 @@ pub async fn replace_with_empty(db_mutex: &std::sync::Mutex<Database>, now: &str
     crate::sync::owner::signed_in_tag(&db)
   }
   .ok_or_else(|| anyhow!(SIGN_IN_FIRST))?;
-  replace_with_empty_on(&Server::signed_in(db_mutex)?, now, &stamp).await
+  replace_with_empty_on(db_mutex, &Server::signed_in(db_mutex)?, now, &stamp).await
 }
 
-/// `replace_with_empty` against any store.
-pub async fn replace_with_empty_on<S: StateStore + ?Sized>(store_of: &S, now: &str, stamp: &str) -> Result<()> {
+/// `replace_with_empty` against any store. The copy kept of what the account
+/// held goes first, whatever comes of the write: it is about to be wrong.
+pub async fn replace_with_empty_on<S: StateStore + ?Sized>(
+  db_mutex: &std::sync::Mutex<Database>,
+  store_of: &S,
+  now: &str,
+  stamp: &str
+) -> Result<()> {
+  forget_state_copy(&db_mutex.guard());
   let empty = SyncDoc { owner: Some(stamp.to_string()), ..SyncDoc::empty(now) };
   let payload = compress(&empty)?;
   for _ in 0..=MAX_CONFLICT_RETRIES {
-    let pulled = store_of.pull().await?;
-    if store_of.push(pulled.version, &payload).await? == Pushed::Kept {
+    let version = match store_of.pull(None).await? {
+      Fetched::Full(pulled) => pulled.version,
+      Fetched::Unchanged { .. } => return Err(anyhow!(ODD_ANSWER))
+    };
+    if store_of.push(version, &payload).await? == Pushed::Kept {
+      keep_state_copy(&db_mutex.guard(), Some(stamp), version + 1, Some(&payload), unix_seconds(now));
       return Ok(());
     }
   }
   Err(anyhow!("Another device is syncing right now. Try again shortly."))
+}
+
+/// A server that says "unchanged" to a pull that named no version.
+const ODD_ANSWER: &str = "The Leaflet server's answer made no sense. Try again shortly.";
+
+/// How long a copy kept of the account's state is trusted without being
+/// fetched whole again: a day. The server's version number is all that says
+/// the copy is still the one it holds, and a server put back from a backup
+/// counts versions again from an older one, so in time it could name the
+/// version kept here for a different document. A day of syncs is still
+/// nearly all of them spared the document; one a day fetches it.
+const STATE_COPY_TRUSTED_SECS: i64 = 24 * 60 * 60;
+
+/// The account's copy as this device last saw it (`STATE_COPY_SETTING`):
+/// whose (the account's tag), its version, the document exactly as the server
+/// holds it (base64 of the gzip), and when it was last known to be the
+/// server's (Unix seconds).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct StateCopy {
+  tag: String,
+  version: i64,
+  state: String,
+  at: i64
+}
+
+/// `now` (RFC 3339, as a sync is handed it) in Unix seconds; the clock's own
+/// when it will not read.
+fn unix_seconds(now: &str) -> i64 {
+  chrono::DateTime::parse_from_rfc3339(now)
+    .map(|at| at.timestamp())
+    .unwrap_or_else(|_| chrono::Utc::now().timestamp())
+}
+
+/// The copy kept of `tag`'s state, if there is one worth asking about: it
+/// reads, it is that account's, and it is recent. One that is not is
+/// forgotten here.
+fn kept_state_copy(db: &Database, tag: &str, now: i64) -> Option<StateCopy> {
+  let value = db.get_setting(STATE_COPY_SETTING).ok().flatten().filter(|value| !value.is_empty())?;
+  let kept = serde_json::from_str::<StateCopy>(&value)
+    .ok()
+    .filter(|kept| kept.tag == tag && kept.version > 0 && (0..STATE_COPY_TRUSTED_SECS).contains(&(now - kept.at)));
+  if kept.is_none() {
+    forget_state_copy(db);
+  }
+  kept
+}
+
+/// Keeps `state` as `tag`'s copy at `version`; forgets the copy instead when
+/// there is nothing to keep (no account, nothing held, no version yet).
+fn keep_state_copy(db: &Database, tag: Option<&str>, version: i64, state: Option<&str>, now: i64) {
+  let (Some(tag), Some(state)) = (tag, state) else {
+    forget_state_copy(db);
+    return;
+  };
+  if version <= 0 {
+    forget_state_copy(db);
+    return;
+  }
+  let kept = StateCopy { tag: tag.to_string(), version, state: state.to_string(), at: now };
+  match serde_json::to_string(&kept) {
+    Ok(value) => {
+      let _ = db.set_setting(STATE_COPY_SETTING, &value);
+    }
+    Err(_) => forget_state_copy(db)
+  }
+}
+
+/// Forgets the copy kept of the account's state: the next sync fetches it whole.
+pub fn forget_state_copy(db: &Database) {
+  let _ = db.set_setting(STATE_COPY_SETTING, "");
+}
+
+/// Reads the account's copy: its version, and what it holds.
+///
+/// A sync used to fetch the whole document every time (up to 2 MB, about ten
+/// times a day), though nearly always nothing had changed since the last.
+/// Where this device kept the copy it last saw, the server is now asked only
+/// whether its version is still that one (`have`), and the kept copy is what
+/// is merged with when it is. Whenever the two might not be the same
+/// document (the server names another version, the kept copy will not read)
+/// the copy is fetched whole: a merge is never made against a wrong one.
+async fn pull_held<S: StateStore + ?Sized>(
+  db_mutex: &std::sync::Mutex<Database>,
+  store_of: &S,
+  tag: Option<&str>,
+  now: i64
+) -> Result<(i64, Remote)> {
+  let kept = tag.and_then(|tag| kept_state_copy(&db_mutex.guard(), tag, now));
+  if let Some(kept) = kept {
+    match store_of.pull(Some(kept.version)).await? {
+      Fetched::Full(pulled) => return Ok(take_pulled(db_mutex, tag, pulled, now)),
+      Fetched::Unchanged { version } if version == kept.version => match decode_remote(&kept.state) {
+        // A kept copy that will not read is no copy at all.
+        Remote::Absent => {}
+        read => return Ok((version, read))
+      },
+      // Not the version kept, so not the document kept either.
+      Fetched::Unchanged { .. } => {}
+    }
+    forget_state_copy(&db_mutex.guard());
+  }
+  match store_of.pull(None).await? {
+    Fetched::Full(pulled) => Ok(take_pulled(db_mutex, tag, pulled, now)),
+    Fetched::Unchanged { .. } => Err(anyhow!(ODD_ANSWER))
+  }
+}
+
+/// A copy fetched whole, read, and kept for next time where it reads.
+fn take_pulled(db_mutex: &std::sync::Mutex<Database>, tag: Option<&str>, pulled: Pulled, now: i64) -> (i64, Remote) {
+  let read = pulled.state.as_deref().map(decode_remote).unwrap_or(Remote::Absent);
+  let db = db_mutex.guard();
+  if matches!(read, Remote::Absent) {
+    forget_state_copy(&db);
+  } else {
+    keep_state_copy(&db, tag, pulled.version, pulled.state.as_deref(), now);
+  }
+  (pulled.version, read)
 }
 // ---- social ---------------------------------------------------------------
 
@@ -1282,7 +1481,9 @@ pub(crate) mod fake {
   use std::sync::Mutex;
 
   /// The server's `/v1/state` without the network: a version that counts
-  /// writes, the copy, and a way to be down.
+  /// writes, the copy, and a way to be down. It answers `have` as the server
+  /// does, unless it is playing one from before `have` (`old`), and counts
+  /// what it sends.
   #[derive(Default)]
   pub struct FakeCloud {
     inner: Mutex<Inner>
@@ -1295,13 +1496,26 @@ pub(crate) mod fake {
     down: bool,
     pushes: u32,
     /// Written by "another device" just before the next push lands.
-    interloper: Option<String>
+    interloper: Option<String>,
+    /// A server from before `have`: it always sends the copy.
+    ignores_have: bool,
+    /// The `have` of each pull, in order.
+    asked: Vec<Option<i64>>,
+    /// How much of the document the pulls have carried, in bytes of base64.
+    sent: usize
   }
 
   impl FakeCloud {
     pub fn failing() -> Self {
       let cloud = FakeCloud::default();
       cloud.inner.lock().unwrap().down = true;
+      cloud
+    }
+
+    /// A server from before `have`.
+    pub fn old() -> Self {
+      let cloud = FakeCloud::default();
+      cloud.inner.lock().unwrap().ignores_have = true;
       cloud
     }
 
@@ -1316,6 +1530,12 @@ pub(crate) mod fake {
       inner.version += 1;
     }
 
+    /// Puts a copy there under the version it has now, as a server put back
+    /// from a backup could come to: what no `have` can tell from the last.
+    pub fn swap_in_place(&self, doc: &SyncDoc) {
+      self.inner.lock().unwrap().state = Some(compress(doc).expect("compress"));
+    }
+
     pub fn sneak_in(&self, doc: &SyncDoc) {
       self.inner.lock().unwrap().interloper = Some(compress(doc).expect("compress"));
     }
@@ -1323,16 +1543,28 @@ pub(crate) mod fake {
     pub fn pushes(&self) -> u32 {
       self.inner.lock().unwrap().pushes
     }
+
+    /// The `have` of each pull since the last call, and the bytes of the
+    /// document they carried.
+    pub fn pulls(&self) -> (Vec<Option<i64>>, usize) {
+      let mut inner = self.inner.lock().unwrap();
+      (std::mem::take(&mut inner.asked), std::mem::take(&mut inner.sent))
+    }
   }
 
   impl StateStore for FakeCloud {
-    fn pull(&self) -> Pending<'_, Pulled> {
+    fn pull(&self, have: Option<i64>) -> Pending<'_, Fetched> {
       Box::pin(async move {
-        let inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap();
         if inner.down {
           return Err(anyhow!("Leaflet server error (503 Service Unavailable): down"));
         }
-        Ok(Pulled { version: inner.version, state: inner.state.clone() })
+        inner.asked.push(have);
+        if !inner.ignores_have && have.is_some_and(|have| have > 0 && have == inner.version) {
+          return Ok(Fetched::Unchanged { version: inner.version });
+        }
+        inner.sent += inner.state.as_ref().map_or(0, String::len);
+        Ok(Fetched::Full(Pulled { version: inner.version, state: inner.state.clone() }))
       })
     }
 
@@ -1731,7 +1963,7 @@ mod tests {
     let cloud = FakeCloud::default();
     cloud.put(&store::snapshot(&library_with(&["old"]).guard(), NOW).expect("snapshot"));
     cloud.sneak_in(&store::snapshot(&library_with(&["old", "older"]).guard(), NOW).expect("snapshot"));
-    replace_with_empty_on(&cloud, LATER, A).await.expect("replaced");
+    replace_with_empty_on(&library_with(&[]), &cloud, LATER, A).await.expect("replaced");
     let held = cloud.doc().expect("held");
     assert!(held.books.is_empty() && held.days.is_empty());
     assert_eq!(held.owner.as_deref(), Some(A));
@@ -1769,5 +2001,182 @@ mod tests {
     assert_eq!(known_visibility(&to), Some(true));
     assert_eq!(signed_in_account_id(&from), None);
     assert_eq!(known_visibility(&from), None);
+  }
+
+  const B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+  /// A sync that finds the account's copy where it left it fetches none of
+  /// it, and merges with the copy it kept.
+  #[tokio::test]
+  async fn an_unchanged_copy_is_not_fetched_again() {
+    let cloud = FakeCloud::default();
+    cloud.put(&store::snapshot(&library_with(&["old"]).guard(), NOW).expect("snapshot"));
+    let laptop = library_with(&["aaa"]);
+    sync_with(&laptop, &cloud, NOW, Some(A)).await.expect("first");
+    let (asked, sent) = cloud.pulls();
+    assert_eq!(asked, vec![None], "nothing kept yet, so nothing named");
+    assert!(sent > 0);
+    assert_eq!(cloud.pushes(), 1);
+
+    // Hours later, nothing new on either side: asked, and nothing carried.
+    sync_with(&laptop, &cloud, LATER, Some(A)).await.expect("second");
+    assert_eq!(cloud.pulls(), (vec![Some(2)], 0));
+    assert_eq!(cloud.pushes(), 1);
+
+    // What is merged with is the copy kept: a document put under the same
+    // version (no server does that) is not even seen.
+    cloud.swap_in_place(&store::snapshot(&library_with(&["zzz"]).guard(), NOW).expect("snapshot"));
+    sync_with(&laptop, &cloud, LATER, Some(A)).await.expect("third");
+    assert_eq!(ids(&laptop), vec!["aaa".to_string(), "old".to_string()]);
+    assert_eq!(cloud.pulls(), (vec![Some(2)], 0));
+  }
+
+  /// A copy another device has moved on is fetched whole, and merged.
+  #[tokio::test]
+  async fn a_changed_copy_is_fetched_whole() {
+    let cloud = FakeCloud::default();
+    let laptop = library_with(&["aaa"]);
+    sync_with(&laptop, &cloud, NOW, Some(A)).await.expect("first");
+    cloud.pulls();
+    let phone = library_with(&["bbb"]);
+    sync_with(&phone, &cloud, NOW, Some(A)).await.expect("phone");
+    cloud.pulls();
+
+    sync_with(&laptop, &cloud, LATER, Some(A)).await.expect("second");
+    let (asked, sent) = cloud.pulls();
+    assert_eq!(asked, vec![Some(1)], "the version kept, which is not the server's now");
+    assert!(sent > 0);
+    assert_eq!(ids(&laptop), vec!["aaa".to_string(), "bbb".to_string()]);
+    // And what came is kept in its turn.
+    sync_with(&laptop, &cloud, LATER, Some(A)).await.expect("third");
+    assert_eq!(cloud.pulls(), (vec![Some(2)], 0));
+  }
+
+  /// A server from before `have` sends the copy every time, as it always
+  /// did, and the sync goes on as it always did.
+  #[tokio::test]
+  async fn a_server_that_ignores_have_still_syncs() {
+    let cloud = FakeCloud::old();
+    cloud.put(&store::snapshot(&library_with(&["old"]).guard(), NOW).expect("snapshot"));
+    let laptop = library_with(&["aaa"]);
+    sync_with(&laptop, &cloud, NOW, Some(A)).await.expect("first");
+    cloud.pulls();
+    let phone = library_with(&["bbb"]);
+    sync_with(&phone, &cloud, NOW, Some(A)).await.expect("phone");
+    cloud.pulls();
+    sync_with(&laptop, &cloud, LATER, Some(A)).await.expect("second");
+    let (asked, sent) = cloud.pulls();
+    assert_eq!(asked, vec![Some(2)]);
+    assert!(sent > 0);
+    assert_eq!(ids(&laptop), vec!["aaa".to_string(), "bbb".to_string(), "old".to_string()]);
+  }
+
+  /// The copy kept is one account's, and only for a day; one that will not
+  /// read is no copy. Each time the next sync fetches the document whole.
+  #[tokio::test]
+  async fn a_copy_kept_is_dropped_for_another_account_a_day_or_a_bad_row() {
+    let cloud = FakeCloud::default();
+    let laptop = library_with(&["aaa"]);
+    sync_with(&laptop, &cloud, NOW, Some(A)).await.expect("first");
+    cloud.pulls();
+
+    // Another account on this library: nothing named, and its copy is kept.
+    sync_with(&laptop, &cloud, NOW, Some(B)).await.expect("other account");
+    assert_eq!(cloud.pulls().0, vec![None]);
+    sync_with(&laptop, &cloud, NOW, Some(A)).await.expect("back");
+    assert_eq!(cloud.pulls().0, vec![None], "B's copy is not A's");
+    sync_with(&laptop, &cloud, NOW, Some(A)).await.expect("again");
+    assert!(cloud.pulls().0[0].is_some(), "named this time");
+
+    // A day on, the copy is not trusted.
+    sync_with(&laptop, &cloud, "2026-09-05T12:00:01+00:00", Some(A)).await.expect("a day on");
+    assert_eq!(cloud.pulls().0, vec![None]);
+
+    // A row that will not read.
+    laptop.guard().set_setting(STATE_COPY_SETTING, "{not json").expect("set");
+    sync_with(&laptop, &cloud, "2026-09-05T12:00:02+00:00", Some(A)).await.expect("bad row");
+    assert_eq!(cloud.pulls().0, vec![None]);
+
+    // A row that reads but holds a document that does not: the server says
+    // "unchanged", and it is fetched whole after all.
+    let kept = |db: &Mutex<Database>| -> StateCopy {
+      serde_json::from_str(&db.guard().get_setting(STATE_COPY_SETTING).expect("row").expect("kept")).expect("a copy")
+    };
+    let bad = StateCopy { state: "aGVsbG8gd29ybGQ=".to_string(), ..kept(&laptop) };
+    laptop.guard().set_setting(STATE_COPY_SETTING, &serde_json::to_string(&bad).expect("json")).expect("set");
+    sync_with(&laptop, &cloud, "2026-09-05T12:00:03+00:00", Some(A)).await.expect("bad copy");
+    let (asked, sent) = cloud.pulls();
+    assert_eq!(asked, vec![Some(bad.version), None]);
+    assert!(sent > 0);
+    assert_eq!(ids(&laptop), vec!["aaa".to_string()]);
+
+    // "Start empty" keeps the copy it wrote, which the next sync goes by.
+    replace_with_empty_on(&laptop, &cloud, "2026-09-05T12:00:04+00:00", A).await.expect("replaced");
+    cloud.pulls();
+    let written = kept(&laptop).version;
+    sync_with(&laptop, &cloud, "2026-09-05T12:00:05+00:00", Some(A)).await.expect("after");
+    assert_eq!(cloud.pulls(), (vec![Some(written)], 0));
+    // One forgotten (as at sign-out) is fetched whole.
+    forget_state_copy(&laptop.guard());
+    sync_with(&laptop, &cloud, "2026-09-05T12:00:06+00:00", Some(A)).await.expect("forgotten");
+    assert_eq!(cloud.pulls().0, vec![None]);
+  }
+
+  /// A store that says "unchanged" whatever version it is told.
+  struct Muddled(FakeCloud);
+
+  impl StateStore for Muddled {
+    fn pull(&self, have: Option<i64>) -> Pending<'_, Fetched> {
+      match have {
+        Some(_) => Box::pin(async { Ok(Fetched::Unchanged { version: 99 }) }),
+        None => self.0.pull(None)
+      }
+    }
+
+    fn push<'a>(&'a self, version: i64, payload: &'a str) -> Pending<'a, Pushed> {
+      self.0.push(version, payload)
+    }
+  }
+
+  /// "Unchanged" at a version other than the one kept is never merged with
+  /// the copy kept: the document is fetched whole.
+  #[tokio::test]
+  async fn unchanged_at_another_version_is_fetched_whole() {
+    let cloud = Muddled(FakeCloud::default());
+    cloud.0.put(&store::snapshot(&library_with(&["old"]).guard(), NOW).expect("snapshot"));
+    let laptop = library_with(&["aaa"]);
+    sync_with(&laptop, &cloud, NOW, Some(A)).await.expect("first");
+    cloud.0.pulls();
+    let phone = library_with(&["bbb"]);
+    sync_with(&phone, &cloud.0, NOW, Some(A)).await.expect("phone");
+    cloud.0.pulls();
+    sync_with(&laptop, &cloud, LATER, Some(A)).await.expect("second");
+    assert_eq!(cloud.0.pulls().0, vec![None], "only the second pull reached the store");
+    assert_eq!(ids(&laptop), vec!["aaa".to_string(), "bbb".to_string(), "old".to_string()]);
+  }
+
+  /// A lost race forgets the copy kept: the next pull is whole.
+  #[tokio::test]
+  async fn a_lost_race_fetches_the_winner_whole() {
+    let cloud = FakeCloud::default();
+    let laptop = library_with(&["aaa"]);
+    sync_with(&laptop, &cloud, NOW, Some(A)).await.expect("first");
+    let theirs = merge::merge(&store::snapshot(&library_with(&["bbb"]).guard(), NOW).expect("snapshot"), &cloud.doc().expect("held"), NOW);
+    cloud.sneak_in(&theirs);
+    laptop.guard().credit_minutes("2026-09-03", 10.0, 20).expect("credit");
+    cloud.pulls();
+    sync_with(&laptop, &cloud, LATER, Some(A)).await.expect("second");
+    assert_eq!(cloud.pulls().0, vec![Some(1), None]);
+    assert_eq!(ids(&laptop), vec!["aaa".to_string(), "bbb".to_string()]);
+  }
+
+  /// The server's answer, read: "unchanged" only without a copy beside it.
+  #[test]
+  fn the_servers_answer_says_unchanged_only_without_a_copy() {
+    let read = |json: &str| fetched_from(serde_json::from_str(json).expect("an answer"));
+    assert_eq!(read(r#"{"version":4,"unchanged":true}"#), Fetched::Unchanged { version: 4 });
+    assert_eq!(read(r#"{"version":4,"state":"abc"}"#), Fetched::Full(Pulled { version: 4, state: Some("abc".to_string()) }));
+    assert_eq!(read(r#"{"version":0,"state":null}"#), Fetched::Full(Pulled { version: 0, state: None }));
+    assert_eq!(read(r#"{"version":4,"state":"abc","unchanged":true}"#), Fetched::Full(Pulled { version: 4, state: Some("abc".to_string()) }));
   }
 }

@@ -5,6 +5,7 @@ import { GAMES, GAME_H, GAME_W, type Controls, type Game, type GameId, type Game
 import { useTouchInput } from "../../../platform/device";
 import { Sprite } from "./base/Sprite";
 import { usePaidRuns } from "./paidRuns";
+import { changeGate, frameGate, runWhileShown } from "./frameGate";
 import "./arcadeBadge.css";
 
 /**
@@ -114,21 +115,25 @@ const GamePreview = ({ game, skin, outfit, live }: { game: GameInfo; skin: strin
     for (let warm = 0; warm < STILL_AFTER_S / TICK; warm++) step();
     draw();
     if (!live || prefersReducedMotion()) return;
-    let raf = 0;
     let last = 0;
     let owed = 0;
+    // Painted thirty times a second (frameGate.ts); the stand-in plays on by the clock, in steps of its own.
+    const gate = frameGate();
     const frame = (now: number) => {
       owed += last ? Math.min(0.05, (now - last) / 1000) : 0;
       last = now;
+      // (Played on only when it is to be painted: by the time owed, so it comes to the same.)
+      if (!gate.due(now)) return;
       while (owed >= TICK) {
         step();
         owed -= TICK;
       }
       draw();
-      raf = requestAnimationFrame(frame);
     };
-    raf = requestAnimationFrame(frame);
-    return () => cancelAnimationFrame(raf);
+    return runWhileShown(canvasRef.current, frame, () => {
+      last = 0;
+      gate.reset();
+    });
   }, [game, skin, worn, live]);
   return <canvas ref={canvasRef} width={GAME_W * PREVIEW_PX} height={GAME_H * PREVIEW_PX} className="pip-arcade-card-picture" aria-hidden="true" />;
 };
@@ -141,7 +146,13 @@ const QuizPreview = ({ skin, outfit, live }: { skin: string; outfit: readonly st
     const ctx = canvasRef.current?.getContext("2d");
     if (!ctx) return;
     const art = gameArt("base", skin, worn ? worn.split("|") : []);
+    /** What the picture shows at a moment: all of it to the whole pixel and the art's frame. */
+    const stateAt = (seconds: number) => {
+      const pick = Math.floor(seconds / 1.4) % 3;
+      return { pick, lift: Math.round(Math.sin(((seconds % 1.4) / 1.4) * Math.PI) * 5), frame: Math.floor(seconds * ART_FPS) };
+    };
     const draw = (seconds: number) => {
+      const { pick, lift, frame } = stateAt(seconds);
       ctx.setTransform(PREVIEW_PX, 0, 0, PREVIEW_PX, 0, 0);
       ctx.imageSmoothingEnabled = false;
       // A reading room at dusk: a wall, a floor, and a rug for Pip to stand on.
@@ -154,9 +165,8 @@ const QuizPreview = ({ skin, outfit, live }: { skin: string; outfit: readonly st
       ctx.fillStyle = "#8a6238";
       ctx.fillRect(0, 86, GAME_W, 3);
       // The answers: three cards, and the one being thought about lifts.
-      const pick = Math.floor(seconds / 1.4) % 3;
       for (let card = 0; card < 3; card++) {
-        const lifted = card === pick ? Math.round(Math.sin(((seconds % 1.4) / 1.4) * Math.PI) * 5) : 0;
+        const lifted = card === pick ? lift : 0;
         const x = 104 + card * 42;
         const y = 36 - lifted;
         ctx.fillStyle = "#1a1a22";
@@ -166,18 +176,17 @@ const QuizPreview = ({ skin, outfit, live }: { skin: string; outfit: readonly st
         ctx.fillStyle = card === pick ? "#8a6238" : "#c9bfa3";
         for (let line = 0; line < 4; line++) ctx.fillRect(x + 5, y + 8 + line * 8, line === 3 ? 14 : 24, 2);
       }
-      const pip = art.pip(live ? "read" : "idea", Math.floor(seconds * ART_FPS));
+      const pip = art.pip(live ? "read" : "idea", frame);
       ctx.drawImage(pip.image, 34, 86 - pip.h + 6);
     };
     draw(0.7);
     if (!live || prefersReducedMotion()) return;
-    let raf = 0;
-    const frame = (now: number) => {
-      draw(now / 1000);
-      raf = requestAnimationFrame(frame);
-    };
-    raf = requestAnimationFrame(frame);
-    return () => cancelAnimationFrame(raf);
+    // Nothing in it moves by less than a whole pixel or between the art's frames: painted only when it would look different.
+    const changed = changeGate();
+    return runWhileShown(canvasRef.current, (now) => {
+      const { pick, lift, frame } = stateAt(now / 1000);
+      if (changed(`${pick} ${lift} ${frame}`)) draw(now / 1000);
+    });
   }, [skin, worn, live]);
   return <canvas ref={canvasRef} width={GAME_W * PREVIEW_PX} height={GAME_H * PREVIEW_PX} className="pip-arcade-card-picture" aria-hidden="true" />;
 };

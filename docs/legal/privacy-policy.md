@@ -277,8 +277,12 @@ account a few days old, and you must have accepted the
 **Readers you interact with.** If your profile is public or kept to
 followers, other signed-in readers can follow you (or ask to), send you kudos
 and challenge you to a weekly reading duel, and we store those interactions
-(who, to whom, and when; for a duel, the number of seeds each side agreed to
-put on it) so they can be shown. What you post for your followers is shown
+(who, to whom, and when; for kudos sent for one of your posts, which post
+and the title of its book; for a duel, the number of seeds each side agreed
+to put on it) so they can be shown. For the two kudos badges, your profile
+also keeps a list of up to ten readers who have sent you kudos and up to ten
+you have sent kudos to; only the number in each list is ever shown, to you
+on your badges. What you post for your followers is shown
 to the readers who follow you. The members of a
 book club see each other's Pip, name, handle and this week's reading minutes,
 whether or not they follow each other: joining a club is agreeing to that.
@@ -351,7 +355,9 @@ to the minimum the features need.
 We keep your account information until you delete your account. Sign-in
 sessions expire after 90 days without use, an email confirmation code after 30 minutes, and a password reset code after 15
 minutes. Community data is kept only as long
-as it is useful: kudos for 21 days, your inbox of notifications for 60 days,
+as it is useful: kudos for 21 days (the two lists of up to ten readers kept
+for the kudos badges stay with your profile until you delete your account),
+your inbox of notifications for 60 days,
 weekly duels for 90 days, and a follow until either reader removes it. A
 present is kept until it is unwrapped and for 30 days after; a request to
 follow until it is answered or withdrawn; a post, a thread or a reply until
@@ -367,7 +373,9 @@ When you delete your account from
 Settings, we delete your account, profile, synced reading state, all sign-in
 sessions, your shared library, your posts and your club memberships, and
 every follow, request, kudos, duel, present and notification that involves
-you, straight away.
+you, straight away. Where you appear in another reader's kudos lists, what
+is left is an internal number that no longer leads to anyone, so the badge
+they earned stays theirs.
 
 ## Your choices and rights
 

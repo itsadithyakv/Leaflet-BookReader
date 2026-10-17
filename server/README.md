@@ -46,6 +46,7 @@ this machine.
 | `MAX_REQUESTS_AT_ONCE` | `40` | How many requests are worked on at once; one that arrives with that many unanswered is answered `503` with `Retry-After` at once (1 to 10000). `/health` is always answered. |
 | `MONGO_MAX_IDLE_MS` | `60000` | How long an idle connection is kept before it is closed (1000 to 3600000). |
 | `MONGO_SERVER_SELECTION_MS` | `10000` | How long a request waits for a cluster that cannot be reached, before `503` (1000 to 60000). |
+| `MONGO_COMPRESSORS` | `zlib` | Compression of what goes to and from the database; `none` turns it off. Anything else is ignored in favour of `zlib`. A `compressors=` in `MONGO_URI` is added to this, not replaced by it: see [Capacity](#capacity). |
 | `HOST` | `127.0.0.1` | Keep on loopback; Caddy is the only thing that should reach it. |
 | `PORT` | `8787` | |
 | `CORS_ORIGIN` | empty (off) | Only for calling the API from a browser page. The app does not need it. |
@@ -55,7 +56,7 @@ this machine.
 A `.env` in the working directory is loaded if present (variables already set
 win). Production uses systemd's `EnvironmentFile` instead, and deploys no `.env`.
 
-Neither the four `MONGO_…` numbers nor `MAX_REQUESTS_AT_ONCE` needs setting: the defaults are the ones
+Neither the four `MONGO_…` numbers, `MONGO_COMPRESSORS` nor `MAX_REQUESTS_AT_ONCE` needs setting: the defaults are the ones
 the server is meant to run with, and a value that is not a whole number in
 range is ignored in favour of the default. The process holds one
 `MongoClient` and nothing opens another; request bodies are parsed per route
@@ -82,7 +83,7 @@ Authenticated routes take `Authorization: Bearer <token>`. Errors are
 | `POST /v1/account/email/confirm` | ✓ | `{code}` → `{account}` with `emailConfirmed: true`. `400` for a wrong or expired code; five wrong tries delete it. |
 | `POST /v1/account/email` | ✓ | `{password, email}` → `{sent, minutes, account}`. Changes the address, keeps every session, starts it unconfirmed and mails it a code. `403` wrong password, `409` address taken. |
 | `DELETE /v1/account` | ✓ | `{password}` → `{deleted: true}`. Deletes community data (see Deletion), account, profile, state and all sessions. `403` if the password is wrong. |
-| `GET /v1/state` | ✓ | `{version, state}` (base64 gzipped blob, or `null`). |
+| `GET /v1/state` | ✓ | `{version, state}` (base64 gzipped blob, or `null`). `?have=N`, the version the app already holds a copy of: if that is still the stored version, `{version: N, unchanged: true}` and no `state` (only the version is read from the database). Anything but a whole number above 0, or a version that is not the stored one, gets the full answer. |
 | `PUT /v1/state` | ✓ | `{version, state}`. `version` is the one last read (0 = none). `409` with the current document if another device wrote first. Up to 2 MB. |
 | `DELETE /v1/state` | ✓ | Removes the stored state. |
 | `GET /v1/profile/me` | ✓ | The reader's own profile: `{handle, displayName, visibility, weekKey, weekMinutes, streak, booksFinished, shelf, reading, level, badges, arcade, camp, kudosFrom, kudosTo, sharesLibrary, raidable, rulesAccepted, isAdmin, suspendedUntil}`. `kudosFrom` is how many different readers have sent this one kudos, and `kudosTo` how many different readers this one has sent kudos to, each counted up to 10 and `0` before any (the badges `kudos-from-10` and `kudos-to-10` are earned at 10; see the full profile below). `badges` here is as the app saved it, without those two. `raidable` says friends may raid the camp (`POST /v1/raids`), and is `true` until the reader turns it off. `reading`, `level`, `arcade` and `camp` are `null` and `badges` is `[]` until sent; with no profile yet, `visibility` is `private` and the rest empty. `rulesAccepted` says the guidelines were accepted (`POST /v1/rules/accept`); `isAdmin` is `role: "admin"` on the profile, which no route can set; `suspendedUntil` is an ISO time while an admin's suspension lasts, else `null`. |
@@ -319,13 +320,33 @@ come to about **20 operations a second**, a tenth of an operation a second
 an app. At 100 a second the cluster is the limit at about 1,000 apps open at
 once in that mix, or about 550 if every one of them sat on the Board tab.
 
-**Transfer.** What comes back from the database is about half a megabyte an
-hour an open app: nearly half of it the reader's own profile read back when
-their figures are saved, three tenths the public board (which is kept in memory
-only until the next reader's figures change, and with a few hundred reading
-that is all the time), the rest the inbox and the board of readers
-followed. Ten gigabytes in seven days is some 2,700 app-hours a day: 200
-readers with the app open eight hours a day use about six tenths of it.
+**Transfer.** What comes back from the database is about 0.48 MB an hour an
+open app (0.56 before the save stopped reading the profile back, measured the
+same way on 2026-10-17): a third of it the public board (which is kept in
+memory only until the next reader's figures change, and with a few hundred
+reading that is all the time), a third the reader's own profile, read once
+on every save of their figures to tell whether anything is new (4 KB, nearly
+all of it the camp; a save with something new was 8 KB, the profile read and
+then read back after the write, and is now that one read and a few fields),
+the rest the inbox and the board of readers followed. `GET /v1/profile/me`
+and the save's read ask for only what the answer shows: not the avatar's
+copy, the dates, or the ids behind the kudos counts. A fetch of the sync
+document that names the version the app holds (`?have=`) reads and sends
+only the version when it is still current, instead of the whole document
+(15 KB typically, 2 MB at most). Ten gigabytes in seven days is some 3,000
+app-hours a day: 200 readers with the app open eight hours a day use about
+half of it.
+
+Those are the bytes of the documents. The server also asks for zlib on the
+wire (`MONGO_COMPRESSORS`), which makes a profile with a full camp about a
+third of its size and a page of them much less. Whether Atlas counts the
+compressed bytes against the free tier's limit is not something this
+repository can show (a local MongoDB's own `network.bytesOut` counts them
+before compression), so the figures above leave it out; the cluster's
+Network chart, before and after a deploy, is the way to see it. A
+`compressors=` in `MONGO_URI` is not needed and does no harm: the driver
+takes both lists together (these first), so neither replaces the other, and
+`MONGO_COMPRESSORS=none` turns off only this one.
 
 **Storage.** A reader with a month or two of use behind them is about 37 KB
 of data and indexes: a profile with a full camp 3.6 KB, follows, inbox
@@ -350,8 +371,8 @@ comfortable at 200 apps, and close at several times as many with a burst of
 sign-ins on top. The VM's own figure is in `systemctl status leaflet-api`.
 
 **What gives first** as readers are added, under those assumptions: the
-cluster's weekly transfer (about 330 readers with the app open eight hours
-every day, or 1,300 at two hours), then its operations a second (about 1,000
+cluster's weekly transfer (about 380 readers with the app open eight hours
+every day, or 1,500 at two hours; more if compression counts), then its operations a second (about 1,000
 apps open at the same moment). The connections, the storage and the VM's
 processor are all further off than either; its memory is the one to watch.
 

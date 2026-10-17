@@ -75,7 +75,8 @@ describe("the connection to the database", () => {
       waitQueueTimeoutMS: 2_000,
       serverSelectionTimeoutMS: 10_000,
       appName: "leaflet-api",
-      retryWrites: true
+      retryWrites: true,
+      compressors: ["zlib"]
     });
     const set = clientOptions({ MONGO_MAX_POOL: "4", MONGO_MAX_IDLE_MS: "30000", MONGO_WAIT_QUEUE_MS: "2000", MONGO_SERVER_SELECTION_MS: "5000" });
     assert.deepEqual([set.maxPoolSize, set.maxIdleTimeMS, set.waitQueueTimeoutMS, set.serverSelectionTimeoutMS], [4, 30_000, 2_000, 5_000]);
@@ -84,6 +85,14 @@ describe("the connection to the database", () => {
       assert.equal(clientOptions({ MONGO_MAX_POOL: wrong }).maxPoolSize, 10, JSON.stringify(wrong));
     }
     assert.equal(clientOptions({ MONGO_WAIT_QUEUE_MS: "0" }).waitQueueTimeoutMS, 2_000, "never the driver's wait-for-ever");
+  });
+
+  test("is compressed with zlib unless the environment says none, and a compressor it cannot load is never asked for", () => {
+    assert.deepEqual(clientOptions({ MONGO_COMPRESSORS: "none" }).compressors, ["none"]);
+    assert.deepEqual(clientOptions({ MONGO_COMPRESSORS: " None " }).compressors, ["none"]);
+    for (const other of ["", "zlib", "ZLIB", "zlib,none", "snappy", "zstd", "zlib,snappy", "gzip", ","]) {
+      assert.deepEqual(clientOptions({ MONGO_COMPRESSORS: other }).compressors, ["zlib"], JSON.stringify(other));
+    }
   });
 
   test("a database that is busy or away is a 503 that says to come back, not a 500", () => {
@@ -305,6 +314,68 @@ describe("saving a profile", () => {
     moved.camp.posts[2] = [31, 80];
     assert.deepEqual((await call("PUT", "/v1/profile/me", { token: me.token, body: moved })).body.camp.posts[2], [31, 80]);
     assert.notEqual(boardStamp(), before);
+  });
+
+  test("is answered with the profile exactly as it is then held, whichever way the save is made", async () => {
+    const me = await reader();
+    const body = { handle: me.handle, displayName: "Ada Lovelace", visibility: "public", shareLibrary: true, raidable: false, ...figures(30) };
+    assert.equal((await call("PUT", "/v1/profile/me", { token: me.token, body })).status, 200);
+    // What a save never sets, put there as the server's other routes would.
+    await db.collection("profiles").updateOne(
+      { _id: me.id },
+      { $set: { kudosFrom: [new ObjectId(), new ObjectId(), new ObjectId()], kudosTo: [new ObjectId()], rulesAcceptedAt: new Date() } }
+    );
+    // The answer, worked out here from the whole document stored, in the order its fields are sent.
+    const held = async () => {
+      const stored = await db.collection("profiles").findOne({ _id: me.id });
+      return JSON.stringify({
+        handle: stored.handle,
+        displayName: stored.displayName,
+        visibility: stored.visibility,
+        weekKey: stored.weekKey,
+        weekMinutes: stored.weekMinutes,
+        streak: stored.streak,
+        booksFinished: stored.booksFinished,
+        shelf: stored.shelf,
+        reading: stored.reading,
+        level: stored.level,
+        badges: stored.badges,
+        arcade: stored.arcade,
+        camp: stored.camp,
+        kudosFrom: 3,
+        kudosTo: 1,
+        sharesLibrary: true,
+        raidable: false,
+        rulesAccepted: true,
+        isAdmin: false,
+        suspendedUntil: null
+      });
+    };
+    const text = async (method, sent) => {
+      const response = await fetch(`${base}/v1/profile/me`, {
+        method,
+        headers: { authorization: `Bearer ${me.token}`, ...(sent ? { "content-type": "application/json" } : {}) },
+        body: sent ? JSON.stringify(sent) : undefined
+      });
+      assert.equal(response.status, 200);
+      return response.text();
+    };
+
+    // Something new, to a shared profile: the one operation, which no longer reads the whole profile back.
+    const changed = await text("PUT", figures(31));
+    assert.equal(changed, await held());
+    assert.equal(JSON.parse(changed).weekMinutes, 31);
+    // Nothing new: nothing written, and the same answer, to the byte.
+    const stored = await db.collection("profiles").findOne({ _id: me.id });
+    assert.equal(await text("PUT", figures(31)), changed);
+    assert.deepEqual(await db.collection("profiles").findOne({ _id: me.id }), stored);
+    // The long way round (a save that names the visibility), and a plain read: the same again.
+    assert.equal(await text("PUT", { visibility: "public", ...figures(31) }), changed);
+    assert.equal(await text("GET"), changed);
+    // A name changed with nothing else: what the save set, and the rest as it was.
+    const renamed = await text("PUT", { displayName: "Ada King" });
+    assert.equal(renamed, await held());
+    assert.equal(JSON.parse(renamed).displayName, "Ada King");
   });
 
   test("the same figures are still kept off a private profile, and go in the moment it is shared", async () => {

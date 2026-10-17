@@ -19,6 +19,20 @@ const MAX_STATE_BYTES = 2 * 1024 * 1024;
 
 const encode = (doc) => (doc?.state ? Buffer.from(doc.state.buffer).toString("base64") : null);
 
+/**
+ * The version named by `?have=`, or null when there is none to go by: a
+ * whole number above 0, written plainly (no sign, no leading 0, no point).
+ * 0 is "I have none", which the full answer already says, and anything else
+ * is taken as not sent.
+ */
+function heldVersion(have) {
+  if (typeof have !== "string" || !/^[1-9][0-9]{0,15}$/.test(have)) {
+    return null;
+  }
+  const version = Number(have);
+  return Number.isSafeInteger(version) && version > 0 ? version : null;
+}
+
 export function stateRoutes(db, limits = defaultLimits()) {
   const router = Router();
   const auth = requireAccount(db);
@@ -37,12 +51,31 @@ export function stateRoutes(db, limits = defaultLimits()) {
   };
 
   // What the client holds now, and the version it must quote to write.
+  //
+  // `?have=N` says the app already holds version N, kept from an earlier
+  // fetch: when that is still the version stored, the answer is
+  // `{version, unchanged: true}` and no `state`, and the document itself is
+  // not even read from the database, only its version. An app checks for a
+  // newer document every time it opens and after every sync, and nearly
+  // always there is none, so this was up to 2 MB from the database and to
+  // the app for nothing. An app that sends no `have` (every one before
+  // this), or one that is not a version (0, junk, a list), gets the answer
+  // it always had; so does one whose version is no longer the stored one.
   router.get(
     "/state",
     auth,
     limitRead,
     asyncHandler(async (request, response) => {
-      const doc = await states(db).findOne({ _id: request.account.id });
+      const have = heldVersion(request.query.have);
+      // One read either way: the state comes back only when its version is
+      // not the one the app has.
+      const projection =
+        have === null ? { version: 1, state: 1 } : { version: 1, state: { $cond: [{ $eq: ["$version", have] }, "$$REMOVE", "$state"] } };
+      const doc = await states(db).findOne({ _id: request.account.id }, { projection });
+      if (have !== null && doc?.version === have) {
+        response.json({ version: have, unchanged: true });
+        return;
+      }
       response.json({ version: doc?.version ?? 0, state: encode(doc) });
     })
   );

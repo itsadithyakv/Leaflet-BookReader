@@ -353,9 +353,12 @@ const requests = {
   search: (reader) => call(reader, "GET /v1/search", "GET", `/v1/search?q=reader${reader.n % 10}&week=${week}`),
   unfollow: (reader) => call(reader, "DELETE /v1/follows/:handle", "DELETE", `/v1/follows/${readers[USERS + ((reader.n * 7) % Math.max(1, BACKGROUND))]?.handle ?? "nobody-here"}`),
   communities: (reader) => call(reader, "GET /v1/communities", "GET", "/v1/communities"),
+  // As an app that keeps the copy it last wrote or read: it names that
+  // version, and is sent the document only when another device wrote since.
   sync: async (reader) => {
-    const pulled = await call(reader, "GET /v1/state", "GET", "/v1/state");
-    await call(reader, "PUT /v1/state", "PUT", "/v1/state", { version: pulled.json?.version ?? 0, state: randomBytes(15 * 1024).toString("base64") });
+    const pulled = await call(reader, "GET /v1/state", "GET", `/v1/state${reader.stateVersion ? `?have=${reader.stateVersion}` : ""}`);
+    const pushed = await call(reader, "PUT /v1/state", "PUT", "/v1/state", { version: pulled.json?.version ?? 0, state: randomBytes(15 * 1024).toString("base64") });
+    reader.stateVersion = pushed.json?.version;
   }
 };
 

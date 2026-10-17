@@ -116,8 +116,36 @@ export function clientOptions(env = process.env) {
     // driver's 30 s default holding the socket and the client waiting.
     serverSelectionTimeoutMS: envWhole(env, "MONGO_SERVER_SELECTION_MS", 10_000, 1_000, 60_000),
     appName: "leaflet-api",
-    retryWrites: true
+    retryWrites: true,
+    compressors: envCompressors(env)
   };
+}
+
+/**
+ * Whether what goes to and from the database is compressed on the wire:
+ * zlib, unless `MONGO_COMPRESSORS` is `none`.
+ *
+ * The first limit a free cluster reaches is its transfer (10 GB each way a
+ * week), and what is sent is JSON-like documents (profiles, camps, boards)
+ * that zlib makes several times smaller, at a little processor on each side.
+ * zlib is the one compressor built into Node and the driver; snappy and zstd
+ * would each be another package to install and build, for a few per cent.
+ * The cluster uses the first compressor it is offered that it supports, and
+ * the handshake and sign-in go uncompressed whatever is set.
+ *
+ * `compressors=zlib` in `MONGO_URI` does the same. The driver does not let
+ * one of the two win: it takes the union of both lists, these listed before
+ * the URI's. So `none` here switches off only what this adds, and a URI that
+ * names a compressor still has it. Anything other than `zlib` or `none` (a
+ * mistyped name, or snappy without its package, which would stop the server
+ * starting) is ignored in favour of the default, as `envWhole`'s numbers are.
+ */
+function envCompressors(env) {
+  const named = String(env.MONGO_COMPRESSORS ?? "").split(",").map((name) => name.trim().toLowerCase()).filter(Boolean);
+  if (named.length > 0 && named.every((name) => name === "none")) {
+    return ["none"];
+  }
+  return ["zlib"];
 }
 
 export async function connect(uri, dbName, env = process.env) {

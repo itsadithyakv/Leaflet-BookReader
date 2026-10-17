@@ -54,6 +54,19 @@ name must match the reserved name exactly ("Leaflet Book Reader", as in
 
 ## What's new in this version
 
+For 1.5.6 (written on 2026-10-17; if 1.5.5 never went out, put this first
+and the 1.5.5 text below it, within 1,500 characters):
+
+> Every reader has a page of their own now: their camp in the Hollow across
+> the top, then their streak and badges, the books they recommend, and their
+> library when they share it with you.
+>
+> Send kudos for a post: the reader sees what it was for. Two new badges,
+> Cheerleader and Well-liked, for kudos to and from ten different readers.
+>
+> Lighter on your battery and your data: the camp draws only as often as it
+> needs to, and Leaflet sends and fetches less when nothing has changed.
+
 For 1.5.5 (the first Windows release after 1.4.2, so it covers 1.5.0 to
 1.5.5; written on 2026-10-16). Phone-only things (the reading light's swipes,
 volume keys, the icon's Continue shortcut) are left out:

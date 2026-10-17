@@ -219,6 +219,30 @@ describe("state", () => {
     assert.equal(got.body.version, 2);
     assert.equal(got.body.state, first);
   });
+
+  test("a fetch that names the version the app has is told it is unchanged, without the document", async () => {
+    const { token } = await signup();
+    // No document yet: the answer it always was, whatever the app says it has.
+    for (const query of ["", "?have=1", "?have=0"]) {
+      assert.deepEqual((await call("GET", `/v1/state${query}`, { token })).body, { version: 0, state: null }, query);
+    }
+    const first = Buffer.from("first").toString("base64");
+    await call("PUT", "/v1/state", { token, body: { version: 0, state: first } });
+    const second = Buffer.from("second").toString("base64");
+    assert.equal((await call("PUT", "/v1/state", { token, body: { version: 1, state: second } })).body.version, 2);
+
+    const unchanged = await call("GET", "/v1/state?have=2", { token });
+    assert.equal(unchanged.status, 200);
+    assert.deepEqual(unchanged.body, { version: 2, unchanged: true });
+    // An older version than the one stored is sent the stored one in full.
+    assert.deepEqual((await call("GET", "/v1/state?have=1", { token })).body, { version: 2, state: second });
+    // 0, or anything that is not a plain whole number, is as if nothing were named.
+    const junk = ["0", "02", "-2", "2.0", "2.5", "two", "", "2e0", "0x2", "%202", "99999999999999999", "2&have=2"];
+    for (const query of [...junk.map((have) => `have=${have}`), "have[]=2", "Have=2"]) {
+      assert.deepEqual((await call("GET", `/v1/state?${query}`, { token })).body, { version: 2, state: second }, query);
+    }
+    assert.deepEqual((await call("GET", "/v1/state", { token })).body, { version: 2, state: second });
+  });
 });
 
 describe("profiles", () => {
