@@ -151,6 +151,23 @@ export const postcardSize = (stats: PostcardStats): { width: number; height: num
 };
 
 /**
+ * The picture alone, at the card's top left (`POSTCARD_W` by
+ * `POSTCARD_PICTURE_H`): the camp as its own page draws it, in art pixels,
+ * hard-edged, the sky first and the clearing under it. The card is this with
+ * paper under it; a reader's page has it as its banner.
+ */
+export const drawPostcardPicture = (ctx: CanvasRenderingContext2D, art: GameArt, look: CampLook): void => {
+  ctx.save();
+  ctx.setTransform(POSTCARD_PX, 0, 0, POSTCARD_PX, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  paintSky(ctx, art, look, POSTCARD_SKY, 0);
+  ctx.translate(0, POSTCARD_SKY);
+  paintCamp(ctx, art, look, 0, POSTCARD_MOMENT);
+  paintGround(ctx, art, look, GAME_H, POSTCARD_GROUND, 0);
+  ctx.restore();
+};
+
+/**
  * Draws the whole card on a canvas that is the size `postcardSize` gives:
  * the camp, and the paper under it. Drawn again from nothing each time, so
  * it can be called once at once and once more when the lettering has loaded.
@@ -163,15 +180,7 @@ export const drawPostcard = (ctx: CanvasRenderingContext2D, art: GameArt, look: 
   ctx.globalCompositeOperation = "source-over";
   ctx.clearRect(0, 0, width, height);
 
-  // The camp, as its own page draws it: in art pixels, hard-edged, the sky first and the clearing under it.
-  ctx.save();
-  ctx.setTransform(POSTCARD_PX, 0, 0, POSTCARD_PX, 0, 0);
-  ctx.imageSmoothingEnabled = false;
-  paintSky(ctx, art, look, POSTCARD_SKY, 0);
-  ctx.translate(0, POSTCARD_SKY);
-  paintCamp(ctx, art, look, 0, POSTCARD_MOMENT);
-  paintGround(ctx, art, look, GAME_H, POSTCARD_GROUND, 0);
-  ctx.restore();
+  drawPostcardPicture(ctx, art, look);
 
   // The paper: a hard line where the picture ends, and a row of dashes along its foot, like a postcard's edge.
   ctx.fillStyle = PAPER;

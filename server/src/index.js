@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { createApp } from "./app.js";
+import { backfillKudosCircles } from "./community.js";
 import { close, connect } from "./db.js";
 import { mailerFromEnv } from "./mail.js";
 
@@ -69,6 +70,17 @@ try {
   console.error(error?.message ?? error);
   process.exit(1);
 }
+// Who has sent kudos to whom, for the kudos badges, from the kudos kept from
+// before the profiles counted it (`backfillKudosCircles`). At every start:
+// it writes nothing a second time, and is three weeks of kudos at most. Not a
+// reason to stay down if it fails; the next start tries again.
+try {
+  const pairs = await backfillKudosCircles(db);
+  console.log(`[leaflet] kudos badges: counted ${pairs} pairs of readers from the kudos kept.`);
+} catch (error) {
+  console.warn("[leaflet] kudos badges: could not count the kudos kept:", error?.message ?? error);
+}
+
 // How many requests are worked on at once before the next is told to come
 // back: the default unless this is a whole number from 1 to 10000.
 const atOnce = Number(process.env.MAX_REQUESTS_AT_ONCE);

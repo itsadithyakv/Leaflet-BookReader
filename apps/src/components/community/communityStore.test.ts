@@ -255,3 +255,18 @@ describe("the inbox", () => {
     expect(useCommunityStore.getState().inbox.map((item) => item.id)).toEqual(["e2", "passed:2026-W40:maya:1", "e1"]);
   });
 });
+
+describe("the readers sent kudos today", () => {
+  it("keeps only the day's, by handle in any case, and forgets them on sign-out", () => {
+    useCommunityStore.setState({ kudosSent: {} });
+    const { noteKudos } = useCommunityStore.getState();
+    noteKudos("Ana", "2026-10-16");
+    noteKudos("ben", "2026-10-16");
+    expect(useCommunityStore.getState().kudosSent).toEqual({ ana: "2026-10-16", ben: "2026-10-16" });
+    // A new day: yesterday's go.
+    noteKudos("cleo", "2026-10-17");
+    expect(useCommunityStore.getState().kudosSent).toEqual({ cleo: "2026-10-17" });
+    useCommunityStore.getState().reset();
+    expect(useCommunityStore.getState().kudosSent).toEqual({});
+  });
+});

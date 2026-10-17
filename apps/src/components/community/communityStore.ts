@@ -32,6 +32,7 @@ export type InboxItem = InboxEvent | PassedEvent;
 
 const SEEN_KEY = "leaflet.community.inboxSeen";
 const SCOPE_KEY = "leaflet.community.scope";
+const KUDOS_KEY = "leaflet.community.kudosSent";
 const INBOX_CAP = 60;
 
 type CommunityState = {
@@ -54,6 +55,12 @@ type CommunityState = {
   seenAt: string;
   /** The reader card being shown, by handle. */
   openHandle: string | null;
+  /**
+   * The readers sent kudos today, by handle, each with the local day it was
+   * (only today's are kept): so a post's Kudos button says "sent" without
+   * asking the server, which allows one a day either way.
+   */
+  kudosSent: Record<string, string>;
 
   setMe: (me: SocialProfile | null) => void;
   /** Reads the reader's profile from the server. */
@@ -69,6 +76,8 @@ type CommunityState = {
   markSeen: () => void;
   openReader: (handle: string) => void;
   closeReader: () => void;
+  /** Notes that this reader was sent kudos on `day` (the local date): by this device, or by another, as the server said. */
+  noteKudos: (handle: string, day: string) => void;
   respondToDuel: (id: string, accept: boolean) => Promise<void>;
   /** Signed out: forget everything personal. */
   reset: () => void;
@@ -145,6 +154,7 @@ export const useCommunityStore = create<CommunityState>((set, get) => ({
   inbox: [],
   seenAt: readJson<string>(SEEN_KEY, new Date(0).toISOString()),
   openHandle: null,
+  kudosSent: readJson<Record<string, string>>(KUDOS_KEY, {}),
 
   setMe(me) {
     set({ me, meError: null });
@@ -266,6 +276,17 @@ export const useCommunityStore = create<CommunityState>((set, get) => ({
     set({ openHandle: null });
   },
 
+  noteKudos(handle, day) {
+    const key = handle.toLowerCase();
+    if (get().kudosSent[key] === day) {
+      return;
+    }
+    // Yesterday's are no use: only the day's own are kept.
+    const kudosSent = Object.fromEntries([...Object.entries(get().kudosSent).filter(([, when]) => when === day), [key, day]]);
+    set({ kudosSent });
+    writeJson(KUDOS_KEY, kudosSent);
+  },
+
   async respondToDuel(id, accept) {
     if (accept) {
       // A staked duel is accepted with the seeds to meet it, or not at all.
@@ -309,8 +330,11 @@ export const useCommunityStore = create<CommunityState>((set, get) => ({
       boardError: { ...state.boardError, following: null },
       duels: [],
       inbox: [],
-      openHandle: null
+      openHandle: null,
+      // Whom this reader cheered is theirs, not the next account's.
+      kudosSent: {}
     }));
+    writeJson(KUDOS_KEY, {});
   }
 }));
 

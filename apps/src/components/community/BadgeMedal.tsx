@@ -1,4 +1,4 @@
-import { BookOpen, CalendarCheck, Clock, Flame, Gamepad2, Gem, Sprout, Star, Sun, Target, type LucideIcon } from "lucide-react";
+import { BookOpen, CalendarCheck, Clock, Flame, Gamepad2, Gem, Leaf, Sprout, Star, Sun, Target, type LucideIcon } from "lucide-react";
 import { badgeInfo, progressText, shownBadges, type BadgeInfo, type BadgeKind } from "./badges";
 import "./friends.css";
 
@@ -12,7 +12,8 @@ const ICONS: Record<BadgeKind, LucideIcon> = {
   collector: Gem,
   arcade: Gamepad2,
   level: Star,
-  month: CalendarCheck
+  month: CalendarCheck,
+  kudos: Leaf
 };
 
 /** One badge: a medal in its tier's metal, with what earned it on hover. */

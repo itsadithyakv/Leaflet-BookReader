@@ -18,7 +18,10 @@ import { MongoClient } from "mongodb";
  * Community (all tiny, all indexed, most self-expiring):
  * `follows`   one per (follower, followee) pair.
  * `kudos`     one per (sender, recipient, local day); expires after 21 days,
- *             since only "this week" and "today" are ever asked of it.
+ *             since only "this week" and "today" are ever asked of it. One
+ *             for a post keeps the post's id and what it was (`about`). Who
+ *             has cheered whom for longer than that is kept on the profiles
+ *             (`kudosFrom`, `kudosTo`: see `kudosCircleWrites`).
  * `duels`     one per pair per week; expires after 90 days.
  * `events`    the inbox, materialised; expires after 60 days.
  * `followRequests` one per (asker, asked) pair, while a reader who shares with

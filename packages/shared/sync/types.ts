@@ -177,6 +177,9 @@ export type SocialProfile = {
   suspendedUntil?: string | null;
   /** Position on this week's board, when the entry came from one. */
   rank?: number | null;
+  /** How many different readers sent this one kudos, and how many they sent kudos to, counted up to ten (the two kudos badges). Absent from older servers. */
+  kudosFrom?: number;
+  kudosTo?: number;
 };
 
 export const EMPTY_PROFILE: SocialProfile = {

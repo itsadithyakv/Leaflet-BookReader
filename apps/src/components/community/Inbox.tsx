@@ -13,7 +13,7 @@ const describe = (item: InboxItem): string => {
     case "follow":
       return `${who} started following you.`;
     case "kudos":
-      return kudosReceivedText(item.actor.handle);
+      return kudosReceivedText(item.actor.handle, item.about);
     case "duel_invite":
       return `${who} challenged you to a duel this week.`;
     case "duel_accepted":

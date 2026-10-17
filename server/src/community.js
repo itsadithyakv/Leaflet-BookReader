@@ -157,6 +157,78 @@ export async function followedIds(db, userId) {
 }
 
 /**
+ * How many different readers the two kudos badges are for: kudos from ten
+ * readers, and kudos sent to ten. Counted by people, not by kudos, so that
+ * one friend's kudos every day for a month earns neither.
+ */
+export const KUDOS_BADGE_AT = 10;
+/** The badges only this server gives (`kudosBadges`); a profile save may not name one. */
+export const KUDOS_BADGES = { from: `kudos-from-${KUDOS_BADGE_AT}`, to: `kudos-to-${KUDOS_BADGE_AT}` };
+export const isKudosBadge = (id) => typeof id === "string" && id.startsWith("kudos-");
+
+/**
+ * The writes that remember a kudos from `fromId` to `toId`, on both profiles:
+ * the sender in the recipient's `kudosFrom`, the recipient in the sender's
+ * `kudosTo`. Each list holds distinct ids and stops at KUDOS_BADGE_AT, which
+ * is all a badge needs to know, so it can be written again and again (by a
+ * kudos a day, or by the backfill) and neither grows nor counts twice. Never
+ * an upsert: a reader without a profile is not given one.
+ */
+export function kudosCircleWrites(fromId, toId) {
+  const roomIn = (field) => ({ [`${field}.${KUDOS_BADGE_AT - 1}`]: { $exists: false } });
+  return [
+    { updateOne: { filter: { _id: toId, ...roomIn("kudosFrom") }, update: { $addToSet: { kudosFrom: fromId } } } },
+    { updateOne: { filter: { _id: fromId, ...roomIn("kudosTo") }, update: { $addToSet: { kudosTo: toId } } } }
+  ];
+}
+
+/** Remembers one kudos sent, on both profiles (`kudosCircleWrites`). */
+export async function rememberKudos(db, fromId, toId) {
+  await profiles(db).bulkWrite(kudosCircleWrites(fromId, toId), { ordered: false });
+}
+
+/** The kudos badges a profile has earned, by the readers counted on it. */
+export function kudosBadges(profile) {
+  const earned = [];
+  if ((profile?.kudosFrom?.length ?? 0) >= KUDOS_BADGE_AT) {
+    earned.push(KUDOS_BADGES.from);
+  }
+  if ((profile?.kudosTo?.length ?? 0) >= KUDOS_BADGE_AT) {
+    earned.push(KUDOS_BADGES.to);
+  }
+  return earned;
+}
+
+/**
+ * The badges a profile shows: what the app saved, less any kudos badge (only
+ * this server says those are earned), and then the kudos badges earned, each
+ * once.
+ */
+export const shownBadges = (profile) => [
+  ...new Set([...(profile?.badges ?? []).filter((id) => !isKudosBadge(id)), ...kudosBadges(profile)])
+];
+
+/**
+ * Fills `kudosFrom` and `kudosTo` from the kudos still kept (the last 21
+ * days), for the readers who sent or were sent kudos before the lists
+ * existed. Run at every start (`index.js`): there is no marker to say it has
+ * been done, and it needs none, since the writes are those a kudos makes
+ * (`kudosCircleWrites`) and change nothing a second time. Bounded by the
+ * kudos collection, which keeps three weeks: one write each way per pair of
+ * readers, a thousand pairs at a time. Says how many pairs it went through.
+ */
+export async function backfillKudosCircles(db) {
+  const pairs = await kudos(db)
+    .aggregate([{ $group: { _id: { fromId: "$fromId", toId: "$toId" } } }])
+    .toArray();
+  for (let at = 0; at < pairs.length; at += 1000) {
+    const writes = pairs.slice(at, at + 1000).flatMap((pair) => kudosCircleWrites(pair._id.fromId, pair._id.toId));
+    await profiles(db).bulkWrite(writes, { ordered: false });
+  }
+  return pairs.length;
+}
+
+/**
  * Turns every request to follow `userId` into a follow: what making a
  * followers-only profile public means, since anyone may follow a public one.
  * Each asker is told, as for a request accepted by hand.
@@ -394,6 +466,12 @@ export async function leavePublic(db, userId) {
  * directions, their replies, their threads and their places in communities
  * (see `forgetAuthor` for the one thing that stays: a thread other readers
  * replied to, with no author).
+ *
+ * Their id is left in other readers' `kudosFrom` and `kudosTo`. It is an
+ * opaque id that points at nothing once the account is gone, nothing shows
+ * it, and taking it out would take away a kudos badge the other reader has
+ * earned (or put them back below ten, to earn it again). Their own two lists
+ * go with their profile, which the caller deletes.
  */
 export async function deleteCommunityData(db, userId) {
   await Promise.all([

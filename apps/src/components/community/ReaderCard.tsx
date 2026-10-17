@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { Flame, Gift, Leaf, Lock, Swords, UserCheck, UserPlus, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { ArrowLeft, Flame, Gift, Leaf, Lock, Swords, UserCheck, UserPlus } from "lucide-react";
 import { socialService, type LockedProfile, type ReaderProfile } from "../../services/socialService";
 import { friendsService, type BookPost } from "../../services/friendsService";
 import { useCommunityStore } from "./communityStore";
@@ -17,11 +17,10 @@ import { SharedShelf } from "./SharedShelf";
 import { at, errorText, minutesText, nameOf } from "./format";
 import { COPY, duelDeclinedText, duelOnText, duelSentText, followingText, kudosSentText, relationText, streakText } from "./copy";
 import { EYEBROW } from "../ui/SectionHeader";
-import { CampVisit } from "../pip/arcade/base/CampExtras";
+import { CampBanner } from "../pip/arcade/base/CampExtras";
 import { useBackClose } from "../../hooks/useBackClose";
 import { isTouchInput } from "../../platform/device";
-
-const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])';
+import { getDateKey } from "../../services/habitService";
 
 type ReaderCardProps = {
   signedIn: boolean;
@@ -33,19 +32,31 @@ type ReaderCardProps = {
 };
 
 const Stat = ({ label, value }: { label: string; value: string | number }) => (
-  <div className="rounded-lg bg-surface-container/70 px-3 py-2">
+  <div className="paper-surface rounded-xl px-4 py-3">
     <p className={EYEBROW}>{label}</p>
-    <p className="mt-0.5 font-headline text-lg font-bold tabular-nums text-on-surface">{value}</p>
+    <p className="mt-1 font-headline text-xl font-bold tabular-nums text-on-surface">{value}</p>
   </div>
 );
 
-type Tab = "shelf" | "library" | "posts";
+const Section = ({ title, children }: { title: string; children: ReactNode }) => (
+  <section aria-label={title} className="flex flex-col gap-3">
+    <h2 className={EYEBROW}>{title}</h2>
+    {children}
+  </section>
+);
 
-/** What a reader finished and said of it; asked for when its tab is opened. */
-const ReaderPosts = ({ handle, showToast }: { handle: string; showToast: (message: string) => void }) => {
+/** A post that says the book is worth reading: finished or reviewed with four stars or five. */
+export const recommends = (post: BookPost) => post.kind !== "quote" && (post.rating ?? 0) >= 4;
+
+/**
+ * What a reader finished and said of it, asked for as the page opens. `null`
+ * while it comes; a sentence when it could not be had.
+ */
+const useReaderPosts = (handle: string | null) => {
   const [posts, setPosts] = useState<BookPost[] | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   useEffect(() => {
+    if (!handle) return undefined;
     let live = true;
     setPosts(null);
     setFailed(null);
@@ -57,24 +68,19 @@ const ReaderPosts = ({ handle, showToast }: { handle: string; showToast: (messag
       live = false;
     };
   }, [handle]);
-  if (failed) {
-    return <p className="text-xs text-on-surface-variant">{failed}</p>;
-  }
-  if (!posts) {
-    return <p className="text-xs text-on-surface-variant">Looking…</p>;
-  }
-  if (posts.length === 0) {
-    return <p className="text-xs text-on-surface-variant">Nothing posted yet.</p>;
-  }
-  return <PostList posts={posts} showToast={showToast} onRemoved={(id) => setPosts((current) => (current ?? []).filter((post) => post.id !== id))} />;
+  const remove = (id: string) => setPosts((current) => (current ?? []).filter((post) => post.id !== id));
+  return { posts, failed, remove };
 };
 
 /**
- * Another reader, up close: their Pip, their week, their badges, their shelf
- * and (for a reader whose follow they accepted) their library — and the three
- * friendly things you can do about it. A profile kept to followers shows a
- * name and a way to ask, until it says yes. A drawer from the right; Escape
- * or the backdrop closes it, and Tab stays inside it while it is open.
+ * Another reader, as a page of its own on the Social page: their camp in the
+ * Hollow across the top as its banner (the Hollow postcard's picture), their
+ * Pip and their name under it, then the friendly things you can do about
+ * them, their week, their badges, the books they recommend, their library
+ * (where they share it, with a reader whose follow they accepted), their
+ * shelf and what else they posted. A profile kept to followers shows a name
+ * and a way to ask, until it says yes. Back (the button, Escape or Android's
+ * Back) returns to the tab it was opened from.
  */
 export const ReaderCard = ({ signedIn, canJoin, showToast, onChanged }: ReaderCardProps) => {
   const handle = useCommunityStore((state) => state.openHandle);
@@ -84,7 +90,6 @@ export const ReaderCard = ({ signedIn, canJoin, showToast, onChanged }: ReaderCa
   const lockedOut = answer && answer.locked ? answer : null;
   const setReader = (change: (current: ReaderProfile | null) => ReaderProfile | null) =>
     setAnswer((current) => (current && !current.locked ? change(current) : current));
-  const [tab, setTab] = useState<Tab>("shelf");
   // Seeds each side puts on a challenge: none unless chosen.
   const [stake, setStake] = useState(0);
   const [gifting, setGifting] = useState(false);
@@ -100,8 +105,15 @@ export const ReaderCard = ({ signedIn, canJoin, showToast, onChanged }: ReaderCa
   }, [handle, wallet, loadWallet]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"follow" | "kudos" | "duel" | null>(null);
-  const closeButton = useRef<HTMLButtonElement | null>(null);
-  const drawer = useRef<HTMLElement | null>(null);
+  const backButton = useRef<HTMLButtonElement | null>(null);
+  const page = useRef<HTMLDivElement | null>(null);
+  // Only a profile that is open to this reader has posts to read.
+  const { posts, failed: postsFailed, remove: removePost } = useReaderPosts(reader ? reader.handle : null);
+  // Today's kudos, from this page or from one of their posts below it: either way the day's one is spent.
+  const today = getDateKey();
+  const kudosNoted = useCommunityStore((state) => Boolean(handle) && state.kudosSent[(handle ?? "").toLowerCase()] === today);
+  const recommended = useMemo(() => (posts ?? []).filter(recommends), [posts]);
+  const otherPosts = useMemo(() => (posts ?? []).filter((post) => !recommends(post)), [posts]);
 
   useEffect(() => {
     if (!handle) {
@@ -109,20 +121,27 @@ export const ReaderCard = ({ signedIn, canJoin, showToast, onChanged }: ReaderCa
     }
     let live = true;
     setAnswer(null);
-    setTab("shelf");
     setStake(0);
     setGifting(false);
     setError(null);
     socialService
       .reader(handle)
-      .then((profile) => live && setAnswer(profile))
+      .then((profile) => {
+        if (!live) return;
+        setAnswer(profile);
+        // Sent today from another device, or before this one remembered: the posts' buttons say so too.
+        if (!profile.locked && profile.kudosSentToday) {
+          useCommunityStore.getState().noteKudos(profile.handle, getDateKey());
+        }
+      })
       .catch((cause) => live && setError(errorText(cause)));
-    // Focus moves in, and back to whatever opened the card when it closes.
+    // The page opens at its top, with the keyboard on Back; it goes back to whatever opened it when it closes.
     const opener = document.activeElement as HTMLElement | null;
-    closeButton.current?.focus();
+    page.current?.scrollIntoView?.({ block: "start" });
+    backButton.current?.focus({ preventScroll: true });
     return () => {
       live = false;
-      opener?.focus?.();
+      opener?.focus?.({ preventScroll: true });
     };
   }, [handle]);
   useBackClose(Boolean(handle), close);
@@ -131,28 +150,11 @@ export const ReaderCard = ({ signedIn, canJoin, showToast, onChanged }: ReaderCa
     return null;
   }
 
-  // Escape closes this card and nothing else; Tab cycles within it.
+  // Escape goes back, as the button does.
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Escape") {
+    if (event.key === "Escape" && !event.defaultPrevented) {
       event.stopPropagation();
       close();
-      return;
-    }
-    if (event.key !== "Tab" || !drawer.current) {
-      return;
-    }
-    const items = Array.from(drawer.current.querySelectorAll<HTMLElement>(FOCUSABLE));
-    if (items.length === 0) {
-      return;
-    }
-    const first = items[0];
-    const last = items[items.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
     }
   };
 
@@ -213,84 +215,83 @@ export const ReaderCard = ({ signedIn, canJoin, showToast, onChanged }: ReaderCa
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex justify-end"
-      role="dialog"
-      aria-modal="true"
-      aria-label={reader ? `${nameOf(reader)}'s card` : "Reader"}
+      ref={page}
+      className="mx-auto flex w-full max-w-3xl scroll-mt-4 flex-col gap-6"
+      role="region"
+      aria-label={reader ? `${nameOf(reader)}'s page` : "Reader"}
       onKeyDown={onKeyDown}
     >
-      <button type="button" tabIndex={-1} className="absolute inset-0 bg-black/40 backdrop-blur-[1px]" aria-label="Close" onClick={close} />
-      <aside ref={drawer} className="paper-surface relative flex h-full w-full max-w-md flex-col gap-5 overflow-y-auto rounded-none p-6 shadow-2xl sm:rounded-l-2xl">
-        <button
-          ref={closeButton}
-          type="button"
-          onClick={close}
-          className="touch-hit absolute right-4 top-4 rounded-full p-1.5 text-on-surface-variant hover:bg-surface-container-high"
-          aria-label="Close"
-        >
-          <X size={18} />
+      <div>
+        <button ref={backButton} type="button" onClick={close} className="tactile-button flex items-center gap-1.5 px-3 py-1.5 text-sm">
+          <ArrowLeft size={16} aria-hidden /> Back
         </button>
+      </div>
 
-        {!answer && !error && <p className="mt-10 text-sm text-on-surface-variant">Opening {at(handle)}…</p>}
-        {lockedOut && (
-          <>
-            <div className="flex items-center gap-4 pr-8">
-              <PipAvatar seed={lockedOut.pipSeed} avatar={lockedOut.avatar} size={80} label={`${nameOf(lockedOut)}'s Pip`} />
-              <div className="min-w-0">
-                <p className="truncate font-headline text-2xl font-bold text-on-surface">{nameOf(lockedOut)}</p>
-                <p className="truncate text-sm text-on-surface-variant">{at(lockedOut.handle)}</p>
-              </div>
+      {!answer && !error && <p className="text-sm text-on-surface-variant">Opening {at(handle)}…</p>}
+      {lockedOut && (
+        <section className="paper-surface flex flex-col gap-4 rounded-2xl p-6">
+          <div className="flex items-center gap-4">
+            <PipAvatar seed={lockedOut.pipSeed} avatar={lockedOut.avatar} size={80} label={`${nameOf(lockedOut)}'s Pip`} />
+            <div className="min-w-0">
+              <h1 className="truncate font-headline text-2xl font-bold text-on-surface">{nameOf(lockedOut)}</h1>
+              <p className="truncate text-sm text-on-surface-variant">{at(lockedOut.handle)}</p>
             </div>
-            <p className="flex items-center gap-2 text-sm text-on-surface-variant">
-              <Lock size={14} aria-hidden /> Kept to followers.
-            </p>
-            <button
-              type="button"
-              disabled={!signedIn || !canJoin || busy !== null}
-              className={`tactile-button flex items-center justify-center gap-2 px-4 py-2.5 text-sm disabled:cursor-not-allowed disabled:opacity-60 ${lockedOut.requested ? "" : "tactile-button-primary"}`}
-              title={lockedOut.requested ? "Take the request back" : undefined}
-              onClick={() => {
-                const ask = !lockedOut.requested;
-                setBusy("follow");
-                socialService
-                  .setFollowing(lockedOut.handle, ask)
-                  .then((result) => {
-                    if (result.following) {
-                      // Accepted meanwhile (or made public): read the whole profile.
-                      return socialService.reader(lockedOut.handle).then(setAnswer);
-                    }
-                    setAnswer({ ...lockedOut, requested: Boolean(result.requested) });
-                    if (ask) {
-                      showToast(`Asked. ${at(lockedOut.handle)} can accept from their profile.`);
-                    }
-                  })
-                  .catch((cause) => showToast(errorText(cause)))
-                  .finally(() => setBusy(null));
-              }}
-            >
-              <UserPlus size={16} aria-hidden />
-              {busy === "follow" ? "…" : lockedOut.requested ? "Requested" : "Ask to follow"}
-            </button>
-            {!signedIn ? (
-              <p className="text-xs text-on-surface-variant">{COPY.signIn}</p>
-            ) : !canJoin ? (
-              <p className="text-xs text-on-surface-variant">{COPY.goPublic}</p>
-            ) : null}
-          </>
-        )}
-        {error && (
-          <div className="mt-10">
-            <p className="font-headline text-lg font-bold text-on-surface">{at(handle)}</p>
-            <p className="mt-2 text-sm text-on-surface-variant">{error}</p>
           </div>
-        )}
+          <p className="flex items-center gap-2 text-sm text-on-surface-variant">
+            <Lock size={14} aria-hidden /> Kept to followers.
+          </p>
+          <button
+            type="button"
+            disabled={!signedIn || !canJoin || busy !== null}
+            className={`tactile-button flex items-center justify-center gap-2 self-start px-4 py-2.5 text-sm disabled:cursor-not-allowed disabled:opacity-60 ${lockedOut.requested ? "" : "tactile-button-primary"}`}
+            title={lockedOut.requested ? "Take the request back" : undefined}
+            onClick={() => {
+              const ask = !lockedOut.requested;
+              setBusy("follow");
+              socialService
+                .setFollowing(lockedOut.handle, ask)
+                .then((result) => {
+                  if (result.following) {
+                    // Accepted meanwhile (or made public): read the whole profile.
+                    return socialService.reader(lockedOut.handle).then(setAnswer);
+                  }
+                  setAnswer({ ...lockedOut, requested: Boolean(result.requested) });
+                  if (ask) {
+                    showToast(`Asked. ${at(lockedOut.handle)} can accept from their profile.`);
+                  }
+                })
+                .catch((cause) => showToast(errorText(cause)))
+                .finally(() => setBusy(null));
+            }}
+          >
+            <UserPlus size={16} aria-hidden />
+            {busy === "follow" ? "…" : lockedOut.requested ? "Requested" : "Ask to follow"}
+          </button>
+          {!signedIn ? (
+            <p className="text-xs text-on-surface-variant">{COPY.signIn}</p>
+          ) : !canJoin ? (
+            <p className="text-xs text-on-surface-variant">{COPY.goPublic}</p>
+          ) : null}
+        </section>
+      )}
+      {error && (
+        <div>
+          <p className="font-headline text-lg font-bold text-on-surface">{at(handle)}</p>
+          <p className="mt-2 text-sm text-on-surface-variant">{error}</p>
+        </div>
+      )}
 
-        {reader && (
-          <>
-            <div className="flex items-center gap-4 pr-8">
-              <PipAvatar seed={reader.pipSeed} avatar={reader.avatar} size={80} play label={`${nameOf(reader)}'s Pip`} />
-              <div className="min-w-0">
-                <p className="truncate font-headline text-2xl font-bold text-on-surface">{nameOf(reader)}</p>
+      {reader && (
+        <>
+          <header className="flex flex-col">
+            {/* Their camp across the top, with their Pip standing up into it. */}
+            {reader.camp && <CampBanner camp={reader.camp} name={at(reader.handle)} />}
+            <div className={`flex gap-4 px-3 ${reader.camp ? "mt-3 items-start" : "items-center"}`}>
+              <div className={`shrink-0 rounded-2xl bg-surface p-1 shadow-md ${reader.camp ? "relative z-[1] -mt-16" : ""}`}>
+                <PipAvatar seed={reader.pipSeed} avatar={reader.avatar} size={96} play label={`${nameOf(reader)}'s Pip`} />
+              </div>
+              <div className="min-w-0 pt-1">
+                <h1 className="truncate font-headline text-3xl font-bold text-on-surface">{nameOf(reader)}</h1>
                 {/* The note wraps under a long handle rather than being cut off with it. */}
                 <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-on-surface-variant">
                   <span className="min-w-0 truncate">{at(reader.handle)}</span>
@@ -302,30 +303,21 @@ export const ReaderCard = ({ signedIn, canJoin, showToast, onChanged }: ReaderCa
                   )}
                 </p>
                 {reader.reading && (
-                  <p className="mt-1 truncate text-xs text-on-surface-variant">
+                  <p className="mt-1 truncate text-sm text-on-surface-variant">
                     Reading <span className="font-semibold text-on-surface">{reader.reading.title}</span> · {reader.reading.percent}%
                   </p>
                 )}
               </div>
             </div>
+          </header>
 
-            <BadgeRow ids={reader.badges} />
-
+          <div className="flex flex-col gap-2">
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              <Stat label="This week" value={minutesText(reader.weekMinutes)} />
-              <Stat label="Streak" value={streakText(reader.streak)} />
-              <Stat label="Finished" value={reader.booksFinished} />
-              <Stat label="Kudos" value={reader.kudosThisWeek} />
-              <Stat label="Followers" value={reader.followerCount} />
-              <Stat label="Following" value={reader.followingCount} />
-            </div>
-
-            <div className="flex flex-col gap-2">
               <button
                 type="button"
                 disabled={locked || busy !== null}
                 aria-label={reader.isFollowing ? `Unfollow ${at(reader.handle)}` : `Follow ${at(reader.handle)}`}
-                className={`tactile-button group flex items-center justify-center gap-2 px-4 py-2.5 text-sm disabled:cursor-not-allowed disabled:opacity-60 ${
+                className={`tactile-button group col-span-2 flex items-center sm:col-span-1 justify-center gap-2 px-4 py-2.5 text-sm disabled:cursor-not-allowed disabled:opacity-60 ${
                   reader.isFollowing ? "" : "tactile-button-primary"
                 }`}
                 onClick={async () => {
@@ -361,183 +353,181 @@ export const ReaderCard = ({ signedIn, canJoin, showToast, onChanged }: ReaderCa
                   "Follow"
                 )}
               </button>
-
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  disabled={locked || busy !== null || Boolean(reader.kudosSentToday)}
-                  className="tactile-button flex items-center justify-center gap-2 px-3 py-2.5 text-sm disabled:cursor-not-allowed disabled:opacity-60"
-                  title={COPY.kudosRule}
-                  onClick={() =>
-                    void act(
-                      "kudos",
-                      async () => {
-                        const result = await socialService.sendKudos(reader.handle);
-                        return { kudosSentToday: true, kudosThisWeek: result.kudosThisWeek };
-                      },
-                      kudosSentText(reader.handle)
-                    )
-                  }
-                >
-                  <Leaf size={16} className="text-primary" aria-hidden />
-                  {reader.kudosSentToday ? "Kudos sent" : busy === "kudos" ? "…" : "Send kudos"}
-                </button>
-                <button
-                  type="button"
-                  disabled={locked || busy !== null || (Boolean(duel) && !incoming)}
-                  className="tactile-button flex items-center justify-center gap-2 px-3 py-2.5 text-sm disabled:cursor-not-allowed disabled:opacity-60"
-                  title={COPY.duelRule}
-                  onClick={() =>
-                    incoming && duel
-                      ? void act(
-                          "duel",
-                          async () => {
-                            await respondToDuel(duel.id, true);
-                            return { activeDuel: { ...duel, status: "accepted" } };
-                          },
-                          duelOnText(reader.handle)
-                        )
-                      : void act(
-                      "duel",
-                      async () => {
-                        const made = await socialService.challenge(reader.handle, stake);
-                        return { activeDuel: { id: made.id, status: "pending", youChallenged: true } };
-                      },
-                      stake > 0 ? `${duelSentText(reader.handle)} ${stake} seeds each ride on it once they accept.` : duelSentText(reader.handle)
-                    )
-                  }
-                >
-                  <Swords size={16} aria-hidden />
-                  {busy === "duel" ? "…" : duelLabel}
-                </button>
-              </div>
-
-              {!locked && (
-                <div className="flex flex-wrap items-center gap-2">
-                  {!duel && mostStake > 0 && (
-                    <label className="flex items-center gap-1.5 text-xs text-on-surface-variant" title="Seeds each of you puts on the duel. The winner's come back doubled; nothing is taken unless they accept.">
-                      Stake
-                      <select className="inset-field px-2 py-1 text-xs text-on-surface" value={stake} onChange={(event) => setStake(Number(event.target.value))}>
-                        {[0, 10, 25, 50]
-                          .filter((amount) => amount === 0 || (amount <= mostStake && amount <= seeds))
-                          .map((amount) => (
-                            <option key={amount} value={amount}>
-                              {amount === 0 ? "Nothing" : `${amount} seeds`}
-                            </option>
-                          ))}
-                      </select>
-                    </label>
-                  )}
-                  {reader.isFollowing && reader.followsYou && (
-                    <button type="button" className="tactile-button ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs" onClick={() => setGifting(true)}>
-                      <Gift size={13} aria-hidden /> Send a present
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {isYou ? (
-                <p className="text-xs text-on-surface-variant">This is you, looking good.</p>
-              ) : !signedIn ? (
-                <p className="text-xs text-on-surface-variant">{COPY.signIn}</p>
-              ) : !canJoin ? (
-                <p className="text-xs text-on-surface-variant">{COPY.goPublic}</p>
-              ) : incoming && duel ? (
-                <p className="flex flex-wrap items-center gap-x-2 text-xs text-on-surface-variant">
-                  They challenged you this week.
-                  <button
-                    type="button"
-                    className="font-semibold text-primary hover:underline disabled:opacity-60"
-                    disabled={busy !== null}
-                    onClick={() =>
-                      void act(
+              <button
+                type="button"
+                disabled={locked || busy !== null || Boolean(reader.kudosSentToday) || kudosNoted}
+                className="tactile-button flex items-center justify-center gap-2 px-3 py-2.5 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                title={COPY.kudosRule}
+                onClick={() =>
+                  void act(
+                    "kudos",
+                    async () => {
+                      const result = await socialService.sendKudos(reader.handle);
+                      useCommunityStore.getState().noteKudos(reader.handle, getDateKey());
+                      return { kudosSentToday: true, kudosThisWeek: result.kudosThisWeek };
+                    },
+                    kudosSentText(reader.handle)
+                  )
+                }
+              >
+                <Leaf size={16} className="text-primary" aria-hidden />
+                {reader.kudosSentToday || kudosNoted ? "Kudos sent" : busy === "kudos" ? "…" : "Send kudos"}
+              </button>
+              <button
+                type="button"
+                disabled={locked || busy !== null || (Boolean(duel) && !incoming)}
+                className="tactile-button flex items-center justify-center gap-2 px-3 py-2.5 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                title={COPY.duelRule}
+                onClick={() =>
+                  incoming && duel
+                    ? void act(
                         "duel",
                         async () => {
-                          await respondToDuel(duel.id, false);
-                          return { activeDuel: { ...duel, status: "declined" } };
+                          await respondToDuel(duel.id, true);
+                          return { activeDuel: { ...duel, status: "accepted" } };
                         },
-                        duelDeclinedText
+                        duelOnText(reader.handle)
                       )
-                    }
-                  >
-                    Decline
+                    : void act(
+                        "duel",
+                        async () => {
+                          const made = await socialService.challenge(reader.handle, stake);
+                          return { activeDuel: { id: made.id, status: "pending", youChallenged: true } };
+                        },
+                        stake > 0 ? `${duelSentText(reader.handle)} ${stake} seeds each ride on it once they accept.` : duelSentText(reader.handle)
+                      )
+                }
+              >
+                <Swords size={16} aria-hidden />
+                {busy === "duel" ? "…" : duelLabel}
+              </button>
+            </div>
+
+            {!locked && (
+              <div className="flex flex-wrap items-center gap-2">
+                {!duel && mostStake > 0 && (
+                  <label className="flex items-center gap-1.5 text-xs text-on-surface-variant" title="Seeds each of you puts on the duel. The winner's come back doubled; nothing is taken unless they accept.">
+                    Stake
+                    <select className="inset-field px-2 py-1 text-xs text-on-surface" value={stake} onChange={(event) => setStake(Number(event.target.value))}>
+                      {[0, 10, 25, 50]
+                        .filter((amount) => amount === 0 || (amount <= mostStake && amount <= seeds))
+                        .map((amount) => (
+                          <option key={amount} value={amount}>
+                            {amount === 0 ? "Nothing" : `${amount} seeds`}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                )}
+                {reader.isFollowing && reader.followsYou && (
+                  <button type="button" className="tactile-button ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs" onClick={() => setGifting(true)}>
+                    <Gift size={13} aria-hidden /> Send a present
                   </button>
-                </p>
+                )}
+              </div>
+            )}
+
+            {isYou ? (
+              <p className="text-xs text-on-surface-variant">This is you, looking good.</p>
+            ) : !signedIn ? (
+              <p className="text-xs text-on-surface-variant">{COPY.signIn}</p>
+            ) : !canJoin ? (
+              <p className="text-xs text-on-surface-variant">{COPY.goPublic}</p>
+            ) : incoming && duel ? (
+              <p className="flex flex-wrap items-center gap-x-2 text-xs text-on-surface-variant">
+                They challenged you this week.
+                <button
+                  type="button"
+                  className="font-semibold text-primary hover:underline disabled:opacity-60"
+                  disabled={busy !== null}
+                  onClick={() =>
+                    void act(
+                      "duel",
+                      async () => {
+                        await respondToDuel(duel.id, false);
+                        return { activeDuel: { ...duel, status: "declined" } };
+                      },
+                      duelDeclinedText
+                    )
+                  }
+                >
+                  Decline
+                </button>
+              </p>
+            ) : (
+              <p className="flex items-center gap-1 text-xs text-on-surface-variant">
+                <Flame size={12} aria-hidden /> {COPY.duelRule}.
+              </p>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <Stat label="Streak" value={streakText(reader.streak)} />
+            <Stat label="This week" value={minutesText(reader.weekMinutes)} />
+            <Stat label="Finished" value={reader.booksFinished} />
+            <Stat label="Kudos" value={reader.kudosThisWeek} />
+            <Stat label="Followers" value={reader.followerCount} />
+            <Stat label="Following" value={reader.followingCount} />
+          </div>
+
+          {reader.badges && reader.badges.length > 0 && <BadgeRow ids={reader.badges} />}
+
+          {recommended.length > 0 && (
+            <Section title="Recommends">
+              <PostList posts={recommended} showToast={showToast} onRemoved={removePost} />
+            </Section>
+          )}
+
+          {/* The library only where it is shared, and only to a reader they accepted (or themself). */}
+          {reader.sharesLibrary && (
+            <Section title="Library">
+              {reader.isYou || reader.isFollowing ? (
+                <ReaderLibrary handle={reader.handle} />
               ) : (
-                <p className="flex items-center gap-1 text-xs text-on-surface-variant">
-                  <Flame size={12} aria-hidden /> {COPY.duelRule}.
-                </p>
+                <p className="text-xs text-on-surface-variant">Follow {at(reader.handle)} to see their library.</p>
               )}
-            </div>
+            </Section>
+          )}
 
-            {reader.arcade && reader.arcade.dash + reader.arcade.catch + reader.arcade.flap > 0 && (
-              <div>
-                <p className={EYEBROW}>Arcade bests</p>
-                <div className="mt-2 grid grid-cols-3 gap-2">
-                  <Stat label="Pip Dash" value={reader.arcade.dash} />
-                  <Stat label="Leaf Catch" value={reader.arcade.catch} />
-                  <Stat label="Page Flap" value={reader.arcade.flap} />
-                </div>
-              </div>
-            )}
+          {reader.shelf.length > 0 && (
+            <Section title="Shelf">
+              <SharedShelf shelf={reader.shelf} />
+            </Section>
+          )}
 
-            {reader.camp && (
-              <div>
-                <p className={EYEBROW}>Their camp</p>
-                <div className="mt-2">
-                  <CampVisit camp={reader.camp} name={at(reader.handle)} />
-                </div>
-              </div>
-            )}
+          {postsFailed ? (
+            <Section title="Posts">
+              <p className="text-xs text-on-surface-variant">{postsFailed}</p>
+            </Section>
+          ) : (
+            otherPosts.length > 0 && (
+              <Section title="Posts">
+                <PostList posts={otherPosts} showToast={showToast} onRemoved={removePost} />
+              </Section>
+            )
+          )}
 
-            <div>
-              <div className="flex gap-1.5" role="tablist" aria-label={`${at(reader.handle)}'s books`}>
-                {(
-                  [
-                    ["shelf", "Shelf"],
-                    ["library", "Library"],
-                    ["posts", "Finished"]
-                  ] as Array<[Tab, string]>
-                )
-                  // The library only where it is shared, and only to a reader they accepted (or themself).
-                  .filter(([id]) => id !== "library" || Boolean(reader.sharesLibrary))
-                  .map(([id, label]) => (
-                    <button
-                      key={id}
-                      type="button"
-                      role="tab"
-                      aria-selected={tab === id}
-                      className={`tactile-button px-3 py-1.5 text-xs ${tab === id ? "tactile-button-primary" : ""}`}
-                      onClick={() => setTab(id)}
-                    >
-                      {label}
-                    </button>
-                  ))}
+          {reader.arcade && reader.arcade.dash + reader.arcade.catch + reader.arcade.flap > 0 && (
+            <Section title="Arcade bests">
+              <div className="grid grid-cols-3 gap-2">
+                <Stat label="Pip Dash" value={reader.arcade.dash} />
+                <Stat label="Leaf Catch" value={reader.arcade.catch} />
+                <Stat label="Page Flap" value={reader.arcade.flap} />
               </div>
-              <div className="mt-3" role="tabpanel">
-                {tab === "shelf" && <SharedShelf shelf={reader.shelf} emptyText="Nothing on the shelf yet — they're just getting started." />}
-                {tab === "library" &&
-                  (reader.isYou || reader.isFollowing ? (
-                    <ReaderLibrary handle={reader.handle} />
-                  ) : (
-                    <p className="text-xs text-on-surface-variant">Follow {at(reader.handle)} to see their library.</p>
-                  ))}
-                {tab === "posts" && <ReaderPosts handle={reader.handle} showToast={showToast} />}
-              </div>
-            </div>
-          </>
-        )}
-        {answer && !answer.isYou && signedIn && (
-          <p className="mt-auto flex gap-4 border-t border-outline-variant/25 pt-3 text-[11px] text-on-surface-variant">
-            <button type="button" className="touch-hit hover:text-on-surface" onClick={() => reportReader({ target: "profile", id: answer.handle, what: at(answer.handle) })}>
-              Report
-            </button>
-            <button type="button" className="touch-hit hover:text-error" onClick={() => void block(answer)}>
-              Block
-            </button>
-          </p>
-        )}
-      </aside>
+            </Section>
+          )}
+        </>
+      )}
+      {answer && !answer.isYou && signedIn && (
+        <p className="flex gap-4 border-t border-outline-variant/25 pt-3 text-[11px] text-on-surface-variant">
+          <button type="button" className="touch-hit hover:text-on-surface" onClick={() => reportReader({ target: "profile", id: answer.handle, what: at(answer.handle) })}>
+            Report
+          </button>
+          <button type="button" className="touch-hit hover:text-error" onClick={() => void block(answer)}>
+            Block
+          </button>
+        </p>
+      )}
       {gifting && reader && <GiftDialog to={reader} onClose={() => setGifting(false)} showToast={showToast} />}
     </div>
   );

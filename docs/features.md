@@ -4221,7 +4221,19 @@ Behind `FEATURES.community`, and needs a Leaflet account. In order:
   a session long enough to pass the next reader, on the book you were last
   reading, and opens it.
 - **Duels**, the **Inbox** (which Pip reacts to) and **Find readers**.
-- Reader cards: follow, kudos and weekly duels (accept or decline right there).
+- Reader pages (a full page on the Social page since 1.5.5, it was a drawer):
+  their camp in the Hollow as the banner (the Hollow postcard's picture),
+  follow, kudos and weekly duels (accept or decline right there), their
+  numbers and badges, the books they recommend (finished or reviewed with
+  four or five stars), their library where they share it with you, their
+  shelf and their other posts.
+- **Kudos**: one a day for each reader, from their page or from one of their
+  posts; one sent from a post says what it was for in their inbox ("for
+  finishing Dune"). Nothing is bought or earned with them, so trading them
+  gains nothing. Two badges count *different* readers, which the server keeps
+  (up to ten each, as the kudos themselves expire after 21 days):
+  **Cheerleader** (kudos to 10 different readers) and **Well-liked** (kudos
+  from 10). The server grants these two; a profile cannot publish them itself.
 
 The board lists only readers whose profile is shared. A profile created at
 sign-up (1.2 and later) is public unless the reader turned the switch off on

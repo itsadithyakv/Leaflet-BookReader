@@ -6,7 +6,7 @@ import { avatarView } from "../avatars.js";
 import { HttpError, asyncHandler, plainText, smallJson } from "../http.js";
 import { listOf, optionalText, record, requiredText, wholeNumber } from "../input.js";
 import { isPlausibleDayKey, isWeekKey, plausibleWeekKeys } from "../week.js";
-import { SOCIAL, acceptAllRequests, deleteCommunityData, deleteSharedData, leavePublic, recordDuelMinutes } from "../community.js";
+import { SOCIAL, acceptAllRequests, deleteCommunityData, deleteSharedData, isKudosBadge, leavePublic, recordDuelMinutes } from "../community.js";
 import { isAdmin, suspendedUntil } from "../standing.js";
 import { forgetBoards } from "../boardCache.js";
 import { defaultLimits } from "../rateLimit.js";
@@ -116,6 +116,11 @@ function ownView(profile) {
     badges: profile?.badges ?? [],
     arcade: profile?.arcade ?? null,
     camp: profile?.camp ?? null,
+    // How many different readers have sent this one kudos, and how many this
+    // one has sent kudos to, up to KUDOS_BADGE_AT: how near the two kudos
+    // badges are. The counts only; the ids they are counted from stay here.
+    kudosFrom: profile?.kudosFrom?.length ?? 0,
+    kudosTo: profile?.kudosTo?.length ?? 0,
     sharesLibrary: profile?.shareLibrary === true,
     // Whether friends may raid the camp (`routes/raids.js`): yes, until the
     // reader says no.
@@ -143,14 +148,20 @@ function sanitiseReading(reading) {
   };
 }
 
-/** Badge ids, each once, in the order sent. */
+/**
+ * Badge ids, each once, in the order sent. A kudos badge (`kudos-…`) is
+ * dropped, not refused: only this server says one is earned (`kudosBadges`),
+ * and an app that sends back the badges it was shown is not wrong to.
+ */
 function sanitiseBadges(badges) {
   const seen = new Set();
   for (const badge of listOf(badges, MAX_BADGES, "badges")) {
     if (typeof badge !== "string" || !BADGE_PATTERN.test(badge)) {
       throw new HttpError(400, "A badge is a short id: lower-case letters, numbers and hyphens.");
     }
-    seen.add(badge);
+    if (!isKudosBadge(badge)) {
+      seen.add(badge);
+    }
   }
   return [...seen];
 }

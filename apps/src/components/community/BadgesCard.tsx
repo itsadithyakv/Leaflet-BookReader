@@ -5,7 +5,8 @@ import { getDateKey } from "../../services/habitService";
 import { useHabitStore } from "../../store/habitStore";
 import { EYEBROW } from "../ui/SectionHeader";
 import { BadgeWall, type BadgeStatus } from "./BadgeMedal";
-import { badgeInfo } from "./badges";
+import { badgeInfo, kudosBadgeStatuses } from "./badges";
+import { useCommunityStore } from "./communityStore";
 import "./friends.css";
 
 /** How many badges not yet earned show before "Show all": the ones nearest to done. */
@@ -42,7 +43,13 @@ export const BadgesCard = () => {
     };
   }, [reading, sessions]);
 
-  const known = useMemo(() => statuses.filter((status) => badgeInfo(status.id) !== null), [statuses]);
+  // The two kudos badges come from the server's counts, on a shared profile only (a private one can neither send nor get kudos).
+  const me = useCommunityStore((state) => state.me);
+  const social = me !== null && me.visibility !== "private";
+  const known = useMemo(
+    () => [...statuses, ...(social ? kudosBadgeStatuses(me) : [])].filter((status) => badgeInfo(status.id) !== null),
+    [statuses, social, me]
+  );
   const earned = known.filter((status) => status.earned);
   const ahead = useMemo(
     () =>

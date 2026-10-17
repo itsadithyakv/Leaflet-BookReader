@@ -17,6 +17,8 @@ import {
   pairKey,
   personView,
   pickVisitors,
+  rememberKudos,
+  shownBadges,
   socialProfilesById,
   visibleDuels
 } from "../community.js";
@@ -39,6 +41,7 @@ import {
 } from "../readers.js";
 import { blockedWith, hasBlocked, refuseBlocked } from "../standing.js";
 import { isPlausibleDayKey, isWeekKey, plausibleWeekKeys, weekIsOver } from "../week.js";
+import { readablePost } from "./posts.js";
 import { HANDLE_PATTERN } from "./social.js";
 import { boardStamp, cachedBoard, cachedVisitors, forgetVisitors, rememberBoard, rememberVisitors } from "../boardCache.js";
 
@@ -60,6 +63,10 @@ const REQUEST_LIMIT = 100;
 /** The most seeds two readers can put on a duel. The apps hold and settle them. */
 const MAX_STAKE = 50;
 const NO_SUCH_REQUEST = "No request to follow you from that reader.";
+/** A post's id as kudos for it names it. */
+const POST_ID = /^[0-9a-f]{24}$/i;
+/** How much of a post's title a kudos for it keeps. */
+const ABOUT_TITLE = 200;
 /** Of a reader in a duel: who they are (`personView`), and the week's minutes the duel keeps. */
 const DUELLIST_FIELDS = { ...PERSON_FIELDS, weekKey: 1, weekMinutes: 1 };
 /**
@@ -263,7 +270,8 @@ export function communityRoutes(db, limits = defaultLimits()) {
         shelf: profile.shelf ?? [],
         reading: profile.reading ?? null,
         level: profile.level ?? null,
-        badges: profile.badges ?? [],
+        // What the app saved, with the kudos badges as this server counts them.
+        badges: shownBadges(profile),
         arcade: profile.arcade ?? null,
         camp: profile.camp ?? null,
         // Whether there is a library to ask for (`GET /profile/:handle/library`),
@@ -560,6 +568,15 @@ export function communityRoutes(db, limits = defaultLimits()) {
    * Kudos: once per reader, per local day. For a reader the sender can see: a
    * public one, or a followers-only one who has accepted their follow (403
    * otherwise: there are no minutes in front of them to cheer).
+   *
+   * `postId`, when sent, says it is for one of their moments: a post of
+   * theirs the sender may read where the posts routes list it
+   * (`readablePost`). Anything else is the same 404, so a kudos cannot be
+   * used to learn whether a post was deleted, hidden or is for followers.
+   * What it was for (its kind, and the book's title as it was) is kept on the
+   * kudos and its event, so the inbox can say so without reading the post
+   * again, and still can once the post is gone. It is still one kudos a day
+   * between the two, for a post or not.
    */
   router.post(
     "/kudos/:handle",
@@ -567,29 +584,54 @@ export function communityRoutes(db, limits = defaultLimits()) {
     smallJson,
     asyncHandler(async (request, response) => {
       limitWrite(request);
-      const { dayKey, weekKey } = request.body ?? {};
+      const { dayKey, weekKey, postId: askedPost } = request.body ?? {};
       if (!isPlausibleDayKey(dayKey)) {
         throw new HttpError(400, "dayKey must be today's local date, like 2026-09-27.");
       }
       if (!isWeekKey(weekKey) || !plausibleWeekKeys().has(weekKey)) {
         throw new HttpError(400, "weekKey must be the current ISO week, like 2026-W39.");
       }
+      // Left out (or null), it is kudos for the reader, as it always was.
+      const forPost = askedPost !== undefined && askedPost !== null;
+      if (forPost && (typeof askedPost !== "string" || !POST_ID.test(askedPost))) {
+        throw new HttpError(400, "postId is a post's id: 24 hexadecimal characters.");
+      }
+      const postId = forPost ? objectId(askedPost) : null;
       const me = await socialSelf(db, request.account.id, WHO_FIELDS);
       const them = await visibleByHandle(db, me._id, request.params.handle, WHO_FIELDS);
       notSelf(me, them, "Kudos to you — but they're for other readers.");
       await refuseBlocked(db, me._id, them._id);
 
+      let about = null;
+      if (postId) {
+        const post = await readablePost(db, postId, them._id, me._id);
+        if (!post) {
+          throw new HttpError(404, "That post isn't there any more.");
+        }
+        about = { kind: post.kind ?? "finished", title: String(post.title ?? "").slice(0, ABOUT_TITLE) };
+      }
+
       const now = new Date();
+      const sent = { fromId: me._id, toId: them._id, dayKey, weekKey, createdAt: now, ...(about ? { postId, about } : {}) };
       let insertedId;
       try {
-        ({ insertedId } = await kudos(db).insertOne({ fromId: me._id, toId: them._id, dayKey, weekKey, createdAt: now }));
+        ({ insertedId } = await kudos(db).insertOne(sent));
       } catch (error) {
         if (error?.code === 11000) {
           throw new HttpError(409, "You've already sent them kudos today.");
         }
         throw error;
       }
-      await events(db).insertOne({ userId: them._id, type: "kudos", actorId: me._id, refId: insertedId, createdAt: now });
+      await events(db).insertOne({
+        userId: them._id,
+        type: "kudos",
+        actorId: me._id,
+        refId: insertedId,
+        ...(about ? { about } : {}),
+        createdAt: now
+      });
+      // Who has cheered whom, for the two kudos badges (`kudosBadges`).
+      await rememberKudos(db, me._id, them._id);
       const kudosThisWeek = await kudos(db).countDocuments({ toId: them._id, weekKey });
       response.status(201).json({ sent: true, kudosThisWeek });
     })
@@ -745,7 +787,8 @@ export function communityRoutes(db, limits = defaultLimits()) {
    * that (an actor who shares with followers only is shown as their card,
    * which anyone may see). A `follow_request` also says whether it is still
    * `pending`, since the event stays as history once it is answered or taken
-   * back; a `duel_*` event carries its duel.
+   * back; a `duel_*` event carries its duel; a `kudos` for a post carries
+   * `about`, what it was for.
    */
   router.get(
     "/inbox",
@@ -788,6 +831,10 @@ export function communityRoutes(db, limits = defaultLimits()) {
         };
         if (row.type === "follow_request") {
           item.pending = stillAsking.has(row.actorId.toHexString());
+        }
+        // Kudos for a moment says which: `{ kind, title }`, as the post was.
+        if (row.type === "kudos" && row.about) {
+          item.about = { kind: row.about.kind, title: row.about.title };
         }
         if (row.type.startsWith("duel_")) {
           const key = row.refId?.toHexString();

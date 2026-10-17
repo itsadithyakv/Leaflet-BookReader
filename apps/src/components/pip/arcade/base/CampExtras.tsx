@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
+import { Flag, Swords, Trophy } from "lucide-react";
 import { campNews, campWaits, seasonOf, settle } from "../../../../pip/base/rules";
 import { getDateKey } from "../../../../services/habitService";
 import { campBegun } from "../../../../pip/base/welcome";
@@ -6,8 +7,8 @@ import type { CampSummary } from "../../../../services/socialService";
 import { minutesRead, nowFrom, useBaseStore } from "../../../../store/baseStore";
 import { useHabitStore } from "../../../../store/habitStore";
 import { gameArt } from "../gameArt";
-import { GAME_H, GAME_W } from "../games";
-import { lookOfSummary, paintCamp } from "./scene";
+import { drawPostcardPicture, POSTCARD_PICTURE_H, POSTCARD_W } from "./postcard";
+import { lookOfSummary } from "./scene";
 
 /**
  * The camp, where it shows outside the arcade: a line at the end of a
@@ -54,29 +55,43 @@ export const useCampWaits = (): boolean => {
   }, [base, snapshot]);
 };
 
+const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
 /**
- * A friend's camp, from their card: drawn from its levels and counts, laid
- * out as they have it (their buildings, fence and decorations where they put
- * them). A card with no layout, from an older app or server, is drawn as a
- * camp begins. Their trophies stand as stacks of books: which books is
- * theirs to know.
+ * A reader's camp, as the banner across the top of their page: the picture
+ * of the Hollow's postcard (`postcard.ts`), sky and all, with Pip out on the
+ * grass, drawn once and standing still. It is drawn from the camp's levels
+ * and counts, laid out as they have it (their buildings, fence and
+ * decorations where they put them); a camp with no layout, from an older app
+ * or server, is drawn as a camp begins. Their trophies stand as stacks of
+ * books: which books is theirs to know. What the camp has won sits in a
+ * corner, as figures with a name on hover.
  */
-export const CampVisit = ({ camp, name }: { camp: CampSummary; name: string }) => {
+export const CampBanner = ({ camp, name }: { camp: CampSummary; name: string }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const season = seasonOf(getDateKey());
   useEffect(() => {
     const ctx = canvasRef.current?.getContext("2d");
     if (!ctx) return;
-    ctx.imageSmoothingEnabled = false;
-    paintCamp(ctx, gameArt("base", "", []), lookOfSummary(camp, season), 0);
+    drawPostcardPicture(ctx, gameArt("base", "", []), lookOfSummary(camp, season));
   }, [camp, season]);
-  const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  const won = [
+    { Icon: Swords, n: camp.camps, label: count(camp.camps, "stronghold", "strongholds") },
+    { Icon: Flag, n: camp.banners, label: count(camp.banners, "banner", "banners") },
+    { Icon: Trophy, n: camp.trophies, label: count(camp.trophies, "trophy", "trophies") }
+  ].filter((figure) => figure.n > 0);
   return (
-    <div className="pip-base-visit">
-      <canvas ref={canvasRef} width={GAME_W} height={GAME_H} className="pip-sprite" style={{ width: "100%", maxWidth: GAME_W * 2, aspectRatio: `${GAME_W} / ${GAME_H}` }} role="img" aria-label={`${name}'s camp`} />
-      <p className="text-xs tabular-nums text-on-surface-variant">
-        {count(camp.camps, "stronghold", "strongholds")} · {count(camp.banners, "banner", "banners")} · {count(camp.trophies, "trophy", "trophies")}
-      </p>
+    <div className="pip-camp-banner">
+      <canvas ref={canvasRef} width={POSTCARD_W} height={POSTCARD_PICTURE_H} role="img" aria-label={`${name}'s camp${won.length ? `: ${won.map((figure) => figure.label).join(", ")}` : ""}`} />
+      {won.length > 0 && (
+        <p className="pip-camp-banner-won" aria-hidden>
+          {won.map(({ Icon, n, label }) => (
+            <span key={label} title={label}>
+              <Icon size={11} /> {n}
+            </span>
+          ))}
+        </p>
+      )}
     </div>
   );
 };

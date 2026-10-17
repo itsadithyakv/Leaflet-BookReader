@@ -1121,7 +1121,14 @@ pub struct Profile {
   #[serde(default)]
   pub is_admin: bool,
   #[serde(default)]
-  pub suspended_until: Option<String>
+  pub suspended_until: Option<String>,
+  /// How many different readers have sent this reader kudos, and how many
+  /// they have sent kudos to, counted up to the badge's ten (the server
+  /// keeps these; 0 from a server that does not).
+  #[serde(default)]
+  pub kudos_from: i64,
+  #[serde(default)]
+  pub kudos_to: i64
 }
 
 fn private_visibility() -> String {

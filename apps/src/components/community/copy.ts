@@ -1,3 +1,4 @@
+import type { KudosAbout } from "../../services/socialService";
 import { at } from "./format";
 
 /**
@@ -60,7 +61,11 @@ export const COPY = {
 export const streakText = (days: number) => `${days} ${days === 1 ? "day" : "days"}`;
 
 export const kudosSentText = (handle: string) => `Kudos sent to ${at(handle)}.`;
-export const kudosReceivedText = (handle: string) => `${at(handle)} sent you kudos.`;
+/** What kudos were for, after "for": "finishing Dune", "your review of Dune", "your quote from Dune". */
+export const kudosForText = (about: KudosAbout) =>
+  about.kind === "review" ? `your review of ${about.title}` : about.kind === "quote" ? `your quote from ${about.title}` : `finishing ${about.title}`;
+export const kudosReceivedText = (handle: string, about?: KudosAbout | null) =>
+  about ? `${at(handle)} sent you kudos for ${kudosForText(about)}.` : `${at(handle)} sent you kudos.`;
 export const followingText = (handle: string) => `Following ${at(handle)}.`;
 export const duelOnText = (handle: string) => `Duel on. Good luck against ${at(handle)}!`;
 export const duelDeclinedText = "Declined. No hard feelings.";

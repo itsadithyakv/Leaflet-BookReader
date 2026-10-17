@@ -59,8 +59,9 @@ export const SocialPage = ({ showToast, nowReading, onReadNow, onNavigate }: Soc
   const books = useLibraryStore((state) => state.books);
   const snapshot = useHabitStore((state) => state.snapshot);
   const [view, setView] = useState<SocialView>(readView);
-  // Another reader's card opens from every tab (a name in a feed, a thread,
-  // a club), so it is mounted here once, not on the board alone.
+  // Another reader's page opens from every tab (a name in a feed, a thread,
+  // a club), so it is shown here, not on the board alone.
+  const openHandle = useCommunityStore((state) => state.openHandle);
   const signedIn = useAccountStore((state) => state.status.signedIn);
   const me = useCommunityStore((state) => state.me);
   const canJoin = signedIn && Boolean(me) && me?.visibility !== "private" && Boolean(me?.handle);
@@ -106,6 +107,27 @@ export const SocialPage = ({ showToast, nowReading, onReadNow, onNavigate }: Soc
     { label: "Total time", value: stats.totalMinutes, format: minutesText }
   ];
 
+  const bookPosts = (
+    <BookPostsDrawer
+      showToast={showToast}
+      onOpenCommunity={(id) => {
+        useCommunityStore.getState().closeReader();
+        useDiscussStore.getState().go({ at: "community", id });
+        chooseView("communities");
+      }}
+    />
+  );
+
+  // Another reader's page stands in for the tabs while it is open; Back returns to the tab it was opened from.
+  if (openHandle) {
+    return (
+      <div className="dock-clear mx-auto flex min-h-full w-full max-w-[1480px] flex-col gap-8">
+        <ReaderCard signedIn={signedIn} canJoin={canJoin} showToast={showToast} onChanged={refreshBoards} />
+        {bookPosts}
+      </div>
+    );
+  }
+
   return (
     <div className="dock-clear mx-auto flex min-h-full w-full max-w-[1480px] flex-col gap-8">
       <header className="flex flex-wrap items-end justify-between gap-4">
@@ -127,14 +149,7 @@ export const SocialPage = ({ showToast, nowReading, onReadNow, onNavigate }: Soc
         />
       </header>
 
-      <ReaderCard signedIn={signedIn} canJoin={canJoin} showToast={showToast} onChanged={refreshBoards} />
-      <BookPostsDrawer
-        showToast={showToast}
-        onOpenCommunity={(id) => {
-          useDiscussStore.getState().go({ at: "community", id });
-          chooseView("communities");
-        }}
-      />
+      {bookPosts}
 
       {view === "discover" ? (
         <div role="tabpanel" id={panelId(ID, "discover")} aria-labelledby={tabId(ID, "discover")} className="flex flex-col gap-6">

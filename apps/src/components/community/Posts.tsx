@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { EyeOff, Flag, Globe2, Quote, Star, Trash2, Users } from "lucide-react";
+import { EyeOff, Flag, Globe2, Leaf, Quote, Star, Trash2, Users } from "lucide-react";
 import { friendsService, type BookPost } from "../../services/friendsService";
+import { socialService } from "../../services/socialService";
+import { getDateKey } from "../../services/habitService";
+import { COPY, kudosSentText } from "./copy";
 import { discussService, type Audience, type NewPost } from "../../services/discussService";
 import { useLibraryStore } from "../../store/libraryStore";
 import type { Book } from "@shared/models/book";
@@ -40,6 +43,51 @@ type CardProps = {
   post: BookPost;
   showToast: (message: string) => void;
   onRemoved?: (id: string) => void;
+};
+
+/**
+ * Kudos for this post: the day's one kudos for its writer, said to be for
+ * this book ("for finishing Dune"). Only for a reader who shares a profile
+ * (kudos come from someone), and "sent" once the writer has had today's,
+ * from here, from their page, or from another device (the server's "already
+ * today" is taken as that).
+ */
+const PostKudos = ({ post, showToast }: { post: BookPost; showToast: (message: string) => void }) => {
+  const me = useCommunityStore((state) => state.me);
+  const today = getDateKey();
+  const sent = useCommunityStore((state) => state.kudosSent[post.person.handle.toLowerCase()] === today);
+  const [busy, setBusy] = useState(false);
+  if (!me?.handle || me.visibility === "private") {
+    return null;
+  }
+  const send = async () => {
+    setBusy(true);
+    try {
+      await socialService.sendKudos(post.person.handle, post.id);
+      useCommunityStore.getState().noteKudos(post.person.handle, today);
+      showToast(kudosSentText(post.person.handle));
+    } catch (cause) {
+      const said = errorText(cause);
+      if (/already/i.test(said)) {
+        useCommunityStore.getState().noteKudos(post.person.handle, today);
+      }
+      showToast(said);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button
+      type="button"
+      className="touch-hit flex items-center gap-1 hover:text-on-surface disabled:opacity-60"
+      disabled={sent || busy}
+      title={sent ? `${at(post.person.handle)} has had your kudos today` : COPY.kudosRule}
+      aria-label={sent ? `Kudos sent to ${at(post.person.handle)}` : `Send ${at(post.person.handle)} kudos for this post`}
+      onClick={() => void send()}
+    >
+      <Leaf size={11} className={sent ? "text-primary" : undefined} aria-hidden /> {sent ? "Kudos sent" : busy ? "…" : "Kudos"}
+    </button>
+  );
 };
 
 /**
@@ -137,6 +185,7 @@ export const PostCard = ({ post, showToast, onRemoved }: CardProps) => {
               {post.audience === "everyone" ? "Everyone" : "Followers"}
             </span>
           )}
+          {!post.isYou && <PostKudos post={post} showToast={showToast} />}
           {post.isYou ? (
             <button type="button" className="touch-hit flex items-center gap-1 hover:text-error" onClick={() => void remove()} aria-label={`Remove your post about ${post.title}`}>
               <Trash2 size={11} aria-hidden /> Remove

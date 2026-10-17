@@ -168,7 +168,7 @@ describe("a reader's card, mounted", () => {
     });
     await settle();
   };
-  const tab = (label: string) => click((element) => element.getAttribute("role") === "tab" && element.textContent === label);
+  const section = (title: string) => container.findAll((element) => element.tagName === "SECTION" && element.getAttribute("aria-label") === title)[0];
   const shown = () => container.textContent;
   const healthy = () => {
     expect(caught.map((entry) => `${entry.error.message}\n${entry.stack}`)).toEqual([]);
@@ -187,14 +187,20 @@ describe("a reader's card, mounted", () => {
   const walkThrough = async () => {
     await open("ana");
     expect(shown()).toContain("Reader ana");
-    expect(shown()).toContain("Their camp");
+    expect(container.findAll((element) => element.getAttribute("aria-label") === "@ana's camp: 3 strongholds, 1 banner, 2 trophies")).toHaveLength(1);
     expect(shown()).toContain("Accept their duel");
+    // One page: the streak, the books they recommend, their library and their shelf, all at once.
+    expect(shown()).toContain("6 days");
+    expect(section("Recommends")?.textContent).toContain("Persuasion");
+    expect(section("Library")?.textContent).toContain("Yours too");
+    expect(section("Shelf")?.textContent).toContain("Middlemarch");
+    expect(section("Posts")).toBeUndefined();
     healthy();
-    await tab("Library");
-    expect(shown()).toContain("Yours too");
-    await tab("Finished");
-    expect(shown()).toContain("Persuasion");
-    await tab("Shelf");
+    // Back closes it.
+    await click((element) => element.textContent.trim() === "Back");
+    expect(shown()).toBe("");
+    await open("ana");
+    expect(shown()).toContain("Reader ana");
     healthy();
     // Another reader while the first is open, then one kept to followers, then back.
     await open("ben");
@@ -213,11 +219,35 @@ describe("a reader's card, mounted", () => {
     await React.act(async () => root.unmount());
   };
 
-  it("opens with a full profile, its tabs, and another reader after it", walkThrough);
+  it("opens with a full profile, its sections, and another reader after it", walkThrough);
+
+  it("recommends what was finished or reviewed with four stars or five, never a quote", async () => {
+    const { recommends } = await import("./ReaderCard");
+    const post = (kind: BookPost["kind"], rating: number | null) => ({ ...posts("ana")[0], kind, rating });
+    expect([post("review", 5), post("finished", 4), post(undefined, 4)].every(recommends)).toBe(true);
+    expect([post("review", 3), post("finished", null), post("quote", 5)].some(recommends)).toBe(false);
+    await React.act(async () => root.unmount());
+  });
 
   it("does the same on a phone (touch, Android)", async () => {
     setMiniDom({ matching: [TOUCH], userAgent: ANDROID });
     await walkThrough();
+  });
+
+  it("sends kudos for a post, which spends the day's kudos on the page too", async () => {
+    const { socialService } = await import("../../services/socialService");
+    const sent = vi.spyOn(socialService, "sendKudos").mockResolvedValue({ sent: true, kudosThisWeek: 4 });
+    useCommunityStore.setState({ kudosSent: {}, me: { handle: "me", displayName: null, visibility: "public", weekMinutes: 0, streak: 0, booksFinished: 0, shelf: [] } });
+    profiles.ana = { ...full("ana"), activeDuel: null };
+    await open("ana");
+    await click((element) => element.getAttribute("aria-label") === "Send @ana kudos for this post");
+    expect(sent).toHaveBeenCalledWith("ana", "post-1");
+    expect(section("Recommends")?.textContent).toContain("Kudos sent");
+    // The page's own button says so as well: one kudos a day, whichever button sent it.
+    expect(container.findAll((element) => element.tagName === "BUTTON" && element.textContent.trim() === "Kudos sent")).toHaveLength(2);
+    healthy();
+    useCommunityStore.setState({ me: null, kudosSent: {} });
+    await React.act(async () => root.unmount());
   });
 
   it("opens a profile kept to followers first, then a full one", async () => {

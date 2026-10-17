@@ -8,7 +8,7 @@
  * know (a newer app's badge on an older one) is simply not shown.
  */
 
-export type BadgeKind = "streak" | "hours" | "books" | "sessions" | "day" | "garden" | "collector" | "arcade" | "level" | "month";
+export type BadgeKind = "streak" | "hours" | "books" | "sessions" | "day" | "garden" | "collector" | "arcade" | "level" | "month" | "kudos";
 
 export type BadgeInfo = {
   id: string;
@@ -19,6 +19,9 @@ export type BadgeInfo = {
   /** How hard it is, 1 to 4: sets the badge's metal (bronze, silver, gold, emerald). */
   tier: 1 | 2 | 3 | 4;
 };
+
+/** Different readers it takes for each kudos badge: the server counts to this and no further. */
+export const KUDOS_BADGE_AT = 10;
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -50,8 +53,24 @@ const FIXED: BadgeInfo[] = [
   { id: "arcade-flap-25", kind: "arcade", name: "Page turner", earnedBy: "Score 25 in Page Flap", tier: 2 },
   { id: "level-5", kind: "level", name: "Level 5", earnedBy: "Reach level 5", tier: 1 },
   { id: "level-10", kind: "level", name: "Level 10", earnedBy: "Reach level 10", tier: 2 },
-  { id: "level-20", kind: "level", name: "Level 20", earnedBy: "Reach level 20", tier: 4 }
+  { id: "level-20", kind: "level", name: "Level 20", earnedBy: "Reach level 20", tier: 4 },
+  // Granted by the server, not by Rust: counted by different readers, so one friend's kudos every day do not earn them.
+  { id: "kudos-to-10", kind: "kudos", name: "Cheerleader", earnedBy: `Send kudos to ${KUDOS_BADGE_AT} different readers`, tier: 1 },
+  { id: "kudos-from-10", kind: "kudos", name: "Well-liked", earnedBy: `Get kudos from ${KUDOS_BADGE_AT} different readers`, tier: 2 }
 ];
+
+/**
+ * The two kudos badges, as the badge wall shows them (earned, or how near):
+ * from the counts the server keeps of different readers (`kudosFrom`,
+ * `kudosTo` on the reader's own profile), which stop at the badge's ten.
+ */
+export const kudosBadgeStatuses = (counts: { kudosFrom?: number; kudosTo?: number } | null | undefined) => {
+  const status = (id: string, count: number | undefined) => {
+    const value = Math.max(0, Math.min(KUDOS_BADGE_AT, Math.floor(count ?? 0)));
+    return { id, earned: value >= KUDOS_BADGE_AT, value, target: KUDOS_BADGE_AT };
+  };
+  return [status("kudos-to-10", counts?.kudosTo), status("kudos-from-10", counts?.kudosFrom)];
+};
 
 const BY_ID = new Map(FIXED.map((badge) => [badge.id, badge]));
 
@@ -116,5 +135,7 @@ export const progressText = (kind: BadgeKind, value: number, target: number): st
       return `Best ${whole(value)} of ${whole(target)}`;
     case "level":
       return `Level ${whole(value)} of ${whole(target)}`;
+    case "kudos":
+      return `${whole(value)} of ${whole(target)} readers`;
   }
 };

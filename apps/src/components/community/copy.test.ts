@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { COPY, PROFILE_PLACE } from "./copy";
+import { COPY, PROFILE_PLACE, kudosReceivedText } from "./copy";
+
+describe("kudos in the inbox", () => {
+  it("say what they were for when they were for a post", () => {
+    expect(kudosReceivedText("ana")).toBe("@ana sent you kudos.");
+    expect(kudosReceivedText("ana", { kind: "finished", title: "Dune" })).toBe("@ana sent you kudos for finishing Dune.");
+    expect(kudosReceivedText("ana", { kind: "review", title: "Dune" })).toBe("@ana sent you kudos for your review of Dune.");
+    expect(kudosReceivedText("ana", { kind: "quote", title: "Dune" })).toBe("@ana sent you kudos for your quote from Dune.");
+  });
+});
 
 describe("where a reader's own profile is", () => {
   it("is the You card on the Board tab", () => {

@@ -9379,17 +9379,47 @@ button.pip-shop-tile:hover,
   }
 }
 
-/* A friend's camp on their card. */
-.pip-base-visit {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
+/* A reader's camp, the banner across the top of their page: the postcard's
+   picture, drawn at five canvas pixels to the art pixel and shown smaller, so
+   it is smoothed down rather than stepped. On a wide page some sky is cut from
+   the top; the camp at the bottom always shows whole. */
+.pip-camp-banner {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  border: 2px solid rgb(var(--color-outline-variant) / 0.7);
+  border-radius: 18px;
+  background: rgb(var(--color-surface-container));
 }
 
-.pip-base-visit canvas {
-  border-radius: 10px;
-  box-shadow: 0 0 0 1px rgb(var(--color-outline-variant) / 0.5);
+.pip-camp-banner canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1200 / 820;
+  max-height: 420px;
+  object-fit: cover;
+  object-position: 50% 100%;
+}
+
+.pip-camp-banner-won {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  display: flex;
+  gap: 4px;
+}
+
+.pip-camp-banner-won > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: 1px solid rgb(var(--color-outline-variant) / 0.6);
+  border-radius: 999px;
+  background: rgb(var(--color-surface) / 0.88);
+  padding: 1px 7px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: rgb(var(--color-on-surface));
 }
 
 .pip-arcade-screen {

@@ -79,10 +79,11 @@ pub async fn community_follow(
   .await
 }
 
+/// Kudos for a reader, once a (local) day; for one of their posts when
+/// `post_id` is given (the inbox then says what it was for).
 #[tauri::command]
-pub async fn community_kudos(handle: String, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-  let today = local_today();
-  let body = serde_json::json!({ "dayKey": today, "weekKey": iso_week_key(&today) });
+pub async fn community_kudos(handle: String, post_id: Option<String>, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+  let body = kudos_body(&local_today(), post_id.as_deref())?;
   community(
     &state,
     Method::POST,
@@ -306,9 +307,35 @@ pub async fn community_set_raidable(on: bool, state: State<'_, AppState>) -> Res
   raidable_saved(&saved, on)
 }
 
+/// What kudos are sent as: the reader's day and week, and the post they are
+/// for when there is one (24 hex digits, as the server makes ids; anything
+/// else is refused here rather than sent).
+pub(crate) fn kudos_body(today: &str, post_id: Option<&str>) -> Result<serde_json::Value, String> {
+  let mut body = serde_json::json!({ "dayKey": today, "weekKey": iso_week_key(today) });
+  if let Some(id) = post_id {
+    let id = id.trim();
+    if id.len() != 24 || !id.chars().all(|c| c.is_ascii_hexdigit()) {
+      return Err("No such post.".to_string());
+    }
+    body["postId"] = serde_json::Value::String(id.to_ascii_lowercase());
+  }
+  Ok(body)
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// Kudos carry the day and week, and a post only when it is one.
+  #[test]
+  fn kudos_carry_the_day_and_a_post_only_when_there_is_one() {
+    let plain = kudos_body("2026-10-17", None).expect("a body");
+    assert_eq!(plain.to_string(), r#"{"dayKey":"2026-10-17","weekKey":"2026-W42"}"#);
+    let moment = kudos_body("2026-10-17", Some(" 0123456789ABCDEF01234567 ")).expect("a body");
+    assert_eq!(moment["postId"], "0123456789abcdef01234567");
+    assert!(kudos_body("2026-10-17", Some("../../v1/account")).is_err());
+    assert!(kudos_body("2026-10-17", Some("")).is_err());
+  }
 
   /// A raid is sent as whose camp and how many stars, and nothing else: no
   /// camp, no layout, nothing about anybody's reading.

@@ -1,5 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { badgeInfo, progressText, shownBadges } from "./badges";
+import { badgeInfo, kudosBadgeStatuses, progressText, shownBadges } from "./badges";
+
+describe("the two kudos badges", () => {
+  it("are named, and counted by different readers up to ten", () => {
+    expect(badgeInfo("kudos-to-10")).toMatchObject({ kind: "kudos", name: "Cheerleader", earnedBy: "Send kudos to 10 different readers", tier: 1 });
+    expect(badgeInfo("kudos-from-10")).toMatchObject({ kind: "kudos", name: "Well-liked", earnedBy: "Get kudos from 10 different readers", tier: 2 });
+    expect(progressText("kudos", 3, 10)).toBe("3 of 10 readers");
+    expect(kudosBadgeStatuses({ kudosFrom: 10, kudosTo: 4 })).toEqual([
+      { id: "kudos-to-10", earned: false, value: 4, target: 10 },
+      { id: "kudos-from-10", earned: true, value: 10, target: 10 }
+    ]);
+    // A server from before them, and numbers that are not counts.
+    expect(kudosBadgeStatuses(null).map((status) => status.value)).toEqual([0, 0]);
+    expect(kudosBadgeStatuses({ kudosFrom: 99, kudosTo: -2 }).map((status) => [status.value, status.earned])).toEqual([
+      [0, false],
+      [10, true]
+    ]);
+  });
+});
 
 describe("badges, in words", () => {
   it("names the fixed ones and the months", () => {

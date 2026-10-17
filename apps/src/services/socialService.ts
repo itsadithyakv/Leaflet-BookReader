@@ -176,7 +176,12 @@ export type InboxEvent = {
   duel?: Duel;
   /** On a `follow_request`: whether it still waits for an answer. */
   pending?: boolean;
+  /** On `kudos` sent for one of the reader's posts: what it was. Absent for kudos sent from a profile. */
+  about?: KudosAbout;
 };
+
+/** What kudos were for: a post of the reader's, by its kind and the book's title. */
+export type KudosAbout = { kind: "finished" | "review" | "quote"; title: string };
 
 export type SearchResult = CommunityPerson & { weekMinutes: number; streak: number };
 
@@ -359,12 +364,12 @@ export const socialService = {
     return call("community_follow", { handle, follow });
   },
 
-  /** Kudos; once per reader per local day. */
-  async sendKudos(handle: string): Promise<{ sent: boolean; kudosThisWeek: number }> {
+  /** Kudos; once per reader per local day. For one of their posts when `postId` is given: the inbox then says which. */
+  async sendKudos(handle: string, postId?: string): Promise<{ sent: boolean; kudosThisWeek: number }> {
     if (!isTauri()) {
       return { sent: false, kudosThisWeek: 0 };
     }
-    return call("community_kudos", { handle });
+    return call("community_kudos", postId ? { handle, postId } : { handle });
   },
 
   /** `stake`: seeds each side puts on it, 0 for a duel for its own sake. */

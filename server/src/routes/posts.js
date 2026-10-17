@@ -91,6 +91,67 @@ function contentOf(kind, body) {
   return content;
 }
 
+/**
+ * Posts as `viewerId` (null when signed out) may see them, in order, up to
+ * `limit` (`page` asks for one more than a page, to know if there are more).
+ *
+ * The same three rules everywhere a post is listed, applied in the database
+ * before the page is cut:
+ *   - a post hidden by reports is shown to its author only;
+ *   - its author still shares a profile and is not suspended (`withAuthor`),
+ *     and neither of the two readers has blocked the other;
+ *   - an `everyone` post by a public reader is for anybody; any other post
+ *     is for the readers in `close`: the viewer, and whom they follow.
+ */
+export async function visiblePosts(db, { match, viewerId, close, blocked, sort, skip = 0, limit, now = new Date() }) {
+  return posts(db)
+    .aggregate([
+      {
+        $match: {
+          $and: [match, { $or: [{ hiddenAt: null }, { userId: viewerId }] }, { userId: { $nin: blocked } }]
+        }
+      },
+      { $sort: sort },
+      // As `poster`: a post's own `author` is the book's, and is not to be written over.
+      withAuthor("userId", viewerId, now, "poster"),
+      {
+        $match: {
+          poster: { $ne: [] },
+          $or: [{ audience: "everyone", "poster.visibility": "public" }, { userId: { $in: close } }]
+        }
+      },
+      { $skip: skip },
+      { $limit: limit }
+    ])
+    .toArray();
+}
+
+/**
+ * One post by `authorId`, if `viewerId` may read it as it is listed on the
+ * author's profile (`GET /profile/:handle/posts`), else null: still there,
+ * not hidden by reports, its author sharing and not suspended, and for
+ * everyone or for the readers who follow them. For something done to a post
+ * from outside the posts routes (kudos for it), so that it is held to the
+ * same rules as the lists, not to a copy of them. Blocks are the caller's to
+ * have checked.
+ */
+export async function readablePost(db, postId, authorId, viewerId) {
+  const follower = Boolean(
+    await follows(db).findOne({ followerId: viewerId, followeeId: authorId }, { projection: { _id: 1 } })
+  );
+  const [post] = await visiblePosts(db, {
+    match: { _id: postId, userId: authorId },
+    viewerId,
+    close: follower ? [authorId] : [],
+    blocked: [],
+    sort: { _id: 1 },
+    limit: 1
+  });
+  // Shown to its author while hidden, but not to be anybody else's: a
+  // hidden post is in nobody else's answers.
+  return post && !post.hiddenAt ? post : null;
+}
+
 export function postRoutes(db, limits = defaultLimits()) {
   const router = Router();
   const auth = requireAccount(db);
@@ -100,40 +161,8 @@ export function postRoutes(db, limits = defaultLimits()) {
   const taps = limiter(limits.react ?? fallback.react);
   const limitWrite = (request) => writes(`acct:${request.account.id}`);
 
-  /**
-   * Posts as `viewerId` (null when signed out) may see them, in order, up to
-   * `limit` (`page` asks for one more than a page, to know if there are more).
-   *
-   * The same three rules everywhere a post is listed, applied in the database
-   * before the page is cut:
-   *   - a post hidden by reports is shown to its author only;
-   *   - its author still shares a profile and is not suspended (`withAuthor`),
-   *     and neither of the two readers has blocked the other;
-   *   - an `everyone` post by a public reader is for anybody; any other post
-   *     is for the readers in `close`: the viewer, and whom they follow.
-   */
-  async function rows({ match, viewerId, close, blocked, sort, skip = 0, limit, now = new Date() }) {
-    return posts(db)
-      .aggregate([
-        {
-          $match: {
-            $and: [match, { $or: [{ hiddenAt: null }, { userId: viewerId }] }, { userId: { $nin: blocked } }]
-          }
-        },
-        { $sort: sort },
-        // As `poster`: a post's own `author` is the book's, and is not to be written over.
-        withAuthor("userId", viewerId, now, "poster"),
-        {
-          $match: {
-            poster: { $ne: [] },
-            $or: [{ audience: "everyone", "poster.visibility": "public" }, { userId: { $in: close } }]
-          }
-        },
-        { $skip: skip },
-        { $limit: limit }
-      ])
-      .toArray();
-  }
+  /** `visiblePosts`, on this router's database. */
+  const rows = (asked) => visiblePosts(db, asked);
 
   /** Those rows as the viewer sees them, each with the viewer's own like or dislike. */
   async function views(shown, viewerId) {

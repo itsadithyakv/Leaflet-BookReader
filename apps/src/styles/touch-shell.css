@@ -335,9 +335,10 @@
   }
 
   /* A small control (a dialog's ×, a text link) keeps its look and is hit at
-     44 px: put `touch-hit` on it. */
-  .touch-hit,
-  .share-close {
+     44 px: put `touch-hit` on it. Under `:where`, so a control placed with
+     `absolute` (a drawer's × in its corner) stays where it was put: any
+     position but static holds the ::after as well. */
+  :where(.touch-hit, .share-close) {
     position: relative;
   }
 
