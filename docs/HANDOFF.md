@@ -1,9 +1,117 @@
-# Handoff — 2026-10-05
+# Handoff — 2026-10-21
 
 A snapshot for the next session, not permanent documentation. Delete it once
 acted on. The durable reference is [docs/README.md](README.md); how to release
 is in [deploy.md](deploy.md) (the checklist) and
-[release-msix.md](release-msix.md) (the details).
+[release-msix.md](release-msix.md) (the details); the Android release is in
+[play-store.md](play-store.md).
+
+## Now (2026-10-21): 1.5.10 in the working tree, 1.5.11 under way
+
+**Where the work is.** `main` is `v1.5.6`, the version in the Microsoft Store.
+The branch `android`, in the worktree `D:\Leaflet\.claude\worktrees\android`,
+has 1.5.7 committed (`3deda2b`). Everything since, 1.5.8, 1.5.9 and 1.5.10,
+is **uncommitted** in that worktree (`git status` and `git diff` show it).
+The version is 1.5.10 in the five places (`apps/package.json`, both places in
+`apps/package-lock.json`, `apps/src-tauri/Cargo.toml`, the `leaflet` entry of
+`Cargo.lock`, `tauri.conf.json`); the Android version code is 1005010. None
+of 1.5.7 to 1.5.10 is released on either store. Commit it at the owner's
+word, in themed commits.
+
+**What 1.5.8 to 1.5.10 hold** (the Play and Store texts are in
+[play-store.md](play-store.md) and [store-listing.md](store-listing.md);
+the details in [features.md](features.md)):
+
+- **Look**: Liquid Glass on Windows and Android (scroll edges that soften
+  under a bar, `components/ui/GradualBlur.tsx`; the lens,
+  `GlassSurface.tsx`; Mica on Windows 11). Visual effects tiers Full, Smooth
+  and minimal (`platform/perfTier.ts`, `styles/perf.css`), chosen in
+  Settings → General → Appearance → Visual effects. **Android defaults to
+  Smooth: no live blur.** The page-wide `:has()` rules are gone, replaced by
+  attributes on `<html>` (`platform/rootMarks.ts`), and a test keeps them
+  out (`styles/hasSelectors.test.ts`). features.md, "Liquid Glass".
+- **Speed**: cover thumbnails made in Rust at 240 and 480 px
+  (`src-tauri/src/storage/thumbs.rs`) and served by a `cover:` scheme
+  (`cover_protocol.rs`); the library's rows moved without React while it
+  scrolls (`components/VirtualRows.tsx`); the Hollow painted only when its
+  art turns or it is being touched (`frameGate.ts`, `runScene`); Settings →
+  Library → Storage.
+- **Read aloud, reworked**: paragraph units, pauses, the best voice ranked
+  for the book, 0.75x to 2x. features.md, "Read aloud".
+- **The Studio voice** (Kokoro via sherpa-onnx, an optional download;
+  [studio-voice.md](studio-voice.md)) is built and **must not ship to
+  readers** until Leaflet runs on sherpa-onnx 2.0: 1.x has eSpeak NG
+  (GPL-3.0) compiled in. Release builds leave its libraries out unless
+  `LEAFLET_STUDIO_VOICE=1`; never set that for a Store or Play build.
+- **Reader**: Scroll or Pages kept as the phone turns; a veil in the page's
+  colour over a re-layout (`readers/readerVeil.ts`); the focus mark out of
+  the text (`readers/sessionMark.ts`); a back-to-library button with the
+  toolbar on a phone (double tap); the screen kept on 3 minutes after the
+  last touch (`readers/readerAwake.ts`); auto-scroll by screen pixels; an
+  "Opening book…" veil, and the pull before opening waits at most 1.2 s
+  (`services/placeElsewhere.ts`). features.md, "Opening a book, turning the
+  phone".
+- **Account**: one simpler sign-in form (`components/account/`); Report a
+  problem (`ReportProblemSheet.tsx`, `server/src/routes/problems.js`, read in
+  Settings → Admin); deletion in one place (`server/src/deletion.js`), with
+  a public page ([legal/delete-account.md](legal/delete-account.md)); nightly
+  encrypted database backups ([backups.md](backups.md)).
+- **The Hollow, 1.5.10**: chapters by hours read (`pip/base/chapters.ts`),
+  nothing expires, the raid board with forecasts and free supplies, friends'
+  raids shown as news, raidable by friends off until the reader says yes,
+  earned skins worked out in Rust (`src-tauri/src/pip/earned.rs`), and the
+  rating prompt after a good read (`components/RatePrompt.tsx`). features.md,
+  "The Hollow by chapters"; pip.md, "The Hollow".
+
+**In progress, for 1.5.11 (not shipped, not finished).**
+
+1. **The Front** ([pip.md](pip.md), "In progress for 1.5.11: The Front"):
+   prowlers come down one trail out of the Dark Wood, a wall stands across
+   it, and six enemy roles each have one counter (`pip/base/front.ts`, the
+   night in `components/pip/arcade/base/wave.ts`, `NightCard.tsx`). The code
+   and its tests are in the working tree alongside 1.5.10's. It is wired
+   into `pip/base/rules.ts` and the camp's screen, not behind a switch, and
+   the chapter texts already speak of the trail, so **a build from this tree
+   today has the Front half-done**: finish it, or set it aside, before a
+   1.5.10 build. Left: the balance (in the first simulation,
+   `wave-results.md`, three of the five counters did not raise the held
+   rate), the raid half, screenshots, and timing on the real phone.
+2. **Then "Your reading, made visible"** (pip.md, "After the Front"): pages
+   arriving up the path into the oak and the chapter bar, book blooms on a
+   meadow Reading Path, Reading Stones for the volumes, and animal fondness.
+   Agreed as a design; not started.
+
+The plans are notes in that session's scratchpad, which is temporary:
+`%TEMP%\claude\D--Leaflet\8118704a-2e8f-4aaa-8932-ad68a5af7684\scratchpad\hollow-front\`
+(`PLAN.md` for the Front, `MEADOW.md` for the rest, `wave-results.md` for the
+simulation). Copy them somewhere lasting before that folder goes. A summary
+of the Front is at <https://claude.ai/artifact/69yxsveTaBKm4VpMjSRtoN>.
+
+**The owner's, before these reach readers:**
+
+1. **Deploy the server** (`deploy.ps1`, deploy.md, "Releasing an update"):
+   raidable off by default (`server/src/routes/raids.js`, `social.js`),
+   problem reports, deletion in one place, and the backup code. Until it is
+   deployed, a 1.5.10 reader who never touched the switch can still be
+   raided. Then set up the backups once ([backups.md](backups.md)).
+2. **sherpa-onnx 2.0** before the Studio voice ships (studio-voice.md,
+   "Moving to sherpa-onnx 2.0").
+3. **Host the voice pack files** for the Studio voice (studio-voice.md, "For
+   the owner: host pinned copies").
+4. **A code-signing certificate**, for a signed Windows installer outside
+   the Store.
+5. **Measure on the real phone**, the OnePlus Nord CE4 Lite (Adreno 619):
+   scrolling the library and a book, Pip thrown about, the Hollow, a night on
+   the Front. Smooth on Android was the owner's call after that phone
+   dropped frames scrolling and throwing Pip; confirm on it that Smooth, the
+   thumbnails and the Hollow's painting are enough.
+6. From play-store.md, "Before the first upload": the Play developer
+   account and its 14-day closed test, the upload key, the privacy and
+   delete-account pages published with their date set, the OAuth consent
+   screen in production, and the desktop shipped from the same branch.
+
+The sections below are earlier snapshots, kept for their history; where
+they disagree with this one, this one is right.
 
 ## Read this first
 

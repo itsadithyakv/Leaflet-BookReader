@@ -211,10 +211,31 @@ a book without one is looked up online. Covers are saved to
 signature (a 404 page was once cached as a permanent "cover").
 
 **Large libraries.** The grid and list draw only the rows on screen once a
-library passes 60 books (`components/VirtualRows.tsx`). Cards show a small JPEG
-thumbnail (`<sha256>-thumb.jpg`, 360 px, made once) rather than the full cover,
-through one cached hook (`hooks/useCoverSrc.ts`). Metadata lookups run three at
-a time with a 15-second timeout, and write to the library in batches.
+library passes 60 books (`components/VirtualRows.tsx`). Since 1.5.8 rows are
+moved by writing their position straight to the page while the list scrolls,
+so React draws again only when a row comes into reach or leaves it; the first
+draw starts where the scroll area already is, and the row holding the
+keyboard's focus stays drawn. Metadata lookups run three at a time with a
+15-second timeout, and write to the library in batches.
+
+**Cover thumbnails come from Rust** (1.5.8; `src-tauri/src/storage/thumbs.rs`,
+`src-tauri/src/cover_protocol.rs`). Drawing a full cover (up to 2000 px) in a
+card made the web view decode about 10 MB of pixels for every card scrolled
+past. Each cover is now decoded once, off the window's thread, and written at
+two widths beside it (`<hash>-thumb-240.jpg`, `<hash>-thumb-480.jpg`). Cards
+ask for `cover://localhost/<book id>?w=240` with a `srcset`, so the web view
+picks the width for the card and the screen; no base64 crosses the IPC bridge.
+The URL carries the cover's file name, so a new cover is a new URL. A cover
+with no thumbnails yet (a library from before them) is answered with the full
+cover while they are made in the background. The old single 360 px thumbnail
+(`-thumb.jpg`) is removed when the pair is made (`hooks/useCoverSrc.ts` picks
+the source).
+
+**Storage** (1.5.9; Settings → Library → Storage, `components/StorageCard.tsx`,
+`commands/space.rs`, `storage/sweep.rs`): how much room books, covers and the
+cache take on this device, and **Free Up Space**, which empties the web view's
+cache and removes files no book uses. Leaflet does the same tidy by itself
+about once a day, a little after start-up. Books, highlights and notes stay.
 
 **Search inside books** (1.3; the row under the library's search box, in the
 app only): the words typed are looked for in the text of every EPUB in the
@@ -1406,6 +1427,51 @@ where the newest edit of each wins and a delete travels as a tombstone.
 Bookmarks from before (in the webview's storage) move over the first time a
 book opens.
 
+### Opening a book, turning the phone, and what floats over the text (1.5.8 to 1.5.10)
+
+The phone's gestures and toolbar are in [android.md](android.md), "Reading".
+What changed in the reader itself:
+
+- **Opening a book says so at once.** A tap shows an "Opening book…" veil
+  (`App.tsx`) while the book is fetched and checked, and further taps wait
+  for it. The reader's code is fetched once the app has settled, so the first
+  book does not wait for it. Before opening, a pull of the other device's
+  place waits at most 1.2 s (`OPEN_WAITS_FOR_PULL_MS`,
+  `services/placeElsewhere.ts`; a pull at start-up held a tap for up to five
+  seconds before 1.5.10). A pull that takes longer goes on, and if the other
+  device is further on, the offer appears in the open book when it lands. The
+  book always opens at this device's own place.
+- **Scroll or Pages is kept as the phone turns** (`layoutForShape`). Each way
+  up used to keep its own layout, and sideways defaulted to pages. Now the
+  reader's choice holds either way up; only a reader who has never chosen
+  opens a book sideways in pages.
+- **A veil covers a re-layout** (`readers/readerVeil.ts`). A turn of the phone,
+  or Scroll and Pages swapped in the type panel, puts a veil in the page's own
+  colour over the page at once. The book is laid out once the window has kept
+  its size for 220 ms (`TURN_SETTLE_MS`; 60 ms once the screen says it has
+  landed), the place is put back, and the veil fades in 200 ms (no fade with
+  reduced motion). It lifts after 3 s whatever happens. The bars and an open
+  sheet stay over it.
+- **Back to the library** on a phone is a round ← at the top left that comes
+  and goes with the toolbar (a double tap; `ReaderPhoneBack` in
+  `readers/text/ReaderToolbar.tsx`). It leaves as Android's Back does: the
+  place is saved, and under focus lock Pip's "Hold to leave" comes first.
+- **A focus session's mug or flower no longer covers text**
+  (`readers/sessionMark.ts`). On a phone it sits small and faint at the right
+  end of the footer's strip; in pages on a desktop or tablet, in the room
+  under the page's text; scrolling on a desktop, in the window's corner as
+  before. It used to sit over the first lines of every page.
+- **Auto-scroll moves by screen pixels** (`autoScrollStep` in
+  `readers/autoScroll.ts`). It moved by whole CSS pixels: at a reading pace
+  that was one step every third or fourth frame, and on a phone (two or three
+  screen pixels to a CSS pixel) the text moved in small, uneven jerks. It now
+  moves on most frames, a screen pixel at a time.
+- **The screen stays on for 3 minutes after the last touch** on a phone or
+  tablet while the book is open and nothing reads itself
+  (`readers/readerAwake.ts`, `TOUCHED_AWAKE_MS`; five minutes until 1.5.9).
+  While Dotty, word by word or auto-scroll runs, it stays on throughout. Never
+  while Leaflet is out of sight.
+
 ### Page reader — `pages/PageReaderView.tsx`
 
 Draws PDFs with pdf.js, and CBZ comics from images the backend serves page by
@@ -2207,6 +2273,9 @@ the window (and, with "Pause when I've been still" on, has gone quiet), and
 when the book is closed.
 In a browser it is the screen wake lock where there is one. Not checked on a
 real screen: it needs a build and the patience to wait out a display timeout.
+On a phone or tablet the screen also stays on for 3 minutes after the last
+touch while a book is open (`readers/readerAwake.ts`; see "Opening a book,
+turning the phone" above).
 
 ### Auto-scroll
 
@@ -2243,6 +2312,55 @@ more on a line, and a fixed lines-a-minute default ran far too fast there.
 Books opened before this keep the speed they had. A run left without a
 correction for a few minutes is learned as a pace the reader keeps up with,
 counting for less than a measurement, as Smart Read's is.
+
+---
+
+## Read aloud
+
+`readers/readAloud/`. Started from the reader's ⋯ menu ("Read aloud", key
+`R`); a pill over the page has play and pause, a sentence back and on, the
+speed and the voice. It reads from the place to the end of the book, the next
+chapter following on its own, and the page follows the sentence being read
+(`follow.ts`) until the reader moves the page themselves. Reworked in 1.5.9:
+
+- **Paragraph units** (`units.ts`). Where the voice says which word it is at,
+  it is given a paragraph at a time (up to 1,000 characters, cut only where a
+  sentence ends), so its tune carries from one sentence to the next. Where it
+  does not, a sentence at a time. Only a few units go ahead of the one being
+  said (`player.ts`).
+- **Pauses** of their own before each unit (`PAUSE_MS`): 400 ms after a
+  paragraph, 650 around a heading, 850 at a new chapter, 950 at a scene break,
+  shorter the faster the reading.
+- **What is said** is not always what is set (`chapterText.ts`,
+  `speechText.ts`): footnote markers, page numbers, scene-break glyphs and
+  hidden text are left out; a drop cap is joined to its word, small caps are
+  said in ordinary case, a web address as its site, Roman numerals after
+  "Chapter" as numbers. Every character said maps back to the page, so the
+  word (where the voice says it) and the sentence are lit exactly.
+- **The voice is ranked** (`voiceRank.ts`): one on the device before one that
+  needs the network, Windows' "Natural" voices well ahead of the older ones,
+  Android's own quality rating, the book's own region (en-GB for a British
+  book) before the reader's. The best is used until the reader picks another;
+  the pick is kept per language.
+- **Speed**: 0.75x, then 0.8x to 2x a tenth at a time (`prefs.ts`,
+  `leaflet.readAloud`), on a slider in the pill's "Voice and speed" sheet; the
+  pill's speed button steps through 0.8, 1, 1.2, 1.5, 1.8 and 2.
+- **Engines** (`engine.ts`): on Windows the browser's speech with Windows'
+  voices (`webSpeechEngine.ts`); on Android the phone's own text-to-speech in
+  Kotlin (`ReadAloud.kt`), which plays on with the screen off, with a
+  notification, lock-screen controls, and a pause for a call or unplugged
+  headphones.
+
+**The Studio voice** (Kokoro, run on the device by sherpa-onnx, an optional
+download) is behind the same engines (`desktopEngine.ts`, `neuralEngine.ts`,
+`StudioVoice.kt`; Settings → Reading → Studio voice). All of it is in
+[studio-voice.md](studio-voice.md). **It does not ship to readers yet.**
+sherpa-onnx 1.x has eSpeak NG (GPL-3.0) compiled in, and Leaflet is MIT. A
+release build leaves the sherpa-onnx libraries out unless
+`LEAFLET_STUDIO_VOICE=1` is set (`msix/build-msix.ps1`,
+`gen/android/app/build.gradle.kts`), and a Store build must not set it until
+Leaflet runs on sherpa-onnx 2.0. Without the libraries the Studio voice is
+simply not offered.
 
 ---
 
@@ -2622,7 +2740,24 @@ be a second, hand-kept price list anyway. A server test fails if
 `pipParts.json` is stale.
 
 - Free things (price 0) are owned from the start; achievement skins
-  (`earnedOnly`) are never sold.
+  (`earnedOnly`) are never sold, nor given: they are earned by reading.
+  `src-tauri/src/pip/earned.rs` holds every rule, against the skin's `unlock`
+  words: the longest streak ever as the header's flame counts it (grace and
+  freeze days in) for Maple (7), Sakura (30) and Golden Pip (365); books
+  finished (as the profile card counts them) for Bookworm (5) and, by genre,
+  Detective, Wizard and Astronaut (3 each); 100 hours on the day ledger for
+  Midnight Ink; 10 mornings (4 to 8 am) and 10 nights (10 pm to 4 am) of
+  reading, from focus sessions and the hour minutes were credited in
+  (`pip.readingHours`, this device's) for Early Bird and Night Owl; reading on
+  31 October for Boo, and on the winter solstice (21 or 22 December, or 20 or 21
+  June south of the equator, by the time zone) for Frost; a finished book read
+  on two days 30+ days apart for Prickly; a book finished in the one focus
+  session it was ever read in for Cartridge. Pages per month (Tour de Page) and
+  league results (Champ, Prism) are not on record yet, so those cannot be earned.
+  A thing found earned is written down as a price-0 purchase `earned-<kind>-<id>`,
+  so it reaches every device and stays even if what earned it is later pruned.
+  The overview lists each with its progress (`earned`) for the wardrobe's hints;
+  Pip shows a new one off once in her house.
 - Floors of the house open in order: `requires` (the floor below) and
   `sessions` (focus sessions done first), checked in Rust.
 - Snacks and seed packets are bought each time they are used. Everything else
@@ -3698,7 +3833,10 @@ app; anything played by a person over days.
 
 Written 2026-10-15, not committed. This replaces the long account of the
 defences that was here ("The Hollow defended"), and is what the game is
-now; the sections above are its history.
+now; the sections above are its history. Since 1.5.10 the camp's level is
+chapters of hours read, the larder and the oak have no cap, and raids cost
+nothing: see "The Hollow by chapters" below, which wins where the two
+disagree.
 
 **Why.** The owner, who designed it over many sessions: "The game is a bit
 confusing to understand, despite helping build it i have no clue what to
@@ -3715,7 +3853,9 @@ chore, reading pays for everything, losses small and seen.
 
 **The game in one paragraph.** Reading drops acorns on the oak (every ten
 minutes) and sends parcels up the path (a chapter read, a day's goal met).
-Acorns build the camp; a building is finished by reading, not by waiting.
+Acorns build the camp, and are its one money: since 1.5.8 a building's
+reading time is part of its price (half an acorn a minute, `ACORNS_A_MINUTE`)
+and it stands as soon as it is paid for; a guardian's training likewise.
 The burrow is the camp's level, and each level clears more of the wood and
 brings something new. From level 2 prowlers come out of the wood while the
 camp is on screen: what throws, the fence, the constructs and the guardians
@@ -3850,6 +3990,75 @@ Left as it is, on purpose: the light reader's pace (above). A ten-minute
 reader is slower than before, and slower than a long reader, which is what
 the Hollow is for (showing that you read); nothing in it asks for a visit a
 day. `BattleScreen` still has the night-watch mode, unused.
+
+### The Hollow by chapters (1.5.8 to 1.5.10)
+
+What changed after the simplifying. The burrow is no longer the camp's
+level, and no larder fills up: the level is the reading done. Pip's side of
+it, and what is being built next, is in [pip.md](pip.md), "The Hollow".
+
+- **Acorns are the one money** (1.5.8; `components/pip/arcade/base/currency.ts`).
+  A building's reading time is part of its price (half an acorn a minute,
+  `ACORNS_A_MINUTE`) and it stands as soon as it is paid for; a guardian's
+  training likewise. Collected acorns fly up to the count (`collect.tsx`).
+- **A tap on a building opens its sheet** (1.5.9; `base/siteSheet.ts`): what it
+  does now, its next level, what that needs, one key, and why not when
+  pressed anyway. On a phone held sideways the camp is a window onto a
+  picture a quarter larger than the screen (`base/camera.ts`); see
+  [android.md](android.md).
+- **Chapters by hours read** (1.5.10; `pip/base/chapters.ts`). Ten chapters,
+  reached at 0, 0.25, 3, 6, 10, 15, 21, 28, 36 and 45 hours read in Leaflet
+  (the minutes ledger the oak counts by), then a new volume every 15 hours
+  with no end. Each chapter brings one new thing (the scouts and raids, the
+  lookout and prowlers, the fence, the yard and decorations, guardians, the
+  meadow and animals, more defences, a second plot, the Magpie King), a chest
+  of acorns paid the moment it is reached (40 at chapter 2 up to 300 at 10;
+  200 a volume) and two or three optional goals that pay acorns too
+  (`GOALS`). The burrow's level follows the chapter by itself (level 2 at
+  chapter 3, up to 5 at chapter 9), and every other building can go as high
+  as the burrow. A volume brings a stone with the hours carved on it and a
+  set of things to set down (`VOLUME_SETS`). A camp from before chapters
+  keeps everything its burrow had opened (`legacy`), and gets one chest.
+- **The chapter bar** across the top (`HollowTop.tsx`): the chapter, how far
+  through it the reading is, and the one next thing. A tap opens the chapter
+  card (`ChapterCard.tsx`) with what the chapter brings, in pictures.
+- **Nothing expires.** No larder cap and no cap on the oak: it holds
+  everything read since the last gather. Up to 99 parcels wait. Acorns have no
+  top; what is saved keeps at most 1,400 in `acorns` and the rest in `bank`,
+  so a 1.5.9 build reading a 1.5.10 camp clamps nothing.
+- **The raid board** (`RaidBoard.tsx`, `raidBoard`, `raidForecast`): up to
+  three cards, a rematch of the last stronghold taken (a sure three stars for
+  small loot), the next stronghold, and from chapter 10 the King. Each says in
+  a plain sentence how the scouts expect it to go, with its stars. "Fight it"
+  is always there; "Send" (the scouts go without the reader, for 75% of the
+  loot) only where they would win. Supplies are free: a raid costs no acorns.
+  Three stars on a stronghold moves the ladder on and pays a bonus.
+- **Friends' raids are news** (`FriendNews.tsx`, `state.news`, five at most):
+  on opening the Hollow, who raided and how it went, in a line each, with
+  **Put them back** for the fence pieces they knocked down and **Raid back**.
+  Nothing is taken and nobody is put to sleep.
+- **Raidable is off by default** (1.5.10). The raid board asks once, "Let
+  friends raid your camp? Just for fun: nothing is taken."
+  (`raidsAsked`). On the server a profile with no `raidable` at all now means
+  no (`server/src/routes/raids.js`, `social.js`); it meant yes. **The server
+  must be deployed for this**; until then a reader who never touched the
+  switch can still be raided.
+- **Rendering**: the camp is painted only when its art turns to a new frame
+  (twelve a second) or while something is being done to it (`sceneGate`,
+  `runScene` in `components/pip/arcade/frameGate.ts`), and not while it is out
+  of view. It used to be painted at every display refresh.
+- **The Build panel** has four tabs (Camp, Defence, People, Decor;
+  `HollowDock.tsx`), and the (i) is a guide of short pages (`HollowGuide.tsx`).
+
+Two things outside the camp came with 1.5.10:
+
+- **Pip's earned skins unlock** (`src-tauri/src/pip/earned.rs`; see the
+  shop's rules under "Seeds and the Pip tab"): a 7-day streak earns Maple.
+- **The rating prompt after a good read** (`components/RatePrompt.tsx`). It
+  followed only a focus session's wrap-up, so a reader who never used Focus
+  was never asked. Closing a book after 15 minutes' reading, or with the
+  day's goal met during the visit, is now a moment too, on the same terms:
+  Leaflet used on 3 days, and not again for 14 days after "Later".
 
 ### The rest of the app, looked at with fresh eyes
 
@@ -4201,6 +4410,24 @@ something:
 | Loose pages, "Free read" | A day's reading outside any focus session. Not a spine: it does not level the wood. A running session's reading is not shown as free |
 | Golden bookend | A perfect week: goal met all seven days |
 | Wood | Levels with the spine count: Pine, Oak, Walnut, Mahogany, Ebony, Gilded |
+| Star sticker | The longest session of a week with four or more spines |
+| Moon sticker | A late-night read (started 23:00–04:00) |
+| Coffee ring | An early-morning read (started 04:00–08:00) |
+
+**Bindings, stickers and wear** (`components/shelf/dress.ts`). A book has
+one binding wherever it stands (hashed from its id, so a run of sessions on
+it is a matching set): cloth with headbands, leather with raised bands and
+gilt lettering where the cloth carries gold, a glossy creased paperback, a
+library binding whose call-number label carries the day, or cloth with a
+paper title label. A tome stands a little taller than a paperback. A spine
+has at most one sticker, and a sticker always means something (above; the
+tip and the spine's label say what). Spines two or more weeks old sometimes
+show a little wear (a dog-ear, a water mark, a scuffed corner, a faded head),
+which means only their age. All of it is gradients on pseudo-elements, the
+same on every device and render. A coverless book on a phone's library grid
+gets a quiet version: its binding's finish (gilt fillets, gloss, a fine
+weave) and on a few books a cup ring or a worn corner, kept off the
+lettering (`--cloth-deco`).
 
 The newest spine drops in when the shelf is next opened, and the wrap-up says
 "Shelved as book #N".
@@ -4638,7 +4865,8 @@ leaderboards now and for one identity across devices when the mobile app ships.
   do not reveal whether an email exists.
 - Sessions: a random token returned once; the server stores only its SHA-256,
   expiring 90 days after last use. On the device the token lives in Windows
-  Credential Manager, never in SQLite or `localStorage`.
+  Credential Manager, or on Android sealed by the Keystore (`SecretBox.kt`),
+  never in SQLite or `localStorage`.
 - The name: an account has one and so does the profile (the profile's is
   the one other readers see; the account's is what the app shows by the
   reader's avatar). They were set together only at sign-up, so a name changed
@@ -4654,8 +4882,41 @@ leaderboards now and for one identity across devices when the mobile app ships.
   step by a test) and never offers earned skins (Champ, Golden, Prism). Boards
   hold avatars still and play the move on hover; the reader card plays it.
   Accounts from before avatars show Pip in a skin picked from their handle.
-- Deleting the account (Settings, with the password) removes the account,
-  profile, synced state, sessions and community data at once.
+- **Signing in, simpler** (1.5.9; `components/account/`). One form for
+  signing in, creating an account and a forgotten password
+  (`AccountForm.tsx`), used by Settings → Account and the account dialog
+  alike. The switch between signing in and creating an account is its top
+  line (it was under the whole sign-up form, below the fold of a phone's
+  sheet). Creating an account asks for an email and a password only; then,
+  where the community is on, one short step: a handle to share the profile,
+  or "Not now", which leaves it private (`signUpFlow.ts`). The emailed code
+  is asked for once after that, or "Later". Signing in never asks. A page
+  that needs an account (Social's board, Friends, Discover) shows one line
+  and a Sign in button that opens the form there (`SignInPrompt.tsx`).
+- **Deleting the account** (Settings → Account → Delete account, with the
+  password) removes the account, profile, synced state, sessions, problem
+  reports and community data at once. Since 1.5.10 every way of deleting
+  goes through one function (`server/src/deletion.js`): the route, the
+  owner's `src/tools/delete-account.js` for a request by email, and the
+  backup restore tool. Each deletion is noted first in `deletions` (the
+  account's id and when, nothing else, kept 45 days), so a restored backup
+  deletes again what was deleted after it was taken. A public page says how
+  to ask without the app and what is kept ([legal/delete-account.md](legal/delete-account.md),
+  built to the site's `/delete-account/`).
+- **Report a problem** (1.5.8; Settings → General → About,
+  `components/ReportProblemSheet.tsx`, `server/src/routes/problems.js`). A
+  reader says what happened, with the app's diagnostics if left on, and
+  presses Send. Signed in, the report carries the account; signed out, an
+  optional reply address. Anyone may send one, held to five a day per
+  account and ten per address, and to 1,000 waiting at once. A report goes
+  by itself after 90 days, and with the account; what it says is never
+  written to the server's log. The owner reads them in Settings → Admin
+  (`ProblemsPanel.tsx`). Where there is no server, the sheet copies the
+  report for an email instead.
+- **The server's database is backed up nightly**, encrypted, to a Google
+  Drive the owner keeps ([backups.md](backups.md)). Atlas's free tier keeps
+  no backups of its own, and since 1.5.3 the database holds signed-in
+  readers' highlights, notes, places and history.
 - The server never receives Google or Drive credentials.
 - **Forgot password?** on the sign-in card emails an eight-character code
   (`ABCD-EFGH`) that sets a new password, signs every device out and this one
@@ -4738,6 +4999,60 @@ Colours are design tokens in `index.css` as space-separated RGB triples
 
 The reader has its own finishes on top: paper, dark paper, true white, true black.
 
+### Liquid Glass (1.5.8, 1.5.9)
+
+Desktop and Android share one look: clear glass bars, sheets and buttons with
+a rim that catches the light, and pages that soften as they scroll under a bar
+instead of stopping at a hard line. Pip's own surfaces keep her pixel-paper
+style.
+
+- **Scroll edges** (`components/ui/GradualBlur.tsx`, `ScrollEdge.tsx`): a ramp
+  of blur where content scrolls under a bar or out of a panel. A touch device
+  gets at most five layers (`TOUCH_LAYERS`: each is a backdrop filter drawn on
+  every scrolled frame). Where no blur is drawn, a tint wash alone fades the
+  edge.
+- **Refraction** (`components/ui/GlassSurface.tsx`, `glassRefraction.ts`,
+  `LiquidGlassDefs.tsx`): the lens bends what is behind it at the rim. Where
+  the bend cannot be drawn, it is frosted glass with a sheen and a rim.
+- **Windows 11's Mica** behind a see-through window (`src-tauri/src/window_material.rs`,
+  `styles/window-material.css`). Chosen before the window exists, since a web
+  view is made see-through only when it is created; Windows 10 keeps its
+  opaque window.
+
+**Visual effects tiers** (`platform/perfTier.ts`, `styles/perf.css`, the one
+place the lighter looks are written). Settings → General → Appearance →
+**Visual effects**: Auto, Full, Smooth.
+
+| Tier | `html[data-perf]` | What is drawn |
+| --- | --- | --- |
+| Full | `full` | Everything: the lens, ramps of blur, frosted bars and sheets |
+| Smooth | `lite` | No lens and no backdrop blur at all; edges fade by tint; bars, sheets and menus are near-opaque tints with the rim; the same shapes and motion |
+| Minimal | `minimal` | Smooth, solid. Not offered as a choice: Auto picks it for the weakest devices |
+
+On Auto, **Android is Smooth on every phone** (the owner's call: a phone
+scrolling under a blurred bar redraws the blur every frame, and an Adreno 619
+dropped frames scrolling and throwing Pip). Minimal at 2 GB of memory or
+less, or a weak or software GPU with little memory or few cores. Full on a
+phone only by choice. Windows is Full, Smooth on a software renderer, minimal
+at 2 GB or less. What the device was judged to be is kept
+(`leaflet.perf.auto.v1`). Then, on Auto only, a short probe of frame times
+after start and a watchdog over scrolling and dragging (15% of frames over
+25 ms across 3 s of movement) can step the tier down for the session. The
+Hollow's busy paints are capped by the tier too (`busyFpsFor`: 60 a second on
+Smooth, 30 on minimal).
+
+**No page-wide `:has()`** (`platform/rootMarks.ts`). Rules like
+`html:has(.reader-scope)` and `.app-shell:has(.pip-house-page)` made the
+browser restyle the whole document whenever any element was added or removed
+anywhere (a row of covers as the library scrolls, Pip's speech, a toast):
+about 10 ms each time on a desktop, 90 to 200 ms on a phone. What they asked
+is now an attribute on `<html>` set in a layout effect: `data-reading` (a book
+is open), `data-pip-page`, `data-pip-fill`, `data-pip-out`; an open sheet is
+`data-sheet-open` (`components/ui/motion.ts`) and the dock is
+`.app-shell[data-dock]`. A test keeps such `:has()` out of every stylesheet
+(`styles/hasSelectors.test.ts`); a `:has()` on a small part (a toolbar, a
+card) is fine.
+
 ---
 
 **The bar at the foot of the page can be made small, and is not on Pip's
@@ -4753,25 +5068,21 @@ is drawn as one still pose now, asleep or awake.
 
 ## Settings
 
-`pages/SettingsPage.tsx`. A few short sections behind tabs (**General**,
-**Reading**, **Habit**, **Library**, **Account**, **About**), each meant to
-fit a 1366×768 window without scrolling. Habit was part of Reading until that
-made five cards, which no arrangement fitted (three columns left it 1,112 px
-tall where 690 show). Measured at 1366×768, both end about 607 px down with
-nothing to scroll; on a 1366×768 laptop at 125% (1093×614) Reading scrolls by
-41 px and Habit by 25 (Reading scrolled by 343). The preview cannot draw the
-Reminders card, which is about as tall as the card beside it. It used to be one page about three screens
-long. Each section is two columns of cards from `lg` up, every card as tall as
-what is in it.
+`pages/SettingsPage.tsx`. A few short sections behind tabs: **General**,
+**Reading**, **Library**, **Account** (only in builds with accounts or the
+community) and **Admin** (only for the owner, signed in). There used to be six
+(Habit and About had a tab each, measured to fit a 1366×768 window without
+scrolling); their cards moved into Reading and General, and a kept tab of
+either name opens the new one (`MOVED` in `pages/settingsSection.ts`). Each
+section is columns of cards, every card as tall as what is in it.
 
 | Section | Cards |
 | --- | --- |
-| General | Appearance; Pip (how much it moves, the tour, sounds) |
-| Reading | Reading pace; Characters; Keep the words I look up |
-| Habit | Daily goal and focus; Reminders |
-| Library | Backup; Book copies; Optional book converter |
-| Account | Account; Leaderboards (only in builds with accounts or the community) |
-| About | Rate, policies, diagnostics; Danger zone |
+| General | Appearance (theme, Visual effects); Pip (how much it moves, the tour, sounds); About (rate, policies, Copy diagnostics, **Report a problem**, open-source notices); Danger zone |
+| Reading | Daily goal and focus; Reminders; Reading pace; Turning pages (a phone: volume keys); Characters; Keep the words I look up; Studio voice (beside Reading pace on a computer, last on a phone; shown only where the build has its runtime) |
+| Library | Backup or Sync; Book copies; Tidy a folder; Optional book converter (not on a phone); Storage |
+| Account | Account; Leaderboards |
+| Admin | Problem reports (`components/discuss/ProblemsPanel.tsx`); the admin panel |
 
 The section is remembered for the session (`pages/settingsSection.ts`, kept
 apart from the page so that asking for a section does not load it), and another

@@ -23,7 +23,7 @@ There is exactly one Pip on screen at any time. Its home is the **header logo**:
 | --- | --- |
 | `src/pip/engine.js` | The 32×32 rig: body, face, leaf, hands and feet, each drawn and given its own 1px outline ("stamped"), so the sprite reads on parchment and leather. Plain JS, typed at the boundary by `index.d.ts`. |
 | `src/pip/anims.js` | The move library (~75 moves). Each move is a pure function of the frame number, so frames can be cached. 12 fps. |
-| `src/pip/skins.js` | The variants: the original achievement skins (`earnedOnly`, not yet unlockable in the app) and the shop's variants (robot, president, skater...), each with a `price` in seeds. |
+| `src/pip/skins.js` | The variants: the achievement skins (`earnedOnly`, never sold; since 1.5.10 earned by reading, by the rules in `src-tauri/src/pip/earned.rs`) and the shop's variants (robot, president, skater...), each with a `price` in seeds. |
 | `src/pip/accessories.js` | The wardrobe: accessories by slot (head, face, neck, back, hand), and `dress(skin, ids)`, which makes a skin wear them. |
 | `src/pip/room.js`, `src/pip/treats.js` | Pip's house (room styles and items, drawn by `renderRoom` / `renderRoomItem`) and its food and toys (each with its own move). |
 | `src/pip/shop.js` | The shop's one list and the price authority: what is for sale and at what price (the art's prices rescaled to the garden economy), plants, plots, premium moves, free signatures, book-nod matching. Read by the Pip tab, and by the generator below. |
@@ -62,8 +62,9 @@ There is exactly one Pip on screen at any time. Its home is the **header logo**:
 
 ## The Pip tab: Pip's house
 
-Pip's own place, and the reward for focus mode: reading in focus waters Pip's
-garden, ripe plants give seeds, seeds are spent on Pip. Economy rules, commands
+Pip's own place, and the reward for reading: all reading waters Pip's garden
+(a focus session twice as fast, since 1.5.7), ripe plants give seeds, seeds
+are spent on Pip. Economy rules, commands
 and data are in [features.md](features.md#seeds-and-the-pip-tab); this is the
 Pip side.
 
@@ -311,6 +312,131 @@ Pip side.
 
 `PipSprite` takes an `outfit` (accessory ids) and dresses the skin with
 `dress()`; the outfit is part of the frame-cache key.
+
+**Earned skins** (1.5.10). The achievement skins used to be shown and never
+given. `src-tauri/src/pip/earned.rs` now holds a rule for each, read from the
+reader's own records (the day ledger and the streak walked from it, books
+finished, focus sessions): Maple for a 7-day streak, Sakura for 30, Golden
+Pip for 365, Bookworm for 5 books finished, and so on (the full list is in
+[features.md](features.md#price-authority)). A skin found earned is written
+as a price-0 purchase, so it reaches every device and is never taken back.
+Pip shows a new one off once in her house. Pages a month and league results
+are not on record, so their skins cannot be earned yet.
+
+## The Hollow
+
+Pip's camp in the wood: the arcade's building game, and since 1.4 what Pip's
+tab opens on. Reading runs it; it is for showing off that you read, never a
+daily chore, and losses are small and seen. The rules and their history are
+in [features.md](features.md#the-hollow-pips-camp-the-arcades-building-game);
+this is the map and the state of it.
+
+| File | Job |
+| --- | --- |
+| `src/pip/base/rules.ts` | The camp's rules as plain functions: settling the reading in, the oak, parcels, building, prowlers, raids, friends' raids, the save (`readBase`, `keptForm`) |
+| `src/pip/base/chapters.ts` | Chapters by hours read, their chests and goals, the burrow following the chapter (1.5.10). Its header lists the whole 1.5.10 rules API |
+| `src/pip/base/battle.ts`, `ladder.ts`, `heroes.ts`, `guards.ts`, `trophies.ts` | Raids and strongholds, heroes from books finished, guardians, the trophies books raise |
+| `src/pip/base/front.ts` | The Front (in progress, below) |
+| `src/store/baseStore.ts` | The camp's store: the save, and the actions the screens call |
+| `src/components/pip/arcade/base/BaseScreen.tsx`, `scene.ts` | The camp's screen and its picture, painted by `runScene` (`../frameGate.ts`) only when the art turns or something is being done to it |
+| `…/base/HollowTop.tsx`, `ChapterCard.tsx`, `HollowDock.tsx`, `HollowGuide.tsx`, `HollowMenu.tsx` | The chapter bar, the chapter card, the Build panel's tabs, the guide, the menu |
+| `…/base/RaidBoard.tsx`, `FriendNews.tsx`, `BattleScreen.tsx` | The raid board with forecasts, friends' raids as news, a raid fought |
+| `…/base/siteSheet.ts`, `camera.ts`, `mapCoach.ts`, `collect.tsx`, `currency.ts` | A building's sheet, the phone's camera, the first-time pointers, acorns flying to the count, what the chips say |
+| `src-tauri/src/commands/pip_shop.rs` (`camp_summary`), `server/src/routes/raids.js` | A friend's card of the camp, and raids between friends |
+
+**What 1.5.10 is** (features.md, "The Hollow by chapters"): acorns as the one
+money; ten chapters reached by hours read, then a volume every 15 hours;
+nothing expires; a raid board with plain forecasts and free supplies;
+friends' raids shown as news, with Put them back; and being raidable by
+friends off until the reader says yes. That last needs the server change in
+`server/src/routes/raids.js` and `social.js` deployed by the owner.
+
+### In progress for 1.5.11: The Front
+
+**Not shipped, and not finished.** The code is in the working tree
+(`src/pip/base/front.ts`, `components/pip/arcade/base/wave.ts`,
+`NightCard.tsx`, and changes to `scene.ts`, `BaseScreen.tsx`, `siteSheet.ts`,
+`ChapterCard.tsx`; the chapter texts for 3, 4 and 8 already speak of the
+trail), with tests, but the balance has not met its targets. The plan is a
+scratchpad note of the session that wrote it; its summary is at
+<https://claude.ai/artifact/69yxsveTaBKm4VpMjSRtoN>.
+
+The owner's ask: walls that make sense because enemies come one way, enemies
+that can break walls, real choices, and a map that looks different.
+
+- **One lane.** The Dark Wood stands along the left of the clearing (at least
+  14 art pixels of it never clears), and the prowlers have trodden one trail
+  through it. Everything that attacks comes down that trail. The trail
+  appears at chapter 3, when prowlers begin.
+- **A wall across it.** The fence becomes a wall across the trail with a gate
+  where the trail meets it; its level sets how long and how tough it is
+  (`sectionsAt`, `SECTION_TOUGH`). In Edit the whole line slides left or right
+  (x 44 to 104), and that is the only placement choice for it. Traps lie on
+  spots on the trail in front of it, towers stand on pads behind it, and
+  both open with chapters (`spotsOpen`, `padsOpen`: up to three of each).
+- **Six enemy roles** (`ROLES`), each good at one thing and, past the
+  creeper, each beaten by one construct (`COUNTER`):
+
+  | Role | Comes from chapter | Does | Beaten by |
+  | --- | --- | --- | --- |
+  | Creeper | 3 | Walks the trail and batters the wall | The wall, and everything that throws |
+  | Runner | 4 | Fast and frail, over the wall in a bound | Thorn strip |
+  | Flier | 5 | Flies straight over wall and traps | Archer's nest |
+  | Brute | 6 | Very sturdy, batters the gate hard | Pitfall |
+  | Digger | 7 | Tunnels under the wall | Thumper |
+  | Bomber | 8 | Blows a wall section away | Stone thrower |
+
+  Twelve constructs become seven, each with one job; a construct a camp
+  owns that is retired or merged is refunded or re-seated, and nothing a
+  camp owns is lost (`becomes`, `seatOld`).
+- **Nights are seen, never fought out of sight.** The night's wave is drawn
+  from the camp and the night (`waveKinds`), so the chip at dusk says exactly
+  who is coming, and the night card shows each face beside its counter.
+  The night is fought out together, ahead, in `wave.ts`, so a bomber's gap
+  lets the creepers behind him through. The first night held after reading
+  pays a small bounty (`nightBounty`: 5 + 2 × the chapter acorns).
+- **Raids the other way round** (planned): strongholds with a trail and a
+  wall facing it, a drop strip along the left edge, lanes for the forecast.
+- **Older devices**: the old fields are still written in their old shapes,
+  and the front rides in one short line of `taught` (`FRONT_MARK`), which
+  every build keeps, so a camp saved by a 1.5.10 device and read again by
+  1.5.11 still has its constructs where they were and its nights held.
+
+What is left: the balance (a first simulation of 200 nights a chapter found
+some counters raise the held rate by far less than the 20 points aimed for,
+and the flier's, brute's and digger's counters by none), the raid half,
+screenshots on a phone held sideways and on a desktop, and measuring a night's
+planning on the real phone (a few ms on a desktop; 8 ms is the bound).
+
+### After the Front: your reading, made visible (1.5.11, planned)
+
+Agreed as a design, not started. Four parts, built in this order, with no
+server or Rust change; nothing new is stored but two small fields, which ride
+in a taught mark so older builds keep them:
+
+1. **Pages up the path.** Opening the camp after reading, pages (one, plus
+   one for each 15 minutes read since, six at most; three on Smooth, none on
+   minimal or with reduced motion) flutter up the parcel path into the oak,
+   and one goes on to the chapter bar, which steps to its new fill. A tap
+   skips it. The figures are behind a tap, in a "Since you were last here"
+   block on the chapter card. About two seconds, played once.
+2. **Book blooms on a Reading Path.** A worn path through the meadow, with a
+   bloom for each book the camp raised a trophy for, its kind by the book's
+   genre (eleven original flowers: pagewort, lamplily, star thistle and the
+   rest), the newest nearest. 48 on the path, older ones growing wild beyond.
+   A bud is the next bloom, opening as the reading towards it goes up. All of
+   it is derived from the trophies and the library.
+3. **Reading Stones** for the long arc after chapter 10: a ring of stones at
+   the back of the meadow, a low one carved for each of chapters 7 to 10 and
+   a tall one carved with the hours for each volume, and Pip setting out each
+   volume's set by them. Derived from the minutes read alone.
+4. **Animal fondness.** Each meadow animal grows fonder with the hours read
+   since it arrived (hearts at 3, 10 and 25 hours, never lost): a home of its
+   own at one heart, and its gift doubled at three. The hen lays on a day you
+   read, not on every calendar day.
+
+The meadow's one purpose in this: it holds the record of your reading and is
+the animals' home. It is never attacked.
 
 ## PipWorld in brief
 

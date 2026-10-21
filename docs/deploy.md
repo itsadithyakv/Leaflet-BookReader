@@ -269,6 +269,11 @@ and from anywhere (browser is fine):
 A `MongoServerSelectionError` in the log almost always means the Atlas
 Network Access entry (step 3.3) or the password in the string.
 
+**Backups.** Atlas's free tier keeps none of its own. The nightly encrypted
+backup to Google Drive is set up once, by its own run sheet:
+[backups.md](backups.md). Until then `deploy.ps1` ends with
+`Backups: off`.
+
 ## 6. Google sign-in (Drive backup) — *console.cloud.google.com*
 
 1. **APIs & Services → Credentials → Create credentials → OAuth client ID →
@@ -429,6 +434,8 @@ once and are not repeated.
 | --- | --- |
 | Update the API | Re-run `deploy.ps1` (step 5) |
 | Watch the API | `sudo journalctl -u leaflet-api -f` on the VM |
+| Keep the address safe | `leafletapp.duckdns.org` belongs to whoever controls the DuckDNS login: give the account it signs in with (GitHub or Google) two-step verification |
 | Move the API to another address | Edit `site/config.source.json`, `node site/sign-config.mjs`, commit and push. Installed apps follow; no Store update |
 | Release an update (e.g. 1.1.0) | Bump the version in `apps/package.json` and both places in `apps/package-lock.json`, in `apps/src-tauri/Cargo.toml` and the `leaflet` entry of `Cargo.lock`, and in `apps/src-tauri/tauri.conf.json`; repeat steps 7–9 (each upload needs a higher version than the last); then `git tag v<version>` and push the tag |
-| Back up the database | Atlas M0 has no automatic backups: `mongodump --uri "<the string>" --out leaflet-$(date +%F)` from a machine on the Atlas allowlist |
+| Back up the database | Nightly and encrypted, to leafletmail's Drive, once set up: [backups.md](backups.md) (setup, checking it, the monthly restore drill, a disaster) |
+| Delete an account a reader asked to have deleted | `src/tools/delete-account.js` on the VM: [server/README.md](../server/README.md#deleting-an-account-on-request) |

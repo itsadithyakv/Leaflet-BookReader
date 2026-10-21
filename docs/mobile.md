@@ -87,8 +87,9 @@ The Android shell, each a small native piece (Tauri plugins exist for most):
 - **Edge to edge.** Android 15 draws apps under the status and gesture bars.
   The CSS insets exist; they need checking on a real notch, with a fallback
   that passes the insets in from the native side if the WebView reports none.
-- **Reading mode hides the system bars**; a tap in the middle brings back
-  them and the toolbar together.
+- **Reading mode hides the system bars** on a phone, either way up, for as
+  long as the book is open; a double tap brings the toolbar (the system's
+  bars stay away, so the text never moves for it).
 - **The screen stays on** while a book is open and something has been touched
   in the last few minutes, and always while Dotty or auto-scroll runs.
 - **Rotation lock** (see the next section).

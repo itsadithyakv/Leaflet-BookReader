@@ -116,11 +116,22 @@ gets (CSS px):
 ### Upright
 
 - **The page is all there is** while reading. The toolbar and the chapter
-  dock come and go together with **a tap in the middle third** of the page;
-  a tap on either side turns the page; a swipe turns it too. A touch that
-  turns a page does not bring the toolbar.
-- **The toolbar** has four things: Back, Contents, Aa (type, layout,
-  page colour, rotation) and ⋯. Search, Characters, Notes, Ambience and the
+  dock come and go together with **a double tap** (in the middle third with
+  pages); **a triple tap** on a word selects it. One tap in the middle does
+  nothing, so a scroll taken for a tap cannot bring the menu: a tap is a
+  finger that moved under 10 px, was down under 300 ms, and landed on a page
+  that was not moving (a touch on a gliding page only stops it;
+  readers/tapRun.ts). With pages, a tap on either side turns the page at
+  once; a swipe turns it too. A touch that turns a page does not bring the
+  toolbar. The first book opened on a touch screen says so once.
+- **The toolbar** has three things: Contents, Aa (type, layout,
+  page colour, rotation) and ⋯. **Back to the library** is a round ← at the
+  top left that comes and goes with it (two taps), and leaves as Android's
+  Back does (the place saved; under focus lock, Pip's "Hold to leave"). It
+  is not the "Back to Chapter 3" chip after a jump.
+- **A focus session's mug or flower** sits small and faint at the right end
+  of the footer's strip, which the text never enters (readers/sessionMark.ts);
+  it sat top right over the first lines of every page. Search, Characters, Notes, Ambience and the
   bookmark are in the ⋯ sheet, each a row with its icon. (Eight 44 px
   buttons are 464 px; a phone has 360.)
 - **The bottom** has the chapter, "‹ chapter name ›", and the progress bar,
@@ -133,10 +144,12 @@ gets (CSS px):
 
 - Height is what is short (eight or nine lines under a toolbar), so **all
   chrome hides** while reading, and the middle tap brings it.
-- **Layout per orientation**, each remembered: sideways defaults to **two
-  columns with pages** (a spread, like an open paperback); "one centred
-  column, scrolling" is the other choice. Upright keeps whatever the reader
-  chose. Type size is shared.
+- **One layout, kept as the phone turns**: Scroll or Pages is the reader's
+  choice either way up, and a turn never swaps one for the other (it used
+  to: each way up kept its own, and sideways defaulted to pages). Pages on
+  its side are **two columns** (a spread, like an open paperback). Only a
+  reader who has never chosen opens a book sideways in pages
+  (`layoutForShape`). Type size is shared.
 - **The toolbar is a strip down the right edge** when shown, under the
   thumb, instead of a bar costing a line of text. The chapter dock sits
   bottom left.
@@ -150,10 +163,17 @@ gets (CSS px):
   makes people hate auto-rotate.
 - **The place survives every turn**: the line at the top of the page before
   is on the page after.
+- **A turn is covered, and laid out once**: a veil in the page's own colour
+  goes over the page the moment the window changes shape, the book is laid
+  out once the window has settled at its new size (`TURN_SETTLE_MS`, less
+  once the screen says it has landed), the place is put back, and the veil
+  fades (200 ms; none with reduced motion). epub.js's own resize and
+  orientation handlers are off by a finger. Scroll and Pages swapped in Aa
+  get the same veil (readers/readerVeil.ts).
 
 ### Selecting, looking up, notes
 
-- **Press and hold** selects a word, as everywhere on Android; the handles
+- **Press and hold**, or three taps, selects a word, as everywhere on Android; the handles
   widen it. Leaflet's selection bar docks at the bottom (above the gesture
   bar), away from Android's own floating Copy bar near the text.
 - **The bar is one row of the five most used** (highlight in the last
@@ -233,6 +253,19 @@ phone.)
   control). Copy says "tap", not "Press Space"; Pause is a button.
 - **Double tap** on the burrow and the garden bed works as double-click
   does; the buttons that do the same stay.
+- **Sideways, by a finger (1.5.8)**: the camp is drawn a quarter larger than
+  the screen and is a window onto it (`base/camera.ts`): a drag looks about
+  (a little past the edges, springing back; a flick carries on), a double
+  tap on open ground or the round key comes home, a tap chooses, and a
+  hold of a moment picks a thing up to move it. A building tapped opens its
+  sheet (`base/siteSheet.ts`) as a card down the other side of the picture
+  (40 % wide at most), the camera moving just enough to keep the building
+  in view: what it does now, its next level, what that needs (acorns as
+  have / need, the Hollow's level), one key, and why not when pressed
+  anyway. The keys at the foot open lists of their shelf. The chips along
+  the top: the Hollow's level (its sheet), Pip's list, and the acorns (a tap
+  says what they are, what reading earns, what holds them). Three pointers
+  show once (`base/mapCoach.ts`).
 
 ## Social
 
@@ -324,6 +357,59 @@ picks or saves a file goes through the Android side:
   book the reader was in. In a debug build,
   `adb shell am broadcast -n com.leaflet.app/.ReminderBootReceiver -a com.leaflet.app.REMINDER_TEST --ei seconds 60`
   sends a sample through the alarm path a minute later.
+
+## Studio voice
+
+Leaflet's own read-aloud voice (Kokoro, run on the phone by sherpa-onnx), an
+optional download. On Android the phone's own voice stays the recommended
+one: a Studio voice is listed under its own heading and read in only when
+picked.
+
+- **Kotlin**: `StudioVoice.kt` makes and plays the speech; `ReadAloud.kt`
+  hands it the items (ids `neural:af_heart`, `neural:bf_emma`,
+  `neural:am_michael`) behind the same MediaSession, notification, audio
+  focus, headphones and service as the phone's voice. If it fails, the
+  phone's voice reads on from the same sentence. `StudioPace.kt` is the
+  arithmetic (tested by `app/src/test/.../StudioPaceTest.kt`, run with
+  `gradlew :app:testArm64DebugUnitTest`).
+- **The pack** is downloaded and checked by the Rust pack manager
+  (`apps/src-tauri/src/tts/packs.rs`) into `<dataDir>/voices/kokoro-v1/`; Kotlin
+  reads it there once `install.json` is written. After install the page runs
+  the self-test (`read_aloud` op `studioSelfTest`, recorded by
+  `studio_voice_record_self_test`).
+- **Pace**: r is the time to make speech over the time to say it (the
+  self-test's, then the last sentences made). r <= 0.85: it reads live. Up to
+  2.5 it **prepares the chapter first**: it starts once the made lead A holds
+  A >= D (1 - 1/r) 1.15 (D, what is left of the chapter), which keeps it
+  ahead to the chapter's end, shows "Preparing · m:ss" with "Use phone voice
+  now", and with the book open and the voice idle it prepares quietly
+  (only with Leaflet in front, not under 15% battery or on a hot phone).
+  Slower than 2.5, or under 3 GB of memory: not offered. For a 30-minute
+  chapter the first sound comes after about 6 s at r = 1.0, 10.4 min at
+  r = 1.3, and 34.5 min at r = 2.0.
+- **Prepared speech** is 16-bit PCM at 24 kHz in
+  `cache/studio-cache/<book>/<chapter>/`, one file per sentence, named by
+  voice, speed and text (so a sentence made earlier is used again), each
+  let go once said: at most 300 MB (less on a nearly full phone), cleared
+  when reading stops or the book closes, and after a day.
+- **Native code**: sherpa-onnx 1.13.8's `libsherpa-onnx-jni.so` and
+  `libonnxruntime.so`, from its official AAR. They must ship in the APK
+  (Play does not allow downloading code); only the voice pack is
+  downloaded. Run `apps\src-tauri\msix\fetch-sherpa-onnx.ps1` once
+  (`-Emulator` adds x86_64); it puts them in `gen/android/vendor/`
+  (git-ignored), and every build checks them by SHA-256
+  (`app/build.gradle.kts`) and downloads nothing. Without them the app
+  builds as before, with no Studio voice. The Kotlin side of the JNI
+  library is `com/k2fsa/sherpa/onnx/Tts.kt`, sherpa-onnx's own file
+  (Apache-2.0, its LICENSE beside it). arm64 goes in every debug build,
+  x86_64 in debug builds for the emulator; about 27 MB more in an arm64 APK
+  (stored uncompressed, as Android maps it; about 10 MB more to download).
+- **Not for the Store yet**: sherpa-onnx 1.x compiles espeak-ng (GPL-3.0)
+  in. A release build leaves the libraries out unless
+  `LEAFLET_STUDIO_VOICE=1` is set; don't set it for a Store build until
+  Leaflet moves to sherpa-onnx 2.0 (no espeak-ng; words come as phonemes
+  from Leaflet's own G2P: `StudioVoice.PHONEMES` and `generate` are the one
+  place to change).
 
 ## Not in this first round
 

@@ -54,6 +54,56 @@ name must match the reserved name exactly ("Leaflet Book Reader", as in
 
 ## What's new in this version
 
+For 1.5.10 (written on 2026-10-21). The Windows Store is on 1.5.6: put this
+first and the 1.5.9 text below it, within 1,500 characters:
+
+> The Hollow grows with your reading. Your camp now counts in chapters reached
+> by hours read, each bringing something new and a chest of acorns, and the
+> bar at the top shows how far you've read and what's next. Nothing expires:
+> the oak keeps everything it drops. Raids are easier to judge, with a plain
+> forecast and a free rematch; friends' raids are opt-in and just for fun.
+>
+> Pip's earned skins now unlock as you read: a 7-day streak earns Maple.
+>
+> Books open the moment you tap them, and auto-scroll is smoother.
+
+For 1.5.9 (written on 2026-10-19). The Windows Store is on 1.5.6, so this
+says what 1.5.7 to 1.5.9 bring; update the desktop and the phone together
+(both need 1.5.7 or later to agree on the streak):
+
+> A new look: liquid glass. On Windows 11 the window sits on Mica, the toolbar
+> and sidebar are clear glass that catches the light, and pages soften as they
+> scroll under a bar instead of stopping at a hard line.
+>
+> Reading: next and previous go chapter by chapter and land where they should;
+> the contents follow a book's parts and chapters; Smart Read glides a screen
+> at a time and pauses so you can find your line, and Dotty now stays on its
+> word while paused and carries on from it.
+>
+> One streak on every device, with a flame in the header that opens it.
+>
+> The Hollow is simpler: acorns are the one money, a tap on a building shows
+> what it needs, and collected acorns fly up to your count.
+>
+> Read aloud sounds more natural: whole paragraphs with real pauses, the word
+> being read lit as it is said, the best voice picked for you, and finer
+> speeds. Signing in is simpler.
+>
+> Report a problem from Settings, and free up space in Settings → Storage.
+
+For 1.5.7 (written on 2026-10-17). Update the desktop and the phone together:
+both need 1.5.7 to agree on the streak:
+
+> One streak on every device: your computer and your phone now work out your
+> streak the same way, from the same reading days and freezes, so they always
+> agree. A flame in the header opens your streak: the week, your freezes, a
+> Buy button, and the next milestone.
+>
+> Focus is simpler: every minute you read waters Pip's garden, and a Focus
+> session waters it twice as fast. One tap starts one.
+>
+> A book listed without its file now offers to connect Google Drive.
+
 For 1.5.6 (written on 2026-10-17; if 1.5.5 never went out, put this first
 and the 1.5.5 text below it, within 1,500 characters):
 

@@ -18,15 +18,27 @@ owner's statement to Google. The Microsoft Store's text is in
    first build is uploaded (Google keeps the key that signs what phones
    install; you keep the upload key).
 3. **The privacy policy published** at the address the listing gives, with its
-   **effective date set** for the 1.5 changes (the date at the top is still
-   4 October 2026).
+   **effective date set** (the top still says `[OWNER: …]`): run
+   `node site/build.mjs` (CI's Website workflow does it on a push to `main`)
+   and check `…/privacy/` and `…/delete-account/` load.
 4. **A release build**: `.\build-android.ps1 -Release` in
    `apps\src-tauri\msix`, with `build.env` (the Google Drive client, accounts
    and community switched on) and the signing key in place. Upload the
    `.aab`.
 5. **The desktop app from the same branch.** Sync between a computer and a
    phone needs 1.5 on both (docs/two-devices.md); a computer still on 1.4.2
-   counts a day read on both only once.
+   counts a day read on both only once. From 1.5.7 the streak is worked out
+   the same way on every device: ship the Windows 1.5.7 with the first Play
+   build, or a 1.5.6 computer and a 1.5.7 phone can show different streaks.
+6. **Google sign-in's consent screen in production.** Google Cloud Console →
+   APIs & Services → OAuth consent screen → **Publish app** (status "In
+   production"). In "Testing", only the listed test users can connect Drive,
+   and every sign-in **expires after 7 days**. Leaflet asks only for
+   `drive.file` (files it made), a non-sensitive scope, so no security review
+   is needed; Google may still ask to verify the app's name and logo (brand
+   verification, a few days) if the consent screen shows a logo.
+7. **The database backups running** ([backups.md](backups.md)) before the
+   first reader who is not a tester signs in.
 
 ## Store listing
 
@@ -120,8 +132,10 @@ on a duel are earned by reading and buy nothing outside the app).
 | Name (display name) | Yes, with an account | No | Yes | Account, app functionality (profile) |
 | User IDs (the `@handle`) | Yes, with an account | No | Yes | App functionality |
 | Other user-generated content (posts, reviews, quotes, threads, replies; highlights and notes inside the synced reading state) | Yes, with an account | No | Yes | App functionality |
-| App activity: other actions (reading places and history, reading minutes, streak, books finished, shelf titles, the book open now, level, badges, arcade scores, the camp's layout, likes, follows, reports, blocks) | Yes, with an account | No | Yes | App functionality |
+| App activity: other actions (reading places and history, reading minutes, streak, books finished, shelf titles, the book open now, level, badges, arcade scores, the camp's layout, likes, kudos and the post they were for, follows, reports, blocks) | Yes, with an account | No | Yes | App functionality |
 | Device or other IDs (a random per-installation identifier in the synced reading state) | Yes, with an account | No | Yes | App functionality (sync) |
+| App info and performance: crash logs and diagnostics (Report a problem: the reader's description, app version, platform, the diagnostics if left on) | Yes, only when the reader sends a report | No | Yes | App functionality (fixing what went wrong) |
+| Email address (a reply address typed into Report a problem while signed out) | Yes, only if typed | No | Yes | Developer communications |
 
 - **Book files (always), and reading state kept in Google Drive by a reader
   who is signed out**, go from the phone to the reader's own Drive and never
@@ -135,10 +149,22 @@ on a duel are earned by reading and buy nothing outside the app).
   stored or linked to the reader.
 - **Encrypted in transit:** yes (HTTPS). **Deletion:** yes, in the app
   (Settings → Account → Delete account) and by email.
+- **Delete account URL** (Data safety asks for one; a web page anyone can
+  use without the app):
+  `https://itsadithyakv.github.io/Leaflet-BookReader/delete-account/`
+  (built from `legal/delete-account.md`). It answers the follow-up questions
+  too: the in-app path, what is deleted, and what is kept for how long
+  (encrypted backups 14 days, never more than 30).
+- **Answering a deletion email:** reply to the address asking them to
+  confirm; once they do, delete it on the VM with
+  `src/tools/delete-account.js --email … --yes` (server/README.md,
+  "Deleting an account on request"), within 7 days, and reply that it is
+  done. The page promises both.
 - **Not collected:** location, financial information, health, messages,
   photos and videos, audio, files (beyond the above), calendar, contacts,
-  web browsing, crash logs (diagnostics are copied by the reader and sent
-  only if they choose to email them).
+  web browsing. Nothing is reported automatically: a problem report (and
+  its diagnostics) leaves the phone only when the reader presses Send, and
+  is deleted after 90 days.
 
 **Permissions** the app asks for, and why (Play asks for no declaration for
 these): `INTERNET` (the account, sync, look-ups), `POST_NOTIFICATIONS`
@@ -165,6 +191,66 @@ no declaration.
 
 **News app:** no. **Government app:** no. **Financial features:** none.
 **Health:** none.
+
+## The closed test (14 days, at least 12 testers)
+
+Play counts testers who have **opted in** and **kept the app installed**;
+the 14 days must run without a gap, and only testers opted in for the whole
+fortnight count. Have 15 to 20 opt in, so a few dropping out does not
+restart the clock.
+
+1. Make a Google Group (groups.google.com), e.g. `leaflet-testers`, and add
+   the testers' Gmail addresses (they need a Google account on the phone).
+2. Play Console → Testing → **Closed testing** → Create track → upload the
+   `.aab` → Testers: the Google Group → save, send for review.
+3. Once it is approved, copy the **opt-in link** and send it to the group.
+   Each tester opens it on the phone, presses **Become a tester**, then
+   installs from Play.
+4. Ask them to open Leaflet a few times over the two weeks (Play looks for
+   engagement) and to send what breaks: Settings → **Report a problem**
+   sends the report and diagnostics to the server (without a server, it
+   copies them for an email).
+5. After 14 days, Play Console → Dashboard → **Apply for production**; the
+   questions are about the test (how testers were found, what changed).
+   Review takes up to 7 days.
+
+An update during the test is fine (upload to the same track); it does not
+restart the 14 days.
+
+## Release notes for 1.5.10 (Play's "What's new", 500 characters)
+
+> The Hollow grows with your reading: chapters reached by hours read, each
+> with something new and a chest of acorns, and a bar showing what's next.
+> Nothing expires. Raids are easier to judge and never cost acorns; friends'
+> raids are opt-in and just for fun. Pip's earned skins now unlock (a 7-day
+> streak earns Maple). Books open at once, smoother auto-scroll, and Leaflet
+> asks for a rating after a good read.
+
+## Release notes for 1.5.9 (Play's "What's new", 500 characters)
+
+> Liquid glass: clear buttons, a floating tab bar, pages that soften under the
+> bars, and a redesigned landscape. Read aloud sounds natural: whole
+> paragraphs, real pauses, the word lit as it is said, the best voice picked
+> for you. Simpler sign-in. Next and previous land where they should; Dotty
+> holds its word when paused. The Hollow: tap a building for its card, pan the
+> map, acorns fly to your count.
+
+## Release notes for 1.5.8 (Play's "What's new", 500 characters)
+
+> A new look: frosted glass and softer motion everywhere. Double-tap for the
+> menu, triple-tap to select a word; scrolling never opens the menu. Next and
+> previous go chapter by chapter and land where they should, and the book no
+> longer jumps when the keyboard or a notification reply appears. Smart Read
+> glides a screen at a time and pauses so you can find your line. Report a
+> problem from Settings. Better covers for a series.
+
+## Release notes for 1.5.7 (Play's "What's new", 500 characters)
+
+> Reading on a phone, cleaned up: the edges of a dark page stay dark, the
+> buttons at the foot never overlap, sheets close with a swipe down, books
+> open in plain scrolling, and a double tap selects a word. One streak on
+> every device, with a flame that opens it, freezes to buy, and the next
+> milestone. Focus waters Pip's garden twice as fast, with one tap.
 
 ## Release notes for 1.5 (Play's "What's new", 500 characters)
 

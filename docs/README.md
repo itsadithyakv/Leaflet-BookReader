@@ -9,12 +9,14 @@ why it is built that way. Written for someone picking the codebase up cold.
 | [architecture.md](architecture.md) | The two halves, how they talk, where state lives |
 | [tech-stack.md](tech-stack.md) | Every dependency and what it is there for |
 | [features.md](features.md) | Each feature, end to end |
-| [pip.md](pip.md) | Pip, the reading companion: engine, world, moments, tour |
+| [pip.md](pip.md) | Pip, the reading companion: engine, world, moments, tour, and the Hollow |
+| [studio-voice.md](studio-voice.md) | The optional downloadable read-aloud voice (Kokoro via sherpa-onnx); not to ship before sherpa-onnx 2.0 |
 | [data-model.md](data-model.md) | SQLite schema, migrations, the sync document |
 | [building.md](building.md) | Desktop and Android builds, the traps |
 | [mobile.md](mobile.md) | The plan for the phone app: two devices as one, reading upright and sideways, Dotty by touch, signing in |
 | [release-msix.md](release-msix.md) | Packaging for the Microsoft Store and submitting |
 | [deploy.md](deploy.md) | The 1.0 run sheet: GitHub Pages, Atlas, the VM, the API, the Store build |
+| [backups.md](backups.md) | The server database's nightly encrypted backup: setup, checking it, the restore drill |
 | [release-notes-1.0.md](release-notes-1.0.md) | What 1.0 does, and its known issues |
 | [store-listing.md](store-listing.md) | Paste-ready Store description, features and search terms |
 | [testing.md](testing.md) | What is tested, what is not, and how to verify UI |
@@ -34,8 +36,9 @@ Three commitments shape most of the design decisions in here:
    self-hosted; nothing is fetched from a CDN at runtime.
 2. **Your books stay yours.** Book files and reading history live on the
    reader's device, and the backup goes to their own Google Drive. Leaflet's
-   server exists only for the optional account and leaderboards, and it never
-   receives book files or Google credentials.
+   server exists only for the optional account (leaderboards, friends, and a
+   signed-in reader's reading state across devices) and problem reports, and
+   it never receives book files or Google credentials.
 3. **One codebase, two platforms.** Desktop and mobile run identical Rust and
    identical React; the differences are a handful of `#[cfg(desktop)]` blocks and
    responsive CSS, not a fork.

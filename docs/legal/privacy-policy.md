@@ -29,7 +29,8 @@ and we never see your books.
   Accounts created before 1.2 were not changed: they stay private unless
   their owner shares them.
 - You can delete your account, and everything we hold about you, from
-  Settings at any time.
+  Settings at any time, or by email
+  ([how](https://itsadithyakv.github.io/Leaflet-BookReader/delete-account/)).
 
 ## What stays on your device
 
@@ -289,6 +290,29 @@ whether or not they follow each other: joining a club is agreeing to that.
 Readers with a private profile cannot be followed, sent kudos or challenged,
 and cannot post, join a club or send presents.
 
+## Problem reports (optional)
+
+When you choose **Report a problem** in Settings and press **Send**, Leaflet
+sends our server what you typed (up to 2,000 characters), the app's version
+and platform, and, unless you switch "Include diagnostics" off, the
+diagnostics: the app's version and build, the operating system and processor
+type, whether it is the Store package, Leaflet's folders on your device (with
+your home folder shown as `~`, so not your user name), the first six
+characters of the library's owner tag, the database version, how many books
+and focus sessions there are, which of Google Drive, a sync folder, a Leaflet
+account and book copies are switched on, the time and time zone, and the last
+200 lines of Leaflet's own log, which can name book files. The (i) beside the
+switch shows exactly what will be sent before you send it. It never contains
+your password, sign-in tokens, email address or the text of your books.
+
+If you are signed in, the report also carries your account's internal number
+and your handle. If you are not, you may add an email address for a reply;
+that is the only contact we keep. We do not store your IP address with it.
+Only we (Leaflet's administrator) can read reports. Each is deleted 90 days
+after it is sent, or sooner if we delete it, and at once if you delete your
+account. If you would rather email, "Email it instead" puts the same text on
+your clipboard and opens your email app.
+
 ## Other services Leaflet talks to
 
 - **Open Library and Wikipedia.** To fill in missing titles, authors and
@@ -330,6 +354,11 @@ and cannot post, join a club or send presents.
   your email address and the one-time code are passed to Google's Apps Script
   and sent from our Gmail account, so Google handles that email under its own
   privacy terms. Nothing else about you or your reading is included.
+- **Google Drive (our backups).** Every night an encrypted copy of our
+  server's database is kept in our own Google Drive, so that a fault cannot
+  lose your account and reading. It is encrypted before it leaves our server,
+  with a key that is kept offline and that neither Google nor our server
+  holds, so Google cannot read it.
 - **DuckDNS.** Our server's address, `leafletapp.duckdns.org`, is provided by
   DuckDNS, which only translates the name into the server's IP address.
 - **Microsoft Store.** The Store handles downloads and updates of the app under
@@ -363,7 +392,7 @@ present is kept until it is unwrapped and for 30 days after; a request to
 follow until it is answered or withdrawn; a post, a thread or a reply until
 you remove it (or we do); a like, a block and your community memberships
 until you take them back; a report until it has been dealt with and for 180
-days after; a book
+days after; a problem report you send for 90 days; a book
 club until its last member leaves. Making
 your profile private hides you from boards, inboxes, duels, feeds and clubs
 straight away, removes the reading figures, shelf, badges and scores stored
@@ -372,8 +401,12 @@ your posts are kept, unseen, and show again if you share your profile again.
 When you delete your account from
 Settings, we delete your account, profile, synced reading state, all sign-in
 sessions, your shared library, your posts and your club memberships, and
-every follow, request, kudos, duel, present and notification that involves
-you, straight away. Where you appear in another reader's kudos lists, what
+every follow, request, kudos, duel, present, notification and problem report
+that involves you, straight away. The encrypted nightly backups of our database are kept
+for 14 days (never more than 30), so a deleted account leaves them as they
+expire; we keep the internal number of a deleted account (nothing else
+about it) for 45 days, so that if we ever restore a backup we delete the
+account from it again. Where you appear in another reader's kudos lists, what
 is left is an internal number that no longer leads to anyone, so the badge
 they earned stays theirs.
 
@@ -381,7 +414,9 @@ they earned stays theirs.
 
 From inside the app you can see and change what is shared, make your profile
 private (or choose that when you create your account), sign out of a device, change your password, and delete your account.
-You can also contact us to ask for a copy of your data or for its deletion.
+You can also contact us to ask for a copy of your data or for its deletion;
+[this page](https://itsadithyakv.github.io/Leaflet-BookReader/delete-account/)
+says how to delete your account without the app.
 Depending on where you live, you may have further rights under laws such as the
 GDPR or the CCPA; contact us and we will help.
 
@@ -396,6 +431,13 @@ contact us and we will delete it.
 If this policy changes, we will update the date above and, for significant
 changes, say so in the app.
 
+- **18 October 2026:** problem reports sent from the app (what you type, and
+  diagnostics unless you leave them out), kept 90 days.
+- **17 October 2026:** encrypted nightly backups of our server's database,
+  kept in our own Google Drive for 14 days (never more than 30); the
+  internal number of a deleted account is kept for 45 days so that a restored
+  backup cannot bring the account back; a web page for deleting an account
+  without the app.
 - **Leaflet 1.5.3:** while you are signed in to a Leaflet account, your
   reading state (places, reading days, highlights, notes, bookmarks,
   collections and Pip) is always kept with the account on our server, compressed

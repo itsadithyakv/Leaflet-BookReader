@@ -1,29 +1,54 @@
 # Leaflet
 
-A calm ebook reader for Windows that turns reading into a daily habit, with
-Pip, a pixel-art companion who lives in the app. Built with Tauri 2, Rust and
-React. Free on the Microsoft Store, with nothing locked; a paid mobile app comes
-later. Made by PaperKite.
+A calm ebook reader for Windows and Android that turns reading into a daily
+habit, with Pip, a pixel-art companion who lives in the app. Built with Tauri 2,
+Rust and React. Free on the Microsoft Store, with nothing locked; the Android
+app is on its way to Google Play. Made by PaperKite.
 
 Website, privacy policy and terms: https://itsadithyakv.github.io/Leaflet-BookReader/
 
 ## What it does
 
 - **Library.** EPUB, PDF, comics and plain text open directly; MOBI, AZW3 and
-  others convert through an optional Calibre install. Metadata and covers fill in
-  from Open Library and Wikipedia, cached for offline use.
-- **Reading.** A scroll reader with chapters and bookmarks, auto-scroll, Smart
-  Read (Dotty, the adaptive pacing dot) and RSVP speed reading, and several paper
-  finishes.
+  others convert through an optional Calibre install on desktop. Metadata and
+  covers fill in from Open Library and Wikipedia, cached for offline use. Rust
+  makes small cover thumbnails, so a big library scrolls smoothly on a phone.
+- **Reading.** A scroll reader and a page reader with chapters, bookmarks and
+  highlights; auto-scroll, Smart Read (Dotty, the adaptive pacing dot), RSVP
+  speed reading and several paper finishes. The screen stays awake for three
+  minutes after your last touch while a book is paused.
+- **Read aloud.** Paragraph by paragraph with natural pauses, the best voice
+  on the device picked for you, and a speed setting. An optional Studio voice
+  (Kokoro, downloaded from Settings) is in development and will ship once its
+  engine is free of GPL code; see [studio-voice.md](docs/studio-voice.md).
 - **A habit.** A daily goal, streaks with freezes and a grace day, focus
   sessions, and a session bookshelf where every spine is a session you finished.
 - **Pip.** Lives in the header logo, hops out to walk the app, celebrates your
   goals (usually by boxing), gives the tour, and can be picked up and thrown.
+- **Pip's Hollow.** A small camp paid for by reading: acorns from the minutes
+  you read, new chapters from the hours. Build, defend at night while you
+  watch, and raid strongholds and (if they allow it) friends' camps. Nothing
+  expires and nothing happens while you are away.
 - **Backup.** Your library and history, backed up to your own Google Drive with
   the `drive.file` scope: Leaflet only sees files it created.
-- **Optional account and leaderboards.** Email and password on PaperKite's
-  server, for weekly leaderboards, follows, kudos and reading duels. Nothing else
-  needs an account.
+- **Optional account.** Email and password on PaperKite's server, for weekly
+  leaderboards, follows, kudos, reading duels, friend raids and keeping your
+  place across devices. Nothing else needs an account, and the account can be
+  deleted from the app.
+- **Looks.** A Liquid Glass look on desktop (soft blur at scroll edges, glass
+  that bends what is behind it). Phones default to Smooth, the same look
+  without live blur; Settings > Appearance > Visual effects switches between
+  Full, Smooth and a plain minimal mode.
+
+### Coming in 1.5.11
+
+- **The Front.** The Hollow's enemies all come down one trail from the Dark
+  Wood, so the wall across it, the traps in front and the towers behind make
+  sense at a glance. Six kinds of enemy (including bombers that blow the wall
+  open and diggers that go under it), each with one defence that beats it.
+- **Your reading, made visible.** The minutes you read arrive as pages that
+  become acorns and fill the chapter bar; every finished book blooms on a
+  Reading Path in the meadow; standing stones carry your hours past chapter 10.
 
 The documentation is in [docs/](docs/README.md): start with
 [product.md](docs/product.md) for what ships, and
@@ -100,48 +125,25 @@ Deeper documentation lives in [`docs/`](docs/README.md): architecture, the full
 tech stack, every feature end to end, the data model and sync document, build
 instructions for both platforms, and what is and is not tested.
 
-## Key Pipelines
+## Tech stack
 
-### Import + Convert + Metadata
-1. User imports books (EPUB/PDF/AZW3/MOBI).
-2. Non-EPUB formats are converted when possible via the bundled converter.
-3. Books are stored locally in the library.
-4. Metadata refresh attempts fill missing title/author/cover info.
-5. Cover artwork is cached locally for offline use.
+- **Tauri 2** shell, with the heavy lifting in **Rust**: the library, sync,
+  conversion, cover thumbnails and the Studio voice engine.
+- **React + TypeScript** UI with **Zustand** state and **Tailwind**, one
+  responsive layout for desktop and phone.
+- **epub.js** for EPUB; a page reader for PDF and comics.
+- **Kotlin** plugins on Android (read aloud, device features).
+- **Node.js** server for accounts and the social side (`server/`).
 
-### Reading Progress
-1. Reader updates progress as the user reads.
-2. Progress is stored in the library store and persisted locally.
-3. Library cards show completion percentage and “Finished” when complete.
+See [tech-stack.md](docs/tech-stack.md), [architecture.md](docs/architecture.md)
+and [testing.md](docs/testing.md).
 
-### Reader Experience
-1. EPUB content is rendered in the reader view.
-2. Theme, typography, and layout are applied consistently.
-3. Optional reader dot marks the last read line after a short idle delay.
-4. Auto-scroll and font sizing are controlled from reader settings.
-5. Sidebar open/close uses eased transitions with a masked layout freeze to avoid text reflow flashes.
+## Local storage and data
 
-### Focus Sessions + Bookshelf
-1. User starts a timed focus session.
-2. Checkpoints (50/90/100%) prompt gentle toasts.
-3. On completion, a bookshelf item is created with session metadata.
-4. Clean sessions receive a visual bonus.
-
-## Tech Stack
-
-- **Tauri** (desktop shell)
-- **React + TypeScript** (UI)
-- **Zustand** (state management)
-- **epub.js** (EPUB rendering)
-
-## Local Storage + Data
-
-- Library, reader preferences, and bookmarks are stored locally.
-- Covers are cached in the app data directory for offline use.
-
-## Notes
-
-- EPUB reading is supported in the reader.
-- PDF files are stored in the library and can be imported; reader support is focused on EPUB.
-- Converter download is optional in dev; enable with `LEAFLET_AUTO_DOWNLOAD_CONVERTER=1`.
-
+- The library, reading progress, preferences, highlights and Pip's state live
+  on the device, in the app data folder.
+- Covers and thumbnails are cached there for offline use.
+- Converter download is optional in dev; enable it with
+  `LEAFLET_AUTO_DOWNLOAD_CONVERTER=1`.
+- Builds include the Studio voice only with `LEAFLET_STUDIO_VOICE=1`; Store
+  builds leave it out.
