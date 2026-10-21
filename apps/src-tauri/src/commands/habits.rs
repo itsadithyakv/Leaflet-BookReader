@@ -292,6 +292,15 @@ pub(crate) fn credit_reading(
         if let Err(reason) = cheer_pip_for_reading(db, date_key, minutes) {
           crate::diag::warn(&format!("reading credited to {date_key}, but Pip was not cheered up: {reason}"));
         }
+        // Read now, in the morning or at night? The early bird and the night
+        // owl ask (`pip::earned`). Only for minutes credited as they are read:
+        // a late minute from an earlier day has lost its hour.
+        let now = chrono::Local::now().naive_local();
+        if date_key == now.format("%Y-%m-%d").to_string() {
+          if let Err(reason) = note_reading_hour(db, now) {
+            crate::diag::warn(&format!("reading credited, but its hour was not noted: {reason}"));
+          }
+        }
       }
       Err(reason) => crate::diag::warn(&format!("reading minutes not credited to {date_key}: {reason}"))
     }

@@ -1,5 +1,6 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import { isAndroid } from "./device";
+import { androidVersion, deviceNoun, isAndroid } from "./device";
+import { expectTurn } from "./shape";
 
 /**
  * What only the Android side can do, for the rest of the app to call without
@@ -27,8 +28,26 @@ export const onAndroid = () => isAndroid() && isTauri();
 type Hold = { id: number; lock: RotationLock };
 const holds: Hold[] = [];
 let holdId = 0;
+let appliedLock: RotationLock = "auto";
+/**
+ * Whether the screen turns when a hold asks it to. From Android 16, a tablet (600 dp or more on its short side, a
+ * foldable open) lays out an app that targets it however the reader holds it, and a hold does nothing: the shell
+ * waited for a turn that never came, the veil over the app for TURN_WAIT_MS each time Pip's tab was opened upright.
+ */
+export const holdsTurnScreen = () => !(deviceNoun() === "tablet" && androidVersion() >= 16);
 const applyHolds = () => {
-  void call("lock_rotation", { lock: holds.length > 0 ? holds[holds.length - 1].lock : "auto" });
+  const lock = holds.length > 0 ? holds[holds.length - 1].lock : "auto";
+  // The screen is about to turn (or may: a hold let go is the phone's to say): the shell waits for it
+  // rather than drawing the way it was for a moment (platform/shape.ts). Pip's sideways let go was the rail's flash.
+  // A hold let go on a phone: it is most likely held upright again (Pip's tab is left for the library), so the shell
+  // takes the sizes a turn passes through for what they are; held on its side after all, the turn is let go of.
+  if (lock !== appliedLock && onAndroid() && holdsTurnScreen()) {
+    if (lock !== "auto") expectTurn(lock);
+    else if (deviceNoun() === "phone") expectTurn("portrait", { guess: true });
+    else expectTurn(null);
+  }
+  appliedLock = lock;
+  void call("lock_rotation", { lock });
 };
 
 /** Holds the screen one way up until the returned function is called. Use from an effect. */
@@ -42,6 +61,75 @@ export const holdRotation = (lock: RotationLock): (() => void) => {
     if (at >= 0) holds.splice(at, 1);
     applyHolds();
   };
+};
+
+/**
+ * Whether the status and navigation bars are drawn for a light page (dark
+ * icons) or a dark one (light icons). Android would follow the phone's dark
+ * mode; Leaflet's own theme sets the look, and an open book holds its page's
+ * look over that (the newest hold wins, as with the rotation).
+ */
+type BarHold = { id: number; light: boolean };
+const barHolds: BarHold[] = [];
+let appBarsLight = true;
+const applyBarLook = () => {
+  const light = barHolds.length > 0 ? barHolds[barHolds.length - 1].light : appBarsLight;
+  void call("set_bar_look", { light });
+};
+
+/** Holds the bars' look (light: dark icons) until the returned function is called. */
+export const holdBarLook = (light: boolean): (() => void) => {
+  holdId += 1;
+  const hold = { id: holdId, light };
+  barHolds.push(hold);
+  applyBarLook();
+  return () => {
+    const at = barHolds.findIndex((entry) => entry.id === hold.id);
+    if (at >= 0) barHolds.splice(at, 1);
+    applyBarLook();
+  };
+};
+
+/**
+ * The activity's night mode, which colours what Android draws for the page
+ * (a `<select>`'s list): the app's theme, or the phone's when the app follows
+ * it; an open book holds its page's over that (a True black page with a light
+ * app has a dark list), the newest hold winning, as with the bars.
+ */
+type NightMode = "light" | "dark" | "system";
+type NightHold = { id: number; mode: "light" | "dark" };
+const nightHolds: NightHold[] = [];
+let appNightMode: NightMode = "system";
+const applyNightMode = () => {
+  const mode = nightHolds.length > 0 ? nightHolds[nightHolds.length - 1].mode : appNightMode;
+  void call("set_night_mode", { mode });
+};
+
+/** Holds the night mode (a dark page: "dark") until the returned function is called. */
+export const holdNightMode = (mode: "light" | "dark"): (() => void) => {
+  holdId += 1;
+  const hold = { id: holdId, mode };
+  nightHolds.push(hold);
+  applyNightMode();
+  return () => {
+    const at = nightHolds.findIndex((entry) => entry.id === hold.id);
+    if (at >= 0) nightHolds.splice(at, 1);
+    applyNightMode();
+  };
+};
+
+/**
+ * A book holds the night mode: the WebView's `prefers-color-scheme` may say
+ * the page's, not the phone's, until it lets go.
+ */
+export const nightModeHeld = () => nightHolds.length > 0;
+
+/** The app's theme, for Android: the bars' look and the night mode when no book holds them. */
+export const followAppTheme = (theme: "light" | "dark", followSystem: boolean) => {
+  appBarsLight = theme === "light";
+  applyBarLook();
+  appNightMode = followSystem ? "system" : theme;
+  applyNightMode();
 };
 
 const call = async <T>(command: string, args?: Record<string, unknown>): Promise<T | null> => {

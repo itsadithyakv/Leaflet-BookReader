@@ -214,7 +214,8 @@ pub(crate) async fn publish_profile(state: &State<'_, AppState>, force: bool) ->
       cloud::remember_visibility(&db, &profile.visibility);
       VISIBILITY_CONFIRMED.store(true, Ordering::Relaxed);
     }
-    Some(answer.map(|profile| profile.visibility == "public").map_err(|e| e.to_string()))
+    let shown = answer.map(|profile| cloud::visibility_shown(&profile.visibility));
+    Some(shown.map_err(|e| e.to_string()))
   } else {
     None
   };
@@ -340,7 +341,8 @@ pub(crate) fn shared_now(known: Option<bool>, asked: Option<Result<bool, String>
   }
 }
 
-/// Publishes this week's minutes, streak and shelf for a public profile.
+/// Publishes this week's minutes, streak and shelf for a shared profile
+/// (public, or kept to followers).
 ///
 /// This used to happen only at the end of a backup, and a backup needs Drive:
 /// a public reader without Drive stayed frozen on the board at whatever they
@@ -410,7 +412,7 @@ pub async fn save_social_profile(
 ) -> Result<cloud::Profile, String> {
   // Shared with everyone or kept to followers: either way the figures go up
   // with the switch, so the profile is never a week behind it.
-  let going_public = matches!(visibility.as_deref(), Some("public") | Some("followers"));
+  let going_public = visibility.as_deref().is_some_and(cloud::visibility_shown);
   // Handles are shown with an "@" and stored without one.
   let handle = handle.map(|value| bare_handle(&value));
   let renamed = display_name.clone();

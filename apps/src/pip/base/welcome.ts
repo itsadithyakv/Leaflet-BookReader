@@ -32,7 +32,6 @@ import {
   WELCOME_PAWS,
   WELCOME_WINDFALL,
   basketOpens,
-  build,
   jobOn,
   type BaseState,
   type Site
@@ -69,14 +68,16 @@ export const openWelcomeBasket = (state: BaseState, day: string): BaseState =>
 
 /**
  * A helping paw: what is going up on a site is finished at once (`settle`
- * raises it), and if nothing is, the site is built first, as `build` would
- * (paid for in acorns, as ever). Unchanged, the same object, when no paw is
- * left or nothing can go up there. The job's start stays where it was and
- * no minute is added anywhere: the paw only says the job wants no more.
+ * raises it). Unchanged, the same object, when no paw is left or nothing is
+ * going up there. The job's start stays where it was and no minute is added
+ * anywhere: the paw only says the job wants no more.
  */
-export const pawFinish = (state: BaseState, site: Site, minutesRead: number, mood?: number): BaseState => {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export const pawFinish = (state: BaseState, site: Site, _minutesRead?: number, _mood?: number): BaseState => {
   if (state.welcome.paws <= 0) return state;
-  const begun = jobOn(state, site) ? state : site === "yard0" || site === "yard1" ? state : build(state, site, minutesRead, undefined, mood);
+  // Since 1.5.8 a building stands as soon as it is paid for (`build`), so a paw has only ever a job kept from before
+  // to finish; with nothing going up there it does nothing (it used to build first, which would now be a second level).
+  const begun = state;
   const job = jobOn(begun, site);
   if (!job) return state;
   return {

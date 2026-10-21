@@ -22,14 +22,15 @@ describe("Pip's menu, where her tab fills a phone on its side", () => {
     expect(PIP_MENU_PLACES.map((place) => place.id)).toEqual(["library", "collections", "social"]);
   });
 
-  it("uses the query the CSS hides the header and rail by", async () => {
+  it("uses the query and the shape the CSS hides the header and rail by", async () => {
     // Read from disk (a CSS import is emptied under the test runner); named so the app's types need no Node.
     const fs = (await import(/* @vite-ignore */ ["node", "fs"].join(":"))) as { readFileSync: (path: URL, encoding: "utf8") => string };
     const css = fs.readFileSync(new URL("../../components/pip/touch.css", import.meta.url), "utf8");
     const block = css.slice(css.indexOf(`@media ${PIP_FULL_SCREEN_QUERY} {`));
     expect(block.length).toBeLessThan(css.length);
     const rules = block.slice(0, block.indexOf("\n}\n"));
-    expect(rules).toContain(".app-shell:has(.pip-house-page) .app-header");
-    expect(rules).toContain(".app-shell:has(.pip-house-page) .sidebar-stage");
+    // A phone on its side by its steady shape (platform/shape.ts), not a window made short by the keyboard.
+    expect(rules).toContain('html[data-pip-page]:where([data-shape="sideways"]) .app-shell .app-header');
+    expect(rules).toContain('html[data-pip-page]:where([data-shape="sideways"]) .app-shell .sidebar-stage');
   });
 });

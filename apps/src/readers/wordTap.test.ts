@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { WORD_TAP_MS, dropHeldTap, holdForSecondTap, isQuickTap, isWordDoubleTap, letHeldTapGo, wordAround } from "./wordTap";
+import { describe, expect, it } from "vitest";
+import { wordAround } from "./wordTap";
 
 const word = (text: string, at: number) => {
   const found = wordAround(text, at);
@@ -54,60 +54,5 @@ describe("wordAround", () => {
     const text = "😀 word";
     expect(word(text, 4)).toBe("word");
     expect(wordAround(text, 4)).toEqual({ start: 3, end: 7 });
-  });
-});
-
-describe("isWordDoubleTap", () => {
-  const first = { at: 1000, x: 100, y: 200 };
-  it("is two taps close in time and place", () => {
-    expect(isWordDoubleTap(first, { at: 1000 + WORD_TAP_MS, x: 110, y: 210 })).toBe(true);
-    expect(isWordDoubleTap(first, { at: 1150, x: 100, y: 200 })).toBe(true);
-  });
-  it("is not two taps too far apart in time, or on the page", () => {
-    expect(isWordDoubleTap(first, { at: 1001 + WORD_TAP_MS, x: 100, y: 200 })).toBe(false);
-    expect(isWordDoubleTap(first, { at: 1100, x: 140, y: 200 })).toBe(false);
-    expect(isWordDoubleTap(null, { at: 1100, x: 100, y: 200 })).toBe(false);
-    expect(isWordDoubleTap(first, { at: 900, x: 100, y: 200 })).toBe(false);
-  });
-  it("only counts taps, not holds or drags", () => {
-    expect(isQuickTap(120, 3)).toBe(true);
-    expect(isQuickTap(500, 3)).toBe(false);
-    expect(isQuickTap(120, 20)).toBe(false);
-  });
-});
-
-describe("the first tap's work, held", () => {
-  afterEach(() => vi.useRealTimers());
-
-  it("runs once the moment for a second tap has passed", () => {
-    vi.useFakeTimers();
-    const key = {};
-    const run = vi.fn();
-    holdForSecondTap(key, run);
-    vi.advanceTimersByTime(WORD_TAP_MS - 1);
-    expect(run).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(1);
-    expect(run).toHaveBeenCalledTimes(1);
-  });
-
-  it("is dropped by a double tap", () => {
-    vi.useFakeTimers();
-    const key = {};
-    const run = vi.fn();
-    holdForSecondTap(key, run);
-    dropHeldTap(key);
-    vi.advanceTimersByTime(WORD_TAP_MS * 2);
-    expect(run).not.toHaveBeenCalled();
-  });
-
-  it("goes at once, and in order, when another tap is not a double", () => {
-    vi.useFakeTimers();
-    const key = {};
-    const order: string[] = [];
-    holdForSecondTap(key, () => order.push("first"));
-    letHeldTapGo(key);
-    holdForSecondTap(key, () => order.push("second"));
-    vi.advanceTimersByTime(WORD_TAP_MS * 2);
-    expect(order).toEqual(["first", "second"]);
   });
 });

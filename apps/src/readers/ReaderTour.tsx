@@ -22,6 +22,25 @@ export const readerTourSeen = () => {
   }
 };
 
+/** The taps' hint, said once on a touch screen (text/useReaderPanels.ts, `useFirstOpen`). */
+const TAP_HINT_KEY = "leaflet.reader.tapHintSeen";
+
+export const tapHintSeen = () => {
+  try {
+    return localStorage.getItem(TAP_HINT_KEY) === "1";
+  } catch {
+    return true;
+  }
+};
+
+export const setTapHintSeen = () => {
+  try {
+    localStorage.setItem(TAP_HINT_KEY, "1");
+  } catch {
+    // This session only.
+  }
+};
+
 export const setReaderTourSeen = (seen: boolean) => {
   try {
     if (seen) {
@@ -139,8 +158,9 @@ export const ReaderTour = ({ paged, onStep, onClose, onTrySmartRead }: ReaderTou
       art: <ContentsArt />,
       body: touch ? (
         <>
-          Tap the middle of the page for the toolbar, then the <strong>list</strong> button, or the chapter's name
-          at the foot of the page. Tap the sides of a page to turn it.
+          Double-tap the page for the toolbar, then the <strong>list</strong> button, or the
+          chapter's name at the foot of the page. Tap the sides of a page to turn it; tap a word
+          three times to select it.
         </>
       ) : (
         <>

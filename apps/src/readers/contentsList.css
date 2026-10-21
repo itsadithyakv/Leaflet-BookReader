@@ -598,7 +598,7 @@
     display: none;
   }
 
-  .reader-sidebar .reader-toc-set {
+  .reader-sidebar .reader-toc-set-edges {
     margin-top: 0.5rem;
   }
 
@@ -607,4 +607,26 @@
     padding-top: 6px;
     padding-bottom: 5px;
   }
+}
+
+/* The chapter list reads down its left edge, parts and the chapters set in
+   under them (ContentsList.tsx). By finger `.reader-icon` centres what is in
+   a button (index.css, "touch targets"), and the list came out as one
+   centred column, parts and chapters alike. */
+.reader-chapter-link.reader-icon {
+  justify-content: flex-start;
+  text-align: left;
+}
+
+/* A part, over its chapters: quieter and smaller, a little apart from the
+   chapter before it. */
+.reader-chapter-link.reader-toc-part {
+  margin-top: 10px;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.reader-chapter-link.reader-toc-part:not(.reader-chapter-active) {
+  opacity: 0.78;
 }

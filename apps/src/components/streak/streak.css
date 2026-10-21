@@ -325,6 +325,27 @@
   color: rgb(var(--color-on-surface-variant));
 }
 
+/* "Buy a freeze" when one cannot be bought: a disabled key to look at, still tappable, so a tap
+   can say why (StreakPanel). It does not press in. */
+.pip-key.pip-key[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.pip-key.pip-key[aria-disabled="true"]:hover {
+  background: var(--hud-face);
+}
+
+.pip-key.pip-key[aria-disabled="true"]:active {
+  transform: none;
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 5px 0 0 var(--hud-lip);
+}
+
 /* ---- Moments ---------------------------------------------------------------------------------- */
 
 .streak-moment {

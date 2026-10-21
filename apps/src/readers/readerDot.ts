@@ -1,4 +1,12 @@
-/** Dotty, the marker beside the line being read: where it may sit. */
+/** Dotty, the marker beside the line being read: where it may sit, and when it shows. */
+
+/**
+ * Whether Dotty shows: in Smart Read, where it reads, and while the
+ * walkthrough introduces it. In Standard reading (and SpeedRead) it is out of
+ * sight, where it was: back in Smart Read it is there again.
+ */
+export const dottyShows = (mode: "standard" | "smart" | "speed", introduced: boolean) =>
+  mode === "smart" || introduced;
 
 /**
  * Whether Dotty has been left below the end of the chapters on the page.

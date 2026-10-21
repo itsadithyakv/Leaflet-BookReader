@@ -10,6 +10,13 @@
  *
  * A replay from the (i) is a demo: every step is a "next", nothing can be
  * built or opened from it, and it grants nothing.
+ *
+ * Since 1.5.10 it is four steps, all in the Hollow: the oak, the larder, the
+ * basket, and the reading that ends the first chapter. Pip's hello is said
+ * with the oak; the burrow grows by itself with the chapters, and the door,
+ * the hat and the seeds are the house's own first walk (walkSteps.ts). The
+ * old steps keep their numbers (a camp keeps where it had got to), and a
+ * camp saved on one of them carries on from the next step there is.
  */
 import type { CampWelcome } from "./welcomeApi";
 
@@ -17,17 +24,23 @@ export const STEP = { hello: 0, oak: 1, larder: 2, basket: 3, burrow: 4, door: 5
 export type StepId = keyof typeof STEP;
 export const STEP_COUNT = 8;
 
+/** The steps there are, in order (1.5.10). */
+export const ORDER: readonly number[] = [STEP.oak, STEP.larder, STEP.basket, STEP.bridge];
+
 /** What Pip says. Short, in her voice; each goes when its step is done. */
 export const LINES: Record<StepId, string> = {
   hello: "this is my hollow! it's a bit bare. let's fix that.",
-  oak: "i shook the oak for you. tap it!",
-  larder: "a larder keeps more acorns. build it here.",
+  oak: "this is my hollow! i shook the oak for you. tap it!",
+  larder: "now a larder, for all those acorns. build it here!",
   basket: "oh! a welcome basket. for you.",
   burrow: "now my burrow. make it bigger!",
   door: "come in! wipe your feet.",
   hat: "spend seeds on me? a hat, maybe…",
-  bridge: "read a little and my oak fills up. your first read sends a big parcel!"
+  bridge: "read a little and your first chapter ends: scouts arrive!"
 };
+
+/** The last step's line, with the reading still to do before the first chapter ends ("1 h", "45 m"). */
+export const bridgeLine = (toGo: string | null) => (toGo ? `read ${toGo} and your first chapter ends: scouts arrive!` : LINES.bridge);
 
 /**
  * What Pip says in a replay from the (i), on a camp that is built already:
@@ -35,13 +48,13 @@ export const LINES: Record<StepId, string> = {
  */
 export const REPLAY_LINES: Record<StepId, string> = {
   hello: "let me show you round again!",
-  oak: "reading fills my oak. tap it for acorns.",
+  oak: "let me show you round again! reading fills my oak: tap it for acorns.",
   larder: "the larder keeps what the oak gives.",
   basket: "parcels from your reading wait by my door.",
   burrow: "raise my burrow and the clearing grows.",
   door: "tap my door to come inside.",
   hat: "spend seeds on me in the shop.",
-  bridge: LINES.bridge
+  bridge: "every hour you read is a chapter of the camp, and each brings something new."
 };
 
 /** Lines for a moment within a step. */
@@ -111,13 +124,22 @@ export const stepDone = (step: number, world: World, tapped = false): boolean =>
  * already. Never back: a step once passed is not asked again.
  */
 export const resolveStep = (saved: number, world: World): number => {
-  let step = Math.max(0, Math.min(STEP_COUNT - 1, Math.floor(saved)));
-  while (step < STEP_COUNT - 1 && advancesBy(step) === "doing" && stepDone(step, world)) step++;
-  return step;
+  const at = Math.max(0, Math.min(STEP_COUNT - 1, Math.floor(saved)));
+  // The first step there is from where the camp had got to (an old step's number goes on to the next one there is).
+  let index = ORDER.findIndex((step) => step >= at);
+  if (index < 0) index = ORDER.length - 1;
+  while (index < ORDER.length - 1 && advancesBy(ORDER[index]) === "doing" && stepDone(ORDER[index], world)) index++;
+  return ORDER[index];
+};
+
+/** The step after this one, or null after the last. */
+export const nextOf = (step: number): number | null => {
+  const index = ORDER.findIndex((entry) => entry > step);
+  return index < 0 ? null : ORDER[index];
 };
 
 /** The steps a demo walks through: the ones out in the camp. (Inside, the house has its own walk.) */
-export const DEMO_STEPS: readonly number[] = [STEP.hello, STEP.oak, STEP.larder, STEP.basket, STEP.burrow, STEP.door, STEP.bridge];
+export const DEMO_STEPS: readonly number[] = ORDER;
 export const nextDemo = (step: number): number | null => {
   const at = DEMO_STEPS.indexOf(step);
   return at < 0 || at === DEMO_STEPS.length - 1 ? null : DEMO_STEPS[at + 1];

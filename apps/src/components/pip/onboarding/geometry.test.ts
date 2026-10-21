@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GAME_W } from "../arcade/games";
-import { doorBox, inDoor, letThrough, overlap, pad, placeBubble, placePaw, sceneToScreen, siteBox, whole, type Rect } from "./geometry";
+import { bubbleCovers, bubbleStays, doorBox, inDoor, letThrough, overlap, pad, placeBubble, placePaw, sceneRectOf, sceneToScreen, siteBox, whole, type Rect } from "./geometry";
 
 const BURROW: [number, number] = [150, 90];
 const PHONE: Rect = { left: 0, top: 0, width: 740, height: 360 };
@@ -97,5 +97,47 @@ describe("Pip's bubble", () => {
     const below = placePaw({ left: 100, top: 10, width: 40, height: 20 }, { width: 27, height: 33 }, PHONE);
     expect(below.up).toBe(true);
     expect(below.top).toBeGreaterThanOrEqual(30);
+  });
+});
+
+describe("the clearing on a phone, where the canvas is a window onto it", () => {
+  const canvas = (rect: { left: number; top: number; width: number }, data: Record<string, string>) =>
+    ({ getBoundingClientRect: () => ({ ...rect, height: 0 }), dataset: data }) as unknown as HTMLCanvasElement;
+
+  it("is where the whole clearing would be, from the camera's place and scale", () => {
+    // Four CSS pixels to the art pixel, the camera 24 across and 30 down: the clearing starts 96 and 120 px off the canvas.
+    expect(sceneRectOf(canvas({ left: 0, top: 0, width: 800 }, { scale: "4", camX: "24", camY: "30" }))).toEqual({ left: -96, top: -120, width: 960 });
+    // A thing in it lands where the camera shows it.
+    const box = sceneToScreen({ x: 120, y: 80, w: 10, h: 10 }, sceneRectOf(canvas({ left: 0, top: 0, width: 800 }, { scale: "4", camX: "24", camY: "30" })));
+    expect(box).toEqual({ left: (120 - 24) * 4, top: (80 - 30) * 4, width: 40, height: 40 });
+  });
+
+  it("is the canvas itself where it shows the whole clearing", () => {
+    expect(sceneRectOf(canvas({ left: 10, top: 20, width: 720 }, {}))).toEqual({ left: 10, top: 20, width: 720 });
+  });
+});
+
+describe("a bubble once it is up", () => {
+  const bounds = { left: 0, top: 0, width: 915, height: 412 };
+  const bubble = { left: 348, top: 120, width: 220, height: 80 };
+
+  it("stays where it is while what it points at moves a little (the camera easing to the basket)", () => {
+    const basket = { left: 300, top: 230, width: 40, height: 40 };
+    expect(bubbleStays(bubble, bounds, basket)).toBe(true);
+    expect(bubbleStays(bubble, bounds, { ...basket, left: basket.left + 60 })).toBe(true);
+  });
+
+  it("moves when it would cover what it points at, or something it keeps clear of, or leave the bounds", () => {
+    expect(bubbleStays(bubble, bounds, { left: 400, top: 150, width: 40, height: 40 })).toBe(false);
+    expect(bubbleStays(bubble, bounds, null, [{ left: 500, top: 100, width: 100, height: 40 }])).toBe(false);
+    expect(bubbleStays(bubble, { ...bounds, width: 500 }, null)).toBe(false);
+  });
+
+  it("stays over no more than it covered when it was put there (too big to cover nothing)", () => {
+    const panel = { left: 500, top: 100, width: 100, height: 40 };
+    const was = bubbleCovers(bubble, null, [panel]);
+    expect(was.avoid).toBeGreaterThan(0);
+    expect(bubbleStays(bubble, bounds, null, [panel], was)).toBe(true);
+    expect(bubbleStays(bubble, bounds, null, [{ ...panel, left: 400 }], was)).toBe(false);
   });
 });

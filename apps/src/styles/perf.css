@@ -1,0 +1,160 @@
+/* The lighter visual effects: Smooth (`html[data-perf="lite"]`) and minimal
+   (`html[data-perf="minimal"]`, which also carries `.no-glass`: the solid tints
+   written for it in styles/glass.css and readers/glass.css). The tier is chosen
+   in platform/perfTier.ts (Settings → Visual effects: Auto, Full, Smooth; Auto is
+   Smooth on Android). This is the one place the lighter looks are written, and it
+   is loaded after every other sheet of the app (main.tsx); the readers' sheet
+   comes later still, with the reader, so what is aimed at the reader here weighs
+   more than its rules (`html[data-perf] .reader-scope …`).
+
+   Why: a backdrop-filter is drawn again on every frame anything under it moves,
+   and the SVG lens (`url(#…)`) is drawn on the CPU. A phone scrolling under the
+   header's ramp (several blurred layers), the tab bar, the book being read and
+   their edges redrew all of them every frame; an entry phone's GPU (Adreno 619)
+   could not keep up, scrolling or throwing Pip.
+
+   Smooth keeps the design: the same shapes, radii, rims (an inset line of light,
+   which costs nothing), sheen and tints, firmer so nothing needs a blur behind
+   it; lighter shadows; the same motion (opacity and transform, no blur in it);
+   no endless decoration. The lens is not even installed (glassRefraction.ts,
+   LiquidGlassDefs.tsx), and the scroll edges draw their tint alone
+   (GradualBlur.tsx). */
+
+/* ---- No backdrop blur, anywhere ----------------------------------------------------- */
+
+html:is([data-perf="lite"], [data-perf="minimal"]) *,
+html:is([data-perf="lite"], [data-perf="minimal"]) .app-shell::before {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+/* (GradualBlur.tsx draws none below full; any drawn before the tier changed go too.) */
+html:is([data-perf="lite"], [data-perf="minimal"]) .gradual-blur-layer {
+  display: none;
+}
+
+/* ---- Smooth: the tints, firm enough to stand without a blur ----------------------------
+   Where there are words on the glass (the tab bar, the book being read, sheets, menus) it is
+   solid: sharp words through even 4 % of cover read as a ghost under the label. Keys with only
+   an icon stay a breath translucent. The rim and the sheen keep it glass. */
+
+html[data-perf="lite"],
+html[data-perf="lite"][data-theme="dark"] {
+  --glass-tint: rgb(var(--color-surface-high) / 0.94);
+  --glass-tint-strong: rgb(var(--color-surface-high));
+  --liquid-tint: rgb(var(--color-surface-high) / 0.9);
+  --liquid-tint-text: rgb(var(--color-surface-high));
+  --liquid-filter: none;
+  --liquid-filter-panel: none;
+  --scrim-blur: 0px;
+}
+
+/* The header on a phone is clear over the top of the page, and the page meets it in a ramp
+   (`.app-header-edge`, App.tsx): with no blur in the ramp the header is the page's own colour,
+   solid over the header (sharp words through even 4 % of cover read as a ghost) and fading out in
+   the ramp's last 1.75 rem below it. */
+html[data-perf="lite"] .app-header-edge .gradual-blur-wash {
+  background: rgb(var(--color-background)) !important;
+  -webkit-mask-image: linear-gradient(to top, transparent 0, #000 1.75rem) !important;
+  mask-image: linear-gradient(to top, transparent 0, #000 1.75rem) !important;
+}
+
+/* The foot of the screen under the tab bar: the same, a little firmer. */
+html[data-perf="lite"] .mobile-nav-edge .gradual-blur-wash {
+  background: rgb(var(--color-background) / 0.9) !important;
+}
+
+/* ---- Smooth and minimal: lighter shadows ----------------------------------------------
+   One soft layer where there were two or three wide ones (a large blurred shadow is drawn
+   again whenever the surface it is under moves or comes in). */
+
+html:is([data-perf="lite"], [data-perf="minimal"]) {
+  --glass-shadow: 0 14px 30px -16px rgb(28 30 36 / 0.32);
+  --glass-shadow-bar: 0 6px 16px -10px rgb(28 30 36 / 0.3);
+  --liquid-shadow: 0 6px 18px -8px rgb(17 17 26 / 0.2);
+  --liquid-shadow-small: 0 2px 8px -3px rgb(17 17 26 / 0.18);
+  /* The rim without its soft inner glow: the lines of light only. */
+  --liquid-rim:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.7),
+    inset 1px 0 0 0 rgb(255 255 255 / 0.3),
+    inset 0 -1px 0 0 rgb(255 255 255 / 0.2),
+    inset 0 0 0 1px rgb(var(--color-outline-variant) / 0.26);
+}
+
+html:is([data-perf="lite"], [data-perf="minimal"])[data-theme="dark"] {
+  --glass-shadow: 0 14px 32px -16px rgb(0 0 0 / 0.62);
+  --glass-shadow-bar: 0 6px 16px -10px rgb(0 0 0 / 0.6);
+  --liquid-shadow: 0 6px 18px -8px rgb(0 0 0 / 0.5);
+  --liquid-shadow-small: 0 2px 8px -3px rgb(0 0 0 / 0.45);
+  --liquid-rim:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.12),
+    inset 1px 0 0 0 rgb(255 255 255 / 0.05),
+    inset 0 0 0 1px rgb(255 255 255 / 0.06);
+}
+
+/* The covers: one shadow, less spread (many are drawn afresh as a fast scroll brings them in). */
+html:is([data-perf="lite"], [data-perf="minimal"]) .book-cover-frame {
+  box-shadow: 3px 5px 10px -3px rgb(0 0 0 / 0.36), inset 3px 0 rgb(255 255 255 / 0.14);
+}
+
+/* ---- Smooth and minimal: motion without blur ----------------------------------------------
+   The same comings and goings (styles/glass.css, styles/touch-shell.css, readers/touch.css), the
+   blur they pass through left out: a filter on a whole sheet is painted again every frame. */
+
+html:is([data-perf="lite"], [data-perf="minimal"]) {
+  --enter-filter: none;
+  --motion-blur: none;
+}
+
+html:is([data-perf="lite"], [data-perf="minimal"]) .reader-scope.reader-chrome-hidden :is(.reader-toolbar, .reader-toolbar-group, .reader-toolbar-title) {
+  filter: none;
+}
+
+/* ---- Smooth and minimal: no endless decoration ---------------------------------------
+   Each kept a frame loop going (and the flame's glow, a filter, repainted every frame), the
+   app's and Pip's marks that something waits (the garden's ripe dot, the Hollow's next thing):
+   they stay, still. Loading spinners and the walkthrough's pointers keep moving: they say something. */
+
+html:is([data-perf="lite"], [data-perf="minimal"]) .streak-chip[data-state="risk"]::after {
+  animation: none;
+  opacity: 0.45;
+}
+
+html:is([data-perf="lite"], [data-perf="minimal"]) :is(
+    .streak-hero[data-state="lit"] .streak-hero-big,
+    .ss-ember,
+    .leaflet-mug-steam,
+    .ambience-mark[data-playing="true"] svg path,
+    .pip-hud-dot,
+    .pip-base-nudge
+  ) {
+  animation: none;
+}
+
+/* ---- The reader, Smooth ------------------------------------------------------------------
+   Its glass is tinted from the page (readers/glass.css): firmer here, as the app's is. */
+
+html[data-perf="lite"] .reader-scope {
+  --reader-glass-tint: color-mix(in srgb, var(--reader-panel) 95%, transparent);
+  --reader-glass-tint-strong: var(--reader-panel);
+  --reader-glass-tint-pill: color-mix(in srgb, var(--reader-panel) 96%, transparent);
+  --reader-liquid-tint: color-mix(in srgb, var(--reader-panel) 90%, transparent);
+  --reader-liquid-tint-text: color-mix(in srgb, var(--reader-panel) 95%, transparent);
+  --reader-scrim-blur: 0px;
+}
+
+html[data-perf="lite"] .reader-scope.reader-true-white-finish {
+  --reader-glass-tint: rgb(255 255 255 / 0.95);
+  --reader-glass-tint-strong: #fff;
+  --reader-glass-tint-pill: rgb(255 255 255 / 0.96);
+  --reader-liquid-tint: rgb(255 255 255 / 0.9);
+  --reader-liquid-tint-text: rgb(255 255 255 / 0.95);
+}
+
+html[data-perf="lite"] .reader-scope.reader-true-black-finish {
+  --reader-glass-tint: rgb(0 0 0 / 0.95);
+  --reader-glass-tint-strong: #000;
+  --reader-glass-tint-pill: rgb(0 0 0 / 0.96);
+  --reader-liquid-tint: rgb(0 0 0 / 0.9);
+  --reader-liquid-tint-text: rgb(0 0 0 / 0.95);
+}

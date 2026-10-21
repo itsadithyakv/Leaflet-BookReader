@@ -1,11 +1,13 @@
 import { Fragment, useState } from "react";
 import type { Book } from "@shared/models/book";
 import { isFinished } from "../../constants/books";
-import { useCoverSrc } from "../../hooks/useCoverSrc";
+import { coverImgProps, useCoverSrc } from "../../hooks/useCoverSrc";
 import { seriesNumberLabel, type SeriesGroup, type SeriesMember } from "../../library/series";
 import { BookMenu } from "../BookMenu";
+import { InfoTip } from "../ui/InfoTip";
 import { EYEBROW } from "../ui/SectionHeader";
 import { SeriesCovers } from "./SeriesCovers";
+import { SeriesMenu } from "./SeriesMenu";
 
 const status = (book: Book) => {
   if (isFinished(book.progress)) {
@@ -19,6 +21,21 @@ const status = (book: Book) => {
 
 /** Beside a book the series can be read without: its kind, and that it may be skipped. */
 const OPTIONAL_CHIP = "hidden rounded-full border border-outline-variant/60 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant sm:inline";
+
+/** A book's state: under its title on a phone, in a column of its own on a wider screen. */
+const STATE = "text-[10px] font-bold uppercase tracking-tight";
+
+/** A row's number in the series: narrow on a phone, where the title needs the room. */
+const NUMBER = "w-7 shrink-0 text-center font-serif text-2xl tabular-nums sm:w-10";
+
+/** A book of the series that is not in the library. */
+const MISSING_ROW =
+  "flex items-center gap-3 rounded-xl border border-dashed border-outline-variant/50 p-3 " +
+  "text-on-surface-variant sm:gap-4";
+
+const SET_RIGHT =
+  "A book in the wrong series, or out of order? Its ⋯ menu → Series sets it right.";
+
 const optionalHint = (kind: string) => `${kind}: beside the main series, and can be skipped`;
 
 const MemberRow = ({
@@ -33,18 +50,22 @@ const MemberRow = ({
   onRemoved: (title: string) => void;
 }) => {
   const { book, index } = member;
-  const { src, onError } = useCoverSrc(book, { thumb: true });
+  const cover = useCoverSrc(book, { thumb: true });
+  const { src } = cover;
   const state = status(book);
+  const tone = state.tone;
   return (
     <li
-      className={`ledger-row flex cursor-pointer items-center gap-4 p-3 ${isNext ? "ring-1 ring-primary/40" : ""}`}
+      className={`ledger-row flex cursor-pointer items-center gap-3 p-3 sm:gap-4 ${
+        isNext ? "ring-1 ring-primary/40" : ""
+      }`}
       onClick={() => onOpen(book)}
     >
-      <span className="w-10 shrink-0 text-center font-serif text-2xl text-on-surface-variant tabular-nums">
+      <span className={`${NUMBER} text-on-surface-variant`}>
         {index != null ? Number(index.toFixed(2)) : "–"}
       </span>
       <div className="book-cover-frame h-16 w-11 shrink-0 overflow-hidden bg-surface-container-high">
-        {src && <img src={src} alt="" className="h-full w-full object-cover" onError={onError} />}
+        {src && <img {...coverImgProps(cover, "44px")} alt="" className="h-full w-full object-cover" />}
       </div>
       <div className="min-w-0 flex-1">
         <button
@@ -58,6 +79,7 @@ const MemberRow = ({
           {book.title}
         </button>
         <p className="truncate text-xs text-on-surface-variant">{book.author ?? "Unknown author"}</p>
+        <p className={`${STATE} mt-0.5 sm:hidden ${tone}`}>{state.label}</p>
       </div>
       {member.extra && (
         <span className={OPTIONAL_CHIP} title={optionalHint(member.extra)}>
@@ -65,7 +87,9 @@ const MemberRow = ({
         </span>
       )}
       {isNext && <span className="hidden rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary sm:inline">Next</span>}
-      <span className={`w-20 shrink-0 text-right text-[11px] font-bold uppercase tracking-tight ${state.tone}`}>{state.label}</span>
+      <span className={`${STATE} hidden w-20 shrink-0 text-right sm:block sm:text-[11px] ${tone}`}>
+        {state.label}
+      </span>
       <div onClick={(event) => event.stopPropagation()}>
         <BookMenu book={book} onRemoved={onRemoved} />
       </div>
@@ -109,8 +133,15 @@ export const SeriesDetail = ({ group, onOpen, showToast }: Props) => {
   return (
     <div className="flex flex-col gap-6">
       <div className="paper-surface flex flex-wrap items-center gap-6 rounded-xl p-5">
-        <div className="min-w-0 flex-1">
-          <p className={EYEBROW}>Series{group.author ? ` · ${group.author}` : ""}</p>
+        {/* Room for the author on one line; on a phone the button goes below. */}
+        <div className="min-w-0 flex-1 basis-72">
+          <div className="flex items-start justify-between gap-2">
+            <p className={`${EYEBROW} flex items-center gap-1.5`}>
+              Series{group.author ? ` · ${group.author}` : ""}
+              <InfoTip className="normal-case tracking-normal" text={SET_RIGHT} />
+            </p>
+            <SeriesMenu name={group.name} onFindCovers={() => setChoosingCovers(true)} />
+          </div>
           <p className="mt-2 text-sm text-on-surface-variant">
             {group.finishedCount} of {total} read
             {group.total !== null && group.ownedCount < group.total && ` · ${group.ownedCount} of ${group.total} in your library`}
@@ -119,14 +150,6 @@ export const SeriesDetail = ({ group, onOpen, showToast }: Props) => {
             <div className="h-1.5 rounded-full bg-tertiary" style={{ width: `${percent}%` }} />
           </div>
         </div>
-        <button
-          type="button"
-          className="tactile-button px-4 py-2.5 text-sm"
-          onClick={() => setChoosingCovers(true)}
-          title="Choose which edition's covers this series wears"
-        >
-          Covers
-        </button>
         {group.next ? (
           <button
             type="button"
@@ -165,9 +188,9 @@ export const SeriesDetail = ({ group, onOpen, showToast }: Props) => {
                 />
               ) : (
                 <li
-                  className={`flex items-center gap-4 rounded-xl border border-dashed border-outline-variant/50 p-3 text-on-surface-variant ${row.extra ? "opacity-70" : ""}`}
+                  className={`${MISSING_ROW} ${row.extra ? "opacity-70" : ""}`}
                 >
-                  <span className="w-10 shrink-0 text-center font-serif text-2xl tabular-nums opacity-60">{row.index}</span>
+                  <span className={`${NUMBER} opacity-60`}>{row.index}</span>
                   <div className="h-16 w-11 shrink-0 rounded border border-dashed border-outline-variant/50" />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm">{row.title ?? `Book ${row.index}`}</p>
@@ -184,9 +207,6 @@ export const SeriesDetail = ({ group, onOpen, showToast }: Props) => {
           );
         })}
       </ol>
-      <p className="text-xs text-on-surface-variant">
-        A book in the wrong series, or out of order? Its ⋯ menu → Series sets it right.
-      </p>
     </div>
   );
 };

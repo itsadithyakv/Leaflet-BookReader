@@ -22,6 +22,12 @@ html[data-input="touch"] .reader-scope .reader-main {
   background-image: var(--reader-page-texture, none);
 }
 
+/* The page's edges are the screen's: the desktop's line down each side of the
+   page was a grey hairline down the left of a phone's. */
+html[data-input="touch"] .reader-scope .reader-page-frame {
+  border-inline: 0;
+}
+
 /* No pointer to rest on the top edge: the middle tap brings the bar. */
 html[data-input="touch"] .reader-toolbar-hot-zone {
   display: none;
@@ -51,6 +57,54 @@ html[data-input="touch"] .reader-toolbar-hot-zone {
   display: none !important;
 }
 
+/* A phone's way back to the library is its own, top left with the chrome
+   (`.reader-phone-back`, below): the bar's arrow is not drawn as well. A
+   tablet and the desktop keep the bar's. */
+.reader-scope[data-shape] .reader-exit-button {
+  display: none;
+}
+
+/* Back to the library, top left, as phones put it: it comes and goes with
+   the chrome (two taps on the page), and takes no touch while away. Under
+   the bar (z-index 50), so a sheet's scrim covers it as it covers the page. */
+.reader-phone-back {
+  position: fixed;
+  top: calc(var(--inset-top) + 10px);
+  left: calc(var(--inset-left) + 10px);
+  z-index: 49;
+  display: flex;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--reader-glass-line, var(--reader-border));
+  border-radius: 9999px;
+  background-color: var(--reader-glass-tint-pill, var(--reader-panel));
+  -webkit-backdrop-filter: blur(var(--reader-glass-blur-pill, 16px));
+  backdrop-filter: blur(var(--reader-glass-blur-pill, 16px));
+  box-shadow: var(--reader-glass-shadow-small, 0 4px 14px rgba(0, 0, 0, 0.22));
+  opacity: 1;
+  transition: opacity 0.18s ease, transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.reader-phone-back .material-symbols-outlined {
+  font-size: 22px;
+}
+
+.reader-scope.reader-chrome-hidden .reader-phone-back {
+  opacity: 0;
+  transform: translateY(-8px);
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reader-phone-back {
+    transition: none;
+  }
+}
+
 /* The radio's mark: its way in is the ··· sheet's "Sound" row on a phone. */
 .reader-scope[data-shape] .reader-toolbar .ambience-mark {
   display: none;
@@ -63,6 +117,14 @@ html[data-input="touch"] .reader-toolbar-hot-zone {
   --reader-strip-width: calc(56px + var(--inset-right));
 }
 
+/* The text reader keeps the strip's room down the right edge, chrome or not
+   (as the upright page keeps its foot's): the strip coming and going laid the
+   pages out again, so the page being read changed, and a column ran on under
+   the strip, cut off mid-word. */
+.reader-scope:not(.page-reader)[data-shape="sideways"] .reader-main {
+  padding-right: var(--reader-strip-width);
+}
+
 .reader-scope[data-shape="sideways"] .reader-toolbar {
   top: 0;
   bottom: 0;
@@ -73,7 +135,7 @@ html[data-input="touch"] .reader-toolbar-hot-zone {
   min-height: 0;
   flex-direction: column;
   justify-content: space-between;
-  padding: calc(var(--inset-top) + 8px) var(--inset-right) calc(var(--inset-bottom) + 8px) 0;
+  padding: calc(var(--inset-top) + 8px) var(--inset-right) calc(var(--reader-gesture-room) + 8px) 0;
   border-bottom: 0;
   border-left: 1px solid var(--reader-border);
 }
@@ -166,7 +228,7 @@ html[data-keyboard="open"] .reader-scope[data-shape] .reader-search {
   position: fixed;
   top: calc(var(--inset-top) + 8px);
   right: calc(var(--reader-strip-width) + 8px);
-  bottom: calc(var(--inset-bottom) + 8px);
+  bottom: calc(var(--reader-gesture-room) + 8px);
   left: auto;
   z-index: 61;
   width: min(24rem, calc(100vw - var(--reader-strip-width) - 24px));
@@ -184,10 +246,12 @@ html[data-keyboard="open"] .reader-scope[data-shape] .reader-search {
 
 /* The characters panel is a sheet too: readers/people/people.css, "On a phone". */
 
+/* Up a little way, fading in, a blur clearing (the way back down: readers/glass.css). */
 @keyframes reader-sheet-rise {
   from {
     transform: translateY(24px);
     opacity: 0;
+    filter: var(--motion-blur, blur(6px));
   }
 }
 
@@ -266,21 +330,26 @@ html[data-input="touch"] .reader-menu input[type="range"] {
    By finger they come and go with the toolbar (a tap in the middle of the
    page), and are full strength and finger-sized when they are there. */
 
+/* (The pill in it fades, not the dock, which would be the glass pill's
+   backdrop root and blank its blur until the fade ended: readers/glass.css.) */
 html[data-input="touch"] .reader-scope .reader-chapter-dock {
   bottom: 30px;
-  opacity: 1;
-  filter: none;
   transform: translateX(-50%);
   max-width: calc(100vw - 16px - var(--inset-left) - var(--inset-right));
+}
+
+html[data-input="touch"] .reader-scope .reader-chapter-dock > div {
+  opacity: 1;
+  filter: none;
   transition: opacity 0.22s ease;
 }
 
 html[data-input="touch"] .reader-scope.reader-chrome-hidden .reader-chapter-dock:not(.is-awake) {
-  opacity: 0;
   pointer-events: none;
 }
 
 html[data-input="touch"] .reader-scope.reader-chrome-hidden .reader-chapter-dock:not(.is-awake) > div {
+  opacity: 0;
   pointer-events: none;
 }
 
@@ -342,8 +411,9 @@ html[data-input="touch"] .reader-scope .reader-progress:not(.is-shown) {
 }
 
 /* Clear of the strip, chrome or not: it is out of sight with the chrome away,
-   and its width no longer changes as it fades. */
-.reader-scope[data-shape="sideways"] .reader-progress {
+   and its width no longer changes as it fades. (The text reader's page stops
+   at the strip already.) */
+.reader-scope.page-reader[data-shape="sideways"] .reader-progress {
   right: var(--reader-strip-width);
 }
 
@@ -603,22 +673,55 @@ html[data-keyboard="open"] .page-reader .reader-chapter-dock.is-awake {
   bottom: calc(var(--inset-keyboard) - var(--inset-bottom) + 8px);
 }
 
-/* The focus session's mug (or flower) sat bottom right, over the dock and the
-   pace pill: on a phone it is small, top right, under the toolbar's place. */
-.reader-scope[data-shape] .leaflet-mug,
-.reader-scope[data-shape] .leaflet-flower {
-  /* Under the bar at the top, or the status bar where the bar is at the foot,
-     and under the bookmark's ribbon. */
-  top: calc(max(var(--reader-toolbar-height), var(--inset-top)) + 28px);
-  right: calc(var(--inset-right) + 8px);
-  bottom: auto;
-  transform: scale(0.6);
-  transform-origin: top right;
+/* The focus session's mug (or flower) never stands over the text
+   (readers/sessionMark.ts, which sets its size, its height off the foot and
+   how faint it is). On a phone it sat top right, under the toolbar's place,
+   over the first lines of every page: it is in the footer's strip now, at
+   the right end, small and faint, and goes while the chrome is up (the dock
+   and the bar are there then). */
+.reader-scope .leaflet-mug[data-spot],
+.reader-scope .leaflet-flower[data-spot] {
+  opacity: var(--session-mark-opacity, 1);
+  transform: scale(var(--session-mark-scale, 1));
+  transform-origin: bottom right;
+  transition: opacity 0.16s ease, box-shadow 0.3s ease;
 }
 
-.reader-scope[data-shape="sideways"]:not(.reader-chrome-hidden) .leaflet-mug,
-.reader-scope[data-shape="sideways"]:not(.reader-chrome-hidden) .leaflet-flower {
-  right: calc(var(--reader-strip-width) + 8px);
+.reader-scope .leaflet-flower:is([data-spot="footer"], [data-spot="foot-pad"]) {
+  width: 72px;
+  height: 72px;
+  padding: 0;
+}
+
+.reader-scope .leaflet-mug[data-spot="footer"],
+.reader-scope .leaflet-flower[data-spot="footer"] {
+  top: auto;
+  right: calc(var(--inset-right) + 12px);
+  bottom: calc(var(--inset-bottom) + var(--session-mark-bottom));
+  box-shadow: none;
+}
+
+/* On its side the page ends at the strip (the text reader keeps its room). */
+.reader-scope:not(.page-reader)[data-shape="sideways"] .leaflet-mug[data-spot="footer"],
+.reader-scope:not(.page-reader)[data-shape="sideways"] .leaflet-flower[data-spot="footer"] {
+  right: calc(var(--reader-strip-width) + 12px);
+}
+
+.reader-scope:not(.reader-chrome-hidden) .leaflet-mug[data-spot="footer"],
+.reader-scope:not(.reader-chrome-hidden) .leaflet-flower[data-spot="footer"] {
+  opacity: 0;
+}
+
+/* The footer's line keeps clear of it. */
+.reader-scope[data-shape]:has(.leaflet-mug[data-spot="footer"], .leaflet-flower[data-spot="footer"]) .reader-phone-footer {
+  max-width: calc(100% - 112px);
+}
+
+/* Pages on a desktop or a tablet: in the room under the page's text, in the corner. */
+.reader-scope .leaflet-mug[data-spot="foot-pad"],
+.reader-scope .leaflet-flower[data-spot="foot-pad"] {
+  right: 20px;
+  bottom: var(--session-mark-bottom);
 }
 
 /* "Your other device is further on" (components/sync/FurtherOnOffer.tsx):
@@ -632,13 +735,16 @@ html[data-input="touch"] .reader-scope[data-shape] .further-on-offer {
   bottom: calc(var(--inset-bottom) + var(--reader-stack-foot));
 }
 
-/* The chapter list keeps its last rows clear of the gesture bar, and its
-   text clear of a cutout on the left of a phone on its side. */
+/* The chapter list keeps its heading clear of the status bar, its last rows
+   clear of the gesture bar, and its text clear of a cutout on the left of a
+   phone on its side. */
 .reader-scope[data-shape] .reader-sidebar {
+  padding-top: calc(1.5rem + var(--inset-top));
   padding-bottom: calc(1.5rem + var(--inset-bottom));
 }
 
 .reader-scope[data-shape="sideways"] .reader-sidebar {
+  padding-top: calc(0.75rem + var(--inset-top));
   padding-left: calc(1.5rem + var(--inset-left));
 }
 
@@ -662,47 +768,136 @@ html[data-input="touch"] .reader-scope .reader-people-link {
 
 /* ---- A phone: the chrome comes for a tap in the middle of the page ----
    The book opens with the page alone (hooks/useAutoHideChrome.ts,
-   `immersive`); the bars come and go quickly, so a tap is answered at once,
-   and not at all under reduced motion. */
+   `immersive`). The bars follow one state, the scope's `data-chrome`
+   ("shown" or "hidden"): in, they fade up, slide the little way to their
+   place and come into focus (a blur clearing) on a long soft ease-out; out,
+   the same backwards, a little quicker. The motion tokens are
+   styles/glass.css's.
+
+   Every bar is always there, hidden or not, and holds the same transitions
+   both ways: nothing is mounted, given a layer or given a transition at the
+   moment it shows, so its first frame is the hidden one (opacity 0, blurred,
+   out of place), never where it ends up. Hidden, the toolbar is also out of
+   the drawing (`visibility`, flipped only once its fade has run): it is
+   glass, and a hidden blur over the text would still be drawn at every
+   frame of the scrolling. The dock's pill fades, not the dock (its glass
+   would blur nothing while the dock faded). */
 
 html .reader-scope[data-shape] .reader-toolbar {
+  visibility: visible;
   transition:
-    transform 0.2s cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 0.16s ease;
+    transform var(--dur-slow) var(--ease-out-soft),
+    opacity var(--dur-base) var(--ease-out-soft),
+    filter var(--dur-base) var(--ease-out-soft),
+    visibility 0s linear 0s;
+}
+
+html .reader-scope[data-shape][data-chrome="hidden"] .reader-toolbar {
+  opacity: 0;
+  filter: blur(6px);
+  visibility: hidden;
+  transition:
+    transform var(--dur-base) var(--ease-in-soft),
+    opacity var(--dur-quick) var(--ease-in-soft),
+    filter var(--dur-quick) var(--ease-in-soft),
+    visibility 0s linear var(--dur-base);
+}
+
+/* A sheet of the bar's own is up (it is fixed to the window: a filter on the
+   bar would hold it inside the bar instead). */
+html .reader-scope[data-shape] .reader-toolbar:has(.reader-sheet-scrim, .reader-menu, .reader-type-panel, .ambience-popover, .reader-notes-panel) {
+  filter: none;
 }
 
 html .reader-scope[data-shape] .reader-chapter-dock,
 html .reader-scope[data-shape] .reader-progress {
   transition:
-    transform 0.2s cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 0.16s ease;
+    transform var(--dur-slow) var(--ease-out-soft),
+    opacity var(--dur-base) var(--ease-out-soft);
+}
+
+html .reader-scope[data-shape][data-chrome="hidden"] :is(.reader-chapter-dock, .reader-progress) {
+  transition:
+    transform var(--dur-base) var(--ease-in-soft),
+    opacity var(--dur-quick) var(--ease-in-soft);
+}
+
+html .reader-scope[data-shape] .reader-chapter-dock > div {
+  transition:
+    opacity var(--dur-base) var(--ease-out-soft),
+    filter var(--dur-base) var(--ease-out-soft),
+    scale var(--dur-slow) var(--ease-out-soft);
+}
+
+html .reader-scope[data-shape][data-chrome="hidden"] .reader-chapter-dock:not(.is-awake) > div {
+  opacity: 0;
+  filter: blur(6px);
+  scale: 0.96;
+  transition:
+    opacity var(--dur-quick) var(--ease-in-soft),
+    filter var(--dur-quick) var(--ease-in-soft),
+    scale var(--dur-base) var(--ease-in-soft);
 }
 
 html .reader-scope[data-shape] .reader-contents-handle {
-  transition: opacity 0.16s ease;
+  transition: opacity var(--dur-quick) ease;
 }
 
+/* The moving parts keep a layer of their own, shown or not. (Not the
+   toolbar's transform: a transform's layer would hold the bar's own sheets,
+   which are fixed to the window, inside it. Nor the dock's opacity: see
+   above.) */
+html .reader-scope[data-shape] :is(.reader-chapter-dock, .reader-progress) {
+  will-change: transform;
+}
+
+html .reader-scope[data-shape] .reader-chapter-dock > div {
+  will-change: opacity;
+}
+
+html .reader-scope[data-shape] .reader-progress {
+  will-change: transform, opacity;
+}
+
+html .reader-scope[data-shape] .reader-toolbar {
+  will-change: opacity;
+}
+
+/* Less motion: a short fade where they are, nothing that slides or blurs. */
 @media (prefers-reduced-motion: reduce) {
-  html .reader-scope[data-shape] .reader-toolbar,
-  html .reader-scope[data-shape] .reader-chapter-dock,
-  html .reader-scope[data-shape] .reader-contents-handle,
-  html .reader-scope[data-shape] .reader-progress {
-    transition: none;
+  html .reader-scope[data-shape] :is(.reader-toolbar, .reader-chapter-dock, .reader-chapter-dock > div, .reader-progress, .reader-contents-handle),
+  html .reader-scope[data-shape][data-chrome="hidden"] :is(.reader-toolbar, .reader-chapter-dock, .reader-chapter-dock > div, .reader-progress) {
+    transition: opacity 120ms ease, visibility 0s linear 0s;
+  }
+
+  html .reader-scope[data-shape][data-chrome="hidden"] .reader-toolbar {
+    transition: opacity 120ms ease, visibility 0s linear 120ms;
+  }
+
+  html .reader-scope[data-shape][data-chrome="hidden"] :is(.reader-toolbar, .reader-chapter-dock:not(.is-awake), .reader-progress),
+  html .reader-scope[data-shape][data-chrome="hidden"] .reader-chapter-dock:not(.is-awake) > div {
+    filter: none;
+    scale: none;
+  }
+
+  html .reader-scope[data-shape][data-chrome="hidden"] .reader-toolbar.reader-toolbar,
+  html .reader-scope:not(.page-reader)[data-shape="upright"][data-chrome="hidden"] .reader-progress.reader-progress {
+    transform: none;
+  }
+
+  html .reader-scope:not(.page-reader)[data-shape="upright"][data-chrome="hidden"] .reader-chapter-dock.reader-chapter-dock:not(.is-awake),
+  html .reader-scope[data-shape][data-chrome="hidden"] .reader-chapter-dock.reader-chapter-dock:not(.is-awake) {
+    transform: translateX(-50%);
+  }
+
+  html .reader-scope[data-shape="sideways"][data-chrome="hidden"] .reader-chapter-dock.reader-chapter-dock:not(.is-awake) {
+    transform: none;
   }
 }
 
-/* ---- By finger: nothing blurred over the text ----
-   The pace pill and the chapter dock sit over the page while it scrolls. A
-   blur of what is behind them is drawn again at every frame of the
-   scrolling, more than a low-end phone's graphics keep up with. The
-   panel's own colour, solid, stands in for it (text showing through
-   unblurred read as clutter, so the pill is no longer faded either). */
-html[data-input="touch"] .reader-scope :is(.reader-autoscroll-pill, .reader-chapter-dock > div) {
-  background: var(--reader-panel);
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
-}
-
+/* By finger the pace pill and the dock are glass, at a smaller blur
+   (readers/glass.css); the pill is not faded (text showing through it read
+   as clutter). */
 html[data-input="touch"] .reader-scope .reader-autoscroll-pill:not(.is-held) {
   opacity: 1;
 }
@@ -789,18 +984,47 @@ html[data-input="touch"] .reader-scope .reader-autoscroll-pill:not(.is-held) {
   pointer-events: none;
 }
 
-/* A bookmarked place: a ribbon hanging into the top right corner, the corner a tap there bookmarks. */
+/* A bookmarked place: a ribbon hanging into the top right corner, the corner a
+   tap there bookmarks. In the margin (18 px, `PHONE_TEXT_PAD`): over the
+   text it hid the end of the line under it. */
 .reader-bookmark-ribbon {
   position: absolute;
   top: 0;
-  right: 18px;
+  right: 4px;
   z-index: 20;
-  width: 14px;
-  height: 22px;
+  width: 10px;
+  height: 18px;
   background: var(--reader-accent);
   clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 74%, 0 100%);
   opacity: 0.85;
   pointer-events: none;
+}
+
+/* How a finger's taps go, said once as a book opens (readers/text/ReaderDialogs.tsx): a
+   small toast at the foot, above whatever holds it (clear of a chapter's heading), on one
+   line where it fits and two even ones where it does not. */
+.reader-tap-hint {
+  position: fixed;
+  bottom: calc(
+    var(--inset-bottom) + var(--reader-stack-foot, calc(var(--reader-footer-height) + 10px))
+  );
+  left: calc(50% + (var(--inset-left) - var(--inset-right)) / 2);
+  z-index: 62;
+  width: max-content;
+  max-width: calc(
+    100vw - 32px - var(--inset-left) - var(--inset-right) - var(--reader-side-room, 0px)
+  );
+  padding: 8px 16px;
+  border-width: 1px;
+  border-radius: 16px;
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: center;
+  text-wrap: balance;
+  transform: translateX(calc(-50% - var(--reader-side-room, 0px) / 2));
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+  pointer-events: none;
+  animation: reader-back-chip-in 0.16s ease both;
 }
 
 /* After a jump, for a few seconds: the way back, over the foot of the page. */
@@ -920,6 +1144,9 @@ html .reader-scope:not(.page-reader)[data-shape="upright"].reader-chrome-hidden 
   --reader-foot-chrome: var(--reader-footer-height);
   --reader-float-room: 0px;
   --reader-side-room: 0px;
+  /* What a bar or sheet at the foot keeps clear of with the system's bars
+     away (`--inset-bottom` is 0 then): the gesture zone is still there. */
+  --reader-gesture-room: max(var(--inset-bottom), 16px);
   --reader-stack-foot: calc(var(--reader-foot-chrome) + var(--reader-float-room) + 8px);
   --reader-text-foot: calc(var(--reader-footer-height) + var(--reader-float-room));
 }
@@ -932,7 +1159,8 @@ html .reader-scope:not(.page-reader)[data-shape="upright"].reader-chrome-hidden 
   --reader-foot-chrome: 144px;
 }
 
-.reader-scope[data-shape="sideways"]:not(.reader-chrome-hidden) {
+.reader-scope[data-shape="sideways"]:not(.reader-chrome-hidden),
+.reader-scope:not(.page-reader)[data-shape="sideways"] {
   --reader-side-room: var(--reader-strip-width);
 }
 
@@ -971,6 +1199,45 @@ html .reader-scope[data-shape] .reader-autoscroll-pill .reader-autoscroll-main {
   html .reader-scope[data-shape] .read-aloud-dock {
     transition: none;
   }
+}
+
+/* With the keyboard up, or a card, the chapter list or a sheet over the page
+   (readers/touchLayout.ts, `floatsAway`): the pills and Dotty are out of
+   sight, and back as they were when it goes. Their room is kept. */
+.reader-scope.reader-floats-away :is(.reader-autoscroll-pill, .read-aloud-dock, .reader-dot) {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* Dotty is Smart Read's (readers/readerDot.ts, `dottyShows`): in Standard
+   reading it is out of sight, where it was, until Smart Read is back. */
+.reader-scope[data-dotty="hidden"] .reader-dot {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* Dotty resting on its line after a phone's glide (readers/smartScroll.ts,
+   `settleDuration`), before it reads on: a soft glow that comes and goes. */
+.reader-dot.reader-dot-settling {
+  animation: reader-dot-settle 1.2s ease-in-out both;
+}
+
+@keyframes reader-dot-settle {
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--reader-dot-color) 24%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reader-dot.reader-dot-settling {
+    animation: none;
+  }
+}
+
+/* Read aloud, the sentence being read is lit: Dotty, on the last line in
+   sight, was a second mark lines below it. */
+.reader-scope.reader-reading-aloud .reader-dot {
+  visibility: hidden;
 }
 
 /* ---- The highlight card by finger (readers/HighlightCard.tsx) ----
@@ -1043,4 +1310,30 @@ html[data-input="touch"] .reader-scope .reader-note-card.is-typing {
 
 html[data-input="touch"] .reader-scope .reader-note-card.is-typing .reader-note-quote {
   max-height: calc(2 * 1.55em + 16px);
+}
+
+/* ---- The veil over a turn, or a new layout (readers/readerVeil.ts) ----
+   The page's own colour over the page, under the bars and a sheet, while the
+   book is laid out again; it lifts with a short fade once the book is at the
+   place. (The desktop's layout switch too.) */
+.reader-scope > .reader-veil {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  background: var(--reader-page-bg, var(--reader-shell-bg, #000));
+  background-image: var(--reader-page-texture, none);
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.reader-scope > .reader-veil.is-lifting {
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reader-scope > .reader-veil {
+    transition: none;
+  }
 }

@@ -9,6 +9,7 @@ import { giftRoutes } from "./routes/gifts.js";
 import { libraryRoutes } from "./routes/library.js";
 import { moderationRoutes } from "./routes/moderation.js";
 import { postRoutes } from "./routes/posts.js";
+import { problemRoutes } from "./routes/problems.js";
 import { raidRoutes } from "./routes/raids.js";
 import { socialRoutes } from "./routes/social.js";
 import { stateRoutes } from "./routes/state.js";
@@ -127,6 +128,8 @@ export function createApp(db, { limits = defaultLimits(), corsOrigin = "", maile
   // them civil (the guidelines, blocks, reports, and the admin's tools).
   app.use("/v1", communityRoomRoutes(db, limits));
   app.use("/v1", moderationRoutes(db, limits, suspensionSalt));
+  // What readers say went wrong with Leaflet itself, and the owner's list of it.
+  app.use("/v1", problemRoutes(db, limits));
 
   app.use(notFound);
   app.use(errorHandler);

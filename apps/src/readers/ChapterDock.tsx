@@ -122,28 +122,34 @@ export const ChapterDock = forwardRef<HTMLDivElement, ChapterDockProps>(
             }
           }}
         >
-          {canGoBack && (
-            <button
-              type="button"
-              className="reader-mini-control reader-dock-back"
-              onClick={onBack}
-              title="Back to where you were (Alt+Left)"
-              aria-label="Back to where you were"
-            >
-              <Undo2 size={14} aria-hidden="true" />
-              <span>Back</span>
-            </button>
-          )}
-          {canGoForward && (
-            <button
-              type="button"
-              className="reader-mini-control reader-dock-forward"
-              onClick={onForward}
-              title="Forward again (Alt+Right)"
-              aria-label="Forward again"
-            >
-              <Redo2 size={14} aria-hidden="true" />
-            </button>
+          {/* The way back after a jump. By finger it sits outside the dock's row, so that its coming and
+              going never moves the arrows under a thumb (readingOutlook.css). */}
+          {(canGoBack || canGoForward) && (
+            <span className="reader-dock-way">
+              {canGoBack && (
+                <button
+                  type="button"
+                  className="reader-mini-control reader-dock-back"
+                  onClick={onBack}
+                  title="Back to where you were (Alt+Left)"
+                  aria-label="Back to where you were"
+                >
+                  <Undo2 size={14} aria-hidden="true" />
+                  <span>Back</span>
+                </button>
+              )}
+              {canGoForward && (
+                <button
+                  type="button"
+                  className="reader-mini-control reader-dock-forward"
+                  onClick={onForward}
+                  title="Forward again (Alt+Right)"
+                  aria-label="Forward again"
+                >
+                  <Redo2 size={14} aria-hidden="true" />
+                </button>
+              )}
+            </span>
           )}
           {mirrored ? chapterOn : chapterBack}
           {mirrored ? on : back}

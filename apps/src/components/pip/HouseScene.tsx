@@ -144,6 +144,8 @@ import {
 import { BARREL_H, BARREL_W, PLOT_H, PLOT_W, renderBarrel, renderGardenBed, renderGardenFloor, renderPlant } from "../../pip/garden.js";
 import { gardenLayout } from "../../pip/gardenRows";
 import { subscribeTick } from "../../pip/ticker";
+import { houseNeedsFrames, restingLoop } from "../../pip/restLoop";
+import { pixelKey } from "../../pip/samePicture";
 import { onPipCue } from "../../pip/life";
 import { playSound } from "../../pip/sound";
 import { usePipWardrobeStore } from "../../store/pipWardrobeStore";
@@ -151,7 +153,7 @@ import { usePipStore } from "../../store/pipStore";
 import { PipSprite } from "../PipSprite";
 import { PipSay } from "../PipSay";
 import { UiIcon } from "../UiIcon";
-import { sceneScale } from "./sceneFit";
+import { BAND_ART, edgeBands, edgePattern, fillPlace, sceneScale } from "./sceneFit";
 import { watchPixelRatio } from "./pixelRatio";
 import { floorPoint } from "./layout";
 import { fixtureKey, useFurnishings, type FurnishPip, type Fridge, type RoomChange } from "./furnishings";
@@ -199,6 +201,7 @@ import { getDateKey } from "../../services/habitService";
 import type { GameId } from "./arcade/games";
 import type { ArcadePage } from "./arcade/ArcadeOverlay";
 import { GardenSky } from "./GardenSky";
+import { currentShellShape } from "../../platform/shape";
 import "./pipLife.css";
 import { banner, burst, centerOf, confetti, dropSeed, floatText, popOff, puff, rain, seedPixel, tossSeed, type Box, type Captured, type Point } from "./fx";
 
@@ -594,6 +597,103 @@ const clockHour = (date = new Date()) => date.getHours() + Math.floor(date.getMi
  */
 const ROOM_STATES_KEPT = 4;
 const roomFrames = new Map<string, Map<number, HTMLCanvasElement>>();
+/** A canvas pixel as a CSS colour. */
+const cssColour = (data: Uint8ClampedArray, at: number) =>
+  data[at + 3] === 255 ? `rgb(${data[at]},${data[at + 1]},${data[at + 2]})` : `rgba(${data[at]},${data[at + 1]},${data[at + 2]},${(data[at + 3] / 255).toFixed(3)})`;
+
+/** The room's edges, read from its picture (`roomEdges`). */
+type RoomEdges = {
+  /** A colour an art row, each side: carried out above and below the room, as one colour a row. */
+  left: string[];
+  right: string[];
+  /** Each side carried on past the room in the pattern it is drawn in (sceneFit.ts `edgePattern`), BAND_ART wide. */
+  bands: { left: Uint32Array; right: Uint32Array } | null;
+};
+
+/**
+ * The room's left and right columns, a colour an art row, to carry out past its edges; null where the picture
+ * cannot be read. Above the skirting both are the wall's colour (the commonest in the two), so a shelf or a
+ * picture that touches the edge is not carried out with it; from the skirting down, the rows as drawn (the
+ * skirting, the floor's boards). And beside the room, each row in its own repeat where it has one (the dots of the
+ * wallpaper, the shade under the ceiling): a band of one colour beside a patterned wall showed a seam at the edge.
+ */
+const roomEdges = (image: HTMLCanvasElement, floorY: number): RoomEdges | null => {
+  try {
+    const context = image.getContext("2d");
+    if (!context || image.width < 1 || image.height < 1) return null;
+    const wallTo = Math.max(0, Math.min(image.height, floorY - 2));
+    const column = (x: number) => {
+      const data = context.getImageData(x, 0, 1, image.height).data;
+      return Array.from({ length: image.height }, (_, row) => cssColour(data, row * 4));
+    };
+    const left = column(0);
+    const right = column(image.width - 1);
+    // One wall colour for both sides, so the two halves meet without a seam over and under the room.
+    const counts = new Map<string, number>();
+    for (const colour of [...left.slice(0, wallTo), ...right.slice(0, wallTo)]) counts.set(colour, (counts.get(colour) ?? 0) + 1);
+    let wall: string | null = null;
+    for (const [colour, count] of counts) if (wall === null || count > (counts.get(wall) ?? 0)) wall = colour;
+    const walled = (rows: string[]) => (wall === null ? rows : rows.map((colour, row) => (row < wallTo ? (wall as string) : colour)));
+    let bands: RoomEdges["bands"] = null;
+    try {
+      const whole = new Uint32Array(context.getImageData(0, 0, image.width, image.height).data.buffer.slice(0));
+      const width = image.width;
+      const rowsFrom = (side: "left" | "right") =>
+        Array.from({ length: image.height }, (_, row) => {
+          const line = new Uint32Array(Math.min(width, 96));
+          for (let k = 0; k < line.length; k++) line[k] = whole[row * width + (side === "left" ? k : width - 1 - k)];
+          return line;
+        });
+      // A row with no repeat: the wall's one colour above the skirting (as the bands above and below), as drawn under it.
+      const wallPacked = (() => {
+        if (wall === null) return null;
+        for (let row = 0; row < wallTo; row++) {
+          if (left[row] === wall) return whole[row * width];
+          if (right[row] === wall) return whole[row * width + width - 1];
+        }
+        return null;
+      })();
+      const flatFor = (side: "left" | "right") =>
+        Array.from({ length: image.height }, (_, row) => (row < wallTo && wallPacked !== null ? wallPacked : whole[row * width + (side === "left" ? 0 : width - 1)]));
+      bands = { left: edgePattern(rowsFrom("left"), flatFor("left"), "left", BAND_ART, wallTo), right: edgePattern(rowsFrom("right"), flatFor("right"), "right", BAND_ART, wallTo) };
+    } catch {
+      bands = null;
+    }
+    return { left: walled(left), right: walled(right), bands };
+  } catch {
+    return null;
+  }
+};
+
+/** One side of the room carried on past it (`RoomEdges.bands`), drawn at the room's own scale, flush with its edge. */
+const EdgeBand = ({ pixels, height, scale, left, top }: { pixels: Uint32Array; height: number; scale: number; left: number; top: number }) => {
+  const ref = useRef<HTMLCanvasElement | null>(null);
+  useLayoutEffect(() => {
+    const canvas = ref.current;
+    const context = canvas?.getContext("2d");
+    if (!canvas || !context) return;
+    const data = context.createImageData(BAND_ART, height);
+    data.data.set(new Uint8ClampedArray(pixels.buffer, pixels.byteOffset, pixels.byteLength));
+    context.putImageData(data, 0, 0);
+  }, [pixels, height]);
+  return (
+    <canvas
+      ref={ref}
+      width={BAND_ART}
+      height={height}
+      className="pip-sprite pip-house-band"
+      aria-hidden="true"
+      style={{ position: "absolute", left, top, width: BAND_ART * scale, height: height * scale, pointerEvents: "none" }}
+    />
+  );
+};
+
+/**
+ * A room state's frames by their pixels (pip/samePicture.ts): a room whose
+ * only motion is a lamp that flickers now and then is the same picture most of
+ * its loop, and is drawn again only when it changes.
+ */
+const samePixelsOf = new WeakMap<Map<number, HTMLCanvasElement>, Map<string, HTMLCanvasElement>>();
 const roomFramesFor = (state: string) => {
   let frames = roomFrames.get(state);
   if (frames) {
@@ -872,6 +972,8 @@ export type HouseSceneProps = {
   onJukebox?: () => void;
   /** Pip is elsewhere (in a game): the room shows without it. */
   hidePip?: boolean;
+  /** The room is out of sight (the Hollow, or a game, laid over it): nothing in it is drawn again until it is back. */
+  still?: boolean;
   /** The garden's plots, on a garden floor. */
   plots?: ScenePlot[];
   onPlot?: (plot: ScenePlot) => void;
@@ -880,6 +982,13 @@ export type HouseSceneProps = {
   plotLabel?: (plot: ScenePlot) => string;
   /** Room kept below the scene (the page's tool rail), in CSS pixels. */
   reserveBelow?: number;
+  /**
+   * Where Pip's tab is the whole screen (a phone on its side): the room is whole in its stage's content box (the
+   * page pads the stage clear of the HUD, the rail and the lift), and its edges are carried out to the stage's
+   * edges, which are the window's. Left out, the room fills the stage's width and the window's height under it,
+   * framed.
+   */
+  fill?: boolean;
   /** What she knows of the reader's books and the world outside the room (pip/behaviour.ts, `World`): it colours what she does. */
   world?: World;
   /** Something laid over the room, in its own coordinates, under Pip: a visitor, a note. */
@@ -969,11 +1078,13 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     onArcade,
     onJukebox,
     hidePip = false,
+    still = false,
     plots,
     onPlot,
     onEmptyPlot,
     plotLabel,
     reserveBelow = 28,
+    fill,
     world,
     overlay,
     onWelcomed,
@@ -999,7 +1110,14 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
   // How big the room is drawn: device pixels per art pixel, and the display's scaling that was worked out for.
   // The two are kept together: the scaling can change on its own (the window dragged to another monitor), and a
   // room that read it afresh at each render kept its old size until something else made it render.
-  const [{ per, ratio }, setFit] = useState(() => ({ per: 3, ratio: window.devicePixelRatio || 1 }));
+  // (And, where the room fills its stage, the stage's size, which places it.)
+  const [{ per, ratio, box }, setFit] = useState<{ per: number; ratio: number; box: { left: number; top: number; width: number; height: number } | null }>(() => ({
+    per: 3,
+    ratio: window.devicePixelRatio || 1,
+    box: null
+  }));
+  // The room's left and right edges, a colour an art row, carried out to the stage's where the room fills it.
+  const [edges, setEdges] = useState<RoomEdges | null>(null);
   // Out of the house altogether (an expedition): no Pip, a note where she sleeps.
   const out = Boolean(world?.away);
   const outRef = useRef(out);
@@ -1028,14 +1146,40 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     if (!stage) return;
     const measure = () => {
       const width = stage.clientWidth;
-      const top = stage.getBoundingClientRect().top;
-      // (A phone on its side has less than 220 px under the HUD: there the room is what the height allows.)
-      const height = Math.max(window.innerHeight <= 520 ? 140 : 220, window.innerHeight - Math.max(0, top) - reserveBelow);
       lastRoomBox.current = roomRef.current?.getBoundingClientRect() ?? null;
       if (width <= 0) return;
       const now = window.devicePixelRatio || 1;
+      if (fill) {
+        // The stage is the window (the page makes it so); its padding is what the controls cover. The room is whole
+        // in the rest, and placed in it.
+        const pad = getComputedStyle(stage);
+        const left = parseFloat(pad.paddingLeft) || 0;
+        const top = parseFloat(pad.paddingTop) || 0;
+        const box = {
+          left,
+          top,
+          width: width - left - (parseFloat(pad.paddingRight) || 0),
+          height: stage.clientHeight - top - (parseFloat(pad.paddingBottom) || 0)
+        };
+        if (box.width <= 0 || box.height <= 0) return;
+        const fits = sceneScale(level.w, level.h, box.width, box.height, now);
+        setFit((was) =>
+          was.per === fits &&
+          was.ratio === now &&
+          was.box?.left === box.left &&
+          was.box.top === box.top &&
+          was.box.width === box.width &&
+          was.box.height === box.height
+            ? was
+            : { per: fits, ratio: now, box }
+        );
+        return;
+      }
+      const top = stage.getBoundingClientRect().top;
+      // (A phone on its side has less than 220 px under the HUD: there the room is what the height allows.)
+      const height = Math.max(currentShellShape() === "sideways" ? 140 : 220, window.innerHeight - Math.max(0, top) - reserveBelow);
       const fits = sceneScale(level.w, level.h, width, height, now);
-      setFit((was) => (was.per === fits && was.ratio === now ? was : { per: fits, ratio: now }));
+      setFit((was) => (was.per === fits && was.ratio === now && was.box === null ? was : { per: fits, ratio: now, box: null }));
     };
     measure();
     const observer = new ResizeObserver(measure);
@@ -1048,7 +1192,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       window.removeEventListener("resize", measure);
       unwatch();
     };
-  }, [level.w, level.h, reserveBelow]);
+  }, [level.w, level.h, reserveBelow, fill]);
 
   const scale = per / ratio;
 
@@ -1186,6 +1330,11 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     welcomed: null as string | null,
     toldWelcomed: null as string | null
   });
+  /** Brings the loop from its looks at rest to every frame at once (set by the loop). */
+  const wakeLoop = useRef<() => void>(() => undefined);
+  /** The room is out of sight: its picture is not drawn again until it is back. */
+  const stillRef = useRef(still);
+  stillRef.current = still;
   const live = useRef({ scale, level, base, repertoire, mood, onActDone, onPoke, onPlayed, ownBall, attentive, decor, plots, decorating, world, onWelcomed, onFridgeBare, onTemper });
   live.current = { scale, level, base, repertoire, mood, onActDone, onPoke, onPlayed, ownBall, attentive, decor, plots, decorating, world, onWelcomed, onFridgeBare, onTemper };
   /** The world as she knows it now: the page's, under anything set by hand (pip/worldStub.ts; the page lays it over too, a render later). */
@@ -1261,6 +1410,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
   const arriving = useRef(new Map<string, number>());
   const [arrivals, setArrivals] = useState<Arrival[]>([]);
   const redraw = useRef<(() => void) | null>(null);
+  // The room as its edges were last read (`stands`, in the draw below).
+  const edgeKey = useRef<string | null>(null);
   // By night: the lights the room is drawn by just now (and the room and moment they are of), and how bright Pip and
   // her ball were last told to be (`lightThings`).
   const roomLights = useRef<{ key: string; glows: Glow[] | null; dark: boolean }>({ key: "", glows: null, dark: false });
@@ -1393,6 +1544,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     };
     let hour = clockHour();
     let step = 0;
+    /** What the room's canvas shows now (drawn by this effect: a new floor or decor starts it again). */
+    const drawnRoom: { image: HTMLCanvasElement | null; region: string; width: number; front: HTMLCanvasElement | null } = { image: null, region: "", width: -1, front: null };
     const draw = (next: number) => {
       step = next;
       const now = clockHour();
@@ -1438,20 +1591,46 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
         try {
           // The garden's glass is left clear: the living sky (GardenSky) shows through it.
           const art = renderHouseLevel(level, next, shown, isEvening(Math.floor(hour)), hour, openSky) ?? renderGardenFloor(level.w, level.h, level.floorY, next);
-          image = toCanvas(art);
+          let alike = samePixelsOf.get(frames);
+          if (!alike) {
+            alike = new Map();
+            samePixelsOf.set(frames, alike);
+          }
+          const key = pixelKey(art);
+          image = alike.get(key) ?? toCanvas(art);
+          alike.set(key, image);
         } catch {
           // Art mid-edit can throw; keep the last good frame.
           return;
         }
         frames.set(next, image);
       }
+      // The same picture as is up already (and the bed's front over Pip as it was): nothing to draw.
+      const region = tuckedRef.current;
+      const regionKey = region ? `${region.x},${region.y},${region.w},${region.h}` : "";
+      if (image === drawnRoom.image && regionKey === drawnRoom.region && canvas.width === drawnRoom.width && frontRef.current === drawnRoom.front) return;
+      drawnRoom.image = image;
+      drawnRoom.region = regionKey;
+      drawnRoom.width = canvas.width;
+      drawnRoom.front = frontRef.current;
       context.imageSmoothingEnabled = false;
       context.clearRect(0, 0, level.w, level.h);
       context.drawImage(image, 0, 0);
+      // The room's edges, for the stage to carry out where the room fills the screen: read again only when the room changes.
+      if (edgeKey.current !== stands) {
+        edgeKey.current = stands;
+        const read = roomEdges(image, level.floorY);
+        const sameBand = (a: Uint32Array | undefined, b: Uint32Array | undefined) => a === b || (a !== undefined && b !== undefined && a.length === b.length && a.every((value, at) => value === b[at]));
+        if (read)
+          setEdges((was) =>
+            was && was.left.join() === read.left.join() && was.right.join() === read.right.join() && sameBand(was.bands?.left, read.bands?.left) && sameBand(was.bands?.right, read.bands?.right)
+              ? was
+              : read
+          );
+      }
       // The bed's front over a sleeping Pip: the room's own pixels, lamps and
       // night light included, copied from the frame just drawn.
       const front = frontRef.current;
-      const region = tuckedRef.current;
       const frontContext = front?.getContext("2d");
       if (front && region && frontContext) {
         frontContext.imageSmoothingEnabled = false;
@@ -1464,7 +1643,10 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     redraw.current = () => draw(step);
     draw(0);
     if (reduced) return;
-    return subscribeTick((tick) => draw(tick % ROOM_LOOP));
+    // Not while the room is out of sight (the Hollow or a game over it): drawn as it is when it is back.
+    return subscribeTick((tick) => {
+      if (!stillRef.current) draw(tick % ROOM_LOOP);
+    });
     // decorKey stands in for decor, a new object on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [level, decorKey]);
@@ -2529,7 +2711,6 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
   useEffect(() => {
     if (hidePip) return;
     const reduced = prefersReducedMotion();
-    let raf = 0;
     let last = 0;
     const step = (time: number) => {
       const dt = last ? Math.min(0.05, (time - last) / 1000) : 0;
@@ -2897,29 +3078,33 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       furnishRef.current?.step(dt, reduced);
     };
     stepRef.current = step;
-    const tick = (time: number) => {
-      step(time + clockSkew);
-      raf = requestAnimationFrame(tick);
+    // Every frame while something moves; at rest, a look four times a second (pip/restLoop.ts). A hand on the room
+    // (or anything the page asks of the scene, which renders it) brings the frames back at once.
+    const moving = () => {
+      const s = st.current;
+      return houseNeedsFrames(
+        { phase: outRef.current ? "out" : s.phase, pressed: s.drag !== null, ball: s.ball !== null, pointerAt: s.pointer?.at ?? null, furnishing: furnishRef.current?.busy() ?? false },
+        nowMs()
+      );
     };
-    const start = () => {
-      if (!raf && document.visibilityState === "visible") {
-        last = 0;
-        raf = requestAnimationFrame(tick);
-      }
-    };
-    const stop = () => {
-      cancelAnimationFrame(raf);
-      raf = 0;
-    };
-    const onVisibility = () => (document.visibilityState === "visible" ? start() : stop());
-    document.addEventListener("visibilitychange", onVisibility);
-    start();
+    const loop = restingLoop((time) => step(time + clockSkew), moving);
+    wakeLoop.current = loop.wake;
+    const stage = stageRef.current;
+    const wake = () => loop.wake();
+    stage?.addEventListener("pointerdown", wake, { capture: true, passive: true });
+    stage?.addEventListener("pointermove", wake, { capture: true, passive: true });
     return () => {
-      stop();
+      loop.stop();
+      wakeLoop.current = () => undefined;
+      stage?.removeEventListener("pointerdown", wake, { capture: true });
+      stage?.removeEventListener("pointermove", wake, { capture: true });
       stepRef.current = null;
-      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [hidePip]);
+  // Whatever the page asks of the scene renders it: the loop looks at once rather than at its next look.
+  useEffect(() => {
+    wakeLoop.current();
+  });
 
   // Development only: Pip's day, stepped by hand. `advance(ms)` winds the
   // scene's clock on in frames, ending each move when its loops are up (the
@@ -4927,15 +5112,31 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
   const noteText = world?.away?.note ?? "out. back soon.";
   // Said aloud, a line loses the marks that lean on a word ("you stopped *there*?").
   const spoken = shownLine?.replace(/\*/g, "") ?? null;
+  // Where the room fills its stage: where it sits in it, and its edges carried out to the stage's, on either side.
+  const inBox = fill && box ? fillPlace(level.w * scale, level.h * scale, box.width, box.height, ratio) : null;
+  const roomAt = inBox && box ? { left: inBox.left + box.left, top: inBox.top + box.top } : null;
+  const fillStyle: CSSProperties | undefined =
+    roomAt && edges
+      ? {
+          background: `${edgeBands(edges.left, roomAt.top, scale)} left top / 50% 100% no-repeat, ${edgeBands(edges.right, roomAt.top, scale)} right top / 50% 100% no-repeat`
+        }
+      : undefined;
 
   return (
-    <div ref={stageRef} className="pip-house-stage">
+    <div ref={stageRef} className="pip-house-stage" data-fill={fill || undefined} style={fillStyle}>
+      {/* Beside the room, its wallpaper, trim and floor run on to the screen's edges in their own pattern. */}
+      {roomAt && edges?.bands && (
+        <>
+          <EdgeBand pixels={edges.bands.left} height={level.h} scale={scale} left={roomAt.left - BAND_ART * scale} top={roomAt.top} />
+          <EdgeBand pixels={edges.bands.right} height={level.h} scale={scale} left={roomAt.left + level.w * scale} top={roomAt.top} />
+        </>
+      )}
       <div
         ref={roomRef}
         className="pip-house-room"
         data-decorating={decorating || undefined}
         data-night={night || undefined}
-        style={{ width: level.w * scale, height: level.h * scale }}
+        style={{ width: level.w * scale, height: level.h * scale, ...(roomAt ? { left: roomAt.left, top: roomAt.top } : null) }}
         role="group"
         aria-label={label}
         onPointerMove={(event) => {

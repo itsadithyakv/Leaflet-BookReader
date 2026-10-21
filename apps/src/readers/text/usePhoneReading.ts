@@ -63,7 +63,7 @@ export const usePhoneReading = (reader: WithSelectionDock) => {
     const timer = window.setInterval(() => setClock(clockNow()), 15000);
     return () => window.clearInterval(timer);
   }, [phone]);
-  const clockLeads = phone && shape === "upright" && systemBarsHidden(shape, chromeVisible, exitGuard.locked);
+  const clockLeads = phone && shape === "upright" && systemBarsHidden(shape, exitGuard.locked);
 
   // ---- The page showing, for the bookmark corner ----
   // Held as whether it is bookmarked, not as where it is: the place changes

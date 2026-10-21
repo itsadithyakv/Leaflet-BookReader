@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useLibraryStore } from "../store/libraryStore";
 import { useShallow } from "zustand/react/shallow";
 import { flowerGrowing, useHabitStore } from "../store/habitStore";
@@ -7,6 +7,7 @@ import { useAppearanceStore, type ThemeMode } from "../store/appearanceStore";
 import { bookService } from "../services/bookService";
 import { clearSmartReadProfiles } from "../services/smartReadService";
 import { ReadingPaceCard } from "../components/ReadingPaceCard";
+import { StudioVoiceCard } from "../components/StudioVoiceCard";
 import { CharactersSetting } from "../readers/people/CharactersSetting";
 import { WordsSetting } from "../readers/words/WordsSetting";
 import { UiIcon } from "../components/UiIcon";
@@ -14,10 +15,12 @@ import { RemindersCard } from "../components/RemindersCard";
 import { ConverterCard } from "../components/ConverterCard";
 import { LeaderboardsCard } from "../components/LeaderboardsCard";
 import { LibraryCopyCard } from "../components/LibraryCopyCard";
+import { StorageCard } from "../components/StorageCard";
 import { TidyFolderCard } from "../components/TidyFolderCard";
 import { pickSyncFolder } from "../platform";
 import { FEATURES } from "../constants/features";
 import { PRIVACY_URL, SUPPORT_EMAIL, TERMS_URL } from "../constants/links";
+import { THIRD_PARTY_NOTICES } from "../constants/thirdParty";
 import { openStoreReview } from "../components/RatePrompt";
 import { useAccountStore } from "../store/accountStore";
 import { accountService, errorMessage } from "../services/accountService";
@@ -25,7 +28,10 @@ import { diagnosticsService } from "../services/diagnosticsService";
 import { forgetBooksOnThisDevice } from "../services/deviceData";
 import { AccountEmail } from "../components/account/AccountEmail";
 import { AccountForm } from "../components/account/AccountForm";
+import { PasswordInput } from "../components/account/PasswordInput";
+import { FieldError, fieldClass } from "../components/account/formParts";
 import { PipAvatar } from "../components/community/PipAvatar";
+import { PROFILE_PLACE } from "../components/community/copy";
 import { usePipStore, type PipMode } from "../store/pipStore";
 import { pickBeat } from "../pip/moments";
 import { playSound, useSoundOn } from "../pip/sound";
@@ -37,13 +43,31 @@ import { useVolumeKeysTurnPages } from "../platform/volumeKeys";
 import { syncConfigured as anywhereToSync } from "../services/syncTiming";
 import { useLibraryOwnerStore } from "../store/libraryOwnerStore";
 import { InfoTip } from "../components/ui/InfoTip";
+import { setEffectsChoice, useEffectsChoice, type EffectsChoice } from "../platform/perfTier";
 import { OWNER_COPY } from "../components/sync/ownerCopy";
+import { ReportProblemSheet } from "../components/ReportProblemSheet";
+import { useCommunityStore } from "../components/community/communityStore";
+import { AdminPanel } from "../components/discuss/AdminPanel";
+import { ProblemsPanel } from "../components/discuss/ProblemsPanel";
 
 const PIP_MODES: Array<{ mode: PipMode; label: string; detail: string; preview: string }> = [
   { mode: "chatty", label: "Chatty", detail: "Pip lives out in the app: it wanders, naps, celebrates, and can be picked up and thrown. Select the logo to call it home.", preview: "look" },
   { mode: "quiet", label: "Quiet", detail: "Pip stays in the logo and only comes out when something happens: a goal, a streak, a finished book.", preview: "idle" },
   { mode: "off", label: "Off", detail: "Pip stays still as the logo. Session summaries still appear, without Pip.", preview: "sleep" }
 ];
+
+/** Settings → Appearance → Visual effects (platform/perfTier.ts). */
+const EFFECTS_CHOICES: Array<{ choice: EffectsChoice; label: string }> = [
+  { choice: "auto", label: "Auto" },
+  { choice: "full", label: "Full" },
+  { choice: "lite", label: "Smooth" }
+];
+const EFFECTS_TIP =
+  "Full: frosted glass behind bars and sheets. Smooth: the same look without the blur, so scrolling and Pip stay fluid. Auto: Smooth on phones, and on a computer that lags.";
+
+/** Behind the Backup heading's (i), in a release without sync across devices. */
+const MOBILE_APP_SOON =
+  "Reading across your phone and computer arrives with the Leaflet mobile app — coming soon.";
 
 export type SettingsPageProps = {
   showToast: (message: string) => void;
@@ -100,6 +124,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
   const followSystem = useAppearanceStore((state) => state.followSystem);
   const followSystemTheme = useAppearanceStore((state) => state.followSystemTheme);
   const setTheme = useAppearanceStore((state) => state.setTheme);
+  const effects = useEffectsChoice();
   const resetAppearance = useAppearanceStore((state) => state.resetTheme);
   const pipMode = usePipStore((state) => state.mode);
   const setPipMode = usePipStore((state) => state.setMode);
@@ -112,7 +137,9 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
   };
   const startPipTour = usePipStore((state) => state.startTour);
   const pipChoice = PIP_MODES.find((item) => item.mode === pipMode) ?? PIP_MODES[0];
+  const storeName = android ? "Google Play" : "the Microsoft Store";
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [reporting, setReporting] = useState(false);
   const [showDriveSetup, setShowDriveSetup] = useState(false);
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
@@ -157,6 +184,17 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
   const syncing = syncStatus === "syncing";
   const syncConfigured = anywhereToSync(sync);
   const accountSignedIn = useAccountStore((state) => state.status.signedIn);
+  // The owner's own tools are a section of their own here, whatever their
+  // profile shares: the server says who the admin is (`isAdmin` on their own
+  // profile, read whether it is private or not), and answers no one else.
+  const isAdmin = useCommunityStore((state) => Boolean(state.me?.isAdmin));
+  const meLoaded = useCommunityStore((state) => state.me !== null);
+  const loadMe = useCommunityStore((state) => state.loadMe);
+  useEffect(() => {
+    if (accountSignedIn && sync.apiBase && !meLoaded) {
+      void loadMe();
+    }
+  }, [accountSignedIn, sync.apiBase, meLoaded, loadMe]);
   // Signed in as another account than this library's: its reading sync is paused.
   const ownerPaused = sync.library?.standing === "other";
   const libraryElsewhere = Boolean(sync.library?.elsewhere);
@@ -267,6 +305,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
         resetLibrary();
         resetHabits();
         resetAppearance();
+        setEffectsChoice("auto");
         // Sync state lives in the backend, which the delete just cleared; re-read
         // it rather than assuming what it now says.
         void loadSyncStatus();
@@ -312,7 +351,8 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
     { id: "general", label: "General" },
     { id: "reading", label: "Reading" },
     { id: "library", label: "Library" },
-    ...(showAccount ? [{ id: "account" as const, label: "Account" }] : [])
+    ...(showAccount ? [{ id: "account" as const, label: "Account" }] : []),
+    ...(isAdmin && accountSignedIn ? [{ id: "admin" as const, label: "Admin" }] : [])
   ];
   const offered = sections.map((item) => item.id);
   const [chosen, setChosen] = useState<SettingsSection>(() => readSettingsSection(offered));
@@ -323,6 +363,8 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
     rememberSettingsSection(next);
     setChosen(next);
   };
+
+  const closeReport = useCallback(() => setReporting(false), []);
 
   const renderToggle = (on: boolean) => (
     <span
@@ -350,6 +392,9 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
     className: `grid items-start gap-4 [&>*]:min-w-0 lg:grid-cols-2${wide ? " xl:grid-cols-3" : ""}`
   });
   const column = "flex flex-col gap-4 [&>*]:min-w-0";
+  // A card's heading, with an (i) beside it for what the card leaves unsaid.
+  const heading =
+    "flex items-center gap-1.5 text-xs uppercase tracking-widest text-on-surface-variant";
 
   return (
     <div className="dock-clear mx-auto flex min-h-full w-full max-w-[1480px] flex-col gap-5">
@@ -367,7 +412,13 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
         <div {...panel("general")}>
           <div className={column}>
             <section className="paper-surface rounded-xl p-5">
-              <p className="text-xs uppercase tracking-widest text-on-surface-variant">Appearance</p>
+              <p className={heading}>
+                Appearance
+                <InfoTip
+                  className="normal-case tracking-normal"
+                  text="For the library and the reader, on this device."
+                />
+              </p>
               <div className="mt-3 flex gap-3">
                 {(["light", "dark"] as ThemeMode[]).map((mode) => (
                   <button
@@ -388,9 +439,8 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
               </div>
               <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                 <span className="text-xs text-on-surface-variant">
-                  {followSystem
-                    ? `Following the ${android ? "system" : "Windows"} appearance setting.`
-                    : "For the library and the reader, on this device."}
+                  {followSystem &&
+                    `Following the ${android ? "system" : "Windows"} appearance setting.`}
                 </span>
                 <button
                   type="button"
@@ -401,10 +451,32 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                   {android ? "Use system theme" : "Use Windows Theme"}
                 </button>
               </div>
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                <span className="flex items-center gap-1.5 text-xs text-on-surface-variant">
+                  Visual effects
+                  <InfoTip text={EFFECTS_TIP} />
+                </span>
+                <div className="flex flex-wrap gap-2" role="group" aria-label="Visual effects">
+                  {EFFECTS_CHOICES.map((item) => (
+                    <button
+                      key={item.choice}
+                      type="button"
+                      className={`tactile-button px-4 py-2 text-xs ${effects === item.choice ? "tactile-button-primary" : ""}`}
+                      aria-pressed={effects === item.choice}
+                      onClick={() => setEffectsChoice(item.choice)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </section>
 
             <section className="paper-surface rounded-xl p-5">
-              <p className="text-xs uppercase tracking-widest text-on-surface-variant">Pip, your reading companion</p>
+              <p className={heading}>
+                Pip, your reading companion
+                <InfoTip className="normal-case tracking-normal" text={pipChoice.detail} />
+              </p>
               <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="How much Pip moves">
                 {PIP_MODES.map((item) => (
                   <button
@@ -423,7 +495,6 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                   </button>
                 )}
               </div>
-              <p className="mt-2 text-xs text-on-surface-variant">{pipChoice.detail}</p>
               <button
                 type="button"
                 role="switch"
@@ -441,11 +512,14 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
           <div className={column}>
             <section className="paper-surface rounded-xl p-5" aria-labelledby="about-title">
               <p className="text-xs uppercase tracking-widest text-on-surface-variant">About</p>
-              <h3 id="about-title" className="mt-2 font-headline text-lg font-bold text-on-surface">
-                Enjoying Leaflet?
-              </h3>
+              <div className="mt-2 flex items-center gap-1.5">
+                <h3 id="about-title" className="font-headline text-lg font-bold text-on-surface">
+                  Enjoying Leaflet?
+                </h3>
+                <InfoTip text={`A rating on ${storeName} helps other readers find it.`} />
+              </div>
               <p className="mt-1 text-xs text-on-surface-variant">
-                A rating on {android ? "Google Play" : "the Microsoft Store"} helps other readers find it. Questions, bugs or ideas:{" "}
+                Questions, bugs or ideas:{" "}
                 <span className="selectable font-semibold text-on-surface">{SUPPORT_EMAIL}</span>
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
@@ -480,12 +554,32 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                 >
                   Copy diagnostics
                 </button>
+                <button
+                  type="button"
+                  className="tactile-button px-4 py-2 text-xs"
+                  onClick={() => setReporting(true)}
+                >
+                  Report a problem
+                </button>
               </div>
+              <details className="mt-3 text-xs text-on-surface-variant">
+                <summary className="cursor-pointer select-none hover:text-primary">Open-source notices</summary>
+                <ul className="mt-2 flex flex-col gap-1.5">
+                  {THIRD_PARTY_NOTICES.map((notice) => (
+                    <li key={notice.name}>
+                      <button type="button" className="font-semibold text-on-surface hover:text-primary" onClick={() => void accountService.openLink(notice.url)}>
+                        {notice.name}
+                      </button>{" "}
+                      · {notice.licence} · {notice.use}
+                    </li>
+                  ))}
+                </ul>
+              </details>
             </section>
 
             <div className="paper-surface flex flex-wrap items-center justify-between gap-4 rounded-xl p-5">
               <div className="min-w-0 flex-1 basis-64">
-                <p className="flex items-center gap-1.5 text-xs uppercase tracking-widest text-on-surface-variant">
+                <p className={heading}>
                   Danger Zone
                   <InfoTip
                     className="normal-case tracking-normal"
@@ -604,6 +698,8 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
             <RemindersCard key={`reminders-${wiped}`} showToast={showToast} />
           </div>
           <div className={column}>
+            {/* The Studio voice: up front on a computer (the voice it reads in once here), lower-key on a phone. */}
+            {!android && <StudioVoiceCard key={`studio-${wiped}`} showToast={showToast} />}
             <ReadingPaceCard key={wiped} showToast={showToast} renderToggle={renderToggle} />
           </div>
           <div className={column}>
@@ -625,6 +721,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
             )}
             <CharactersSetting key={`characters-${wiped}`} renderToggle={renderToggle} />
             <WordsSetting key={`words-${wiped}`} renderToggle={renderToggle} />
+            {android && <StudioVoiceCard key={`studio-${wiped}`} showToast={showToast} />}
           </div>
         </div>
       )}
@@ -633,7 +730,12 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
         <div {...panel("library")}>
           <div className={column}>
             <div className="paper-surface rounded-xl p-5">
-              <p className="text-xs uppercase tracking-widest text-on-surface-variant">{syncWords ? "Sync" : "Backup"}</p>
+              <p className={heading}>
+                {syncWords ? "Sync" : "Backup"}
+                {!FEATURES.multiDeviceSync && !android && (
+                  <InfoTip className="normal-case tracking-normal" text={MOBILE_APP_SOON} />
+                )}
+              </p>
               <p className="mt-3 font-headline text-2xl font-bold text-on-surface">
                 {sync.driveConnected
                   ? sync.accountEmail ?? "Google Drive"
@@ -843,12 +945,6 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                   {syncing ? (syncWords ? "Syncing…" : "Backing up…") : syncWords ? "Sync Now" : "Back Up Now"}
                 </button>
               )}
-              {!FEATURES.multiDeviceSync && !android && (
-                <p className="mt-3 text-[11px] leading-relaxed text-on-surface-variant">
-                  Reading across your phone and computer arrives with the Leaflet mobile app — coming
-                  soon.
-                </p>
-              )}
             </div>
           </div>
           <div className={column}>
@@ -858,6 +954,8 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
 
             {/* Calibre has no phone version: a Kindle file the reader cannot open says so when it is opened. */}
             {!android && <ConverterCard showToast={showToast} />}
+
+            <StorageCard key={`storage-${wiped}`} showToast={showToast} />
           </div>
         </div>
       )}
@@ -870,6 +968,19 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
           {FEATURES.community && <LeaderboardsCard showToast={showToast} />}
         </div>
       )}
+
+      {section === "admin" && (
+        <div {...panel("admin")}>
+          <div className={column}>
+            <ProblemsPanel showToast={showToast} />
+          </div>
+          <div className={column}>
+            <AdminPanel showToast={showToast} />
+          </div>
+        </div>
+      )}
+
+      <ReportProblemSheet open={reporting} onClose={closeReport} showToast={showToast} />
     </div>
   );
 };
@@ -925,158 +1036,163 @@ const AccountCard = ({ showToast }: { showToast: (message: string) => void }) =>
     setPanel(which);
   };
 
-  const fieldClass = "inset-field mt-1 w-full px-3 py-2 text-xs text-on-surface";
-  const labelClass = "mt-3 block text-[10px] uppercase tracking-[0.2em] text-on-surface-variant";
   const account = status.account;
 
   if (!loaded) {
     return null;
   }
 
-  const errorBox = error && (
-    <p className="mt-3 rounded-lg bg-error-container/40 px-3 py-2 text-xs text-on-surface">{error}</p>
-  );
-
-  if (status.signedIn) {
+  if (!status.signedIn) {
     return (
       <div className="paper-surface rounded-xl p-5">
-        <p className="text-xs uppercase tracking-widest text-on-surface-variant">Account</p>
-        <div className="mt-3 flex items-center gap-3">
-          {account?.avatar && <PipAvatar seed={null} avatar={account.avatar} size={48} play="idle" label="Your Pip" />}
-          <div className="min-w-0">
-            <p className="truncate font-headline text-2xl font-bold text-on-surface">{account?.email || "Signed in"}</p>
-            {FEATURES.community && (
-              <p className="mt-1 text-xs text-on-surface-variant">Your name, handle and Pip are on Social → Board → You.</p>
-            )}
-          </div>
-        </div>
-        {status.offline && (
-          <p className="mt-2 text-[11px] text-on-surface-variant">Offline. Showing saved details.</p>
-        )}
-        {library?.standing === "other" && (
-          <div className="mt-3 flex flex-wrap items-center gap-3">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-container-high px-3 py-1 text-[11px] font-semibold text-on-surface">
-              {OWNER_COPY.otherTitle}
-              <InfoTip text={OWNER_COPY.otherNote} />
-            </span>
-            <button
-              type="button"
-              className="tactile-button px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={switchBusy}
-              title={library.elsewhere ? OWNER_COPY.openMineNote : OWNER_COPY.startFreshNote}
-              onClick={() => void useLibraryOwnerStore.getState().switchAndReload(library.elsewhere ? "mine" : "fresh")}
-            >
-              {library.elsewhere ? OWNER_COPY.openMine : OWNER_COPY.startFreshShort}
-            </button>
-          </div>
-        )}
-        {panel === "none" && <AccountEmail account={account} showToast={showToast} />}
-
-        {panel === "password" && (
-          <div className="mt-1">
-            <label htmlFor="account-current-password" className={labelClass}>Current password</label>
-            <input
-              id="account-current-password"
-              type="password"
-              autoComplete="current-password"
-              value={current}
-              onChange={(event) => setCurrent(event.target.value)}
-              className={fieldClass}
-            />
-            <label htmlFor="account-new-password" className={labelClass}>New password</label>
-            <input
-              id="account-new-password"
-              type="password"
-              autoComplete="new-password"
-              value={next}
-              onChange={(event) => setNext(event.target.value)}
-              className={fieldClass}
-            />
-            <p className="mt-1 text-[10px] text-on-surface-variant">
-              At least 8 characters. Your other devices will be signed out.
-            </p>
-          </div>
-        )}
-
-        {panel === "delete" && (
-          <div className="mt-3">
-            <p className="text-xs leading-relaxed text-on-surface-variant">
-              This deletes your account, profile and synced data from the server. Books and reading
-              history on this device stay.
-            </p>
-            <label htmlFor="account-delete-password" className={labelClass}>Password to confirm</label>
-            <input
-              id="account-delete-password"
-              type="password"
-              autoComplete="current-password"
-              value={current}
-              onChange={(event) => setCurrent(event.target.value)}
-              className={fieldClass}
-            />
-          </div>
-        )}
-
-        {errorBox}
-
-        <div className="mt-4 flex flex-wrap gap-3">
-          {panel === "none" && (
-            <>
-              <button type="button" className="tactile-button px-4 py-2 text-xs" onClick={() => open("password")}>
-                Change password
-              </button>
-              <button
-                type="button"
-                className="tactile-button px-4 py-2 text-xs disabled:opacity-60"
-                disabled={busy}
-                onClick={() => attempt(signOut, "Signed out.")}
-              >
-                Sign out
-              </button>
-              <button
-                type="button"
-                className="tactile-button border-error/50 bg-error/10 px-4 py-2 text-xs text-error hover:bg-error/20"
-                onClick={() => open("delete")}
-              >
-                Delete account
-              </button>
-            </>
-          )}
-          {panel === "password" && (
-            <button
-              type="button"
-              className="tactile-button tactile-button-primary px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={busy || !current || next.length < 8}
-              onClick={() => attempt(() => changePassword(current, next), "Password changed.")}
-            >
-              {busy ? "Saving…" : "Save password"}
-            </button>
-          )}
-          {panel === "delete" && (
-            <button
-              type="button"
-              className="tactile-button border-error/50 bg-error/10 px-4 py-2 text-xs text-error hover:bg-error/20 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={busy || !current}
-              onClick={() => attempt(() => deleteAccount(current), "Account deleted.")}
-            >
-              {busy ? "Deleting…" : "Delete for good"}
-            </button>
-          )}
-          {panel !== "none" && (
-            <button type="button" className="tactile-button px-4 py-2 text-xs" disabled={busy} onClick={() => open("none")}>
-              Cancel
-            </button>
-          )}
-        </div>
+        <AccountForm onDone={showToast} />
       </div>
     );
   }
 
+  const destructive = "tactile-button border-error/50 bg-error/10 px-4 py-2 text-xs text-error hover:bg-error/20 disabled:cursor-not-allowed disabled:opacity-60";
+
   return (
     <div className="paper-surface rounded-xl p-5">
-      <p className="text-xs uppercase tracking-widest text-on-surface-variant">Account</p>
-      <div className="mt-3">
-        <AccountForm onDone={showToast} />
+      <div className="flex items-center gap-3">
+        {account?.avatar && <PipAvatar seed={null} avatar={account.avatar} size={44} play="idle" label="Your Pip" />}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <p className="min-w-0 truncate text-base font-semibold text-on-surface" title={account?.email}>
+              {account?.email || "Signed in"}
+            </p>
+            {FEATURES.community && <InfoTip text={`Your name, handle and Pip are on ${PROFILE_PLACE}.`} />}
+          </div>
+          {status.offline && <p className="text-[11px] text-on-surface-variant">Offline</p>}
+        </div>
       </div>
+      {library?.standing === "other" && (
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-container-high px-3 py-1 text-[11px] font-semibold text-on-surface">
+            {OWNER_COPY.otherTitle}
+            <InfoTip text={OWNER_COPY.otherNote} />
+          </span>
+          <button
+            type="button"
+            className="tactile-button px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={switchBusy}
+            title={library.elsewhere ? OWNER_COPY.openMineNote : OWNER_COPY.startFreshNote}
+            onClick={() => void useLibraryOwnerStore.getState().switchAndReload(library.elsewhere ? "mine" : "fresh")}
+          >
+            {library.elsewhere ? OWNER_COPY.openMine : OWNER_COPY.startFreshShort}
+          </button>
+        </div>
+      )}
+      {panel === "none" && <AccountEmail account={account} showToast={showToast} />}
+
+      {panel === "password" && (
+        <form
+          className="mt-3"
+          noValidate
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!busy && current && next.length >= 8) {
+              attempt(() => changePassword(current, next), "Password changed.");
+            }
+          }}
+        >
+          <label htmlFor="account-current-password" className="sr-only">Current password</label>
+          <PasswordInput
+            id="account-current-password"
+            autoComplete="current-password"
+            placeholder="Current password"
+            value={current}
+            onChange={(event) => setCurrent(event.target.value)}
+            className={fieldClass}
+          />
+          <label htmlFor="account-new-password" className="sr-only">New password</label>
+          <span className="mt-2 flex items-center gap-1.5">
+            <span className="min-w-0 flex-1">
+              <PasswordInput
+                id="account-new-password"
+                autoComplete="new-password"
+                placeholder="New password (8+ characters)"
+                value={next}
+                onChange={(event) => setNext(event.target.value)}
+                className={fieldClass}
+              />
+            </span>
+            <InfoTip text="Your other devices are signed out." />
+          </span>
+          <FieldError>{error}</FieldError>
+          <div className="mt-3 flex flex-wrap gap-3">
+            <button
+              type="submit"
+              className="tactile-button tactile-button-primary px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={busy || !current || next.length < 8}
+            >
+              {busy ? "Saving…" : "Save password"}
+            </button>
+            <button type="button" className="tactile-button px-4 py-2 text-xs" disabled={busy} onClick={() => open("none")}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+
+      {panel === "delete" && (
+        <form
+          className="mt-3"
+          noValidate
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!busy && current) {
+              attempt(() => deleteAccount(current), "Account deleted.");
+            }
+          }}
+        >
+          <p className="text-xs text-on-surface-variant">
+            Deletes your account and its synced data from the server. Books on this {deviceNoun()} stay.
+          </p>
+          <label htmlFor="account-delete-password" className="sr-only">Password to confirm</label>
+          <span className="mt-2 block">
+            <PasswordInput
+              id="account-delete-password"
+              autoComplete="current-password"
+              placeholder="Password to confirm"
+              value={current}
+              onChange={(event) => setCurrent(event.target.value)}
+              className={fieldClass}
+            />
+          </span>
+          <FieldError>{error}</FieldError>
+          <div className="mt-3 flex flex-wrap gap-3">
+            <button type="submit" className={destructive} disabled={busy || !current}>
+              {busy ? "Deleting…" : "Delete for good"}
+            </button>
+            <button type="button" className="tactile-button px-4 py-2 text-xs" disabled={busy} onClick={() => open("none")}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+
+      {panel === "none" && (
+        <>
+          <FieldError>{error}</FieldError>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              className="tactile-button px-4 py-2 text-xs disabled:opacity-60"
+              disabled={busy}
+              onClick={() => attempt(signOut, "Signed out.")}
+            >
+              Sign out
+            </button>
+            <button type="button" className="tactile-button px-4 py-2 text-xs" onClick={() => open("password")}>
+              Change password
+            </button>
+            <button type="button" className="ml-auto py-1 text-xs font-semibold text-error hover:underline" onClick={() => open("delete")}>
+              Delete account
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 };

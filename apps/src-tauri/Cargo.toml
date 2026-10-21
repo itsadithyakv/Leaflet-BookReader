@@ -1,6 +1,6 @@
 [package]
 name = "leaflet"
-version = "1.5.7"
+version = "1.5.10"
 edition = "2021"
 build = "build.rs"
 
@@ -73,7 +73,16 @@ keyring = { version = "3", features = ["windows-native", "apple-native", "linux-
 dotenvy = "0.15"
 base64 = "0.22"
 regex = "1.10"
+# The time zone's name, for the half of the world the reader is in (Pip's Frost
+# skin is earned on the longest night: December in the north, June in the
+# south). Already in the tree through chrono.
+iana-time-zone = "0.1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+# The Studio voice's pack (src/tts/packs.rs): the model archive is a .tar.bz2. bzip2 is
+# the version zip already builds; tar is small and pure Rust. Every platform:
+# Android's Kotlin reads the files this downloads.
+bzip2 = "0.4"
+tar = { version = "0.4", default-features = false }
 
 # Focuses an already-running window when a second launch arrives with a file.
 # A phone has no such concept and the plugin has no mobile implementation.
@@ -84,6 +93,24 @@ tauri-plugin-single-instance = "2.4.3"
 # Rust calls SecretBox.kt by JNI. Same version wry already builds on Android.
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"
+
+# The Studio voice's engine on Windows (src/tts/native.rs), behind the `studio-voice`
+# feature. sherpa-onnx (Apache-2.0) runs Kokoro through onnxruntime: `shared`
+# puts sherpa-onnx-c-api.dll and onnxruntime.dll next to the exe (the static
+# build links the C runtime statically, which Rust's default does not). Its
+# build script fetches the prebuilt archive unless SHERPA_ONNX_ARCHIVE_DIR
+# points at a copy: .cargo/config.toml points it at vendor/sherpa-onnx
+# (docs/studio-voice.md). cpal plays the sound (WASAPI); same `windows`
+# crate range as ours.
+[target.'cfg(windows)'.dependencies.sherpa-onnx]
+version = "=1.13.8"
+default-features = false
+features = ["shared"]
+optional = true
+
+[target.'cfg(windows)'.dependencies.cpal]
+version = "0.17"
+optional = true
 
 # Reading reminders (src/reminders/toast.rs): Windows toasts, shown now or
 # scheduled with Windows for when the app is closed. Called directly because
@@ -100,10 +127,18 @@ windows = { version = "0.61", features = [
   # down, and Windows' own "a full-screen app or a presentation is running".
   # Keeping the display on while the page reads itself (commands/power.rs).
   "Win32_System_Power",
+  # Loading the Studio voice's DLLs by full path (src/tts/native.rs).
+  "Win32_System_LibraryLoader",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging"
 ] }
+# Which Windows build, for Mica (src/window_material.rs). The version Tauri's
+# window effects already build on, so no new crate.
+windows-version = "0.1.7"
+# Emptying the web view's disk cache (src/commands/space.rs). The version wry
+# already builds on, so no new crate.
+webview2-com = "0.38"
 
 # No `protocol-asset`: covers and book bytes reach the webview through commands,
 # so nothing needs `asset://`, and leaving it on exposed the whole app-data
@@ -113,4 +148,9 @@ version = "2.5.6"
 features = []
 
 [features]
+# The Studio voice's engine (Windows only: elsewhere it has no effect, and
+# Android speaks in Kotlin). On by default; `--no-default-features` builds
+# without it, and the voice is then never offered on the desktop.
+default = ["studio-voice"]
+studio-voice = ["dep:sherpa-onnx", "dep:cpal"]
 custom-protocol = ["tauri/custom-protocol"]

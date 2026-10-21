@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { nightModeHeld } from "../platform/android";
 
 export type ThemeMode = "light" | "dark";
 
@@ -96,7 +97,8 @@ export const watchSystemTheme = () => {
     return () => undefined;
   }
   const onChange = () => {
-    if (!useAppearanceStore.getState().followSystem) {
+    // (An open book holding Android's night mode moves the query too: it is not the phone's.)
+    if (!useAppearanceStore.getState().followSystem || nightModeHeld()) {
       return;
     }
     const theme = readSystemTheme();

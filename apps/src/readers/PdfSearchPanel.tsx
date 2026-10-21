@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { UiIcon } from "../components/UiIcon";
 import { MIN_QUERY } from "./pdfText";
+import { ListEdges } from "./ListEdges";
 import { hitsInPageOrder, nextHitIndex, searchPdf, type PdfSearchHit, type PdfSearchState } from "./pdfSearch";
 
 type PdfSearchPanelProps = {
@@ -200,7 +201,8 @@ export const PdfSearchPanel = ({
           />
         </div>
       )}
-      <ol ref={list} className="mt-3 min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
+      <ListEdges className="mt-3">
+      <ol ref={list} className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
         {hits.map((hit, index) => {
           const current = sameHit(active, hit);
           return (
@@ -224,6 +226,7 @@ export const PdfSearchPanel = ({
           );
         })}
       </ol>
+      </ListEdges>
     </div>
   );
 };

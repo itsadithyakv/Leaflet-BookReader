@@ -17,7 +17,7 @@ import app.tauri.Logger
 /**
  * Keeps Leaflet reading aloud with the screen off or another app in front: a
  * foreground service of the media-playback kind, with the media notification
- * (a sentence back, play or pause, a sentence on, stop) that the lock screen
+ * (back, play or pause, next, stop) that the lock screen
  * shows too. `ReadAloud` does the reading; this is its notification and its
  * hold on the process, from the first sentence until reading aloud stops.
  */
@@ -129,7 +129,7 @@ class ReadAloudService : Service() {
           )
         )
         .setDeleteIntent(button(context, ACTION_STOP, 5))
-        .addAction(action(android.R.drawable.ic_media_previous, "A sentence back", button(context, ACTION_PREVIOUS, 1)))
+        .addAction(action(android.R.drawable.ic_media_previous, "Back", button(context, ACTION_PREVIOUS, 1)))
         .addAction(
           if (playing) {
             action(android.R.drawable.ic_media_pause, "Pause", button(context, ACTION_PLAY_PAUSE, 2))
@@ -137,7 +137,7 @@ class ReadAloudService : Service() {
             action(android.R.drawable.ic_media_play, "Play", button(context, ACTION_PLAY_PAUSE, 2))
           }
         )
-        .addAction(action(android.R.drawable.ic_media_next, "A sentence on", button(context, ACTION_NEXT, 3)))
+        .addAction(action(android.R.drawable.ic_media_next, "Next", button(context, ACTION_NEXT, 3)))
         .addAction(action(android.R.drawable.ic_menu_close_clear_cancel, "Stop", button(context, ACTION_STOP, 4)))
         .setStyle(style)
         .build()

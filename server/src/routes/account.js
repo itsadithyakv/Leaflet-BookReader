@@ -1,11 +1,11 @@
 import { Router } from "express";
 import { createHash, randomInt, timingSafeEqual } from "node:crypto";
-import { accounts, confirmations, profiles, quoteTallies, resets, states, tallies } from "../db.js";
+import { accounts, confirmations, profiles, resets } from "../db.js";
 import { HttpError, asyncHandler, plainText, smallJson } from "../http.js";
 import { accountView, createSession, endSession, endSessionsOf, loadAccount, requireAccount } from "../auth.js";
 import { burnPasswordCheck, hashPassword, passwordProblem, verifyPassword } from "../passwords.js";
 import { RateLimiter } from "../rateLimit.js";
-import { deleteCommunityData } from "../community.js";
+import { deleteAccount } from "../deletion.js";
 import { forgetBoards } from "../boardCache.js";
 import { isAvatar } from "../avatars.js";
 import { liveSuspension, rememberSuspension } from "../standing.js";
@@ -96,7 +96,7 @@ export function normaliseEmail(value) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
 
-function emailProblem(email) {
+export function emailProblem(email) {
   if (!email || email.length > EMAIL_MAX || !EMAIL_PATTERN.test(email)) {
     return "Enter a valid email address.";
   }
@@ -642,11 +642,9 @@ export function accountRoutes(db, limits, mailer = null, suspensionSalt = "") {
   );
 
   /**
-   * Deletes the account and everything keyed to it: community data (follows
-   * and requests to follow, kudos, duels, the library, posts, gifts, places in
-   * clubs, inbox events; see `deleteCommunityData`), profile, state blob,
-   * sessions, then the account. Sessions go before the account, so a failure
-   * part-way leaves an account the reader can still sign in to and delete.
+   * Deletes the account and everything keyed to it (see `deleteAccount` in
+   * `deletion.js`, which the owner's tools use too), once the password is
+   * given again.
    */
   router.delete(
     "/account",
@@ -657,19 +655,7 @@ export function accountRoutes(db, limits, mailer = null, suspensionSalt = "") {
       if (!(await checkPassword(`id:${account._id}`, request.body?.password, account.passwordHash))) {
         throw new HttpError(403, "Password is incorrect.");
       }
-      await deleteCommunityData(db, account._id);
-      await profiles(db).deleteOne({ _id: account._id });
-      forgetBoards();
-      await states(db).deleteOne({ _id: account._id });
-      // The counts behind the daily and per-book allowances. Kept when only
-      // the profile is deleted (or that would refill them); the account
-      // going is the end of them.
-      await tallies(db).deleteMany({ userId: account._id });
-      await quoteTallies(db).deleteMany({ userId: account._id });
-      await endSessionsOf(db, account._id);
-      await resets(db).deleteOne({ _id: account._id });
-      await confirmations(db).deleteOne({ _id: account._id });
-      await accounts(db).deleteOne({ _id: account._id });
+      await deleteAccount(db, account._id);
       response.json({ deleted: true });
     })
   );

@@ -1,9 +1,75 @@
-import { useState } from "react";
-import { AudioLines, Info, LocateFixed, Pause, Play, SkipBack, SkipForward, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { AudioLines, Info, LocateFixed, Pause, Play, SkipBack, SkipForward, Sparkles, X } from "lucide-react";
 import type { ReaderScope } from "../text/scope";
 import { RATES, rateLabel } from "./prefs";
 import { openSpeechSettings } from "./androidEngine";
 import "./readAloud.css";
+
+/** The speed as a step of `RATES` (for the slider), the nearest one. */
+const stepOf = (rate: number) =>
+  RATES.reduce((best, step, index) => (Math.abs(step - rate) < Math.abs(RATES[best] - rate) ? index : best), 0);
+
+/**
+ * The speed, a tenth at a time: a slider whose speed is heard once it is let
+ * go (each new speed starts the voice again from its word).
+ */
+const RateSlider = ({ rate, onRate }: { rate: number; onRate: (rate: number) => void }) => {
+  const [step, setStep] = useState(() => stepOf(rate));
+  useEffect(() => setStep(stepOf(rate)), [rate]);
+  const commit = () => {
+    if (Math.abs(RATES[step] - rate) > 0.001) onRate(RATES[step]);
+  };
+  return (
+    <div className="read-aloud-rate">
+      <input
+        type="range"
+        min={0}
+        max={RATES.length - 1}
+        step={1}
+        value={step}
+        aria-label="Speed"
+        aria-valuetext={rateLabel(RATES[step])}
+        onChange={(event) => setStep(Number(event.target.value))}
+        onPointerUp={commit}
+        onKeyUp={commit}
+        onBlur={commit}
+      />
+      <span className="read-aloud-rate-value tabular-nums reader-text-color">{rateLabel(RATES[step])}</span>
+    </div>
+  );
+};
+
+/** Seconds as m:ss. */
+const clock = (seconds: number) => {
+  const whole = Math.max(0, Math.round(seconds));
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
+};
+
+/**
+ * A studio voice preparing the chapter before it starts (a device too slow to
+ * read it live): a ring filling as the wait runs down, the time left, and the
+ * device's own voice to read now instead. It starts by itself when ready.
+ */
+const Preparing = ({ seconds, android, onPhoneVoice }: { seconds: number; android: boolean; onPhoneVoice: (() => void) | null }) => {
+  const [total, setTotal] = useState(seconds);
+  useEffect(() => setTotal((was) => Math.max(was, seconds)), [seconds]);
+  const done = total > 0 ? Math.min(1, Math.max(0, 1 - seconds / total)) : 0;
+  const around = 2 * Math.PI * 7;
+  return (
+    <div className="read-aloud-preparing reader-panel reader-border" role="status" aria-live="polite">
+      <svg className="read-aloud-ring reader-accent" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+        <circle className="read-aloud-ring-track" cx="9" cy="9" r="7" />
+        <circle className="read-aloud-ring-fill" cx="9" cy="9" r="7" strokeDasharray={around} strokeDashoffset={around * (1 - done)} />
+      </svg>
+      <span className="tabular-nums reader-text-color">Preparing · {clock(seconds)}</span>
+      {onPhoneVoice && (
+        <button type="button" className="read-aloud-link reader-accent" onClick={onPhoneVoice}>
+          {android ? "Use phone voice now" : "Use system voice now"}
+        </button>
+      )}
+    </div>
+  );
+};
 
 /**
  * Reading aloud's own controls, there while it reads: a sentence back,
@@ -51,23 +117,16 @@ export const ReadAloudPill = ({ reader }: { reader: ReaderScope }) => {
       {readAloud.active && readAloud.sheetOpen && (
         <div className="read-aloud-sheet reader-panel reader-border" role="dialog" aria-label="Voice and speed">
           <div className="text-[10px] uppercase tracking-widest reader-muted">Speed</div>
-          <div className="read-aloud-rates" role="radiogroup" aria-label="Speed">
-            {RATES.map((rate) => (
-              <button
-                key={rate}
-                type="button"
-                role="radio"
-                aria-checked={Math.abs(readAloud.rate - rate) < 0.001}
-                className={`reader-notes-tab ${Math.abs(readAloud.rate - rate) < 0.001 ? "is-active" : ""}`}
-                onClick={() => readAloud.setRate(rate)}
-              >
-                {rateLabel(rate)}
-              </button>
-            ))}
-          </div>
+          <RateSlider rate={readAloud.rate} onRate={readAloud.setRate} />
           <div className="mt-3 text-[10px] uppercase tracking-widest reader-muted">Voice</div>
           <div className="read-aloud-voices" role="radiogroup" aria-label="Voice">
-            {readAloud.voices.map((voice) => (
+            {readAloud.voices.map((voice, index, all) => [
+              // Leaflet's own downloaded voices first, under a heading of their own, then the device's.
+              all.some((entry) => entry.studio) && (index === 0 || Boolean(all[index - 1].studio) !== Boolean(voice.studio)) && (
+                <div key={`group-${voice.studio ? "studio" : "system"}`} className="read-aloud-group reader-muted">
+                  {voice.studio ? "Studio voices" : "On this device"}
+                </div>
+              ),
               <button
                 key={voice.id}
                 type="button"
@@ -78,11 +137,30 @@ export const ReadAloudPill = ({ reader }: { reader: ReaderScope }) => {
                 title={voice.lang}
               >
                 <span className="truncate">{voice.name}</span>
-                {voice.online && <span className="read-aloud-tag reader-muted">online</span>}
+                <span className="read-aloud-tags">
+                  {voice.online && <span className="read-aloud-tag reader-muted">online</span>}
+                  {voice.studio && voice.slow && (
+                    <span
+                      className="read-aloud-best reader-muted"
+                      title={android ? "Prepares each chapter before reading on this phone" : "Prepares each chapter before reading on this computer"}
+                      aria-label="Prepares each chapter before reading"
+                    >
+                      <Info size={12} aria-hidden="true" />
+                    </span>
+                  )}
+                  {voice.id === readAloud.bestVoiceId && readAloud.voices.length > 1 && (
+                    <span className="read-aloud-best reader-accent" title="Sounds best on this device" aria-label="Sounds best on this device">
+                      <Sparkles size={12} aria-hidden="true" />
+                    </span>
+                  )}
+                </span>
               </button>
-            ))}
+            ])}
           </div>
         </div>
+      )}
+      {readAloud.active && readAloud.preparing !== null && (
+        <Preparing seconds={readAloud.preparing} android={android} onPhoneVoice={readAloud.usePhoneVoice} />
       )}
       {readAloud.active && !readAloud.following && (
         <button type="button" className="read-aloud-follow reader-panel reader-border reader-accent" onClick={readAloud.follow} title="Back to the sentence being read">

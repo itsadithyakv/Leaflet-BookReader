@@ -2,6 +2,7 @@ import { useShallow } from "zustand/react/shallow";
 import { usePipStore } from "../store/pipStore";
 import { usePipPresence } from "../pip/usePipPresence";
 import { PipSprite } from "./PipSprite";
+import { useRootMark } from "../platform/rootMarks";
 
 /**
  * The logo, and Pip's home. There is one Pip: when it is home it sits here as
@@ -19,6 +20,9 @@ export const PipHome = () => {
     }))
   );
   const { asleep } = usePipPresence();
+  const present = inside && !leaving;
+  // Out in the app: `html[data-pip-out]`, and phones keep a lane clear for her above the dock (styles/phone-polish.css).
+  useRootMark("pipOut", mode !== "off" && !present ? "" : null);
 
   // With Pip switched off, the logo is simply Pip, holding still.
   if (mode === "off") {
@@ -29,7 +33,6 @@ export const PipHome = () => {
     );
   }
 
-  const present = inside && !leaving;
   const move = present ? (asleep ? "sleep" : "idle") : "home-empty";
   const label = inside ? "Leaflet. Let Pip out" : "Leaflet. Call Pip home";
 
@@ -38,7 +41,6 @@ export const PipHome = () => {
       type="button"
       className="leaflet-logo-pip pip-home"
       data-pip-home
-      // Out in the app: on a phone the spot is drawn as her open door (styles/phone-polish.css).
       data-out={present ? undefined : ""}
       onClick={() => setHome(!inside)}
       aria-label={label}

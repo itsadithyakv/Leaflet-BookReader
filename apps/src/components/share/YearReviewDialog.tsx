@@ -182,7 +182,7 @@ export const YearReviewDialog = () => {
       className="sheet-backdrop fixed inset-0 z-[95] flex items-center justify-center bg-black/55 px-4"
       {...backdropClose(() => closeYearReview())}
     >
-      <div ref={panel} role="dialog" aria-modal="true" aria-label={`Your ${year} in review`} className="modal-surface confirm-pop share-dialog sheet-panel rounded-2xl p-5">
+      <div ref={panel} role="dialog" aria-modal="true" aria-label={`Your ${year} in review`} className={`modal-surface confirm-pop share-dialog sheet-panel rounded-2xl p-5 ${review.empty ? "" : "share-dialog-pictured"}`}>
         <SheetHandle onClose={closeYearReview} />
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-1">

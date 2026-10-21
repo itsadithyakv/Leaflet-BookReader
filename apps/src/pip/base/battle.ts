@@ -35,7 +35,7 @@ export const RAID_SECONDS = 60;
 /** Simulation ticks per second. */
 export const BATTLE_TICK = 1 / 30;
 
-export type UnitKind = "sprout" | "slinger" | "mole" | "hero";
+export type UnitKind = "sprout" | "slinger" | "mole" | "bomber" | "hero";
 export type StructureKind = "nest" | "hoard" | "perch" | "wall" | "other";
 
 /** What a hero is, to the battle: how strong, and the one thing they do. */
@@ -92,6 +92,14 @@ export type Setup = {
   slowed?: number;
   /** Who the raiders are, by night: 0 (or nothing) the magpies, 1 a rabble, 2 the Gilded, 3 the Stumbling, 4 frostwights. */
   faction?: number;
+  /**
+   * (1.5.11) Where scouts come in: a camp is come at down its trail, from the left, and scouts may be put down only
+   * this far across the field (and not in among the camp). Absent, anywhere outside the camp (as before; the night's
+   * raiders come in at any edge).
+   */
+  drop?: number;
+  /** (1.5.11) Puffcaps the hut has trained for this raid: each blows a wall open (they come out of `capacity`). */
+  bombers?: number;
 };
 
 export type Structure = {
@@ -155,6 +163,8 @@ export type Unit = {
   busy: boolean;
   /** One of the Stumbling that has been put down once already. */
   rose?: boolean;
+  /** A Puffcap that has gone off: it is not a scout that fell, and the picture shows a puff where it was. */
+  blew?: boolean;
 };
 
 /** The camp's champion: one villain, who comes out to whoever gets near. */
@@ -184,14 +194,20 @@ const UNITS: Record<Exclude<UnitKind, "hero">, UnitFigures> = {
   /** Frail, and throws from where a sentry may not reach. */
   slinger: { hp: 18, dps: 7, speed: 18, reach: 30 },
   /** Goes for the loot, under the wall. */
-  mole: { hp: 44, dps: 8, speed: 16, reach: 3 }
+  mole: { hp: 44, dps: 8, speed: 16, reach: 3 },
+  /** A Puffcap: runs to the nearest wall and goes off against it (`BLAST`). */
+  bomber: { hp: 26, dps: 0, speed: 17, reach: 3 }
 };
 /** The magpies who come by night: frailer than a scout, and there to snatch, not to pull a camp down. One on foot, one on the wing. */
 const RAIDERS: Record<Exclude<UnitKind, "hero">, UnitFigures> = {
   sprout: { hp: 12, dps: 1.8, speed: 17, reach: 3 },
   slinger: { hp: 12, dps: 3, speed: 17, reach: 20 },
-  mole: { hp: 11, dps: 3, speed: 24, reach: 3 }
+  mole: { hp: 11, dps: 3, speed: 24, reach: 3 },
+  bomber: { hp: 12, dps: 0, speed: 17, reach: 3 }
 };
+/** What a Puffcap does going off: a section of wall it is at comes down, those beside it lose half, and a building takes this much. */
+export const BLAST = 70;
+const BLAST_BESIDE = 12;
 /**
  * What each kind of night raider is, against a magpie on foot: how sturdy, how
  * hard and how fast, how much harder on a fence; whether it gets up again
@@ -217,8 +233,13 @@ const FASTER = 1.25;
 /** How near a healer has to be to mend a scout. */
 const HEAL_REACH = 26;
 
-/** How much sturdier each camp is than the one before. */
-const STURDIER_A_CAMP = 0.1;
+/**
+ * How much sturdier each camp is than the one before. (0.1 until 1.5.11. A scout used to stop a hair short of what it
+ * was making for, for good, as often as not: the sums left it a fraction too far off to strike, and it stepped that
+ * fraction again and again. With that put right the scouts were far stronger than the ladder was set for, and a
+ * stronghold is come at from one side since 1.5.11: this puts the ladder back where it was, within a stronghold or two.)
+ */
+const STURDIER_A_CAMP = 0.16;
 const KING_STURDIER = 1.3;
 const NEST = { hp: 160, r: 14 };
 const KING_NEST = { hp: 260, r: 18 };
@@ -242,6 +263,8 @@ const DUEL_REACH = 34;
 /** How near a scout has to be to turn on a champion who has hold of somebody else: past its own reach by this. */
 const MOB_REACH = 10;
 
+/** Where scouts come in on a stronghold, since 1.5.11: the strip down the left edge of the field, its trail's side. */
+export const DROP_STRONGHOLD = 40;
 /** How near a camp a scout may be put down: this far from a building's edge, and from a wall's. */
 const KEEP_OFF = 16;
 const KEEP_OFF_WALL = 6;
@@ -276,8 +299,11 @@ export const campHas = (n: number, king: boolean) => ({
 /**
  * The camp of a number, laid out: the same every time. The hoards and the
  * sentries sit about the nest wherever this camp's own roll puts them, so no
- * two camps are attacked the same way; the wall is always across the near
- * (left) side, so there is always a way round it for scouts put down wide.
+ * two camps are attacked the same way. Since 1.5.11 a stronghold is come at
+ * down its trail, from the left: its wall stands straight across that side
+ * (x `WALL_X`), its middle section the gate (half as tough again), and it
+ * does not reach the top and foot of the field, so there is a way round it
+ * for scouts put down wide; or a Puffcap opens it.
  */
 export const layout = (n: number, king: boolean, seed = 0): Structure[] => {
   const roll = seeded(0xb10c + n * 7919 + (king ? 31 : 0) + Math.imul(seed, 2654435761));
@@ -315,12 +341,16 @@ export const layout = (n: number, king: boolean, seed = 0): Structure[] => {
     const angle = lean + (index * Math.PI * 2) / Math.max(1, has.perches) + (roll() - 0.5) * 0.6;
     add("perch", CENTRE.x + Math.cos(angle) * 25, CENTRE.y + Math.sin(angle) * 21, PERCH.r, PERCH.hp, PERCH, index === has.perches - 1 ? newest : 1);
   }
-  for (let index = 0; index < has.walls; index++) {
-    const angle = Math.PI + (index - (has.walls - 1) / 2) * 0.23;
-    add("wall", CENTRE.x + Math.cos(angle) * 50, CENTRE.y + Math.sin(angle) * 44, WALL.r, WALL.hp, null);
+  const sections = Math.min(king ? 8 : 6, has.walls);
+  for (let index = 0; index < sections; index++) {
+    const y = CENTRE.y + (index - (sections - 1) / 2) * 10;
+    const gate = Math.abs(y - CENTRE.y) < 5.1 && index === Math.floor((sections - 1) / 2);
+    add("wall", WALL_X, y, WALL.r, WALL.hp * (gate ? 1.5 : 1), null);
   }
   return made;
 };
+/** Where a stronghold's wall stands across the field. */
+export const WALL_X = 106;
 
 // ---- the battle ---------------------------------------------------------------------
 
@@ -349,6 +379,8 @@ export class Battle {
   heroLeft: boolean;
   over = false;
   private made = 0;
+  /** Puffcaps still to put down. */
+  bombersLeft: number;
 
   /** `structures`: the camp to fight over, when it is not a magpie camp laid out by its number (the reader's own, at night). */
   constructor(setup: Setup, structures?: Structure[]) {
@@ -356,6 +388,7 @@ export class Battle {
     this.structures = structures ? structures.map((entry, id) => ({ ...entry, id })) : layout(setup.n, setup.king, setup.seed ?? 0);
     this.left = Math.max(0, Math.floor(setup.capacity));
     this.heroLeft = Boolean(setup.hero);
+    this.bombersLeft = setup.kinds.includes("bomber") ? Math.max(0, Math.floor(setup.bombers ?? 0)) : 0;
     if (setup.champion !== null && setup.champion !== undefined && !setup.raiders) {
       const nest = this.structures[0];
       const max = Math.round(CHAMPION.hp * (1 + STURDIER_A_CAMP * setup.n) * (setup.king ? KING_STURDIER : 1));
@@ -375,7 +408,10 @@ export class Battle {
     if (x < EDGE.left || x > EDGE.right || y < this.top || y > EDGE.bottom) return false;
     // Raiders come in at the edge, however near it the camp was built.
     if (this.setup.raiders) return true;
-    return !this.structures.some((entry) => entry.hp > 0 && far(x, y, entry.x, entry.y) < entry.r + (entry.kind === "wall" ? KEEP_OFF_WALL : KEEP_OFF));
+    // Down the trail, from the left: only so far across the field.
+    if (this.setup.drop !== undefined && x > this.setup.drop) return false;
+    // (What lies on the ground, a trap, is walked onto, not kept off.)
+    return !this.structures.some((entry) => entry.hp > 0 && !entry.flat && entry.traps === undefined && far(x, y, entry.x, entry.y) < entry.r + (entry.kind === "wall" ? KEEP_OFF_WALL : KEEP_OFF));
   }
 
   /** Who the raiders are: the magpies, unless the night says otherwise. */
@@ -395,6 +431,7 @@ export class Battle {
   deploy(kind: UnitKind, x: number, y: number): boolean {
     const hero = kind === "hero";
     if (hero ? !this.setup.hero : !this.setup.kinds.includes(kind)) return false;
+    if (kind === "bomber" && this.bombersLeft <= 0) return false;
     if (!this.canDeploy(x, y, hero)) return false;
     const strong = 1 + STRONGER_A_LEVEL * (Math.min(5, Math.max(1, this.setup.level)) - 1);
     const max = Math.round(this.figures(kind).hp * strong);
@@ -403,6 +440,7 @@ export class Battle {
     this.units.push({ id: this.made++, kind, x, y: Math.min(EDGE.bottom, Math.max(this.top, y + nudge * 0.6)), hp: max, max, target: null, left: false, busy: false });
     if (hero) this.heroLeft = false;
     else this.left -= 1;
+    if (kind === "bomber") this.bombersLeft -= 1;
     return true;
   }
 
@@ -415,6 +453,8 @@ export class Battle {
   private pick(unit: Unit): Structure | null {
     const nearest = (among: Structure[]) =>
       among.reduce<Structure | null>((best, entry) => (!best || far(unit.x, unit.y, entry.x, entry.y) - entry.r < far(unit.x, unit.y, best.x, best.y) - best.r ? entry : best), null);
+    // A Puffcap: the nearest wall standing (the gate as soon as any other), and with none, the nearest building.
+    if (unit.kind === "bomber") return nearest(this.structures.filter((entry) => entry.kind === "wall" && entry.hp > 0)) ?? nearest(this.alive());
     // By night every magpie is after the larder: the ones on foot go straight for it too, and have to get through whatever is in the way.
     // A thumper's drumming draws the ones on foot: they go to it while it stands, and the larder waits.
     if (this.setup.raiders && unit.kind !== "mole" && !this.faction.proud) {
@@ -469,7 +509,8 @@ export class Battle {
 
       // Whoever the champion has hold of fights back, and so does any scout close by; a hero turns to meet him from further off.
       const toFoe = foe ? far(unit.x, unit.y, foe.x, foe.y) : Infinity;
-      if (foe && (foeAt === unit || toFoe <= (traits ? DUEL_REACH : figures.reach + MOB_REACH))) {
+      // (A Puffcap does not stop to fight: it runs on to the wall, the champion at its heels or not.)
+      if (foe && unit.kind !== "bomber" && (foeAt === unit || toFoe <= (traits ? DUEL_REACH : figures.reach + MOB_REACH))) {
         const gap = far(unit.x, unit.y, foe.x, foe.y);
         unit.left = foe.x < unit.x;
         if (gap > Math.max(figures.reach, CHAMPION.reach)) {
@@ -485,7 +526,7 @@ export class Battle {
       }
 
       let goal = unit.target === null ? null : (this.structures[unit.target] ?? null);
-      if (!goal || goal.hp <= 0 || goal.kind === "wall") {
+      if (!goal || goal.hp <= 0 || (goal.kind === "wall" && unit.kind !== "bomber")) {
         goal = this.pick(unit);
       }
       if (!goal) {
@@ -513,7 +554,7 @@ export class Battle {
       // A thrower stops where it can reach; at a wall everyone has to be at it.
       const reach = at.kind === "wall" ? Math.min(figures.reach, 8) : figures.reach;
       unit.left = at.x < unit.x;
-      if (gap > reach) {
+      if (gap > reach + 1e-6) {
         // On the wing by night, nothing on the ground has hold of them.
         const onWing = Boolean(this.setup.raiders) && flies;
         const tangled = onWing ? 0 : Math.max(0, ...patches.filter((patch) => far(unit.x, unit.y, patch.x, patch.y) <= (patch.zone ?? 0)).map((patch) => patch.slows ?? 0));
@@ -523,6 +564,15 @@ export class Battle {
         unit.x += ((at.x - unit.x) / length) * stride;
         unit.y += ((at.y - unit.y) / length) * stride;
         unit.busy = false;
+      } else if (unit.kind === "bomber") {
+        // At it: off he goes. A section of wall is down, and those beside it the worse; a building takes the blast.
+        if (at.kind === "wall") {
+          at.hp = 0;
+          for (const other of this.structures) if (other !== at && other.kind === "wall" && other.hp > 0 && far(other.x, other.y, at.x, at.y) <= BLAST_BESIDE) other.hp = Math.max(0, other.hp - other.max * 0.5);
+        } else at.hp = Math.max(0, at.hp - BLAST);
+        unit.hp = 0;
+        unit.busy = false;
+        unit.blew = true;
       } else {
         const times = (kind: StructureKind) =>
           unit.kind === "mole" && kind === "hoard" ? MOLE_AT_HOARD : this.setup.raiders && kind === "wall" ? this.faction.walls : (traits?.times?.[kind] ?? 1);
@@ -618,7 +668,7 @@ export class Battle {
     // The Stumbling get up again, once, part mended.
     if (this.faction.rises) {
       for (const unit of this.units) {
-        if (unit.hp <= 0 && !unit.rose) {
+        if (unit.hp <= 0 && !unit.rose && !unit.blew) {
           unit.rose = true;
           unit.hp = Math.round(unit.max * this.faction.rises);
         }
@@ -686,13 +736,21 @@ export const autoPilot = (battle: Battle, side: Side = "left"): (() => void) => 
   for (let index = 0; index < throwers; index++) order.push("slinger");
   for (let index = 0; index < moles; index++) order.push("mole");
   if (setup.hero) order.splice(Math.min(3, order.length), 0, "hero");
+  // Puffcaps lead, where there are any: the wall is the first thing in the way.
+  const bombers = setup.kinds.includes("bomber") ? Math.min(Math.max(0, Math.floor(setup.bombers ?? 0)), order.length) : 0;
+  for (let index = 0; index < bombers; index++) order[order.lastIndexOf("sprout") >= 0 ? order.lastIndexOf("sprout") : order.length - 1] = "bomber";
+  order.sort((a, b) => Number(b === "bomber") - Number(a === "bomber"));
   const middle = setup.raiders ? { x: FIELD_W / 2, y: (RAIDERS_TOP + EDGE.bottom) / 2 } : CENTRE;
   const top = setup.raiders ? RAIDERS_TOP : EDGE.top;
   let sent = 0;
   let next = 0;
   return () => {
     if (battle.over || sent >= order.length || battle.time < next) return;
-    const gate = gateOf(side, ((sent % 5) - 2) * 7, top, middle);
+    // Down the trail (1.5.11): every one in at the left edge, at the lane's height: the middle, or wide at the top or foot.
+    const gate =
+      setup.drop !== undefined && !setup.raiders
+        ? { x: 8, y: (side === "top" ? 26 : side === "bottom" ? 104 : middle.y) + ((sent % 5) - 2) * 4 }
+        : gateOf(side, ((sent % 5) - 2) * 7, top, middle);
     // A gate that is in among the camp is moved out along its side until it is not.
     for (let out = 0; out < 12 && !battle.deploy(order[sent], gate.x, gate.y); out++) {
       if (side === "left" || side === "right") gate.y += out % 2 ? 10 * (out + 1) : -10 * (out + 1);
@@ -717,5 +775,11 @@ export const runAuto = (setup: Setup, side: Side = "left", structures?: Structur
 export const autoPlay = (setup: Setup, side: Side = "left"): Result => runAuto(setup, side).result();
 
 /** The best a raid played by rule does from any side: what a reader who picks the side well can count on. */
-export const autoBest = (setup: Setup): Result =>
-  SIDES.map((side) => autoPlay(setup, side)).reduce((best, result) => (result.destroyed > best.destroyed ? result : best));
+export const autoBest = (setup: Setup): Result => autoBestLane(setup).result;
+/** The lanes a raid can be sent down: for a camp come at down its trail, the middle of the strip, or wide at its top or its foot. */
+export const LANES: readonly Side[] = ["left", "top", "bottom"];
+/** The best a raid played by rule does, and down which lane (or from which side). */
+export const autoBestLane = (setup: Setup): { result: Result; side: Side } =>
+  (setup.drop !== undefined && !setup.raiders ? LANES : SIDES)
+    .map((side) => ({ result: autoPlay(setup, side), side }))
+    .reduce((best, entry) => (entry.result.destroyed > best.result.destroyed ? entry : best));

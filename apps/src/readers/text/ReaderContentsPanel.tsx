@@ -1,8 +1,11 @@
+import { useRef } from "react";
 import { isFinished } from "../../constants/books";
 import { TOUR_CONTENTS_STEP } from "../ReaderTour";
 import { List as ListIcon, X as CloseIcon } from "lucide-react";
 import { ContentsList } from "../ContentsList";
 import { handleSizeFor } from "../contentsPanel";
+import { useDrawerSwipe } from "../drawerSwipe";
+import { isPhoneShape } from "../touchLayout";
 import type { ReaderScope } from "./scope";
 
 /** The chapter list and the ways to it: the window's edge, the handle, and the page behind it. */
@@ -13,6 +16,10 @@ export const ReaderContentsPanel = ({ reader }: { reader: ReaderScope }) => {
     resolvedCover, scheduleReaderSidebarClose, scheduleReaderSidebarOpen, setSidebarOpen, sidebarOpen, sidebarPinned,
     sidebarPinnedRef, textMargin, toc, tourOpen, tourStep
   } = reader;
+  // On a phone a swipe toward the left edge puts the list away, as the ✕ does.
+  const drawerRef = useRef<HTMLElement | null>(null);
+  const swipeable = sidebarOpen && isPhoneShape(reader.shape);
+  useDrawerSwipe(() => drawerRef.current, () => pinContents(false), swipeable);
   return (
     <>
       <div
@@ -43,6 +50,7 @@ export const ReaderContentsPanel = ({ reader }: { reader: ReaderScope }) => {
         <span className="reader-contents-handle-word">Contents</span>
       </button>
       <aside
+        ref={drawerRef}
         aria-hidden={!sidebarOpen}
         aria-label="Contents"
         data-beside={contentsBeside ? "true" : undefined}

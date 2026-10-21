@@ -13,9 +13,12 @@ import {
   linkResolver,
   matterByText,
   mergeContents,
+  nestFlatParts,
   numberFrom,
   readHeading,
   readKept,
+  splitJoinedLabel,
+  splitJoinedLabels,
   styleHints,
   tidyLabel,
   treeOf,
@@ -514,5 +517,174 @@ describe("what the stylesheets and links say", () => {
     expect(from("a%20b.xhtml")).toEqual({ section: 5, anchor: null });
     expect(from("https://example.com/x")).toBeNull();
     expect(from("missing.xhtml")).toBeNull();
+  });
+});
+
+describe("a book whose contents page lists only its parts", () => {
+  const link = (text: string, to: number, anchor: string | null = null, at: number | null = 0): ScannedLink => ({ text, section: to, anchor, at });
+  // A Kindle book as Leaflet converts it: each chapter's epigraph a file of
+  // its own (no heading), each chapter opening with its number alone, centred
+  // and bold. The book's link to Part Two went to the very end of chapter 3's
+  // file, so its own contents name that file "Part Two: Mist".
+  const kindle = () => [
+    cover(),
+    section(1, [["Contents", "^ b c"], ["Part One: Ash", "b"], ["Part Two: Mist", "b"], ["Part Three: Steel", "b"], ["Epilogue", "b"]], {
+      chars: 70,
+      links: [link("Part One: Ash", 2), link("Part Two: Mist", 7, "fp2", 0.998), link("Part Three: Steel", 12), link("Epilogue", 16), link("Notes", 17)]
+    }),
+    section(2, [["PART ONE", "^ b c"]], { chars: 40 }),
+    section(3, [], { chars: 200 }),
+    section(4, [["1", "^ b c"]]),
+    section(5, [], { chars: 200 }),
+    section(6, [["2", "^ b c"]]),
+    section(7, [["3", "^ b c"]]),
+    section(8, [["PART TWO", "^ b c"]], { chars: 40 }),
+    section(9, [], { chars: 200 }),
+    section(10, [["4", "^ b c"]]),
+    section(11, [["5", "^ b c"]]),
+    section(12, [["PART THREE", "^ b c"]], { chars: 40 }),
+    section(13, [["6", "^ b c"]]),
+    section(14, [["7", "^ b c"]]),
+    section(15, [["8", "^ b c"]]),
+    section(16, [["EPILOGUE", "^ b c"]]),
+    section(17, [], { chars: 900 })
+  ];
+  const mine = (): TocItem[] => [
+    { label: "The Title", href: "text/part0.xhtml" },
+    { label: "PART ONE", href: "text/part2.xhtml" },
+    { label: "PART TWO: Mist", href: "text/part7.xhtml" },
+    { label: "PART TWO", href: "text/part8.xhtml" },
+    { label: "PART THREE", href: "text/part12.xhtml" },
+    { label: "EPILOGUE", href: "text/part16.xhtml" }
+  ];
+  const tree = (items: TocItem[]) => items.map((item) => [item.label, item.href, (item.subitems ?? []).map((sub) => `${sub.label}@${sub.href}`)]);
+
+  it("keeps the book's contents page first, which finds no more than the contents", () => {
+    expect(findChapters(kindle()).source).toBe("page");
+    expect(judgeContents(own(mine().map((item) => [item.label, placeOf(item.href).section ?? 0] as [string, number])), kindle(), findChapters(kindle())).use).toBe("own");
+  });
+
+  it("adds the chapters headed in the text beneath the book's parts", () => {
+    const decision = decideContents(mine(), placeOf, kindle());
+    expect(decision.use).toBe("merged");
+    expect(decision.source).toBe("patterns");
+    expect(tree(decision.toc)).toEqual([
+      ["The Title", "text/part0.xhtml", []],
+      ["PART ONE", "text/part2.xhtml", ["Chapter 1@text/part4.xhtml", "Chapter 2@text/part6.xhtml", "Chapter 3@text/part7.xhtml"]],
+      // Numbers alone are called chapters. The part's entry that named chapter 3's file now leads to the part's title page.
+      ["PART TWO: Mist", "text/part8.xhtml", []],
+      ["PART TWO", "text/part8.xhtml", ["Chapter 4@text/part10.xhtml", "Chapter 5@text/part11.xhtml"]],
+      ["PART THREE", "text/part12.xhtml", ["Chapter 6@text/part13.xhtml", "Chapter 7@text/part14.xhtml", "Chapter 8@text/part15.xhtml"]],
+      ["EPILOGUE", "text/part16.xhtml", []]
+    ]);
+  });
+
+  it("takes nothing from the contents page itself", () => {
+    const decision = decideContents(mine(), placeOf, kindle());
+    const all = flattenLabels(decision.toc);
+    expect(all.filter((label) => /Ash|Steel/.test(label))).toEqual([]);
+  });
+
+  it("keeps the book's own when the headings in the text are not sure", () => {
+    const book = kindle();
+    // Two numbered heads only: too few to be sure of.
+    [10, 11, 13, 14, 15].forEach((index) => {
+      book[index] = section(index, []);
+    });
+    [4, 6].forEach((index) => {
+      book[index].blocks = [];
+    });
+    expect(decideContents(mine(), placeOf, book).use).toBe("own");
+  });
+
+  it("leaves a book with a full chapter-level contents page as it is", () => {
+    const full = [
+      cover(),
+      section(1, [["Contents", "h2 ^"]], {
+        chars: 90,
+        links: [1, 2, 3, 4, 5, 6].map((n) => link(`Chapter ${n}`, n + 1))
+      }),
+      ...[1, 2, 3, 4, 5, 6].map((n) => section(n + 1, [[`Chapter ${n}`, "h2 ^"]]))
+    ];
+    const listed: TocItem[] = [1, 2, 3, 4, 5, 6].map((n) => ({ label: `Chapter ${n}`, href: `text/part${n + 1}.xhtml` }));
+    const decision = decideContents(listed, placeOf, full);
+    expect(decision.use).toBe("own");
+    expect(decision.toc).toBe(listed);
+  });
+});
+
+const flattenLabels = (items: TocItem[]): string[] => items.flatMap((item) => [item.label, ...flattenLabels(item.subitems ?? [])]);
+
+describe("a contents name that is two lines run together", () => {
+  it("is parted by the lines of the page it leads to", () => {
+    expect(splitJoinedLabel("THE WELL OF ASCENSIONBOOK TWO OF MISTBORN", ["THE WELL OF ASCENSION", "BOOK TWO OF MISTBORN", "BRANDON SANDERSON"])).toBe(
+      "THE WELL OF ASCENSION · BOOK TWO OF MISTBORN"
+    );
+    expect(splitJoinedLabel("Part OneThe Ashen SkyAn Ending", ["Part One", "The Ashen Sky", "An Ending"])).toBe("Part One · The Ashen Sky · An Ending");
+  });
+
+  it("takes the page's own line when it is the name with a line break in it", () => {
+    expect(splitJoinedLabel("THE WELL OF ASCENSIONBOOK TWO OF MISTBORN", ["THE WELL OF ASCENSION BOOK TWO OF MISTBORN"])).toBe("THE WELL OF ASCENSION BOOK TWO OF MISTBORN");
+    expect(splitJoinedLabel("The Gate", ["The Gate"])).toBeNull();
+  });
+
+  it("leaves a name that is not that alone", () => {
+    expect(splitJoinedLabel("Chapter 1", ["Chapter 1", "The Road"])).toBeNull();
+    expect(splitJoinedLabel("MAPS", ["MAPS"])).toBeNull();
+    expect(splitJoinedLabel("The Gate", ["Something else", "Again"])).toBeNull();
+  });
+
+  it("parts the book's own entries in the list that is merged, and leaves an untouched list as it was", () => {
+    const pages = [cover(), section(1, [["THE WELL OF ASCENSION", "^ b c"], ["BOOK TWO OF MISTBORN", "b c +"]], { chars: 40 }), section(2, [["Chapter 1", "h2 ^"]])];
+    const mine: TocItem[] = [
+      { label: "THE WELL OF ASCENSIONBOOK TWO OF MISTBORN", href: "text/part1.xhtml" },
+      { label: "Chapter 1", href: "text/part2.xhtml" }
+    ];
+    expect(splitJoinedLabels(mine, placeOf, pages).map((item) => item.label)).toEqual(["THE WELL OF ASCENSION · BOOK TWO OF MISTBORN", "Chapter 1"]);
+    const plain: TocItem[] = [{ label: "Chapter 1", href: "text/part2.xhtml" }];
+    expect(splitJoinedLabels(plain, placeOf, pages)).toBe(plain);
+  });
+});
+
+describe("a flat list of parts and chapters (a Kindle book as Leaflet converts it)", () => {
+  const flat: TocItem[] = ["The Well of Ascension", "MAPS", "PART ONE", "Chapter 1", "Chapter 2", "PART TWO: Ghosts", "Chapter 3", "EPILOGUE", "1. Metals Quick-Reference Chart"].map(
+    (label, at) => ({ label, href: `text/part${at}.xhtml` })
+  );
+
+  it("sets each part's chapters under it, and leaves the rest where it is, in the same order", () => {
+    const nested = nestFlatParts(flat);
+    expect(nested.map((item) => [item.label, (item.subitems ?? []).map((sub) => sub.label)])).toEqual([
+      ["The Well of Ascension", []],
+      ["MAPS", []],
+      ["PART ONE", ["Chapter 1", "Chapter 2"]],
+      ["PART TWO: Ghosts", ["Chapter 3"]],
+      ["EPILOGUE", []],
+      ["1. Metals Quick-Reference Chart", []]
+    ]);
+  });
+
+  it("leaves a list that is nested already, or has fewer than two parts, as it is", () => {
+    const one = flat.filter((item) => !item.label.startsWith("PART TWO"));
+    expect(nestFlatParts(one)).toBe(one);
+    const already: TocItem[] = [{ label: "PART ONE", href: "a", subitems: [{ label: "Chapter 1", href: "b" }] }, { label: "PART TWO", href: "c" }];
+    expect(nestFlatParts(already)).toBe(already);
+  });
+});
+
+describe("the book's own contents with a name run together", () => {
+  const pages = [cover(), section(1, [["THE WELL OF ASCENSION BOOK TWO OF MISTBORN", "^ b c"]], { chars: 40 }), ...[2, 3, 4].map((n) => section(n, [[`Chapter ${n - 1}`, "h2 ^"]]))];
+  const mine: TocItem[] = [
+    { label: "THE WELL OF ASCENSIONBOOK TWO OF MISTBORN", href: "text/part1.xhtml" },
+    ...[2, 3, 4].map((n) => ({ label: `Chapter ${n - 1}`, href: `text/part${n}.xhtml` }))
+  ];
+
+  it("is kept as the book's, with the name put right, and kept so for the next time", () => {
+    const decision = decideContents(mine, placeOf, pages);
+    expect(decision.use).toBe("own");
+    expect(decision.retitled).toBe(true);
+    expect(decision.toc[0].label).toBe("THE WELL OF ASCENSION BOOK TWO OF MISTBORN");
+    const kept = readKept(JSON.stringify(keepContents(decision, pages.length, {})), pages.length);
+    expect(kept?.use).toBe("own");
+    expect(kept?.toc?.[0].label).toBe("THE WELL OF ASCENSION BOOK TWO OF MISTBORN");
   });
 });

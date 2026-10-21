@@ -299,15 +299,33 @@ export const useReaderMarks = (reader: WithOutlook & Later<"annotations" | "orde
     } catch {
       return;
     }
-    const timer = window.setTimeout(() => {
+    searchMarkRef.current = { cfi, timer: unmarkLater(rendition, cfi) };
+  };
+  /** The mark goes this long after the page has settled round it. */
+  const SEARCH_MARK_MS = 4000;
+  const unmarkLater = (rendition: NonNullable<typeof renditionRef.current>, cfi: string) =>
+    window.setTimeout(() => {
       try {
         rendition.annotations.remove(cfi, "highlight");
       } catch {
         // Gone with its section.
       }
       searchMarkRef.current = null;
-    }, 4000);
-    searchMarkRef.current = { cfi, timer };
+    }, SEARCH_MARK_MS);
+  /**
+   * The page has settled round a marked match (readers/jumpSettle.ts): its
+   * few seconds start now. They used to start as soon as the jump was asked
+   * for, and on a slow phone the chapter took longer than that to be drawn:
+   * the mark had gone before the match could be seen.
+   */
+  const keepSearchMark = (cfi: string) => {
+    const rendition = renditionRef.current;
+    const mark = searchMarkRef.current;
+    if (!rendition || !mark || mark.cfi !== cfi) {
+      return;
+    }
+    window.clearTimeout(mark.timer);
+    searchMarkRef.current = { cfi, timer: unmarkLater(rendition, cfi) };
   };
   /** Jumps to a search result and marks the words there for a few seconds. */
   const openSearchHit = (hit: SearchHit, query?: string) => {
@@ -324,12 +342,17 @@ export const useReaderMarks = (reader: WithOutlook & Later<"annotations" | "orde
     noteJumpFromHere();
     releaseUserReadingAnchor();
     markNavigating();
+    reader.beginJump();
     void rendition.display(hit.cfi).then(() => {
       if (renditionRef.current !== rendition) {
         return;
       }
       clearToolbar(hit.cfi);
       markSearchHit(hit.cfi);
+      reader.pinJump(
+        () => reader.placeTopFor(hit.cfi),
+        () => keepSearchMark(hit.cfi)
+      );
     });
   };
 

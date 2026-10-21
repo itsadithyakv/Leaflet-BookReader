@@ -12,13 +12,13 @@ import {
   finishRaid,
   gather,
   gatherBrings,
-  holds,
   openParcel,
   parcelGives,
   PARCELS_MOST,
   grantWant,
   heroWith,
   minutesOf,
+  priceOf,
   moodQuicker,
   newBase,
   oakDrops,
@@ -41,6 +41,7 @@ import {
 import { HEROES, heroTraits } from "./heroes";
 import { BLADES, BLADE_AT_BOND } from "./guards";
 import { bladesWon } from "./rules";
+import { beforeChapters } from "./testing";
 
 // A winter day: the season does nothing to a gathering (in autumn the oak gives a fifth more, which has its own test).
 const DAY = "2026-01-12";
@@ -48,7 +49,7 @@ const NEXT_DAY = "2026-01-13";
 const at = (minutes: number, more: Partial<Now> = {}): Now => ({ minutes, day: DAY, lit: false, ...more });
 const camp = (change: Partial<BaseState> = {}, levels: Partial<Record<BuildingId, number>> = {}): BaseState => {
   const fresh = newBase(1000, DAY);
-  return { ...fresh, ...change, levels: { ...fresh.levels, ...levels } };
+  return beforeChapters({ ...fresh, ...change, levels: { ...fresh.levels, ...levels } });
 };
 /** A camp one hero has come to: the librarian, who comes with any book finished. */
 const lived = (change: Partial<BaseState> = {}, levels: Partial<Record<BuildingId, number>> = {}) => raise(camp({ acorns: 100, ...change }, { store: 2, ...levels }), "book-a", "A Book", DAY, 0);
@@ -67,8 +68,8 @@ describe("a gathering", () => {
     expect(gather(first, 60, 0, NEXT_DAY).acorns - first.acorns).toBe(drop * 3);
     // What the screen says before the tap is what the tap brings, a streak and the season counted in.
     expect(gatherBrings(state, 30, 14, "2026-10-12")).toBe(gather(state, 30, 14, "2026-10-12").acorns - state.acorns);
-    // And no more than the larder has room for.
-    expect(gatherBrings({ ...state, acorns: holds(state) - 5 }, 30, 0, DAY)).toBe(5);
+    // And all of it, however many acorns the camp has (1.5.10: there is no brim).
+    expect(gatherBrings({ ...state, acorns: 1395 }, 30, 0, DAY)).toBe(drop * 3);
   });
 });
 
@@ -79,9 +80,11 @@ describe("Pip's mood, from the house", () => {
     const plain = minutesOf(state, "store", 2);
     expect(minutesOf(state, "store", 2, 30)).toBe(plain);
     expect(minutesOf(state, "store", 2, 95)).toBe(Math.round(plain * 0.8));
-    // What a job needs is settled when it is begun, with the mood she was in then.
-    expect(build(state, "store", 1000, undefined, 95).jobs[0].needs).toBe(minutesOf(state, "store", 1, 95));
-    expect(build(state, "store", 1000).jobs[0].needs).toBe(minutesOf(state, "store", 1));
+    // Her work is part of a building's price: a happy Pip makes it cheaper, and she is paid what she was when it was built.
+    expect(priceOf(state, "store", 2, 95)).toBeLessThan(priceOf(state, "store", 2));
+    expect(priceOf(state, "store", 2, 30)).toBe(priceOf(state, "store", 2));
+    expect(build(state, "store", 1000, undefined, 95).acorns).toBe(500 - priceOf(state, "store", 1, 95));
+    expect(build(state, "store", 1000).acorns).toBe(500 - priceOf(state, "store", 1));
   });
 });
 
@@ -169,20 +172,18 @@ describe("Pip's walks, and the tales", () => {
     for (const tale of TALES) expect(tale.length).toBeLessThanOrEqual(110);
   });
 
-  it("wait, and are never lost to a full larder: a parcel is opened whole or not at all", () => {
-    const full = { ...home, acorns: holds(home) - parcelGives(home) + 1, parcels: 2 };
-    expect(openParcel(full)).toBe(full);
-    const roomy = { ...full, acorns: holds(home) - parcelGives(home) };
-    expect(openParcel(roomy)).toMatchObject({ parcels: 1, acorns: holds(home) });
-    expect(PARCELS_MOST).toBe(6);
+  it("wait, and are never lost: a parcel is opened whole, however many acorns the camp has", () => {
+    const full = { ...home, acorns: 1400, parcels: 2 };
+    expect(openParcel(full)).toMatchObject({ parcels: 1, acorns: 1400 + parcelGives(home) });
+    expect(PARCELS_MOST).toBe(99);
   });
 
   it("are what the dot on the way in is for, with a building finished and a full oak: nothing that asks to be come back for", () => {
     const quiet = camp({ oakFrom: 1000, acorns: 0 }, { store: 3 });
     expect(campWaits(quiet, at(1000))).toBe(false);
     expect(campWaits({ ...quiet, parcels: 1 }, at(1000))).toBe(true);
-    // A parcel the larder has no room for is not something waiting to be done.
-    expect(campWaits({ ...quiet, parcels: 1, acorns: holds(quiet) }, at(1000))).toBe(false);
+    // However many acorns the camp has: there is always room (1.5.10).
+    expect(campWaits({ ...quiet, parcels: 1, acorns: 1400 }, at(1000))).toBe(true);
     // A day turned, a hedgehog, a fence not put down: none of them is a dot.
     expect(campWaits({ ...quiet, visitor: null, night: "2020-01-01", levels: { ...quiet.levels, fence: 1, burrow: 3 } }, at(1000))).toBe(false);
   });

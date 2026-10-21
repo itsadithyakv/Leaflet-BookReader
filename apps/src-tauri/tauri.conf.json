@@ -52,7 +52,7 @@
     ]
   },
   "productName": "Leaflet",
-  "version": "1.5.7",
+  "version": "1.5.10",
   "identifier": "com.leaflet.app",
   "plugins": {},
   "app": {
@@ -75,7 +75,7 @@
         "default-src": "'self' ipc: http://ipc.localhost",
         "script-src": "'self'",
         "style-src": "'self' 'unsafe-inline' blob:",
-        "img-src": "'self' data: blob:",
+        "img-src": "'self' data: blob: cover: http://cover.localhost https://cover.localhost",
         "font-src": "'self' data: blob:",
         "media-src": "'self' data: blob:",
         "connect-src": "'self' ipc: http://ipc.localhost blob: data:",

@@ -152,6 +152,9 @@ pub struct ReadingStats {
   pub days_last_7: i64
 }
 
+/// Where this device last stood in a book: progress, place (a CFI) and when (ISO).
+pub type PlaceHereRow = (f32, Option<String>, Option<String>);
+
 pub struct Database {
   conn: Connection,
   path: PathBuf
@@ -423,6 +426,10 @@ impl Database {
        WHERE id = ?2",
       params![deleted_at, book_id, FINISHED_AT]
     )?;
+    // Removed from this device: so is where this device stood in it. A copy
+    // imported again later starts afresh, and is not offered its old place
+    // as "your other device" ("was last at Chapter 1 · 0%").
+    self.conn.execute("DELETE FROM places_here WHERE book_id = ?1", params![book_id])?;
     Ok(())
   }
 
@@ -514,16 +521,34 @@ impl Database {
   /// Where this device itself last stood in a book (progress and place), if
   /// it has ever been read here. Never written by a sync.
   pub fn place_here(&self, book_id: &str) -> Result<Option<(f32, Option<String>)>> {
+    Ok(self.place_here_at(book_id)?.map(|(progress, position, _)| (progress, position)))
+  }
+
+  /// The same, with when this device stood there: a place the books row
+  /// holds from before then is not another device's, whatever it says.
+  pub fn place_here_at(&self, book_id: &str) -> Result<Option<PlaceHereRow>> {
     Ok(
       self
         .conn
         .query_row(
-          "SELECT progress, position FROM places_here WHERE book_id = ?1",
+          "SELECT progress, position, at FROM places_here WHERE book_id = ?1",
           params![book_id],
-          |row| Ok((row.get(0)?, row.get(1)?))
+          |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
         )
         .optional()?
     )
+  }
+
+  /// This device's own place in a book, set to what the books row now says:
+  /// a change made here that is not reading (marked finished or not started).
+  fn place_here_follows_row(&self, book_id: &str) -> Result<()> {
+    self.conn.execute(
+      "UPDATE places_here SET progress = (SELECT progress FROM books WHERE id = ?1),
+         position = (SELECT position FROM books WHERE id = ?1), at = ?2
+       WHERE book_id = ?1",
+      params![book_id, now_iso()]
+    )?;
+    Ok(())
   }
 
   /// "Mark as finished" and "Mark as not started", from a book's menu.
@@ -544,6 +569,8 @@ impl Database {
         params![now, book_id]
       )?;
     }
+    // Said here: this device's own place follows (or the old one was offered back).
+    self.place_here_follows_row(book_id)?;
     Ok(())
   }
 
@@ -1292,7 +1319,10 @@ impl Database {
 fn write_ahead(conn: &Connection) {
   let mode: String = conn.query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0)).unwrap_or_default();
   if mode.eq_ignore_ascii_case("wal") {
-    let _ = conn.execute_batch("PRAGMA synchronous = NORMAL;");
+    // The log is emptied into the database every thousand pages, but its
+    // file stays as big as it grew (4 MB beside a database of 200 KB) unless
+    // told otherwise. For this connection: asked at each open.
+    let _ = conn.execute_batch("PRAGMA synchronous = NORMAL; PRAGMA journal_size_limit = 1048576;");
   } else {
     crate::diag::warn(&format!("the library database keeps its \"{mode}\" journal: write-ahead logging was refused"));
   }
@@ -2063,6 +2093,45 @@ pub(crate) mod tests {
 
     db.update_progress("aaa", 0.6, Some(now_iso()), Some("epubcfi(/6/30)".to_string())).expect("went there");
     assert_eq!(db.place_here("aaa").expect("place"), Some((0.6, Some("epubcfi(/6/30)".to_string()))));
+  }
+
+  /// A book removed takes this device's place in it with it; marked not
+  /// started, the place here is the start. Neither is offered back later.
+  #[test]
+  fn the_place_here_goes_with_the_book_and_follows_a_mark() {
+    let db = memory_db();
+    let book = BookRecord {
+      finished_at: None,
+      id: "bbb".to_string(),
+      title: "A book".to_string(),
+      author: None,
+      genres: Vec::new(),
+      cover_url: None,
+      local_path: "/books/bbb.epub".to_string(),
+      file_hash: "bbb".to_string(),
+      progress: 0.0,
+      position: None,
+      series: None,
+      series_index: None,
+      last_opened: None,
+      created_at: now_iso(),
+      metadata_checked_at: None,
+      metadata_updated_at: None,
+      progress_updated_at: None,
+      deleted_at: None,
+      available: true
+    };
+    db.upsert_book(&book).expect("import");
+    db.update_progress("bbb", 0.4, Some(now_iso()), Some("epubcfi(/6/40)".to_string())).expect("read");
+    let (_, _, at) = db.place_here_at("bbb").expect("place").expect("read here");
+    assert!(at.is_some(), "when this device stood there");
+
+    db.set_finished("bbb", false, &now_iso()).expect("not started");
+    assert_eq!(db.place_here("bbb").expect("place"), Some((0.0, None)));
+
+    db.update_progress("bbb", 0.4, Some(now_iso()), Some("epubcfi(/6/40)".to_string())).expect("read again");
+    db.delete_book("bbb", &now_iso()).expect("remove");
+    assert_eq!(db.place_here("bbb").expect("place"), None, "removed with the book");
   }
 
   #[test]

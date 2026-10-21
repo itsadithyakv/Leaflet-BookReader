@@ -21,6 +21,33 @@ const BLOCKS_MAX = 800;
 const nameOf = (element: Element) => (element.localName || element.tagName || "").toLowerCase();
 const collapse = (text: string) => text.replace(/\s+/g, " ").trim();
 
+/**
+ * An element's words, a line broken inside it (`<br>`) as a space: its
+ * `textContent` ran the lines together ("THE WELL OF ASCENSION" over "BOOK
+ * TWO OF MISTBORN" read as "...ASCENSIONBOOK...").
+ */
+const wordsOf = (element: Element): string => {
+  if (!element.querySelector("br")) {
+    return element.textContent ?? "";
+  }
+  let text = "";
+  const walk = (node: Node) => {
+    node.childNodes.forEach((child) => {
+      if (child.nodeType === 3) {
+        text += (child as Text).data;
+      } else if (child.nodeType === 1) {
+        if (nameOf(child as Element) === "br") {
+          text += " ";
+        } else if (!SKIPPED.has(nameOf(child as Element))) {
+          walk(child);
+        }
+      }
+    });
+  };
+  walk(element);
+  return text;
+};
+
 const hintsFor = (element: Element, hints: StyleHints): StyleHint => {
   const out = { bold: false, centred: false, larger: false, breaks: false };
   for (const name of (element.getAttribute("class") ?? "").split(/\s+/)) {
@@ -176,14 +203,14 @@ export const scanSection = (
     }
     if (tag === "a" && element.getAttribute("href") && links.length < 600) {
       const to = linkTo(element.getAttribute("href") ?? "");
-      const text = collapse(element.textContent ?? "") || pictureWords(element);
+      const text = collapse(wordsOf(element)) || pictureWords(element);
       if (to && text) {
         links.push({ text: text.slice(0, LINE_MAX), section: to.section, anchor: to.anchor, at: null });
       }
     }
     // A block with no block inside it: a line of the page.
     if (BLOCKS.has(tag) && tag !== "body" && tag !== "hr" && !Array.from(element.children).some((child) => BLOCKS.has(nameOf(child)) && nameOf(child) !== "hr")) {
-      const own = collapse(element.textContent ?? "");
+      const own = collapse(wordsOf(element));
       const pictured = own ? "" : pictureWords(element);
       const text = own || pictured;
       const style = `${tag}${element.getAttribute("class") ? `.${collapse(element.getAttribute("class") ?? "").split(" ").join(".")}` : ""}`;

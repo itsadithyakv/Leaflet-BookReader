@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Camera, Check, Footprints, House, Info, Nut, Star, TreePine, Trees, X } from "lucide-react";
+import { Camera, Check, Footprints, Info, ListChecks, Nut, Star, TreePine, Trees, X } from "lucide-react";
 import { useBackLayer } from "../../../../platform/back";
 import { playSound } from "../../../../pip/sound";
 import { chipLine, ladderOf, tutorialRunning, type Brought } from "../../../../pip/base/ladder";
@@ -57,8 +57,9 @@ type GoalLadderProps = {
 };
 
 /**
- * The goal ladder: one chip in the camp's row of chips, "Burrow 2 · 2/5 ·
- * next: Lookout +15", and Pip's list under it when it is tapped: the steps
+ * The goal ladder: one chip in the camp's row of chips, "2/5 · Next: Lookout
+ * +15" (the Hollow's level has a chip of its own since 1.5.8), and Pip's
+ * list under it when it is tapped: the steps
  * that take the burrow to its next level, raising it last, why a step
  * cannot be done yet (in its (i)), and what that level brings. While Pip's
  * guided first session runs, the chip keeps quiet and does not open.
@@ -105,10 +106,7 @@ export const GoalLadder = ({ base, minutes, note, onGo }: GoalLadderProps) => {
           setOpen((was) => !was);
         }}
       >
-        <House size={13} aria-hidden />
-        <span>
-          Burrow <strong>{ladder.level}</strong>
-        </span>
+        <ListChecks size={13} aria-hidden />
         {next ? (
           <>
             <span className="pip-ladder-pips" aria-hidden="true">
@@ -120,7 +118,7 @@ export const GoalLadder = ({ base, minutes, note, onGo }: GoalLadderProps) => {
               {ladder.done}/{ladder.total}
             </span>
             <span className="pip-ladder-next" aria-hidden="true">
-              <span className="pip-ladder-next-word">next: </span>
+              <span className="pip-ladder-next-word">Next: </span>
               <strong>{next.quest.short}</strong>
             </span>
             {reward > 0 && (
@@ -130,14 +128,17 @@ export const GoalLadder = ({ base, minutes, note, onGo }: GoalLadderProps) => {
             )}
           </>
         ) : (
-          <Check size={13} aria-hidden />
+          <>
+            <span aria-hidden="true">Pip's list</span>
+            <Check size={13} aria-hidden />
+          </>
         )}
       </button>
       {shown && (
         <span className="pip-ladder-card" role="dialog" aria-label="Pip's list">
           <span className="pip-ladder-head">
             <span className="pip-base-title">Pip's list</span>
-            <span className="pip-ladder-to">{ladder.group?.to ? `Burrow ${ladder.level} → ${ladder.group.to}` : `Burrow ${ladder.level}`}</span>
+            <span className="pip-ladder-to">{ladder.group?.to ? `Hollow level ${ladder.level} → ${ladder.group.to}` : `Hollow level ${ladder.level}`}</span>
             <button type="button" className="pip-ladder-close" aria-label="Close" onClick={() => setOpen(false)}>
               <X size={14} aria-hidden />
             </button>

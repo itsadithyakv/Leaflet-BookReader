@@ -6,6 +6,7 @@ import { type ReadingMode, type ReaderWord } from "../readerTypes";
 import { PAGE_TOP_PAD } from "../finish";
 import { rsvpStageVars, rsvpRamp, getPaceFactor, handsFreeCounts, stillTooLong } from "../pacing";
 import { predictPlainWpm } from "../paceModel";
+import { tickReading } from "../paceTracker";
 import { isPictureGap } from "../smartScroll";
 import type { WithChrome, WithCover, WithPanels } from "./scope";
 
@@ -205,6 +206,7 @@ export const useReadingEngine = (reader: WithCover) => {
     markReadingActivity, modeBeforeRef, paceContext, paceProfileRef, pausedWhileAwayRef, persistReaderState,
     positionReaderDotAtWord, prepareReaderWords, programmaticScrollUntilRef, readerDotAnchorIndexRef, readerDotEnabled,
     readerDotOffscreenTimerRef, readerDotUserAnchorUntilRef, readerWordsRef, readerWordsStale, readingEngineTimerRef,
+    scheduleReaderWordIndex, keepDottyOnItsWord, forgetHeldPlace,
     readingMode, readingModeRef, readingPaceScaleRef, readingPaused, readingPausedRef, removeLastReadMarker,
     renditionRef, requestedStartIndexRef, restAtPicture, savePaceProfileRef, scrollWordIntoReadingBand,
     sectionWordDifficultyRef, setAutoScrollActive, setReadingPaused, setReadingWord, setSmartAtPicture, setSmartWpm,
@@ -343,6 +345,10 @@ export const useReadingEngine = (reader: WithCover) => {
       smartPlainRef.current = predictPlainWpm(paceProfileRef.current, paceContext());
       setSmartWpm(Math.round(smartWpmNow()));
       startSmartSessionAt(activeWordIndexRef.current);
+      // What an automatic raise may go a little over: the reader's own pace for the book.
+      if (smartSessionRef.current) {
+        smartSessionRef.current.baseWpm = smartWpmNow();
+      }
     } else {
       finishSmartSession();
       removeLastReadMarker();
@@ -381,7 +387,20 @@ export const useReadingEngine = (reader: WithCover) => {
             Date.now() < smartStepHoldUntilRef.current);
         if (readingPausedRef.current || waiting) {
           if (smartSessionRef.current) {
-            smartSessionRef.current.lastTickAt = Date.now();
+            tickReading(smartSessionRef.current, Date.now(), true);
+          }
+          // Nothing reads on, but the page can still change under Dotty
+          // (readers/dottyHold.ts): chapters come and go, the page is laid out
+          // again. Dotty stays beside its word, and the words are counted
+          // again once the page has changed, not only when reading goes on.
+          if (readingModeRef.current === "smart") {
+            if (readerWordsStale()) {
+              if (!wordIndexTimerRef.current && Date.now() >= programmaticScrollUntilRef.current) {
+                scheduleReaderWordIndex(false, 0);
+              }
+            } else {
+              keepDottyOnItsWord();
+            }
           }
           shownSincePlay = 0;
           schedule(180);
@@ -449,6 +468,8 @@ export const useReadingEngine = (reader: WithCover) => {
         if (handsFreeCounts(quiet)) {
           markReadingActivity();
         }
+        // Reading on from here: a place held while the page was laid out again is let go.
+        forgetHeldPlace();
         let wpm = speedReadWpmRef.current;
         if (mode === "smart") {
           wpm = smartWpmNow();
@@ -457,11 +478,8 @@ export const useReadingEngine = (reader: WithCover) => {
           if (session) {
             // The first word's wait is Smart Read setting off, not reading.
             const first = session.activeMs === 0 && session.acceptedWords === 0;
-            const step = first ? 0 : Math.min(2500, Math.max(0, now - session.lastTickAt));
-            session.activeMs += step;
-            session.acceptedMs += step;
+            session.acceptedMs += tickReading(session, now, first);
             session.acceptedWords += 1;
-            session.lastTickAt = now;
             // A long stretch at Dotty's pace is learned as it goes, not only at the end.
             if (session.acceptedMs >= 4 * 60_000) {
               learnPace(session.acceptedWords, session.acceptedMs, "guided");
@@ -565,7 +583,11 @@ export const useReadingEngine = (reader: WithCover) => {
         window.clearTimeout(readingEngineTimerRef.current);
         readingEngineTimerRef.current = null;
       }
-      if (readingMode === "smart") finishSmartSession();
+      if (readingMode === "smart") {
+        finishSmartSession();
+        // A place held through a relayout belongs to this session: a later one that starts paused must not jump to it.
+        reader.forgetHeldPlace();
+      }
     };
   }, [readingMode, book.id]);
 };

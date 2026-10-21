@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { easeInOutCubic } from "../smartScroll";
-import { isPhoneShape, tapAction, tapZone } from "../touchLayout";
+import { isPhoneShape, runAction, tapAction, tapZone, type TapAction } from "../touchLayout";
 import { inBookmarkCorner } from "../phoneReading";
 import { DOUBLE_CLICK_MS, TAP_SLACK_PX, WHEEL_AT_REST, clickZone, pageAt, pageCount, pageTurnDuration, pageTurnTarget, pressIsClick, strayPageTarget, swipeTurn, wheelTurn } from "../pageTurn";
 import { MARK_NAME } from "../people/marks";
 import { chapterPageRange } from "../chapterSpan";
-import { holdForSecondTap } from "../wordTap";
+import { endTapRun, holdTapRun, isNotTap } from "../tapRun";
 import type { Later, WithAnnotations, WithContentsList } from "./scope";
 
 /**
@@ -597,8 +597,9 @@ export const usePageInput = (reader: WithAnnotations & Later<"cornerBookmarkRef"
     // double-click, which selects a word.
     //
     // A finger's tap (readers/touchLayout.ts, `tapZone`): the outer thirds
-    // turn, the middle brings the toolbar and the dock or sends them away. On
-    // a word it waits a moment, for a double tap, which selects the word.
+    // turn, at once, a tap a turn. In the middle the taps make a run
+    // (readers/tapRun.ts): two bring the toolbar and the dock or send them
+    // away, three select the word (useTapRuns.ts).
     /** Which way a click at this point of the page turns it (0, the middle: a finger's tap there is for the chrome); and the facts of where it landed. */
     const clickPlace = (event: MouseEvent, touch: boolean) => {
       const frameNow = (rendition.manager as any)?.container === container ? container : null;
@@ -634,6 +635,10 @@ export const usePageInput = (reader: WithAnnotations & Later<"cornerBookmarkRef"
       const from = press;
       press = null;
       const touch = from?.touch ?? (event as PointerEvent).pointerType === "touch";
+      // (A held finger or a drag: useTapRuns.ts.)
+      if (touch && isNotTap(event)) {
+        return;
+      }
       const place = clickPlace(event, touch);
       if (!place) {
         return;
@@ -653,8 +658,8 @@ export const usePageInput = (reader: WithAnnotations & Later<"cornerBookmarkRef"
       if (!plain) {
         return;
       }
-      const action = tapAction(place.turn, "pages", phoneRef.current, place.corner);
-      const turn = () => {
+      const single = tapAction(place.turn, "pages", phoneRef.current, place.corner);
+      const act = (action: TapAction) => {
         clickTimer = 0;
         if (renditionRef.current !== rendition || layoutRef.current !== "pages" || covered() || selecting(place.doc)) {
           return;
@@ -671,13 +676,16 @@ export const usePageInput = (reader: WithAnnotations & Later<"cornerBookmarkRef"
         }
       };
       window.clearTimeout(clickTimer);
-      if (place.onText && !touch) {
-        clickTimer = window.setTimeout(turn, DOUBLE_CLICK_MS);
+      if (touch && single.kind === "turn") {
+        // A turn is a tap's own, at once: quick taps at a side are as many turns, never a run.
+        endTapRun(rendition);
+        act(single);
+      } else if (touch) {
+        holdTapRun(rendition, (taps) => act(runAction(single, taps)));
       } else if (place.onText) {
-        // A finger's on a word waits a moment too: a second tap selects the word (useWordDoubleTap.ts).
-        holdForSecondTap(rendition, turn);
+        clickTimer = window.setTimeout(() => act(single), DOUBLE_CLICK_MS);
       } else {
-        turn();
+        act(single);
       }
     };
     // Clicks made quickly in the margin are page turns, one each: the second

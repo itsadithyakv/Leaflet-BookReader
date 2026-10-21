@@ -3,7 +3,6 @@ import { runAuto } from "./battle";
 import {
   FRIEND_PRIZE,
   HELD_PRIZE,
-  MEND_A_STAR,
   MEND_MOST,
   HARM_MOST,
   POST_REACH,
@@ -27,7 +26,8 @@ import {
   finishFriendRaid,
   friendBlocked,
   newBase,
-  placeWall,
+  fronted,
+  fencePieces,
   readBase,
   settle,
   startFriendRaid,
@@ -36,12 +36,13 @@ import {
   type BaseState,
   type SharedCamp
 } from "./rules";
+import { beforeChapters } from "./testing";
 
 const DAY = "2026-10-12";
 const NOW = { minutes: 600, day: DAY, lit: false };
 const mine = (more: Partial<BaseState> = {}): BaseState => {
   const base = newBase(0, DAY);
-  return { ...base, acorns: 100, levels: { burrow: 3, oak: 3, store: 3, fence: 2, tower: 2, hut: 3 }, ...more };
+  return beforeChapters({ ...base, acorns: 100, levels: { burrow: 3, oak: 3, store: 3, fence: 2, tower: 2, hut: 3 }, ...more });
 };
 const THEIRS: SharedCamp = {
   levels: { burrow: 3, oak: 2, store: 3, fence: 1, tower: 3, hut: 2 },
@@ -63,7 +64,9 @@ describe("raiding a friend's camp", () => {
     const camp = campOfShared(THEIRS, DAY);
     expect(camp.levels.tower).toBe(3);
     expect(camp.spots.store).toEqual([200, 70]);
-    expect(camp.walls).toHaveLength(2);
+    // Their wall stands across their trail at their fence's level, whatever pieces their card lists (1.5.11).
+    expect(camp.walls).toHaveLength(fencePieces(camp));
+    expect(camp.walls.length).toBeGreaterThan(0);
     expect(camp.guards[0]).toBe(2);
     expect(camp.acorns).toBe(newBase(0, DAY).acorns);
     // What a card might carry that it should not is not taken on trust.
@@ -128,43 +131,36 @@ describe("being raided by a friend", () => {
     expect(after.events[0].text).toBe("The camp held against Tovah's scouts.");
   });
 
-  it("costs a piece of fence a star and a little reading to mend, and never the larder", () => {
-    let base = mine();
-    base = placeWall(placeWall(placeWall(base, 100, 104), 110, 104), 120, 104);
-    expect(base.walls).toHaveLength(3);
+  it("costs a piece of fence a star, put up again for nothing, and never the larder or any reading", () => {
+    const base = fronted(mine());
+    expect(base.walls).toHaveLength(5);
     const after = sufferRaids(base, [{ name: "Tovah", stars: 2 }], 600, DAY);
     expect(after.acorns).toBe(base.acorns);
-    expect(after.walls).toHaveLength(1);
-    expect(after.wreck).toEqual({ by: "Tovah", stars: 2, from: 600, needs: 2 * MEND_A_STAR });
-    expect(wreckLeft(after, 603)).toBe(2 * MEND_A_STAR - 3);
-    // The fence is not built on while Pip mends it; everything else is (since 2026-10-15 a raid stops the fence alone).
-    expect(blocked(after, "fence")).toBe("mend");
-    expect(blocked(after, "oak")).not.toBe("mend");
-    // Read off, it is mended, and building is open again.
-    const mended = settle(after, { minutes: 600 + 2 * MEND_A_STAR, day: DAY, lit: false });
-    expect(mended.wreck).toBeNull();
-    expect(mended.events.some((event) => event.text === "The camp is mended.")).toBe(true);
-    expect(blocked(mended, "fence")).not.toBe("mend");
+    expect(after.walls).toHaveLength(3);
+    expect(after.events[0].text).toBe("Tovah's scouts raided the camp: 2 stars. 2 sections of the wall came down.");
+    // Nothing to be mended by reading since 1.5.8: the fence is built on at once.
+    expect(after.wreck).toBeNull();
+    expect(blocked(after, "fence")).not.toBe("mend");
   });
 
-  it("is never more than twenty minutes to mend, however many came, and gets no worse for being left", () => {
-    const base = mine();
-    const many = sufferRaids(
-      base,
-      Array.from({ length: 6 }, (_, index) => ({ name: `Friend ${index}`, stars: 3 })),
-      600,
-      DAY
-    );
-    expect(many.wreck?.needs).toBe(MEND_MOST);
-    // A month away and no reading: it wants exactly what it wanted.
-    const later = settle(many, { minutes: 600, day: "2026-11-12", lit: false });
-    expect(wreckLeft(later, 600)).toBe(MEND_MOST);
+  it("mends a camp kept from before that was still being mended by reading, at once and for nothing", () => {
+    const kept = { ...mine(), wreck: { by: "Tovah", stars: 3, from: 600, needs: MEND_MOST } };
+    expect(blocked(kept, "fence")).toBe("mend");
+    expect(wreckLeft(kept, 600)).toBe(MEND_MOST);
+    // Brought up to now with no reading since, or a month later: mended either way, and nothing taken.
+    for (const now of [{ minutes: 600, day: DAY, lit: false }, { minutes: 600, day: "2026-11-12", lit: false }]) {
+      const mended = settle(kept, now);
+      expect(mended.wreck).toBeNull();
+      expect(mended.acorns).toBe(kept.acorns);
+      expect(mended.events.some((event) => event.text === "The camp is mended.")).toBe(true);
+    }
   });
 
   it("is not taken on trust: odd stars and names are tidied, and what is kept reads back", () => {
     const after = sufferRaids(mine(), [{ name: "  ", stars: 99 }], 600, DAY);
-    expect(after.wreck).toMatchObject({ by: "A friend", stars: 3 });
-    expect(readBase(JSON.parse(JSON.stringify(after)))?.wreck).toEqual(after.wreck);
+    expect(after.events[0].text).toMatch(/^A friend's scouts raided the camp: 3 stars\./);
+    const wrecked = { ...after, wreck: { by: "A friend", stars: 3, from: 600, needs: 8 } };
+    expect(readBase(JSON.parse(JSON.stringify(wrecked)))?.wreck).toEqual(wrecked.wreck);
     expect(readBase({ ...JSON.parse(JSON.stringify(after)), wreck: { by: 7, stars: "x" }, rivals: { day: 3, raided: [1, "ok"] } })).toMatchObject({ wreck: null, rivals: { day: "", raided: ["ok"] } });
   });
 });
@@ -212,9 +208,12 @@ describe("a guardian's signpost", () => {
   it("starts beside their building, and goes wherever it is carried", () => {
     const base = posted();
     const first = postSpotOf(base, 0)!;
-    // Beside the lookout, not on it.
-    expect(Math.hypot(first[0] - base.spots.tower[0], first[1] - base.spots.tower[1])).toBeGreaterThan(5);
-    expect(Math.hypot(first[0] - base.spots.tower[0], first[1] - base.spots.tower[1])).toBeLessThan(20);
+    // On the front (1.5.11): the ranger on the wall by the gate, up the picture from it.
+    expect(first).toEqual([base.front.x + 5, 72]);
+    // A camp's card with no wall's line on it: beside the lookout, not on it.
+    const card = postSpotOf({ spots: base.spots, walls: [], yard: base.yard }, 0)!;
+    expect(Math.hypot(card[0] - base.spots.tower[0], card[1] - base.spots.tower[1])).toBeGreaterThan(5);
+    expect(Math.hypot(card[0] - base.spots.tower[0], card[1] - base.spots.tower[1])).toBeLessThan(20);
     const moved = movePost(base, 0, 60, 90);
     expect(postSpotOf(moved, 0)).toEqual([60, 90]);
     // Kept on the grass the camp has cleared, wherever it is let go.
@@ -284,12 +283,15 @@ describe("worn out", () => {
     expect(there(base, AT + REST_MS + 10)).toEqual([0, 1, 3]);
   });
 
-  it("is what a friend's raid of two stars or more does to every guardian on the ground", () => {
-    const light = sufferRaids(posted(), [{ name: "Tovah", stars: 1 }], 600, DAY, AT);
-    expect(sleepers(light, AT + 1)).toEqual([]);
-    const heavy = sufferRaids(posted(), [{ name: "Tovah", stars: 2 }], 600, DAY, AT);
-    expect(sleepers(heavy, AT + 1).sort()).toEqual([0, 1, 3]);
-    expect(isAsleep(heavy, 4, AT + 1)).toBe(false);
-    expect(readBase(JSON.parse(JSON.stringify(heavy)))?.tired).toEqual(heavy.tired);
+  it("is never what a friend's raid does (since 1.5.10: two stars or more put every guardian to sleep before)", () => {
+    for (const stars of [1, 2, 3]) {
+      const raided = sufferRaids(posted(), [{ name: "Tovah", stars }], 600, DAY, AT);
+      expect(sleepers(raided, AT + 1)).toEqual([]);
+      expect(raided.tired).toEqual(posted().tired);
+    }
+    // One already asleep from before sleeps it off by the clock.
+    const before = { ...posted(), tired: { 0: { wounds: WOUNDS_MOST, since: AT, until: AT + REST_MS } } };
+    expect(isAsleep(sufferRaids(before, [{ name: "Tovah", stars: 2 }], 600, DAY, AT), 0, AT + 1)).toBe(true);
+    expect(isAsleep(before, 0, AT + REST_MS + 1)).toBe(false);
   });
 });

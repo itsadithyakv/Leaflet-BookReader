@@ -1,0 +1,20 @@
+{
+  "entries": [
+    {"title":"Mistborn","publishers":["Tor Publishing Group"],"publish_date":"2023","languages":[{"key":"/languages/eng"}],"physical_format":"Papberback","covers":[15158368],"isbn_13":["9781250868282"]},
+    {"title":"Mistborn","publishers":["Tor"],"publish_date":"2006","languages":[{"key":"/languages/eng"}],"physical_format":"paperback","covers":[14658348,9347425],"isbn_13":["9780765377135"],"isbn_10":["0765377136"]},
+    {"title":"Mistborn","publishers":["Tor Fantasy"],"publish_date":"2019","languages":[{"key":"/languages/eng"}],"physical_format":"mass market paperback","covers":[14658378,8785064],"isbn_13":["9781250318541"],"isbn_10":["1250318548"]},
+    {"title":"The Final Empire (Mistborn, Book 1)","publishers":["Tor Books"],"publish_date":"July 25, 2006","languages":[{"key":"/languages/eng"}],"physical_format":"Hardcover","covers":[524534],"isbn_13":["9780765311788"],"isbn_10":["076531178X"]},
+    {"title":"The Final Empire","publishers":["Gollancz"],"publish_date":"2009","languages":[{"key":"/languages/eng"}],"physical_format":"paperback","covers":[15101787,14658410,10340115],"isbn_13":["9780575089914"],"isbn_10":["0575089911"]},
+    {"title":"The Final Empire: Collector's Tenth Anniversary Limited Edition","publishers":["Gollancz"],"publish_date":"Aug 24, 2001","physical_format":"hardcover","covers":[8762070],"isbn_13":["9781473216815"],"isbn_10":["1473216818"]},
+    {"title":"Sissoylu - Son Imparatorluk 1","publishers":["Akilcelen Kitaplar"],"publish_date":"Apr 13, 2020","physical_format":"paperback","covers":[10852405],"isbn_13":["9786052382462"],"isbn_10":["6052382465"]},
+    {"title":"El Imperio Final","publishers":["NOVA","Nova"],"publish_date":"Jul 08, 2021","physical_format":"hardcover","covers":[13540550],"isbn_13":["9788418037214"],"isbn_10":["8418037210"]},
+    {"title":"ミストボーン　1　灰色の帝国","publishers":["ToÌ„kyoÌ„ : Hayakawa ShoboÌ„, 2009."],"publish_date":"May 15, 2009","physical_format":"paperback bunko","covers":[10293530],"isbn_13":["9784150204952"],"isbn_10":["4150204950"]},
+    {"title":"Mistborn: The Final Empire","publishers":["Macmillan Audio"],"publish_date":"2008-12-28","languages":[{"key":"/languages/eng"}],"physical_format":"Audible eAudiobook","covers":[14837620]},
+    {"title":"Mistborn 1","publishers":["GraphicAudio"],"publish_date":"Dec 01, 2013","physical_format":"audio cd","covers":[10508308],"isbn_13":["9781628510218"],"isbn_10":["1628510218"]},
+    {"title":"Mistborn","publishers":["Leya"],"publish_date":"Abril 2014","languages":[{"key":"/languages/por"}],"physical_format":"Brochura","covers":[15089737],"isbn_13":["9788580448641"]},
+    {"title":"Kinder des Nebels","publishers":["Piper"],"publish_date":"01.03.2018","languages":[{"key":"/languages/ger"}],"physical_format":"Taschenbuch","covers":[14838260],"isbn_13":["9783492704793"]},
+    {"title":"Mistborn","publishers":["Doherty Associates, LLC, Tom"],"publish_date":"2010","languages":[{"key":"/languages/eng"}],"covers":[15245124],"isbn_13":["9781429914567"]},
+    {"title":"Imperio Final / the Final Empire","publishers":["Ediciones B Mexico","B de Bolsillo"],"publish_date":"2021","languages":[{"key":"/languages/spa"}],"covers":[13625337],"isbn_13":["9788413143194"]},
+    {"title":"The Final Empire","publishers":["Tor"],"publish_date":"2006","covers":[-1]}
+  ]
+}

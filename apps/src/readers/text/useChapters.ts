@@ -7,13 +7,15 @@ import { chapterEndFor } from "../timeLeft";
 import { NO_JUMPS, noteJump, stepBack, stepForward, type JumpHistory } from "../jumpHistory";
 import { fractionAt, seekTarget } from "../seek";
 import { anchorElement } from "../contentsScan";
-import { chapterEndWithin, chapterTail, earlierEntry, entryAtShare, nextChapterEntry, pagesOfChapter, previousChapterEntry, type ChapterStart } from "../chapterSpan";
+import { chapterBook, partEntries, chapterEndWithin, chapterTail, earlierEntry, entryAtShare, nextChapterStep, pagesOfChapter, previousChapterEntry, previousChapterStep, type ChapterStart, type ChapterStep } from "../chapterSpan";
+import { JUMP_MAX_MS } from "../jumpSettle";
+import { readHeading } from "../autoContents";
 import { bookOfSection, gapFollows, labelInBook, type ContentsRow, type InnerBook } from "../innerBooks";
 import type { Later, WithPlace } from "./scope";
 
 /** What this reaches that hooks called after it add (scope.ts). */
 type ChaptersLater = Later<
-  | "noteRequestRef" | "setNote" | "chapterEntryRef" | "goToPageEdge"
+  | "noteRequestRef" | "setNote" | "chapterEntryRef" | "goToPageEdge" | "entryHere"
 >;
 
 /**
@@ -254,6 +256,7 @@ export const useChapters = (reader: WithPlace & ChaptersLater) => {
     releaseUserReadingAnchor();
     progressArmedRef.current = true;
     markNavigating();
+    reader.beginJump();
     void rendition
       .display(target.href)
       .then(() => {
@@ -285,20 +288,13 @@ export const useChapters = (reader: WithPlace & ChaptersLater) => {
         // takes its real height a moment after it loads.
         // And a place in the chapter's last screenful is out of reach until
         // the chapter after it has arrived below (the end of the book's
-        // story stopped at the bottom edge of the window): it is put again
-        // as that happens, unless the reader has moved on meanwhile.
-        let put: number | null = null;
-        const place = () => {
+        // story stopped at the bottom edge of the window): it is held there
+        // until that has happened, unless the reader takes the page
+        // meanwhile (readers/jumpSettle.ts).
+        reader.pinJump(() => {
           const element = manager?.views?.find?.(target)?.element as HTMLElement | undefined;
-          if (!element || renditionRef.current !== rendition || (put !== null && Math.abs(container.scrollTop - put) > 2)) {
-            return;
-          }
-          container.scrollTop = Math.max(element.offsetTop, element.offsetTop + within * element.offsetHeight - PAGE_TOP_PAD);
-          put = container.scrollTop;
-        };
-        place();
-        requestAnimationFrame(place);
-        [250, 600, 1200].forEach((ms) => window.setTimeout(place, ms));
+          return element ? Math.max(element.offsetTop, element.offsetTop + within * element.offsetHeight - PAGE_TOP_PAD) : null;
+        });
         loadFurther();
       })
       .catch(() => undefined);
@@ -466,32 +462,72 @@ export const useChapters = (reader: WithPlace & ChaptersLater) => {
     }
   };
 
+  /**
+   * Where next and previous chapter go from (readers/chapterSpan.ts): the
+   * file the reading line is in and the chapter the dock names there, by
+   * the same rule (useReaderOutlook's `entryHere`), worked out now rather
+   * than taken from the dock's last look. While a jump made by them is still
+   * settling, from where it is going: a second press used to be worked out
+   * from the page as it was before the first (the window blank, or still
+   * showing the chapter left), and went to the same chapter again.
+   */
+  const stepFrom = (): { reading: number; current: number; flying: boolean } | null => {
+    const nav = reader.navTargetRef.current;
+    if (nav && Date.now() < nav.until && (layoutRef.current === "pages" || reader.jumpHoldRef.current !== null)) {
+      return { reading: nav.section, current: nav.entry, flying: true };
+    }
+    const location = renditionRef.current?.location;
+    const reading = sectionPlace()?.section ?? location?.start?.index ?? location?.end?.index;
+    return typeof reading === "number" ? { reading, current: reader.entryHere(reading), flying: false } : null;
+  };
+  /** The book as the chapter rules see it: its entries as places, and its files' sizes (for a chapter's epigraph). */
+  const chapterBookNow = () =>
+    chapterBook(
+      chapterStarts(),
+      sectionWeightsRef.current?.bytes ?? [],
+      partEntries(tocLabelsRef.current, contentsRowsRef.current.map((row) => row.depth), (label) => readHeading(label)?.kind === "part")
+    );
+  /** Takes a step of next or previous chapter, and remembers where it is going for a press that comes before it is there. */
+  const takeStep = (step: ChapterStep) => {
+    const place = tocPlacesRef.current[step.entry];
+    const file = step.file !== null ? ((bookRef.current as any)?.spine?.get?.(step.file)?.href as string | undefined) : undefined;
+    if (file) {
+      // From the top of the chapter's epigraph.
+      askedEntryRef.current = null;
+      displayChapter(file, { useSaved: false });
+    } else if (!goToEntry(step.entry)) {
+      return false;
+    }
+    const section = step.file ?? place?.spine;
+    if (typeof section === "number") {
+      reader.navTargetRef.current = { section, entry: step.entry, until: Date.now() + JUMP_MAX_MS };
+    }
+    return true;
+  };
+
   const goNextSection = () => {
-    // A chapter skipped is a jump: the line left can be come back to.
-    noteJumpFromHere();
     const rendition = renditionRef.current;
     const epub = bookRef.current as any;
-    const location = rendition?.location;
-    const index = location?.start?.index ?? location?.end?.index;
-    // The next heading, when the contents place it inside a file: several
-    // chapters to a file used to be skipped together (readers/chapterSpan.ts).
-    const reading = sectionPlace()?.section ?? index;
-    if (typeof reading === "number") {
-      const next = nextChapterEntry(chapterStarts(), reading, reader.chapterEntryRef.current);
-      if (next !== null && goToEntry(next)) {
+    const from = stepFrom();
+    // A chapter skipped is a jump: the line left can be come back to (once, for presses in a row).
+    if (!from?.flying) {
+      noteJumpFromHere();
+    }
+    if (from) {
+      // The next chapter after the one being read, from its epigraph, put at
+      // the top: whether or not its opening is in the window already.
+      const step = nextChapterStep(chapterBookNow(), from.reading, from.current);
+      if (step && takeStep(step)) {
         return;
       }
-    }
-    const href = location?.start?.href ?? location?.end?.href;
-    if (href && epub?.spine?.get) {
-      // From the chapter the reading line is in, which is the one the dock names.
-      const current = epub.spine.get(sectionPlace()?.section ?? href);
-      const next = current?.next ? current.next() : null;
+      // Past the last entry: the next file, as it always was.
+      const next = epub?.spine?.get?.(from.reading)?.next?.();
       if (next?.href) {
         displayChapter(next.href, { useSaved: false });
         return;
       }
     }
+    const index = rendition?.location?.start?.index ?? rendition?.location?.end?.index;
     if (typeof index === "number" && displaySpine(index + 1, 1)) {
       return;
     }
@@ -499,16 +535,18 @@ export const useChapters = (reader: WithPlace & ChaptersLater) => {
   };
 
   const goPrevSection = () => {
-    noteJumpFromHere();
     const rendition = renditionRef.current;
     const epub = bookRef.current as any;
     const location = rendition?.location;
-    const index = location?.start?.index ?? location?.end?.index;
-    // The heading before, when it or this chapter starts inside a file.
-    const reading = sectionPlace()?.section ?? index;
-    if (typeof reading === "number") {
+    const from = stepFrom();
+    if (!from?.flying) {
+      noteJumpFromHere();
+    }
+    if (from) {
+      const { reading, current } = from;
       const starts = chapterStarts();
-      const before = previousChapterEntry(starts, reading, reader.chapterEntryRef.current);
+      // The heading before, when it or this chapter starts inside a file.
+      const before = previousChapterEntry(starts, reading, current);
       if (layoutRef.current === "pages" && before !== null) {
         // With pages, a heading on a file's first page shares that page with
         // the file's own entry: going "back" to the one from the other showed
@@ -525,7 +563,7 @@ export const useChapters = (reader: WithPlace & ChaptersLater) => {
         const startPages = chapterStartsHere(reading) ?? [];
         const lands = (entry: number) =>
           starts[entry]?.spine === reading && (starts[entry].within > 0 ? startPages.find((start) => start.entry === entry)?.page : 1) === page;
-        const target = earlierEntry(starts, reading, before === "top" ? reader.chapterEntryRef.current - 1 : before, lands);
+        const target = earlierEntry(starts, reading, before === "top" ? current - 1 : before, lands);
         if (target >= 0 && goToEntry(target)) {
           return;
         }
@@ -540,17 +578,19 @@ export const useChapters = (reader: WithPlace & ChaptersLater) => {
           return;
         }
       }
-    }
-    const href = location?.start?.href ?? location?.end?.href;
-    if (href && epub?.spine?.get) {
-      // From the chapter the reading line is in, which is the one the dock names.
-      const current = epub.spine.get(sectionPlace()?.section ?? href);
-      const prev = current?.prev ? current.prev() : null;
+      // Neither chapter starts inside a file: the start of the chapter before
+      // the one being read, from its epigraph (readers/chapterSpan.ts).
+      const step = previousChapterStep(chapterBookNow(), reading, current);
+      if (step && takeStep(step)) {
+        return;
+      }
+      const prev = epub?.spine?.get?.(reading)?.prev?.();
       if (prev?.href) {
         displayChapter(prev.href, { useSaved: false });
         return;
       }
     }
+    const index = location?.start?.index ?? location?.end?.index;
     if (typeof index === "number" && displaySpine(index - 1, -1)) {
       return;
     }
@@ -640,29 +680,21 @@ export const useChapters = (reader: WithPlace & ChaptersLater) => {
     // The chapter's last line, most of the way down the window, with the
     // next chapter's opening under it (readers/smartScroll.ts).
     // Until the chapter after it is on the page there is nothing to scroll
-    // into, and the last line stops at the bottom edge: it is put again as
-    // that chapter arrives, unless the reader has moved on meanwhile.
-    let put: number | null = null;
-    const place = () => {
-      const container = ensureScrollContainer();
-      const view = manager?.views?.find?.(target);
-      const element = view?.element as HTMLElement | undefined;
-      if (!container || !element || renditionRef.current !== rendition) {
-        return;
-      }
-      if (put !== null && Math.abs(container.scrollTop - put) > 2) {
-        return;
-      }
-      const room = (view.contents?.document as Document | undefined)?.querySelector<HTMLElement>("[data-leaflet-end]")?.offsetHeight ?? 0;
-      container.scrollTop = chapterEndTop(element.offsetTop, element.offsetHeight, room, container.clientHeight);
-      put = container.scrollTop;
-      loadFurther();
-    };
-    const settle = () => {
-      place();
-      requestAnimationFrame(place);
-      [250, 600, 1200].forEach((ms) => window.setTimeout(place, ms));
-    };
+    // into, and the last line stops at the bottom edge: it is held there
+    // as that chapter arrives, unless the reader takes the page meanwhile
+    // (readers/jumpSettle.ts).
+    const settle = () =>
+      reader.pinJump(() => {
+        const container = ensureScrollContainer();
+        const view = manager?.views?.find?.(target);
+        const element = view?.element as HTMLElement | undefined;
+        if (!container || !element) {
+          return null;
+        }
+        const room = (view.contents?.document as Document | undefined)?.querySelector<HTMLElement>("[data-leaflet-end]")?.offsetHeight ?? 0;
+        return chapterEndTop(element.offsetTop, element.offsetHeight, room, container.clientHeight);
+      });
+    reader.beginJump();
     if (manager?.views?.find?.(target)) {
       settle();
       return;
@@ -677,6 +709,6 @@ export const useChapters = (reader: WithPlace & ChaptersLater) => {
     chapterSpineIndicesRef, tocSpineStartsRef, jumpsRef, jumpBelowRef, jumps, setJumps, dockAwake, dockAwakeTimerRef,
     goBackRef, goForwardRef, dockNear, setDockNear, canSeek, setCanSeek, chapterPagesHere, chapterStartsHere,
     noteJumpFromHere, goBack, goForward, chapterAtFraction, bookAtFraction, bookMarks, seekTo, chapterNameOfSection,
-    chapterOfSection, chapterStarts, nextHeadingShare, goToListedLineRef, goNextSection, goPrevSection
+    chapterOfSection, chapterStarts, chapterBookNow, nextHeadingShare, goToListedLineRef, goNextSection, goPrevSection
   };
 };

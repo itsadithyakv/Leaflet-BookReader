@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { useShellShapeIs } from "../platform/shape";
 
 const matches = (query: string) =>
   typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia(query).matches;
@@ -18,9 +19,17 @@ export const useMediaQuery = (query: string): boolean =>
 
 /** Below `sm`: a dialog is a sheet from the bottom (styles/touch-shell.css). */
 export const SHEET_QUERY = "(max-width: 639px)";
-/** A phone by touch, either way up: menus hanging from a button become sheets. */
-export const PHONE_MENU_QUERY =
-  "(hover: none) and (pointer: coarse) and (max-width: 639px), (hover: none) and (pointer: coarse) and (max-height: 520px)";
+const TOUCH_QUERY = "(hover: none) and (pointer: coarse)";
 
 export const useSheetLayout = () => useMediaQuery(SHEET_QUERY);
-export const usePhoneMenus = () => useMediaQuery(PHONE_MENU_QUERY);
+
+/**
+ * A phone by touch, either way up: menus hanging from a button become sheets. Below `sm`, or on its
+ * side (platform/shape.ts: not a short window measured with the keyboard up).
+ */
+export const usePhoneMenus = () => {
+  const touch = useMediaQuery(TOUCH_QUERY);
+  const narrow = useMediaQuery(SHEET_QUERY);
+  const sideways = useShellShapeIs("sideways");
+  return touch && (narrow || sideways);
+};

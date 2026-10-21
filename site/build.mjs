@@ -38,7 +38,10 @@ function markdown(src) {
     para = [];
   };
   const flushList = () => {
-    if (list) out.push(`<ul>${list.map((item) => `<li>${inline(item)}</li>`).join("")}</ul>`);
+    if (list) {
+      const tag = list.ordered ? "ol" : "ul";
+      out.push(`<${tag}>${list.items.map((item) => `<li>${inline(item)}</li>`).join("")}</${tag}>`);
+    }
     list = null;
   };
   const flushTable = () => {
@@ -76,14 +79,17 @@ function markdown(src) {
       (table ??= []).push(line);
       continue;
     }
-    if (/^\s*- /.test(line)) {
+    const item = /^\s*(-|\d+\.) (.*)$/.exec(line);
+    if (item) {
+      const ordered = item[1] !== "-";
       flushPara();
       flushTable();
-      (list ??= []).push(line.replace(/^\s*- /, ""));
+      if (list && list.ordered !== ordered) flushList();
+      (list ??= { ordered, items: [] }).items.push(item[2]);
       continue;
     }
     if (/^\s{2,}\S/.test(line) && list) {
-      list[list.length - 1] += " " + line.trim();
+      list.items[list.items.length - 1] += " " + line.trim();
       continue;
     }
     if (line.startsWith(">")) {
@@ -172,9 +178,16 @@ write("index.html", page({ title: "Leaflet — a reader with a reading habit", d
 
 for (const [slug, file, title] of [
   ["privacy", "privacy-policy.md", "Privacy Policy"],
-  ["terms", "terms-of-use.md", "Terms of Use"]
+  ["terms", "terms-of-use.md", "Terms of Use"],
+  ["delete-account", "delete-account.md", "Account Deletion"],
+  ["guidelines", "community-guidelines.md", "Community Guidelines"]
 ]) {
-  const md = readFileSync(join(repo, "docs", "legal", file), "utf8");
+  // The legal pages link to each other as files (privacy-policy.md); on the
+  // site each is a folder of its own.
+  const md = readFileSync(join(repo, "docs", "legal", file), "utf8")
+    .replace(/\]\(privacy-policy\.md\)/g, "](../privacy/)")
+    .replace(/\]\(terms-of-use\.md\)/g, "](../terms/)")
+    .replace(/\]\(community-guidelines\.md\)/g, "](../guidelines/)");
   write(`${slug}/index.html`, page({ title: `Leaflet ${title}`, description: `Leaflet's ${title.toLowerCase()}.`, path: "legal", body: `<article class="doc">${markdown(md)}</article>`, depth: 1 }));
 }
 

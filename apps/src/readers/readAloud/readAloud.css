@@ -24,6 +24,7 @@
 
 .read-aloud-pill,
 .read-aloud-follow,
+.read-aloud-preparing,
 .read-aloud-notice,
 .read-aloud-sheet {
   border: 1px solid var(--reader-border);
@@ -107,6 +108,45 @@
   line-height: 1.5;
 }
 
+/* A studio voice preparing the chapter before it starts. */
+.read-aloud-preparing {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  flex-wrap: wrap;
+  justify-content: center;
+  padding: 4px 14px 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.read-aloud-ring {
+  flex-shrink: 0;
+  transform: rotate(-90deg);
+}
+
+.read-aloud-ring circle {
+  fill: none;
+  stroke-width: 2.25;
+}
+
+.read-aloud-ring-track {
+  stroke: var(--reader-border);
+}
+
+.read-aloud-ring-fill {
+  stroke: currentColor;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 1s linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .read-aloud-ring-fill {
+    transition: none;
+  }
+}
+
 .read-aloud-link {
   font-weight: 600;
   text-decoration: underline;
@@ -121,11 +161,27 @@
   font-size: 12px;
 }
 
-.read-aloud-rates {
-  display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 4px;
+.read-aloud-rate {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin-top: 6px;
+  padding: 0 2px;
+}
+
+.read-aloud-rate input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  accent-color: var(--reader-accent);
+  cursor: pointer;
+}
+
+.read-aloud-rate-value {
+  min-width: 40px;
+  text-align: right;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .read-aloud-voices {
@@ -149,6 +205,25 @@
 .read-aloud-voice:hover,
 .read-aloud-voice.is-active {
   background: color-mix(in srgb, var(--reader-accent) 12%, transparent);
+}
+
+.read-aloud-group {
+  padding: 6px 10px 2px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.read-aloud-tags {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.read-aloud-best {
+  display: inline-flex;
+  opacity: 0.8;
 }
 
 .read-aloud-tag {
@@ -187,8 +262,8 @@ html[data-input="touch"] .read-aloud-voice {
   min-height: 44px;
 }
 
-html[data-input="touch"] .read-aloud-rates button {
-  min-height: 40px;
+html[data-input="touch"] .read-aloud-rate input[type="range"] {
+  height: 40px;
 }
 
 /* Smart Read's or auto-scroll's pill cannot be up with this one (each stops

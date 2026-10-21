@@ -717,7 +717,10 @@ button.reader-people-note-where:hover {
   height: min(80dvh, calc(100dvh - var(--inset-top) - 24px));
   max-height: none;
   border-radius: 18px 18px 0 0;
-  padding: 0 max(14px, var(--inset-right)) calc(10px + var(--inset-bottom)) max(14px, var(--inset-left));
+  /* Its foot (Import, Export, the wiki) clear of the gesture zone, the
+     system's bars away or not. */
+  padding: 0 max(14px, var(--inset-right))
+    calc(10px + var(--reader-gesture-room, var(--inset-bottom))) max(14px, var(--inset-left));
   box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.28);
   animation: reader-sheet-rise 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
@@ -736,7 +739,7 @@ button.reader-people-note-where:hover {
 .reader-scope[data-shape="sideways"] .reader-people-panel {
   top: calc(var(--inset-top) + 8px);
   right: calc(var(--reader-strip-width) + 8px);
-  bottom: calc(var(--inset-bottom) + 8px);
+  bottom: calc(var(--reader-gesture-room, var(--inset-bottom)) + 8px);
   left: auto;
   width: min(24rem, calc(100vw - var(--reader-strip-width) - var(--inset-left) - 24px));
   max-width: none;
@@ -771,6 +774,11 @@ button.reader-people-note-where:hover {
    the wiki (unless the wiki's own field is the one being typed in). */
 html[data-keyboard="open"] .reader-scope[data-shape] .reader-people-panel-foot:not(:focus-within) {
   display: none;
+}
+
+/* (On the keyboard there is no gesture zone to keep clear of.) */
+html[data-keyboard="open"] .reader-scope[data-shape="upright"] .reader-people-panel {
+  padding-bottom: 10px;
 }
 
 /* The wiki's field and its buttons wrap, the field on a line of its own. */

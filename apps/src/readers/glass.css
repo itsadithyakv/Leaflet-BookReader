@@ -1,0 +1,662 @@
+/* The readers' liquid glass: the app's recipe (styles/glass.css, whose motion
+   tokens and keyframes these use) tinted from the page's own colours, so a
+   bar over a sepia page is sepia glass and one over a True black page is
+   black glass. Both readers import this after readers/touch.css.
+
+   True black: the tint is black itself, so where glass lies over the page's
+   black it is still black, and no shadow, line or lighter tint reaches the
+   screen's edges (an OLED shows any of it at night). A bar at the top of the
+   screen takes its light line along its foot, not along the screen's edge.
+
+   Where glass may not blur (styles/glass.css, top): the toolbar holds its own
+   sheets, so it gives up its blur while one is up, or it would be their
+   backdrop root and they would blur nothing; the dock's pill and the cards
+   fade themselves, never a parent; a sheet on a blurred scrim takes the tint
+   only. */
+
+/* ---- Tokens, per page ---------------------------------------------------- */
+
+.reader-scope {
+  --reader-glass-tint: color-mix(in srgb, var(--reader-panel) 80%, transparent);
+  --reader-glass-tint-strong: color-mix(in srgb, var(--reader-panel) 88%, transparent);
+  --reader-glass-inner: color-mix(in srgb, var(--reader-text) 5%, transparent);
+  --reader-glass-blur: 20px;
+  /* Over the text while it scrolls, every frame: the bars and the pills blur less. */
+  --reader-glass-blur-bar: 16px;
+  /* Small pills over the text (the way back, the tap hint, toasts, the pace and read-aloud pills,
+     the chapter dock): the text behind showed through and fought their own label (QA, 1.5.8). Nearly
+     solid, and blurred enough that what is behind is mush, never words: the glass is in the edge
+     and a little light, the label reads at WCAG AA on any page. */
+  --reader-glass-tint-pill: color-mix(in srgb, var(--reader-panel) 92%, transparent);
+  --reader-glass-blur-pill: 24px;
+  --reader-glass-saturate: 1.4;
+  --reader-glass-specular: rgb(255 255 255 / 0.08);
+  --reader-glass-line: color-mix(in srgb, var(--reader-border) 55%, transparent);
+  --reader-glass-shadow: 0 18px 42px -16px rgb(0 0 0 / 0.6), 0 3px 10px -4px rgb(0 0 0 / 0.3);
+  --reader-glass-shadow-small: 0 8px 22px -10px rgb(0 0 0 / 0.55);
+  --reader-scrim: rgb(0 0 0 / 0.34);
+  --reader-scrim-blur: 10px;
+}
+
+.reader-scope.reader-light {
+  --reader-glass-tint: color-mix(in srgb, var(--reader-panel) 82%, transparent);
+  --reader-glass-tint-strong: color-mix(in srgb, var(--reader-panel) 90%, transparent);
+  --reader-glass-tint-pill: color-mix(in srgb, var(--reader-panel) 93%, transparent);
+  --reader-glass-specular: rgb(255 255 255 / 0.55);
+  --reader-glass-shadow: 0 18px 40px -16px rgb(64 52 34 / 0.32), 0 3px 10px -4px rgb(64 52 34 / 0.14);
+  --reader-glass-shadow-small: 0 8px 22px -10px rgb(64 52 34 / 0.3);
+  --reader-scrim: rgb(34 28 20 / 0.22);
+}
+
+.reader-scope.reader-true-white-finish {
+  --reader-glass-tint: rgb(255 255 255 / 0.8);
+  --reader-glass-tint-strong: rgb(255 255 255 / 0.9);
+  --reader-glass-tint-pill: rgb(255 255 255 / 0.93);
+}
+
+.reader-scope.reader-true-black-finish {
+  --reader-glass-tint: rgb(0 0 0 / 0.74);
+  --reader-glass-tint-strong: rgb(0 0 0 / 0.88);
+  --reader-glass-tint-pill: rgb(0 0 0 / 0.92);
+  --reader-glass-specular: rgb(255 255 255 / 0.05);
+  --reader-glass-line: rgb(255 255 255 / 0.08);
+  /* (No shadow, but a list item: `none` in a list of shadows would void the whole list.) */
+  --reader-glass-shadow: 0 0 #0000;
+  --reader-glass-shadow-small: 0 0 #0000;
+  --reader-scrim: rgb(0 0 0 / 0.5);
+}
+
+/* ---- The toolbar ---------------------------------------------------------- */
+
+.reader-scope .reader-toolbar {
+  border-color: var(--reader-glass-line);
+  background-color: var(--reader-glass-tint);
+  background-image: none;
+  -webkit-backdrop-filter: blur(var(--reader-glass-blur-bar)) saturate(var(--reader-glass-saturate));
+  backdrop-filter: blur(var(--reader-glass-blur-bar)) saturate(var(--reader-glass-saturate));
+  /* At the top of the screen: the light along its foot. */
+  box-shadow: inset 0 -1px 0 var(--reader-glass-specular), var(--reader-glass-shadow-small);
+}
+
+/* At the foot (an upright phone's text reader): the light along its top. */
+.reader-scope:not(.page-reader)[data-shape="upright"] .reader-toolbar.reader-toolbar {
+  border-top-color: var(--reader-glass-line);
+  box-shadow: inset 0 1px 0 var(--reader-glass-specular), 0 -10px 28px -14px rgb(0 0 0 / 0.4);
+}
+
+/* Down the right edge (sideways): along its left. */
+.reader-scope[data-shape="sideways"] .reader-toolbar.reader-toolbar {
+  border-left-color: var(--reader-glass-line);
+  box-shadow: inset 1px 0 0 var(--reader-glass-specular), -10px 0 28px -14px rgb(0 0 0 / 0.4);
+}
+
+/* True black: its one faint line, nothing more. */
+.reader-scope.reader-true-black-finish .reader-toolbar.reader-toolbar,
+.reader-scope.reader-true-black-finish[data-shape] .reader-toolbar.reader-toolbar.reader-toolbar {
+  box-shadow: none;
+}
+
+/* One of its own sheets or popovers is up: no blur of its own (it would be
+   their backdrop root), a firmer tint instead. */
+html .reader-scope .reader-toolbar.reader-toolbar:has(.reader-sheet-scrim, .reader-menu, .reader-type-panel, .ambience-popover, .reader-notes-panel) {
+  background-color: var(--reader-glass-tint-strong);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  will-change: auto;
+}
+
+/* The desktop's bar drifts up and fades, and blurs as it goes. */
+.reader-scope:not([data-shape]) .reader-toolbar {
+  transition:
+    transform 0.5s var(--ease-out-soft),
+    opacity 0.4s ease,
+    filter 0.4s ease;
+}
+
+.reader-scope.reader-chrome-hidden:not([data-shape]) .reader-toolbar {
+  filter: blur(6px);
+}
+
+/* ---- Sheets and popovers -------------------------------------------------- */
+
+.reader-scope :is(.reader-menu, .reader-type-panel, .ambience-popover, .reader-notes-panel, .reader-search, .reader-people-panel) {
+  border-color: var(--reader-glass-line);
+  border-radius: 18px;
+  background-color: var(--reader-glass-tint-strong);
+  background-image: none;
+  -webkit-backdrop-filter: blur(var(--reader-glass-blur)) saturate(var(--reader-glass-saturate));
+  backdrop-filter: blur(var(--reader-glass-blur)) saturate(var(--reader-glass-saturate));
+  box-shadow: inset 0 1px 0 var(--reader-glass-specular), var(--reader-glass-shadow);
+}
+
+/* On a phone a sheet lies on a blurred scrim (below): the scrim is the blur. */
+.reader-scope[data-shape]:has(.reader-sheet-scrim, .reader-people-scrim) :is(.reader-menu, .reader-type-panel, .ambience-popover, .reader-notes-panel, .reader-search, .reader-people-panel) {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* Upright, a sheet runs edge to edge from the foot: no line down the
+   screen's sides or along its foot. */
+.reader-scope[data-shape="upright"] :is(.reader-toolbar .reader-menu, .reader-toolbar .ambience-popover, .reader-notes-panel, .reader-search, .reader-people-panel) {
+  border-inline-width: 0;
+  border-bottom-width: 0;
+  border-radius: 26px 26px 0 0;
+  box-shadow: inset 0 1px 0 var(--reader-glass-specular), 0 -14px 36px -14px rgb(0 0 0 / 0.4);
+}
+
+.reader-scope.reader-true-black-finish[data-shape="upright"] :is(.reader-toolbar .reader-menu, .reader-toolbar .ambience-popover, .reader-notes-panel, .reader-search, .reader-people-panel) {
+  box-shadow: inset 0 1px 0 var(--reader-glass-specular);
+}
+
+/* What hangs from a button grows from it (on a phone the sheets rise:
+   readers/touch.css, `reader-sheet-rise`). */
+.reader-scope:not([data-shape]) :is(.reader-menu, .reader-type-panel, .ambience-popover, .reader-notes-panel, .reader-search, .reader-people-panel) {
+  transform-origin: top right;
+  animation: glass-hang-in var(--dur-base) var(--ease-out-soft) both;
+}
+
+/* Sideways, a sheet stands beside the strip: it comes from it. */
+.reader-scope[data-shape="sideways"] :is(.reader-toolbar .reader-menu, .reader-toolbar .ambience-popover, .reader-notes-panel, .reader-search, .reader-people-panel) {
+  transform-origin: right center;
+  animation: glass-pop-in var(--dur-base) var(--ease-out-soft) both;
+}
+
+/* Glass inside glass: a wash, no second blur. */
+.reader-scope :is(.reader-menu, .reader-type-panel, .ambience-popover, .reader-notes-panel, .reader-search, .reader-people-panel, .reader-lookup, .reader-sidebar)
+  :is(.reader-menu, .reader-type-panel, .ambience-popover, .reader-lookup, .reader-term-peek) {
+  background-color: var(--reader-glass-inner);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+}
+
+/* ---- Scrims: the page dims and blurs behind a sheet or the chapter list ---- */
+
+.reader-scope :is(.reader-sheet-scrim, .reader-people-scrim, .reader-sidebar-scrim) {
+  background: var(--reader-scrim);
+  -webkit-backdrop-filter: blur(var(--reader-scrim-blur)) saturate(1.1);
+  backdrop-filter: blur(var(--reader-scrim-blur)) saturate(1.1);
+  animation: glass-fade-in var(--dur-base) var(--ease-out-soft) both;
+}
+
+/* Wider than a phone, a list opened to stay leaves the page as it is (readers/contentsList.css). */
+@media (min-width: 768px) {
+  .reader-scope .reader-sidebar-scrim.reader-sidebar-scrim-clear {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: transparent;
+    animation: none;
+  }
+}
+
+/* ---- The chapter list (a drawer from the left) ------------------------------
+   Glass in the page's colours, in place of the leather (the app's rail
+   keeps it): the reader's own inks again, and the chapter rows lit from the
+   accent. */
+
+.reader-scope .reader-sidebar.leather-surface {
+  --reader-text: inherit;
+  --reader-muted: inherit;
+  --reader-icon: inherit;
+  --reader-hover-bg: color-mix(in srgb, var(--reader-text) 7%, transparent);
+  --chapter-hover-bg: color-mix(in srgb, var(--reader-text) 7%, transparent);
+  --chapter-hover-ink: var(--reader-text);
+  --chapter-active-edge: color-mix(in srgb, var(--reader-accent) 38%, transparent);
+  --chapter-active-bg: color-mix(in srgb, var(--reader-accent) 17%, transparent);
+  --chapter-active-ink: var(--reader-text);
+  --chapter-active-lip: var(--reader-glass-specular);
+  border-color: var(--reader-glass-line);
+  border-radius: 0 26px 26px 0;
+  background-color: var(--reader-glass-tint-strong);
+  background-image: none;
+  color: var(--reader-text);
+  -webkit-backdrop-filter: blur(var(--reader-glass-blur)) saturate(var(--reader-glass-saturate));
+  backdrop-filter: blur(var(--reader-glass-blur)) saturate(var(--reader-glass-saturate));
+  box-shadow: inset -1px 0 0 var(--reader-glass-specular), 16px 0 40px -18px rgb(0 0 0 / 0.5);
+}
+
+.reader-scope.reader-true-black-finish .reader-sidebar.leather-surface {
+  box-shadow: inset -1px 0 0 var(--reader-glass-specular);
+}
+
+.reader-scope .reader-sidebar.leather-surface::before,
+.reader-scope .reader-sidebar.leather-surface::after {
+  content: none;
+}
+
+/* An upright phone: its scrim is the blur. */
+.reader-scope[data-shape="upright"]:has(.reader-sidebar-scrim) .reader-sidebar.leather-surface {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* ---- Pills: the dock, Smart Read's pace, read aloud, the way back, toasts ---- */
+
+.reader-scope :is(.reader-chapter-dock > div, .reader-autoscroll-pill, .read-aloud-pill, .read-aloud-follow, .read-aloud-notice, .read-aloud-sheet, .reader-back-chip, .reader-tap-hint, .reader-toast > div, .reader-checkpoint) {
+  border-color: var(--reader-glass-line);
+  background-color: var(--reader-glass-tint-pill);
+  background-image: none;
+  -webkit-backdrop-filter: blur(var(--reader-glass-blur-pill)) saturate(var(--reader-glass-saturate));
+  backdrop-filter: blur(var(--reader-glass-blur-pill)) saturate(var(--reader-glass-saturate));
+  box-shadow: inset 0 1px 0 var(--reader-glass-specular), var(--reader-glass-shadow-small);
+}
+
+.reader-scope :is(.reader-chapter-dock > div, .reader-autoscroll-pill, .read-aloud-pill) {
+  border-radius: 9999px;
+}
+
+/* The pace and read-aloud pills stay up over text that keeps moving, so every frame of a glide
+   redraws their blur: a lighter one there. Their near-solid tint keeps the label clear anyway.
+   (`html` first: the rule above weighs as much as its heaviest choice, `.reader-chapter-dock > div`,
+   and outweighed this one, so the pills kept the 24 px blur.) */
+html .reader-scope :is(.reader-autoscroll-pill, .read-aloud-pill) {
+  -webkit-backdrop-filter: blur(14px) saturate(var(--reader-glass-saturate));
+  backdrop-filter: blur(14px) saturate(var(--reader-glass-saturate));
+}
+
+/* By finger the way back after a jump stands above the dock's left end (readingOutlook.css), in a
+   pill taking the dock's tint, line and round ends: that pill is the one shape. Its keys lie flat in
+   it; each kept its own 7 px box, so a rounded square sat in a rounder pill, which showed round it
+   as a faint halo over the text. It takes the small shadow, drawn round the pill. No blur: it lies
+   inside the dock's pill, whose blur is its backdrop root, so its own blurred nothing. */
+html[data-input="touch"] .reader-scope .reader-dock-way {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: inset 0 1px 0 var(--reader-glass-specular), var(--reader-glass-shadow-small);
+}
+
+html[data-input="touch"] .reader-scope .reader-dock-way .reader-mini-control {
+  border-color: transparent;
+  background: transparent;
+}
+
+/* Toasts drop in, the way back and the tap hint too. */
+.reader-scope :is(.reader-toast > div, .reader-checkpoint) {
+  animation: glass-drop-in var(--dur-slow) var(--ease-out-soft) both;
+}
+
+/* ---- The selection's bar and the cards (look up, a highlight, who someone is, a recap) ---- */
+
+.reader-scope :is(.reader-selection-bar, .reader-lookup, .reader-term-peek) {
+  border-color: var(--reader-glass-line);
+  border-radius: 18px;
+  background-color: var(--reader-glass-tint-strong);
+  background-image: none;
+  -webkit-backdrop-filter: blur(var(--reader-glass-blur)) saturate(var(--reader-glass-saturate));
+  backdrop-filter: blur(var(--reader-glass-blur)) saturate(var(--reader-glass-saturate));
+  box-shadow: inset 0 1px 0 var(--reader-glass-specular), var(--reader-glass-shadow);
+  animation: glass-pop-in var(--dur-base) var(--ease-out-soft) both;
+}
+
+/* ---- Going out (components/ui/motion.ts) ---------------------------------- */
+
+@keyframes reader-sheet-sink {
+  to {
+    transform: translateY(24px);
+    opacity: 0;
+    filter: var(--motion-blur, blur(6px));
+  }
+}
+
+.reader-scope [data-leaving="panel"] {
+  animation: glass-pop-out var(--dur-quick) var(--ease-in-soft) both !important;
+}
+
+.reader-scope[data-shape="upright"] [data-leaving="panel"] {
+  animation: reader-sheet-sink var(--dur-base) var(--ease-in-soft) both !important;
+}
+
+/* ---- Less motion: fades only, nothing that moves or blurs ---- */
+
+@media (prefers-reduced-motion: reduce) {
+  .reader-scope:not([data-shape]) .reader-toolbar {
+    transition: opacity 0.2s ease;
+  }
+
+  .reader-scope.reader-chrome-hidden:not([data-shape]) .reader-toolbar {
+    filter: none;
+  }
+
+  .reader-scope :is(.reader-menu, .reader-type-panel, .ambience-popover, .reader-notes-panel, .reader-search, .reader-people-panel, .reader-selection-bar, .reader-lookup, .reader-term-peek, .reader-toast > div, .reader-checkpoint, .reader-sheet-scrim, .reader-people-scrim, .reader-sidebar-scrim),
+  .reader-scope[data-shape] :is(.reader-toolbar .reader-menu, .reader-toolbar .ambience-popover, .reader-notes-panel, .reader-search, .reader-people-panel) {
+    animation: glass-fade-in 120ms ease-out both;
+  }
+}
+
+/* ---- No glass ---- */
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .reader-scope {
+    --reader-glass-tint: var(--reader-panel);
+    --reader-glass-tint-strong: var(--reader-panel);
+    --reader-glass-tint-pill: var(--reader-panel);
+  }
+
+  .reader-scope.reader-true-black-finish {
+    --reader-glass-tint: #000;
+    --reader-glass-tint-strong: #000;
+    --reader-glass-tint-pill: #000;
+  }
+}
+
+html.no-glass .reader-scope {
+  --reader-glass-tint: var(--reader-panel);
+  --reader-glass-tint-strong: var(--reader-panel);
+  --reader-glass-tint-pill: var(--reader-panel);
+}
+
+html.no-glass .reader-scope.reader-true-black-finish {
+  --reader-glass-tint: #000;
+  --reader-glass-tint-strong: #000;
+  --reader-glass-tint-pill: #000;
+}
+
+html.no-glass .reader-scope :is(.reader-toolbar, .reader-menu, .reader-type-panel, .ambience-popover, .reader-notes-panel, .reader-search, .reader-people-panel, .reader-sidebar, .reader-chapter-dock > div, .reader-autoscroll-pill, .read-aloud-pill, .read-aloud-follow, .read-aloud-notice, .read-aloud-sheet, .reader-back-chip, .reader-tap-hint, .reader-toast > div, .reader-checkpoint, .reader-selection-bar, .reader-lookup, .reader-term-peek, .reader-sheet-scrim, .reader-people-scrim, .reader-sidebar-scrim) {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* ---- Liquid glass, in the page's colours -----------------------------------
+   The app's liquid glass (styles/glass.css, "Liquid glass": the shared lens
+   `#leaflet-liquid`, components/ui/LiquidGlassDefs.tsx), tinted from the
+   page as the frosted recipe above is: nearly clear where a surface holds only
+   icons, firmer where it holds words (WCAG AA over any page), light caught
+   along the top of the rim, all of it inside the shape.
+
+   The lens bends only on a wide screen with a pointer, and only on what never
+   scales (the toolbar's capsules, the pace and read-aloud pills, the way back,
+   the toasts). Chromium draws an SVG backdrop filter on a scaled box at the
+   box's unscaled size: the dock (small until the pointer comes) and the
+   popovers and cards (which grow in) showed a sharp, misplaced rectangle of
+   the text round them. Those keep a plain blur and take the rim and the
+   sheen. By finger nothing in the reader bends: its pills and bars sit over
+   text that Smart Read, auto-scroll and read aloud keep moving, and a lens is
+   redrawn on every frame of that. */
+
+.reader-scope {
+  --reader-liquid-tint: color-mix(in srgb, var(--reader-panel) 50%, transparent);
+  --reader-liquid-tint-text: color-mix(in srgb, var(--reader-panel) 84%, transparent);
+  --reader-liquid-rim:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.14),
+    inset 1px 0 0 0 rgb(255 255 255 / 0.05),
+    inset 0 0 0 1px rgb(255 255 255 / 0.06),
+    inset 0 0 12px 1px rgb(255 255 255 / 0.035);
+  --reader-liquid-sheen: linear-gradient(135deg, rgb(255 255 255 / 0.06) 0%, rgb(255 255 255 / 0) 42%, rgb(255 255 255 / 0) 64%, rgb(255 255 255 / 0.025) 100%);
+  --reader-liquid-shadow-small: 0 1px 2px rgb(0 0 0 / 0.28), 0 6px 18px -6px rgb(0 0 0 / 0.42);
+  --reader-liquid-hover: color-mix(in srgb, var(--reader-text) 9%, transparent);
+  --reader-liquid-press: color-mix(in srgb, var(--reader-text) 15%, transparent);
+}
+
+.reader-scope.reader-light {
+  --reader-liquid-tint: color-mix(in srgb, var(--reader-panel) 48%, transparent);
+  --reader-liquid-tint-text: color-mix(in srgb, var(--reader-panel) 86%, transparent);
+  --reader-liquid-rim:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.75),
+    inset 1px 0 0 0 rgb(255 255 255 / 0.35),
+    inset 0 -1px 0 0 rgb(255 255 255 / 0.25),
+    inset 0 0 0 1px color-mix(in srgb, var(--reader-border) 45%, transparent),
+    inset 0 0 10px 1px rgb(255 255 255 / 0.2);
+  --reader-liquid-sheen: linear-gradient(135deg, rgb(255 255 255 / 0.36) 0%, rgb(255 255 255 / 0) 42%, rgb(255 255 255 / 0) 64%, rgb(255 255 255 / 0.12) 100%);
+  --reader-liquid-shadow-small: 0 1px 2px rgb(64 52 34 / 0.1), 0 6px 18px -6px rgb(64 52 34 / 0.24);
+}
+
+.reader-scope.reader-true-white-finish {
+  --reader-liquid-tint: rgb(255 255 255 / 0.5);
+  --reader-liquid-tint-text: rgb(255 255 255 / 0.88);
+}
+
+/* True black: black glass, a breath of light on its rim, and nothing outside it. */
+.reader-scope.reader-true-black-finish {
+  --reader-liquid-tint: rgb(0 0 0 / 0.5);
+  --reader-liquid-tint-text: rgb(0 0 0 / 0.86);
+  --reader-liquid-rim: inset 0 1px 0 0 rgb(255 255 255 / 0.09), inset 0 0 0 1px rgb(255 255 255 / 0.06);
+  --reader-liquid-sheen: none;
+  --reader-liquid-shadow-small: 0 0 #0000;
+}
+
+/* The lens, where it is drawn. `--reader-lens` is left unset everywhere else,
+   and `var(--reader-lens,)` is then nothing: a plain blur. */
+@media not (prefers-reduced-transparency: reduce) {
+  html.glass-refracts:not(.no-glass):not([data-input="touch"]) .reader-scope {
+    --reader-lens: url(#leaflet-liquid);
+  }
+}
+
+/* ---- The desktop's toolbar: its keys in two glass capsules ------------------
+   The text reader's bar on a wide screen is no longer a slab across the top:
+   the page's edge goes soft under it (a ramp, "Scroll edges" below), the
+   title reads over that, and the keys float in two capsules. The bar itself
+   neither blurs nor fades (it would be the capsules' backdrop root, and they
+   would blur nothing while it faded): each capsule and the title fade and
+   blur themselves as the bar drifts up (no scale: see the lens above). The
+   page reader keeps its bar. */
+
+html .reader-scope:not(.page-reader):not([data-shape]) .reader-toolbar.reader-toolbar.reader-toolbar {
+  border-color: transparent;
+  background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+  opacity: 1;
+  filter: none;
+}
+
+html:not(.no-glass) .reader-scope:not(.page-reader):not([data-shape]) .reader-toolbar-group {
+  gap: 2px;
+  padding: 4px;
+  border-radius: 9999px;
+  background-color: var(--reader-liquid-tint);
+  background-image: var(--reader-liquid-sheen);
+  -webkit-backdrop-filter: var(--reader-lens,) blur(8px) saturate(1.7);
+  backdrop-filter: var(--reader-lens,) blur(8px) saturate(1.7);
+  box-shadow: var(--reader-liquid-rim), var(--reader-liquid-shadow-small);
+}
+
+html.no-glass .reader-scope:not(.page-reader):not([data-shape]) .reader-toolbar-group {
+  gap: 2px;
+  padding: 4px;
+  border-radius: 9999px;
+  background-color: var(--reader-panel);
+  box-shadow: inset 0 0 0 1px var(--reader-glass-line);
+}
+
+html .reader-scope:not(.page-reader):not([data-shape]) :is(.reader-toolbar-group, .reader-toolbar-title) {
+  transition:
+    opacity 0.32s var(--ease-out-soft),
+    filter 0.32s var(--ease-out-soft),
+    background-color 0.18s ease;
+}
+
+html .reader-scope.reader-chrome-hidden:not(.page-reader):not([data-shape]) :is(.reader-toolbar-group, .reader-toolbar-title) {
+  opacity: 0;
+  filter: blur(6px);
+}
+
+/* One of its own popovers is up: that capsule gives up its blur (it would be
+   the popover's backdrop root) for the firmer tint. */
+html .reader-scope:not(.page-reader):not([data-shape]) .reader-toolbar-group:has(.reader-menu, .reader-type-panel, .ambience-popover, .reader-notes-panel, .reader-exit-guard) {
+  background-color: var(--reader-liquid-tint-text);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* Its keys: round, lit from within on hover, pressed in a little. */
+html .reader-scope:not(.page-reader):not([data-shape]) :is(.reader-toolbar-group > button, .reader-toolbar-group > div > button) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 36px;
+  min-height: 36px;
+  padding-inline: 8px;
+  border-radius: 9999px;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+
+html .reader-scope:not(.page-reader):not([data-shape]) :is(.reader-toolbar-group > button, .reader-toolbar-group > div > button):is(:hover, [aria-expanded="true"]) {
+  background-color: var(--reader-liquid-hover);
+}
+
+html .reader-scope:not(.page-reader):not([data-shape]) :is(.reader-toolbar-group > button, .reader-toolbar-group > div > button):active {
+  background-color: var(--reader-liquid-press);
+}
+
+/* The way back keeps its words in a wide window: a longer capsule key. */
+html .reader-scope:not(.page-reader):not([data-shape]) .reader-toolbar-group > .reader-exit-button {
+  padding-inline: 10px 12px;
+}
+
+/* ---- The pills and the dock: liquid capsules ---- */
+
+html:not(.no-glass) .reader-scope :is(.reader-chapter-dock > div, .reader-autoscroll-pill, .read-aloud-pill, .read-aloud-follow, .read-aloud-notice, .reader-back-chip, .reader-tap-hint, .reader-toast > div, .reader-checkpoint) {
+  border-color: transparent;
+  background-image: var(--reader-liquid-sheen);
+  box-shadow: var(--reader-liquid-rim), var(--reader-liquid-shadow-small);
+}
+
+/* A wide screen: the lens at their rim (not the dock's: it scales), their
+   words on the firmer tint. (By finger they keep their own blur and tint
+   above: lighter on the two that stay up over moving text.) */
+html:not(.no-glass):not([data-input="touch"]) .reader-scope:not([data-shape]) .reader-chapter-dock > div {
+  background-color: var(--reader-liquid-tint-text);
+}
+
+html:not(.no-glass):not([data-input="touch"]) .reader-scope:not([data-shape]) :is(.reader-autoscroll-pill, .read-aloud-pill, .reader-back-chip, .reader-toast > div, .reader-checkpoint) {
+  background-color: var(--reader-liquid-tint-text);
+  -webkit-backdrop-filter: var(--reader-lens,) blur(var(--reader-glass-blur-pill)) saturate(1.6);
+  backdrop-filter: var(--reader-lens,) blur(var(--reader-glass-blur-pill)) saturate(1.6);
+}
+
+/* ---- Sheets, popovers and cards on a wide screen: the rim and the sheen ---- */
+
+html:not(.no-glass) .reader-scope:not([data-shape]) :is(.reader-menu, .reader-type-panel, .ambience-popover, .reader-notes-panel, .reader-search, .reader-people-panel, .reader-selection-bar, .reader-lookup, .reader-term-peek) {
+  border-color: transparent;
+  border-radius: 20px;
+  background-image: var(--reader-liquid-sheen);
+  box-shadow: var(--reader-liquid-rim), var(--reader-glass-shadow);
+}
+
+/* Glass inside glass, still: a wash. */
+html:not(.no-glass) .reader-scope:not([data-shape]) :is(.reader-menu, .reader-type-panel, .ambience-popover, .reader-notes-panel, .reader-search, .reader-people-panel, .reader-lookup, .reader-sidebar)
+  :is(.reader-menu, .reader-type-panel, .ambience-popover, .reader-lookup, .reader-term-peek) {
+  background-image: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+}
+
+/* ---- Scroll edges (readers/scrollEdges.ts) ----------------------------------
+   Where the text scrolls out under a bar or off the window it goes soft: a
+   ramp of blur fading into the page's own colour (so True black fades into
+   black, with no line at any edge). The ramps take no pointer and lie over
+   the book only (readers/text/ReaderEdges.tsx); a panel's list gets its own
+   (readers/ListEdges.tsx). */
+
+.reader-scope {
+  /* Solid at the very edge: the foot's ramp meets the strip the text stops at with no seam. */
+  --reader-edge-tint: var(--reader-page-bg, var(--reader-shell-bg, #000));
+  --reader-edge-tint-bar: color-mix(in srgb, var(--reader-page-bg, var(--reader-shell-bg, #000)) 94%, transparent);
+  --reader-list-edge-tint: var(--reader-glass-tint-strong);
+}
+
+/* A list in a panel: the box that holds it and its two edges takes its place in the column. */
+.reader-list-edges {
+  position: relative;
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+/* (A list's edge is the fade only: inside a glass panel a blur layer drew the panel's tint twice.) */
+.reader-list-edge .gradual-blur-layer {
+  display: none;
+}
+
+/* While the text is moved for the reader by finger (Smart Read, auto-scroll,
+   read aloud): the colour's fade only, no blur to redraw on every frame. */
+.reader-edge.is-tint-only .gradual-blur-layer {
+  display: none;
+}
+
+/* A wide screen. The ramp under the bar goes up and away with it, as its
+   backdrop; the window's own thin edge is there while the bar is away (and
+   goes, under the bar's ramp, a moment after the bar is back). */
+.reader-scope .reader-edge-bar {
+  visibility: visible;
+  transition: transform 0.5s var(--ease-out-soft), visibility 0s linear 0s;
+}
+
+.reader-scope.reader-chrome-hidden .reader-edge-bar {
+  transform: translateY(-100%);
+  visibility: hidden;
+  transition: transform 0.5s var(--ease-out-soft), visibility 0s linear 0.5s;
+}
+
+.reader-scope:not([data-shape]):not(.reader-chrome-hidden) .reader-edge-top {
+  visibility: hidden;
+  transition: visibility 0s linear 0.3s;
+}
+
+/* A phone: the foot's ramp sits on the strip the text stops at, and with the
+   chrome up on an upright phone, on the bar at the foot. */
+html .reader-scope:not(.page-reader)[data-shape="upright"] .reader-edge-foot {
+  transition: transform var(--dur-slow) var(--ease-out-soft);
+}
+
+html .reader-scope:not(.page-reader)[data-shape="upright"]:not(.reader-chrome-hidden) .reader-edge-foot {
+  transform: translateY(min(calc(var(--reader-text-foot, 0px) - 56px), 0px));
+}
+
+/* ---- Less motion: the capsules and the ramps fade or swap, nothing moves or blurs ---- */
+
+@media (prefers-reduced-motion: reduce) {
+  html .reader-scope:not(.page-reader):not([data-shape]) :is(.reader-toolbar-group, .reader-toolbar-title) {
+    transition: opacity 0.2s ease, background-color 0.18s ease;
+  }
+
+  html .reader-scope.reader-chrome-hidden:not(.page-reader):not([data-shape]) :is(.reader-toolbar-group, .reader-toolbar-title) {
+    filter: none;
+  }
+
+  .reader-scope .reader-edge-bar,
+  .reader-scope.reader-chrome-hidden .reader-edge-bar,
+  html .reader-scope:not(.page-reader)[data-shape="upright"] .reader-edge-foot {
+    transition: none;
+  }
+
+  .reader-scope.reader-chrome-hidden .reader-edge-bar {
+    transform: none;
+  }
+}
+
+/* ---- Where glass is not drawn: the liquid tints are the page's panel ---- */
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .reader-scope {
+    --reader-liquid-tint: var(--reader-panel);
+    --reader-liquid-tint-text: var(--reader-panel);
+  }
+
+  .reader-scope.reader-true-black-finish {
+    --reader-liquid-tint: #000;
+    --reader-liquid-tint-text: #000;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .reader-scope {
+    --reader-liquid-tint: var(--reader-glass-tint-strong);
+    --reader-liquid-tint-text: var(--reader-glass-tint-strong);
+  }
+}
+
+html.no-glass .reader-scope {
+  --reader-liquid-tint: var(--reader-panel);
+  --reader-liquid-tint-text: var(--reader-panel);
+}
+
+html.no-glass .reader-scope.reader-true-black-finish {
+  --reader-liquid-tint: #000;
+  --reader-liquid-tint-text: #000;
+}

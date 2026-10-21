@@ -1,0 +1,880 @@
+/* Liquid glass, and the motion that goes with it: one system for the app's
+   floating surfaces (the reader's are readers/glass.css, from the same
+   recipe). Loaded last of the app's sheets (main.tsx), so at equal weight a
+   rule here wins.
+
+   Glass is for what floats over content: the header and the tab bar over a
+   scrolling page, the book being read, sheets, dialogs, menus, toasts. A card
+   lying on a plain page gains nothing from a blur and stays paper. Pip's own
+   pixel-paper surfaces (her house, the arcade, the album, the shop, the
+   drawer) keep their look and are left out by name below.
+
+   How a surface leaves (fades, blurs, slides back down) is drawn here too, on
+   the copy components/ui/motion.ts holds for a moment after React removes the
+   real one (`data-leaving`).
+
+   Two rules of the browser shape everything here:
+   - A blur reads only up to the nearest ancestor that is itself a "backdrop
+     root" (one with opacity under 1, a filter, a backdrop-filter, or
+     will-change on one of those). Glass inside such a parent blurs nothing
+     and pops into blur when the parent's fade ends. So a surface fades and
+     blurs itself, never its parent, and glass is never nested: a sheet in a
+     blurred scrim takes the tint only (the scrim's blur is behind it).
+   - The backdrop-filter itself is never animated (it is redrawn every frame
+     anyway); the surface's opacity, transform and filter are. */
+
+/* ---- Tokens --------------------------------------------------------------- */
+
+:root {
+  /* Tints. Bars and pills with short, bold labels take the lighter one; text-heavy
+     sheets and dialogs the stronger, which keeps body and muted text at WCAG AA
+     even with a dark cover behind (worked out over black, the worst case). */
+  --glass-tint: rgb(var(--color-surface-high) / 0.74);
+  --glass-tint-strong: rgb(var(--color-surface-high) / 0.84);
+  /* Glass inside glass: a wash, no second blur. */
+  --glass-tint-inner: rgb(var(--color-on-surface) / 0.045);
+  /* Where no blur is drawn (no support, `.no-glass`). */
+  --glass-tint-solid: rgb(var(--color-surface-high));
+  /* A faint light falling from the top: what makes it read as liquid, not frosted plastic. */
+  --glass-sheen: linear-gradient(180deg, rgb(255 255 255 / 0.22), rgb(255 255 255 / 0) 42%);
+  --glass-blur: 22px;
+  /* The bars that are always there over a scrolling page are the dearest to draw: less blur. */
+  --glass-blur-bar: 18px;
+  --glass-saturate: 1.5;
+  --glass-specular: inset 0 1px 0 rgb(255 255 255 / 0.35);
+  /* The edge is drawn inside the shape, never round it: a ring outside the border, or a light
+     border over the tint, showed at a rounded corner as a sliver of another colour (a phone,
+     2026-10-18). Inside, it follows the radius and the corner shows only what is behind it. */
+  --glass-hairline: inset 0 0 0 1px rgb(var(--color-outline-variant) / 0.3);
+  --glass-edge: var(--glass-specular), var(--glass-hairline);
+  /* A surface's 1 px border takes the tint (the line is the inset hairline above). */
+  --glass-border: transparent;
+  --glass-shadow: 0 24px 48px -18px rgb(28 30 36 / 0.26), 0 4px 14px -6px rgb(28 30 36 / 0.12);
+  --glass-shadow-bar: 0 10px 28px -14px rgb(28 30 36 / 0.3);
+  --scrim-dim: rgb(14 16 20 / 0.34);
+  --scrim-blur: 10px;
+  /* A sheet as it shows: its tint over the page dimmed behind it (a sheet's scrim is about half
+     black). What its held buttons lie on while the form scrolls under them. */
+  --sheet-held: color-mix(in srgb, rgb(var(--color-surface-high)) 84%, color-mix(in srgb, rgb(var(--color-surface)) 45%, black));
+  --sheet-held-line: inset 0 1px 0 rgb(var(--color-outline-variant) / 0.18);
+
+  /* Motion. Enter on a long soft ease-out, leave a little faster on an ease-in. */
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-soft: cubic-bezier(0.5, 0, 0.75, 0);
+  --dur-quick: 180ms;
+  --dur-base: 240ms;
+  --dur-slow: 320ms;
+  --enter-blur: 8px;
+  /* The blur a surface comes in through, and the one it goes out through (a sheet rises out of
+     it too): tokens, so the Smooth effects can draw the same motion with none (styles/perf.css). */
+  --enter-filter: blur(var(--enter-blur));
+  --motion-blur: blur(6px);
+  --enter-scale: 0.97;
+  --leave-scale: 0.98;
+}
+
+:root[data-theme="dark"] {
+  --glass-tint: rgb(var(--color-surface-high) / 0.78);
+  --glass-tint-strong: rgb(var(--color-surface-high) / 0.86);
+  --sheet-held: color-mix(in srgb, rgb(var(--color-surface-high)) 86%, color-mix(in srgb, rgb(var(--color-surface)) 45%, black));
+  --glass-tint-inner: rgb(255 255 255 / 0.04);
+  --glass-sheen: linear-gradient(180deg, rgb(255 255 255 / 0.05), rgb(255 255 255 / 0) 42%);
+  --glass-specular: inset 0 1px 0 rgb(255 255 255 / 0.08);
+  --glass-hairline: inset 0 0 0 1px rgb(255 255 255 / 0.07);
+  --glass-shadow: 0 24px 56px -18px rgb(0 0 0 / 0.6), 0 4px 14px -6px rgb(0 0 0 / 0.36);
+  --glass-shadow-bar: 0 10px 28px -14px rgb(0 0 0 / 0.6);
+  --scrim-dim: rgb(0 0 0 / 0.46);
+}
+
+/* ---- Liquid glass ----------------------------------------------------------------
+   What floats over the page is liquid glass, as Apple draws it: nearly clear in the
+   middle, a lens at the rim that bends what is behind it (an SVG filter shared by
+   every surface: components/ui/LiquidGlassDefs.tsx, mounted once in App.tsx), light
+   caught along the top and left of the rim, and soft layered shadows under it. Tint
+   only where there are words on it (`--liquid-tint-text`, the same cover as the
+   frosted glass, worked out for WCAG AA over black); a key with only an icon on it
+   is nearly clear (`--liquid-tint`).
+
+   The bend is drawn where Chromium draws an SVG backdrop filter (the Windows app and
+   the Android app: `html.glass-refracts`, glassRefraction.ts); elsewhere, and on
+   `.no-glass` or for reduced transparency, the same tokens are a plain blur. By a
+   finger only small things bend (`--liquid-filter`): the panel lens is a blur there,
+   as a big lens redrawn on every scrolled frame costs a phone too much. */
+
+:root {
+  --liquid-tint: rgb(var(--color-surface-high) / 0.4);
+  --liquid-tint-text: rgb(var(--color-surface-high) / 0.74);
+  --liquid-blur: 4px;
+  --liquid-blur-panel: 14px;
+  --liquid-saturate: 1.8;
+  /* The plain fallbacks: frosted, a little brighter than what is behind. */
+  --liquid-filter: blur(12px) saturate(var(--liquid-saturate)) brightness(1.04);
+  --liquid-filter-panel: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  /* Light along the top-left of the rim, a fainter return at the foot, a thin line that
+     follows the radius and a soft glow just inside it. All inset: nothing outside the shape. */
+  --liquid-rim:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.7),
+    inset 1px 0 0 0 rgb(255 255 255 / 0.32),
+    inset 0 -1px 0 0 rgb(255 255 255 / 0.22),
+    inset 0 0 0 1px rgb(var(--color-outline-variant) / 0.22),
+    inset 0 0 10px 1px rgb(255 255 255 / 0.18);
+  --liquid-sheen: linear-gradient(135deg, rgb(255 255 255 / 0.34) 0%, rgb(255 255 255 / 0) 42%, rgb(255 255 255 / 0) 64%, rgb(255 255 255 / 0.12) 100%);
+  --liquid-shadow: 0 4px 16px rgb(17 17 26 / 0.06), 0 8px 24px rgb(17 17 26 / 0.06), 0 16px 56px rgb(17 17 26 / 0.07);
+  --liquid-shadow-small: 0 1px 2px rgb(17 17 26 / 0.08), 0 4px 14px -4px rgb(17 17 26 / 0.14);
+  --liquid-hover: rgb(255 255 255 / 0.22);
+  --liquid-press: rgb(var(--color-on-surface) / 0.08);
+}
+
+:root[data-theme="dark"] {
+  --liquid-tint: rgb(var(--color-surface-high) / 0.42);
+  --liquid-tint-text: rgb(var(--color-surface-high) / 0.8);
+  /* Dark: the light on the rim is a breath, never a white line round the edge. */
+  --liquid-rim:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.14),
+    inset 1px 0 0 0 rgb(255 255 255 / 0.06),
+    inset 0 0 0 1px rgb(255 255 255 / 0.05),
+    inset 0 0 12px 1px rgb(255 255 255 / 0.035);
+  --liquid-sheen: linear-gradient(135deg, rgb(255 255 255 / 0.07) 0%, rgb(255 255 255 / 0) 42%, rgb(255 255 255 / 0) 64%, rgb(255 255 255 / 0.03) 100%);
+  --liquid-shadow: 0 4px 16px rgb(0 0 0 / 0.2), 0 8px 24px rgb(0 0 0 / 0.2), 0 16px 56px rgb(0 0 0 / 0.26);
+  --liquid-shadow-small: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 14px -4px rgb(0 0 0 / 0.42);
+  --liquid-hover: rgb(255 255 255 / 0.07);
+  --liquid-press: rgb(255 255 255 / 0.1);
+}
+
+/* (Chromium draws an SVG backdrop filter on a scaled box at its unscaled size, a sharp
+   rectangle of what is behind, for as long as the scale is not 1: where the lens is drawn,
+   surfaces come and go without growing or shrinking.) */
+html.glass-refracts {
+  --enter-scale: 1;
+  --leave-scale: 1;
+  --liquid-filter: url(#leaflet-liquid) blur(var(--liquid-blur)) saturate(var(--liquid-saturate));
+  --liquid-filter-panel: url(#leaflet-liquid-panel) blur(var(--liquid-blur-panel)) saturate(var(--liquid-saturate));
+}
+
+html.glass-refracts[data-input="touch"] {
+  --liquid-filter-panel: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}
+
+html.no-glass,
+html.no-glass.glass-refracts {
+  --liquid-filter: none;
+  --liquid-filter-panel: none;
+  --liquid-tint: var(--glass-tint-solid);
+  --liquid-tint-text: var(--glass-tint-solid);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root,
+  html.glass-refracts {
+    --liquid-filter: blur(12px);
+    --liquid-filter-panel: blur(var(--glass-blur));
+    --liquid-tint: var(--glass-tint-strong);
+    --liquid-tint-text: var(--glass-tint-solid);
+  }
+}
+
+/* The utilities: `.liquid-glass` for a panel with words on it, `.liquid-control` for a
+   small key (keeps its radius), `.liquid-pill` for a capsule. */
+.liquid-glass,
+.liquid-control,
+.liquid-pill {
+  background-color: var(--liquid-tint-text);
+  background-image: var(--liquid-sheen);
+  -webkit-backdrop-filter: var(--liquid-filter-panel);
+  backdrop-filter: var(--liquid-filter-panel);
+  box-shadow: var(--liquid-rim), var(--liquid-shadow);
+}
+
+.liquid-control,
+.liquid-pill {
+  background-color: var(--liquid-tint);
+  -webkit-backdrop-filter: var(--liquid-filter);
+  backdrop-filter: var(--liquid-filter);
+  box-shadow: var(--liquid-rim), var(--liquid-shadow-small);
+}
+
+.liquid-pill {
+  border-radius: 9999px;
+}
+
+/* Glass in glass: the rim and the sheen, no second lens. */
+:is(.glass, .glass-pill, .liquid-glass, .liquid-control, .liquid-pill) :is(.liquid-glass, .liquid-control, .liquid-pill) {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root .liquid-glass,
+  :root .liquid-control,
+  :root .liquid-pill {
+    background-color: var(--glass-tint-solid);
+  }
+}
+
+/* ---- Where the page meets a bar: a ramp of blur (components/ui/GradualBlur.tsx), as
+   the page goes under it, not a hard line. None while Pip is carried (each layer
+   was drawn afresh every frame she moved: see below); the tint alone stays. */
+html[data-perf="full"] .pip-dragging .gradual-blur-layer {
+  display: none;
+}
+
+/* Edges held inside a scroller (components/ui/ScrollEdge.tsx): a strip of no height that
+   sticks to the scroller's edge and hangs its ramp over the content (out over the scroller's
+   padding to its edges: the component reads the padding). */
+.scroll-edge {
+  position: sticky;
+  z-index: 6;
+  display: block;
+  flex: none;
+  align-self: stretch;
+  height: 0;
+  pointer-events: none;
+}
+
+/* (It carries `hidden` so `space-y-*` spacing passes over it: drawn all the same.) */
+.scroll-edge[hidden] {
+  display: block;
+}
+
+.scroll-edge-top {
+  top: 0;
+}
+
+.scroll-edge-bottom {
+  bottom: 0;
+}
+
+/* The app's pages: at the top only beside the rail (where the header floats over the page it is
+   the header's own ramp), and at the foot only where no tab bar is (that has its own, MobileNav.tsx). */
+:where(html:is([data-shape="upright"], [data-shape="sideways"])) .app-main-edge.scroll-edge-top,
+:where(html[data-shape="upright"]) .app-main-edge.scroll-edge-bottom {
+  display: none;
+}
+
+/* Under the tab bar's capsule the page fades and blurs into the foot of the screen. */
+.mobile-nav-edge {
+  z-index: 44;
+}
+
+/* ---- The utility -------------------------------------------------------------
+   `.glass` on anything new that floats; `.glass-pill` for a fully round one. */
+
+.glass,
+.glass-pill {
+  background-color: var(--glass-tint);
+  background-image: var(--glass-sheen);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  box-shadow: var(--glass-edge), var(--glass-shadow);
+}
+
+.glass-pill {
+  border-radius: 9999px;
+}
+
+.glass :is(.glass, .glass-pill),
+.glass-pill :is(.glass, .glass-pill),
+.glass-inner {
+  background-color: var(--glass-tint-inner);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--glass-specular);
+}
+
+/* ---- The app's floating surfaces --------------------------------------------- */
+
+/* The header: over the page on a phone (it floats, and the page scrolls up
+   under it); above it on a desktop, where the blur costs nothing as nothing
+   moves behind it. */
+:root .app-header.app-header {
+  border-color: rgb(var(--color-outline-variant) / 0.18);
+  background-color: var(--glass-tint);
+  background-image: var(--glass-sheen);
+  -webkit-backdrop-filter: blur(var(--glass-blur-bar)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur-bar)) saturate(var(--glass-saturate));
+  box-shadow: inset 0 -1px 0 rgb(var(--color-outline-variant) / 0.18), var(--glass-shadow-bar);
+}
+
+:root .app-header-hidden.app-header-hidden {
+  box-shadow: none;
+}
+
+/* Where the header lies over the page (a phone, a narrow window) it runs edge to edge under the
+   status bar, so it is flush: no rounded corner, no shadow, one hairline at its foot. Its one
+   rounded corner (the desktop's paper toolbar, beside the rail) showed the page and the shadow
+   pooled under the curve as a darker sliver, and the strip under the clock (below) is square:
+   flush, the two read as one surface. */
+:root:where(:is([data-shape="upright"], [data-shape="sideways"])) .app-header.app-header {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* There the header is clear, and the page meets it in a ramp of blur that is its glass
+   (`.app-header-edge`, a <GradualBlur> inside it, App.tsx): strongest under the clock,
+   gone a little below the header's foot, tinted the page's colour so words fade as well
+   as blur, and only while some of the page is under it. One ramp, not a bar's blur and a
+   ramp on top of each other. Its keys are rimmed liquid glass with no lens of their own:
+   the ramp has blurred what is under them already. */
+/* (Solid where no blur is drawn, `.no-glass` (below); while Pip is carried the ramp's blur goes
+   and its tint stays.) */
+html:not(.no-glass):where(:is([data-shape="upright"], [data-shape="sideways"])) .app-header.app-header:not(:has(.anchored-panel)) {
+  border-color: transparent;
+  background-color: transparent;
+  background-image: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+:where(html[data-shape="wide"]) .app-header-edge {
+  display: none;
+}
+
+:where(html:is([data-shape="upright"], [data-shape="sideways"])) .app-header :is(.key-button, .streak-chip, .profile-button) {
+  border-color: transparent;
+  background: var(--liquid-tint);
+  background-image: var(--liquid-sheen);
+  box-shadow: var(--liquid-rim), var(--liquid-shadow-small);
+}
+
+:where(html:is([data-shape="upright"], [data-shape="sideways"])) .app-header .key-button {
+  border-radius: 9999px;
+}
+
+/* A panel hanging from the header (the profile, the streak) is glass of its
+   own: the header gives up its blur while one is open, or it would be the
+   panel's backdrop root and the panel would blur nothing below the header. */
+:root .app-header.app-header:has(.anchored-panel) {
+  background-color: var(--glass-tint-strong);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* The status bar's strip, while the header is away on a phone: glass like it.
+   Out of sight while the header is there, which is glass over it already. */
+:where(html:is([data-shape="upright"], [data-shape="sideways"])) .app-shell::before {
+  background: var(--glass-tint);
+  -webkit-backdrop-filter: blur(var(--glass-blur-bar)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur-bar)) saturate(var(--glass-saturate));
+}
+
+:where(html:is([data-shape="upright"], [data-shape="sideways"])) .app-shell.app-shell:not([data-header-hidden])::before {
+  opacity: 0;
+}
+
+/* While Pip is carried over the page (`.pip-dragging` on the body, PipWorld.tsx) the bars
+   that are always there go solid: each was blurred afresh every frame she moved under it,
+   which took a phone's drag from 35 frames a second to 19. Given back when she is let go. Only on
+   the full effects: on Smooth nothing is blurred, and the rule's restyle at pick-up and let-go is
+   all it would cost. */
+:root[data-perf="full"] .pip-dragging
+  :is(.app-header.app-header, .mobile-nav.mobile-nav, .now-reading-bar.now-reading-bar),
+:root[data-perf="full"] .pip-dragging .app-shell::before {
+  background-color: var(--glass-tint-solid);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* A book open fills the window, and the app under it is not drawn. It was:
+   each frame the text moved (Smart Read's glide, auto-scroll, read aloud)
+   the whole screen was composited again, and with it every glass layer of
+   the app below (the header, the now reading bar's and the tab bar's lens,
+   their blurred edges), which no one could see. An endless animation there
+   (the streak's ring when the day is at risk) did the same while the page
+   stood still. On the emulator a frame took 85 ms of GPU, not 16. Hidden,
+   not removed: the Library keeps its scroll and layout for when the book
+   closes. What the app shows over a book (dialogs, toasts) comes after the
+   reader and is not one of these. */
+html[data-reading] .app-shell > :is(.app-header, .app-body, .now-reading-dock, .mobile-nav-edge, .mobile-nav),
+html[data-reading] .app-shell::before {
+  visibility: hidden;
+}
+
+/* (Pseudo-elements cannot go in `:is()`: the streak's ring is an `::after`.) */
+html[data-reading] .app-shell > :is(.app-header, .app-body, .now-reading-dock, .mobile-nav-edge, .mobile-nav) *,
+html[data-reading] .app-shell > :is(.app-header, .app-body, .now-reading-dock, .mobile-nav-edge, .mobile-nav) *::before,
+html[data-reading] .app-shell > :is(.app-header, .app-body, .now-reading-dock, .mobile-nav-edge, .mobile-nav) *::after {
+  animation-play-state: paused !important;
+}
+
+/* The tab bar: a capsule of liquid glass floating above the foot of the screen, clear of
+   the gesture bar and the sides (its room, `--mobile-nav-height`: styles/touch-shell.css).
+   The page under it meets the foot in a ramp (`.mobile-nav-edge`, MobileNav.tsx). */
+:root .mobile-nav.mobile-nav {
+  left: max(12px, calc(var(--inset-left, 0px) + 8px));
+  right: max(12px, calc(var(--inset-right, 0px) + 8px));
+  bottom: calc(var(--inset-bottom, 0px) + 8px);
+  gap: 2px;
+  padding: 5px;
+  border: 0;
+  border-radius: 9999px;
+  background-color: var(--liquid-tint-text);
+  background-image: var(--liquid-sheen);
+  -webkit-backdrop-filter: var(--liquid-filter);
+  backdrop-filter: var(--liquid-filter);
+  box-shadow: var(--liquid-rim), var(--liquid-shadow);
+}
+
+:root .mobile-nav.mobile-nav .mobile-nav-item {
+  border-radius: 9999px;
+}
+
+/* The place you are on: a drop of the accent in the glass. */
+:root .mobile-nav.mobile-nav .mobile-nav-item[data-active] {
+  background-color: rgb(var(--color-primary) / 0.14);
+  box-shadow: inset 0 0 0 1px rgb(var(--color-primary) / 0.12);
+}
+
+/* ---- The rail on a phone on its side: a floating capsule ------------------------------------
+   Sideways by a finger the rail is not a full-height slab of leather but the tab bar stood on
+   end: a capsule of liquid glass with the same four keys, icons only, floating at the leading
+   edge clear of the notch and centred in the room under the header. Its column (`--rail-width`,
+   the room the page, the book being read and Pip keep clear of it) is just the capsule and its
+   air, and is see-through. Nothing scrolls under it, so its lens costs nothing per frame.
+   (A short desktop window, by a mouse, keeps its rail.) */
+:root[data-shape="sideways"][data-input="touch"] {
+  --rail-width: calc(74px + var(--inset-left, 0px));
+  --rail-capsule: 56px;
+}
+
+:root[data-shape="sideways"][data-input="touch"] .leaflet-sidebar.leaflet-sidebar {
+  top: calc(var(--app-header-h, 0px) + (100% - var(--app-header-h, 0px)) / 2);
+  bottom: auto;
+  left: calc(var(--inset-left, 0px) + 10px);
+  width: var(--rail-capsule);
+  height: auto;
+  max-height: calc(100% - var(--app-header-h, 0px) - 16px);
+  translate: 0 -50%;
+  padding: 5px;
+  overflow-y: auto;
+  border: 0;
+  border-radius: 9999px;
+  color: rgb(var(--color-on-surface-variant));
+  background-color: var(--liquid-tint-text);
+  background-image: var(--liquid-sheen);
+  -webkit-backdrop-filter: var(--liquid-filter);
+  backdrop-filter: var(--liquid-filter);
+  box-shadow: var(--liquid-rim), var(--liquid-shadow);
+}
+
+:root[data-shape="sideways"][data-input="touch"] .leaflet-sidebar.leaflet-sidebar::before,
+:root[data-shape="sideways"][data-input="touch"] .leaflet-sidebar.leaflet-sidebar::after,
+:root[data-shape="sideways"][data-input="touch"] .leaflet-sidebar .sidebar-rail-label {
+  display: none;
+}
+
+:root[data-shape="sideways"][data-input="touch"] .leaflet-sidebar nav.space-y-2 > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 4px;
+}
+
+:root[data-shape="sideways"][data-input="touch"] .leaflet-sidebar .sidebar-nav-item {
+  width: 46px;
+  min-height: 46px;
+  height: 46px;
+  padding: 0;
+  justify-content: center;
+  border: 0;
+  border-radius: 9999px;
+  color: rgb(var(--color-on-surface-variant));
+  background: transparent;
+  box-shadow: none;
+}
+
+/* The page takes the room up to the capsule's air (the capsule's column is its gutter) and
+   starts just under the header: the height is what is scarce on its side, and it goes to the
+   books, not to air over a heading. */
+:root[data-shape="sideways"][data-input="touch"] .app-main-scroll.app-main-scroll {
+  padding-top: calc(var(--app-header-h, 0px) + 0.75rem);
+  padding-left: 0.75rem;
+}
+
+/* Each page's head is one slim row: a smaller title, its controls beside it, less air under. */
+:root[data-shape="sideways"][data-input="touch"] .app-main-scroll > .dock-clear.flex-col {
+  row-gap: 1rem;
+}
+
+/* Search is in the header at any width on its side (Pip's outline is the logo; the word goes),
+   and the Library's Focus key in its heading's row (pages/LibraryPage.tsx): the row they shared
+   on the page goes, and the books follow the heading closely. */
+:root[data-shape="sideways"][data-input="touch"] .app-header .header-search {
+  display: block;
+  padding-inline: 0.75rem;
+}
+
+:root[data-shape="sideways"][data-input="touch"] .app-header .leaflet-wordmark,
+:root[data-shape="sideways"][data-input="touch"] .library-page > .phone-search-row {
+  display: none;
+}
+
+:root[data-shape="sideways"][data-input="touch"] .library-page > section.flex-col {
+  row-gap: 0.75rem;
+}
+
+:root[data-shape="sideways"][data-input="touch"] .app-main-scroll > .dock-clear > :first-child :is(h1, h2).page-title:is(.text-3xl, .text-4xl, .text-5xl),
+:root[data-shape="sideways"][data-input="touch"] .app-main-scroll > .dock-clear > :first-child > :is(h1, h2).page-title:is(.text-3xl, .text-4xl, .text-5xl),
+:root[data-shape="sideways"][data-input="touch"] .library-phone-head .page-title {
+  font-size: 1.75rem;
+  line-height: 2.125rem;
+}
+
+/* The place you are on: a drop of the accent in the glass, as on the tab bar. */
+:root[data-shape="sideways"][data-input="touch"] .leaflet-sidebar .sidebar-nav-item[aria-current="page"] {
+  color: rgb(var(--color-primary));
+  background-color: rgb(var(--color-primary) / 0.14);
+  box-shadow: inset 0 0 0 1px rgb(var(--color-primary) / 0.12);
+}
+
+:root[data-shape="sideways"][data-input="touch"] .leaflet-sidebar .sidebar-icon-well {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  box-shadow: none;
+}
+
+/* While Pip is carried, solid (she may be carried over it); and gone while the keyboard is up, as
+   Android's own bars step away, its room kept so nothing moves. */
+:root[data-perf="full"][data-shape="sideways"][data-input="touch"] .pip-dragging .leaflet-sidebar.leaflet-sidebar {
+  background-color: var(--glass-tint-solid);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+:root[data-shape="sideways"][data-input="touch"][data-keyboard="open"] .leaflet-sidebar.leaflet-sidebar {
+  visibility: hidden;
+}
+
+html.no-glass[data-shape="sideways"][data-input="touch"] .leaflet-sidebar.leaflet-sidebar {
+  background-color: var(--glass-tint-solid);
+}
+
+/* The book being read. Its keys go flat: a raised key on glass is two
+   materials at once. */
+:root .now-reading-bar.now-reading-bar {
+  border-color: var(--glass-border);
+  background: var(--liquid-tint-text);
+  background-image: var(--liquid-sheen);
+  -webkit-backdrop-filter: var(--liquid-filter-panel);
+  backdrop-filter: var(--liquid-filter-panel);
+  box-shadow: var(--liquid-rim), var(--liquid-shadow);
+}
+
+/* By a finger it is a small floating bar: the small lens (the panel one is a blur there). */
+:root[data-input="touch"] .now-reading-bar.now-reading-bar {
+  -webkit-backdrop-filter: var(--liquid-filter);
+  backdrop-filter: var(--liquid-filter);
+}
+
+.now-reading-bar .now-reading-action:not(.now-reading-action-primary) {
+  border-color: transparent;
+  background: var(--glass-tint-inner);
+  box-shadow: none;
+}
+
+.now-reading-bar .now-reading-action-primary {
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.22);
+}
+
+.now-reading-bar .now-reading-progress {
+  background: rgb(var(--color-on-surface) / 0.1);
+  box-shadow: none;
+}
+
+/* Sheets, dialogs, menus, the update card, "further on", the streak: every
+   `.modal-surface` but Pip's. */
+:root .modal-surface:not(.pip-album-dialog, .pip-arcade, .pip-drawer, .pip-shop, .pip-house-page *) {
+  border-color: var(--glass-border);
+  background: var(--glass-tint-strong);
+  background-image: var(--liquid-sheen);
+  -webkit-backdrop-filter: var(--liquid-filter-panel);
+  backdrop-filter: var(--liquid-filter-panel);
+  box-shadow: var(--liquid-rim), var(--glass-shadow);
+}
+
+/* Toasts: a pill of glass. */
+:root .app-toast.app-toast {
+  border: 1px solid var(--glass-border);
+  border-radius: 22px;
+  background: var(--glass-tint-strong);
+  background-image: var(--liquid-sheen);
+  -webkit-backdrop-filter: var(--liquid-filter);
+  backdrop-filter: var(--liquid-filter);
+  box-shadow: var(--liquid-rim), var(--liquid-shadow);
+}
+
+/* A segmented control's track lies on the page, not over it: the glass's
+   look (tint, the top light, the hairline) without a blur of nothing. */
+:root .segmented-tabs.segmented-tabs {
+  background-color: rgb(var(--color-on-surface) / 0.05);
+  background-image: var(--glass-sheen);
+  box-shadow: var(--glass-specular), var(--glass-hairline);
+}
+
+/* ---- Scrims ---------------------------------------------------------------------
+   Behind a sheet or a dialog the page dims and blurs (the dim is each
+   backdrop's own `bg-black/…`). The scrim is the blur: the sheet on it takes
+   the tint and no blur of its own, which would be a second pass reading only
+   the scrim (it is the sheet's backdrop root). */
+
+.sheet-backdrop:not(.pip-house-page *, .pip-arcade *),
+.profile-sheet-backdrop {
+  -webkit-backdrop-filter: blur(var(--scrim-blur)) saturate(1.15);
+  backdrop-filter: blur(var(--scrim-blur)) saturate(1.15);
+  animation: glass-fade-in var(--dur-base) var(--ease-out-soft) both;
+}
+
+.sheet-backdrop:not(.pip-house-page *, .pip-arcade *) > .modal-surface:not(.pip-album-dialog, .pip-arcade, .pip-drawer, .pip-shop) {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* A sheet's buttons at its foot (held there as the form scrolls on a phone: styles/touch-shell.css)
+   are the sheet's own glass, not a box on it. Any coat over the sheet's tint is a second coat, and
+   read as a lighter rectangle (2026-10-18; a blur of its own too, as the scroller is what it reads).
+   So it is bare, with nothing under it, and covers the form only while some of the form is under
+   it: then it takes the sheet's colour as it shows over the dimmed page (`--sheet-held`, opaque, so
+   the fields do not show through the buttons) and a hairline, and gives both back as the form's end
+   comes up clear of it (a scroll-driven fade; with none, it keeps them). */
+.sheet-panel .sheet-actions.sheet-actions {
+  background: var(--sheet-held);
+  box-shadow: var(--sheet-held-line);
+}
+
+@supports (animation-timeline: scroll()) {
+  .sheet-panel .sheet-actions.sheet-actions {
+    background: transparent;
+    box-shadow: none;
+    /* Not scrollable (the form fits): no timeline, no animation, bare. */
+    animation: sheet-actions-held linear both;
+    animation-timeline: scroll(nearest block);
+  }
+}
+
+@keyframes sheet-actions-held {
+  0%,
+  94% {
+    background-color: var(--sheet-held);
+    box-shadow: var(--sheet-held-line);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: inset 0 1px 0 rgb(var(--color-outline-variant) / 0);
+  }
+}
+
+/* ---- Coming in --------------------------------------------------------------------
+   Opacity, a small rise and scale (none where the lens is drawn: `--enter-scale`), and a
+   blur that clears. `translate` and
+   `scale` rather than `transform`, so a surface centred by a transform (the
+   "further on" card, `-translate-x-1/2`) keeps its place while it moves. On
+   a phone a sheet rises from the foot instead (styles/touch-shell.css,
+   `sheet-rise`, which outweighs the dialog's rule there). */
+
+@keyframes glass-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes glass-pop-in {
+  from {
+    opacity: 0;
+    translate: 0 8px;
+    scale: var(--enter-scale);
+    filter: var(--enter-filter);
+  }
+}
+
+/* Hanging from something above: it drops the little way into place. */
+@keyframes glass-hang-in {
+  from {
+    opacity: 0;
+    translate: 0 -6px;
+    scale: var(--enter-scale);
+    filter: var(--enter-filter);
+  }
+}
+
+@keyframes glass-drop-in {
+  from {
+    opacity: 0;
+    translate: 0 12px;
+    filter: var(--enter-filter);
+  }
+}
+
+/* Dialogs in the middle of the window. (Under :where, so the phone's sheet-rise, at
+   .sheet-backdrop > .sheet-panel.sheet-panel, outweighs it.) */
+.sheet-backdrop > .modal-surface:where(:not(.pip-album-dialog, .pip-arcade, .pip-drawer, .pip-shop)) {
+  animation: glass-pop-in var(--dur-slow) var(--ease-out-soft) both;
+}
+
+/* Menus and panels grow from what they hang from. */
+.anchored-panel {
+  transform-origin: top right;
+  animation: glass-hang-in var(--dur-base) var(--ease-out-soft) both;
+}
+
+.modal-surface[role="menu"]:not(.sheet-panel) {
+  transform-origin: top center;
+  animation: glass-hang-in var(--dur-base) var(--ease-out-soft) both;
+}
+
+/* (Opened upward, from a button low in the window: it rises instead.) */
+.modal-surface[role="menu"][style*="bottom"]:not(.sheet-panel) {
+  transform-origin: bottom center;
+  animation-name: glass-pop-in;
+}
+
+/* Toasts and the cards at the foot rise into place. */
+.app-toast,
+.update-card,
+.further-on-offer {
+  animation: glass-drop-in var(--dur-slow) var(--ease-out-soft) both;
+}
+
+/* ---- Going out (components/ui/motion.ts) ---------------------------------------
+   The copy left in place while it goes: nothing in it starts over or moves on
+   its own, whatever its own rules say. */
+
+[data-leaving] *,
+[data-leaving-root] * {
+  animation: none !important;
+  transition: none !important;
+}
+
+[data-leaving],
+[data-leaving-root] {
+  pointer-events: none !important;
+}
+
+@keyframes glass-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes glass-pop-out {
+  to {
+    opacity: 0;
+    translate: 0 6px;
+    scale: var(--leave-scale);
+    filter: var(--motion-blur);
+  }
+}
+
+@keyframes glass-sheet-out {
+  to {
+    transform: translateY(100%);
+  }
+}
+
+[data-leaving="fade"],
+[data-leaving="swiped"] {
+  animation: glass-fade-out var(--dur-quick) var(--ease-in-soft) both !important;
+}
+
+[data-leaving="pop"] {
+  animation: glass-pop-out var(--dur-quick) var(--ease-in-soft) both !important;
+}
+
+/* A dialog: the scrim fades, the dialog shrinks back and blurs. */
+[data-leaving="sheet"] {
+  animation: glass-fade-out var(--dur-base) var(--ease-in-soft) both !important;
+}
+
+[data-leaving="sheet"] > .modal-surface {
+  animation: glass-pop-out var(--dur-quick) var(--ease-in-soft) both !important;
+}
+
+/* A sheet goes back down the way it came up. */
+@media (max-width: 639px) {
+  [data-leaving="sheet"] > .sheet-panel {
+    animation: glass-sheet-out var(--dur-base) var(--ease-in-soft) both !important;
+  }
+}
+
+@media (hover: none) and (pointer: coarse) and (min-width: 640px) {
+  :where(html[data-shape="sideways"]) [data-leaving="sheet"].sheet-backdrop-menu > :is(.book-menu-sheet, .profile-sheet, .phone-sheet) {
+    animation: glass-sheet-out var(--dur-base) var(--ease-in-soft) both !important;
+  }
+}
+
+/* ---- Less motion: a short fade, nothing that moves or blurs ---- */
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet-backdrop,
+  .profile-sheet-backdrop,
+  .sheet-backdrop > .modal-surface:not(.pip-album-dialog, .pip-arcade, .pip-drawer, .pip-shop),
+  .anchored-panel,
+  .modal-surface[role="menu"],
+  .app-toast,
+  .update-card,
+  .further-on-offer {
+    animation: glass-fade-in 120ms ease-out both;
+  }
+
+  /* (components/ui/motion.ts makes every exit a "fade" here.) */
+  [data-leaving="fade"] {
+    animation: glass-fade-out 120ms ease-in both !important;
+  }
+}
+
+/* ---- No glass: no blur drawn, or turned off (a low-memory phone, `.no-glass` on
+   <html>, set by components/ui/motion.ts) ---- the same surfaces, solid. */
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root .glass,
+  :root .glass-pill,
+  :root .app-header.app-header,
+  :root .mobile-nav.mobile-nav,
+  :root .now-reading-bar.now-reading-bar,
+  :root .app-toast.app-toast,
+  :root .modal-surface:not(.pip-album-dialog, .pip-arcade, .pip-drawer, .pip-shop, .pip-house-page *) {
+    background-color: var(--glass-tint-solid);
+  }
+
+  .app-shell::before {
+    background: rgb(var(--color-surface));
+  }
+
+  :root,
+  :root[data-theme="dark"] {
+    --sheet-held: var(--glass-tint-solid);
+  }
+}
+
+html.no-glass :is(
+    .glass,
+    .glass-pill,
+    .app-header.app-header,
+    .mobile-nav.mobile-nav,
+    .now-reading-bar.now-reading-bar,
+    .app-toast.app-toast,
+    .sheet-backdrop,
+    .profile-sheet-backdrop,
+    .modal-surface:not(.pip-album-dialog, .pip-arcade, .pip-drawer, .pip-shop, .pip-house-page *)
+  ),
+html.no-glass .app-shell::before {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+html.no-glass :is(
+    .glass,
+    .glass-pill,
+    .app-header.app-header,
+    .mobile-nav.mobile-nav,
+    .now-reading-bar.now-reading-bar,
+    .app-toast.app-toast,
+    .modal-surface:not(.pip-album-dialog, .pip-arcade, .pip-drawer, .pip-shop, .pip-house-page *)
+  ),
+html.no-glass .app-shell::before {
+  background-color: var(--glass-tint-solid);
+}
+
+/* The sheet solid: what its held buttons lie on, the same. */
+html.no-glass,
+html.no-glass[data-theme="dark"] {
+  --sheet-held: var(--glass-tint-solid);
+}

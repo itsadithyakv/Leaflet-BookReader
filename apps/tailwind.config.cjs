@@ -1,3 +1,5 @@
+const plugin = require("tailwindcss/plugin");
+
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   // `hover:` only where something can hover. On a phone a tapped button keeps
@@ -8,11 +10,6 @@ module.exports = {
   theme: {
     extend: {
       screens: {
-        // A landscape phone is *wider* than `md` (844x390 on an iPhone 14), so
-        // width alone misreads it as a tablet. Height is the real constraint
-        // there, and these two carry that distinction into the markup.
-        short: { raw: "(max-height: 520px)" },
-        tall: { raw: "(min-height: 521px)" },
         // Touch input, regardless of screen size: hover affordances do not
         // exist and hit targets need to be finger-sized.
         touch: { raw: "(hover: none) and (pointer: coarse)" }
@@ -91,5 +88,13 @@ module.exports = {
       }
     }
   },
-  plugins: []
+  plugins: [
+    // `short:`: a phone on its side, or a squat window. A landscape phone is *wider* than `md`
+    // (844x390 on an iPhone 14), so width alone misreads it as a tablet; height is the real
+    // constraint there. Not `(max-height: 520px)`, which a phone's keyboard also met (the window
+    // ends at it): the window's steady shape, `html[data-shape]` (src/platform/shape.ts).
+    plugin(({ addVariant }) => {
+      addVariant("short", 'html[data-shape="sideways"] &');
+    })
+  ]
 };

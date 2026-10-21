@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { changeGate, frameGate, runWhileShown } from "./frameGate";
+import { busyFpsFor, changeGate, frameGate, hidesAt, mostlyHidden, runScene, runWhileShown, sceneGate, solidColour, untilNextArtFrame } from "./frameGate";
 
 /** The times a display gives frames at, for `seconds`, each up to `jitter` ms early or late. */
 const refreshes = (hz: number, seconds: number, jitter = 0) => {
@@ -196,5 +196,154 @@ describe("a frame loop that runs while there is something to see", () => {
     // 336 frames given; twelve art frames a second and the lifts between them come to under a paint in ten.
     expect(paints).toBeGreaterThan(12 * 2.8);
     expect(paints).toBeLessThan(20 * 2.8);
+  });
+});
+
+describe("how often the camp is painted (sceneGate)", () => {
+  it("at rest, once for each frame of its art: twelve a second, whatever the display", () => {
+    for (const hz of [60, 90, 120, 144]) {
+      const gate = sceneGate({ artFps: 12, busyFps: null });
+      const painted = refreshes(hz, 2).filter((time) => gate.due(time, 1000, false));
+      expect(painted.length, `${hz} Hz`).toBe(24);
+    }
+  });
+
+  it("while touched, every frame; or every other at 120 Hz on a lighter device", () => {
+    const full = sceneGate({ artFps: 12, busyFps: busyFpsFor("full") });
+    expect(refreshes(120, 1).filter((time) => full.due(time, 1000, true)).length).toBe(120);
+    const lite = sceneGate({ artFps: 12, busyFps: busyFpsFor("lite") });
+    expect(refreshes(120, 1).filter((time) => lite.due(time, 1000, true)).length).toBe(60);
+    const minimal = sceneGate({ artFps: 12, busyFps: busyFpsFor("minimal") });
+    expect(refreshes(120, 1).filter((time) => minimal.due(time, 1000, true)).length).toBe(30);
+  });
+
+  it("after a busy spell, goes back to the art's frames", () => {
+    const gate = sceneGate({ artFps: 12, busyFps: null });
+    const painted = refreshes(120, 1).filter((time) => gate.due(time, 1000, time < 1500));
+    // Half a second of every frame (60), then the art's frames for the rest of the second (6).
+    expect(painted.length).toBeGreaterThanOrEqual(60 + 5);
+    expect(painted.length).toBeLessThanOrEqual(60 + 6);
+  });
+
+  it("says how long until the art's next frame", () => {
+    expect(untilNextArtFrame(1000, 1000, 12)).toBeCloseTo(1000 / 12);
+    expect(untilNextArtFrame(1050, 1000, 12)).toBeCloseTo(1000 / 12 - 50);
+    expect(untilNextArtFrame(990, 1000, 12)).toBeCloseTo(10);
+  });
+});
+
+describe("a scene loop that sleeps between the frames it paints", () => {
+  let queued: Array<{ id: number; run: (time: number) => void }> = [];
+  let timers: Array<{ id: number; at: number; run: () => void; every?: number }> = [];
+  let clock = 0;
+  let nextId = 1;
+  const install = () => {
+    queued = [];
+    timers = [];
+    clock = 0;
+    vi.stubGlobal("requestAnimationFrame", (run: (time: number) => void) => {
+      const id = nextId++;
+      queued.push({ id, run });
+      return id;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => {
+      queued = queued.filter((entry) => entry.id !== id);
+    });
+    const clear = (id: number) => {
+      timers = timers.filter((entry) => entry.id !== id);
+    };
+    vi.stubGlobal("window", {
+      setTimeout: (run: () => void, ms: number) => {
+        const id = nextId++;
+        timers.push({ id, at: clock + ms, run });
+        return id;
+      },
+      clearTimeout: clear,
+      setInterval: (run: () => void, ms: number) => {
+        const id = nextId++;
+        timers.push({ id, at: clock + ms, run, every: ms });
+        return id;
+      },
+      clearInterval: clear
+    });
+    vi.stubGlobal("document", { visibilityState: "visible", addEventListener: () => undefined, removeEventListener: () => undefined });
+  };
+  const play = (hz: number, seconds: number) => {
+    for (let n = 0; n < hz * seconds; n++) {
+      clock += 1000 / hz;
+      const due = queued;
+      queued = [];
+      for (const entry of due) entry.run(clock);
+      const ready = timers.filter((entry) => entry.at <= clock);
+      for (const entry of ready) {
+        if (entry.every) entry.at += entry.every;
+        else timers = timers.filter((other) => other !== entry);
+        entry.run();
+      }
+    }
+  };
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("is given a dozen frames a second at rest where it took every one (120)", () => {
+    install();
+    const gate = sceneGate({ artFps: 12, busyFps: null });
+    let frames = 0;
+    let paints = 0;
+    const loop = runScene({} as Element, (time) => {
+      frames += 1;
+      if (gate.due(time, 0, false)) paints += 1;
+      return untilNextArtFrame(time, 0, 12);
+    });
+    play(120, 2);
+    expect(paints).toBeGreaterThanOrEqual(23);
+    expect(paints).toBeLessThanOrEqual(25);
+    // A frame or two more than paints at most: each one it is given is one it paints.
+    expect(frames).toBeLessThanOrEqual(paints + 2);
+    loop.stop();
+  });
+
+  it("takes every frame again from the moment it is woken, while the picture is busy", () => {
+    install();
+    let busy = false;
+    let frames = 0;
+    const loop = runScene({} as Element, (time) => {
+      frames += 1;
+      return busy ? undefined : untilNextArtFrame(time, 0, 12);
+    });
+    play(120, 1);
+    const resting = frames;
+    busy = true;
+    loop.wake();
+    play(120, 1);
+    expect(frames - resting).toBe(120);
+    loop.stop();
+    const stopped = frames;
+    play(120, 1);
+    expect(frames).toBe(stopped);
+  });
+});
+
+describe("whether something is laid over the picture", () => {
+  it("counts a big solid thing, not a button, Pip's word or a see-through scrim", () => {
+    expect(hidesAt(null, 1000)).toBe(false);
+    expect(hidesAt({ area: 600, solid: true }, 1000)).toBe(true);
+    expect(hidesAt({ area: 100, solid: true }, 1000)).toBe(false);
+    expect(hidesAt({ area: 1000, solid: false }, 1000)).toBe(false);
+  });
+
+  it("is covered when more than half the points are", () => {
+    expect(mostlyHidden([true, true, true, true, true, false, false, false, false])).toBe(true);
+    expect(mostlyHidden([true, true, true, true, false, false, false, false, false])).toBe(false);
+    expect(mostlyHidden([])).toBe(false);
+  });
+
+  it("reads a background colour as solid, or as one the picture shows through", () => {
+    expect(solidColour("rgb(250, 245, 230)")).toBe(true);
+    expect(solidColour("rgba(0, 0, 0, 0.4)")).toBe(false);
+    expect(solidColour("rgba(255, 255, 255, 0.92)")).toBe(true);
+    expect(solidColour("rgb(0 0 0 / 30%)")).toBe(false);
+    expect(solidColour("transparent")).toBe(false);
   });
 });

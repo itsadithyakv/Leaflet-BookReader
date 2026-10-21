@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { WASTE_ALLOWED, fitPicture } from "./fit";
+import { WASTE_ALLOWED, coverPicture, fitPicture } from "./fit";
 
 describe("how big the camp's picture is shown", () => {
   it("is a whole number of screen pixels to each of its own where that nearly fills the room", () => {
@@ -47,5 +47,24 @@ describe("a picture that is the page", () => {
     expect(filled.crisp).toBe(false);
     // A room that is a whole size is still drawn hard-edged.
     expect(fitPicture(240, 120, 960, 600, 1, 0)).toEqual({ css: 4, backing: 4, crisp: true });
+  });
+});
+
+describe("the camp on a phone held sideways", () => {
+  it("covers the screen, a quarter larger across, at whole pixels where that is near enough", () => {
+    // 800 x 360 at 2.625: 1.25 times across is 10.9 screen pixels to the art pixel; ten still covers it, so ten.
+    const phone = coverPicture(240, 120, 800, 360, 2.625, 1.25);
+    expect(phone).toEqual({ css: 10 / 2.625, backing: 10, crisp: true });
+    expect(240 * phone.css).toBeGreaterThan(800);
+    expect(120 * phone.css).toBeGreaterThanOrEqual(360);
+  });
+
+  it("is never smaller than the screen either way, however the screen is shaped", () => {
+    for (const [wide, tall, ratio] of [[640, 360, 2], [915, 412, 2.625], [740, 360, 3], [800, 480, 1.5]]) {
+      const fit = coverPicture(240, 120, wide, tall, ratio, 1.25);
+      expect(240 * fit.css, `${wide}x${tall}`).toBeGreaterThanOrEqual(wide - 1e-6);
+      expect(120 * fit.css, `${wide}x${tall}`).toBeGreaterThanOrEqual(tall - 1e-6);
+      expect(Number.isInteger(fit.backing)).toBe(true);
+    }
   });
 });

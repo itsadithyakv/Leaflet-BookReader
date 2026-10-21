@@ -5,11 +5,12 @@ import { isAndroid, isTouchInput } from "../platform/device";
 /**
  * The screen stays on while a book is read (docs/android.md, "Dotty,
  * SpeedRead, auto-scroll"): always while the page reads itself, and on a
- * phone also while the book is open and was touched in the last five
- * minutes, since a page read slowly sends the phone nothing. Never while
+ * phone also while the book is open and was touched in the last three
+ * minutes, since a page read slowly sends the phone nothing (five until
+ * 1.5.9: the owner found the screen stayed on too long once paused). Never while
  * Leaflet is out of sight, and never once the book is closed.
  */
-export const TOUCHED_AWAKE_MS = 5 * 60 * 1000;
+export const TOUCHED_AWAKE_MS = 3 * 60 * 1000;
 
 /** How often the touched-lately rule is looked at again. */
 export const AWAKE_CHECK_MS = 30 * 1000;

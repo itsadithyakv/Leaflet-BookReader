@@ -22,8 +22,10 @@ import { NO_INTERACTION, blockedAmong, isBlockedPair } from "../standing.js";
  *
  * Both readers must share a profile and each must follow the other (for a
  * followers-only reader, a follow they accepted), the camp must be on its
- * reader's profile, and that reader must not have switched raids off
- * (`raidable` on the profile, which is on until it is turned off).
+ * reader's profile, and that reader must have switched raids on
+ * (`raidable` on the profile). Since app 1.5.10 it is off until the reader
+ * turns it on: a reader who never touched the switch (no `raidable` at all)
+ * cannot be raided, whatever an older app assumed.
  */
 
 const MAX_STARS = 3;
@@ -102,13 +104,13 @@ export function raidRoutes(db, limits = defaultLimits()) {
       const rows = friends.length
         ? await profiles(db)
             .find(
-              // `raidable` is absent until the switch is first touched, and absent means yes.
+              // `raidable` is absent until the switch is first touched, and absent means no (since app 1.5.10).
               {
                 _id: { $in: friends },
                 visibility: { $in: SOCIAL },
                 handle: { $type: "string" },
                 camp: { $type: "object" },
-                raidable: { $ne: false }
+                raidable: true
               },
               {
                 projection: { handle: 1, displayName: 1, visibility: 1, camp: 1 },
@@ -182,7 +184,7 @@ export function raidRoutes(db, limits = defaultLimits()) {
       if (each.length < 2) {
         throw new HttpError(403, "Raids are for friends: a reader you follow who follows you back.");
       }
-      if (them.raidable === false) {
+      if (them.raidable !== true) {
         throw new HttpError(403, "They have switched raids off.");
       }
       if (!hasCamp(them)) {

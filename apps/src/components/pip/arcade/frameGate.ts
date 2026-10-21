@@ -103,25 +103,70 @@ export const changeGate = () => {
  * called with each frame's time; `resumed` when it starts again after a stop,
  * for the loop to forget the time it was away. Returns the stop.
  */
-export const runWhileShown = (element: Element | null, frame: (now: number) => void, resumed?: () => void): (() => void) => {
+export const runWhileShown = (element: Element | null, frame: (now: number) => void, resumed?: () => void): (() => void) =>
+  runScene(element, frame, { resumed }).stop;
+
+export type SceneLoop = {
+  stop: () => void;
+  /** Something has started moving: frames from the next one, not from when the loop meant to look again. */
+  wake: () => void;
+};
+
+/** Below this, a rest between frames is not worth a timer: the next frame is asked for. */
+const NAP_MIN_MS = 20;
+/** How often a scene that can be covered looks to see whether it is (`coveredMuch`). */
+export const COVER_LOOK_MS = 600;
+
+/**
+ * `runWhileShown`, for a scene that knows when it next has something to show.
+ * `frame` may return how long (ms) until it next needs a frame: the loop then
+ * sleeps on a timer rather than taking every frame the display gives, each of
+ * which costs the page a pass of style and paint even when nothing is drawn
+ * (on a phone at 120 Hz, a fifth of a core at rest). `wake` brings it back
+ * early. With `cover`, the loop also stops while something is laid over most
+ * of `element` (a sheet, a dialog: `coveredMuch`), looked at every
+ * `COVER_LOOK_MS`.
+ */
+export const runScene = (
+  element: Element | null,
+  frame: (now: number) => number | void,
+  options: { resumed?: () => void; cover?: boolean } = {}
+): SceneLoop => {
   let raf = 0;
+  let nap = 0;
   let ended = false;
   let visible = typeof document === "undefined" || document.visibilityState !== "hidden";
   // In view until told otherwise: an observer says so once, soon after it starts watching.
   let inView = true;
+  let uncovered = true;
+  const running = () => !ended && visible && inView && uncovered;
   const run = (now: number) => {
     raf = 0;
-    frame(now);
-    if (!ended && raf === 0 && visible && inView) raf = requestAnimationFrame(run);
+    const rest = frame(now);
+    if (!running() || raf !== 0 || nap !== 0) return;
+    if (typeof rest === "number" && rest >= NAP_MIN_MS) {
+      // (Woken when the rest is up, not before: the frame asked for then comes just after it, and is the one it was for.)
+      nap = window.setTimeout(() => {
+        nap = 0;
+        if (running() && raf === 0) raf = requestAnimationFrame(run);
+      }, rest);
+    } else {
+      raf = requestAnimationFrame(run);
+    }
+  };
+  const halt = () => {
+    if (raf !== 0) cancelAnimationFrame(raf);
+    if (nap !== 0) window.clearTimeout(nap);
+    raf = 0;
+    nap = 0;
   };
   const update = () => {
-    const on = !ended && visible && inView;
-    if (on && raf === 0) {
-      resumed?.();
+    const on = running();
+    if (on && raf === 0 && nap === 0) {
+      options.resumed?.();
       raf = requestAnimationFrame(run);
-    } else if (!on && raf !== 0) {
-      cancelAnimationFrame(raf);
-      raf = 0;
+    } else if (!on) {
+      halt();
     }
   };
   const onVisibility = () => {
@@ -139,12 +184,155 @@ export const runWhileShown = (element: Element | null, frame: (now: number) => v
     });
     observer.observe(element);
   }
+  let coverTimer = 0;
+  if (options.cover && element) {
+    coverTimer = window.setInterval(() => {
+      // (Not while the window is hidden or the picture scrolled away: there is nothing to ask then.)
+      if (ended || !visible || !inView) return;
+      const free = !coveredMuch(element);
+      if (free !== uncovered) {
+        uncovered = free;
+        update();
+      }
+    }, COVER_LOOK_MS);
+  }
   if (visible) raf = requestAnimationFrame(run);
-  return () => {
-    ended = true;
-    cancelAnimationFrame(raf);
-    raf = 0;
-    if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisibility);
-    observer?.disconnect();
+  return {
+    stop: () => {
+      ended = true;
+      halt();
+      if (coverTimer) window.clearInterval(coverTimer);
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisibility);
+      observer?.disconnect();
+    },
+    wake: () => {
+      if (!running()) return;
+      if (nap !== 0) {
+        window.clearTimeout(nap);
+        nap = 0;
+      }
+      if (raf === 0) raf = requestAnimationFrame(run);
+    }
   };
 };
+
+/** The points `coveredMuch` asks about, as shares of the picture's width and height: three by three, in from the edges. */
+const COVER_GRID = [0.17, 0.5, 0.83];
+/** Laid over more than this share of those points, a picture is covered. */
+export const COVERED_SHARE = 0.5;
+/** Smaller than this share of the picture, what is over it is a button, a badge, Pip's word: it hides nothing. */
+export const COVER_MIN_SHARE = 0.2;
+
+/**
+ * Whether what is at one of the points hides the picture there: something
+ * other than the picture, not a small thing over it (`COVER_MIN_SHARE`), and
+ * not see-through (a scrim that lets it show, a layer that only catches the
+ * pointer). `hit` is null where the picture itself is what shows.
+ */
+export const hidesAt = (hit: { area: number; solid: boolean } | null, pictureArea: number): boolean =>
+  hit !== null && hit.solid && hit.area >= pictureArea * COVER_MIN_SHARE;
+
+/** Whether most of the points hide the picture. */
+export const mostlyHidden = (hides: readonly boolean[]) => hides.length > 0 && hides.filter(Boolean).length / hides.length > COVERED_SHARE;
+
+/** Whether a colour (as computed: `rgb(...)`, `rgba(...)`, `transparent`) is mostly opaque. */
+export const solidColour = (colour: string) => {
+  if (colour === "transparent" || colour === "") return false;
+  const parts = /\(([^)]*)\)/.exec(colour)?.[1].split(/[\s,/]+/).filter(Boolean) ?? [];
+  if (parts.length < 4) return true;
+  const alpha = parts[3];
+  return (alpha.endsWith("%") ? parseFloat(alpha) / 100 : parseFloat(alpha)) >= 0.6;
+};
+
+const solidStyle = (style: CSSStyleDeclaration) =>
+  solidColour(style.backgroundColor) || style.backgroundImage !== "none" || (style.backdropFilter !== "" && style.backdropFilter !== "none" && style.backdropFilter !== undefined);
+
+/**
+ * Whether something is laid over most of `element` (a sheet up over the camp, a
+ * dialog, the battle): asked at a few points, by what the page would hit
+ * there. What hides a point is the outermost thing at it that does not hold the
+ * picture, measured whole; it must be big and solid (`hidesAt`).
+ */
+export const coveredMuch = (element: Element): boolean => {
+  if (typeof document === "undefined" || typeof document.elementFromPoint !== "function") return false;
+  const box = element.getBoundingClientRect();
+  const left = Math.max(0, box.left);
+  const top = Math.max(0, box.top);
+  const right = Math.min(window.innerWidth, box.right);
+  const bottom = Math.min(window.innerHeight, box.bottom);
+  if (right <= left || bottom <= top) return false;
+  const pictureArea = (right - left) * (bottom - top);
+  const hides: boolean[] = [];
+  for (const fy of COVER_GRID) {
+    for (const fx of COVER_GRID) {
+      const at = document.elementFromPoint(left + (right - left) * fx, top + (bottom - top) * fy);
+      if (!at || at === element || element.contains(at)) {
+        hides.push(false);
+        continue;
+      }
+      // Up from what was hit (short of what holds the picture) to the first thing there with a solid face: the sheet,
+      // the dialog, or only a HUD's button. How much of the picture that thing covers is what counts.
+      let solid: Element | null = null;
+      for (let node: Element | null = at; node && !node.contains(element); node = node.parentElement) {
+        if (solidStyle(getComputedStyle(node))) {
+          solid = node;
+          break;
+        }
+      }
+      if (!solid) {
+        hides.push(false);
+        continue;
+      }
+      const r = solid.getBoundingClientRect();
+      const area = Math.max(0, Math.min(right, r.right) - Math.max(left, r.left)) * Math.max(0, Math.min(bottom, r.bottom) - Math.max(top, r.top));
+      hides.push(hidesAt({ area, solid: true }, pictureArea));
+    }
+  }
+  return mostlyHidden(hides);
+};
+
+/**
+ * When a scene next has something to show, at rest: the start of its next art
+ * frame (`artFps` a second, counted from `started`), in ms from `now`.
+ */
+export const untilNextArtFrame = (now: number, started: number, artFps: number) => {
+  const every = 1000 / artFps;
+  const into = (((now - started) % every) + every) % every;
+  return every - into;
+};
+
+/**
+ * How often a scene is painted (the Hollow's camp): at rest, when its art
+ * turns to a new frame (`artFps`, twelve a second; what glides there moves a
+ * whole pixel at a time, and at that rate keeps step with the art), and while
+ * something is being done to it at `busyFps` (every frame the display gives
+ * when null). It used to be thirty a second at rest, whatever changed: two
+ * paints in five of the same art frame.
+ */
+export const sceneGate = (options: { artFps: number; busyFps: number | null }) => {
+  const busyGate = options.busyFps === null ? null : frameGate(options.busyFps);
+  let shownArt = Number.NaN;
+  return {
+    /** Whether to paint the frame at `now` (the loop's clock began at `started`); `busy`: something is being done to the picture. */
+    due(now: number, started: number, busy: boolean) {
+      const art = Math.floor(((now - started) / 1000) * options.artFps);
+      // (The busy gate is asked at every frame, painted or not: it learns the display's rate from them.)
+      const onCue = busyGate ? busyGate.due(now) : true;
+      if (busy) {
+        if (!onCue) return false;
+        shownArt = art;
+        return true;
+      }
+      if (art === shownArt) return false;
+      shownArt = art;
+      return true;
+    },
+    reset() {
+      busyGate?.reset();
+      shownArt = Number.NaN;
+    }
+  };
+};
+
+/** The cap on a scene's busy paints by how much the device is given to draw (`html[data-perf]`, platform/perfTier.ts). */
+export const busyFpsFor = (tier: string | undefined): number | null => (tier === "minimal" ? 30 : tier === "lite" ? 60 : null);

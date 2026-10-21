@@ -74,8 +74,11 @@ async function call(method, path, { token, body, at = base } = {}) {
   return { status: response.status, body: text ? JSON.parse(text) : null, retryAfter: response.headers.get("retry-after") };
 }
 
-/** A signed-up reader with a profile and a camp on it; public unless told otherwise, and `camp: null` for none. */
-async function reader({ visibility = "public", prefix = "r", camp = CAMP, extra = {} } = {}) {
+/**
+ * A signed-up reader with a profile and a camp on it; public unless told otherwise, and `camp: null` for none. They
+ * have switched raids on (raids are off until a reader does), unless `chose: false`: a reader who never touched it.
+ */
+async function reader({ visibility = "public", prefix = "r", camp = CAMP, chose = true, extra = {} } = {}) {
   const email = `r-${randomBytes(5).toString("hex")}@example.com`;
   const signup = await call("POST", "/v1/auth/signup", { body: { email, password: PASSWORD } });
   assert.equal(signup.status, 201, JSON.stringify(signup.body));
@@ -83,7 +86,7 @@ async function reader({ visibility = "public", prefix = "r", camp = CAMP, extra 
   const handle = `${prefix}${randomBytes(4).toString("hex")}`;
   const saved = await call("PUT", "/v1/profile/me", {
     token,
-    body: { handle, displayName: handle.toUpperCase(), visibility, weekKey: WEEK, weekMinutes: 30, streak: 2, readDay: TODAY, camp, ...extra }
+    body: { handle, displayName: handle.toUpperCase(), visibility, weekKey: WEEK, weekMinutes: 30, streak: 2, readDay: TODAY, camp, ...(chose ? { raidable: true } : {}), ...extra }
   });
   assert.equal(saved.status, 200, JSON.stringify(saved.body));
   return { token, handle, id: new ObjectId(signup.body.account.id) };
@@ -267,13 +270,14 @@ describe("who may raid whom", () => {
 
   test("the list is by handle, and fifty at most", async () => {
     const raider = await reader();
-    // Fifty-two friends, written straight in: a profile with a camp, and a follow each way.
+    // Fifty-two friends, written straight in: a profile with a camp and raids switched on, and a follow each way.
     const friends = Array.from({ length: 52 }, (_, index) => ({
       _id: new ObjectId(),
       handle: `zz${String(index).padStart(2, "0")}${randomBytes(3).toString("hex")}`,
       displayName: null,
       visibility: "public",
-      camp: CAMP
+      camp: CAMP,
+      raidable: true
     }));
     await db.collection("profiles").insertMany(friends);
     await db.collection("follows").insertMany(
@@ -471,15 +475,16 @@ describe("the raids waiting", () => {
 });
 
 describe("the switch", () => {
-  test("is on until turned off, takes only true or false, and outlasts a change of visibility", async () => {
-    const camper = await reader();
+  test("is off until turned on (since app 1.5.10), takes only true or false, and outlasts a change of visibility", async () => {
+    const camper = await reader({ chose: false });
     const mine = async () => (await call("GET", "/v1/profile/me", { token: camper.token })).body.raidable;
-    assert.equal(await mine(), true);
+    assert.equal(await mine(), false);
     assert.equal("raidable" in (await db.collection("profiles").findOne({ _id: camper.id })), false);
     for (const value of ["no", 0, null, {}]) {
       assert.equal((await save(camper, { raidable: value })).status, 400, JSON.stringify(value));
     }
-    assert.equal(await mine(), true);
+    assert.equal(await mine(), false);
+    assert.equal((await save(camper, { raidable: true })).body.raidable, true);
 
     const off = await save(camper, { raidable: false });
     assert.equal(off.status, 200);
@@ -491,6 +496,20 @@ describe("the switch", () => {
     assert.equal((await save(camper, { raidable: true })).body.raidable, true);
     // It is the reader's own business: not on the card others are shown.
     assert.equal("raidable" in (await call("GET", `/v1/profile/${camper.handle}`)).body, false);
+  });
+
+  test("never touched (every reader from before 1.5.10 who did not choose), the reader is on nobody's list and cannot be raided", async () => {
+    const camper = await reader({ chose: false });
+    const raider = await reader();
+    await befriend(raider, camper);
+    assert.deepEqual(await targets(raider), []);
+    const refused = await raid(raider, camper);
+    assert.equal(refused.status, 403);
+    assert.equal(await count({ toId: camper.id }), 0);
+    // A reader who once said yes stays yes; one who said no stays no.
+    await save(camper, { raidable: true });
+    assert.deepEqual((await targets(raider)).map((row) => row.handle), [camper.handle]);
+    assert.equal((await raid(raider, camper)).status, 201);
   });
 
   test("off, the reader is on nobody's list and cannot be raided; on again, they can", async () => {

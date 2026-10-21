@@ -1,5 +1,11 @@
 import { create } from "zustand";
 import {
+  buyWork,
+  gotThrough,
+  nightOver,
+  seatWork,
+  slideWall,
+  type FrontSlot,
   adopt,
   advanceList,
   afterGame,
@@ -52,8 +58,15 @@ import {
   placeWork,
   armHero,
   SITES,
+  keptForm,
+  openParcels,
+  putBack,
+  seeNews,
+  seenOff,
+  askedRaids,
   type Place
 } from "../pip/base/rules";
+import { seeChapter } from "../pip/base/chapters";
 import type { Result } from "../pip/base/battle";
 import { trophyKind } from "../pip/base/trophies";
 import { learnt, noTips } from "../pip/base/tips";
@@ -118,7 +131,8 @@ type BaseStore = {
   refresh: () => void;
   build: (site: Site, kind?: YardKind) => void;
   clearPlot: (site: Site) => void;
-  gather: () => void;
+  /** Takes in what the oak has, as far as the larder has room; says how many acorns came in (0: nothing, or no room). */
+  gather: () => number;
   /** Things set down, in the camp or in the meadow. */
   placeDecor: (kind: number, x: number, y: number, place?: Place) => void;
   moveDecor: (index: number, x: number, y: number, place?: Place) => void;
@@ -130,6 +144,14 @@ type BaseStore = {
   moveLand: (index: number, x: number, y: number, place?: Place) => void;
   removeLand: (index: number, place?: Place) => void;
   placeWork: (kind: number, x: number, y: number) => void;
+  /** (1.5.11) The front: buy a construct (onto the first free slot of its sort, or the shed), put one on a slot (-1 takes it off), slide the wall. */
+  buyWork: (kind: number) => void;
+  seatWork: (slot: FrontSlot, kind: number) => void;
+  slideWall: (x: number) => void;
+  /** A night watched to its end: held or not. What it paid (the first after some reading, held), in acorns. */
+  nightOver: (held: boolean) => number;
+  /** A kind of prowler got through (Pip has a word about it, once). */
+  gotThrough: (role: Parameters<typeof gotThrough>[1]) => void;
   armHero: (hero: number, blade: number) => void;
   /** Where things stand: a building moved, a piece of fence put down or taken up. */
   moveSite: (site: Placed, x: number, y: number) => void;
@@ -162,6 +184,18 @@ type BaseStore = {
   storyRead: (bookId: string, stretch: number, title: string) => void;
   /** Opens one of the parcels that came from the reading. */
   openParcel: () => void;
+  /** Opens every parcel waiting ("Open all"); says how many acorns they brought. */
+  openAllParcels: () => number;
+  /** The chapter card was shown (`chapterNews`): not shown again for this chapter. */
+  seeChapter: () => void;
+  /** The friends'-raids card was shown (`state.news`). */
+  seeNews: () => void;
+  /** Lays the pieces of fence friends knocked down back where they were. */
+  putBack: () => void;
+  /** A prowler was seen off while the camp was watched (for the chapter's goal). */
+  seeOff: () => void;
+  /** "Let friends raid your camp?" has been asked (whatever the answer): it is not asked again. */
+  askedRaids: () => void;
   /** Makes the gate of the piece of fence at a point, or an ordinary piece of it again. */
   setGate: (x: number, y: number) => void;
   /** Moves a piece of fence to another square. */
@@ -201,6 +235,13 @@ type BaseStore = {
 };
 
 let opening: Promise<void> | null = null;
+/**
+ * The changes made while `opening` reads the kept camp: made to the camp in
+ * hand, so done again on the one read. Without them the read put back the
+ * camp as it was before them (on a phone the read is slower than the Hollow
+ * coming up: the welcome it gave was undone, and the tour's Next did nothing).
+ */
+let changedWhileOpening: Array<(base: BaseState, now: Now) => BaseState> | null = null;
 
 /** The camp in hand is the one kept on this device (read from it, or saved since). */
 let keptHere = false;
@@ -230,6 +271,7 @@ export const useBaseStore = create<BaseStore>((set, get) => {
     if (next !== current) {
       set({ base: next });
       keep(next);
+      changedWhileOpening?.push(act);
     }
     return next;
   };
@@ -242,7 +284,8 @@ export const useBaseStore = create<BaseStore>((set, get) => {
     }
     keptHere = true;
     heldBack = false;
-    void baseService.save(base).catch(() => undefined);
+    // Saved with no more than 1400 in `acorns` and the rest in `bank`, so a 1.5.9 build that reads it cuts nothing.
+    void baseService.save(keptForm(base)).catch(() => undefined);
   };
 
   /** The guard is down: the camp is read again (the pull may have brought one), and what waited is kept if it did not. */
@@ -294,6 +337,7 @@ export const useBaseStore = create<BaseStore>((set, get) => {
     tutorialReplay: null,
     open() {
       void guard();
+      if (!opening) changedWhileOpening = [];
       opening ??= baseService
         .load()
         .then((kept) => {
@@ -305,7 +349,11 @@ export const useBaseStore = create<BaseStore>((set, get) => {
             .getState()
             .books.filter(hasFinished)
             .map((book) => ({ id: book.id, kind: trophyKind(book.genres) }));
-          const base = settle(adopt(from, finished, now.minutes), now);
+          let base = settle(adopt(from, finished, now.minutes), now);
+          // What was done while it was read, done again on the camp read (the camp in hand has it already).
+          const since = changedWhileOpening ?? [];
+          changedWhileOpening = null;
+          if (kept) for (const act of since) base = advanceList(act(settle(base, now), now), now.day);
           set({ base });
           if (kept) {
             keptHere = true;
@@ -318,6 +366,7 @@ export const useBaseStore = create<BaseStore>((set, get) => {
         })
         .finally(() => {
           opening = null;
+          changedWhileOpening = null;
         });
       return opening;
     },
@@ -330,12 +379,8 @@ export const useBaseStore = create<BaseStore>((set, get) => {
       if (get().mood !== mood) set({ mood });
     },
     build(site, kind) {
-      change((base, now) => {
-        const begun = build(base, site, now.minutes, kind, now.mood);
-        // Paws left after the guided session (one skipped, say): the next builds finish at once, as the session's did.
-        const paw = begun !== base && base.welcome.paws > 0 && base.welcome.tutorial.done && !get().tutorialReplay;
-        return paw ? settle(pawFinish(begun, site, now.minutes, now.mood), now) : begun;
-      });
+      // Paid for and standing at once (1.5.8: a building's work is part of its price), with the camp's news of it.
+      change((base, now) => build(base, site, now.minutes, kind, now.mood, now.day));
     },
     giveWelcome() {
       if (!get().welcomeReady) return;
@@ -368,7 +413,15 @@ export const useBaseStore = create<BaseStore>((set, get) => {
       change((base) => clearPlot(base, site));
     },
     gather() {
-      change((base, now) => gather(base, now.minutes, now.streak ?? 0, now.day));
+      // What the oak itself gave, every bonus counted, against the camp as it stands now (settled, as `change` has it):
+      // the screen shows this, never a figure worked out on its own copy. (What the list pays for it comes after.)
+      let got = 0;
+      change((base, now) => {
+        const next = gather(base, now.minutes, now.streak ?? 0, now.day);
+        got = next.acorns - base.acorns;
+        return next;
+      });
+      return got;
     },
     placeDecor(kind, x, y, place = "camp") {
       change((base) => placeDecor(base, kind, x, y, place));
@@ -380,7 +433,8 @@ export const useBaseStore = create<BaseStore>((set, get) => {
       change((base) => removeDecor(base, index, place));
     },
     trainGuard(guard) {
-      change((base, now) => trainGuard(base, guard, now.minutes));
+      // Trained at once (1.5.8): settled again so the rank is there now.
+      change((base, now) => settle(trainGuard(base, guard, now.minutes), now));
     },
     placeLand(kind, x, y, place = "camp") {
       change((base) => placeLand(base, kind, x, y, place));
@@ -393,6 +447,27 @@ export const useBaseStore = create<BaseStore>((set, get) => {
     },
     placeWork(kind, x, y) {
       change((base) => placeWork(base, kind, x, y));
+    },
+    buyWork(kind) {
+      change((base) => buyWork(base, kind));
+    },
+    seatWork(slot, kind) {
+      change((base) => seatWork(base, slot, kind));
+    },
+    slideWall(x) {
+      change((base) => slideWall(base, x));
+    },
+    nightOver(held) {
+      let paid = 0;
+      change((base, now) => {
+        const over = nightOver(base, held, now.minutes, now.day);
+        paid = over.bounty;
+        return over.state;
+      });
+      return paid;
+    },
+    gotThrough(role) {
+      change((base) => gotThrough(base, role));
     },
     armHero(hero, blade) {
       change((base) => armHero(base, hero, blade));
@@ -468,6 +543,30 @@ export const useBaseStore = create<BaseStore>((set, get) => {
     },
     openParcel() {
       change((base) => openParcel(base));
+    },
+    openAllParcels() {
+      let got = 0;
+      change((base) => {
+        const next = openParcels(base);
+        got = next.acorns - base.acorns;
+        return next;
+      });
+      return got;
+    },
+    seeChapter() {
+      change((base) => seeChapter(base));
+    },
+    seeNews() {
+      change((base) => seeNews(base));
+    },
+    putBack() {
+      change((base) => putBack(base));
+    },
+    seeOff() {
+      change((base) => seenOff(base));
+    },
+    askedRaids() {
+      change((base) => askedRaids(base));
     },
     moveWall(index, x, y) {
       change((base) => moveWall(base, index, x, y));

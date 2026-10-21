@@ -103,6 +103,10 @@ export function defaultLimits() {
     // Confirmation emails: per account asking (a new code, or a change of
     // address), and per address written to. The one sent at sign-up counts.
     confirmAccount: { limit: 5, windowMs: 60 * MINUTE },
-    confirmEmail: { limit: 3, windowMs: 60 * MINUTE }
+    confirmEmail: { limit: 3, windowMs: 60 * MINUTE },
+    // Problem reports per address, signed in or not (per account it is
+    // five a UTC day, in `tallies`). Ten, so two readers behind one router
+    // can each send their five.
+    problems: { limit: 10, windowMs: 24 * 60 * MINUTE }
   };
 }

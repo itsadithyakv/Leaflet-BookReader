@@ -21,8 +21,10 @@ import {
   nightRaiders,
   startFriendRaid,
   placeLand,
-  placeWall,
+  buyWork,
+  fronted,
   placeWork,
+  seatWork,
   raise,
   readBase,
   removeLand,
@@ -33,13 +35,16 @@ import {
   type BuildingId,
   type Now
 } from "./rules";
+import { beforeChapters } from "./testing";
 
 const DAY = "2026-10-12";
 const at = (minutes: number, day = DAY): Now => ({ minutes, day, lit: false });
 const camp = (change: Partial<BaseState> = {}, levels: Partial<Record<BuildingId, number>> = {}): BaseState => {
   const fresh = newBase(1000, DAY);
-  return { ...fresh, ...change, levels: { ...fresh.levels, ...levels } };
+  return beforeChapters({ ...fresh, ...change, levels: { ...fresh.levels, ...levels } });
 };
+/** A construct set down at a point, as the battle meets it (the front seats them on its slots: `buyWork`, `seatWork`). */
+const withWork = (state: BaseState, kind: number, x: number, y: number): BaseState => ({ ...state, works: [...state.works.filter((entry) => entry.kind !== kind), { kind, x, y }] });
 const days = Array.from({ length: 200 }, (_, index) => `2027-${String(1 + Math.floor(index / 28)).padStart(2, "0")}-${String(1 + (index % 28)).padStart(2, "0")}`);
 
 describe("landscape", () => {
@@ -72,22 +77,41 @@ describe("landscape", () => {
 describe("the constructs", () => {
   const ready = camp({ acorns: 2000 }, { burrow: 4, store: 3, tower: 2, hut: 2 });
 
-  it("are one of each: bought the first time, moved for nothing after", () => {
-    expect(workBlocked(camp({ acorns: 2000 }, { burrow: 2 }), 0)).toBe("burrow");
-    expect(workBlocked({ ...ready, acorns: 10 }, 0)).toBe("acorns");
-    const set = placeWork(ready, 0, 150, 90);
-    expect(set.works).toEqual([{ kind: 0, x: 150, y: 90 }]);
-    expect(set.acorns).toBe(ready.acorns - WORKS[0].cost);
-    const moved = placeWork(set, 0, 60, 100);
-    expect(moved.works).toEqual([{ kind: 0, x: 60, y: 100 }]);
-    expect(moved.acorns).toBe(set.acorns);
-    expect(workBlocked({ ...set, acorns: 0 }, 0)).toBeNull();
+  it("go on the front since 1.5.11: a trap on a spot on the trail, a tower on a pad behind the wall, the rest in the shed", () => {
+    // The ward stone is no more (it is the archer's nest now): nobody can have one.
+    expect(workBlocked({ ...ready, acorns: 10_000 }, 0)).toBe("chapter");
+    expect(workBlocked({ ...ready, acorns: 10 }, 10)).toBe("acorns");
+    const set = buyWork(ready, 10);
+    expect(set.acorns).toBe(ready.acorns - WORKS[10].cost);
+    expect(set.front.pads[0]).toBe(10);
+    expect(set.works).toEqual([{ kind: 10, x: set.works[0].x, y: set.works[0].y }]);
+    // Behind the wall, by the gate.
+    expect(set.works[0].x).toBeGreaterThan(set.front.x);
+    // Two of a tower at most, one of anything else.
+    const two = buyWork(set, 10);
+    expect(workBlocked(two, 10)).toBe("most");
+    const trap = buyWork(two, 8);
+    expect(workBlocked(trap, 8)).toBe("most");
+    // On the trail, in front of the wall.
+    const strip = trap.works.find((entry) => entry.kind === 8)!;
+    expect(strip.x).toBeLessThan(trap.front.x);
+    // Taken off a spot, it goes to the shed, and back on for nothing.
+    const off = seatWork(trap, { at: "spot", index: trap.front.spots.indexOf(8) }, -1);
+    expect(off.front.shed).toContain(8);
+    expect(off.works.some((entry) => entry.kind === 8)).toBe(false);
+    const on = seatWork(off, { at: "spot", index: 0 }, 8);
+    expect(on.acorns).toBe(off.acorns);
+    expect(on.front.shed).not.toContain(8);
+    // A trap is not put on a pad, nor a tower on a spot.
+    expect(seatWork(on, { at: "pad", index: 0 }, 8)).toBe(on);
     expect(WORKS).toHaveLength(12);
+    // (Set down by a point, as before 1.5.11: it goes to the nearest slot of its sort.)
+    expect(placeWork(ready, 4, 10, 85).front.spots).toContain(4);
   });
 
   it("stand in the camp as the raiders meet it, each with the one thing it does", () => {
-    let set: BaseState = { ...ready, acorns: 5000, levels: { ...ready.levels, burrow: 5 } };
-    WORKS.forEach((_, kind) => (set = placeWork(set, kind, 30 + kind * 24, 100)));
+    let set: BaseState = { ...ready, acorns: 5000, levels: { ...ready.levels, burrow: 5 }, legacy: { burrow: 5 } };
+    WORKS.forEach((_, kind) => (set = withWork(set, kind, 30 + kind * 24, 100)));
     const made = campStructures(set, false).filter((entry) => entry.look?.name === "work");
     expect(made.map((entry) => entry.look?.variant)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     expect(made[0].grounds).toBe(WORKS[0].reach);
@@ -122,30 +146,30 @@ describe("the constructs", () => {
   // The larder at the east, a fence across the way to it, and everything else out of the line.
   const laid = (() => {
     const state = { ...ready, levels: { ...ready.levels, fence: 2 }, spots: { ...ready.spots, store: [200, 90] as [number, number], burrow: [60, 70] as [number, number], hut: [40, 108] as [number, number], tower: [30, 70] as [number, number], oak: [100, 112] as [number, number] } };
-    return placeWall(state, 170, 90);
+    return { ...state, walls: [[170, 94]] as Array<[number, number]> };
   })();
 
   it("a ward stone grounds the ones on the wing: inside its ring a fence stops them like anybody else", () => {
     expect(targetOf(lone(laid, "mole", 140, 90))).toBe("store");
-    const warded = placeWork(laid, 0, 150, 104);
+    const warded = withWork(laid, 0, 150, 104);
     expect(targetOf(lone(warded, "mole", 140, 90))).toBe("fencepiece");
     // And out of its ring they fly as before.
-    expect(targetOf(lone(placeWork(laid, 0, 30, 110), "mole", 140, 90))).toBe("store");
+    expect(targetOf(lone(withWork(laid, 0, 30, 110), "mole", 140, 90))).toBe("store");
   });
 
   it("a thumper draws whoever is on foot, but not the Gilded; and smoke sends them to whatever is nearest", () => {
-    const drum = placeWork(laid, 2, 110, 110);
+    const drum = withWork(laid, 2, 110, 110);
     expect(targetOf(lone(drum, "sprout", 130, 80))).toBe("Thumper");
     expect(targetOf(lone(drum, "sprout", 130, 80, 2))).not.toBe("Thumper");
     expect(targetOf(lone(drum, "mole", 130, 80))).toBe("store");
-    const smoke = placeWork(laid, 3, 30, 112);
+    const smoke = withWork(laid, 3, 30, 112);
     // The burrow is nearer than the larder, and with the larder hidden it is the burrow they go for.
     expect(targetOf(lone(laid, "sprout", 80, 80))).toBe("store");
     expect(targetOf(lone(smoke, "sprout", 80, 80))).toBe("burrow");
   });
 
   it("a hedge cuts whoever walks through it, and nobody who flies over", () => {
-    const hedge = placeWork(laid, 1, 140, 90);
+    const hedge = withWork(laid, 1, 140, 90);
     const walker = lone(hedge, "sprout", 140, 92);
     const flier = lone(hedge, "mole", 140, 92);
     for (let tick = 0; tick < 30; tick++) {
@@ -207,8 +231,7 @@ describe("a night lost", () => {
   const doomed = (() => {
     let state = camp({ acorns: 800, camps: 20, night: "2027-01-01", nightAt: 900 }, { burrow: 5, store: 4, fence: 2 });
     state = { ...state, spots: { ...state.spots, store: [210, 84] }, decor: [{ kind: 13, x: 60, y: 100 }, { kind: 3, x: 100, y: 110 }] };
-    for (let piece = 0; piece < 6; piece++) state = placeWall(state, 190, 64 + piece * 10);
-    return state;
+    return { ...state, walls: Array.from({ length: 6 }, (_, piece): [number, number] => [190, 64 + piece * 10]) };
   })();
   const lostOn = days.find((day) => {
     const night = nightOutcome({ ...doomed, night: day }, day, false)!;
@@ -220,7 +243,8 @@ describe("a night lost", () => {
     const before = { ...doomed, night: lostOn };
     const after = settle(before, at(1000, "2028-06-01"));
     expect(after.report).toBeNull();
-    expect(after.walls).toEqual(before.walls);
+    // (The wall is made from the fence's level since 1.5.11: whatever it was, it is that and no worse.)
+    expect(after.walls).toEqual(fronted(before).walls);
     expect(after.decor).toEqual(before.decor);
     expect(after.acorns).toBe(before.acorns);
     expect(after.stolen).toBeNull();
@@ -293,7 +317,7 @@ describe("the blades", () => {
 describe("a camp kept, with all of this", () => {
   it("comes back as it was, and one kept before reads as having none of it", () => {
     let kept = camp({ acorns: 3000, camps: 9, nightAt: 950 }, { burrow: 4, store: 2 });
-    kept = placeWork(placeLand(placeLand(kept, 1, 100, 90), 4, 30, 60, "meadow"), 3, 140, 100);
+    kept = buyWork(placeLand(placeLand(kept, 1, 100, 90), 4, 30, 60, "meadow"), 4);
     kept = { ...armHero(raise(kept, "any", "A Book", DAY, 0), 0, 2), stolen: { kind: 4, x: 50, y: 90 } };
     const back = readBase(JSON.parse(JSON.stringify(kept)))!;
     expect(back.land).toEqual(kept.land);
@@ -304,13 +328,15 @@ describe("a camp kept, with all of this", () => {
     expect(back.stolen).toEqual(kept.stolen);
 
     const old = JSON.parse(JSON.stringify(newBase(1000, DAY))) as Record<string, unknown>;
-    for (const part of ["land", "meadowLand", "works", "arms", "nightAt", "stolen"]) delete old[part];
+    for (const part of ["land", "meadowLand", "works", "arms", "nightAt", "stolen", "front"]) delete old[part];
     const read = readBase(old)!;
     expect(read).toMatchObject({ land: [], meadowLand: [], works: [], nightAt: 0, stolen: null });
     expect(read.arms.every((blade) => blade === -1)).toBe(true);
-    // Two of one construct, a blade in two hands, and things of no kind are not kept.
+    // A blade in two hands, and things of no kind are not kept. Two ward stones (kept before 1.5.11) are two
+    // archer's nests now; the dread totem a kind of no kind is read as is no more, and paid back.
     const odd = readBase({ ...old, works: [{ kind: 0, x: 50, y: 90 }, { kind: 0, x: 90, y: 90 }, { kind: 99, x: 1, y: 1 }], arms: [1, 1, 99, -5], land: [{ kind: 99, x: 5, y: 5 }, { kind: 2, x: 500, y: 5 }] })!;
-    expect(odd.works).toEqual([{ kind: 0, x: 50, y: 90 }, { kind: 11, x: 8, y: 52 }]);
+    expect([...odd.front.pads, ...odd.front.shed].filter((kind) => kind === 10)).toHaveLength(2);
+    expect(odd.acorns).toBe((old.acorns as number) + WORKS[11].cost);
     expect(odd.arms.slice(0, 4)).toEqual([1, -1, 8, -1]);
     expect(odd.land).toEqual([{ kind: 9, x: 6, y: 46 }, { kind: 2, x: 234, y: 46 }]);
   });
@@ -331,7 +357,7 @@ describe("the newer constructs", () => {
   };
 
   it("a tanglefoot patch slows whoever walks through it, and nobody who flies over", () => {
-    const patch = placeWork(laid, 4, 130, 90);
+    const patch = withWork(laid, 4, 130, 90);
     const free = after(lone(laid, "sprout", 120, 90), 1).x;
     const held = after(lone(patch, "sprout", 120, 90), 1).x;
     expect(free - 120).toBeGreaterThan(1);
@@ -344,7 +370,7 @@ describe("the newer constructs", () => {
   });
 
   it("a hornet jar stings what is on the wing near it, and leaves a walker be", () => {
-    const jar = placeWork(laid, 5, 130, 104);
+    const jar = withWork(laid, 5, 130, 104);
     expect(after(lone(jar, "mole", 130, 92), 1).hp).toBeLessThan(after(lone(laid, "mole", 130, 92), 1).hp);
     expect(after(lone(jar, "sprout", 130, 92), 1).hp).toBe(after(lone(laid, "sprout", 130, 92), 1).hp);
     // Out of its reach, nothing.
@@ -352,7 +378,7 @@ describe("the newer constructs", () => {
   });
 
   it("a pitfall has the first three on foot who step on it, and then is full", () => {
-    const pit = placeWork(laid, 6, 130, 90);
+    const pit = withWork(laid, 6, 130, 90);
     const battle = new Battle({ ...nightRaiders(pit), capacity: 5, kinds: ["sprout"], faction: 0 }, campStructures(pit, false));
     for (let scout = 0; scout < 5; scout++) battle.deploy("sprout", 100 - scout * 4, 90);
     for (let gone = 0; gone < 8; gone += BATTLE_TICK) battle.step(BATTLE_TICK);
@@ -388,9 +414,9 @@ describe("the newer constructs", () => {
     };
     const quiet = wait(laid);
     expect(quiet).toBeGreaterThan(0);
-    expect(wait(placeWork(laid, 7, 74, 92))).toBeCloseTo(quiet * 0.7, 3);
+    expect(wait(withWork(laid, 7, 74, 92))).toBeCloseTo(quiet * 0.7, 3);
     // Out of earshot it rings for nobody.
-    expect(wait(placeWork(laid, 7, 220, 110))).toBeCloseTo(quiet, 3);
+    expect(wait(withWork(laid, 7, 220, 110))).toBeCloseTo(quiet, 3);
   });
 
   it("act on a friend's scouts as they do on the night's raiders", () => {
@@ -398,13 +424,16 @@ describe("the newer constructs", () => {
     const theirs = {
       levels: laid.levels,
       yard: [],
-      spots: { ...laid.spots, store: [156, 90] as [number, number], burrow: [222, 66] as [number, number], oak: [222, 110] as [number, number], tower: [226, 88] as [number, number], hut: [24, 64] as [number, number] },
+      spots: { ...laid.spots, store: [156, 90] as [number, number], burrow: [222, 66] as [number, number], oak: [222, 110] as [number, number], tower: [226, 88] as [number, number], hut: [190, 64] as [number, number] },
       works: [{ kind: 6, x: 132, y: 90 }]
     };
     const begun = startFriendRaid({ ...ready, raidFrom: 0 }, theirs, { handle: "t", name: "T" }, { minutes: 600, day: "2026-10-13", lit: false })!;
     expect(begun.raid.setup.works).toBe(true);
+    // (1.5.11) Their pitfall is on their trail now, and the scouts come down it from the left.
+    const pit = begun.raid.structures.find((entry) => entry.look?.name === "work" && entry.look.variant === 6)!;
+    expect(pit.x).toBeLessThan(begun.raid.structures.find((entry) => entry.kind === "hoard")!.x);
     const battle = new Battle({ ...begun.raid.setup, capacity: 4, kinds: ["sprout"], hero: null }, begun.raid.structures);
-    for (let scout = 0; scout < 4; scout++) battle.deploy("sprout", 96 + scout * 2, 90);
+    for (let scout = 0; scout < 4; scout++) battle.deploy("sprout", 8 + scout * 2, pit.y);
     expect(battle.units).toHaveLength(4);
     for (let gone = 0; gone < 4; gone += BATTLE_TICK) battle.step(BATTLE_TICK);
     expect(battle.units.filter((unit) => unit.hp <= 0).length).toBeGreaterThanOrEqual(3);

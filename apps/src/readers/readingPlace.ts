@@ -43,8 +43,36 @@ export const readingLineIn = (chapters: readonly ChapterBox[], line: number, win
  * Pages: the page's first line, which is what a page is found again by. The
  * top of the window stands in when the reading line cannot be read.
  */
-export const placeToSave = (layout: "scroll" | "pages", readingLineCfi: string | null, topCfi: string | null) =>
-  layout === "scroll" ? (readingLineCfi ?? topCfi) : topCfi;
+export const placeToSave = (layout: "scroll" | "pages", readingLineCfi: string | null, topCfi: string | null, carried: string | null = null) =>
+  // A place carried into a new layout (a phone turned) and not yet on a page
+  // shown: still the reader's. The pages first open at their chapter's top,
+  // and that was saved as the place: turned back before the page holding it
+  // came up (a keyboard that turned a phone "on its side" for a moment), the
+  // book reopened at the top of the chapter.
+  carried ?? (layout === "scroll" ? (readingLineCfi ?? topCfi) : topCfi);
+
+/**
+ * The place to save as the reader leaves the page (the app out of sight, the
+ * window closing): where the reading is, unless the page is between places
+ * just now (a jump settling, the book being laid out again, a carried place
+ * not yet shown), when the place last saved stands. Null: keep that one.
+ */
+export const placeOnLeaving = (now: {
+  layout: "scroll" | "pages";
+  readingLine: string | null;
+  pagePlace: string | null;
+  carried: string | null;
+  settling: boolean;
+  relaying: boolean;
+}): string | null => {
+  if (now.carried) {
+    return now.carried;
+  }
+  if (now.settling || now.relaying) {
+    return null;
+  }
+  return now.layout === "scroll" ? now.readingLine : now.pagePlace;
+};
 
 /**
  * A piece of a chapter in reading order: a run of text (one text node) or a

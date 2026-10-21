@@ -49,8 +49,18 @@ describe("splitSentences", () => {
     const parts = split(text);
     expect(text.length).toBeGreaterThan(LONG_SENTENCE);
     expect(parts).toEqual([`${half};`, `${half}.`]);
-    // A long sentence with nowhere good to cut is still cut.
+    // Every part but the last goes on (it is not the end of the sentence).
+    expect(splitSentences(text).map((span) => Boolean(span.cont))).toEqual([true, false]);
+  });
+
+  it("never cuts a long sentence at a comma, nor between two words", () => {
+    const half = "word ".repeat(40).trim();
+    const commas = `${half}, ${half}, ${half}.`;
+    expect(split(commas)).toEqual([commas]);
     const solid = "x".repeat(LONG_SENTENCE * 2 + 10);
-    expect(cutLong(solid, { start: 0, end: solid.length }).length).toBeGreaterThan(1);
+    expect(cutLong(solid, { start: 0, end: solid.length })).toEqual([{ start: 0, end: solid.length }]);
+    // A dash will do.
+    const dashed = `${half} — ${half}.`;
+    expect(split(dashed)).toEqual([`${half} —`, `${half}.`]);
   });
 });

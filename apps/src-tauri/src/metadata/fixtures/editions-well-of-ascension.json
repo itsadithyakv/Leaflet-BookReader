@@ -1,0 +1,16 @@
+{
+  "entries": [
+    {"title":"Well of Ascension","publishers":["Doherty Associates, LLC, Tom","Tor Books"],"publish_date":"2023","languages":[{"key":"/languages/eng"}],"covers":[13849916],"isbn_13":["9781250868299"]},
+    {"title":"The Well of Ascension","publishers":["Tor Fantasy"],"publish_date":"2019","languages":[{"key":"/languages/eng"}],"physical_format":"mass market paperback","covers":[14658377,10121319],"isbn_13":["9781250318572"],"isbn_10":["1250318572"]},
+    {"title":"The Well of Ascension","publishers":["Tor"],"publish_date":"2007","languages":[{"key":"/languages/eng"}],"physical_format":"Hardcover","covers":[15206420,14658341,1443143],"isbn_13":["9780765316882"],"isbn_10":["0765316889"]},
+    {"title":"The Well of Ascension (Mistborn, Book 2)","publishers":["Tor Fantasy"],"publish_date":"June 3, 2008","languages":[{"key":"/languages/eng"}],"physical_format":"Mass Market Paperback","covers":[7248032],"isbn_13":["9780765356130"],"isbn_10":["0765356139"]},
+    {"title":"The Well of Ascension","publishers":["Gollancz"],"publish_date":"2009","languages":[{"key":"/languages/eng"}],"physical_format":"paperback","covers":[15217275,15217274,14846716,14658353,10193950],"isbn_13":["9780575089938"],"isbn_10":["0575089938"]},
+    {"title":"The Well of Ascension","publishers":["Gollancz"],"publish_date":"2017","languages":[{"key":"/languages/eng"}],"covers":[14658375,8458741],"isbn_13":["9781473223080"],"isbn_10":["1473223083"]},
+    {"title":"Sissoylu 2 - Kusatma","publishers":["Akilcelen Kitaplar"],"publish_date":"Oct 18, 2019","physical_format":"paperback","covers":[12119190],"isbn_13":["9786052382561"],"isbn_10":["6052382562"]},
+    {"title":"El pozo de la ascensión","publishers":["B de Bolsillo"],"publish_date":"2021","covers":[12547282],"isbn_13":["9788413143736"]},
+    {"title":"The Well of Ascension","publishers":["Macmillan Audio"],"publish_date":"2008-12-23","languages":[{"key":"/languages/eng"}],"physical_format":"eAudiobook","covers":[14838159],"isbn_13":["9781427206381"]},
+    {"title":"Mistborn","publishers":["GraphicAudio"],"publish_date":"Feb 08, 2014","physical_format":"audio cd","covers":[10622604],"isbn_13":["9781628510706"],"isbn_10":["1628510706"]},
+    {"title":"ミストスピリット 霧のうつし身 2","publishers":["ToÌ„kyoÌ„ : Hayakawa ShoboÌ„, 2010."],"publish_date":"Apr 15, 2010","physical_format":"paperback bunko","covers":[10189167],"isbn_13":["9784150205126"],"isbn_10":["4150205124"]},
+    {"title":"The Well of Ascension: A Mistborn Novel","publishers":["Tor Teen"],"publish_date":"Aug 05, 2014","covers":[8452665],"isbn_13":["9780765377142"],"isbn_10":["0765377144"]}
+  ]
+}

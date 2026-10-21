@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { baseLanguage, loadPrefs, nextRate, pickVoice, rateLabel, READ_ALOUD_KEY, savePrefs, voicesFor } from "./prefs";
+import { baseLanguage, loadPrefs, nextRate, pickVoice, RATES, rateLabel, READ_ALOUD_KEY, savePrefs, snapRate, voicesFor } from "./prefs";
 import type { SpeechVoice } from "./engine";
 
 const memory = () => {
@@ -36,12 +36,19 @@ describe("read-aloud prefs", () => {
     expect(() => savePrefs({ getItem: () => null, setItem: () => { throw new Error("full"); } }, { rate: 1, voices: {} })).not.toThrow();
   });
 
-  it("steps the speed round from 0.75x to 2x", () => {
-    expect(nextRate(1)).toBe(1.25);
-    expect(nextRate(1.75)).toBe(2);
-    expect(nextRate(2)).toBe(0.75);
+  it("offers 0.75x, then 0.8x to 2x a tenth at a time; the pill steps round a few of them", () => {
+    expect(RATES).toEqual([0.75, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2]);
+    expect(nextRate(1)).toBe(1.2);
+    expect(nextRate(1.75)).toBe(1.8);
+    expect(nextRate(2)).toBe(0.8);
+    expect(nextRate(0.75)).toBe(0.8);
     expect(rateLabel(1)).toBe("1×");
-    expect(rateLabel(1.25)).toBe("1.25×");
+    expect(rateLabel(1.2)).toBe("1.2×");
+    expect(rateLabel(0.75)).toBe("0.75×");
+    // A speed kept from before (1.25x) is the nearest offered now.
+    expect(snapRate(1.25)).toBe(1.2);
+    expect(snapRate(1.71)).toBe(1.7);
+    expect(snapRate("fast")).toBe(1);
   });
 
   it("offers the voices for the book's language, its own region and the engine's pick first", () => {
@@ -58,5 +65,10 @@ describe("read-aloud prefs", () => {
     expect(pickVoice(VOICES, "en-US", { rate: 1, voices: { en: "gone" } })?.id).toBe("us-1");
     expect(pickVoice(VOICES, "fr", { rate: 1, voices: {} })?.id).toBe("fr-1");
     expect(pickVoice(VOICES, "ja", { rate: 1, voices: {} })).toBeNull();
+    // Offline, a voice chosen that needs the network is passed over for now (it would say nothing), and kept.
+    const prefs = { rate: 1, voices: { en: "us-net" } };
+    expect(pickVoice(VOICES, "en-US", prefs)?.id).toBe("us-net");
+    expect(pickVoice(VOICES, "en-US", prefs, { offline: true })?.id).toBe("us-1");
+    expect(prefs.voices.en).toBe("us-net");
   });
 });

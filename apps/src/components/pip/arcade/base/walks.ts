@@ -67,11 +67,11 @@ export const wayRound = (from: readonly [number, number], to: readonly [number, 
     [to[0], to[1]]
   ];
 
-/** The same, for whoever needs to know that there is no way round: null then. */
-export const findWay = (from: readonly [number, number], to: readonly [number, number], blocks: readonly Block[]): Array<[number, number]> | null => {
-  const a: [number, number] = [from[0], from[1]];
-  const b: [number, number] = [to[0], to[1]];
-  if (clearWay(blocks, a, b)) return [a, b];
+/** Which cells of the grid are taken, for a list of what is in the way: worked out once for each list (a night's walkers share theirs). */
+const SHUT = new WeakMap<readonly Block[], Uint8Array>();
+const shutOf = (blocks: readonly Block[]) => {
+  const kept = SHUT.get(blocks);
+  if (kept) return kept;
   const shut = new Uint8Array(COLS * ROWS);
   for (let row = 0; row < ROWS; row++) {
     for (let col = 0; col < COLS; col++) {
@@ -79,6 +79,16 @@ export const findWay = (from: readonly [number, number], to: readonly [number, n
       if (within(blocks, x, y, ROOM)) shut[row * COLS + col] = 1;
     }
   }
+  SHUT.set(blocks, shut);
+  return shut;
+};
+
+/** The same, for whoever needs to know that there is no way round: null then. */
+export const findWay = (from: readonly [number, number], to: readonly [number, number], blocks: readonly Block[]): Array<[number, number]> | null => {
+  const a: [number, number] = [from[0], from[1]];
+  const b: [number, number] = [to[0], to[1]];
+  if (clearWay(blocks, a, b)) return [a, b];
+  const shut = shutOf(blocks);
   /** The open cell nearest a point: a door's own cell is as often as not under its building. */
   const nearest = (x: number, y: number) => {
     const [col, row] = cellOf(x, y);

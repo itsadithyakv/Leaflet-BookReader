@@ -16,7 +16,10 @@ import { backdropClose } from "./ui/backdrop";
  * Pip asks once, at a good moment: right after a session wrap-up in which the
  * day's goal was met, or that was a proper sit-down (`GOOD_SESSION_MINUTES`),
  * and only once Leaflet has been used on a few different days (a rating from
- * someone who opened it yesterday says little).
+ * someone who opened it yesterday says little). A wrap-up only follows a Focus
+ * session, so closing a book read freely is a good moment too, on the same
+ * terms (`noteBookOpened`/`noteBookClosed`): until 1.5.10 a reader who never
+ * used Focus was never asked (the owner, 2026-10-21).
  *
  * A day used is counted when Leaflet opens, when its window comes back to the
  * front, and when a session ends. It used to be counted only when Leaflet
@@ -95,6 +98,46 @@ export const openStoreReview = async () => {
   await accountService.openLink(STORE_WEB_URL);
 };
 
+const RATE_MOMENT = "leaflet:rate-moment";
+
+/** Where today's reading stood when a book was opened. */
+let openedWith: { day: string; minutes: number; met: boolean } | null = null;
+
+const todayFigures = () => {
+  const snapshot = useHabitStore.getState().snapshot;
+  // The day is noted with the figures: a visit that runs past midnight counts today's reading from nothing (`goodVisit`).
+  return { day: getDateKey(), minutes: snapshot.todayMinutes, met: snapshot.todayMet };
+};
+
+/** A book was opened: remembers where today's reading stood. */
+export const noteBookOpened = () => {
+  openedWith = todayFigures();
+};
+
+/** Whether a visit to a book was a good moment to ask: a proper sit-down, or the day's goal met during it. */
+export const goodVisit = (
+  before: { day: string; minutes: number; met: boolean },
+  after: { day: string; minutes: number; met: boolean }
+) => {
+  const read = before.day === after.day ? after.minutes - before.minutes : after.minutes;
+  const metNow = after.met && !(before.day === after.day && before.met);
+  return read >= GOOD_SESSION_MINUTES || metNow;
+};
+
+/**
+ * A book was closed. The reader's last minutes reach the ledger a moment after
+ * it closes, so the figures are read once they have.
+ */
+export const noteBookClosed = () => {
+  const before = openedWith;
+  openedWith = null;
+  if (!before) return;
+  window.setTimeout(() => {
+    noteDayUsed();
+    if (goodVisit(before, todayFigures()) && mayAsk()) window.dispatchEvent(new Event(RATE_MOMENT));
+  }, 1500);
+};
+
 /** Mounted once in the app. Shows itself when a good moment comes. */
 export const RatePrompt = () => {
   const [open, setOpen] = useState(false);
@@ -126,6 +169,13 @@ export const RatePrompt = () => {
     }
     return undefined;
   }, [wrapUp]);
+
+  // Or: a book read freely, closed after a proper sit-down.
+  useEffect(() => {
+    const moment = () => setOpen(true);
+    window.addEventListener(RATE_MOMENT, moment);
+    return () => window.removeEventListener(RATE_MOMENT, moment);
+  }, []);
 
   // Back is "Later", as a tap outside is.
   useBackClose(open, () => {

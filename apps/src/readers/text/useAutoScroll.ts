@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { PAGE_TOP_PAD } from "../finish";
-import { AUTO_SCROLL_DEFAULT_KEY, AUTO_SCROLL_YIELD_BACK_MS, AUTO_SCROLL_YIELD_AHEAD_MS, AUTO_SCROLL_TUNE_COOLDOWN_MS, autoScrollLinesPerMinute, autoScrollPixelsPerSecond, autoScrollSpeedForLines, readAutoScrollDefault } from "../autoScroll";
+import { AUTO_SCROLL_DEFAULT_KEY, AUTO_SCROLL_YIELD_BACK_MS, AUTO_SCROLL_YIELD_AHEAD_MS, AUTO_SCROLL_TUNE_COOLDOWN_MS, autoScrollLinesPerMinute, autoScrollPixelsPerSecond, autoScrollSpeedForLines, autoScrollStep, autoScrollCounted, readAutoScrollDefault } from "../autoScroll";
 import { stillTooLong } from "../pacing";
 import { isTouchInput } from "../../platform/device";
 import { predictWpm, readerPace } from "../paceModel";
@@ -250,14 +250,15 @@ export const useAutoScrollEngine = (reader: WithCover) => {
       const before = container.scrollTop;
       const speedPxPerSecond = autoScrollPixelsPerSecond(autoScrollSpeed, linePx());
       autoScrollCarryRef.current += speedPxPerSecond * deltaSeconds;
-      const move = Math.floor(autoScrollCarryRef.current);
+      // A screen pixel at a time, not a CSS one (readers/autoScroll.ts: autoScrollStep).
+      const move = autoScrollStep(autoScrollCarryRef.current, window.devicePixelRatio);
       if (move > 0) {
         container.scrollTop = before + move;
         // What the page really moved: on a display scaled to 150% a step of
         // one pixel lands on the next device pixel, a third further, and
         // "35 lines a minute" ran at 47. Counting the step asked for hid it.
         const moved = container.scrollTop - before;
-        const counted = moved > 0 ? moved : move;
+        const counted = autoScrollCounted(move, moved);
         autoScrollCarryRef.current -= counted;
         autoScrollRunRef.current.px += counted;
       }

@@ -12,3 +12,34 @@
   /* The smallest thing a finger can hit reliably (Android asks for 48 dp; 44 is the floor). */
   --touch-target: 44px;
 }
+
+/* Over the app while a turn the app made is under way (platform/shape.ts `showVeil`): the page's own colour, down
+   at once (no first frame of the page laid out the other way about), lifted with a soft blur and fade once the new
+   shape and its insets are on. */
+.turn-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  background: rgb(var(--color-background));
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.turn-veil.is-lifting {
+  -webkit-backdrop-filter: blur(0);
+  backdrop-filter: blur(0);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    backdrop-filter 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    -webkit-backdrop-filter 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .turn-veil.is-lifting {
+    transition: opacity 120ms linear;
+  }
+}

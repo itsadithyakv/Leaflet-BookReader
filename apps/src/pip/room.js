@@ -638,17 +638,18 @@ const ITEMS = [
     }
   },
   {
-    id: "poster", name: "Reading Poster", kind: "wall", price: 60, w: 18, h: 22, at: [4, 6], mount: "wall",
+    // 19 wide: READ (15 pixels) with a pixel of paper either side, its D clear of the frame.
+    id: "poster", name: "Reading Poster", kind: "wall", price: 60, w: 19, h: 22, at: [4, 6], mount: "wall",
     draw(g) {
       g.stamp((l) => {
-        l.rect(1, 1, 16, 20, "#FFF6DF").rect(2, 2, 14, 11, "#7FD6FF");
+        l.rect(1, 1, 17, 20, "#FFF6DF").rect(2, 2, 15, 11, "#7FD6FF");
         l.ell(9, 10, 4, 3.4, (nx, ny) => (nx + ny < -0.6 ? "#A2E477" : "#6CC04A"));
         l.px(7, 9, "#10231A").px(10, 9, "#10231A").px(8, 11, "#10231A").px(9, 11, "#10231A");
         l.line(9, 6, 10, 4, "#285F36").ell(11.5, 3.6, 2, 1.2, "#2FA35E");
-        l.rect(2, 12, 14, 1, "#1FA36A");
+        l.rect(2, 12, 15, 1, "#1FA36A");
       }, "#2A2A33");
       g.text("READ", 2, 14, "#C8453B", false);
-      g.px(1, 1, "#FFFFFFaa").px(16, 1, "#FFFFFFaa");
+      g.px(1, 1, "#FFFFFFaa").px(17, 1, "#FFFFFFaa");
     }
   },
   {

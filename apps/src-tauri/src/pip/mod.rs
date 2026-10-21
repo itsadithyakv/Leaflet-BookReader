@@ -20,6 +20,8 @@ use std::sync::OnceLock;
 
 /// What is in Pip's fridge, from the snacks on record; and what finding it bare costs her.
 pub mod fridge;
+/// The things never sold, only earned by reading: the rules, from the records.
+pub mod earned;
 /// Streak freezes, bought with seeds.
 pub mod freezes;
 /// A thing paid for here and owned by a friend.
@@ -225,14 +227,14 @@ pub(crate) fn owned_free(catalogue: &Catalogue) -> BTreeSet<(String, String)> {
 }
 
 /// How many things the reader owns because a record says so: bought, or given
-/// by a friend. Not the free things everyone has, and not the starter pieces
-/// that came with a floor.
+/// by a friend. Not the free things everyone has, not the starter pieces
+/// that came with a floor, and not the things earned by reading (`earned`).
 pub fn bought_count(catalogue: &Catalogue, purchases: &[Purchase]) -> i64 {
   let free = owned_free(catalogue);
   owned(catalogue, purchases)
     .iter()
     .filter(|thing| !free.contains(*thing))
-    .filter(|(kind, id)| catalogue.get(kind, id).map(|item| item.free_with.is_none()).unwrap_or(true))
+    .filter(|(kind, id)| catalogue.get(kind, id).map(|item| item.free_with.is_none() && !item.earned_only).unwrap_or(true))
     .count() as i64
 }
 

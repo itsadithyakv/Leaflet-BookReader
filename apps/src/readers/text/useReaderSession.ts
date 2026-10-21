@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getSessionProgress, sessionElapsedMs, useHabitStore } from "../../store/habitStore";
 import { useReadingHeartbeat } from "../../hooks/useReadingHeartbeat";
+import { shownProgress } from "../sessionProgress";
 import { useFocusLockExit } from "../../hooks/useFocusLockExit";
 import type { WithPrefs } from "./scope";
 
@@ -29,7 +30,8 @@ export const useReaderSession = (reader: WithPrefs) => {
       return undefined;
     }
     const timer = window.setInterval(() => {
-      setCoffeeProgress(getSessionProgress(activeSession));
+      // In half percent steps: the same value again draws nothing (readers/sessionProgress.ts).
+      setCoffeeProgress(shownProgress(getSessionProgress(activeSession)));
     }, 1200);
     return () => window.clearInterval(timer);
   }, [activeSession]);

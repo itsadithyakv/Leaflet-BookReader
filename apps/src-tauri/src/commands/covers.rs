@@ -3,6 +3,10 @@
 
 use super::*;
 use crate::metadata::editions;
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+use tauri::ipc::Channel;
 
 // ---- covers ----------------------------------------------------------------
 //
@@ -25,34 +29,95 @@ pub struct CoverAsk {
 /// another (Open Library asks clients to be gentle).
 const SERIES_MAX: usize = 24;
 
+/// Told as each book of the series has been looked up: `done` of `total`.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CoverProgress {
+  pub done: usize,
+  pub total: usize
+}
+
+/// The newest look for a series' covers. An older one stops between books:
+/// its sheet was closed, or opened again.
+static COVERS_TURN: AtomicU64 = AtomicU64::new(0);
+
+/// The language most of these books are in, as Open Library writes it, from
+/// each EPUB's own `dc:language`. English when none says.
+fn series_language(books: &[(PathBuf, String)]) -> String {
+  let mut counts: HashMap<String, usize> = HashMap::new();
+  for (path, hash) in books {
+    let converted = storage::converted_epub_path(hash).ok();
+    let Some(epub) = crate::search::epub_of(path, converted.as_deref()) else {
+      continue;
+    };
+    let tag = storage::epub::package(&epub).ok().and_then(|package| package.language);
+    if let Some(code) = tag.as_deref().and_then(editions::language_code) {
+      *counts.entry(code).or_default() += 1;
+    }
+  }
+  counts
+    .into_iter()
+    .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(&a.0)))
+    .map(|(code, _)| code)
+    .unwrap_or_else(|| "eng".to_string())
+}
+
 /// The sets of covers a series can wear: one publisher's cover for each book
-/// it published, the publishers that cover most of the series first.
+/// it published, the publishers that cover most of the series first. Each
+/// book is told of down `on_progress` once it has been looked up.
 #[tauri::command]
-pub async fn series_cover_sets(books: Vec<CoverAsk>, state: State<'_, AppState>) -> Result<Vec<editions::CoverSet>, String> {
+pub async fn series_cover_sets(
+  books: Vec<CoverAsk>,
+  on_progress: Channel<CoverProgress>,
+  state: State<'_, AppState>
+) -> Result<Vec<editions::CoverSet>, String> {
+  let turn = COVERS_TURN.fetch_add(1, AtomicOrdering::SeqCst) + 1;
   // Only books this library has: an id is what a cover is later put on.
-  let known: Vec<CoverAsk> = {
+  let (known, files): (Vec<CoverAsk>, Vec<(PathBuf, String)>) = {
     let db = state.db.guard();
     books
       .into_iter()
-      .filter(|ask| !ask.title.trim().is_empty() && db.find_by_id(&ask.book_id).ok().flatten().is_some())
+      .filter(|ask| !ask.title.trim().is_empty())
+      .filter_map(|ask| {
+        let book = db.find_by_id(&ask.book_id).ok().flatten()?;
+        Some((ask, (PathBuf::from(book.local_path), book.file_hash)))
+      })
       .take(SERIES_MAX)
-      .collect()
+      .unzip()
   };
-  let mut found = Vec::with_capacity(known.len());
+  let language = tauri::async_runtime::spawn_blocking(move || series_language(&files))
+    .await
+    .unwrap_or_else(|_| "eng".to_string());
+  let total = known.len();
+  // The sheet may have shut: nobody is listening, and that is fine.
+  let _ = on_progress.send(CoverProgress { done: 0, total });
+  let mut found = Vec::with_capacity(total);
   let mut failed = None;
-  for ask in known {
+  for (at, ask) in known.into_iter().enumerate() {
+    if COVERS_TURN.load(AtomicOrdering::SeqCst) != turn {
+      return Ok(Vec::new());
+    }
     let query = normalize::normalize_query(&ask.title, ask.author.as_deref());
     match editions::fetch(&query.title, query.author.as_deref()).await {
-      Ok(covers) => found.push((ask.book_id, covers)),
+      Ok(covers) => {
+        found.push(editions::SeriesBook { book_id: ask.book_id, title: query.title, covers });
+      }
       // One book the catalogue will not answer for does not lose the rest.
       Err(error) => failed = Some(error.to_string())
     }
+    let _ = on_progress.send(CoverProgress { done: at + 1, total });
   }
-  let sets = editions::cover_sets(&found);
+  let sets = editions::cover_sets(&found, &language);
   match (sets.is_empty(), failed) {
     (true, Some(error)) => Err(format!("Could not reach Open Library: {error}")),
     _ => Ok(sets)
   }
+}
+
+/// Stops the look for a series' covers that is running: its sheet was closed.
+#[tauri::command]
+pub fn series_cover_sets_cancel() {
+  COVERS_TURN.fetch_add(1, AtomicOrdering::SeqCst);
 }
 
 async fn cover_bytes(cover_id: i64, size: char) -> Result<Vec<u8>, String> {

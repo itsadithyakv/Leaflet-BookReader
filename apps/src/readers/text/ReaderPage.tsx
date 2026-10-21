@@ -14,6 +14,7 @@ import { android, onAndroid } from "../../platform/android";
 import { isPhoneShape } from "../touchLayout";
 import { FurtherOnOffer } from "../../components/sync/FurtherOnOffer";
 import { PhoneReadingMarks } from "./PhoneReadingMarks";
+import { ReaderEdges } from "./ReaderEdges";
 
 /** The page: the book itself, and what sits over its foot (the selection bar, a note, the dock). */
 export const ReaderPage = ({ reader }: { reader: ReaderScope }) => {
@@ -67,7 +68,9 @@ export const ReaderPage = ({ reader }: { reader: ReaderScope }) => {
         <div className={`reader-page-frame relative h-full overflow-hidden ${paged ? "" : "is-scrolling"}`}>
           {/* (Not while the book is laid out anew: the page that was stays until the new one is up.) */}
           {loading && !reader.relayingRef.current && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center text-sm reader-panel-soft reader-muted">
+            <div
+              className="reader-loading absolute inset-0 z-10 flex items-center justify-center text-sm"
+            >
               Loading book...
             </div>
           )}
@@ -81,6 +84,8 @@ export const ReaderPage = ({ reader }: { reader: ReaderScope }) => {
                 : undefined
             }
           />
+          {/* Where the text scrolls out under the bars and the window's edges, it goes soft (readers/scrollEdges.ts). */}
+          <ReaderEdges reader={reader} />
           <SpeedReadStage reader={reader} />
           <PhoneReadingMarks reader={reader} />
           {(selection || people.card) && (

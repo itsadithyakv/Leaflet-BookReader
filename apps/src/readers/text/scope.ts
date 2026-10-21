@@ -104,6 +104,7 @@ export interface ReaderLater {
   sectionWordsRef: MutableRefObject<Map<number, number>>;
   updateOutlookRef: MutableRefObject<() => void>;
   chapterEntryRef: MutableRefObject<number>;
+  entryHere: (section: number) => number;
   // useNotesAndPictures
   noteRequestRef: MutableRefObject<number>;
   setNote: Dispatch<SetStateAction<{ href: string; marker: string; paragraphs: NoteRun[][]; truncated: boolean } | null>>;
@@ -115,8 +116,6 @@ export interface ReaderLater {
   markReadingActivity: ReturnType<typeof useReadingHeartbeat>;
   // useReaderChrome
   people: ReturnType<typeof usePeopleReader>;
-  chromeBackHides: boolean;
-  hideChrome: () => void;
   // usePhoneReading
   cornerBookmarkRef: MutableRefObject<() => boolean>;
   // useBookAnnotations

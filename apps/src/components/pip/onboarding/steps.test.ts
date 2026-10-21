@@ -86,19 +86,16 @@ describe("the guided session's steps", () => {
     expect(resolveStep(STEP.larder, fresh({ welcome: given, gathered: 20 }))).toBe(STEP.larder);
     // The larder went up before the app closed: on to the basket.
     expect(resolveStep(STEP.larder, fresh({ welcome: given, gathered: 20, store: 1 }))).toBe(STEP.basket);
-    // Larder, basket and burrow all done: at the door.
-    expect(resolveStep(STEP.larder, fresh({ welcome: welcome({ basketOpened: true }), gathered: 20, store: 1, burrow: 2 }))).toBe(STEP.door);
-    // Hello waits for its key, whatever the camp has done.
-    expect(resolveStep(STEP.hello, fresh({ welcome: given, gathered: 20, store: 1 }))).toBe(STEP.hello);
-    // Never back: a saved step past one that is not done stays where it was.
-    expect(resolveStep(STEP.burrow, fresh({ welcome: given }))).toBe(STEP.burrow);
-    // Reopened outside after buying the hat: the bridge.
-    expect(resolveStep(STEP.hat, fresh({ welcome: given, burrow: 2, hatOn: true }))).toBe(STEP.bridge);
-    // Reopened outside without the hat: still the hat's step (the door again).
-    expect(resolveStep(STEP.hat, fresh({ welcome: given, burrow: 2 }))).toBe(STEP.hat);
-    // Out of range is held in range.
+    // Larder and basket done: the last step, the reading that ends the first chapter (1.5.10: four steps, all outside).
+    expect(resolveStep(STEP.larder, fresh({ welcome: welcome({ basketOpened: true }), gathered: 20, store: 1 }))).toBe(STEP.bridge);
+    // Pip's hello is said with the oak: a camp saved on it starts at the oak.
+    expect(resolveStep(STEP.hello, fresh({ welcome: given }))).toBe(STEP.oak);
+    // The old steps (the burrow, the door, the hat) are gone: a camp saved on one carries on at the next there is.
+    expect(resolveStep(STEP.burrow, fresh({ welcome: given }))).toBe(STEP.bridge);
+    expect(resolveStep(STEP.hat, fresh({ welcome: given, burrow: 2 }))).toBe(STEP.bridge);
+    // Never back, and held in range.
     expect(resolveStep(99, fresh({ welcome: given }))).toBe(STEP.bridge);
-    expect(resolveStep(-3, fresh({ welcome: given }))).toBe(STEP.hello);
+    expect(resolveStep(-3, fresh({ welcome: given }))).toBe(STEP.oak);
   });
 
   it("puts a helping paw on the larder and the burrow while they go up, and nowhere else", () => {
@@ -123,10 +120,11 @@ describe("the guided session's steps", () => {
     const at = fresh({ welcome: welcome({ given: false, paws: 2 }, { done: true }), job: "store" });
     for (const step of DEMO_STEPS) expect(effectsOf(step, at, true)).toEqual([]);
     // It walks the steps out in the camp, and ends.
-    const seen: number[] = [STEP.hello];
-    for (let step = nextDemo(STEP.hello); step !== null; step = nextDemo(step)) seen.push(step);
+    const seen: number[] = [STEP.oak];
+    for (let step = nextDemo(STEP.oak); step !== null; step = nextDemo(step)) seen.push(step);
     expect(seen).toEqual([...DEMO_STEPS]);
-    expect(seen).not.toContain(STEP.hat);
+    // Four steps, all in the Hollow: no burrow to raise, no door, no hat, no seeds.
+    expect(seen).toEqual([STEP.oak, STEP.larder, STEP.basket, STEP.bridge]);
     expect(nextDemo(STEP.bridge)).toBeNull();
   });
 

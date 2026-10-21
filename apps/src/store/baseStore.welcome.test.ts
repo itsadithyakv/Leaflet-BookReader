@@ -90,7 +90,7 @@ describe("the sync guard: a new device does not overwrite a camp it has not pull
     expect(store.getState().base?.welcome.given).toBe(false);
     store.getState().gather();
     store.getState().build("store");
-    expect(store.getState().base?.jobs).toHaveLength(1);
+    expect(store.getState().base?.levels.store).toBe(1);
     expect(saves).toHaveLength(0);
 
     // The launch's pull.
@@ -129,7 +129,7 @@ describe("the sync guard: a new device does not overwrite a camp it has not pull
     expect(saves).toHaveLength(0);
     await library.getState().syncNow();
     await vi.waitFor(() => expect(saves.length).toBeGreaterThan(0));
-    expect(saves[saves.length - 1]?.jobs[0]?.site).toBe("store");
+    expect(saves[saves.length - 1]?.levels.store).toBe(1);
   });
 
   it("stays up while the account holds a library still to be brought in", async () => {
@@ -147,7 +147,7 @@ describe("the sync guard: a new device does not overwrite a camp it has not pull
 });
 
 describe("the welcome through the store", () => {
-  it("walks the session: the oak, the larder by a paw, the basket, the burrow by the other; then finishes", async () => {
+  it("walks the session: the oak, the larder, the basket, the burrow, each standing as it is paid for; then finishes", async () => {
     const { store } = await load();
     await store.getState().open();
     await vi.waitFor(() => expect(store.getState().welcomeReady).toBe(true));
@@ -156,13 +156,17 @@ describe("the welcome through the store", () => {
     s().setTutorialStep(2);
     s().gather();
     expect(s().base!.acorns).toBe(50);
-    expect(s().usePaw("store")).toBe(true);
+    s().build("store");
     expect(s().base!.levels.store).toBe(1);
-    expect(s().base!.acorns).toBe(35);
+    // A paw has nothing left to finish: the larder stood when it was paid for.
+    expect(s().usePaw("store")).toBe(false);
+    expect(s().base!.acorns).toBe(32);
     s().openWelcomeBasket();
-    expect(s().base!.acorns).toBe(115);
-    expect(s().usePaw("burrow")).toBe(true);
-    expect(s().base!.levels.burrow).toBe(2);
+    expect(s().base!.acorns).toBe(112);
+    // The burrow is not bought since 1.5.10: it waits for chapter 3, read for.
+    s().build("burrow");
+    expect(s().base!.levels.burrow).toBe(1);
+    expect(s().base!.acorns).toBe(112);
     expect(s().usePaw("hut")).toBe(false);
     s().finishTutorial(false);
     expect(s().base!.welcome.tutorial).toMatchObject({ done: true, skipped: false });
@@ -176,7 +180,7 @@ describe("the welcome through the store", () => {
     const s = store.getState;
     s().finishTutorial(true);
     const before = s().base!;
-    expect(before.welcome.paws).toBe(2);
+    expect(before.welcome.paws).toBe(0);
     s().replayTutorial();
     s().setTutorialStep(4);
     expect(s().tutorialReplay).toEqual({ step: 4 });
@@ -186,7 +190,7 @@ describe("the welcome through the store", () => {
     expect(s().base).toBe(before);
   });
 
-  it("skipped, the paws still finish the next two builds", async () => {
+  it("skipped, the next builds stand at once as every build does, and no paw is spent", async () => {
     const { store } = await load();
     await store.getState().open();
     await vi.waitFor(() => expect(store.getState().welcomeReady).toBe(true));
@@ -195,6 +199,7 @@ describe("the welcome through the store", () => {
     s().gather();
     s().build("store");
     expect(s().base!.levels.store).toBe(1);
-    expect(s().base!.welcome.paws).toBe(1);
+    expect(s().base!.jobs).toEqual([]);
+    expect(s().base!.welcome.paws).toBe(0);
   });
 });

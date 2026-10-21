@@ -1,12 +1,13 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { isAndroid, isTouchInput } from "../platform/device";
 import { android, holdRotation, type RotationLock } from "../platform/android";
+import { steadyHeight, type HeightMemory } from "../platform/shape";
 import { LAYOUT_KEY, type ReaderLayout } from "./readerTypes";
 
 /**
  * The readers on a phone and a tablet (docs/android.md, "The reader"): what
  * shape of screen the book is on, what a tap on the page means there, and the
- * layout each way up remembers.
+ * layout, which a turn keeps.
  *
  *   desktop   a mouse (or a touch screen wider than a phone): as it was
  *   tablet    a finger, and room in both directions
@@ -34,8 +35,19 @@ export const readerShape = (width: number, height: number, touch: boolean): Read
 /** A phone, either way up: what has a compact toolbar and sheets. */
 export const isPhoneShape = (shape: ReaderShape) => shape === "upright" || shape === "sideways";
 
+/**
+ * The window's height for its shape: the tallest it has been at this width
+ * (platform/shape.ts, shared with the app around the pages). Without it a
+ * keyboard had the book laid out again as a phone on its side, in pages, and
+ * back when the keyboard went, at the place it was saved at by then (the top
+ * of the chapter, the pages having opened there).
+ */
+export { steadyHeight, type HeightMemory };
+
+const windowHeights: HeightMemory = { width: 0, height: 0 };
+
 const currentShape = (): ReaderShape =>
-  typeof window === "undefined" ? "desktop" : readerShape(window.innerWidth, window.innerHeight, isTouchInput());
+  typeof window === "undefined" ? "desktop" : readerShape(window.innerWidth, steadyHeight(windowHeights, window.innerWidth, window.innerHeight), isTouchInput());
 
 const subscribeShape = (listener: () => void) => {
   window.addEventListener("resize", listener);
@@ -92,30 +104,64 @@ export const tapAction = (zone: 1 | -1 | 0, layout: ReaderLayout, immersive = fa
   return { kind: "turn", step: zone };
 };
 
-// ---- The layout each way up --------------------------------------------------
+/**
+ * What a run of finger taps does (readers/tapRun.ts), from what one tap there
+ * would (`single`, `tapAction`). Two taps bring the menu or send it away,
+ * anywhere; three select the word (that is the tap counter's own), so the
+ * run does nothing more. One tap keeps its own meaning, except in the middle:
+ * the menu no longer comes for one tap, which a scroll could be taken for.
+ */
+export const runAction = (single: TapAction, taps: number): TapAction => {
+  if (taps >= 3) {
+    return { kind: "none" };
+  }
+  if (taps === 2) {
+    return { kind: "chrome" };
+  }
+  return single.kind === "chrome" ? { kind: "none" } : single;
+};
 
-/** A sideways phone's own layout. The upright phone (and every other screen) keeps `LAYOUT_KEY`. */
+// ---- The layout, kept as the phone turns ---------------------------------------
+
+/**
+ * Where a sideways phone's own layout used to be kept, apart from the upright
+ * one. It is read only for a book opened sideways by a reader who has never
+ * chosen a layout (`layoutForShape`), and goes once one is chosen.
+ */
 export const SIDEWAYS_LAYOUT_KEY = "leaflet.reader.layout.sideways";
 
-export type StoredLayouts = { upright: string | null; sideways: string | null };
+/** `chosen`: the reader's own choice (`LAYOUT_KEY`), for every shape. `sideways`: the old sideways key. */
+export type StoredLayouts = { chosen: string | null; sideways: string | null };
 
 const asLayout = (value: string | null): ReaderLayout | null => (value === "pages" || value === "scroll" ? value : null);
 
 /**
- * The layout for this shape of screen. Upright (and on a desktop or tablet),
- * the reader's own choice, scrolling by default. Sideways a phone has eight
- * or nine lines under a toolbar, so it defaults to pages, laid out as a
- * spread of two columns, like an open paperback; scrolling is its other
- * choice, and it is remembered apart.
+ * The layout a book opens in. Scrolling or pages is the reader's one choice,
+ * whichever way up the phone is: turning the phone never changes it (it used
+ * to: a phone kept a layout for each way up and on its side defaulted to
+ * pages, so a reader scrolling upright was put into pages by the turn, and
+ * back). Only a reader who has never chosen gets a default for the shape the
+ * book opens in: scrolling, or on a phone's side a spread of two pages (eight
+ * or nine lines under a toolbar read poorly scrolling).
  */
 export const layoutForShape = (shape: ReaderShape, stored: StoredLayouts): ReaderLayout =>
-  shape === "sideways" ? (asLayout(stored.sideways) ?? "pages") : (asLayout(stored.upright) ?? "scroll");
+  asLayout(stored.chosen) ?? (shape === "sideways" ? (asLayout(stored.sideways) ?? "pages") : "scroll");
+
+/**
+ * The layout after a turn of the phone (or any change of the window's shape):
+ * the one the book is in. A turn may make pages a spread or one column
+ * (`spreadFor`), never scrolling pages or pages scrolling.
+ */
+export const layoutAcrossTurn = (now: ReaderLayout): ReaderLayout => now;
 
 /** A tablet on its side spreads its pages from this wide (epub.js's own threshold for a spread). */
 export const TABLET_SPREAD_MIN_WIDTH = 800;
 
 const windowWidth = () => (typeof window === "undefined" ? 0 : window.innerWidth);
-const windowHeight = () => (typeof window === "undefined" ? 0 : window.innerHeight);
+const windowHeight = () => (typeof window === "undefined" ? 0 : steadyHeight(windowHeights, window.innerWidth, window.innerHeight));
+
+/** The window's height for its shape, now (`steadyHeight`): what a keyboard has not taken. */
+export const steadyWindowHeight = windowHeight;
 
 /**
  * Pages are a spread, two columns a turn, on a phone on its side and on a
@@ -131,9 +177,6 @@ const currentTabletSideways = () => currentShape() === "tablet" && windowWidth()
 /** A tablet on its side, kept as it turns (its shape stays "tablet"; its pages become a spread or stop being one). */
 export const useTabletSideways = (): boolean => useSyncExternalStore(subscribeShape, currentTabletSideways, () => false);
 
-/** The key a layout chosen on this shape of screen is kept under. */
-export const layoutKeyFor = (shape: ReaderShape) => (shape === "sideways" ? SIDEWAYS_LAYOUT_KEY : LAYOUT_KEY);
-
 const readKey = (key: string) => {
   try {
     return localStorage.getItem(key);
@@ -142,13 +185,15 @@ const readKey = (key: string) => {
   }
 };
 
-export const readStoredLayouts = (): StoredLayouts => ({ upright: readKey(LAYOUT_KEY), sideways: readKey(SIDEWAYS_LAYOUT_KEY) });
+export const readStoredLayouts = (): StoredLayouts => ({ chosen: readKey(LAYOUT_KEY), sideways: readKey(SIDEWAYS_LAYOUT_KEY) });
 
 export const readLayoutFor = (shape: ReaderShape): ReaderLayout => layoutForShape(shape, readStoredLayouts());
 
-export const saveLayoutFor = (shape: ReaderShape, layout: ReaderLayout) => {
+/** The reader chose a layout: for every way up, and the old sideways one goes. */
+export const saveLayout = (layout: ReaderLayout) => {
   try {
-    localStorage.setItem(layoutKeyFor(shape), layout);
+    localStorage.setItem(LAYOUT_KEY, layout);
+    localStorage.removeItem(SIDEWAYS_LAYOUT_KEY);
   } catch {
     // This session only.
   }
@@ -204,19 +249,35 @@ export const canLockRotation = () => isAndroid() && typeof document !== "undefin
 /**
  * What a reader asks of the Android side while it is open: the rotation lock
  * chosen in the type panel, and the system's bars out of the way (for a
- * focus-lock session, and on a phone on its side while the chrome is away).
- * Both are let go when the book closes. No-ops anywhere but the Android app.
+ * focus-lock session, and on a phone). Both are let go when the book closes.
+ * No-ops anywhere but the Android app.
  */
 /**
  * Whether the system's status and gesture bars are away while a book is open:
- * for a focus-lock session; on a phone held upright, for as long as the book
- * is open (the page is all there is, and the chrome comes over it; were the
- * bars to come and go with the chrome, the text would move under the finger
- * at every tap, since the page keeps clear of them); on a phone on its side,
- * while the chrome is away. A swipe in from the edge shows them for a moment.
+ * for a focus-lock session, and on a phone either way up for as long as the
+ * book is open (the page is all there is, and the chrome comes over it). Were
+ * the bars to come and go with the chrome, the text would move under the
+ * finger at every tap, since the page keeps clear of them: on its side the
+ * pages were laid out again, 18 of them a chapter with the chrome away and 21
+ * with it up, and the page being read was another. A swipe in from the edge
+ * shows them for a moment.
  */
-export const systemBarsHidden = (shape: ReaderShape, chromeVisible: boolean, locked: boolean) =>
-  locked || shape === "upright" || (shape === "sideways" && !chromeVisible);
+export const systemBarsHidden = (shape: ReaderShape, locked: boolean) =>
+  locked || isPhoneShape(shape);
+
+/** What lies over a phone's page, for `floatsAway`. */
+export type OverThePage = { keyboard: boolean; card: boolean; drawer: boolean; sheet: boolean };
+
+/**
+ * Whether what floats over the page by finger (the pace and read-aloud pills,
+ * and Dotty) is out of sight: while the keyboard is up, and while a card (a
+ * note, a character, a word looked up), the chapter list or a sheet is open
+ * over the page. The pill sat over the card being typed in, and over the
+ * chapter list. Only out of sight: Smart Read stays paused or reading as it
+ * was, and the pill's room at the foot is kept, so the text does not move.
+ */
+export const floatsAway = (shape: ReaderShape, over: OverThePage) =>
+  shape !== "desktop" && (over.keyboard || over.card || over.drawer || over.sheet);
 
 export const useReaderDevice = (barsHidden: boolean, rotation: RotationLock) => {
   // Held while the book is open, and let go when it closes, so the screen goes

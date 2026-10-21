@@ -16,16 +16,20 @@ import { markInkImages } from "../inkImages";
 import { friendlyOpenError } from "../openErrors";
 import { markOpenings, OPENINGS_CSS } from "../dropCaps";
 import { PAGE_FOOT_PAD, PAGES_CSS, PHONE_PAGE_GAP, PHONE_PAGES_CSS, PHONE_TEXT_CSS, PHONE_TEXT_PAD, phonePageSides } from "../pagesStyle";
-import { insetPx, isPhoneShape, readerShape } from "../touchLayout";
+import { insetPx, isPhoneShape, readerShape, steadyWindowHeight } from "../touchLayout";
 import { BLOCKS_CSS, markBlocks, markListedLines, pictureRoom } from "../bookBlocks";
+import { NARROW_CSS, markNarrowBoxes, markNarrowColumn, textColumnWidth } from "../narrowColumn";
 import { sectionsFromArchive } from "../archiveSections";
 import { holdsFetching } from "../scrollbarHold";
+import { heldScrollTop, holdsPrepend } from "../jumpSettle";
+import { aboveWindow, aboveWindowPrepended } from "../keepStill";
 import { isOutsideLink } from "../bookLinks";
 import { markViewable, pictureAt } from "../pictures";
-import { RELOCATE_AFTER_SCROLL_MS, afterScrollSettles, fetchAheadPx, readerScroll, reportWhileScrolling } from "../scrollQuiet";
+import { MOVING_FETCH_SCREENS, RELOCATE_AFTER_SCROLL_MS, afterScrollSettles, fetchAheadPx, readerScroll, reportWhileScrolling } from "../scrollQuiet";
 import { fractionAt } from "../seek";
+import { quietShow } from "../viewShow";
 import { fullerToc, tocFromNcx } from "../ncx";
-import { CONTENTS_KEY_PREFIX, decideContents, keepContents, placeKey, readKept, type KeptContents } from "../autoContents";
+import { CONTENTS_KEY_PREFIX, decideContents, keepContents, nestFlatParts, placeKey, readKept, type KeptContents } from "../autoContents";
 import { scanBook } from "../contentsScan";
 import { listedAgain } from "../chapterSpan";
 import { findInnerBooks, storyGaps, tocDepths, type ContentsRow } from "../innerBooks";
@@ -36,7 +40,11 @@ import type { WithCover } from "./scope";
 import { noteChapter } from "../../pip/base/storyFeed";
 import { isTouchInput } from "../../platform/device";
 import { freezeRendition, windowChangesLayout, type Ghost } from "./renditionGhost";
+import { dropReaderVeil, liftReaderVeil, raiseReaderVeil } from "../readerVeil";
 import { selectionIsAccidental, type Press } from "../touchSelect";
+
+/** Scrolling, a book drawn anew under the veil is uncovered this long after it is up: the line is pinned back by then. */
+const UNCOVER_SCROLLED_MS = 80;
 
 /**
  * Opens the book: reads the file, builds the contents, makes the rendition,
@@ -104,12 +112,22 @@ export const useBookOpening = (reader: WithCover) => {
     let cancelled = false;
     /** This rendition has drawn the reader's place: it can be held on screen while the next is made. */
     let shown = false;
-    /** Heard before epub.js hears it: a resize that changes the layout holds the page as it is (renditionGhost.ts). */
+    /**
+     * Heard before epub.js hears it, and before the window's first new size
+     * is drawn: a turn that makes pages a spread, or one column again, covers
+     * the page at once, until the book is drawn anew for the way up it ends
+     * at (useShapeLayout; readers/readerVeil.ts). The page as it is is held,
+     * deaf and mute, meanwhile (renditionGhost.ts): laid out at the sizes
+     * the window passes through, it moved the place it is about to be drawn
+     * anew at. A turn that keeps the layout is covered as the page's frame
+     * changes size (useResizeRelayout).
+     */
     const onResizeFirst = () => {
       const rendition = renditionRef.current;
       if (!shown || ghostRef.current || !rendition || !windowChangesLayout({ layout: layoutRef.current, spread: reader.spreadRef.current })) {
         return;
       }
+      raiseReaderVeil(viewerRef.current);
       ghostRef.current = freezeRendition(rendition);
     };
 
@@ -187,7 +205,7 @@ export const useBookOpening = (reader: WithCover) => {
 
         window.addEventListener("resize", onResizeFirst);
         /** On a phone (readers/pagesStyle.ts): narrower margins, the cutout as a page's margin, hyphenation that works. */
-        const phone = isPhoneShape(readerShape(window.innerWidth, window.innerHeight, isTouchInput()));
+        const phone = isPhoneShape(readerShape(window.innerWidth, steadyWindowHeight(), isTouchInput()));
         // Scrolling is one continuous book: the chapters follow each other
         // down the page, fetched as the reading nears them. It used to be a
         // chapter at a time, swapped for the next at its last line.
@@ -228,9 +246,106 @@ export const useBookOpening = (reader: WithCover) => {
             }
             // Scrolling down through a chapter, the next is fetched two
             // windows ahead (readers/scrollQuiet.ts: fetchAheadPx).
-            const ahead = args.length === 0 && manager.container ? fetchAheadPx(manager.container.scrollTop, manager.container.clientHeight) : null;
+            // In a fling, three windows ahead (readers/scrollQuiet.ts: fetchWhileMoving).
+            const now = Date.now();
+            const moving = now < reader.appendOnlyUntilRef.current;
+            const ahead =
+              args.length === 0 && manager.container
+                ? moving
+                  ? Math.round(manager.container.clientHeight * MOVING_FETCH_SCREENS)
+                  : fetchAheadPx(manager.container.scrollTop, manager.container.clientHeight)
+                : null;
+            // A jump settling, or a fetch asked for in a fling: no chapter is
+            // put in above, which needs a scroll to keep the text still (it
+            // fell short under a jump's place, and stops a fling). epub.js
+            // is told the page is far enough down not to want one
+            // (readers/jumpSettle.ts).
+            if (manager.container && !manager.settings?.fullsize && (holdsPrepend(reader.jumpHoldRef.current, now) || moving)) {
+              const given = typeof args[1] === "number" ? args[1] : 0;
+              const reach = Math.max(given, ahead ?? 0, Number(manager.settings?.offset) || 0);
+              manager.scrollTop = heldScrollTop(manager.container.scrollTop, reach);
+            }
             return ahead !== null ? check(undefined, ahead) : check(...args);
           };
+          // A chapter fetched ahead is kept drawn until it is reached. epub.js
+          // lets go of (empties) every chapter more than 500px from the window
+          // whenever it looks, so one fetched three windows ahead was emptied
+          // at the next look and drawn again as it came into the window: in a
+          // fling, a blank stretch where it should have been.
+          if (typeof manager.update === "function") {
+            const update = manager.update.bind(manager);
+            manager.update = (offset?: number) =>
+              update(
+                typeof offset === "number"
+                  ? offset
+                  : Math.max(Number(manager.settings?.offset) || 0, Math.round((manager.container?.clientHeight ?? 0) * MOVING_FETCH_SCREENS))
+              );
+          }
+          // A chapter above the window that changes height (a picture in it
+          // arrives, it is drawn again after being let go, its fonts come)
+          // moved the text being read by as much: epub.js keeps the text
+          // still only for a chapter it has just put above. Every other one
+          // above the window does the same now (readers/keepStill.ts).
+          if (typeof manager.createView === "function" && typeof manager.prepend === "function" && typeof manager.counter === "function") {
+            const createView = manager.createView.bind(manager);
+            /** Keeps the text still when `view` changes height above the window, by `rule` (readers/keepStill.ts). */
+            const keepStill = (view: any, rule: typeof aboveWindow) =>
+              view.on("resized", (bounds: { heightDelta?: number } | undefined) => {
+                const container = manager.container as HTMLElement | undefined;
+                const element = view.element as HTMLElement | undefined;
+                const delta = Number(bounds?.heightDelta) || 0;
+                if (!container || !element?.isConnected || manager.isPaginated || layoutRef.current !== "scroll") {
+                  return;
+                }
+                if (rule(element.offsetTop, element.offsetHeight, delta, container.scrollTop)) {
+                  manager.counter(bounds);
+                }
+                // A jump's place held: put back by where it is, which a
+                // change told in steps (or told twice) cannot leave short.
+                reader.pinNowRef.current?.();
+              });
+            let prepending = false;
+            manager.createView = (...args: unknown[]) => {
+              const view = createView(...args);
+              if (!prepending && typeof view?.on === "function") {
+                keepStill(view, aboveWindow);
+              }
+              return view;
+            };
+            // epub.js's own `prepend`, but for when it keeps the text still.
+            manager.prepend = (section: unknown, forceRight?: unknown) => {
+              prepending = true;
+              let view: any;
+              try {
+                view = manager.createView(section, forceRight);
+              } finally {
+                prepending = false;
+              }
+              keepStill(view, aboveWindowPrepended);
+              view.on("resized", () => {
+                view.expanded = true;
+              });
+              view.on("axis", (axis: unknown) => manager.updateAxis?.(axis));
+              view.on("writingMode", (mode: unknown) => manager.updateWritingMode?.(mode));
+              manager.views.prepend(view);
+              view.onDisplayed = manager.afterDisplayed.bind(manager);
+              return view;
+            };
+          }
+          // A chapter already showing is not shown again every time epub.js
+          // looks at the page, which forced a layout of the whole page every
+          // 30 ms while it scrolled (readers/viewShow.ts). Those on the page
+          // now, and every one made from here (prepended ones too).
+          if (typeof manager.createView === "function") {
+            const makeView = manager.createView.bind(manager);
+            manager.createView = (...args: unknown[]) => {
+              const view = makeView(...args);
+              return typeof view?.show === "function" ? quietShow(view) : view;
+            };
+            for (const view of (manager.views?.all?.() ?? []) as any[]) {
+              if (typeof view?.show === "function") quietShow(view);
+            }
+          }
           // Where the page is, said at least once a second while it never
           // rests, moving slowly (readers/scrollQuiet.ts: reportWhileScrolling).
           if (manager.container && typeof (rendition as any).reportLocation === "function") {
@@ -354,6 +469,18 @@ export const useBookOpening = (reader: WithCover) => {
           doc.documentElement.setAttribute("data-leaflet-layout", layoutRef.current);
           // A phone's pages keep no room for chrome that is away (readers/pagesStyle.ts).
           doc.documentElement.toggleAttribute("data-leaflet-phone", phone);
+          // A narrow column reins in the book's widest insets and boxes (readers/narrowColumn.ts).
+          markNarrowColumn(
+            doc,
+            textColumnWidth({
+              pages: layoutRef.current === "pages",
+              frame: (((rendition.manager as any)?.container as HTMLElement | undefined) ?? viewerRef.current)?.clientWidth || window.innerWidth,
+              columnWidth: layout?.columnWidth,
+              pad,
+              measure: bookMeasureCss(),
+              fontSize: fontSizeRef.current
+            })
+          );
           if (!doc.getElementById("reader-font-scale")) {
             // The book's drop caps and opening small capitals are found
             // first, while the publisher's own sizes can still be read: the
@@ -370,6 +497,11 @@ export const useBookOpening = (reader: WithCover) => {
               markBlocks(doc);
             } catch {
               // A block left unmarked is set as running text, as it was.
+            }
+            try {
+              markNarrowBoxes(doc);
+            } catch {
+              // A block left unmarked keeps the book's own room on a narrow column.
             }
             const style = doc.createElement("style");
             style.id = "reader-font-scale";
@@ -539,6 +671,7 @@ export const useBookOpening = (reader: WithCover) => {
               [data-leaflet-zoom] { cursor: zoom-in; }
               ${OPENINGS_CSS}
               ${BLOCKS_CSS}
+              ${NARROW_CSS}
               ${PAGES_CSS}
               ${PHONE_PAGES_CSS}
               ${PHONE_TEXT_CSS}
@@ -897,7 +1030,9 @@ export const useBookOpening = (reader: WithCover) => {
          * be replaced after the book has opened (a list made by Leaflet for a
          * book that came with none: `made`).
          */
-        const applyContents = (tree: TocItem[], made: boolean) => {
+        const applyContents = (given: TocItem[], made: boolean) => {
+          // Parts and their chapters at one level: the chapters under their parts (readers/autoContents.ts).
+          const tree = nestFlatParts(given);
           const flatToc = flattenToc(tree).map((item) => ({
             ...item,
             label: item.label.replace(/\s+/g, " ").trim(),
@@ -987,7 +1122,7 @@ export const useBookOpening = (reader: WithCover) => {
         }
         if (keptContents) {
           if (keptContents.toc) {
-            applyContents(keptContents.toc, true);
+            applyContents(keptContents.toc, keptContents.use !== "own");
           }
           tocWithinRef.current = withinOf(keptContents.toc ?? tocTree, keptContents.within);
         } else {
@@ -1035,6 +1170,9 @@ export const useBookOpening = (reader: WithCover) => {
             }
             if (decision.use !== "own") {
               applyContentsRef.current(decision.toc, true);
+            } else if (decision.retitled) {
+              // The book's own, its names put right.
+              applyContentsRef.current(decision.toc, false);
             }
             tocWithinRef.current = withinOf(decision.toc, within);
             updateOutlookRef.current();
@@ -1049,6 +1187,11 @@ export const useBookOpening = (reader: WithCover) => {
           window.setTimeout(() => void findContents(), 8000);
         }
 
+        /** With pages, the place carried in from the layout before while no page shown holds it yet (useReaderPlace). */
+        const carriedPlace = () => {
+          const carried = reader.carriedPlaceRef.current;
+          return layoutRef.current === "pages" && carried && Date.now() <= carried.until ? carried.cfi : null;
+        };
         /** When the saved place was put back (0: not yet, or there was none), and the last input then. */
         let restoredAt = 0;
         let handsOnAtRestore = 0;
@@ -1179,7 +1322,9 @@ export const useBookOpening = (reader: WithCover) => {
                 layoutRef.current,
                 lineNow?.cfi ?? null,
                 // With pages, the place held across re-layouts (see pagePlaceRef), when there is one.
-                (layoutRef.current === "pages" ? pagePlaceRef.current?.cfi : null) ?? (location?.start?.cfi as string | undefined) ?? null
+                (layoutRef.current === "pages" ? pagePlaceRef.current?.cfi : null) ?? (location?.start?.cfi as string | undefined) ?? null,
+                // With pages, a place carried from the layout before, not yet on a page shown (readers/readingPlace.ts).
+                carriedPlace()
               );
           if (location?.start?.cfi) {
             const href = location?.start?.href;
@@ -1440,6 +1585,10 @@ export const useBookOpening = (reader: WithCover) => {
         // The saved place, if it still resolves. A stale or broken position
         // used to reject here and the book never opened again.
         markNavigating(2500);
+        // Held there while the chapters round it come (readers/jumpSettle.ts):
+        // put once, a place near a chapter's end opened a screen early.
+        const opening = lastCfiRef.current;
+        reader.beginJump();
         const restored = lastCfiRef.current
           ? await rendition.display(lastCfiRef.current).then(
               () => true,
@@ -1455,12 +1604,17 @@ export const useBookOpening = (reader: WithCover) => {
           handsOnAtRestore = lastHandsOnAtRef.current;
           // epub.js puts the saved line at the very top, under the toolbar:
           // it goes back to the reading line, as far below it as it was.
-          clearToolbar(lastCfiRef.current, Math.min(lastCfiBelowRef.current, (ensureScrollContainer()?.clientHeight ?? 0) / 2));
+          const below = Math.min(lastCfiBelowRef.current, (ensureScrollContainer()?.clientHeight ?? 0) / 2);
+          clearToolbar(lastCfiRef.current, below);
+          if (opening) {
+            reader.pinJump(() => reader.placeTopFor(opening, below));
+          }
           // With pages, a place in the middle of a paragraph opened a page early.
           if (lastCfiRef.current) {
             settleOnPage(lastCfiRef.current);
           }
         } else {
+          reader.jumpHoldRef.current = null;
           // No local position (another device, cleared data): start at the
           // chapter the synced progress points into, rather than page one.
           const progress = typeof book.progress === "number" ? book.progress : 0;
@@ -1486,8 +1640,10 @@ export const useBookOpening = (reader: WithCover) => {
         shown = true;
         relayingRef.current = false;
         setLoading(false);
-        // The page that was goes once the new one is drawn.
+        // The page that was goes once the new one is drawn, and the veil over
+        // a turn or a new layout lifts (scrolling, once the line is pinned back).
         window.requestAnimationFrame(dropGhost);
+        liftReaderVeil(layoutRef.current === "scroll" ? UNCOVER_SCROLLED_MS : 0);
         // The match the book was opened at is marked as a result of the
         // in-book search is, with that search open on the same words: the
         // book's other matches are a click away.
@@ -1518,6 +1674,7 @@ export const useBookOpening = (reader: WithCover) => {
         }
         relayingRef.current = false;
         dropGhost();
+        liftReaderVeil();
         setLoadError(friendlyOpenError(error instanceof Error ? error.message : String(error ?? "")));
         setLoading(false);
       }
@@ -1588,6 +1745,7 @@ export const useBookOpening = (reader: WithCover) => {
   useEffect(
     () => () => {
       dropGhost();
+      dropReaderVeil();
       parsedRef.current = null;
       if (bookRef.current) {
         try {

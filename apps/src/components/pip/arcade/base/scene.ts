@@ -3,6 +3,24 @@ import { GUARDIANS, SCENERY } from "../../../../pip/base/guards";
 import { findWay, onWalk, planWalk, shuffled, wayRound, type Block, type Plan, type Stop } from "./walks";
 import type { GameArt } from "../gameArt";
 import { GAME_H, GAME_W } from "../games";
+import { GOAT_TOUGHER, LINE_DEFAULT, MOUTH_Y, ROLE_FROM, TRAIL_Y, WALL_LEAN, darkWood, sectionsAt, trailOf, wallXAt, waveKinds } from "../../../../pip/base/front";
+import { GUARD_GIVES } from "../../../../pip/base/guards";
+import {
+  FIZZ_SECONDS,
+  PROWL_SPEED,
+  SQUAT,
+  TICK,
+  along as alongWay,
+  offBy,
+  planNight,
+  type FrontSetup,
+  type Post,
+  type NightPlan,
+  type ProwlPlan,
+  type Ring,
+  type WalkPlan,
+  type Walker
+} from "./wave";
 
 /**
  * The picture of a camp: the clearing in its season, by day or night, with
@@ -35,6 +53,10 @@ import { GAME_H, GAME_W } from "../games";
 export const ART_FPS = 12;
 
 export type CampLook = {
+  /** (1.5.10) How far the wood is cleared back: the burrow's level, but the whole clearing only once chapter 10 has opened it. Absent, the burrow's. */
+  clearing?: number;
+  /** (1.5.10) The burrow's level when the camp was brought onto chapters: what it had opened stays open. */
+  legacy?: number;
   levels: Record<BuildingId, number>;
   yard: readonly Yard[];
   /** Where each building stands, and each piece of fence. */
@@ -72,8 +94,10 @@ export type CampLook = {
   decor: readonly Decor[];
   /** The hedgehog is here with something to offer. */
   visitor: boolean;
-  /** Acorns wait on the oak. */
+  /** Acorns wait on the oak, and a tap takes them in (`oakStatus` "ready"): one bobs over it, asking to be tapped. */
   oakReady: boolean;
+  /** Acorns on the oak with no room in the larder for them (`oakStatus` "full"): one sits still in its leaves, asking nothing. */
+  oakFull?: boolean;
   /** The heroes who live here and are about the place: which, a few at most. */
   residents?: readonly number[];
   /** A week's reading streak or better: a rainbow stands over the trees. */
@@ -91,6 +115,10 @@ export type CampLook = {
   works?: readonly Decor[];
   /** The lookout's path, once it has one: it is a different tower to look at. */
   towerPath?: "a" | "b" | null;
+  /** (1.5.11) Where the wall across the trail stands, across the picture (`front.ts`). Absent, where a camp's begins. */
+  line?: number;
+  /** (1.5.11) The nights of this visit: what makes them (the same every time it is asked), and the chapter, which says who comes. Absent, nobody comes by night. */
+  wave?: { seed: number; chapter: number };
 };
 
 /** The piece of landscape under a point, the nearest the front first; -1 for none. Flat pieces are low and wide, the rest tall. */
@@ -258,6 +286,9 @@ const boxOf = (site: Placed, spot: Spot, by = THINGS) => {
   return { left: Math.round(spot[0] - (size.w * by) / 2), top: spot[1] - size.h * by, w: size.w * by, h: size.h * by };
 };
 
+/** Where the acorn that waits on the oak is drawn, about its middle: the first of them sets off from there when gathered. */
+export const oakAcornAt = (spots: Pick<Record<Placed, Spot>, "oak">) => ({ x: spots.oak[0], y: boxOf("oak", spots.oak).top + 2 });
+
 /** The building under a point of the scene, the nearest the front first. */
 export const siteAt = (spots: Record<Placed, Spot>, x: number, y: number, there: readonly Placed[] = PLACED): Placed | null => {
   for (const site of [...there].sort((a, b) => spots[b][1] - spots[a][1])) {
@@ -301,10 +332,15 @@ export type CampExtras = {
   bounce?: { site: Placed; age: number } | null;
   /** Acorns on their way from the oak to the larder: how far along each is, 0 to 1. */
   flying?: readonly number[];
+  /**
+   * The oak tapped, and seen to be: "gather", a quick shiver and a few leaves let go as its acorns come down; "full",
+   * a slow shake of its head, with nothing let go, when the larder has no room. How many seconds ago.
+   */
+  oakShake?: { kind: "gather" | "full"; age: number } | null;
   /** The hedgehog trundling in: how far along, 0 to 1. */
   arriving?: number;
   /** While things are moved about: how far each thing that throws reaches, and the line the magpies will take to the larder. */
-  rings?: ReadonlyArray<{ x: number; y: number; r: number }>;
+  rings?: ReadonlyArray<{ x: number; y: number; r: number; /** How far it would reach a level up (a building sheet): a dashed line of butter, no wash. */ next?: boolean }>;
   path?: { from: readonly [number, number]; to: readonly [number, number] } | null;
   /** An animal just petted: where, and how many seconds ago. */
   petted?: { x: number; y: number; age: number } | null;
@@ -347,6 +383,16 @@ export type CampExtras = {
   cameOut?: number | null;
   /** The burrow's door glows, to be found (its first visit, and the tour's step for it): how bright, 0 to 1. */
   doorGlow?: number;
+  /** (1.5.11) The front's slots, while it is arranged: where each trap spot and tower pad is, how many are open, which have something on them, and the one chosen. */
+  front?: {
+    spots: ReadonlyArray<readonly [number, number]>;
+    pads: ReadonlyArray<readonly [number, number]>;
+    open: { spots: number; pads: number };
+    filled: { spots: readonly boolean[]; pads: readonly boolean[] };
+    chosen?: { at: "spot" | "pad"; index: number } | null;
+  } | null;
+  /** (1.5.11) The wall is taken hold of, to be slid along the trail: it glows. */
+  sliding?: boolean;
 };
 
 /** Places to a grid of so many to the art pixel. */
@@ -385,6 +431,29 @@ export const pipRounds = (time: number, stops: ReadonlyArray<readonly [number, n
 
 /** The squash a thing just chosen gives: down, up, and still again, in half a second. */
 const boing = (age: number) => (age < 0 || age > 0.6 ? 0 : 0.16 * Math.exp(-6 * age) * Math.cos(18 * age));
+
+/** How long the oak's shake lasts, in seconds: the gathering's shiver, and the full larder's slower "no". */
+export const OAK_SHAKE_SECONDS = { gather: 0.42, full: 0.6 } as const;
+/**
+ * Where the oak is, sideways, while it shakes: a whole art pixel either way or none, never between (a small
+ * sprite moved by fractions shimmers). Gathering, it shivers quickly; with the larder full, it shakes its head
+ * slowly, twice, and is still.
+ */
+export const oakShakeOffset = (kind: "gather" | "full", age: number): -1 | 0 | 1 => {
+  if (age < 0 || age >= OAK_SHAKE_SECONDS[kind]) return 0;
+  const beat = Math.floor(age / (kind === "gather" ? 0.06 : 0.15));
+  return kind === "gather" ? (beat % 2 === 0 ? 1 : -1) : ([1, -1, 1, 0] as const)[beat % 4];
+};
+/** The leaves a gathering shakes out of the oak: so many, falling for so long (seconds). */
+const LEAVES_LET_GO = 5;
+const LEAF_FALL_SECONDS = 0.9;
+/** The leaves' colours by the season: spring, summer, autumn, winter (as the trees' own). */
+const LEAF_COLOURS = [
+  ["#7cc85a", "#4e8e3e"],
+  ["#e8943a", "#d8642c"],
+  ["#f4f6ff", "#c9d1ff"],
+  ["#f4a8c8", "#9ad06a"]
+] as const;
 
 const DRIFT: ReadonlyArray<{ count: number; colours: readonly string[]; fall: number; sway: number }> = [
   // Summer has butterflies, drawn their own way.
@@ -466,9 +535,7 @@ const marker = (ctx: CanvasRenderingContext2D, x: number, top: number, frame: nu
  * an oval on the screen; and reach is measured the way it is drawn, so that
  * what the oval covers is what is reached.
  */
-export const SQUAT = 0.6;
-/** How far off something is, as reach goes: a pixel up or down the screen is more ground than a pixel across it. */
-export const offBy = (dx: number, dy: number) => Math.hypot(dx, dy / SQUAT);
+// (`SQUAT` and `offBy`, how far off something is as reach goes, are `wave.ts`'s since 1.5.11: the night is fought there.)
 
 /** A patch of colour on the grass, an oval as the ring round it is: the ground a thing takes, or how far it reaches. */
 const disc = (ctx: CanvasRenderingContext2D, x: number, y: number, r: number, colour: string) => {
@@ -536,14 +603,19 @@ export const inLight = (ctx: CanvasRenderingContext2D, night: boolean | number, 
 /**
  * The picture keeps hours of its own. A day by the wall clock would show a
  * reader who opens the app in the evening nothing but night, for ever; so
- * a day in the clearing is four minutes long: light for a little over two,
- * a dusk, a night of a little over a minute, a dawn. It begins in the
- * morning each time the camp is opened. It is for looking at only: the
- * night the raiders come in is still the calendar's.
+ * a day in the clearing is twelve minutes long: light for nine, a dusk, a
+ * night of a little over two minutes, a dawn. It begins in the morning each
+ * time the camp is opened. It is for looking at only: the night the raiders
+ * come in is still the calendar's.
+ *
+ * (It was four minutes, light for two of them, until 1.5.8: on a phone a
+ * visit of a few minutes, a card or two read, went dark "at midday", which
+ * read as a fault. Still far quicker than the wall clock, as the owner
+ * asked; a visit is now mostly by day.)
  */
-export const DAY_SECONDS = 240;
-const DUSK_AT = 130;
-const TURN_SECONDS = 18;
+export const DAY_SECONDS = 720;
+const DUSK_AT = 540;
+const TURN_SECONDS = 24;
 const DAWN_AT = DAY_SECONDS - TURN_SECONDS;
 /** How far night has fallen so many seconds after the camp was opened: 0 by day, 1 by night, and eased between at dusk and at dawn. */
 export const duskAt = (seconds: number) => {
@@ -716,12 +788,32 @@ export const gardenAt = (spots: Record<Placed, Spot>, x: number, y: number) => {
  * has put there, so a camp laid out before the wood was thought of is not
  * buried in it.
  */
-const WOODS = new WeakMap<CampLook, Decor[]>();
-const forestOf = (look: CampLook): Decor[] => {
+const WOODS = new WeakMap<CampLook, Array<Decor & { dark?: boolean }>>();
+/** How near the trail no tree of the Dark Wood stands: the trail is a way through it. */
+const TRAIL_ROOM = 8;
+/** How far a point is from the trail (in front of the wall), across the ground. */
+const offTrail = (trail: ReadonlyArray<readonly [number, number]>, x: number, y: number) => {
+  let best = Infinity;
+  for (let at = 1; at < trail.length; at++) {
+    const [ax, ay] = trail[at - 1];
+    const [bx, by] = trail[at];
+    const dx = bx - ax;
+    const dy = by - ay;
+    const long = dx * dx + dy * dy;
+    const share = long === 0 ? 0 : Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / long));
+    best = Math.min(best, Math.hypot(ax + dx * share - x, ay + dy * share - y));
+  }
+  return best;
+};
+const forestOf = (look: CampLook): Array<Decor & { dark?: boolean }> => {
   const kept = WOODS.get(look);
   if (kept) return kept;
-  const wood = woodAt(look.levels.burrow);
-  const trees: Decor[] = [];
+  const right = woodAt(look.clearing ?? look.levels.burrow);
+  // The Dark Wood on the left never clears (1.5.11): its trail comes through it.
+  const left = leftWoodOfLook(look);
+  const trail = look.levels.burrow >= PROWLERS_FROM ? trailOf(left, frontLine(look)) : null;
+  const wood = Math.max(left, right);
+  const trees: Array<Decor & { dark?: boolean }> = [];
   if (wood > 0) {
     const taken: Array<readonly [number, number]> = [
       ...PLACED.map((site) => look.spots[site]),
@@ -733,19 +825,21 @@ const forestOf = (look: CampLook): Decor[] => {
     // Pine, birch and bush, a pine oftenest: rows of them from the trees' edge to the foot of the picture.
     const KINDS = [4, 9, 4, 5, 4, 9];
     // A little way in from where things may be set down: the last trees stand at the clearing's very edge.
-    const deep = wood + 4;
     let n = 0;
     for (let row = 0; row < 9; row++) {
       const y = 53 + row * 8;
-      for (let col = 0; col * 7 < deep; col++) {
+      for (let col = 0; col * 7 < wood + 4; col++) {
         for (const side of [0, 1]) {
           n += 1;
+          const deep = (side === 0 ? left : right) + 4;
           const inward = col * 7 + scatter(n * 3.1 + 7) * 5 - (row % 2) * 3;
-          if (inward > deep - 2) continue;
+          if (deep <= 4 || inward > deep - 2) continue;
           const x = Math.round(side === 0 ? inward : GAME_W - inward);
           const ty = Math.round(y + scatter(n * 5.3 + 2) * 5);
           if (taken.some(([tx, tyy]) => Math.hypot(tx - x, tyy - ty) < 15)) continue;
-          trees.push({ kind: KINDS[Math.floor(scatter(n * 9.7 + 1) * KINDS.length)], x, y: Math.min(GAME_H - 1, ty) });
+          // The trail is kept clear through the Dark Wood.
+          if (side === 0 && trail && offTrail(trail, x, ty - 2) < TRAIL_ROOM) continue;
+          trees.push({ kind: KINDS[Math.floor(scatter(n * 9.7 + 1) * KINDS.length)], x, y: Math.min(GAME_H - 1, ty), dark: side === 0 && trail !== null });
         }
       }
     }
@@ -850,7 +944,7 @@ export const prowlBlocks = (look: CampLook, after: Placed | null): Block[] => {
   for (const site of PLACED) {
     if (site === after) continue;
     const yard = site === "yard0" ? look.yard[0] : site === "yard1" ? look.yard[1] : undefined;
-    if (!plotOpenAt(look.levels.burrow, yard, site)) continue;
+    if (!plotOpenAt(look.levels.burrow, yard, site, look.legacy ?? 0)) continue;
     const rx = PLOT_SIZE[site].w * THINGS * 0.46;
     const ry = Math.max(3.5, rx * 0.42);
     blocks.push({ x: look.spots[site][0], y: look.spots[site][1] - ry * 0.5, rx, ry });
@@ -866,7 +960,7 @@ const blocksOf = (look: CampLook): Block[] => {
   const blocks: Block[] = [];
   for (const site of PLACED) {
     const yard = site === "yard0" ? look.yard[0] : site === "yard1" ? look.yard[1] : undefined;
-    if (!plotOpenAt(look.levels.burrow, yard, site)) continue;
+    if (!plotOpenAt(look.levels.burrow, yard, site, look.legacy ?? 0)) continue;
     const rx = PLOT_SIZE[site].w * THINGS * 0.46;
     const ry = Math.max(3.5, rx * 0.42);
     blocks.push({ x: look.spots[site][0], y: look.spots[site][1] - ry * 0.5, rx, ry });
@@ -890,11 +984,10 @@ const blocksOf = (look: CampLook): Block[] => {
   }
   look.trophies.slice(0, TROPHIES_SHOWN).forEach((_, index) => blocks.push({ x: TROPHY_SPOTS[index][0], y: TROPHY_SPOTS[index][1] - 1, rx: 3, ry: 2 }));
   // The wood at either side, while any of it stands: nobody goes for a walk through it.
-  const wood = woodAt(look.levels.burrow);
-  if (wood > 0) {
-    blocks.push({ x: 0, y: 84, rx: wood + 6, ry: 70 });
-    blocks.push({ x: GAME_W, y: 84, rx: wood + 6, ry: 70 });
-  }
+  const wood = woodAt(look.clearing ?? look.levels.burrow);
+  const left = leftWoodOfLook(look);
+  if (left > 0) blocks.push({ x: 0, y: 84, rx: left + 6, ry: 70 });
+  if (wood > 0) blocks.push({ x: GAME_W, y: 84, rx: wood + 6, ry: 70 });
   if (look.visitor) blocks.push({ x: HEDGEHOG_AT[0], y: HEDGEHOG_AT[1] - 1, rx: 5, ry: 2.5 });
   return blocks;
 };
@@ -939,7 +1032,7 @@ const placesOf = (look: CampLook, blocks: readonly Block[]) => {
   // Open grass: a few spots of it, wherever nothing stands.
   const seed = Math.round(look.spots.burrow[0] * 7 + look.spots.burrow[1] * 13 + look.decor.length * 31 + look.walls.length * 17 + (look.land?.length ?? 0) * 5);
   const grass: Array<[number, number]> = [];
-  const edge = 18 + woodAt(look.levels.burrow);
+  const edge = 18 + woodAt(look.clearing ?? look.levels.burrow);
   for (let col = 0; col < 8; col++) for (let row = 0; row < 4; row++) if (28 + col * 26 >= edge && 28 + col * 26 <= GAME_W - edge) grass.push([28 + col * 26, 68 + row * 13]);
   shuffled(grass, seed)
     .filter(([x, y]) => !blocks.some((block) => ((x - block.x) / (block.rx + 4)) ** 2 + ((y - block.y) / (block.ry + 4)) ** 2 < 1))
@@ -1024,7 +1117,9 @@ export const pipEntering = (entry: ReturnType<typeof pipEntry>, age: number) => 
     }
   }
   const inFor = age - entry.walk;
-  return { x: end[0], y: end[1], move: "idle", faceLeft: false, age: inFor, shown: entry.inside ? 0 : Math.max(0, 1 - inFor / DOOR_IN), door };
+  // (Rounded off at the end: a walk's time and the door's added and taken away again can leave a hair of her showing.)
+  const left = 1 - inFor / DOOR_IN;
+  return { x: end[0], y: end[1], move: "idle", faceLeft: false, age: inFor, shown: entry.inside || left < 1e-9 ? 0 : left, door };
 };
 
 /**
@@ -1078,53 +1173,26 @@ const folkWalk = (look: CampLook, hero: number, index: number): Plan => {
 };
 
 /**
- * Between raids the wood is not empty. Now and then something comes out of
- * it and makes for the larder: a prowler, not a raid, and nothing is taken.
- * More of them by night, when there are two or three about at once.
+ * Between raids the wood is not empty. Since 1.5.11 everything that comes at
+ * the camp comes down one trail out of the Dark Wood, on the left (`front.ts`):
+ * by day a lone creeper or runner now and then, and every night a wave of
+ * them, so many and of such kinds as the chapter has (the night's chip says
+ * who, at dusk). They batter the wall across the trail, or go round a first
+ * fence, over it, under it, or (a bomber) through it; and whatever in the camp
+ * throws, throws at them while they are within its reach. One who gets to
+ * what he came for knocks it about, or makes off with a few acorns, a little
+ * and at most so much a day.
  *
  * Each has some health, more in a bigger camp, and it is on a bar over his
- * head. Whatever in the camp throws, throws at him while he is within its
- * reach and no oftener than it can: a stone takes half a second to get
- * there and takes one off him. So he is seen off only where enough of the
- * camp reaches the way he came for long enough. One lookout is not enough
- * for a camp laid out without thought: he walks through its reach, is hit
- * three or four times, and is still on his feet at the larder, where he
- * raps on it and runs. It is there to be watched: the defences are seen to
- * work, and a side nobody watches is seen to be one.
- *
- * Like everything else in the picture it is told by the clock alone: a
- * prowler's whole walk is worked out once, when it is first wanted, and
- * after that the time says where on it he is.
+ * head. A night is fought out ahead, all of it together (`wave.ts`), and after
+ * that the clock says where everyone is.
  */
 export const PROWL_EVERY = 8;
-const PROWL_SPEED = 13;
-/** Seconds between two stones from the same thrower, and how long one is in the air. */
-const THROW_EVERY = 1.35;
-const THROW_FLIES = 0.5;
-/** Seconds between two blows in a fight, and how long one who is near takes to step out to it and back. */
-const BLOW_EVERY = 0.85;
-const RUN_SECONDS = 0.55;
-/** How long one who has got to a building is at it before it is the worse for it; how far off the camp's fighters hear him; and how fast they come. */
-const KNOCK_SECONDS = 4.4;
-const HEARD_FROM = 95;
-/** A run, and no more than one: quicker than this and a figure this small is not seen to run at all, only to be somewhere else. */
-const RUN_SPEED = 38;
-const TICK = 0.1;
-/** Something that throws: where, how far, and (for the two constructs that throw their own way) how long between throws and how hard. */
-type Ring = { x: number; y: number; r: number; every?: number; hurts?: number; site?: string | null; work?: number | null };
+export { PROWL_SPEED, SQUAT, offBy, prowlHealth, type Post, type ProwlPlan, type Ring } from "./wave";
+export { NIGHT_MOST, countRoles } from "../../../../pip/base/front";
 /** The kind of prowler that comes on the wing: a magpie, over everything on the ground until it is brought down or lands. */
 const FLIER = 4;
-/**
- * Three more, each after something. Rattlenut, the great red squirrel who
- * carries gossip up and down the oak and helps himself on the way: the
- * quickest thing there is, over a fence in a bound, and half as sturdy as
- * the rest. The Rootgnaw, a mole, who comes under the ground (under the
- * fence, and under everything that throws) and up only when he is nearly
- * at the larder, or sooner where a thumper is drumming. And Fizzwick, a
- * square mossy fellow with a sprout that fizzes: he walks up to a
- * building, hisses at it, and goes off with a pop, which knocks it about
- * twice over and is the end of him either way.
- */
+/** Rattlenut the squirrel (a runner), the Rootgnaw (a digger) and Fizzwick (a bomber), by their looks' numbers. */
 const SQUIRREL = 5;
 const MOLE = 6;
 const FIZZER = 7;
@@ -1135,331 +1203,30 @@ export const PROWLER_NAMES = ["the Mudtusk rabble", "the Gilded", "the Stumbling
  * the Gilded for fantasy and the classics, Fizzwick for science fiction,
  * the mole for a mystery, magpies for a romance, the Stumbling for horror,
  * the rabble for history, the Frostwights for science, the squirrel for
- * adventures and young readers' books. Three in ten of those who come,
- * while a book of that kind is being read.
+ * adventures and young readers' books. Three nights in ten, one more of that
+ * kind (once its role has come: `front.ts` `waveKinds`).
  */
 export const GENRE_FOE: ReadonlyArray<number | null> = [null, 1, FIZZER, MOLE, FLIER, 2, 0, 3, 1, SQUIRREL, SQUIRREL];
-/** How much further than the straight way whoever comes on foot will go, to go round a fence and not over it. */
-const DETOUR = 2.2;
-/** Where on a way of several straight pieces somebody is, who has gone so far along it. */
-const along = (path: ReadonlyArray<readonly [number, number]>, lens: readonly number[], far: number): [number, number] => {
-  if (far <= 0 || path.length < 2) return [path[0][0], path[0][1]];
-  for (let piece = 1; piece < path.length; piece++) {
-    if (far <= lens[piece] || piece === path.length - 1) {
-      const long = Math.max(1e-6, lens[piece] - lens[piece - 1]);
-      const share = Math.min(1, (far - lens[piece - 1]) / long);
-      return [path[piece - 1][0] + (path[piece][0] - path[piece - 1][0]) * share, path[piece - 1][1] + (path[piece][1] - path[piece - 1][1]) * share];
-    }
-  }
-  return [path[path.length - 1][0], path[path.length - 1][1]];
-};
-const lensOf = (path: ReadonlyArray<readonly [number, number]>) => {
-  const lens = [0];
-  for (let piece = 1; piece < path.length; piece++) lens.push(lens[piece - 1] + Math.hypot(path[piece][0] - path[piece - 1][0], path[piece][1] - path[piece - 1][1]));
-  return lens;
-};
-/** Where a prowler is, so far along his way. */
-export const prowlSpot = (plan: Pick<ProwlPlan, "path" | "lens">, far: number) => along(plan.path, plan.lens, far);
-const FIZZ_SECONDS = 1.8;
-const MOLE_UP = 24;
-/** Somebody who fights whoever comes near where they stand: who (a guardian's number, or a hero's plus a hundred), where, how near, and how many blows they have in them. */
-export type Post = { who: number; x: number; y: number; r: number; blows: number; /** Shoots from where they stand, and does not go out to him. */ ranged?: boolean; /** One of the camp's people, not a guardian: goes to wherever the trouble is, where a guardian keeps to the ground about their post. */ roams?: boolean };
-type Shot = { from: number; lands: number; fx: number; fy: number; tx: number; ty: number; /** The construct that threw it, or null for a building. */ work: number | null; /** The foot of whatever threw it, and how high up it the thrower stands. */ foot: number; rise: number };
-type Duel = { who: number; from: number; until: number; x: number; y: number; px: number; py: number; blows: number[]; ranged: boolean; /** Seconds they take getting to him. */ run: number };
-export type ProwlPlan = {
-  from: [number, number];
-  ux: number;
-  uy: number;
-  long: number;
-  kind: number;
-  health: number;
-  /** How far along his way he is at each tenth of a second: he stands still while he is fought, and at what he came for. */
-  fars: number[];
-  shots: Shot[];
-  duel: Duel | null;
-  /** When each thing that takes one off his health lands: stones and blows alike. */
-  hurts: number[];
-  /** When the last of his health goes; null when it never does. */
-  falls: number | null;
-  /** When he gets to what he came for, if he does. */
-  there: number;
-  /** When it is the worse for him: he got there, and was still on his feet when he had done knocking at it. Null when he never was. */
-  harms: number | null;
-  /** Comes on the wing. */
-  flies: boolean;
-  /** When one who tunnels came up: 0 for everyone who walks in the open, null if he never did. */
-  rose: number | null;
-  /** Goes off with a pop when he has done: it is worth two knocks, and he does not walk away from it. */
-  pops: boolean;
-  /** When he was held at a piece of fence, getting over it: from when, until when. */
-  breaks: Array<[number, number]>;
-  /** The way he takes, round whatever stands in it, and how far along it each of its points is. */
-  path: Array<[number, number]>;
-  lens: number[];
-};
-/** Health a prowler has: more in a bigger camp, so a camp has to go on adding to what it defends with. */
-export const prowlHealth = (burrow: number) => 1 + Math.max(1, burrow);
-/** Whether a prowler sets out at a slot of the camp's clock: one slot in eight by day, one in three by night. */
-/*
- * Fewer than there were: one a minute or so by day and one every twenty-four seconds by night (it was every half minute
- * and every ten seconds), which was more going on than a camp that is being read beside wants. In winter, twice that.
- */
-const prowlSets = (slot: number, winter = false) => (duskAt(slot * PROWL_EVERY) >= 0.5 ? slot % 3 === 0 || (winter && slot % 3 === 1) : slot % 8 === 0 || (winter && slot % 8 === 4));
-/** Where the prowler of a slot comes out of the wood, and which kind he is: out of sight until he is on the grass. The mole and Fizzwick keep to bigger camps. */
-export const prowlStart = (slot: number, burrow = 9, favoured: number | null = null): { from: [number, number]; kind: number } => {
-  const roll = (n: number) => scatter(slot * 7.13 + n * 3.7);
-  const side = Math.floor(roll(1) * 4);
-  // The book being read has a say: three in ten are of the kind it brings.
-  const rolled = favoured !== null && scatter(slot * 5.9 + 2.2) < 0.3 ? favoured : Math.floor(roll(3) * 8);
-  return {
-    from: side === 0 ? [-12, 62 + roll(2) * 50] : side === 1 ? [GAME_W + 12, 62 + roll(2) * 50] : side === 2 ? [20 + roll(2) * 200, 49] : [20 + roll(2) * 200, GAME_H + 44],
-    kind: (rolled === MOLE && burrow < 3) || (rolled === FIZZER && burrow < 4) ? rolled % 4 : rolled
-  };
-};
+/** Where on his way a prowler is, so far along it. */
+export const prowlSpot = (plan: Pick<ProwlPlan, "path" | "lens">, far: number) => alongWay(plan.path, plan.lens, far);
 
 /**
- * One prowler's whole walk, worked out ahead: the way he comes, every stone
- * thrown at him and when it lands, whoever comes out to fight him (one he
- * passes close by, or failing that whoever is nearest when he starts on
- * the building), and how it ends: seen off, or still at it when he has
- * done his knocking, and the building the worse for it.
+ * When in the camp's day the night's prowlers set out (a little after dusk begins), and how: in bands of two at most,
+ * a band every `BAND_EVERY` seconds, and the prowlers of a band a moment apart. So a night is a minute or two of bands
+ * coming down the trail, and two at a gate batter it down twice as fast as one.
  */
-export const planProwl = (
-  target: readonly [number, number],
-  burrow: number,
-  watch: readonly Ring[],
-  slot: number,
-  posts: readonly Post[] = [],
-  /** The constructs he may come to: a hedge and caltrops cut him, a patch of tanglefoot slows him, a pitfall may have him, hornets sting one on the wing, a ward stone brings one down, a thumper brings up one who tunnels, a totem may turn him, and near a bell the camp throws oftener. */
-  works: ReadonlyArray<{ kind: number; x: number; y: number }> = [],
-  /** The fence: where its pieces are, and how good a fence it is. One on foot who comes to a piece has to get over it, which takes a while, and longer over a better fence. Where there is a gate, and it is not much further, he goes round to it instead, and is twice as long getting through. */
-  fence: { pieces: ReadonlyArray<readonly [number, number]>; level: number; gate?: readonly [number, number] | null } | null = null,
-  /** What stands in his way on the ground (see `prowlBlocks`), and the kind the book being read brings oftener. */
-  more: { blocks?: readonly Block[]; favoured?: number | null } = {}
-): ProwlPlan => {
-  const { from, kind } = prowlStart(slot, burrow, more.favoured ?? null);
-  const flier = kind === FLIER;
-  const squirrel = kind === SQUIRREL;
-  const mole = kind === MOLE;
-  const fizzer = kind === FIZZER;
-  const whole = Math.max(10, Math.hypot(target[0] - from[0], target[1] - from[1]));
-  const ux = (target[0] - from[0]) / whole;
-  const uy = (target[1] - from[1]) / whole;
-  // His way. On the wing, or under the ground, it is straight. On foot it goes round the lie of the land and
-  // the buildings; and round the fence too, by the gate or an open end, where that is not much further than
-  // going straight at it. Where it is, or there is no way round at all, he comes straight on and climbs. The
-  // squirrel does not trouble to go round a fence.
-  const gate = fence?.gate ?? null;
-  const isGate = (piece: readonly [number, number]) => gate !== null && piece[0] === gate[0] && piece[1] === gate[1];
-  let path: Array<[number, number]> = [
-    [from[0], from[1]],
-    [target[0], target[1]]
-  ];
-  if (!flier && !mole) {
-    const ground = more.blocks ?? [];
-    const barred: Block[] =
-      fence && !squirrel
-        ? [
-            ...fence.pieces.filter((piece) => !isGate(piece)).map((piece) => ({ x: piece[0], y: piece[1] + 2, rx: 5.5, ry: 5.5 })),
-            // Two pieces on the diagonal are joined: nobody slips between them. (Not at the gate: the way through it is kept wide.)
-            ...fenceLinks(fence.pieces)
-              .filter(([x, y, bx, by]) => x !== bx && !isGate([x, y]) && !isGate([bx, by]))
-              .map(([x, y, bx, by]) => ({ x: (x + bx) / 2, y: (y + by) / 2 + 2, rx: 3.5, ry: 3.5 }))
-          ]
-        : [];
-    const round = barred.length > 0 ? findWay(from, target, [...ground, ...barred]) : null;
-    if (round && lensOf(round)[round.length - 1] <= whole * DETOUR) path = round;
-    else if (ground.length > 0) path = findWay(from, target, ground) ?? path;
-  }
-  // Where two pieces on the slant are joined, there is fence between them to get over like any other.
-  const joins: Array<readonly [number, number]> = fence
-    ? fenceLinks(fence.pieces)
-        .filter(([x, , bx]) => x !== bx)
-        .map(([x, y, bx, by]) => [(x + bx) / 2, (y + by) / 2] as const)
-    : [];
-  const lens = lensOf(path);
-  const long = Math.max(1, lens[lens.length - 1] - 9);
-  const spot = (far: number) => along(path, lens, far);
-  const health = squirrel ? Math.max(2, Math.ceil(prowlHealth(burrow) / 2)) : prowlHealth(burrow);
-  const knock = fizzer ? FIZZ_SECONDS : KNOCK_SECONDS;
-  const shots: Shot[] = [];
-  const hurts: number[] = [];
-  const fars: number[] = [];
-  const breaks: Array<[number, number]> = [];
-  const crossed = new Set<number>();
-  const ready = watch.map(() => 0);
-  let duel: Duel | null = null;
-  let far = 0;
-  let falls: number | null = null;
-  let arrived = -1;
-  let stuck = 0;
-  let cut = 0;
-  let stung = 0;
-  let pitted = false;
-  let spiked = false;
-  let cowed = false;
-  let rose: number | null = mole ? null : 0;
-  // Guardians keep to their posts; the camp's people answer in turn, a different one for the next who comes.
-  const roamers = posts.filter((entry) => entry.roams);
-  const turn = roamers.length > 0 ? ((slot % roamers.length) + roamers.length) % roamers.length : 0;
-  const called = [...roamers.slice(turn), ...roamers.slice(0, turn)];
-  const standing = [...posts.filter((entry) => !entry.roams), ...called];
-  // Whoever of them has seen him and is on their way: from when, and when they will be with him.
-  let coming: { entry: Post; from: number; at: number } | null = null;
-  // Reach is an oval on the screen, and is measured as one.
-  const near = (which: number, x: number, y: number, reach: number) => works.some((work) => work.kind === which && offBy(x - work.x, y - work.y) <= reach);
-  /** The end of him, here and now: whatever he had left goes at once. */
-  const finish = (t: number) => {
-    for (let left = health - hurts.length; left > 0; left--) hurts.push(t);
-  };
-  // A tenth of a second at a time: is he being fought, who has him in reach, and what has landed.
-  for (let step = 0; step < 900 && falls === null; step++) {
-    const t = step * TICK;
-    if (arrived >= 0 && t >= arrived + knock) break;
-    const [wasX, wasY] = spot(far);
-    // One who tunnels comes up when he is nearly there; or sooner, where a thumper is drumming.
-    if (rose === null && (long - far <= MOLE_UP || near(2, wasX, wasY, 30))) rose = t;
-    const under = rose === null;
-    // On the wing he is over everything on the ground, until a ward stone has him down. Landed on what he came for, he
-    // can be got at with a blade; but he did not walk there, and what lies in the grass on the way never had him.
-    const grounded = !under && (!flier || near(0, wasX, wasY, 34));
-    const onFoot = !under && (grounded || arrived >= 0);
-    // One who is shot at keeps coming; one who is met with a blade, or has a fence to get over, has to stop for it.
-    const held = arrived < 0 && ((duel !== null && !duel.ranged && t < duel.until) || t < stuck);
-    // In a patch of tanglefoot he goes at less than half his pace; on the wing, a good deal quicker than on foot.
-    const pace = PROWL_SPEED * (under ? 0.9 : !grounded ? 1.35 : (near(4, wasX, wasY, 15) ? 0.45 : 1) * (squirrel ? 1.7 : fizzer ? 0.8 : 1));
-    if (arrived < 0 && !held) far = Math.min(long, far + pace * TICK);
-    fars.push(far);
-    const [x, y] = spot(far);
-    if (grounded) {
-      // A hedge cuts him for as long as he is in it; caltrops, the once; and a pitfall, stepped on, has one in two of them outright.
-      if (t >= cut && near(1, x, y, 13)) {
-        hurts.push(t);
-        cut = t + 1.2;
-      }
-      if (!spiked && near(8, x, y, 6)) {
-        spiked = true;
-        hurts.push(t);
-      }
-      if (!pitted && near(6, x, y, 6)) {
-        pitted = true;
-        if (scatter(slot * 3.3 + 1) < 0.5) finish(t);
-      }
-      // A piece of fence in his way: he is at it until he is over it, and whatever throws has him standing still.
-      // The squirrel is over it in a bound.
-      if (fence && arrived < 0 && t >= stuck) {
-        const piece = fence.pieces.findIndex((entry, index) => !crossed.has(index) && Math.hypot(x - entry[0], y - (entry[1] + 2)) <= 5.5);
-        const join = piece >= 0 ? -1 : joins.findIndex((mid, index) => !crossed.has(fence.pieces.length + index) && Math.hypot(x - mid[0], y - (mid[1] + 2)) <= 4.5);
-        const at = piece >= 0 ? piece : join >= 0 ? fence.pieces.length + join : -1;
-        if (at >= 0) {
-          crossed.add(at);
-          // The gate is barred: twice as long getting through it as over a piece.
-          stuck = t + (squirrel ? 0.3 : (1.4 + Math.max(1, fence.level) * 0.6) * (piece >= 0 && isGate(fence.pieces[piece]) ? 2 : 1));
-          breaks.push([t, stuck]);
-        }
-      }
-    } else if (flier && arrived < 0 && t >= stung && near(5, x, y, 26)) {
-      // On the wing near a hornet jar, they are at him.
-      hurts.push(t);
-      stung = t + 0.8;
-    }
-    // A dread totem: one in three who come near it think better of the whole thing.
-    if (!under && !cowed && near(11, x, y, 24)) {
-      cowed = true;
-      if (scatter(slot * 4.4 + 3) < 0.34) finish(t);
-    }
-    // He is let a little way out of the trees first, so that it is seen. Under the ground, nothing has him.
-    if (far >= 12 && !under) {
-      // One of the camp's people, whoever's turn it is, sees him as soon as he is within sight of the hut, and sets out
-      // to meet him: that is what they are in the camp for. He does not stand and wait for them: he comes on, and
-      // they meet where he has got to by the time they have run to him. (It used to be that nobody stirred until he
-      // was already knocking at something, and then only if he could be heard.)
-      if (!duel && !coming && called.length > 0) {
-        const seen = Math.hypot(x - called[0].x, y - called[0].y);
-        if (seen <= HEARD_FROM) coming = { entry: called[0], from: t, at: t + Math.max(RUN_SECONDS, (seen * 0.75) / RUN_SPEED) };
-      }
-      if (!duel && coming && t >= coming.at && onFoot) {
-        const first = 0.2;
-        const blows = Array.from({ length: coming.entry.blows }, (_, blow) => t + first + blow * BLOW_EVERY);
-        duel = { who: coming.entry.who, from: coming.from, until: blows[blows.length - 1] + 0.3, x, y, px: coming.entry.x, py: coming.entry.y, blows, ranged: false, run: t - coming.from };
-        hurts.push(...blows);
-      }
-      if (!duel && arrived < 0) {
-        // A blade is no use against one on the wing; a bow is.
-        const post = standing.find((entry) => (entry.ranged || onFoot) && entry !== coming?.entry && offBy(x - entry.x, y - entry.y) <= entry.r);
-        if (post) {
-          // As long getting to him as it is far: nobody is across their own ring in no time.
-          const run = post.ranged ? RUN_SECONDS : Math.max(RUN_SECONDS, Math.hypot(x - post.x, y - post.y) / RUN_SPEED);
-          const first = post.ranged ? 0.45 : run + 0.2;
-          const blows = Array.from({ length: post.blows }, (_, blow) => t + first + blow * BLOW_EVERY);
-          duel = { who: post.who, from: t, until: blows[blows.length - 1] + 0.3, x, y, px: post.x, py: post.y, blows, ranged: Boolean(post.ranged), run };
-          hurts.push(...blows);
-        }
-      }
-      if (arrived < 0 && far >= long && !held) {
-        arrived = t;
-        if (!duel) {
-          // Nobody met him on the way. A guardian whose ground the building stands on has him, whichever side of it he
-          // is at: the building beside their post is theirs to keep. Failing that, one of the camp's people hears him
-          // at it and comes running, whoever's turn it is; it takes them as long as it is far. A guardian posted
-          // somewhere else does not come: their post is their post.
-          const keeper = standing.find((entry) => !entry.roams && !entry.ranged && offBy(target[0] - entry.x, target[1] - entry.y) <= entry.r + 6);
-          const heard = keeper
-            ? { entry: keeper, off: Math.hypot(x - keeper.x, y - keeper.y) }
-            : coming
-              ? undefined
-              : called.map((entry) => ({ entry, off: Math.hypot(x - entry.x, y - entry.y) })).filter((found) => found.off <= HEARD_FROM)[0];
-          if (heard) {
-            const run = Math.max(RUN_SECONDS, heard.off / RUN_SPEED);
-            const blows = Array.from({ length: heard.entry.blows }, (_, blow) => t + run + 0.25 + blow * BLOW_EVERY);
-            duel = { who: heard.entry.who, from: t, until: blows[blows.length - 1] + 0.3, x, y, px: heard.entry.x, py: heard.entry.y, blows, ranged: false, run };
-            hurts.push(...blows);
-          }
-        }
-      }
-      for (let who = 0; who < watch.length; who++) {
-        const ring = watch[who];
-        // Nobody throws at one who is done for already: the stones and blows on their way will see to him.
-        if (health - hurts.length <= 0) break;
-        if (t < ready[who] || offBy(x - ring.x, y - ring.y) > ring.r) continue;
-        // With the watch bell ringing for him, the next throw comes sooner.
-        ready[who] = t + (ring.every ?? THROW_EVERY) * (near(7, x, y, 32) ? 0.7 : 1);
-        const lands = t + THROW_FLIES;
-        const at = held || arrived >= 0 ? far : Math.min(long, far + pace * THROW_FLIES);
-        // Thrown by somebody, from somewhere: off the roof of a building, or out of the construct itself.
-        const rise = ring.site && ring.site in PLOT_SIZE ? PLOT_SIZE[ring.site as Placed].h - 9 : 0;
-        const [aimX, aimY] = spot(at);
-        shots.push({ from: t, lands, fx: ring.x, fy: ring.y - (rise > 0 ? rise * THINGS + 7 : 12), tx: aimX, ty: aimY - 6, work: ring.work ?? null, foot: ring.y, rise });
-        for (let hurt = 0; hurt < (ring.hurts ?? 1); hurt++) hurts.push(lands);
-      }
-    }
-    if (health - hurts.filter((when) => when <= t).length <= 0) falls = [...hurts].sort((a, b) => a - b)[health - 1];
-  }
-  hurts.sort((a, b) => a - b);
-  // What would have landed after he fell did not: he was not there for it.
-  const counted = falls === null ? hurts : hurts.slice(0, health);
-  return {
-    from,
-    ux,
-    uy,
-    long,
-    kind,
-    health,
-    fars,
-    shots: falls === null ? shots : shots.filter((shot) => shot.lands <= falls!),
-    duel,
-    hurts: counted,
-    falls,
-    there: arrived >= 0 ? arrived : fars.length * TICK,
-    harms: falls === null && arrived >= 0 ? arrived + knock : null,
-    flies: flier,
-    breaks,
-    path,
-    lens,
-    rose,
-    pops: fizzer
-  };
-};
+export const NIGHT_FROM = DUSK_AT + 10;
+export const NIGHT_EVERY = 1.8;
+export const BAND_EVERY = 15;
+const BAND_MOST = 2;
+/** When the prowler of a night's place in it sets out, in seconds into the night. */
+export const setsOutAt = (index: number) => Math.floor(index / BAND_MOST) * BAND_EVERY + (index % BAND_MOST) * NIGHT_EVERY;
+/** The night a moment of the camp's clock is in, or the last one before it: its number, from 0. -1 before the first. */
+export const nightAt = (clock: number) => Math.floor((clock - NIGHT_FROM) / DAY_SECONDS);
+/** When a night's prowlers begin to set out, on the camp's clock. */
+export const nightStart = (night: number) => night * DAY_SECONDS + NIGHT_FROM;
+/** Whether a lone prowler sets out in a slot of the camp's clock by day: one in sixteen (about one every two minutes; in winter, twice that). */
+const daySets = (slot: number, winter = false) => duskAt(slot * PROWL_EVERY) < 0.5 && duskAt(slot * PROWL_EVERY + 60) < 0.5 && (slot % 16 === 3 || (winter && slot % 16 === 11));
 
 type Prowl = {
   x: number;
@@ -1610,16 +1377,17 @@ const fightersOf = (look: CampLook): Post[] => {
 /**
  * What a prowler makes for. Each kind has its own mind: the rabble are
  * hungry and go for the larder; the Gilded go for what stands tallest,
- * the lookout or the burrow; the Stumbling for whatever is nearest where
- * they came out; the Frostwights for the oak, which they cannot abide.
- * And three in ten of any kind are after easy pickings: whatever in the
- * camp the fewest things reach. A building nobody watches is found.
+ * the lookout or the burrow; the Stumbling for whatever is nearest the
+ * trail; the Frostwights for the oak, which they cannot abide; the squirrel
+ * for the oak too; the mole and the magpie for the larder; Fizzwick for
+ * whatever is nearest. And three in ten of any kind are after easy
+ * pickings: whatever in the camp the fewest things reach.
  */
-/** The kind of prowler the book being read brings oftener, if it brings one and the camp is big enough for him. */
+/** The kind of prowler the book being read brings oftener, if it brings one. */
 const favouredOf = (look: CampLook): number | null => (look.reading === undefined || look.reading === null ? null : (GENRE_FOE[look.reading] ?? null));
 
-const prowlTarget = (look: CampLook, watch: readonly Ring[], slot: number): Placed => {
-  const { from, kind } = prowlStart(slot, look.levels.burrow, favouredOf(look));
+const prowlTarget = (look: CampLook, watch: readonly Ring[], kind: number, roll: number): Placed => {
+  const from: readonly [number, number] = [frontLine(look), TRAIL_Y];
   const built = PLACED.filter((site) =>
     site === "yard0" ? Boolean(look.yard[0]?.kind) && look.yard[0].level > 0 : site === "yard1" ? Boolean(look.yard[1]?.kind) && look.yard[1].level > 0 : site === "burrow" || look.levels[site as BuildingId] > 0
   );
@@ -1629,48 +1397,155 @@ const prowlTarget = (look: CampLook, watch: readonly Ring[], slot: number): Plac
     const [x, y] = look.spots[site];
     return watch.filter((ring) => offBy(x - ring.x, y - ring.y) <= ring.r).length + posts.filter((post) => offBy(x - post.x, y - post.y) <= post.r + 6).length;
   };
-  if (scatter(slot * 9.77 + 4) < 0.3) return [...built].sort((a, b) => reached(a) - reached(b))[0] ?? "burrow";
+  if (scatter(roll * 9.77 + 4) < 0.3) return [...built].sort((a, b) => reached(a) - reached(b))[0] ?? "burrow";
   const nearest = () => [...built].sort((a, b) => Math.hypot(look.spots[a][0] - from[0], look.spots[a][1] - from[1]) - Math.hypot(look.spots[b][0] - from[0], look.spots[b][1] - from[1]))[0] ?? "burrow";
-  // The squirrel is after the oak, and the mole and the magpie after the larder: what the camp lives on is what they come for.
   const wanted: Placed = kind === 1 ? (has("tower") ? "tower" : "burrow") : kind === 2 || kind === FIZZER ? nearest() : kind === 3 || kind === SQUIRREL ? "oak" : "store";
   return has(wanted) ? wanted : has("store") ? "store" : "burrow";
 };
 
-const PROWLS = new WeakMap<CampLook, Map<number, ProwlPlan & { site: Placed }>>();
-/** The prowler who sets out in a slot of the camp's clock, his whole walk worked out; null when nobody does. */
-export const prowlPlanOf = (look: CampLook, watch: readonly Ring[], slot: number): (ProwlPlan & { site: Placed }) | null => {
-  // In winter the nights are long and the wood is hungry: more of them come.
-  if (look.prowlers === false || look.levels.burrow < PROWLERS_FROM || slot < 0 || !prowlSets(slot, look.season % 4 === 2)) return null;
+/** Where the wall's line is: the camp's own, or (a camp from before the front, on a card) where a camp begins. */
+const frontLine = (look: CampLook) => look.line ?? LINE_DEFAULT;
+/** The wood on the left of a camp's clearing: the Dark Wood never clears. */
+export const leftWoodOfLook = (look: Pick<CampLook, "clearing" | "levels">) => darkWood(woodAt(look.clearing ?? look.levels.burrow));
+
+/** The front as the night meets it: what throws (with where each throws from), who is posted, the traps, and the wall. */
+const setupOf = (look: CampLook, watch: readonly Ring[]): FrontSetup => {
+  const line = frontLine(look);
+  const level = look.levels.fence;
+  const corwin = Math.min(3, Math.max(0, (look.guards ?? [])[1] ?? 0));
+  return {
+    watch: watch.map((ring) => {
+      // Thrown by somebody, from somewhere: off the roof of a building, or out of the construct itself.
+      const rise = ring.site && ring.site in PLOT_SIZE ? PLOT_SIZE[ring.site as Placed].h - 9 : 0;
+      return { ...ring, rise, top: ring.y - (rise > 0 ? rise * THINGS + 7 : 12) };
+    }),
+    posts: fightersOf(look),
+    works: look.works ?? [],
+    line,
+    wall: level > 0,
+    all: sectionsAt(level),
+    standing: look.walls.filter(([x, y]) => Math.abs(x - wallXAt(line, y)) < 1).map(([, y]) => y),
+    gate: look.gate ? TRAIL_Y : null,
+    level,
+    tough: GUARD_GIVES.fence[corwin] * ((look.animals ?? []).includes(2) ? GOAT_TOUGHER : 1),
+    trail: trailOf(leftWoodOfLook(look), line),
+    blocks: prowlBlocks(look, null),
+    burrow: look.levels.burrow
+  };
+};
+/** A front, as a few words: two that read the same are the same front, and a night goes on as planned. */
+const frontKey = (setup: FrontSetup) =>
+  JSON.stringify([
+    setup.watch.map((ring) => [Math.round(ring.x), Math.round(ring.y), Math.round(ring.r), ring.every ?? 0, ring.hurts ?? 1, ring.work ?? -1]),
+    setup.posts.map((post) => [post.who, Math.round(post.x), Math.round(post.y), post.blows]),
+    setup.works.map((work) => [work.kind, work.x, work.y]),
+    setup.line,
+    setup.wall,
+    setup.standing,
+    setup.level,
+    setup.tough
+  ]);
+
+/** Who comes on a night of this camp, in order: none before prowlers come, or on a camp's card. */
+export const nightKinds = (look: CampLook, night: number): number[] =>
+  !look.wave || look.prowlers === false || look.levels.burrow < PROWLERS_FROM || night < 0 ? [] : waveKinds(look.wave.chapter, look.wave.seed, night, look.season % 4 === 2, favouredOf(look));
+
+/**
+ * The nights planned in this visit, by the visit's seed and the night's number: who comes (fixed when the night is
+ * first wanted), and the front as it stood from each moment of it. A front that changes while the night is on adds a
+ * moment, and the night is planned again from it.
+ */
+const NIGHTS = new Map<string, { walkers: Walker[]; fronts: Array<{ at: number; setup: FrontSetup; key: string }>; plan: NightPlan | null }>();
+export const nightPlanOf = (look: CampLook, watch: readonly Ring[], night: number, clock?: number): NightPlan | null => {
+  const kinds = nightKinds(look, night);
+  if (kinds.length === 0 || !look.wave) return null;
+  const name = `${look.wave.seed}|${night}`;
+  const setup = setupOf(look, watch);
+  const key = frontKey(setup);
+  let kept = NIGHTS.get(name);
+  // Into the night so far: before it begins, the front is just as it is.
+  const into = clock === undefined ? 0 : Math.max(0, Math.round((clock - nightStart(night)) / TICK) * TICK);
+  if (!kept) {
+    const walkers = kinds.map((kind, index): Walker => {
+      const site = prowlTarget(look, watch, kind, night * 31 + index);
+      return { kind, start: setsOutAt(index), site, target: look.spots[site], lane: ((index * 3) % 5) - 2 };
+    });
+    kept = { walkers, fronts: [{ at: 0, setup, key }], plan: null };
+    NIGHTS.set(name, kept);
+    // Only the nights that may still be watched are kept.
+    for (const other of NIGHTS.keys()) if (other.startsWith(`${look.wave.seed}|`) && Number(other.split("|")[1]) < night - 1) NIGHTS.delete(other);
+    if (NIGHTS.size > 8) NIGHTS.delete(NIGHTS.keys().next().value as string);
+  } else if (kept.fronts[kept.fronts.length - 1].key !== key) {
+    if (into <= 0) kept.fronts = [{ at: 0, setup, key }];
+    else kept.fronts = [...kept.fronts, { at: Math.max(kept.fronts[kept.fronts.length - 1].at, into), setup, key }];
+    kept.plan = null;
+  }
+  if (!kept.plan) kept.plan = planNight(kept.walkers, kept.fronts, look.wave.seed + night);
+  return kept.plan;
+};
+
+/** A lone prowler by day, in a slot of the camp's clock: a creeper, or (once they come) a runner. */
+const DAYS = new WeakMap<CampLook, Map<number, WalkPlan | null>>();
+const dayPlanOf = (look: CampLook, watch: readonly Ring[], slot: number): WalkPlan | null => {
+  if (look.prowlers === false || look.levels.burrow < PROWLERS_FROM || slot < 0 || !daySets(slot, look.season % 4 === 2)) return null;
   // The cat: one in ten thinks better of it and stays in the wood.
   if ((look.animals ?? []).includes(1) && scatter(slot * 3.31 + 9.1) < 0.1) return null;
-  let plans = PROWLS.get(look);
-  if (!plans) PROWLS.set(look, (plans = new Map()));
-  const kept = plans.get(slot);
-  if (kept) return kept;
-  const site = prowlTarget(look, watch, slot);
-  const plan = {
-    ...planProwl(look.spots[site], look.levels.burrow, watch, slot, fightersOf(look), look.works ?? [], look.levels.fence > 0 ? { pieces: look.walls, level: look.levels.fence, gate: look.gate ?? null } : null, {
-      blocks: prowlBlocks(look, site),
-      favoured: favouredOf(look)
-    }),
-    site
-  };
+  let plans = DAYS.get(look);
+  if (!plans) DAYS.set(look, (plans = new Map()));
+  if (plans.has(slot)) return plans.get(slot) ?? null;
+  const chapter = look.wave?.chapter ?? 3;
+  const favoured = favouredOf(look);
+  const creeper = look.season % 4 === 2 ? 3 : favoured === 2 || favoured === 0 ? favoured : 0;
+  const kind = chapter >= ROLE_FROM.runner && scatter(slot * 5.9 + 2.2) < 0.35 ? SQUIRREL : creeper;
+  const site = prowlTarget(look, watch, kind, slot);
+  const plan = planNight([{ kind, start: 0, site, target: look.spots[site], lane: (slot % 5) - 2 }], [{ at: 0, setup: setupOf(look, watch) }], slot).walks[0] ?? null;
   plans.set(slot, plan);
-  // Kept for the walks that are being walked, not for every one there ever was.
   if (plans.size > 14) for (const old of plans.keys()) if (old < slot - 9) plans.delete(old);
   return plan;
+};
+
+/** A walk somebody is on, wherever in the camp's clock it set out: by day (`d` and its slot) or in a night (`n`, the night and his place in it). */
+export type Walk = WalkPlan & { id: string; at: number; night: number | null };
+/**
+ * Everyone who has set out by a moment of the camp's clock and may still be about (or have just been): the day's
+ * lone ones and the night's, each with when he set out on the clock.
+ */
+export const walksAt = (look: CampLook, watch: readonly Ring[], clock: number): Walk[] => {
+  const walks: Walk[] = [];
+  const now = Math.floor(clock / PROWL_EVERY);
+  // A lone walk is never much longer than a minute: those that set out in the last eight slots may still be on it.
+  for (let slot = Math.max(0, now - 8); slot <= now; slot++) {
+    const walk = dayPlanOf(look, watch, slot);
+    if (walk) walks.push({ ...walk, id: `d${slot}`, at: slot * PROWL_EVERY, night: null });
+  }
+  const night = nightAt(clock);
+  for (const n of [night - 1, night]) {
+    if (n < 0) continue;
+    const plan = nightPlanOf(look, watch, n, clock);
+    if (!plan) continue;
+    plan.walks.forEach((walk, index) => {
+      if (nightStart(n) + walk.start <= clock) walks.push({ ...walk, id: `n${n}.${index}`, at: nightStart(n) + walk.start, night: n });
+    });
+  }
+  return walks;
+};
+/** The sections of the wall down at a moment of the camp's clock: knocked down in tonight's fight, and not yet mended (at dawn). */
+export const wallDownAt = (look: CampLook, watch: readonly Ring[], clock: number): number[] => {
+  const night = nightAt(clock);
+  if (night < 0) return [];
+  const into = clock - nightStart(night);
+  // Mended by dawn: the night runs until the day turns.
+  if (into > DAWN_AT + TURN_SECONDS - NIGHT_FROM) return [];
+  const plan = nightPlanOf(look, watch, night, clock);
+  return plan ? plan.breaks.filter((entry) => entry.at <= into).map((entry) => entry.y) : [];
 };
 
 /** The prowlers there are about at a moment of the camp's clock, and whoever is out fighting one. */
 const prowlsAt = (look: CampLook, watch: readonly Ring[], clock: number): { about: Prowl[]; fights: Map<number, Fight> } => {
   const about: Prowl[] = [];
   const fights = new Map<number, Fight>();
-  const now = Math.floor(clock / PROWL_EVERY);
-  // A walk is never much longer than six slots: those that set out in them may still be on it.
-  for (let slot = Math.max(0, now - 7); slot <= now; slot++) {
-    const walk = prowlPlanOf(look, watch, slot);
-    if (!walk) continue;
-    const t = clock - slot * PROWL_EVERY;
+  for (const walk of walksAt(look, watch, clock)) {
+    const t = clock - walk.at;
     const farAt = (when: number) => {
       const step = Math.max(0, when / TICK);
       const low = Math.min(walk.fars.length - 1, Math.floor(step));
@@ -2467,6 +2342,262 @@ const burrowDoor = (on: CanvasRenderingContext2D, spot: Spot, level: number, ope
   }
 };
 
+// ---- the front, drawn (1.5.11): the Dark Wood, its trail, the trail's mouth --------------------------------------
+
+/** A tree of the Dark Wood: the camp's own kinds of tree, in the wood's own dark (kept, a picture at a time). */
+const DARKS = new WeakMap<object, CanvasImageSource>();
+const darkened = (image: CanvasImageSource, w: number, h: number): CanvasImageSource => {
+  const kept = DARKS.get(image as object);
+  if (kept) return kept;
+  if (typeof document === "undefined") return image;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return image;
+  ctx.drawImage(image, 0, 0);
+  ctx.globalCompositeOperation = "source-atop";
+  ctx.fillStyle = "rgba(14, 18, 36, 0.62)";
+  ctx.fillRect(0, 0, w, h);
+  DARKS.set(image as object, canvas);
+  return canvas;
+};
+const darkTree = (on: CanvasRenderingContext2D, art: GameArt, kind: number, x: number, y: number) => {
+  const still = art.sprite("land", 0, { variant: kind });
+  if (!still) return;
+  on.drawImage(darkened(still.image, still.w, still.h), Math.round(x - still.w / 2), Math.round(y - still.h));
+};
+
+/** The trail's earth by the season (summer, autumn, winter, spring): its middle, its edges, and a fleck. */
+const TRAIL_TONES: ReadonlyArray<readonly [string, string, string]> = [
+  ["#b8925c", "#957043", "#d2b07a"],
+  ["#a8804e", "#86603a", "#c98a3c"],
+  ["#d6dbe3", "#aeb6c4", "#8d7a66"],
+  ["#93704a", "#735536", "#6f8f4a"]
+];
+const TRAILS = new Map<string, HTMLCanvasElement | null>();
+/**
+ * The trail on the ground: worn earth from out of the Dark Wood to the wall, and a fainter track on through the gate
+ * to the burrow's door. Drawn once for a camp as it stands, and kept.
+ */
+const paintTrail = (on: CanvasRenderingContext2D, look: CampLook) => {
+  if (look.levels.burrow < PROWLERS_FROM) return;
+  const line = frontLine(look);
+  const left = leftWoodOfLook(look);
+  const season = ((look.season % 4) + 4) % 4;
+  const [bx, by] = look.spots.burrow;
+  const key = `${line}|${left}|${season}|${bx}|${by}|${look.levels.fence > 0 ? 1 : 0}`;
+  if (!TRAILS.has(key)) {
+    if (TRAILS.size > 12) TRAILS.clear();
+    TRAILS.set(key, typeof document === "undefined" ? null : drawTrail(line, left, season, [bx, by]));
+  }
+  const canvas = TRAILS.get(key);
+  if (canvas) on.drawImage(canvas, 0, 0);
+};
+const drawTrail = (line: number, left: number, season: number, burrow: readonly [number, number]): HTMLCanvasElement | null => {
+  const canvas = document.createElement("canvas");
+  canvas.width = GAME_W;
+  canvas.height = GAME_H;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  const [middle, edge, fleck] = TRAIL_TONES[season];
+  const trail = trailOf(left, line);
+  // The track on from the gate to the door: the camp's own, fainter.
+  const inside: Array<readonly [number, number]> = [
+    [line, TRAIL_Y],
+    [line + 14, TRAIL_Y + 2],
+    [burrow[0] - 4, burrow[1] + 7]
+  ];
+  const lay = (path: ReadonlyArray<readonly [number, number]>, half: number, colour: string, alpha: number) => {
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = colour;
+    for (let at = 1; at < path.length; at++) {
+      const [ax, ay] = path[at - 1];
+      const [bxx, byy] = path[at];
+      const steps = Math.max(1, Math.ceil(Math.hypot(bxx - ax, byy - ay)));
+      for (let step = 0; step <= steps; step++) {
+        const x = Math.round(ax + ((bxx - ax) * step) / steps);
+        const y = Math.round(ay + ((byy - ay) * step) / steps);
+        // An oval a row at a time: the ground is seen from a slant.
+        for (let row = -Math.ceil(half * SQUAT); row <= Math.ceil(half * SQUAT); row++) {
+          const wide = Math.round(half * Math.sqrt(Math.max(0, 1 - (row / (half * SQUAT + 0.5)) ** 2)));
+          ctx.fillRect(x - wide, y + row, wide * 2 + 1, 1);
+        }
+      }
+    }
+    ctx.globalAlpha = 1;
+  };
+  lay(trail, 6, edge, 0.85);
+  lay(trail, 4.5, middle, 0.95);
+  lay(inside, 3.5, edge, 0.45);
+  lay(inside, 2.5, middle, 0.5);
+  // Footprints and grit, the same every time for the same trail.
+  ctx.fillStyle = fleck;
+  for (let k = 0; k < 40; k++) {
+    const x = Math.round(scatter(k * 4.7 + line) * line);
+    const y = Math.round(trailYAtLook(trail, x) + (scatter(k * 2.3 + left) - 0.5) * 6);
+    ctx.fillRect(x, y, scatter(k * 1.9) < 0.5 ? 1 : 2, 1);
+  }
+  return canvas;
+};
+/** Up the picture, where the trail is at a point across it. */
+const trailYAtLook = (trail: ReadonlyArray<readonly [number, number]>, x: number) => {
+  for (let at = 1; at < trail.length; at++) {
+    const [ax, ay] = trail[at - 1];
+    const [bx, by] = trail[at];
+    if (x <= bx || at === trail.length - 1) return ay + (by - ay) * (bx === ax ? 1 : Math.max(0, Math.min(1, (x - ax) / (bx - ax))));
+  }
+  return TRAIL_Y;
+};
+
+/**
+ * The trail's mouth: where it comes out of the Dark Wood, a dark hollow between two gnarled trunks, brambles either
+ * side of the way, and a crooked post with a warning on it (an acorn, struck through). Drawn among everything that
+ * stands, by its foot.
+ */
+const trailMouth = (on: CanvasRenderingContext2D, look: CampLook) => {
+  const x0 = Math.round(leftWoodOfLook(look));
+  const y0 = MOUTH_Y + 1;
+  // The hollow: the way going on into the dark under the trees, an arch with the dark deepest at its heart.
+  for (let row = 0; row < 15; row++) {
+    const up = 15 - row;
+    const wide = Math.round(Math.min(7, 2 + row * 0.55)) + (row > 11 ? 1 : 0);
+    const middle = x0 - 6 - Math.round(row * 0.15);
+    on.fillStyle = "#2b2236";
+    on.fillRect(middle - wide, y0 - up, wide * 2 + 1, 1);
+    if (wide > 2) {
+      on.fillStyle = row > 4 ? "#120d19" : "#1b1424";
+      on.fillRect(middle - wide + 2, y0 - up, wide * 2 - 3, 1);
+    }
+  }
+  // Gnarled roots and trunks either side, leaning in.
+  on.fillStyle = "#2b2219";
+  on.fillRect(x0 - 15, y0 - 10, 2, 11);
+  on.fillRect(x0 - 14, y0 - 14, 2, 5);
+  on.fillRect(x0 - 12, y0 - 17, 2, 4);
+  on.fillRect(x0 + 1, y0 - 9, 2, 10);
+  on.fillRect(x0 + 0, y0 - 13, 2, 5);
+  on.fillRect(x0 - 2, y0 - 16, 2, 4);
+  on.fillRect(x0 - 17, y0, 4, 1);
+  on.fillRect(x0 + 2, y0, 3, 1);
+  on.fillStyle = "#3d3024";
+  on.fillRect(x0 - 15, y0 - 5, 1, 5);
+  on.fillRect(x0 + 2, y0 - 4, 1, 4);
+  // Their crowns, meeting over it: ragged, not a lid.
+  const leaves: ReadonlyArray<readonly [number, number, number, number]> = [
+    [-19, -21, 7, 4],
+    [-14, -24, 8, 4],
+    [-8, -23, 7, 3],
+    [-3, -21, 7, 4],
+    [-17, -18, 5, 2],
+    [-1, -18, 5, 2],
+    [-10, -20, 4, 2]
+  ];
+  on.fillStyle = "#16221c";
+  for (const [dx, dy, w, h] of leaves) on.fillRect(x0 + dx, y0 + dy, w, h);
+  on.fillStyle = "#223229";
+  on.fillRect(x0 - 13, y0 - 24, 3, 1);
+  on.fillRect(x0 - 6, y0 - 23, 2, 1);
+  on.fillRect(x0 - 18, y0 - 21, 2, 1);
+  // A few hanging down into the mouth.
+  on.fillStyle = "#16221c";
+  on.fillRect(x0 - 11, y0 - 17, 1, 3);
+  on.fillRect(x0 - 5, y0 - 18, 1, 2);
+  // Brambles either side of the way.
+  on.fillStyle = "#2c3a26";
+  for (const [bx, by] of [
+    [x0 + 4, y0 - 8],
+    [x0 + 7, y0 + 4],
+    [x0 - 1, y0 + 4],
+    [x0 + 10, y0 - 7]
+  ] as const) {
+    on.fillRect(bx - 2, by, 5, 1);
+    on.fillRect(bx - 1, by - 1, 3, 1);
+    on.fillRect(bx, by - 2, 1, 1);
+  }
+  on.fillStyle = "#7d3b3b";
+  on.fillRect(x0 + 4, y0 - 9, 1, 1);
+  on.fillRect(x0 + 7, y0 + 3, 1, 1);
+  // The warning post: an acorn, struck through.
+  const px = x0 + 12;
+  const py = y0 - 9;
+  on.fillStyle = "#4e3622";
+  on.fillRect(px, py - 9, 1, 10);
+  on.fillStyle = "#8a6a44";
+  on.fillRect(px - 3, py - 10, 7, 4);
+  on.fillStyle = "#5e3f22";
+  on.fillRect(px - 1, py - 9, 2, 2);
+  on.fillStyle = "#9b2f2f";
+  on.fillRect(px - 2, py - 9, 1, 1);
+  on.fillRect(px - 1, py - 8, 1, 1);
+  on.fillRect(px + 1, py - 9, 1, 1);
+  on.fillRect(px + 2, py - 8, 1, 1);
+};
+/** At dusk and by night, eyes in the trail's mouth: a pair, then another, each blinking now and then on its own time. */
+const mouthEyes = (on: CanvasRenderingContext2D, look: CampLook, time: number, dusk: number) => {
+  if (dusk < 0.2 || look.levels.burrow < PROWLERS_FROM) return;
+  const x0 = Math.round(leftWoodOfLook(look));
+  const pairs: ReadonlyArray<readonly [number, number, number]> = [
+    [x0 - 9, MOUTH_Y - 7, 0],
+    [x0 - 5, MOUTH_Y - 4, 1.7]
+  ];
+  on.fillStyle = "#ffd34a";
+  pairs.forEach(([x, y, own], index) => {
+    if (index === 1 && dusk < 0.6) return;
+    // Open most of the time; shut for a fifth of a second every few seconds.
+    if ((time + own) % 4.3 < 0.2) return;
+    on.globalAlpha = Math.min(1, (dusk - 0.2) * 2);
+    on.fillRect(x, y, 1, 1);
+    on.fillRect(x + 2, y, 1, 1);
+  });
+  on.globalAlpha = 1;
+};
+/** By night a low mist creeps out of the mouth along the trail, drifting slowly. */
+const mouthMist = (on: CanvasRenderingContext2D, look: CampLook, time: number, dusk: number) => {
+  if (dusk < 0.3 || look.levels.burrow < PROWLERS_FROM) return;
+  const x0 = Math.round(leftWoodOfLook(look));
+  on.fillStyle = "rgba(160, 140, 200, 1)";
+  for (let k = 0; k < 4; k++) {
+    const drift = Math.round(((time * 1.5 + k * 7) % 22) - 4);
+    on.globalAlpha = 0.1 * Math.min(1, (dusk - 0.3) * 2) * (1 - Math.abs(drift - 7) / 18);
+    on.fillRect(x0 - 2 + drift, MOUTH_Y - 1 + (k % 2) * 3 - k, 10 + (k % 3) * 3, 1);
+  }
+  on.globalAlpha = 1;
+};
+
+/** The front's slots, shown while it is arranged: an empty trap spot is a worn flat stone in the trail, an empty pad a ring of timber. The chosen one, ringed. */
+const frontSlots = (on: CanvasRenderingContext2D, slots: NonNullable<CampExtras["front"]>, time: number | null) => {
+  const ring = (x: number, y: number, rx: number, colour: string) => {
+    for (let k = 0; k < 24; k++) {
+      const a = (k / 24) * Math.PI * 2;
+      on.fillStyle = colour;
+      on.fillRect(Math.round(x + Math.cos(a) * rx), Math.round(y + Math.sin(a) * rx * SQUAT), 1, 1);
+    }
+  };
+  slots.spots.forEach(([x, y], index) => {
+    if (index >= slots.open.spots) return;
+    if (!slots.filled.spots[index]) {
+      on.fillStyle = "rgba(226, 214, 184, 0.75)";
+      on.fillRect(x - 4, y - 1, 9, 3);
+      on.fillStyle = "rgba(160, 146, 116, 0.8)";
+      on.fillRect(x - 4, y + 1, 9, 1);
+    }
+    if (slots.chosen?.at === "spot" && slots.chosen.index === index) ring(x, y, 7 + (time !== null && Math.floor(time * 3) % 2 === 0 ? 1 : 0), "#ffe08a");
+  });
+  slots.pads.forEach(([x, y], index) => {
+    if (index >= slots.open.pads) return;
+    if (!slots.filled.pads[index]) {
+      on.fillStyle = "#7a5233";
+      on.fillRect(x - 5, y - 2, 11, 3);
+      on.fillStyle = "#a0714a";
+      on.fillRect(x - 4, y - 2, 9, 1);
+      on.fillStyle = "#5a3a22";
+      on.fillRect(x - 5, y + 1, 11, 1);
+    }
+    if (slots.chosen?.at === "pad" && slots.chosen.index === index) ring(x, y, 8 + (time !== null && Math.floor(time * 3) % 2 === 0 ? 1 : 0), "#ffe08a");
+  });
+};
+
 export const paintCamp = (ctx: CanvasRenderingContext2D, art: GameArt, look: CampLook, frame: number, extras: CampExtras = {}) => {
   ctx.clearRect(0, 0, GAME_W, GAME_H);
   if (look.area === "meadow") {
@@ -2495,12 +2626,16 @@ export const paintCamp = (ctx: CanvasRenderingContext2D, art: GameArt, look: Cam
 
   // What is chosen says what it needs and what it does: how far it reaches in blue, the ground it takes in red.
   // Laid on the grass, under everything that stands.
-  for (const ring of extras.rings ?? []) disc(ctx, ring.x, ring.y - 2, ring.r, "rgba(70, 140, 255, 0.21)");
+  for (const ring of extras.rings ?? []) if (!ring.next) disc(ctx, ring.x, ring.y - 2, ring.r, "rgba(70, 140, 255, 0.21)");
   for (const space of extras.spaces ?? []) disc(ctx, space.x, space.y - 1, space.r, "rgba(236, 72, 60, 0.32)");
 
   inLight(ctx, dusk, (on) => {
+    // The trail out of the Dark Wood, worn into the ground under everything (1.5.11).
+    paintTrail(on, look);
+    if (extras.front) frontSlots(on, extras.front, time);
     // Everything that stands, by where its feet are.
     const things: Standing[] = [];
+    if (look.levels.burrow >= PROWLERS_FROM) things.push({ y: MOUTH_Y - 0.5, draw: () => trailMouth(on, look) });
     const { about: prowls, fights } = extras.watch && extras.clock !== undefined && time !== null ? prowlsAt(look, extras.watch, extras.clock) : { about: [] as Prowl[], fights: new Map<number, Fight>() };
     // What is being knocked at just now, and how far into it: a building that is hit is seen to be.
     const knocked = new Map<Placed, number>();
@@ -2526,7 +2661,9 @@ export const paintCamp = (ctx: CanvasRenderingContext2D, art: GameArt, look: Cam
 
     layLand(on, art, look.land ?? [], time, things, px);
     // The wood the camp has not yet cleared: it stands like any other trees, and is in front of or behind things as they are.
-    forestOf(look).forEach((tree) => things.push({ y: tree.y, x: tree.x, shade: 6, draw: () => eased(on, art, "land", tree.kind, tree.x, tree.y, null, 0, 0) }));
+    forestOf(look).forEach((tree) =>
+      things.push({ y: tree.y, x: tree.x, shade: 6, draw: () => (tree.dark ? darkTree(on, art, tree.kind, tree.x, tree.y) : eased(on, art, "land", tree.kind, tree.x, tree.y, null, 0, 0)) })
+    );
     (look.works ?? []).forEach((entry) => {
       // A patch of tanglefoot and a pitfall lie on the ground: whoever is on them is drawn over them, and they throw no shadow.
       const lies = entry.kind === 4 || entry.kind === 6;
@@ -2603,7 +2740,136 @@ export const paintCamp = (ctx: CanvasRenderingContext2D, art: GameArt, look: Cam
     const veils = (x: number, y: number) =>
       (behind !== null && y >= behind.spot[1] - 2 && y + 3 - fenceTall < behind.spot[1] && y + 3 > behind.box.top && Math.abs(x - behind.spot[0]) <= behind.box.w / 2 + 7) ||
       (peek !== null && Math.abs(x - peek.x) <= 9 && peek.y >= y + 3 - fenceTall - 6 && peek.y <= y + 5);
+    // The wall across the trail (1.5.11): a palisade, or stone from the fourth level, seen running away up the picture as
+    // stake after stake (or block after block), with a gatehouse where the trail meets it. What tonight's prowlers have
+    // knocked down lies in a heap until dawn.
+    const down = extras.watch && extras.clock !== undefined && time !== null ? wallDownAt(look, extras.watch, extras.clock) : [];
+    const onLine = (x: number, y: number) => look.line !== undefined && Math.abs(x - wallXAt(look.line, y)) < 1;
+    const stone = look.levels.fence >= 4;
+    /** One log of the palisade (a block of the stone wall), its foot at `foot`: its shadowed side to the trail, its lit side to the camp, a point on top. */
+    const stake = (x: number, foot: number, tall: number, shade: boolean) => {
+      if (stone) {
+        on.fillStyle = shade ? tones.side : tones.face;
+        on.fillRect(x - 3, foot - tall, 7, tall);
+        on.fillStyle = "#34303a";
+        on.fillRect(x - 3, foot - tall, 1, tall);
+        on.fillStyle = tones.top;
+        on.fillRect(x + 3, foot - tall + 1, 1, tall - 1);
+        on.fillStyle = "#57525c";
+        for (let row = foot - 4; row > foot - tall; row -= 4) on.fillRect(x - 2, row, 5, 1);
+        on.fillStyle = tones.top;
+        on.fillRect(x - 3, foot - tall - 1, 7, 1);
+        if (look.levels.fence >= 5) {
+          on.fillRect(x - 3, foot - tall - 3, 2, 2);
+          on.fillRect(x + 2, foot - tall - 3, 2, 2);
+        }
+        return;
+      }
+      // A log: dark on the side to the trail, lit on the side to the camp, and pointed.
+      on.fillStyle = shade ? "#6a4426" : "#80552f";
+      on.fillRect(x - 2, foot - tall, 5, tall);
+      on.fillStyle = "#33200f";
+      on.fillRect(x - 2, foot - tall + 1, 1, tall - 1);
+      on.fillStyle = "#b5854f";
+      on.fillRect(x + 2, foot - tall + 1, 1, tall - 2);
+      on.fillRect(x - 1, foot - tall - 1, 3, 1);
+      on.fillStyle = "#d9b27a";
+      on.fillRect(x, foot - tall - 2, 1, 1);
+      // The rope that binds it to the next.
+      on.fillStyle = "#3d2a16";
+      on.fillRect(x - 2, foot - tall + 4, 5, 1);
+    };
+    /** A section of the wall: logs (or blocks) one behind another, the far one first. */
+    const section = (x: number, y: number) => {
+      const tall = stone ? 12 : 14 + (look.levels.fence >= 3 ? 2 : 0);
+      const steps = stone ? [-3, 1] : [-4, -1.5, 1, 3.5];
+      // Drawn leaning a little, the far end to the right: the wall is seen running away up the picture, its face to the trail.
+      steps.forEach((dy, index) => stake(Math.round((look.line ?? x) + (TRAIL_Y - (y + dy)) * WALL_LEAN), Math.round(y + dy) + 3, tall, index % 2 === 1));
+      if (extras.sliding) {
+        on.fillStyle = "#ffe08a";
+        on.fillRect(Math.round(x) - 3, Math.round(y) - tall - 3, 7, 1);
+      }
+    };
+    /** The gatehouse: two log towers (stone, from the fourth level) with caps, the doors between, and a beam over. */
+    const gatehouse = (x: number, y: number) => {
+      const left = Math.round(x);
+      const back = Math.round(y) - 3;
+      const front = Math.round(y) + 6;
+      const tower = (foot: number) => {
+        on.fillStyle = stone ? tones.face : "#6e4a2c";
+        on.fillRect(left - 3, foot - 21, 7, 21);
+        on.fillStyle = stone ? "#3d3a40" : "#3b2616";
+        on.fillRect(left - 3, foot - 21, 1, 21);
+        on.fillStyle = stone ? tones.top : "#9a6f3e";
+        on.fillRect(left + 3, foot - 20, 1, 20);
+        on.fillStyle = stone ? tones.side : "#4a3220";
+        for (let row = foot - 5; row > foot - 21; row -= 5) on.fillRect(left - 2, row, 5, 1);
+        // A cap over it.
+        on.fillStyle = "#6b2f22";
+        on.fillRect(left - 4, foot - 23, 9, 2);
+        on.fillRect(left - 2, foot - 25, 5, 2);
+        on.fillRect(left, foot - 26, 1, 1);
+        on.fillStyle = "#8c4430";
+        on.fillRect(left - 3, foot - 23, 7, 1);
+      };
+      tower(back);
+      // The doors, seen edge on as the wall is: planks, banded with iron.
+      for (const foot of [back + 3, back + 5, back + 7]) {
+        on.fillStyle = "#a87b48";
+        on.fillRect(left - 2, foot - 13, 5, 13);
+        on.fillStyle = "#6e4c2c";
+        on.fillRect(left - 2, foot - 13, 1, 13);
+        on.fillStyle = "#55555f";
+        on.fillRect(left - 2, foot - 10, 5, 1);
+        on.fillRect(left - 2, foot - 4, 5, 1);
+      }
+      // The beam over, from the far tower to the near.
+      on.fillStyle = "#4a3220";
+      for (let step = 0; step <= front - back; step++) on.fillRect(left - 2, back - 17 + step, 5, 2);
+      tower(front);
+      if (extras.sliding) {
+        on.fillStyle = "#ffe08a";
+        on.fillRect(left - 4, back - 27, 9, 1);
+        on.fillRect(left - 4, front - 27, 9, 1);
+      }
+    };
+    /** A section knocked down in the night: stumps and splinters (a heap of stone), until dawn. */
+    const rubble = (x: number, y: number) => {
+      const foot = Math.round(y) + 3;
+      const left = Math.round(x + (TRAIL_Y - y) * WALL_LEAN);
+      on.fillStyle = stone ? tones.face : tones.side;
+      on.fillRect(left - 3, foot - 2, 2, 2);
+      on.fillRect(left, foot - 3, 2, 3);
+      on.fillRect(left + 2, foot - 1, 2, 1);
+      on.fillStyle = stone ? tones.side : tones.face;
+      on.fillRect(left - 5, foot, 2, 1);
+      on.fillRect(left + 4, foot - 1, 3, 1);
+      on.fillRect(left - 1, foot + 1, 2, 1);
+    };
+    for (const y of down) {
+      if (look.line === undefined) break;
+      const x = wallXAt(look.line, y);
+      things.push({ y, x, at: y + 3, wide: true, draw: () => rubble(look.line ?? x, y) });
+    }
     look.walls.forEach(([x, y]) => {
+      if (onLine(x, y) && down.includes(y)) return;
+      if (onLine(x, y)) {
+        const isGate = Boolean(look.gate && look.gate[0] === x && look.gate[1] === y);
+        things.push({
+          y: y + 3,
+          x,
+          at: y + 6,
+          wide: true,
+          draw: () => {
+            const thin = veils(x, y);
+            if (thin) on.globalAlpha = 0.28;
+            if (isGate) gatehouse(x, y);
+            else section(x, y);
+            if (thin) on.globalAlpha = 1;
+          }
+        });
+        return;
+      }
       const isGate = Boolean(look.gate && look.gate[0] === x && look.gate[1] === y);
       const run = !isGate && endOn(look.walls, x, y);
       // A corner: fence runs back or forward from this piece, and along from it to one side only. -1 when the side it
@@ -2640,7 +2906,7 @@ export const paintCamp = (ctx: CanvasRenderingContext2D, art: GameArt, look: Cam
     // wall running away from the reader what shows is its top, all the way along, and its face only at the near end
     // (which is the near piece's own post). Of one running away on the slant, the top and the side that is turned
     // this way. It was drawn as its side all the way up, which made a dark bar with posts through it.
-    fenceLinks(look.walls).forEach(([x, y, bx, by]) => {
+    fenceLinks(look.walls.filter(([x, y]) => !onLine(x, y))).forEach(([x, y, bx, by]) => {
       things.push({
         y: (y + by) / 2,
         draw: () => {
@@ -2758,7 +3024,7 @@ export const paintCamp = (ctx: CanvasRenderingContext2D, art: GameArt, look: Cam
       const size = PLOT_SIZE[site];
       const yard = site === "yard0" ? look.yard[0] : site === "yard1" ? look.yard[1] : null;
       // A plot of the yard is what a level of the camp brings: until then there is nothing there to draw.
-      if (!plotOpenAt(look.levels.burrow, yard ?? undefined, site)) continue;
+      if (!plotOpenAt(look.levels.burrow, yard ?? undefined, site, look.legacy ?? 0)) continue;
       const level = yard ? yard.level : look.levels[site as BuildingId];
       const name = yard ? (yard.kind ?? "workshop") : site;
       things.push({
@@ -2774,6 +3040,8 @@ export const paintCamp = (ctx: CanvasRenderingContext2D, art: GameArt, look: Cam
           // Knocked at: it jolts with each blow, a pixel and back.
           const rapped = knocked.get(site);
           if (rapped !== undefined && rapped % 0.75 < 0.13) on.translate(rapped % 1.5 < 0.75 ? 1 : -1, 0);
+          // Tapped: the oak shivers as its acorns come down, or shakes its head when the larder is full.
+          else if (site === "oak" && extras.oakShake) on.translate(oakShakeOffset(extras.oakShake.kind, extras.oakShake.age), 0);
           // A lookout that has taken a path is another tower to look at: the white spire, or the dark watch.
           const pathLook = site === "tower" && look.towerPath && level >= 3 ? stand(look.towerPath === "a" ? "spire" : "darkwatch", spot[0], spot[1], level - 3, squash, wear) : null;
           if (!pathLook && !stand(name, spot[0], spot[1], level, squash, wear)) {
@@ -3296,6 +3564,10 @@ export const paintCamp = (ctx: CanvasRenderingContext2D, art: GameArt, look: Cam
     haze(on, dusk);
   }, px);
 
+  if (time !== null) {
+    mouthMist(ctx, look, time, dusk);
+    mouthEyes(ctx, look, time, dusk);
+  }
   lights.forEach((light) => light());
   if (time !== null) smallLights(ctx, look, time, dusk);
   if (extras.floats && extras.floats.length > 0) floatsOf(ctx, extras.floats);
@@ -3396,7 +3668,7 @@ export const paintCamp = (ctx: CanvasRenderingContext2D, art: GameArt, look: Cam
     const [x, y] = carried ? [carried.x, carried.y] : look.spots.tower;
     circle(ctx, x, y - 2, extras.reach, "#fff6c2");
   }
-  for (const ring of extras.rings ?? []) circle(ctx, ring.x, ring.y - 2, ring.r, "#cfe4ff");
+  for (const ring of extras.rings ?? []) circle(ctx, ring.x, ring.y - 2, ring.r, ring.next ? "#ffd23f" : "#cfe4ff");
   for (const space of extras.spaces ?? []) circle(ctx, space.x, space.y - 1, space.r, "#ffb4a8");
   if (extras.path) {
     // The way they will come: a dotted line from where they come in to the larder they are after.
@@ -3418,12 +3690,35 @@ export const paintCamp = (ctx: CanvasRenderingContext2D, art: GameArt, look: Cam
     }
   }
 
-  // Acorns waiting on the oak: one bobbing over it.
-  if (look.oakReady && look.levels.oak > 0) {
+  // Acorns waiting on the oak: one bobbing over it, when a tap will take them in. With the larder full it sits still
+  // and low in the leaves, a little faded: there, but asking nothing (a tap says why, BaseScreen's `gatherOak`).
+  if ((look.oakReady || look.oakFull) && look.levels.oak > 0) {
     const acorn = art.sprite("acorn", frame);
-    const bob = time === null ? Math.round(Math.sin((frame / ART_FPS) * Math.PI * 2) * 1.5) : snap(Math.sin(time * 3.2) * 1.8);
     const oak = boxOf("oak", look.spots.oak);
-    if (acorn) ctx.drawImage(acorn.image, look.spots.oak[0] - Math.round(acorn.w / 2), oak.top - 2 + bob);
+    const shake = extras.oakShake ? oakShakeOffset(extras.oakShake.kind, extras.oakShake.age) : 0;
+    if (acorn && look.oakReady) {
+      const bob = time === null ? Math.round(Math.sin((frame / ART_FPS) * Math.PI * 2) * 1.5) : snap(Math.sin(time * 3.2) * 1.8);
+      ctx.drawImage(acorn.image, look.spots.oak[0] - Math.round(acorn.w / 2), oak.top - 2 + bob);
+    } else if (acorn) {
+      ctx.globalAlpha = 0.72;
+      ctx.drawImage(acorn.image, look.spots.oak[0] - Math.round(acorn.w / 2) + shake, oak.top + 3);
+      ctx.globalAlpha = 1;
+    }
+  }
+  // A gathering shakes a few leaves out of the crown: they drift down and are gone, each at whole pixels.
+  if (extras.oakShake?.kind === "gather" && extras.oakShake.age < LEAF_FALL_SECONDS && look.levels.oak > 0) {
+    const age = extras.oakShake.age;
+    const oak = boxOf("oak", look.spots.oak);
+    const colours = LEAF_COLOURS[look.season % 4];
+    ctx.globalAlpha = Math.max(0, Math.min(1, (LEAF_FALL_SECONDS - age) / 0.3));
+    for (let leaf = 0; leaf < LEAVES_LET_GO; leaf++) {
+      const start = look.spots.oak[0] + (leaf - (LEAVES_LET_GO - 1) / 2) * 6;
+      const fall = age * (14 + leaf * 3);
+      const sway = Math.sin(age * 9 + leaf * 1.7) * 2;
+      ctx.fillStyle = colours[leaf % 2];
+      ctx.fillRect(snap(start + sway), snap(oak.top + 8 + (leaf % 3) * 3 + fall), 2, 1);
+    }
+    ctx.globalAlpha = 1;
   }
   // Acorns just gathered: each in an arc from the oak's crown to the larder's door.
   if (extras.flying && extras.flying.length > 0) {

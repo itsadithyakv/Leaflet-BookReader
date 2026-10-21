@@ -9,9 +9,12 @@ import { lineAt } from "../lineAt";
 import { isLook, placeAtOpen, placeFollows } from "../openAt";
 import { decodeFindPlace } from "../findPlace";
 import type { WithCover, WithDot } from "./scope";
-import { isFrozen } from "./renditionGhost";
+import { isFrozen, windowChangesLayout } from "./renditionGhost";
 import { isTouchInput } from "../../platform/device";
 import { keyboardIsOpen } from "../keyboardOpen";
+import { SETTLE_HEIGHT_MS, relayoutFor, resizeDuringTurn } from "../relayoutFor";
+import { liftReaderVeil, raiseReaderVeil, turnSettleNow } from "../readerVeil";
+import { JUMP_TICK_MS, noteLeft, pinStep, startJump } from "../jumpSettle";
 
 /** By finger, a keyboard is up (or coming) for a field outside the book. */
 const keyboardOverPage = () => {
@@ -26,8 +29,8 @@ const keyboardOverPage = () => {
  */
 export const useReaderPlace = (reader: WithDot) => {
   const {
-    book, contentsForCfi, displayedViews, ensureScrollContainer, initialPrefs, layoutRef, markNavigating, openAt,
-    releaseUserReadingAnchor, renditionRef, sectionTop
+    book, contentsForCfi, displayedViews, ensureScrollContainer, initialPrefs, jumpHoldRef, lastHandsOnAtRef, layoutRef, loadFurther,
+    markNavigating, openAt, programmaticScrollUntilRef, releaseUserReadingAnchor, renditionRef, sectionTop
   } = reader;
   // Seeded from the library, so closing a book before its position is known
   // writes back what was there rather than 0.
@@ -219,15 +222,130 @@ export const useReaderPlace = (reader: WithDot) => {
     // section, dropping Dotty at an unrelated line.
     releaseUserReadingAnchor();
     markNavigating();
+    beginJump();
     void rendition.display(cfi).then(
       () => {
         if (renditionRef.current === rendition) {
           clearToolbar(cfi, below);
           settleOnPage(cfi);
+          // Scrolling: held there while the chapters round it settle.
+          pinJump(() => placeTopFor(cfi, below));
         }
       },
       () => undefined
     );
+  };
+
+  /** The jump's pin on its way: a newer jump takes over from it. */
+  const pinTokenRef = useRef(0);
+  /**
+   * A jump while scrolling is about to be made: no chapter goes in above the
+   * place until it has settled (readers/jumpSettle.ts). Called before epub.js
+   * is sent there. With pages, nothing.
+   */
+  const beginJump = () => {
+    if (layoutRef.current !== "scroll") {
+      return;
+    }
+    pinTokenRef.current += 1;
+    jumpHoldRef.current = startJump(Date.now(), lastHandsOnAtRef.current);
+    reader.pinNowRef.current = null;
+    // (Next and previous chapter say again where they are going, after this.)
+    reader.navTargetRef.current = null;
+  };
+  /**
+   * Holds the place gone to at the top of the window while the chapters round
+   * it come (readers/jumpSettle.ts). `locate` gives the scroll position that
+   * puts it there, from where it is now (null while its chapter is not on the
+   * page): the page is set by the place, not by adding up what changed above
+   * it. First the chapters below; once they have settled, the chapter above,
+   * the place still held, until the reader takes the page (a touch, the
+   * wheel, a key, or the page scrolled by anything else) or 15 s. It used to
+   * be let go after 3 s, and a chapter laid out later than that, above,
+   * left the page short. A change above the window is answered at once
+   * (`pinNowRef`, called by useBookOpening's watch), not at the next look.
+   */
+  const pinJump = (locate: () => number | null, onSettled?: () => void) => {
+    const rendition = renditionRef.current;
+    const container = layoutRef.current === "scroll" ? ensureScrollContainer() : null;
+    if (!rendition || !container) {
+      jumpHoldRef.current = null;
+      return;
+    }
+    if (!jumpHoldRef.current) {
+      beginJump();
+    }
+    const token = pinTokenRef.current;
+    const live = () => token === pinTokenRef.current && jumpHoldRef.current !== null && renditionRef.current === rendition;
+    /** One look: puts the place back if it moved; false once the place is let go. */
+    const look = () => {
+      const hold = jumpHoldRef.current;
+      if (!hold || !live()) {
+        return false;
+      }
+      let want: number | null = null;
+      try {
+        want = locate();
+      } catch {
+        want = null;
+      }
+      const step = pinStep(hold, {
+        now: Date.now(),
+        want,
+        scrollTop: container.scrollTop,
+        handsOnAt: lastHandsOnAtRef.current,
+        most: container.scrollHeight - container.clientHeight
+      });
+      if (step.done) {
+        jumpHoldRef.current = null;
+        reader.pinNowRef.current = null;
+        loadFurther();
+        return false;
+      }
+      if (step.put && want !== null) {
+        // (The page's own move, not the reader's: readers/text/useReaderScroll.ts.)
+        programmaticScrollUntilRef.current = Date.now() + 250;
+        container.scrollTop = Math.max(0, want);
+      }
+      // Short of it: the chapters below are not long enough (yet, or again).
+      if (want !== null && container.scrollTop < want - 1) {
+        loadFurther();
+      }
+      jumpHoldRef.current = noteLeft(step.hold, container.scrollTop);
+      if (step.settled) {
+        // The page below has come: now the chapter above, the place still held.
+        loadFurther();
+        onSettled?.();
+      }
+      return true;
+    };
+    reader.pinNowRef.current = () => {
+      look();
+    };
+    const tick = () => {
+      if (look()) {
+        window.setTimeout(tick, JUMP_TICK_MS);
+      }
+    };
+    tick();
+  };
+
+  /** Scrolling: the scroll position that puts a place (a CFI) at the reading line, `below` it; null when its chapter is not on the page. */
+  const placeTopFor = (cfi: string, below = 0): number | null => {
+    try {
+      const spinePos = (new EpubCFI(cfi) as unknown as { spinePos?: number }).spinePos;
+      const view = displayedViews().find((shown) => shown?.section?.index === spinePos);
+      const element = view?.element as HTMLElement | undefined;
+      if (element && view.contents?.range?.(cfi)) {
+        const top = Number(view.contents.locationOf(cfi)?.top);
+        if (Number.isFinite(top)) {
+          return Math.max(0, element.offsetTop + top - PAGE_TOP_PAD - Math.max(0, below));
+        }
+      }
+    } catch {
+      // Not on the page.
+    }
+    return null;
   };
 
   /**
@@ -437,11 +555,13 @@ export const useReaderPlace = (reader: WithDot) => {
    * round) and shows the page holding the reader's place. Scrolling, or with
    * no place yet, it only lays out.
    */
-  const relayPages = (relayout: (place: string | null) => void) => {
+  /** `onShown`: the page is at the place again (with pages), or laid out (scrolling, which puts the line back itself). */
+  const relayPages = (relayout: (place: string | null) => void, onShown?: () => void) => {
     const rendition = renditionRef.current;
     const place = layoutRef.current === "pages" ? (pagePlaceRef.current?.cfi ?? null) : null;
     if (!rendition || !place) {
       relayout(null);
+      onShown?.();
       return;
     }
     pageRelayoutsRef.current += 1;
@@ -462,7 +582,8 @@ export const useReaderPlace = (reader: WithDot) => {
           settleOnPage(place);
         }
       })
-      .then(release, release);
+      .then(release, release)
+      .then(() => onShown?.());
   };
 
   /**
@@ -500,22 +621,12 @@ export const useReaderPlace = (reader: WithDot) => {
     // was out of reach until the next chapter arrived below: a book closed
     // near a chapter's end (where a reader stops) reopened most of a screen
     // early, as did Back, a bookmark or a search result there.
-    if (cfi) {
-      try {
-        const spinePos = (new EpubCFI(cfi) as unknown as { spinePos?: number }).spinePos;
-        const view = displayedViews().find((shown) => shown?.section?.index === spinePos);
-        const element = view?.element as HTMLElement | undefined;
-        if (element && view.contents?.range?.(cfi)) {
-          const top = Number(view.contents.locationOf(cfi)?.top);
-          if (Number.isFinite(top)) {
-            container.scrollTop = Math.max(0, element.offsetTop + top - PAGE_TOP_PAD - Math.max(0, below));
-            return;
-          }
-        }
-      } catch {
-        // The page stays where epub.js put it, brought down below the toolbar.
-      }
+    const at = cfi ? placeTopFor(cfi, below) : null;
+    if (at !== null) {
+      container.scrollTop = at;
+      return;
     }
+    // (Not found: the page stays where epub.js put it, brought down below the toolbar.)
     container.scrollTop = Math.max(0, container.scrollTop - PAGE_TOP_PAD - Math.max(0, below));
   };
 
@@ -537,6 +648,9 @@ export const useReaderPlace = (reader: WithDot) => {
     const paged = layoutRef.current === "pages";
     const fileTarget = !useSaved && !paged && target.includes("#") ? target.slice(0, target.indexOf("#")) : target;
     markNavigating();
+    if (!useSaved) {
+      beginJump();
+    }
     void rendition
       .display(fileTarget)
       .then(() => {
@@ -551,50 +665,44 @@ export const useReaderPlace = (reader: WithDot) => {
         if (hashAt < 0) {
           // A chapter entry: its top. The chapter before it is on the page
           // above (scrolling runs them together), so the top is where this
-          // chapter's own frame starts, and is found again once the one
-          // above has settled.
-          const toTop = () => {
-            container.scrollTop = sectionTop(fileTarget) ?? 0;
-          };
-          toTop();
-          requestAnimationFrame(toTop);
-          window.setTimeout(toTop, 250);
+          // chapter's own frame starts: held there while the chapters round
+          // it settle (readers/jumpSettle.ts).
+          pinJump(() => sectionTop(fileTarget));
           return;
         }
         // An entry into the middle of a file (several chapters per file).
         // epub.js loads the file but, in scrolling mode, stays at its top, so
-        // scroll to the anchor ourselves, just below the floating toolbar.
+        // the page is taken to the anchor here, just below the floating toolbar.
         const id = decodeURIComponent(target.slice(hashAt + 1));
-        const toAnchor = () => {
+        pinJump(() => {
           for (const frame of Array.from(container.querySelectorAll("iframe"))) {
             const anchor = frame.contentDocument?.getElementById(id);
             if (anchor) {
               const top =
                 anchor.getBoundingClientRect().top + frame.getBoundingClientRect().top - container.getBoundingClientRect().top;
-              container.scrollTop = Math.max(0, container.scrollTop + top - PAGE_TOP_PAD);
-              return;
+              return Math.max(0, container.scrollTop + top - PAGE_TOP_PAD);
             }
           }
-        };
-        // epub.js settles the new section at its top a moment after display
-        // resolves, so the jump is made again once that has happened.
-        toAnchor();
-        requestAnimationFrame(toAnchor);
-        window.setTimeout(toAnchor, 250);
+          return null;
+        });
       })
       .catch(() => undefined);
   };
 
   return {
     lastProgressRef, lastComputedProgressRef, progressArmedRef, openedAtRef, lastCfiRef, lastCfiProgressRef,
-    shownLineRef, lastCfiBelowRef, chapterPositionsRef, openedAtPlaceRef, soughtRef, storedPlaceRef, placeFollowsNow,
+    shownLineRef, lastCfiBelowRef, chapterPositionsRef, openedAtPlaceRef, soughtRef, storedPlaceRef, placeFollowsNow, carriedPlaceRef,
     updateBookProgress, sectionWeightsRef, readingPlace, readingPlaceCfi, sectionPlace, storyEndBottom,
     storyEndWasBelowRef, storyEndInView, goToPlace, settleOnPage, pageFrame, pagePlaceRef, pageRelayoutsRef, holdPlaceForRelayout,
-    notePagePlace, relayPages, measurePagesAgain, clearToolbar, displayChapter
+    notePagePlace, relayPages, measurePagesAgain, clearToolbar, displayChapter, beginJump, pinJump, placeTopFor
   };
 };
 
-/** A window resized lays the page out round the reading line. */
+/**
+ * A window resized lays the page out round the reading line. By a finger a
+ * new width is a turn: under the veil, laid out once the window has settled,
+ * and uncovered once the place is back (readers/relayoutFor.ts, `resizeDuringTurn`).
+ */
 export const useResizeRelayout = (reader: WithCover) => {
   const {
     book, clearToolbar, ensureSingleScrollContainer, layoutRef, loading, markNavigating, refreshReaderDot, relayPages,
@@ -607,17 +715,45 @@ export const useResizeRelayout = (reader: WithCover) => {
     if (!viewer || !rendition?.resize) return;
 
     let frame = 0;
+    /** A change of height, with pages, waiting to have held (readers/relayoutFor.ts). */
+    let settleTimer = 0;
+    /** A turn, waiting for the window to keep its size. */
+    let turnTimer = 0;
     // The book was laid out at this size a moment ago. Telling epub.js the
     // size again made it clear the page (it measures the scrolling layout a
     // scrollbar narrower, so the two never agreed) with no place yet known to
     // put back: the book opened blank.
     let laidOut = { width: Math.round(viewer.clientWidth), height: Math.round(viewer.clientHeight) };
     // epub.js hears the window's resize itself, and lays the book out again
-    // at any new size: not for a keyboard over the page (below).
+    // at any new size: not for a keyboard over the page (below), and by a
+    // finger not at all (a turn is laid out once, below). Nor, by a finger,
+    // does it hear the screen's own turn ("orientationchange"), which it laid
+    // out at once and again half a second later, at whatever size the window
+    // had reached by then.
     const stage = (rendition as any).manager?.stage;
     const ownResize = stage?.resizeFunc as ((...args: unknown[]) => void) | undefined;
+    const ownTurn = stage?.orientationChangeFunc as ((...args: unknown[]) => void) | undefined;
+    const touch = isTouchInput();
+    /** Tells epub.js how tall the window is now, without laying anything out again (readers/relayoutFor.ts). */
+    const refreshBounds = () => {
+      const manager = (rendition as any).manager;
+      try {
+        if (manager && typeof manager.bounds === "function") {
+          manager._bounds = manager.bounds();
+        }
+      } catch {
+        // Measured again at the next layout.
+      }
+    };
     const heldResize = (...args: unknown[]) => {
-      if (Math.round(viewer.clientWidth) === laidOut.width && Math.round(viewer.clientHeight) < laidOut.height && keyboardOverPage()) {
+      const now = { width: Math.round(viewer.clientWidth), height: Math.round(viewer.clientHeight) };
+      // Scrolling, a change of height is not epub.js's to lay out again
+      // (it emptied the page and went back to its last place: a search
+      // result snapped back as the keyboard went down); with pages, the
+      // keyboard coming up is not either. By a finger a new width is a
+      // turn, laid out once it has settled (below).
+      if (touch || relayoutFor(layoutRef.current, laidOut, now, keyboardOverPage()) !== "relayout") {
+        refreshBounds();
         return;
       }
       ownResize?.(...args);
@@ -627,6 +763,31 @@ export const useResizeRelayout = (reader: WithCover) => {
       stage.resizeFunc = heldResize;
       window.addEventListener("resize", heldResize);
     }
+    if (touch && ownTurn) {
+      window.removeEventListener("orientationchange", ownTurn);
+    }
+    const viewerSize = () => ({ width: Math.max(1, Math.round(viewer.clientWidth)), height: Math.max(1, Math.round(viewer.clientHeight)) });
+    /** The turn has settled: laid out once, at the size it ended at, and uncovered once the place is back. */
+    const endTurn = () => {
+      turnTimer = 0;
+      if (isFrozen(rendition) || renditionRef.current !== rendition) {
+        return;
+      }
+      // The turn changes the layout itself (pages become a spread, or stop
+      // being one): the book is drawn anew for it (useShapeLayout), which
+      // uncovers the page once it is up. Laying this one out first was work
+      // thrown away.
+      if (windowChangesLayout({ layout: layoutRef.current, spread: reader.spreadRef.current })) {
+        return;
+      }
+      const now = viewerSize();
+      if (now.width === laidOut.width && now.height === laidOut.height) {
+        // Turned and back again: nothing to lay out.
+        liftReaderVeil();
+        return;
+      }
+      relayoutNow(now.width, now.height, () => liftReaderVeil());
+    };
     const syncViewport = () => {
       window.cancelAnimationFrame(frame);
       frame = window.requestAnimationFrame(() => {
@@ -634,55 +795,120 @@ export const useResizeRelayout = (reader: WithCover) => {
         if (isFrozen(rendition) || renditionRef.current !== rendition) {
           return;
         }
-        const width = Math.max(1, Math.round(viewer.clientWidth));
-        const height = Math.max(1, Math.round(viewer.clientHeight));
-        if (width === laidOut.width && height === laidOut.height) {
-          return;
-        }
+        const { width, height } = viewerSize();
         // A phone's keyboard, come up for a note or a search, makes the page
-        // shorter (Android resizes it to end at the keyboard): the book stays
-        // laid out as it was, under the keyboard, and is just as it was when
-        // the keyboard goes.
-        if (width === laidOut.width && height < laidOut.height && keyboardOverPage()) {
+        // shorter (Android resizes it to end at the keyboard): with pages the
+        // book stays laid out as it was, under the keyboard, and is just as
+        // it was when the keyboard goes. Scrolling, no change of height is
+        // laid out again: the lines are where they were (readers/relayoutFor.ts).
+        const need = resizeDuringTurn(
+          relayoutFor(layoutRef.current, laidOut, { width, height }, keyboardOverPage()),
+          touch,
+          turnTimer !== 0
+        );
+        if (need === "none") {
           return;
         }
-        laidOut = { width, height };
-        // With pages, round the reader's place (see pagePlaceRef): epub.js
-        // would lay out round the first word of the page showing.
-        // Scrolling, round the reading line as it was last seen (the text
-        // may already have moved under the old scroll position by now).
-        const held = layoutRef.current === "scroll" ? shownLineRef.current : null;
-        relayPages((place) => (rendition as any).resize(width, height, place ?? held?.cfi ?? undefined));
-        if (held) {
-          // epub.js puts the line at the top of the window, and cannot reach
-          // one in a chapter's last screenful while the chapter stands alone:
-          // it goes back to the reading line once the page is drawn again.
-          markNavigating();
-          void rendition.display(held.cfi).then(
-            () => {
-              if (renditionRef.current === rendition) {
-                clearToolbar(held.cfi, held.below);
-              }
-            },
-            () => undefined
-          );
+        if (need === "turn") {
+          raiseReaderVeil(viewer);
+          window.clearTimeout(settleTimer);
+          settleTimer = 0;
+          window.clearTimeout(turnTimer);
+          turnTimer = window.setTimeout(endTurn, turnSettleNow());
+          return;
         }
-        ensureSingleScrollContainer();
-        // Reflow moves the anchored word; the marker has to follow it.
-        refreshReaderDot();
+        if (need === "bounds") {
+          laidOut = { width, height };
+          refreshBounds();
+          return;
+        }
+        if (need === "settle") {
+          // Pages, a change of height not known to be our keyboard: laid out
+          // once it has held, and not at all if it has gone back (a keyboard
+          // from another app's notification came and went). The page stays
+          // as it was meanwhile, under it.
+          window.clearTimeout(settleTimer);
+          settleTimer = window.setTimeout(() => {
+            settleTimer = 0;
+            const now = viewerSize();
+            if (now.width === laidOut.width && now.height === laidOut.height) {
+              return;
+            }
+            relayoutNow(now.width, now.height);
+          }, SETTLE_HEIGHT_MS);
+          return;
+        }
+        window.clearTimeout(settleTimer);
+        settleTimer = 0;
+        relayoutNow(width, height);
       });
     };
-    const observer = new ResizeObserver(syncViewport);
+    /** Lays the book out again at this size, round the reader's place. `onShown`: the place is back on the page. */
+    const relayoutNow = (width: number, height: number, onShown?: () => void) => {
+      if (isFrozen(rendition) || renditionRef.current !== rendition) {
+        return;
+      }
+      laidOut = { width, height };
+      // With pages, round the reader's place (see pagePlaceRef): epub.js
+      // would lay out round the first word of the page showing.
+      // Scrolling, round the reading line as it was last seen (the text
+      // may already have moved under the old scroll position by now).
+      const held = layoutRef.current === "scroll" ? shownLineRef.current : null;
+      relayPages((place) => (rendition as any).resize(width, height, place ?? held?.cfi ?? undefined), held ? undefined : onShown);
+      if (held) {
+        // epub.js puts the line at the top of the window, and cannot reach
+        // one in a chapter's last screenful while the chapter stands alone:
+        // it goes back to the reading line once the page is drawn again.
+        markNavigating();
+        reader.beginJump();
+        void rendition.display(held.cfi).then(
+          () => {
+            if (renditionRef.current !== rendition) {
+              return;
+            }
+            clearToolbar(held.cfi, held.below);
+            reader.pinJump(() => reader.placeTopFor(held.cfi, held.below), onShown);
+            // The pin puts the line back at its first look; the chapters
+            // round it come in after without moving it (readers/keepStill.ts),
+            // so the page is uncovered without waiting for them.
+            if (onShown) {
+              window.setTimeout(onShown, UNCOVER_AFTER_PIN_MS);
+            }
+          },
+          () => onShown?.()
+        );
+      }
+      ensureSingleScrollContainer();
+      // Reflow moves the anchored word; the marker has to follow it.
+      refreshReaderDot();
+    };
+    const observer = new ResizeObserver(() => {
+      // A new width by a finger is a turn: covered now, before the frame is
+      // drawn at it (the observer is heard before the paint), and laid out
+      // once it has settled (syncViewport).
+      if (touch && !isFrozen(rendition) && renditionRef.current === rendition && Math.round(viewer.clientWidth) !== laidOut.width) {
+        raiseReaderVeil(viewer);
+      }
+      syncViewport();
+    });
     observer.observe(viewer);
     syncViewport();
     return () => {
       window.cancelAnimationFrame(frame);
+      window.clearTimeout(settleTimer);
+      window.clearTimeout(turnTimer);
       observer.disconnect();
       if (ownResize && stage.resizeFunc === heldResize) {
         window.removeEventListener("resize", heldResize);
         stage.resizeFunc = ownResize;
         if (!isFrozen(rendition)) window.addEventListener("resize", ownResize);
       }
+      if (touch && ownTurn && !isFrozen(rendition)) {
+        window.addEventListener("orientationchange", ownTurn);
+      }
     };
   }, [book.id, loading]);
 };
+
+/** Scrolling, a turn's page is uncovered this long after the reading line is pinned back (two or three of the pin's looks). */
+const UNCOVER_AFTER_PIN_MS = 80;

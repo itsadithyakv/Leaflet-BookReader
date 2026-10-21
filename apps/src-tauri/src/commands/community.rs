@@ -288,12 +288,12 @@ pub async fn community_raids_ack(ids: Vec<String>, state: State<'_, AppState>) -
   Ok(())
 }
 
-/// Whether friends may raid this reader's camp: yes until they say no, and
-/// yes for a reader who is signed out (nobody can raid them anyway).
+/// Whether friends may raid this reader's camp: no until they say yes
+/// (1.5.10), and no for a reader who is signed out (nobody can raid them).
 #[tauri::command]
 pub async fn community_raidable(state: State<'_, AppState>) -> Result<bool, String> {
   if !signed_in(&state) {
-    return Ok(true);
+    return Ok(false);
   }
   let profile = cloud::get_profile(&state.db).await.map_err(|e| e.to_string())?;
   Ok(profile.raidable)
@@ -384,14 +384,14 @@ mod tests {
   /// The switch is sent alone, read as on from a server that does not say,
   /// and a save that such a server ignored is not passed off as saved.
   #[test]
-  fn the_raid_switch_is_sent_alone_and_is_on_unless_the_server_says_off() {
+  fn the_raid_switch_is_sent_alone_and_is_off_unless_the_server_says_on() {
     let off = cloud::ProfileUpdate { raidable: Some(false), ..cloud::ProfileUpdate::default() };
     assert_eq!(serde_json::to_string(&off).expect("json"), r#"{"raidable":false}"#);
     let untouched = cloud::ProfileUpdate { streak: Some(4), ..cloud::ProfileUpdate::default() };
     assert!(!serde_json::to_string(&untouched).expect("json").contains("raidable"));
 
     let read = |json: &str| serde_json::from_str::<cloud::Profile>(json).expect("a profile").raidable;
-    assert!(read(r#"{"handle":"adi","visibility":"public"}"#), "a server from before raids");
+    assert!(!read(r#"{"handle":"adi","visibility":"public"}"#), "a server that does not say: off");
     assert!(read(r#"{"handle":"adi","raidable":true}"#));
     assert!(!read(r#"{"handle":"adi","raidable":false}"#));
 

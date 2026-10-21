@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { TOUR_CONTENTS_STEP, readerTourSeen, readStartMode } from "../ReaderTour";
+import {
+  TOUR_CONTENTS_STEP, readerTourSeen, readStartMode, setTapHintSeen, tapHintSeen
+} from "../ReaderTour";
+import { isTouchInput } from "../../platform/device";
 import { PEEK_MIN_WIDTH, setContentsSeen } from "../contentsPanel";
 import { useAmbiencePopoverOpen } from "../../ambience";
 import { daysAway, worthRecap } from "../recap/recap";
 import type { WithAnnotations, WithCover, WithPages } from "./scope";
 
+/** How long the taps' hint stays. */
+const TAP_HINT_MS = 5000;
 /** A book come back to is reminded of this long after it is on the page: after Smart Read has taken its place. */
 const RECAP_AFTER_MS = 1500;
 
@@ -38,6 +43,9 @@ export const useReaderPanels = (reader: WithPages) => {
    * been left when it opened by itself (null when it was asked for).
    */
   const [recap, setRecap] = useState<{ days: number | null } | null>(null);
+
+  /** How the taps go on a touch screen (`useFirstOpen`): said once, for a few seconds. */
+  const [tapHint, setTapHint] = useState(false);
 
   /** Which step of the walkthrough is showing (the chapter list's handle is lit on its own step). */
   const [tourStep, setTourStep] = useState(-1);
@@ -77,7 +85,7 @@ export const useReaderPanels = (reader: WithPages) => {
   return {
     fontPanelOpen, setFontPanelOpen, fontPanelRef, morePanelOpen, setMorePanelOpen, soundPanelOpen, morePanelRef,
     morePanelCloseRef, shortcutsOpen, setShortcutsOpen, shortcutsOpenRef, tourOpen, setTourOpen, tourStep,
-    spotlightDotty, recap, setRecap
+    spotlightDotty, recap, setRecap, tapHint, setTapHint
   };
 };
 
@@ -130,7 +138,10 @@ export const usePanelDismissal = (reader: WithAnnotations) => {
  * open in Smart Read, paused, unless the reader turned that off.
  */
 export const useFirstOpen = (reader: WithCover) => {
-  const { beginReadingMode, layoutRef, loadError, loading, readingModeRef, setTourOpen } = reader;
+  const {
+    beginReadingMode, layoutRef, loadError, loading, readingModeRef, renditionRef, setTapHint,
+    setTourOpen, tapHint
+  } = reader;
   // The first book opened on this device gets the walkthrough. After that,
   // books open in Smart Read, paused at the reader's line, unless they turned
   // that off.
@@ -141,14 +152,58 @@ export const useFirstOpen = (reader: WithCover) => {
     }
     const timer = window.setTimeout(() => {
       openingHandledRef.current = true;
+      // A touch screen is told once how its taps go: in the walkthrough, or
+      // by itself for a reader who had the walkthrough before the taps changed.
+      const tellTaps = isTouchInput() && !tapHintSeen();
+      if (tellTaps) {
+        setTapHintSeen();
+      }
       if (!readerTourSeen()) {
         setTourOpen(true);
-      } else if (readStartMode() === "smart" && layoutRef.current === "scroll" && readingModeRef.current === "standard") {
+        return;
+      }
+      if (tellTaps) {
+        setTapHint(true);
+      }
+      const standing = layoutRef.current === "scroll" && readingModeRef.current === "standard";
+      if (readStartMode() === "smart" && standing) {
         beginReadingMode("smart", "top", { paused: true });
       }
     }, 900);
     return () => window.clearTimeout(timer);
   }, [loading, loadError]);
+  // The hint goes by itself after a few seconds, or for any tap: on it, the
+  // page (the book's pages are documents of their own) or the chrome.
+  useEffect(() => {
+    if (!tapHint) {
+      return undefined;
+    }
+    const away = () => setTapHint(false);
+    const timer = window.setTimeout(away, TAP_HINT_MS);
+    const docs = new Set<Document>();
+    const bind = () => {
+      const all: Document[] = [document];
+      ((rendition?.getContents?.() as any[] | undefined) ?? []).forEach((contents) => {
+        if (contents?.document) {
+          all.push(contents.document as Document);
+        }
+      });
+      all.forEach((doc) => {
+        if (!docs.has(doc)) {
+          docs.add(doc);
+          doc.addEventListener("pointerdown", away, true);
+        }
+      });
+    };
+    const rendition = renditionRef.current;
+    bind();
+    rendition?.on?.("rendered", bind);
+    return () => {
+      window.clearTimeout(timer);
+      rendition?.off?.("rendered", bind);
+      docs.forEach((doc) => doc.removeEventListener("pointerdown", away, true));
+    };
+  }, [tapHint]);
 };
 
 /**

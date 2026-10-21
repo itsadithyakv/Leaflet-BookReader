@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { judgeCatchUp, PagePaceTracker, ReadingWindow, ScrollPaceTracker } from "./paceTracker";
+import {
+  AUTO_RAISE_EVERY_MS,
+  aheadToastDue,
+  autoRaise,
+  judgeCatchUp,
+  nudgedWpm,
+  tickReading,
+  PagePaceTracker,
+  ReadingWindow,
+  ScrollPaceTracker
+} from "./paceTracker";
 
 const window = () => new ReadingWindow({ minMs: 75_000, minWords: 180, maxStepMs: 180_000 });
 
@@ -134,5 +144,79 @@ describe("reading ahead of Dotty", () => {
     expect(judgeCatchUp({ words: 1500, activeMs: 60_000, dottyWpm: 220 }).kind).toBe("moved");
     // Not faster than Dotty at all: the page was scrolled on ahead of the reading.
     expect(judgeCatchUp({ words: 210, activeMs: 60_000, dottyWpm: 220 }).kind).toBe("moved");
+  });
+});
+
+describe("saying the reader is ahead of Dotty", () => {
+  it("says it once a reading session", () => {
+    expect(aheadToastDue(null, 260)).toBe(true);
+    expect(aheadToastDue(260, 260)).toBe(false);
+    expect(aheadToastDue(260, 280)).toBe(false);
+  });
+
+  it("says it again only for a real rise in the pace", () => {
+    expect(aheadToastDue(260, 299)).toBe(true);
+    expect(aheadToastDue(300, 320)).toBe(false);
+  });
+});
+
+describe("raising Dotty's pace by itself", () => {
+  const at250 = { dottyWpm: 250, base: 250, raisedAt: null, activeMs: 10 * 60_000 };
+
+  it("goes up 12 % at most, however far ahead the reader scrolled", () => {
+    // A skim: 600 a minute "read" ahead. The catch-up used to take 80 % of the gap, to 530.
+    expect(autoRaise({ ...at250, wanted: 250 + (600 - 250) * 0.8 })).toBeCloseTo(280, 5);
+    // A small gap is closed as measured.
+    expect(autoRaise({ ...at250, wanted: 265 })).toBe(265);
+  });
+
+  it("comes once in two minutes of reading", () => {
+    const raisedAt = 10 * 60_000;
+    expect(autoRaise({ ...at250, wanted: 300, raisedAt, activeMs: raisedAt + 60_000 })).toBeNull();
+    const later = raisedAt + AUTO_RAISE_EVERY_MS;
+    expect(autoRaise({ ...at250, wanted: 300, raisedAt, activeMs: later })).not.toBeNull();
+  });
+
+  it("never takes Dotty past 20 % over the reader's own pace for the book", () => {
+    // From 250, one raise every two minutes: 280, then 300, and no further.
+    let dotty = 250;
+    let raisedAt: number | null = null;
+    for (let minute = 0; minute < 30; minute += 1) {
+      const activeMs = minute * 60_000;
+      const next = autoRaise({ dottyWpm: dotty, wanted: 600, base: 250, raisedAt, activeMs });
+      if (next !== null) {
+        dotty = next;
+        raisedAt = activeMs;
+      }
+    }
+    expect(dotty).toBeCloseTo(300, 5);
+    // Over it already (the reader's own +): nothing more by itself.
+    expect(autoRaise({ ...at250, dottyWpm: 400, wanted: 500 })).toBeNull();
+  });
+});
+
+describe("the pace's − and +", () => {
+  it("go to round numbers, in steps that suit the pace", () => {
+    expect(nudgedWpm(400, true)).toBe(425);
+    expect(nudgedWpm(400, false)).toBe(375);
+    expect(nudgedWpm(397, true)).toBe(400);
+    expect(nudgedWpm(397, false)).toBe(380);
+    expect(nudgedWpm(250, true)).toBe(260);
+    expect(nudgedWpm(150, false)).toBe(140);
+  });
+});
+
+describe("Smart Read's reading clock", () => {
+  it("does not count a wait (the rest after a glide) as reading", () => {
+    const session = { activeMs: 0, lastTickAt: 0 };
+    tickReading(session, 200, false);
+    expect(session.activeMs).toBe(200);
+    // The glide and the rest after it: 2 s of waiting ticks.
+    for (let at = 380; at <= 2200; at += 180) {
+      expect(tickReading(session, at, true)).toBe(0);
+    }
+    expect(session.activeMs).toBe(200);
+    // The next word counts only from the end of the wait.
+    expect(tickReading(session, 2400, false)).toBe(2400 - 2180);
   });
 });

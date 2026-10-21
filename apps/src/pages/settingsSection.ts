@@ -6,10 +6,10 @@
  * section does not load it.
  */
 
-export type SettingsSection = "general" | "reading" | "library" | "account";
+export type SettingsSection = "general" | "reading" | "library" | "account" | "admin";
 
 const SECTION_KEY = "leaflet.settings.section";
-const SECTIONS: SettingsSection[] = ["general", "reading", "library", "account"];
+const SECTIONS: SettingsSection[] = ["general", "reading", "library", "account", "admin"];
 /** Tabs there used to be (six, most holding a card or two), and where what was on them is now. */
 const MOVED: Record<string, SettingsSection> = { habit: "reading", about: "general" };
 

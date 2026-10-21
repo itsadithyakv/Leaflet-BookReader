@@ -1,17 +1,18 @@
 import type { Book } from "@shared/models/book";
 import type { CSSProperties } from "react";
-import { useCoverSrc } from "../../hooks/useCoverSrc";
+import { coverImgProps, useCoverSrc } from "../../hooks/useCoverSrc";
 import { clothStyle } from "../shelf/spine";
 
 const StackedCover = ({ book, offset, total }: { book: Book; offset: number; total: number }) => {
-  const { src, onError } = useCoverSrc(book, { thumb: true });
+  const cover = useCoverSrc(book, { thumb: true });
+  const { src } = cover;
   return (
     <div
       className="book-cover-frame absolute top-0 h-full w-[58%] overflow-hidden bg-surface-container-high shadow-md"
       style={{ left: `${offset * (42 / Math.max(1, total - 1))}%`, zIndex: total - offset }}
     >
       {src ? (
-        <img src={src} alt="" className="h-full w-full object-cover" onError={onError} />
+        <img {...coverImgProps(cover, "120px")} alt="" className="h-full w-full object-cover" />
       ) : (
         // The title stands in for the cover: a few lines of it, broken anywhere,
         // so a long word stays inside the little cover.

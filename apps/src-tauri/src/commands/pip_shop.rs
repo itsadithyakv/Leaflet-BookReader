@@ -99,24 +99,6 @@ pub(crate) fn grow_garden(
   habit::seeds::grow(&drops, &plants, &picked)
 }
 
-/// The setting that holds the local day this device took up the water rule
-/// where all reading waters (`habit::seeds::water_drops`).
-const PLAIN_WATER_SINCE_KEY: &str = "garden_plain_water_since";
-
-/// The day this device took up the rule that all reading waters the garden:
-/// written the first time it is asked for, so earlier days keep the water
-/// they were poured under and plain reading before it is never paid.
-pub(crate) fn plain_water_since(db: &db::Database) -> Result<String, String> {
-  if let Some(day) = db.get_setting(PLAIN_WATER_SINCE_KEY).map_err(|e| e.to_string())? {
-    if chrono::NaiveDate::parse_from_str(&day, "%Y-%m-%d").is_ok() {
-      return Ok(day);
-    }
-  }
-  let today = local_today();
-  db.set_setting(PLAIN_WATER_SINCE_KEY, &today).map_err(|e| e.to_string())?;
-  Ok(today)
-}
-
 /// The whole economy from its records: the garden replayed, what the reading
 /// earned, Pip's rewards, what is owned. Pure, so the same records (one
 /// device's, or a merged sync document's) always give the same answer.
@@ -144,7 +126,8 @@ pub(crate) fn ledger_from(
   // What stakes won is read from the same records: the day ledger says
   // whether a week's goal stake was met, and a duel's prize is bounded by
   // the stake beside it (`pip::stakes`).
-  let earned = habit::seeds::earnings(days, &inputs, garden.harvested)
+  let bought = pip::freezes::bought_days(&purchases);
+  let earned = habit::seeds::earnings(days, &bought, &inputs, garden.harvested)
     .with_rewards(paid.goals, paid.chest, paid.sets, paid.wishes)
     .with_winnings(pip::stakes::goal_winnings(&purchases, days), pip::stakes::duel_prizes(&purchases));
   let sessions_done = sessions.iter().filter(|session| session.minutes >= 1.0).count() as i64;
@@ -163,8 +146,8 @@ fn ledger_and_days(db: &db::Database) -> Result<(PipLedger, std::collections::Ha
   let plantings = db.pip_plantings().map_err(|e| e.to_string())?;
   let harvests = db.pip_harvests().map_err(|e| e.to_string())?;
   let purchases = db.pip_purchases().map_err(|e| e.to_string())?;
-  let since = plain_water_since(db)?;
-  let ledger = ledger_from(&days, &sessions, &plantings, &harvests, purchases, &since);
+  let since = habit::seeds::PLAIN_WATER_SINCE;
+  let ledger = ledger_from(&days, &sessions, &plantings, &harvests, purchases, since);
   Ok((ledger, days))
 }
 
@@ -179,8 +162,8 @@ pub(crate) fn garden_totals(
   let plantings = db.pip_plantings().map_err(|e| e.to_string())?;
   let harvests = db.pip_harvests().map_err(|e| e.to_string())?;
   let purchases = db.pip_purchases().map_err(|e| e.to_string())?;
-  let since = plain_water_since(db)?;
-  let ledger = ledger_from(days, sessions, &plantings, &harvests, purchases, &since);
+  let since = habit::seeds::PLAIN_WATER_SINCE;
+  let ledger = ledger_from(days, sessions, &plantings, &harvests, purchases, since);
   Ok((ledger.garden, ledger.earned.total))
 }
 
@@ -255,7 +238,10 @@ pub struct PipOverview {
   pub stake_rules: StakeRules,
   /// Her fridge: until when the snacks on record keep it stocked, and whether
   /// finding it bare has taken its toll today (`pip::fridge`).
-  pub fridge: pip::fridge::FridgeView
+  pub fridge: pip::fridge::FridgeView,
+  /// Every thing earned by reading, never sold: done or not, and how far
+  /// along (`pip::earned`). The done ones are in `owned`.
+  pub earned: Vec<pip::earned::EarnStatus>
 }
 
 /// Streak freezes as the shop sells them (`pip::freezes`).
@@ -534,7 +520,10 @@ pub(crate) fn pip_overview(db: &db::Database) -> Result<PipOverview, String> {
 /// is showing, and which month's freezes are counted.
 pub(crate) fn pip_overview_on(db: &db::Database, today: &str) -> Result<PipOverview, String> {
   let catalogue = pip::Catalogue::bundled();
-  let (ledger, days) = ledger_and_days(db)?;
+  // First, so what it writes down is in the ledger read next.
+  let earned = earned_or_none(db, today);
+  let (mut ledger, days) = ledger_and_days(db)?;
+  pip::earned::grant(catalogue, &mut ledger.owned, &earned);
   let level = ledger.level();
   let freezes = freeze_shop(db, catalogue, &ledger.purchases, today);
   let goal_stake = pip::stakes::goal_stake_view(&ledger.purchases, &days, today);
@@ -576,7 +565,8 @@ pub(crate) fn pip_overview_on(db: &db::Database, today: &str) -> Result<PipOverv
     freezes,
     goal_stake,
     stake_rules: stake_rules(),
-    fridge
+    fridge,
+    earned
   })
 }
 
@@ -637,8 +627,12 @@ pub fn pip_buy(kind: String, id: String, state: State<'_, AppState>) -> Result<P
 pub fn pip_state_set(look: pip::PipLook, state: State<'_, AppState>) -> Result<PipOverview, String> {
   let db = state.db.guard();
   let catalogue = pip::Catalogue::bundled();
+  // What reading has earned is Pip's to wear, written down yet or not.
+  let earned = earned_or_none(&db, &local_today());
   let purchases = db.pip_purchases().map_err(|e| e.to_string())?;
-  pip::check_look(catalogue, &pip::owned(catalogue, &purchases), &look)?;
+  let mut owned = pip::owned(catalogue, &purchases);
+  pip::earned::grant(catalogue, &mut owned, &earned);
+  pip::check_look(catalogue, &owned, &look)?;
   let mut saved = stored_pip_state(&db)?;
   saved.variant = look.variant;
   saved.outfit = look.outfit;
@@ -1254,6 +1248,158 @@ fn books_finished(db: &db::Database) -> Result<i64, String> {
   Ok((here + removed) as i64)
 }
 
+// ---- earned by reading ------------------------------------------------------------
+//
+// The things never sold (`pip::earned` has the rules). The facts are gathered
+// here, in this machine's local time; a thing found earned is written down in
+// the purchase ledger, so it reaches every device and stays.
+
+/// The mornings and nights this device saw reading credited in
+/// (`pip::earned::NotedHours`). This device's alone, like the arcade's scores.
+pub(crate) const READING_HOURS_SETTING: &str = "pip.readingHours";
+
+pub(crate) fn read_noted_hours(db: &db::Database) -> pip::earned::NotedHours {
+  db.get_setting(READING_HOURS_SETTING)
+    .ok()
+    .flatten()
+    .and_then(|value| serde_json::from_str(&value).ok())
+    .unwrap_or_default()
+}
+
+/// Notes that reading was credited at local moment `at`, for the early bird
+/// and the night owl: the day ledger keeps minutes, not when they were read.
+pub(crate) fn note_reading_hour(db: &db::Database, at: chrono::NaiveDateTime) -> Result<(), String> {
+  let Some(next) = read_noted_hours(db).note(at) else {
+    return Ok(());
+  };
+  let encoded = serde_json::to_string(&next).map_err(|e| e.to_string())?;
+  db.set_setting(READING_HOURS_SETTING, &encoded).map_err(|e| e.to_string())
+}
+
+/// An instant as this machine's local time.
+fn local_time(stamp: &str) -> Option<chrono::NaiveDateTime> {
+  chrono::DateTime::parse_from_rfc3339(stamp)
+    .ok()
+    .map(|at| at.with_timezone(&chrono::Local).naive_local())
+}
+
+fn day_of(key: &str) -> Option<chrono::NaiveDate> {
+  chrono::NaiveDate::parse_from_str(key, "%Y-%m-%d").ok()
+}
+
+/// The reader's half of the world, from this machine's time zone; the north
+/// when it cannot be read.
+fn hemisphere() -> pip::earned::Hemisphere {
+  iana_time_zone::get_timezone()
+    .map(|zone| pip::earned::hemisphere_of(&zone))
+    .unwrap_or(pip::earned::Hemisphere::North)
+}
+
+/// Every earned thing as the records stand today (the reader's local day),
+/// done or not and how far along; a thing done and not yet written down is
+/// written down now, once, for every device.
+pub(crate) fn earned_now(db: &db::Database, today: &str) -> Result<Vec<pip::earned::EarnStatus>, String> {
+  let catalogue = pip::Catalogue::bundled();
+  let days = db.reading_days().map_err(|e| e.to_string())?;
+  // The longest streak ever, as the flame counts it: the walk's, or the one
+  // the last walk kept, whichever is longer, and never less than the one running.
+  let walk = walk_streak(db, today)?;
+  let best = walk.state.longest_streak.max(walk.streak).max(read_streak_state(db).longest_streak);
+
+  let mut sessions = db.focus_sessions().map_err(|e| e.to_string())?;
+  let names = ReadNames::load(db)?;
+  sessions.iter_mut().for_each(|session| names.name_session(session));
+  let sessions: Vec<&FocusSessionRecord> = sessions.iter().filter(|session| session.minutes >= 1.0).collect();
+
+  // Every day each book was opened (this device's) or read in a session (every device's).
+  let mut read_days: std::collections::HashMap<String, std::collections::BTreeSet<chrono::NaiveDate>> = std::collections::HashMap::new();
+  for (book_id, opened_at) in db.book_opens().map_err(|e| e.to_string())? {
+    if let Some(at) = local_time(&opened_at) {
+      read_days.entry(book_id).or_default().insert(at.date());
+    }
+  }
+  let mut sittings: std::collections::HashMap<String, Vec<pip::earned::Sitting>> = std::collections::HashMap::new();
+  for session in &sessions {
+    let Some(book_id) = session.book_id.clone() else { continue };
+    let start_day = day_of(&started_day(session));
+    let days_read = read_days.entry(book_id.clone()).or_default();
+    days_read.extend(start_day.into_iter().chain(day_of(&session.date_key)));
+    if let Some(start_day) = start_day {
+      sittings.entry(book_id).or_default().push(pip::earned::Sitting {
+        start_ms: millis(&session.started_at),
+        end_ms: millis(&session.ended_at),
+        start_day
+      });
+    }
+  }
+
+  // The books finished, as the card counts them: those here at their end or
+  // with a finished date, and those removed with one.
+  let finished: Vec<pip::earned::FinishedBook> = db
+    .list_books_for_sync()
+    .map_err(|e| e.to_string())?
+    .into_iter()
+    .filter(|book| {
+      if book.deleted_at.is_some() {
+        book.finished_at.as_deref().is_some_and(|at| !at.is_empty())
+      } else {
+        has_finished(book)
+      }
+    })
+    .map(|book| {
+      let finished_at = book.finished_at.clone().filter(|at| !at.is_empty()).or_else(|| book.progress_updated_at.clone());
+      let finished_day = finished_at
+        .as_deref()
+        .or(book.last_opened.as_deref())
+        .and_then(local_time)
+        .map(|at| at.date());
+      pip::earned::FinishedBook {
+        genres: book.genres.clone(),
+        finished_ms: finished_at.as_deref().map(millis).filter(|ms| *ms > 0),
+        finished_day,
+        read_days: read_days.get(&book.id).cloned().unwrap_or_default(),
+        sittings: sittings.remove(&book.id).unwrap_or_default()
+      }
+    })
+    .collect();
+
+  let spans: Vec<(chrono::NaiveDateTime, chrono::NaiveDateTime)> = sessions
+    .iter()
+    .filter_map(|session| Some((local_time(&session.started_at)?, local_time(&session.ended_at)?)))
+    .collect();
+  let noted = read_noted_hours(db);
+  let (mornings, nights) = pip::earned::mornings_and_nights(&spans, &noted.mornings, &noted.nights);
+
+  let facts = pip::earned::EarnFacts {
+    best_streak: best,
+    days: &days,
+    finished: &finished,
+    early_days: mornings.len(),
+    late_nights: nights.len(),
+    hemisphere: hemisphere()
+  };
+  let purchases = db.pip_purchases().map_err(|e| e.to_string())?;
+  let held = pip::owned(catalogue, &purchases);
+  let list = pip::earned::statuses(catalogue, &facts, &held);
+  let stamp = local_stamp();
+  for status in pip::earned::to_record(&list, &held) {
+    // Still the reader's if this fails (`pip::earned::grant`); the next look writes it.
+    if let Err(reason) = db.insert_pip_purchase(&pip::earned::record(&status.kind, &status.id, &stamp)) {
+      crate::diag::warn(&format!("{} {} was earned, but not written down: {reason}", status.kind, status.id));
+    }
+  }
+  Ok(list)
+}
+
+/// The earned things, or none when they could not be worked out (said in the
+/// log): what is already written down is still owned.
+fn earned_or_none(db: &db::Database, today: &str) -> Vec<pip::earned::EarnStatus> {
+  earned_now(db, today).unwrap_or_else(|reason| {
+    crate::diag::warn(&format!("Pip's earned things could not be worked out: {reason}"));
+    Vec::new()
+  })
+}
+
 /// Where a reader stands: every badge, the level, and the arcade's best
 /// scores (dash, catch, flap).
 struct Standing {
@@ -1658,13 +1804,13 @@ mod tests {
     assert_eq!(odd["camps"], 0);
   }
 
-  /// The economy a device holding this document works out, on a device that
-  /// took up the rule that all reading waters after every day here.
+  /// The economy a device holding this document works out, with the rule
+  /// that all reading waters taken up after every day here.
   fn ledger_of(doc: &SyncDoc) -> PipLedger {
     ledger_since(doc, "9999-12-31")
   }
 
-  /// The economy worked out on a device that took up that rule on `since`.
+  /// The economy worked out with that rule taken up on `since`.
   fn ledger_since(doc: &SyncDoc, since: &str) -> PipLedger {
     let days = doc.days.iter().map(|day| (day.date_key.clone(), day.to_record())).collect();
     let sessions: Vec<FocusSessionRecord> = doc.sessions.iter().map(SessionEntry::to_record).collect();
@@ -1710,25 +1856,29 @@ mod tests {
     assert_eq!(ledger_since(&merge(&laptop, &merged, NOW), since).garden.water, both.garden.water);
     assert_eq!(ledger_since(&merge(&merged, &merged, NOW), since).garden.water, both.garden.water);
 
-    // The same day on a device that took up the rule later keeps the old
-    // water: the session alone, half again for its clean finish.
+    // The same day before the rule keeps the old water: the session alone,
+    // half again for its clean finish.
     assert_eq!(ledger_since(&merged, "2026-10-21").garden.water, 30.0);
   }
 
-  /// The day the rule is taken up is written once, and kept.
+  /// The day all reading waters is the same on every device. It was the day
+  /// each one took the rule up, kept in its settings: a phone updated a week
+  /// after the laptop (or installed afresh) poured that week under the old
+  /// rule, and grew a different garden from the same records.
   #[test]
-  fn the_day_all_reading_waters_is_written_once() {
-    let root = std::env::temp_dir().join(format!("leaflet-water-rule-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
-    let db = db::Database::open_at(&root.join(db::DB_FILE)).expect("db");
-    let first = plain_water_since(&db).expect("since");
-    assert_eq!(first, local_today());
-    db.set_setting(PLAIN_WATER_SINCE_KEY, "2026-10-01").expect("set");
-    assert_eq!(plain_water_since(&db).expect("since"), "2026-10-01", "kept, not moved to today");
-    db.set_setting(PLAIN_WATER_SINCE_KEY, "garbage").expect("set");
-    assert_eq!(plain_water_since(&db).expect("since"), local_today(), "a value that is no day is written again");
-    drop(db);
-    let _ = std::fs::remove_dir_all(&root);
+  fn every_device_waters_from_the_same_day() {
+    let (laptop, phone, fresh) = (memory_db(), memory_db(), memory_db());
+    // What 1.5.7's first builds wrote: the laptop took the rule up on the day
+    // it was made, the phone a week later; the fresh install has nothing.
+    laptop.set_setting("garden_plain_water_since", habit::seeds::PLAIN_WATER_SINCE).expect("set");
+    phone.set_setting("garden_plain_water_since", "2026-10-24").expect("set");
+    for db in [&laptop, &phone, &fresh] {
+      db.credit_minutes("2026-10-20", 30.0, 20).expect("read");
+    }
+    let water = |db: &db::Database| pip_ledger(db).expect("ledger").garden.water;
+    assert_eq!(water(&laptop), 30.0 * 0.75, "plain reading waters from the day 1.5.7 was made");
+    assert_eq!(water(&phone), water(&laptop));
+    assert_eq!(water(&fresh), water(&laptop));
   }
 
   fn purchase(id: &str, kind: &str, item: &str, price: i64, at: &str) -> pip::Purchase {
@@ -1913,6 +2063,69 @@ mod tests {
     for date in 1..=10 {
       db.credit_minutes(&format!("2026-09-{date:02}"), 25.0, 20).expect("a day");
     }
+  }
+
+  /// The purchase records, less the things earned by reading written down.
+  fn spending(db: &db::Database) -> Vec<pip::Purchase> {
+    db.pip_purchases()
+      .expect("purchases")
+      .into_iter()
+      .filter(|purchase| !purchase.id.starts_with("earned-"))
+      .collect()
+  }
+
+  /// The bug: an 8-day streak, and Maple was still locked.
+  #[test]
+  fn a_streak_of_eight_days_earns_maple_once_and_pip_can_wear_it() {
+    let db = memory_db();
+    for date in 14..=21 {
+      db.credit_minutes(&format!("2026-10-{date:02}"), 25.0, 20).expect("a day");
+    }
+    assert_eq!(walk_streak(&db, "2026-10-21").expect("walk").streak, 8, "the flame says 8");
+    let overview = pip_overview_on(&db, "2026-10-21").expect("overview");
+    let maple = overview.earned.iter().find(|status| status.id == "autumn").expect("Maple is listed");
+    assert!(maple.done && maple.earnable);
+    assert!(overview.owned.iter().any(|owned| owned.kind == "skin" && owned.id == "autumn"), "owned");
+    let sakura = overview.earned.iter().find(|status| status.id == "sakura").expect("Sakura is listed");
+    assert!(!sakura.done);
+    assert_eq!((sakura.value, sakura.target, sakura.unit.as_str()), (8.0, 30.0, "days"), "the wardrobe's 8/30 days");
+
+    // Written down once, at no cost, and kept through another look.
+    pip_overview_on(&db, "2026-10-21").expect("again");
+    let records: Vec<pip::Purchase> = db.pip_purchases().expect("purchases").into_iter().filter(|purchase| purchase.id.starts_with("earned-")).collect();
+    assert_eq!(records.len(), 1);
+    assert_eq!((records[0].item_kind.as_str(), records[0].item_id.as_str(), records[0].price), ("skin", "autumn", 0));
+    assert_eq!(overview.wallet.spent, 0);
+
+    // Worn: the look is checked against what is owned, the record included.
+    let catalogue = pip::Catalogue::bundled();
+    let owned = pip::owned(catalogue, &db.pip_purchases().expect("purchases"));
+    let look = pip::PipLook {
+      variant: "autumn".to_string(),
+      outfit: Vec::new(),
+      room: std::collections::BTreeMap::new(),
+      room_style: String::new(),
+      signature: "read".to_string()
+    };
+    assert!(pip::check_look(catalogue, &owned, &look).is_ok());
+    // Still never sold, nor given.
+    assert!(send_gift(&db, "skin", "autumn", DUEL).is_err());
+    assert!(receive_gift(&db, "skin", "golden", DUEL).is_err());
+  }
+
+  #[test]
+  fn reading_at_night_is_noted_for_the_night_owl() {
+    let db = memory_db();
+    let at = |stamp: &str| chrono::NaiveDateTime::parse_from_str(stamp, "%Y-%m-%d %H:%M").expect("time");
+    note_reading_hour(&db, at("2026-10-02 00:30")).expect("noted");
+    note_reading_hour(&db, at("2026-10-02 13:00")).expect("nothing to note");
+    note_reading_hour(&db, at("2026-10-03 06:15")).expect("noted");
+    let noted = read_noted_hours(&db);
+    assert_eq!(noted.nights.len(), 1);
+    assert_eq!(noted.mornings.len(), 1);
+    let overview = pip_overview_on(&db, "2026-10-03").expect("overview");
+    let owl = overview.earned.iter().find(|status| status.id == "nightowl").expect("listed");
+    assert_eq!((owl.value, owl.target, owl.unit.as_str()), (1.0, 10.0, "nights"));
   }
 
   fn freeze_catalogue() -> pip::Catalogue {
@@ -2127,7 +2340,8 @@ mod tests {
     assert_eq!(send_gift(&db, &thing.kind, &thing.id, DUEL).expect("again").wallet.balance, sent.wallet.balance);
     let second = send_gift(&db, &thing.kind, &thing.id, OTHER).expect("to another friend");
     assert_eq!(second.wallet.balance, before.wallet.balance - 2 * thing.price);
-    let records = db.pip_purchases().expect("purchases");
+    // (The ten days `rich` read are a streak that earned Maple, written down too.)
+    let records: Vec<pip::Purchase> = spending(&db);
     assert_eq!(records.len(), 2);
     assert!(records.iter().all(|record| record.item_kind == "gift" && record.price == thing.price));
     assert!(records.iter().any(|record| record.item_id == format!("{}:{}:{DUEL}", thing.kind, thing.id)));
@@ -2136,7 +2350,7 @@ mod tests {
     assert!(send_gift(&db, "level", "kitchen", THIRD).is_err());
     assert!(send_gift(&db, "treat", "nothing-of-the-kind", THIRD).is_err());
     assert!(send_gift(&db, &thing.kind, &thing.id, "a-gift").is_err());
-    assert_eq!(db.pip_purchases().expect("purchases").len(), 2);
+    assert_eq!(spending(&db).len(), 2);
   }
 
   #[test]

@@ -61,6 +61,13 @@ export const ReaderDialogs = ({ reader }: { reader: ReaderScope }) => {
         />
       )}
 
+      {/* How a finger's taps go, said once (useReaderPanels.ts, `useFirstOpen`). */}
+      {reader.tapHint && (
+        <div className="reader-tap-hint reader-panel reader-border reader-text-color" role="status">
+          Double-tap for the menu · Triple-tap to select
+        </div>
+      )}
+
       {pendingReadingMode && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 px-6">
           <div className="reader-panel reader-border w-full max-w-md rounded-2xl border p-6 shadow-2xl">

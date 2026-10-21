@@ -9,6 +9,7 @@
 mod comic;
 mod commands;
 mod convert;
+mod cover_protocol;
 mod db;
 mod desktop_pip;
 mod diag;
@@ -28,6 +29,8 @@ mod reminders;
 mod search;
 mod storage;
 mod sync;
+mod tts;
+mod window_material;
 
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -173,7 +176,25 @@ pub fn run() {
   dotenvy::dotenv().ok();
   let startup_paths = supported_book_paths(std::env::args().skip(1));
 
+  // The window's material (Mica on Windows 11), chosen before the window is
+  // made: only then can its webview be made see-through (`window_material.rs`).
+  let material = window_material::detect();
+  let mut context = tauri::generate_context!();
+  if material == window_material::Material::Mica {
+    for window in context.config_mut().app.windows.iter_mut() {
+      window.transparent = true;
+    }
+  }
+
   let builder = tauri::Builder::default();
+
+  // The page learns the material before any of its own script runs.
+  #[cfg(desktop)]
+  let builder = builder.plugin(
+    tauri::plugin::Builder::<tauri::Wry>::new("window-material")
+      .js_init_script(material.page_script())
+      .build()
+  );
 
   // Single-instance is a desktop idea: it exists to focus an already-running
   // window when a second launch arrives with a file. Android and iOS manage app
@@ -209,6 +230,8 @@ pub fn run() {
     // Opens the OAuth consent page in the system browser: Google refuses to
     // run its sign-in inside an embedded webview.
     .plugin(tauri_plugin_opener::init())
+    // The library's covers by URL, at the size each card draws them (`cover_protocol`).
+    .register_asynchronous_uri_scheme_protocol(cover_protocol::SCHEME, cover_protocol::handle)
     .setup(move |_app| {
       // Must happen before the database is opened, which is why state is
       // managed here rather than on the builder.
@@ -258,6 +281,12 @@ pub fn run() {
         let _ = sync::remote_config::refresh(&state.db).await;
       });
 
+      // What the library no longer uses, cleared away a little later, off
+      // this thread (`commands::space`).
+      commands::tidy_after_startup(_app.handle());
+      // The library's covers at card size, for a library from before they were made (`cover_protocol`).
+      cover_protocol::warm_after_startup(_app.handle());
+
       // Reading reminders: takes over from Windows' schedule while running.
       reminders::runtime::init(_app.handle());
       // Pip on the desktop: nothing starts until the reader has switched her on.
@@ -275,6 +304,18 @@ pub fn run() {
           let _ = window.set_icon(icon);
         }
       }
+      // Mica behind the see-through window. Its light or dark follows the
+      // window's theme, which the page sets from the app's (`window_material_theme`).
+      #[cfg(windows)]
+      if material == window_material::Material::Mica {
+        if let Some(window) = _app.get_webview_window("main") {
+          let _ = window.set_effects(
+            tauri::window::EffectsBuilder::new()
+              .effect(tauri::window::Effect::Mica)
+              .build()
+          );
+        }
+      }
       Ok(())
     })
     // Closing the main window is how Leaflet exits: the moment to leave the
@@ -287,6 +328,7 @@ pub fn run() {
       }
     })
     .invoke_handler(tauri::generate_handler![
+      window_material::window_material_theme,
       reminders::runtime::reminders_get,
       reminders::runtime::reminders_set,
       reminders::runtime::reminders_context,
@@ -307,6 +349,7 @@ pub fn run() {
       commands::save_page_cover,
       commands::book_file_size,
       commands::series_cover_sets,
+      commands::series_cover_sets_cancel,
       commands::cover_preview,
       commands::apply_cover,
       commands::list_books,
@@ -340,6 +383,9 @@ pub fn run() {
       commands::publish_social_stats,
       commands::log_client_error,
       commands::diagnostics,
+      commands::report_problem,
+      commands::problem_diagnostics,
+      commands::send_problem,
       commands::epub_sections,
       commands::annotations_list,
       commands::annotations_highlight_counts,
@@ -439,6 +485,8 @@ pub fn run() {
       commands::cloud_reachable,
       commands::take_pending_open_paths,
       commands::clear_all_data,
+      commands::storage_usage,
+      commands::storage_free_up,
       commands::supported_formats,
       commands::needs_converter,
       commands::comic_open,
@@ -468,8 +516,21 @@ pub fn run() {
       commands::pip_played,
       commands::pip_fridge_bare,
       commands::pip_plant,
-      commands::pip_harvest
+      commands::pip_harvest,
+      tts::commands::studio_voice_status,
+      tts::commands::studio_voice_download,
+      tts::commands::studio_voice_cancel,
+      tts::commands::studio_voice_remove,
+      tts::commands::studio_voice_record_self_test,
+      tts::commands::studio_voice_self_test,
+      tts::commands::studio_speak,
+      tts::commands::studio_pause,
+      tts::commands::studio_resume,
+      tts::commands::studio_stop,
+      tts::commands::studio_set_rate,
+      tts::commands::studio_set_voice,
+      tts::commands::studio_preview
     ])
-    .run(tauri::generate_context!())
+    .run(context)
     .expect("error while running tauri application");
 }

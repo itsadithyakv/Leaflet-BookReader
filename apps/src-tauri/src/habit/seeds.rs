@@ -18,9 +18,8 @@
 //!
 //! Seeds earned before the garden existed (`GARDEN_SINCE`) were paid straight
 //! from minutes; they are kept, as if already harvested. Water poured before
-//! a device took up the rule above (`water_drops`' `plain_since`) stays as it
-//! was poured: focus sessions only, half as much again for one completed
-//! without leaving the book.
+//! the rule above (`PLAIN_WATER_SINCE`) stays as it was poured: focus sessions
+//! only, half as much again for one completed without leaving the book.
 //!
 //! A session's minutes count only up to the reading the heartbeat recorded on
 //! the days it spans: the day it ended, then the day it started (a session
@@ -41,6 +40,20 @@ use std::collections::{HashMap, HashSet};
 /// directly (the legacy rules below); reading from it on waters plants.
 pub const GARDEN_SINCE: &str = "2026-09-27";
 
+/// The first local day all reading waters, and focus at twice the rate
+/// (`water_drops`): the day 1.5.7 was made. The same day on every device.
+///
+/// It was the day each device took the rule up, kept in its own settings,
+/// so a device updated a week after another (or installed afresh) poured
+/// that week's reading under the old rule, and the two grew different
+/// gardens from the same records.
+pub const PLAIN_WATER_SINCE: &str = "2026-10-17";
+
+/// The first local day a goal day's streak bonus goes by the streak engine
+/// (`super::evaluate`) rather than the stamps on the ledger: the same day,
+/// as both came with 1.5.7.
+pub const WALKED_BONUS_SINCE: &str = PLAIN_WATER_SINCE;
+
 pub const WELCOME_GIFT: i64 = 50;
 /// Goal-day bonuses, kept small: the garden is the main income.
 pub const GOAL_DAY_BONUS: i64 = 4;
@@ -56,7 +69,7 @@ pub const FOCUS_WATER_PER_MINUTE: f64 = 1.5;
 /// dyadic fraction), and so is every sum of them a garden could reach: water
 /// accrues exactly, in any order, and no day is rounded.
 pub const PLAIN_WATER_PER_MINUTE: f64 = 0.75;
-/// Before `plain_since`: what a completed, clean session added on top of its
+/// Before `PLAIN_WATER_SINCE`: what a completed, clean session added on top of its
 /// minutes, as a fraction. Kept for the days it was poured on.
 pub const CLEAN_WATER_BONUS: f64 = 0.5;
 /// The rain barrel: water read while nothing grows, waiting for a planting.
@@ -243,8 +256,8 @@ fn day_end_ms(date_key: &str) -> Option<i64> {
 
 /// The water reading poured, in the order it poured: `(at_ms, water)`.
 ///
-/// From `plain_since` (the local day this device took up the rule; never
-/// before the garden), every whole minute the heartbeat recorded waters:
+/// From `plain_since` (`PLAIN_WATER_SINCE`, the local day the rule began;
+/// never before the garden), every whole minute the heartbeat recorded waters:
 /// a minute a focus session counted pours `FOCUS_WATER_PER_MINUTE` when the
 /// session ended, and each day's minutes left over, read with no session
 /// running, pour `PLAIN_WATER_PER_MINUTE` at the day's end. A minute is
@@ -282,9 +295,56 @@ pub fn water_drops(days: &HashMap<String, DayRecord>, sessions: &[SessionSeeds<'
   drops
 }
 
+/// How long the streak was on each day of `ledger` that counts toward one,
+/// reading its days as they stand: a day met or covered continues the run of
+/// the day before it, and anything else ends it.
+fn streak_runs(ledger: &HashMap<String, DayRecord>) -> HashMap<&str, i64> {
+  let mut dated: Vec<(NaiveDate, &DayRecord)> = ledger
+    .values()
+    .filter_map(|day| parse_day(&day.date_key).map(|date| (date, day)))
+    .collect();
+  dated.sort_by_key(|(date, _)| *date);
+  let mut runs = HashMap::new();
+  let mut run = 0i64;
+  let mut previous: Option<NaiveDate> = None;
+  for (date, day) in dated {
+    if day.counts() {
+      let continues = previous.map(|prev| prev.succ_opt() == Some(date)).unwrap_or(false);
+      run = if continues { run + 1 } else { 1 };
+      previous = Some(date);
+      runs.insert(day.date_key.as_str(), run);
+    } else {
+      run = 0;
+      previous = None;
+    }
+  }
+  runs
+}
+
+/// The ledger as the streak engine judges it (`super::evaluate`, `super::judged`):
+/// covered where the replayed bank paid for a day, and nowhere else. Walked to
+/// the last day on record, which judges every day the same as walking to today
+/// would: a day is judged by the days before it.
+fn walked_ledger(
+  days: &HashMap<String, DayRecord>,
+  freezes_bought: &[String]
+) -> HashMap<String, DayRecord> {
+  let Some(last) = days.keys().filter(|key| parse_day(key).is_some()).max() else {
+    return HashMap::new();
+  };
+  let walk = super::evaluate(days, freezes_bought, last, &super::StreakState::default());
+  super::judged(days, &walk.kept)
+}
+
 /// Everything a reader has earned: the ledger's bonuses, the harvests (from
 /// `grow`), the welcome gift, and what the old rules paid before the garden.
-pub fn earnings(days: &HashMap<String, DayRecord>, sessions: &[SessionSeeds<'_>], harvests: i64) -> SeedEarnings {
+/// `freezes_bought` are the days freezes were bought on, for the streak.
+pub fn earnings(
+  days: &HashMap<String, DayRecord>,
+  freezes_bought: &[String],
+  sessions: &[SessionSeeds<'_>],
+  harvests: i64
+) -> SeedEarnings {
   let mut result = SeedEarnings {
     welcome: WELCOME_GIFT,
     harvests: harvests.max(0),
@@ -300,28 +360,20 @@ pub fn earnings(days: &HashMap<String, DayRecord>, sessions: &[SessionSeeds<'_>]
     result.earlier += whole + if session.completed_clean { whole / 2 } else { 0 };
   }
 
-  // Goal days, walked in date order so each knows how long its streak was.
-  // A day covered by a freeze or grace keeps a streak going (as it does for
-  // the streak itself) but earns nothing: no reading, no seeds.
-  let mut dated: Vec<(NaiveDate, &DayRecord)> = days
-    .values()
-    .filter_map(|day| parse_day(&day.date_key).map(|date| (date, day)))
-    .collect();
-  dated.sort_by_key(|(date, _)| *date);
-  let mut run = 0i64;
-  let mut previous: Option<NaiveDate> = None;
-  for (date, day) in dated {
-    if day.counts() {
-      let continues = previous.map(|prev| prev.succ_opt() == Some(date)).unwrap_or(false);
-      run = if continues { run + 1 } else { 1 };
-      previous = Some(date);
-    } else {
-      run = 0;
-      previous = None;
-    }
-    if !day.goal_met() {
-      continue;
-    }
+  // Goal days, each with how long its streak was that day. A day covered by
+  // a freeze or grace keeps a streak going (as it does for the streak itself)
+  // but earns nothing: no reading, no seeds.
+  //
+  // From `WALKED_BONUS_SINCE` the streak is the engine's, which every device
+  // works out alike from the merged ledger and the freezes bought. Days before
+  // it keep what they were paid: the streak read from the ledger's stamps,
+  // which each device once wrote from a bank of its own.
+  let stamped = streak_runs(days);
+  let walked_days = walked_ledger(days, freezes_bought);
+  let walked = streak_runs(&walked_days);
+  for day in days.values().filter(|day| day.goal_met() && parse_day(&day.date_key).is_some()) {
+    let runs = if day.date_key.as_str() >= WALKED_BONUS_SINCE { &walked } else { &stamped };
+    let run = runs.get(day.date_key.as_str()).copied().unwrap_or(0);
     if in_garden_era(&day.date_key) {
       result.goal_days += GOAL_DAY_BONUS;
       result.streak_bonus += streak_bonus_for(run);
@@ -595,21 +647,21 @@ mod tests {
 
   #[test]
   fn a_new_reader_has_the_welcome_gift() {
-    let result = earnings(&HashMap::new(), &[], 0);
+    let result = earnings(&HashMap::new(), &[], &[], 0);
     assert_eq!(result.total, WELCOME_GIFT);
   }
 
   #[test]
   fn minutes_no_longer_pay_seeds_directly() {
     let days = ledger(vec![day("2026-10-01", 30.0, 60)]);
-    let result = earnings(&days, &[session("a", "2026-10-01", 0, 25.0, true)], 0);
+    let result = earnings(&days, &[], &[session("a", "2026-10-01", 0, 25.0, true)], 0);
     assert_eq!(result.total, WELCOME_GIFT, "reading waters the garden; seeds come from harvests");
   }
 
   #[test]
   fn seeds_earned_before_the_garden_are_kept() {
     let days = ledger(vec![day("2026-09-20", 30.0, 60)]);
-    let result = earnings(&days, &[session("a", "2026-09-20", 0, 25.0, true)], 0);
+    let result = earnings(&days, &[], &[session("a", "2026-09-20", 0, 25.0, true)], 0);
     assert_eq!(result.earlier, 37, "25 a minute plus half again, as the old rules paid");
   }
 
@@ -620,7 +672,7 @@ mod tests {
       day("2026-10-02", 25.0, 20),
       day("2026-10-03", 30.0, 20)
     ]);
-    let result = earnings(&days, &[], 0);
+    let result = earnings(&days, &[], &[], 0);
     assert_eq!(result.goal_days, 3 * GOAL_DAY_BONUS);
     assert_eq!(result.streak_bonus, 1 + 2 + 3);
     assert_eq!(streak_bonus_for(100), STREAK_BONUS_CAP);
@@ -631,39 +683,81 @@ mod tests {
     let mut frozen = day("2026-10-02", 0.0, 20);
     frozen.freeze_used = true;
     let days = ledger(vec![day("2026-10-01", 20.0, 20), frozen, day("2026-10-03", 20.0, 20)]);
-    let result = earnings(&days, &[], 0);
+    let result = earnings(&days, &[], &[], 0);
     assert_eq!(result.goal_days, 2 * GOAL_DAY_BONUS);
     assert_eq!(result.streak_bonus, 1 + 3);
   }
 
+  /// From `WALKED_BONUS_SINCE` the bonus goes by the streak every device
+  /// walks alike, not by stamps: one the bank could not pay for keeps no
+  /// streak, and a cover not yet stamped on this device keeps it all the same.
+  /// (Days before it keep the stamps they were paid by: the test above.)
+  #[test]
+  fn the_streak_bonus_goes_by_the_streak_engine() {
+    assert!(WALKED_BONUS_SINCE <= "2026-10-20");
+    let mut stale = day("2026-10-23", 0.0, 20);
+    stale.freeze_used = true;
+    let days = ledger(vec![
+      day("2026-10-20", 20.0, 20),
+      day("2026-10-21", 0.0, 20),
+      day("2026-10-22", 20.0, 20),
+      stale,
+      day("2026-10-24", 20.0, 20),
+      day("2026-10-25", 20.0, 20)
+    ]);
+    // Grace keeps the 21st; with no freeze in the bank, the 23rd is a break.
+    let result = earnings(&days, &[], &[], 0);
+    assert_eq!(result.goal_days, 4 * GOAL_DAY_BONUS);
+    assert_eq!(result.streak_bonus, 1 + 3 + 1 + 2, "the stamps alone would say 1 + 1 + 3 + 4");
+
+    // The grace stamped on this device, or not yet: the same seeds.
+    let mut graced = days.clone();
+    graced.get_mut("2026-10-21").expect("the 21st").grace_used = true;
+    assert_eq!(earnings(&graced, &[], &[], 0), result);
+    // A missed day with no row at all is kept by grace too.
+    let mut absent = days.clone();
+    absent.remove("2026-10-21");
+    assert_eq!(earnings(&absent, &[], &[], 0), result);
+
+    // A freeze bought before the 23rd pays for it, on every device.
+    let bought = ["2026-10-22".to_string()];
+    assert_eq!(earnings(&days, &bought, &[], 0).streak_bonus, 1 + 3 + 5 + 6);
+  }
+
   #[test]
   fn harvests_are_part_of_the_total() {
-    assert_eq!(earnings(&HashMap::new(), &[], 20).total, WELCOME_GIFT + 20);
+    assert_eq!(earnings(&HashMap::new(), &[], &[], 20).total, WELCOME_GIFT + 20);
   }
 
   #[test]
   fn pips_rewards_join_the_total() {
-    let result = earnings(&HashMap::new(), &[], 4).with_rewards(10, 30, 0, 8);
+    let result = earnings(&HashMap::new(), &[], &[], 4).with_rewards(10, 30, 0, 8);
     assert_eq!((result.goals, result.chest, result.sets, result.wishes), (10, 30, 0, 8));
     assert_eq!(result.total, WELCOME_GIFT + 4 + 10 + 30 + 8);
   }
 
   #[test]
   fn what_stakes_won_joins_the_total() {
-    let result = earnings(&HashMap::new(), &[], 4).with_rewards(10, 30, 0, 8).with_winnings(40, 20);
+    let result = earnings(&HashMap::new(), &[], &[], 4)
+      .with_rewards(10, 30, 0, 8)
+      .with_winnings(40, 20);
     assert_eq!((result.stakes, result.prizes), (40, 20));
     assert_eq!(result.total, WELCOME_GIFT + 4 + 10 + 30 + 8 + 40 + 20);
     // In either order, and a loss is never a debt: what was staked is in
     // what was spent, not taken off what was earned.
-    let other_way = earnings(&HashMap::new(), &[], 4).with_winnings(40, 20).with_rewards(10, 30, 0, 8);
+    let other_way = earnings(&HashMap::new(), &[], &[], 4)
+      .with_winnings(40, 20)
+      .with_rewards(10, 30, 0, 8);
     assert_eq!(other_way, result);
-    assert_eq!(earnings(&HashMap::new(), &[], 0).with_winnings(-40, -20).total, WELCOME_GIFT);
+    assert_eq!(earnings(&HashMap::new(), &[], &[], 0).with_winnings(-40, -20).total, WELCOME_GIFT);
   }
 
   #[test]
   fn the_total_is_always_the_sum_of_its_parts() {
     let days = ledger(vec![day("2026-09-20", 30.0, 20), day("2026-10-01", 20.0, 20), day("2026-10-02", 25.0, 20)]);
-    let result = earnings(&days, &[session("a", "2026-09-20", 0, 25.0, true)], 24).with_rewards(40, 30, 25, 16).with_winnings(200, 60);
+    let result = earnings(&days, &[], &[session("a", "2026-09-20", 0, 25.0, true)], 24)
+      .with_rewards(40, 30, 25, 16)
+      .with_winnings(200, 60);
     let parts = [
       result.harvests,
       result.goal_days,
@@ -769,7 +863,8 @@ mod tests {
   fn sessions_before_the_garden_count_as_they_were_paid() {
     // Read across midnight under the old rules: the day it ended on alone.
     let days = ledger(vec![day("2026-09-19", 15.0, 60), day("2026-09-20", 10.0, 60)]);
-    let result = earnings(&days, &[spanning("a", "2026-09-19", "2026-09-20", 0, 25.0, false)], 0);
+    let spanned = [spanning("a", "2026-09-19", "2026-09-20", 0, 25.0, false)];
+    let result = earnings(&days, &[], &spanned, 0);
     assert_eq!(result.earlier, 11, "10 read after midnight, and the minute of slack");
   }
 

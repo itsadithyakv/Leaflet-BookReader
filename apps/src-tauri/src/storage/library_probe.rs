@@ -94,7 +94,7 @@ fn real_library_import_table() {
           fs::write(&cover, &bytes).expect("write cover");
           let shape = image::load_from_memory(&bytes).map(|image| (image.width(), image.height()));
           let started = Instant::now();
-          let thumb = thumbnail_into(&scratch, &cover, &hash[..12]);
+          let thumb = super::thumbs::make(&scratch, &cover, &hash[..12]).map(|made| made[made.len() - 1].clone());
           let thumb_ms = ms(started);
           let thumb_shape = thumb
             .as_ref()

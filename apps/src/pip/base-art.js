@@ -33,6 +33,7 @@
    burst      24 x 24   8 frames, played once over a building just finished
    scout      14 x 14   4 frames, one of Pip's scouts running right with a twig sword
    slinger    14 x 14   4 frames, a scout with a sling
+   puffcap    14 x 14   4 frames, a scout with a lit acorn of fizz-powder (1.5.11): it blows a wall open
    mole       16 x 12   4 frames, a mole with a miner's lamp, scurrying right
 
    perch      16 x 26   a sentry magpie on a post; variant 1 is the post broken, empty
@@ -1573,6 +1574,22 @@ const scout = {
       const hy = y0 + 3;
       if (up) l.px(10, hy, STICK[2]).px(11, hy - 1, STICK[1]).px(12, hy - 2, STICK[0]).px(12, hy - 3, "#F0D9A8");
       else l.px(10, hy, STICK[2]).px(10, hy - 1, STICK[1]).px(11, hy - 2, STICK[0]).px(11, hy - 3, STICK[0]).px(12, hy - 4, "#F0D9A8");
+    });
+  }
+};
+
+// A Puffcap (1.5.11): a scout with an acorn of fizz-powder held ahead of it, its fuse alight. It runs to the nearest
+// wall and goes off against it, and the wall comes down there.
+const puffcap = {
+  w: 14, h: 14, frames: 4,
+  draw(g, f) {
+    const k = ((Math.round(f) % 4) + 4) % 4;
+    sprout(g, 2, k, (l, y0) => {
+      const bx = 10, by = y0 + 2;
+      l.px(bx - 1, by + 1, SPROUT.B);
+      l.rect(bx, by + 1, 3, 3, "#9A6A3C").rect(bx, by, 3, 1, "#5E3A1C").px(bx, by + 1, "#C8935A").px(bx + 2, by + 3, "#6B4226");
+      l.px(bx + 1, by - 1, "#3A2A1A").px(bx + 2, by - 2, k % 2 ? "#FFE36B" : "#FF9E3D");
+      if (k % 2 === 0) l.px(bx + 3, by - 3, "#FFF6C2");
     });
   }
 };
@@ -3534,7 +3551,7 @@ const signpost = {
 
 export const BASE_SPRITES = {
   title: "The Hollow", bg, burrow, oak, store, fence, tower, hut, scaffold, acorn, magpie, nest,
-  workshop, hive, well, stall, trophy, banner: flagpole, king, hedgehog, lantern: lamp, burst, scout,
+  workshop, hive, well, stall, trophy, banner: flagpole, king, hedgehog, lantern: lamp, burst, scout, puffcap,
   slinger, mole, perch, hoard, twigwall, nestdown, kingdown, pebble, battleground, decor,
   hero, champion, raider, fencepiece, ring: reach, guardian, animal, heart, land, work, blade,
   spire, darkwatch, foe, skytop, groundend, gardenbed, signpost

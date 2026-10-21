@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import { onTopEdge, useSheetSwipe } from "./sheetSwipe";
+import ScrollEdge from "./ScrollEdge";
 
 /**
  * The grip at the top of a dialog drawn as a sheet on a phone
@@ -22,9 +23,14 @@ export const SheetHandle = ({ onClose }: { onClose: () => void }) => {
     onClose: () => onClose()
   });
 
+  // Every sheet has one at its top, so it brings the sheet's top edge too: what scrolls up out
+  // of the sheet blurs and fades as it goes, while there is some above.
   return (
-    <div ref={ref} className="sheet-handle" aria-hidden="true">
-      <span />
-    </div>
+    <>
+      <ScrollEdge edge="top" scroller="parent" />
+      <div ref={ref} className="sheet-handle" aria-hidden="true">
+        <span />
+      </div>
+    </>
   );
 };

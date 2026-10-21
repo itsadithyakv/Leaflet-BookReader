@@ -2,8 +2,18 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { errorMessage } from "../services/accountService";
 import { socialService } from "../services/socialService";
 import { useLibraryStore } from "../store/libraryStore";
+import { InfoTip } from "./ui/InfoTip";
 
 type Reach = { state: "checking" } | { state: "ok" } | { state: "down"; reason: string };
+
+const HEADING =
+  "flex items-center gap-1.5 text-xs uppercase tracking-widest text-on-surface-variant";
+/** What it is for, behind the heading's (i). */
+const WHAT_IT_IS =
+  "A weekly leaderboard, and a shelf you can share. Only your reading stats are sent, never " +
+  "your books. A new account's profile is shared with other readers unless you switch that off " +
+  "when you create it, and you can make it private at any time under Social. Reading and " +
+  "backup work without it.";
 
 /**
  * Settings → Leaderboards & shared shelves.
@@ -79,14 +89,12 @@ export const LeaderboardsCard = ({ showToast }: { showToast: (message: string) =
 
   return (
     <div className="paper-surface rounded-xl p-5">
-      <p className="text-xs uppercase tracking-widest text-on-surface-variant">Leaderboards &amp; Shared Shelves</p>
+      <p className={HEADING}>
+        Leaderboards &amp; Shared Shelves
+        <InfoTip className="normal-case tracking-normal" text={WHAT_IT_IS} />
+      </p>
       <p className="mt-3 font-headline text-2xl font-bold text-on-surface" role="status">
         {title}
-      </p>
-      <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
-        A weekly leaderboard, and a shelf you can share. Only your reading stats are sent, never your books.
-        A new account's profile is shared with other readers unless you switch that off when you create it,
-        and you can make it private at any time under Social. Reading and backup work without it.
       </p>
 
       {apiBase && reach.state === "down" && (

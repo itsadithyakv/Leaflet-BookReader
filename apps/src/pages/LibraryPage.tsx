@@ -21,7 +21,7 @@ import { FocusFlower, flowerCaption, flowerLook } from "../components/FocusFlowe
 import { askConfirm } from "../components/ConfirmDialog";
 import { MobileComingSoonBanner } from "../components/MobileComingSoonBanner";
 import { useAddBooksRequest } from "../hooks/useAddBooksRequest";
-import { useMediaQuery } from "../hooks/useMediaQuery";
+import { useShellShapeIs } from "../platform/shape";
 import { isAndroid, useTouchInput } from "../platform/device";
 import { DailyHighlight } from "../components/highlights/DailyHighlight";
 import { UpNextStrip } from "../components/UpNextStrip";
@@ -335,11 +335,15 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast, onStartFocus }:
   const touch = useTouchInput();
   // A phone has a + of its own (over the tab bar upright, in the header
   // sideways), so once there are books the big import box gives its screen to them.
-  const phoneShape = useMediaQuery("(max-width: 767px) and (min-height: 521px), (max-height: 520px)");
+  const phoneShape = useShellShapeIs("upright", "sideways");
+  const sidewaysShape = useShellShapeIs("sideways");
   const importBox = libraryEmpty || !phoneShape;
   // A phone by a finger: the streak and session in a slim card, the shelf's filters behind one key
   // (pages/library/PhoneLibrary.tsx). A small desktop window keeps the full ones.
   const phone = touch && phoneShape;
+  // On its side the height is what is scarce: the Focus key joins the heading's row (with Sort &
+  // filter) rather than standing on a row of its own over the books.
+  const sideways = phone && sidewaysShape;
 
   /** A book's ⋯ menu removed it (the menu asks first, and has no toast of its own). */
   const sayRemoved = useCallback((title: string) => showToast(`Removed ${title}.`), [showToast]);
@@ -497,7 +501,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast, onStartFocus }:
   return (
     <div className={`library-page dock-clear mx-auto flex min-h-full w-full max-w-[2240px] flex-col ${phone ? "gap-5" : "gap-10"}`}>
       {/* From md the header carries search: a phone on its side keeps only the Focus key here. */}
-      <div className={phone ? "phone-search-row" : "md:hidden"}>
+      <div className={phone ? `phone-search-row${sideways ? " md:hidden" : ""}` : "md:hidden"}>
         <div className="relative min-w-0 flex-1 md:hidden">
           <UiIcon
             name="search"
@@ -516,7 +520,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast, onStartFocus }:
             onChange={(event) => setFilter({ query: event.target.value })}
           />
         </div>
-        {phone && !activeSession && focusStrip}
+        {phone && !sideways && !activeSession && focusStrip}
       </div>
 
       {/* News about the phone app can wait until there is a library to carry over. */}
@@ -692,7 +696,7 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast, onStartFocus }:
       <section className="flex flex-1 flex-col gap-6">
         {phone ? (
           // Pip does not perch on the first row of books under this: on a phone it is too close, and she covered the count.
-          <div className="flex items-center justify-between gap-3" data-pip-keep-clear>
+          <div className="library-phone-head flex items-center justify-between gap-3" data-pip-keep-clear>
             <div className="min-w-0">
               <h2 className="page-title text-3xl">Library</h2>
               <p className="mt-1 truncate text-xs text-on-surface-variant">
@@ -700,6 +704,11 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast, onStartFocus }:
 
               </p>
             </div>
+            {sideways && !activeSession && (
+              <div className="ml-auto flex shrink-0 items-center gap-2">
+                {focusStrip}
+              </div>
+            )}
             {!libraryEmpty && (
               <PhoneShelfTools
                 filters={filters}
@@ -827,12 +836,11 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast, onStartFocus }:
               Loading your library...
             </div>
           ) : libraryEmpty ? (
-            // The import box above is the one way in; a second button here made three.
+            // The import box above is the one way in; a second button here made three. The
+            // formats are said once, there, not again here.
             <div className="paper-surface flex h-full flex-col items-center justify-center gap-2 rounded-xl p-8 text-center text-on-surface-variant">
               <p className="text-lg font-semibold text-on-surface">Your books will appear here</p>
-              <p className="max-w-md text-sm">
-                {touch ? `${dependencyFreeSummary()} open straight away.` : `${dependencyFreeSummary()} open straight away; drop one anywhere on this page.`}
-              </p>
+              {!touch && <p className="max-w-md text-sm">Drop one anywhere on this page.</p>}
             </div>
           ) : filteredBooks.length === 0 ? (
             <div className="paper-surface flex h-full flex-col items-center justify-center gap-3 rounded-xl p-8 text-center text-on-surface-variant">

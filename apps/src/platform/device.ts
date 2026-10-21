@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { chooseInsets, insetMemory, receiveInsets, seeAspect, type InsetAspect } from "./insetHold";
 
 /**
  * What kind of device Leaflet is on, for the phone and tablet layouts: the
@@ -24,6 +25,13 @@ const TOUCH_QUERY = "(hover: none) and (pointer: coarse)";
 
 export const isAndroid = () => typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent);
 
+/** The Android release the WebView says it is on ("Android 16"), or 0 where it does not say. */
+export const androidVersion = (): number => {
+  if (typeof navigator === "undefined") return 0;
+  const found = /Android (\d+)/i.exec(navigator.userAgent);
+  return found ? Number(found[1]) : 0;
+};
+
 /**
  * What to call this device in a sentence ("your library on this ___"): a
  * tablet when the Android screen's short side is 600 dp or more (Android's
@@ -45,6 +53,8 @@ export const currentOrientation = (): Orientation =>
 const listeners = new Set<() => void>();
 const changed = () => {
   mark();
+  // A turn: the insets the window has may be the other way up's (insetHold.ts).
+  if (typeof window !== "undefined" && insets.latest) layInsets();
   for (const listener of listeners) listener();
 };
 
@@ -71,16 +81,67 @@ export const installDeviceSignals = () => {
   window.matchMedia?.(TOUCH_QUERY).addEventListener?.("change", changed);
 };
 
-/** The system's insets, in CSS px, from the Android side. Anything not given is left as the browser reports it. */
-export const setInsets = (insets: Partial<Insets>) => {
+/** The insets as sent, and as laid out each way up (platform/insetHold.ts). */
+const insets = insetMemory();
+let insetsAreSettled = true;
+/** What came first, a turn or the insets: in order, not by the clock (both can come in the same millisecond). */
+let tick = 0;
+const insetListeners = new Set<() => void>();
+
+const windowAspect = (): InsetAspect | null => {
+  if (typeof window === "undefined" || window.innerWidth === window.innerHeight) return null;
+  return window.innerWidth < window.innerHeight ? "portrait" : "landscape";
+};
+
+/** Writes the insets for the window as it is now: never a phone on its side's into an upright window. */
+const layInsets = () => {
+  seeAspect(insets, windowAspect(), ++tick);
+  const chosen = chooseInsets(insets);
   const style = document.documentElement.style;
-  for (const side of ["top", "right", "bottom", "left"] as const) {
-    const value = insets[side];
-    if (typeof value === "number" && Number.isFinite(value)) style.setProperty(`--inset-${side}`, `${Math.max(0, value)}px`);
+  if (chosen.insets) {
+    for (const side of ["top", "right", "bottom", "left"] as const) {
+      const value = chosen.insets[side];
+      if (typeof value === "number" && Number.isFinite(value)) {
+        const css = `${Math.max(0, value)}px`;
+        if (style.getPropertyValue(`--inset-${side}`) !== css) style.setProperty(`--inset-${side}`, css);
+      }
+    }
   }
-  if (typeof insets.keyboard === "number" && Number.isFinite(insets.keyboard)) {
-    style.setProperty("--inset-keyboard", `${Math.max(0, insets.keyboard)}px`);
-    document.documentElement.dataset.keyboard = insets.keyboard > 0 ? "open" : "closed";
+  const was = insetsAreSettled;
+  insetsAreSettled = chosen.settled;
+  if (insetsAreSettled !== was || insetsAreSettled) for (const listener of insetListeners) listener();
+};
+
+/**
+ * Whether the insets laid out are the ones for the window as it is (after a turn, the new ones have come). True
+ * where the Android side sends none.
+ */
+export const insetsSettled = () => insetsAreSettled;
+
+/** Called as the insets laid out change or settle. */
+export const onInsets = (listener: () => void) => {
+  insetListeners.add(listener);
+  return () => {
+    insetListeners.delete(listener);
+  };
+};
+
+/** The system's insets, in CSS px, from the Android side. Anything not given is left as the browser reports it. */
+export const setInsets = (sent: Partial<Insets>) => {
+  const sides = ["top", "right", "bottom", "left"] as const;
+  if (sides.every((side) => typeof sent[side] === "number" && Number.isFinite(sent[side]))) {
+    receiveInsets(insets, { top: sent.top!, right: sent.right!, bottom: sent.bottom!, left: sent.left! }, ++tick);
+    layInsets();
+  } else {
+    const style = document.documentElement.style;
+    for (const side of sides) {
+      const value = sent[side];
+      if (typeof value === "number" && Number.isFinite(value)) style.setProperty(`--inset-${side}`, `${Math.max(0, value)}px`);
+    }
+  }
+  if (typeof sent.keyboard === "number" && Number.isFinite(sent.keyboard)) {
+    document.documentElement.style.setProperty("--inset-keyboard", `${Math.max(0, sent.keyboard)}px`);
+    document.documentElement.dataset.keyboard = sent.keyboard > 0 ? "open" : "closed";
   }
 };
 

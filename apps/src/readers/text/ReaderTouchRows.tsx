@@ -142,13 +142,13 @@ export const FINISHES: Array<{ id: ReaderDisplayMode; label: string }> = [
 export const RotationChoice = ({ value, onChoose }: { value: RotationLock; onChoose: (next: RotationLock) => void }) =>
   canLockRotation() ? <Choices label="Turning" options={ROTATION_CHOICES} value={value} onChoose={onChoose} /> : null;
 
-/** The Aa sheet's own rows on a phone: the layout (for this way up), the page finish, the turn lock. */
+/** The Aa sheet's own rows on a phone: the layout (kept as the phone turns), the page finish, the turn lock. */
 export const ReaderLookRows = ({ reader }: { reader: ReaderScope }) => {
   const { chooseLayout, chooseRotation, displayMode, layout, rotation, setDisplayMode, shape } = reader;
   return (
     <>
       <Choices
-        label={shape === "sideways" ? "Layout on its side" : "Layout"}
+        label="Layout"
         options={[
           { id: "scroll", label: "Scroll" },
           { id: "pages", label: shape === "sideways" ? "Two pages" : "Pages" }

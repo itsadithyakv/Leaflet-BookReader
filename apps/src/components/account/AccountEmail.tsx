@@ -3,6 +3,7 @@ import { useAccountStore } from "../../store/accountStore";
 import { errorMessage, type Account } from "../../services/accountService";
 import { emailHint } from "./emailHint";
 import { emailCodeReady } from "./signUpFlow";
+import { PasswordInput } from "./PasswordInput";
 
 type Props = {
   account: Account | null;
@@ -179,13 +180,14 @@ export const AccountEmail = ({ account, showToast }: Props) => {
           )}
           <label className={labelClass}>
             Password
-            <input
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className={`${fieldClass} normal-case tracking-normal`}
-            />
+            <span className="mt-1 block">
+              <PasswordInput
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                className="inset-field w-full px-3 py-2 text-xs text-on-surface normal-case tracking-normal"
+              />
+            </span>
           </label>
           <div className="mt-3 flex flex-wrap gap-3">
             <button

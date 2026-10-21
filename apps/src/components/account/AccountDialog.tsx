@@ -77,7 +77,7 @@ export const AccountDialog = ({ showToast }: { showToast: (message: string) => v
         role="dialog"
         aria-modal="true"
         aria-label={firstRun ? "Create your Leaflet account" : "Leaflet account"}
-        className="modal-surface confirm-pop sheet-panel relative m-auto w-full max-w-md rounded-2xl p-6"
+        className="modal-surface confirm-pop sheet-panel relative m-auto w-full max-w-sm rounded-2xl p-6"
       >
         <SheetHandle onClose={close} />
         <button
@@ -88,30 +88,24 @@ export const AccountDialog = ({ showToast }: { showToast: (message: string) => v
         >
           <UiIcon name="close" size={16} />
         </button>
+        {/* First run: Pip says hello, and "Skip for now" is said, not only an X. */}
         {firstRun && (
-          <div className="mb-4 flex items-center gap-3">
-            <PipSprite move="welcome" size={56} loops={2} />
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">One more thing</p>
+          <div className="mb-2 flex justify-center">
+            <PipSprite move="welcome" size={44} loops={2} />
           </div>
         )}
         <AccountForm
           key={`${mode}-${firstRun}`}
           initialMode={mode}
-          welcoming={firstRun}
-          intro={
-            firstRun
-              ? "Optional. It keeps your places, highlights and reading days in step across your devices, and puts you and a Pip on the weekly leaderboard. Everything else works without one."
-              : undefined
-          }
+          besideClose
           onDone={(message) => {
             close();
             showToast(message);
           }}
         />
         {firstRun && (
-          <div className="mt-5 flex items-center justify-between gap-3 border-t border-outline-variant/30 pt-4">
-            <p className="text-[11px] leading-relaxed text-on-surface-variant">You can do this later from your profile, top right.</p>
-            <button type="button" className="tactile-button shrink-0 px-4 py-2 text-xs font-semibold" onClick={close}>
+          <div className="mt-3 flex justify-center">
+            <button type="button" className="py-1 text-xs font-semibold text-on-surface-variant hover:text-on-surface" onClick={close}>
               Skip for now
             </button>
           </div>

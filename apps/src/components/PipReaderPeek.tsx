@@ -4,7 +4,7 @@ import { usePipStore } from "../store/pipStore";
 import { useEquippedPip } from "../store/pipWardrobeStore";
 import { PipSprite } from "./PipSprite";
 import { PipSay } from "./PipSay";
-import { useMediaQuery } from "../hooks/useMediaQuery";
+import { useShellShapeIs } from "../platform/shape";
 
 /** Long enough to read the line after the move ends, short enough to not linger. */
 const LINGER_MS = 1800;
@@ -19,7 +19,7 @@ export const PipReaderPeek = () => {
   const [leaving, setLeaving] = useState(false);
   const equipped = useEquippedPip();
   // A phone's screen is small: she peeks smaller there.
-  const small = useMediaQuery("(max-width: 767px), (max-height: 520px)");
+  const small = useShellShapeIs("upright", "sideways");
   const ref = useRef<HTMLButtonElement | null>(null);
 
   // Never over the reader's own controls at the foot of the page (a phone's chapter dock is most of its width):

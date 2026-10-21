@@ -4,9 +4,10 @@ import { handsFreeCounts } from "../pacing";
 import { isScrollCorrection } from "../smartScroll";
 import { glideFrame, glideSet, startGlide } from "../glide";
 import { NOT_HELD, STILL_MS, isOnScrollbar, letGo, pageScrolled, pressOn, type ScrollbarHold } from "../scrollbarHold";
-import { readerScroll } from "../scrollQuiet";
+import { fetchWhileMoving, readerScroll } from "../scrollQuiet";
 import type { Later, WithCover, WithLook } from "./scope";
 import { GHOST_ATTR } from "./renditionGhost";
+import type { JumpHold } from "../jumpSettle";
 
 /**
  * The scrolling window and the chapters in it: finding it, moving it, and
@@ -25,6 +26,21 @@ export const useReaderScroll = (reader: WithLook & Later<"cancelSmartPageTurn" |
   const manualScrollTimerRef = useRef<number | null>(null);
   const programmaticScrollUntilRef = useRef(0);
   const contentWheelHandlerRef = useRef<((deltaY: number) => void) | null>(null);
+  /**
+   * A jump settling (readers/jumpSettle.ts): no chapter is put above the
+   * place until it has (useBookOpening's watch over epub.js's fetching).
+   */
+  const jumpHoldRef = useRef<JumpHold | null>(null);
+  /** Until then, chapters are fetched below only: asked for during a fling, when one put above would stop it (readers/scrollQuiet.ts: fetchWhileMoving). */
+  const appendOnlyUntilRef = useRef(0);
+  /**
+   * Where a next or previous chapter on its way is going (useChapters): a
+   * press before it is there goes on from it. Let go when another jump
+   * begins, and worth nothing once the jump has settled.
+   */
+  const navTargetRef = useRef<{ section: number; entry: number; until: number } | null>(null);
+  /** While a jump's place is held: puts it back at once (a chapter above changed height). */
+  const pinNowRef = useRef<(() => void) | null>(null);
 
   /**
    * The chapter on screen that a place belongs to. Scrolling shows several
@@ -184,7 +200,7 @@ export const useReaderScroll = (reader: WithLook & Later<"cancelSmartPageTurn" |
 
   return {
     scrollAdvanceLockRef, scrollAdvanceTimerRef, scrollContainerRef, scrollbarHoldRef, scrollbarLetGoRef,
-    manualScrollTimerRef, programmaticScrollUntilRef, contentWheelHandlerRef, contentsForCfi, displayedViews,
+    manualScrollTimerRef, programmaticScrollUntilRef, contentWheelHandlerRef, jumpHoldRef, appendOnlyUntilRef, navTargetRef, pinNowRef, contentsForCfi, displayedViews,
     keyScrollFrameRef, smoothScrollBy, isAtScrollBottom, ensureScrollSpacer, ensureScrollContainer, loadFurther,
     hasFurtherSection, sectionTop, triggerScrollAdvance, getScrollContainer
   };
@@ -256,6 +272,9 @@ export const useScrollWatch = (reader: WithCover) => {
         event.target === container &&
         isOnScrollbar(event.clientX - container.getBoundingClientRect().left - container.clientLeft, container.clientWidth);
       scrollbarHoldRef.current = pressOn(onScrollbar, Date.now());
+      // The reader's hand on the page (its scrollbar, or the margin beside the
+      // text): a jump's place held is theirs from here (readers/jumpSettle.ts).
+      lastHandsOnAtRef.current = Date.now();
       if (onScrollbar) {
         armScrollbarResume();
       }
@@ -301,6 +320,8 @@ export const useScrollWatch = (reader: WithCover) => {
 
     /** A chapter that was in the window at the last scroll, and where its top was in it. */
     let inWindow: { element: HTMLElement; top: number } | null = null;
+    /** When the next chapter was last asked for in a fling. */
+    let lastMovingFetchAt = 0;
     const onScroll = (event: Event) => {
       // scroll-only mode
       const target = event.currentTarget as HTMLElement;
@@ -341,6 +362,14 @@ export const useScrollWatch = (reader: WithCover) => {
       }
       if (isAtScrollBottom(target, 2) && now - lastWheelDownAtRef.current < 700) {
         triggerScrollAdvance();
+      }
+      // Going down in a fling, which never pauses for epub.js to look: the
+      // next chapter is asked for here, three windows before the end of
+      // what is loaded, below only (readers/scrollQuiet.ts: fetchWhileMoving).
+      if (delta > 0 && !corrected && layoutRef.current === "scroll" && fetchWhileMoving(target.scrollHeight - target.scrollTop - target.clientHeight, target.clientHeight, now - lastMovingFetchAt)) {
+        lastMovingFetchAt = now;
+        reader.appendOnlyUntilRef.current = now + 400;
+        loadFurther();
       }
       if (now >= programmaticScrollUntilRef.current && !corrected) {
         if (readingModeRef.current === "smart") {

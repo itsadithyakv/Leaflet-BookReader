@@ -53,6 +53,10 @@ this machine.
 | `RESET_MAIL_URL` | empty (reset off) | The Apps Script web app that sends reset emails (`deploy/password-reset-mailer.gs`). |
 | `RESET_MAIL_SECRET` | empty | The shared secret, equal to the script's `SECRET` property. |
 
+The nightly backup has its own values (`BACKUP_URL`, `BACKUP_SECRET`,
+`BACKUP_PUBLIC_KEY`, optional `BACKUP_PART_MB`) in `/etc/leaflet-backup.env`:
+see [docs/backups.md](../docs/backups.md).
+
 A `.env` in the working directory is loaded if present (variables already set
 win). Production uses systemd's `EnvironmentFile` instead, and deploys no `.env`.
 
@@ -86,8 +90,8 @@ Authenticated routes take `Authorization: Bearer <token>`. Errors are
 | `GET /v1/state` | ✓ | `{version, state}` (base64 gzipped blob, or `null`). `?have=N`, the version the app already holds a copy of: if that is still the stored version, `{version: N, unchanged: true}` and no `state` (only the version is read from the database). Anything but a whole number above 0, or a version that is not the stored one, gets the full answer. |
 | `PUT /v1/state` | ✓ | `{version, state}`. `version` is the one last read (0 = none). `409` with the current document if another device wrote first. Up to 2 MB. |
 | `DELETE /v1/state` | ✓ | Removes the stored state. |
-| `GET /v1/profile/me` | ✓ | The reader's own profile: `{handle, displayName, visibility, weekKey, weekMinutes, streak, booksFinished, shelf, reading, level, badges, arcade, camp, kudosFrom, kudosTo, sharesLibrary, raidable, rulesAccepted, isAdmin, suspendedUntil}`. `kudosFrom` is how many different readers have sent this one kudos, and `kudosTo` how many different readers this one has sent kudos to, each counted up to 10 and `0` before any (the badges `kudos-from-10` and `kudos-to-10` are earned at 10; see the full profile below). `badges` here is as the app saved it, without those two. `raidable` says friends may raid the camp (`POST /v1/raids`), and is `true` until the reader turns it off. `reading`, `level`, `arcade` and `camp` are `null` and `badges` is `[]` until sent; with no profile yet, `visibility` is `private` and the rest empty. `rulesAccepted` says the guidelines were accepted (`POST /v1/rules/accept`); `isAdmin` is `role: "admin"` on the profile, which no route can set; `suspendedUntil` is an ISO time while an admin's suspension lasts, else `null`. |
-| `PUT /v1/profile/me` | ✓ | `handle`, `displayName`, `visibility` (`public`, `followers` or `private`; anything else is taken as `private`), `shareLibrary` (boolean), `raidable` (boolean: whether friends may raid the camp; on until turned off), `weekKey` + `weekMinutes`, `streak`, `booksFinished`, `shelf`, `readDay` (the reader's local date on which they last read, like `2026-09-27`; a date no clock could be in is a `400`, `null` clears it), `reading` (`null`, or `{title (1–120), author (≤80) or null, percent (whole, 0–100)}`), `level` (whole, 0–999), `badges` (at most 80 ids matching `^[a-z0-9][a-z0-9-]{0,39}$`; repeats are dropped, order kept, and any id starting `kudos-` is dropped: only the server gives those), `arcade` (`{dash, catch, flap}`, each whole, 0–10000000, a missing one is 0), `camp` (`null` clears it; otherwise `{levels, yard, camps, banners, trophies}`, Pip's camp in the arcade's building game as the reader shows it: `levels` is `{burrow, oak, store, fence, tower, hut}`, each whole, 0–5; `yard` is at most 2 of `{kind, level}`, `kind` one of `workshop`, `hive`, `well`, `stall` or `null` and `level` whole, 0–3; `camps`, `banners` and `trophies` are whole, 0–100000. Every one of those parts has to be there. Seven more may come with them, and say where things stand in the 240 by 120 scene: `spots` (`{burrow, oak, store, tower, hut, yard0, yard1}`, each `[x, y]`), `walls` (at most 32 of `[x, y]`, the pieces of fence), `decor` (at most 24 of `{kind, x, y}`, `kind` whole, 0–17), `land` (at most 30 of `{kind, x, y}`, the landscape, `kind` whole, 0–9) and `works` (at most 12 of `{kind, x, y}`, the defences, `kind` whole, 0–11), with `x` whole, 0–240 and `y` whole, 0–120; `guards` (a list of 7 whole numbers, 0–3, the rank of the guardian at each post, 0 for none); and `posts` (a list of exactly 7, each `[x, y]` or `null`, where each guardian's signpost was carried to, `null` for one not moved). These seven are never a `400`: one that is not the right shape is left out, an entry that cannot be read is dropped, a place outside the scene is brought to its edge, and a list that is too long is cut. `guards` is kept as 7 ranks or not at all: a shorter list is filled out with 0, a longer one is cut to its first 7, a rank that cannot be read is 0, one above 3 is 3, and a list with no rank above 0 is left out. `posts` is kept as 7 entries or not at all: a list that is not 7 long is left out, an entry that cannot be read is `null`, the fifth (the dragon, who has no post) and one whose guardian's rank is 0 are always `null`, and a list of nothing but `null` is left out. Anything sent beside all these is dropped, not stored). Each is optional and only what is sent changes; a malformed value is a `400` and nothing is saved. The reading figures (everything from `weekKey` on, `shareLibrary` and `raidable` apart) are kept only for a shared profile (`public` or `followers`): sent for a private one they are checked, answered `200` and not stored, and `visibility: "private"` removes the ones held, along with the uploaded library and the requests to follow that were waiting. `visibility: "public"` turns the requests waiting on a followers-only profile into follows. The answer is the profile as `GET` gives it, so a client can see from `visibility` that its figures were not kept. Names, titles and authors are stored as one line of visible text (no control characters, right-to-left overrides or zero-width spaces), cut to their length; `displayName: ""` clears the name. `409` if the handle is taken. |
+| `GET /v1/profile/me` | ✓ | The reader's own profile: `{handle, displayName, visibility, weekKey, weekMinutes, streak, booksFinished, shelf, reading, level, badges, arcade, camp, kudosFrom, kudosTo, sharesLibrary, raidable, rulesAccepted, isAdmin, suspendedUntil}`. `kudosFrom` is how many different readers have sent this one kudos, and `kudosTo` how many different readers this one has sent kudos to, each counted up to 10 and `0` before any (the badges `kudos-from-10` and `kudos-to-10` are earned at 10; see the full profile below). `badges` here is as the app saved it, without those two. `raidable` says friends may raid the camp (`POST /v1/raids`), and is `false` until the reader turns it on (since app 1.5.10; a reader who never touched it has no `raidable` stored). `reading`, `level`, `arcade` and `camp` are `null` and `badges` is `[]` until sent; with no profile yet, `visibility` is `private` and the rest empty. `rulesAccepted` says the guidelines were accepted (`POST /v1/rules/accept`); `isAdmin` is `role: "admin"` on the profile, which no route can set; `suspendedUntil` is an ISO time while an admin's suspension lasts, else `null`. |
+| `PUT /v1/profile/me` | ✓ | `handle`, `displayName`, `visibility` (`public`, `followers` or `private`; anything else is taken as `private`), `shareLibrary` (boolean), `raidable` (boolean: whether friends may raid the camp; off until turned on), `weekKey` + `weekMinutes`, `streak`, `booksFinished`, `shelf`, `readDay` (the reader's local date on which they last read, like `2026-09-27`; a date no clock could be in is a `400`, `null` clears it), `reading` (`null`, or `{title (1–120), author (≤80) or null, percent (whole, 0–100)}`), `level` (whole, 0–999), `badges` (at most 80 ids matching `^[a-z0-9][a-z0-9-]{0,39}$`; repeats are dropped, order kept, and any id starting `kudos-` is dropped: only the server gives those), `arcade` (`{dash, catch, flap}`, each whole, 0–10000000, a missing one is 0), `camp` (`null` clears it; otherwise `{levels, yard, camps, banners, trophies}`, Pip's camp in the arcade's building game as the reader shows it: `levels` is `{burrow, oak, store, fence, tower, hut}`, each whole, 0–5; `yard` is at most 2 of `{kind, level}`, `kind` one of `workshop`, `hive`, `well`, `stall` or `null` and `level` whole, 0–3; `camps`, `banners` and `trophies` are whole, 0–100000. Every one of those parts has to be there. Seven more may come with them, and say where things stand in the 240 by 120 scene: `spots` (`{burrow, oak, store, tower, hut, yard0, yard1}`, each `[x, y]`), `walls` (at most 32 of `[x, y]`, the pieces of fence), `decor` (at most 24 of `{kind, x, y}`, `kind` whole, 0–17), `land` (at most 30 of `{kind, x, y}`, the landscape, `kind` whole, 0–9) and `works` (at most 12 of `{kind, x, y}`, the defences, `kind` whole, 0–11), with `x` whole, 0–240 and `y` whole, 0–120; `guards` (a list of 7 whole numbers, 0–3, the rank of the guardian at each post, 0 for none); and `posts` (a list of exactly 7, each `[x, y]` or `null`, where each guardian's signpost was carried to, `null` for one not moved). These seven are never a `400`: one that is not the right shape is left out, an entry that cannot be read is dropped, a place outside the scene is brought to its edge, and a list that is too long is cut. `guards` is kept as 7 ranks or not at all: a shorter list is filled out with 0, a longer one is cut to its first 7, a rank that cannot be read is 0, one above 3 is 3, and a list with no rank above 0 is left out. `posts` is kept as 7 entries or not at all: a list that is not 7 long is left out, an entry that cannot be read is `null`, the fifth (the dragon, who has no post) and one whose guardian's rank is 0 are always `null`, and a list of nothing but `null` is left out. Anything sent beside all these is dropped, not stored). Each is optional and only what is sent changes; a malformed value is a `400` and nothing is saved. The reading figures (everything from `weekKey` on, `shareLibrary` and `raidable` apart) are kept only for a shared profile (`public` or `followers`): sent for a private one they are checked, answered `200` and not stored, and `visibility: "private"` removes the ones held, along with the uploaded library and the requests to follow that were waiting. `visibility: "public"` turns the requests waiting on a followers-only profile into follows. The answer is the profile as `GET` gives it, so a client can see from `visibility` that its figures were not kept. Names, titles and authors are stored as one line of visible text (no control characters, right-to-left overrides or zero-width spaces), cut to their length; `displayName: ""` clears the name. `409` if the handle is taken. |
 | `DELETE /v1/profile/me` | ✓ | `{deleted: true}`. Removes the profile and all community data (see Deletion). |
 | `GET /v1/leaderboard?week=2026-W39&scope=everyone` | optional | Top 100 public profiles for that ISO week (default: the server's). Rows: `{rank, handle, displayName, pipSeed, avatar, weekMinutes, streak, booksFinished, reading, level, isYou}` (`reading` and `level` as on the profile, or `null`). With a token, `you` is the reader's own row and rank even outside the top 100 (public profiles only: a private or followers-only reader gets `null`, and the app draws their own row from the minutes on their device). `sharedReaders` counts the public profiles there are, read this week or not, so an empty board can say why it is empty; followers-only profiles are not on this board and not counted. |
 | `GET /v1/leaderboard?week=…&scope=following` | ✓ | The reader plus the readers they follow who share a profile (public, or followers-only: a follow of those exists only once accepted), zeros included. Same rows. |
@@ -125,8 +129,8 @@ Authenticated routes take `Authorization: Bearer <token>`. Errors are
 | `POST /v1/gifts` | ✓ | `{to: handle, kind, itemId}` → `201 {gift: {id}}`. `kind` is one of `accessory`, `room`, `wallpaper`, `flooring`, `skin`, `move`; `itemId` matches `^[a-z][a-z0-9_-]{0,31}$` (`400` otherwise, and for a gift to yourself). Both must share a profile (`403` the sender, `404` the receiver) and each follow the other (`403`). `429` (with `Retry-After`) past 5 sent in a UTC day; `409` while 20 unclaimed gifts wait for the receiver. Tells the receiver (`gift`). `403` in the neutral words while either has blocked the other. |
 | `GET /v1/gifts` | ✓ | `{gifts: [{id, from: {handle, displayName, pipSeed, avatar}, kind, itemId, createdAt}]}`: the caller's unclaimed gifts, oldest first, at most 20. One from a reader who no longer shares a profile is left out. So is one from a reader on either side of a block. |
 | `POST /v1/gifts/:id/claim` | ✓ | `{claimed: true}`. The receiver only (`404` otherwise); claiming twice is the same as once. |
-| `GET /v1/raids/targets` | ✓ | `{targets: [{handle, name, camp, raidedToday}]}`: whose camp the caller could raid. The readers they follow who follow them back, who share a profile with a `camp` on it and have not turned `raidable` off, by handle, at most 50. `name` is the display name, or the handle where there is none; `camp` is the one on the profile; `raidedToday` says the caller has raided it this UTC day. A caller who does not share a profile gets `{targets: []}`. |
-| `POST /v1/raids` | ✓ | `{to: handle, stars}` → `201 {raid: {id}}`. Records a raid the caller's app has just played against that reader's camp; `stars` is whole, 0–3 (`400` otherwise, and for a raid on yourself). Both must share a profile (`403` the raider, `404` the reader raided) and each follow the other (`403`); `403` if the reader raided has turned `raidable` off; `409` if they show no camp. `429` (with `Retry-After`) for a second raid by the same reader on the same camp in one UTC day. At most 20 wait for one reader: a newer one marks the oldest as seen. Nobody's inbox is told. `403` in the neutral words while either has blocked the other. |
+| `GET /v1/raids/targets` | ✓ | `{targets: [{handle, name, camp, raidedToday}]}`: whose camp the caller could raid. The readers they follow who follow them back, who share a profile with a `camp` on it and have turned `raidable` on, by handle, at most 50. `name` is the display name, or the handle where there is none; `camp` is the one on the profile; `raidedToday` says the caller has raided it this UTC day. A caller who does not share a profile gets `{targets: []}`. |
+| `POST /v1/raids` | ✓ | `{to: handle, stars}` → `201 {raid: {id}}`. Records a raid the caller's app has just played against that reader's camp; `stars` is whole, 0–3 (`400` otherwise, and for a raid on yourself). Both must share a profile (`403` the raider, `404` the reader raided) and each follow the other (`403`); `403` unless the reader raided has turned `raidable` on; `409` if they show no camp. `429` (with `Retry-After`) for a second raid by the same reader on the same camp in one UTC day. At most 20 wait for one reader: a newer one marks the oldest as seen. Nobody's inbox is told. `403` in the neutral words while either has blocked the other. |
 | `GET /v1/raids` | ✓ | `{raids: [{id, by, name, stars, at}]}`: the raids on the caller's camp not yet acknowledged, oldest first, at most 20. `by` and `name` are the raider's handle and name as they were when they raided; `at` is an ISO time. One from a reader who no longer shares a profile is left out. So is one from a reader on either side of a block. |
 | `POST /v1/raids/ack` | ✓ | `{ids}` (at most 100 raid ids; `400` for anything that is not a list of ids) → `{acknowledged: true}`. Marks those of them that are raids on the caller's own camp as seen, so they are not handed over again; an id that is another reader's, already seen or gone is passed over. |
 | `POST /v1/rules/accept` | ✓ | `{accepted: true}`. Records, once, that the reader accepted the community guidelines (needed to post in public). Idempotent. `403` with no profile yet. |
@@ -155,6 +159,11 @@ Authenticated routes take `Authorization: Bearer <token>`. Errors are
 | `GET /v1/notice` | — | `{version, note, at}`: the newest Leaflet as the owner has said (all `null` when nothing is said). No account needed: most readers have none. Kept in memory for a minute, so hundreds of apps asking cost at most one read a minute. Apps from 1.4.2 ask 20 s after opening and every 6 hours, and show a reader who is behind a card with Update (the Store's page). |
 | `PUT /v1/admin/notice` | admin | `{version (two to four whole numbers with dots, or null), note? (≤160, spaces folded)}` → `{version, note, at}`. `version: null` takes the notice down. `400` for a malformed version or a note that is not text. Seen by every app at once (the kept copy is dropped). Stored as the `notice` document in `settings`. |
 | `GET /v1/admin/settings` · `PUT /v1/admin/settings` | admin | `{publicPosting: boolean}` → `{publicPosting}`. |
+| `POST /v1/problems` | optional | A problem report from Settings → Report a problem: `{message (1–2000 characters), diagnostics? (text, ≤64 KB), version (two to four whole numbers with dots), platform ("windows" \| "android" \| "macos" \| "linux"), contact? (an email address)}` → `201 {id}`. Signed in, the account and its handle are kept with it and `contact` is ignored; signed out, `contact` is kept if given (normalised; `400` if it is not an address). Longer text is refused (`400`), not cut; control characters are stripped (the diagnostics keep their line breaks and tabs). `429` past 10 a day from one address (every attempt counts, before the body is read) or 5 a UTC day from one account (`tallies`); `503` with a plain message while 1,000 are open; `413` for a body over 160 KB. Never logged. Apps from 1.5.7 send it, and offer to email instead when it fails (an older server answers `404`). See `problems` under stored data. |
+| `GET /v1/admin/problems?status=open\|closed&before=<id>` | admin | `{problems: [{id, at, preview, cut, hasDiagnostics, version, platform, signedIn, handle, contact, status, note}], more}`: the reports with that status (`open` if not given), newest first, 50 a page. `preview` is the first 200 characters of the message, `cut` whether there is more; the diagnostics are not sent. `before` is the id of the last one shown, for the next page (`400` if it is not an id). |
+| `GET /v1/admin/problems/:id` | admin | `{id, at, message, diagnostics, version, platform, signedIn, handle, contact, status, note, closedAt}`: one report, whole. `404` once it is gone. |
+| `POST /v1/admin/problems/:id` | admin | `{status: "open" \| "closed", note? (≤500, or null to take it away)}` → the report as above. Closing notes when (`closedAt`), reopening clears it; a note left out stays. |
+| `DELETE /v1/admin/problems/:id` | admin | → `{deleted: true}`; `404` if there is no such report. |
 
 A profile is shared one of three ways, and every route filters by it when it
 answers, so a change of `visibility` takes effect everywhere at once and
@@ -262,6 +271,7 @@ In memory, per process (see `src/rateLimit.js`):
 | Communities started per reader · kept at once · joined at once · members a keeper removes | 1 / UTC day (`tallies`) · 5 · 50 · 10 / UTC day (`tallies`) |
 | Threads · replies per reader, across all communities | 5 / UTC day · 60 / UTC day (`tallies`) |
 | Reports made per reader · blocks per reader | 20 / UTC day (`tallies`) · 1000 |
+| Problem reports (`POST /v1/problems`) per IP, signed in or not, counted before the body is read · per account · open at once | 10 / day (`problems`) · 5 / UTC day (`tallies`) · 1000 (then `503`) |
 | Gifts sent per reader · unclaimed gifts waiting for one reader | 5 / UTC day · 20 (counted in `gifts`, not in memory) |
 | Raids by one reader on one camp · unacknowledged raids waiting for one reader | 1 / UTC day (the unique index on `raids`) · 20 (a newer one pushes the oldest out) |
 | Visitor lists (`GET /v1/visitors`) per account | 30 / 15 min |
@@ -408,8 +418,9 @@ For the privacy policy. Four core collections keyed by the account's
 ObjectId, a short-lived password-reset record, nine small community
 collections that reference it (`libraries` is keyed by it too), and the
 public layer's nine (`quoteTallies`, `tallies`, `reactions`, `communities`,
-`threads`, `replies`, `reports`, `blocks`, `suspensions`) and one settings
-document.
+`threads`, `replies`, `reports`, `blocks`, `suspensions`), one settings
+document, `deletions` (the ids of accounts deleted in the last 45 days), and
+`problems` (the problem reports readers send from Settings, signed in or not).
 
 **`accounts`** — one per account
 - `_id` — ObjectId
@@ -439,7 +450,7 @@ document.
 - `avatar` — a copy of the account's, refreshed on every profile save and avatar change
 - `visibility` — `private` (default), `followers` or `public`
 - `shareLibrary` — optional boolean: whether followers may ask for the uploaded library. A setting, kept whatever the visibility (like the handle); absent means no
-- `raidable` — optional boolean: whether friends may raid the camp. A setting, kept whatever the visibility; absent means yes
+- `raidable` — optional boolean: whether friends may raid the camp. A setting, kept whatever the visibility; absent means no (it meant yes before app 1.5.10)
 - `weekKey` — ISO week the minutes belong to, e.g. `2026-W39`
 - `weekMinutes` — 0–10080; `streak` — 0–36500; `booksFinished` — 0–100000
 - `shelf` — up to 12 of `{title (≤120), author (≤80) | null, styleSeed (≤64)}`
@@ -540,6 +551,20 @@ document.
 - `accountId` — the account it was last matched to (so lifting the suspension can find it); `suspendedUntil` — date
 - Index: `{suspendedUntil}` with a TTL
 
+**`problems`** — one per problem report sent from the app (Settings → Report a problem), signed in or not. **Deleted automatically 90 days after it was sent**, by the admin from the app's Admin section, or with the account that sent it. Read only by the admin; never logged
+- `message` — what the reader wrote, up to 2000 characters, control characters stripped
+- `diagnostics` — only if the reader left "Include diagnostics" on (the default), else `null`: the app's plain-text report, up to 64 KB, exactly as the app shows it before sending (Settings → Copy diagnostics gives the same). It holds the app's version and build, the operating system and processor family, whether it is the Store package, the data folder's and the library's paths on the device (which may hold the computer's user name), the first six characters of the library's owner tag, the database schema, how many books and focus sessions, whether Drive, a sync folder, a Leaflet account and book copies are on, the time the report was made with its time zone, and the last 200 lines of the app's own log (errors and events; file paths and error messages there may name book files). No passwords, tokens, email addresses or book contents
+- `version` — the app's version; `platform` — `windows`, `android`, `macos` or `linux`
+- `accountId`, `handle` — only when sent signed in: the account's ObjectId and its profile's handle at the time (or `null`)
+- `contact` — only when sent signed out, and only if the reader typed one: an email address for a reply, normalised
+- `at` — when it was sent; `status` — `open` or `closed`; `note` — the admin's own note, up to 500 characters, if any; `closedAt` — when it was closed, or `null`
+- Indexes: `{status, _id: -1}` (the admin's list); `{accountId}` sparse (deleting an account's); `{at}` with a 90-day TTL
+- No IP address is stored: the per-address limit is counted in memory only
+
+**`deletions`** — one per deleted account, **for 45 days** (deleted automatically), so that restoring a backup deletes again what was deleted after it was taken (see [docs/backups.md](../docs/backups.md))
+- `_id` — the deleted account's ObjectId; `at` — date. Nothing else: no email, no handle
+- Index: `{at}` with a TTL
+
 **`clubs`** — one per book club; kept until its last member leaves or is deleted
 - `name` (≤60); `code` — the 8-character join code (unique)
 - `ownerId` — account ObjectId; `memberIds` — up to 50 account ObjectIds, in the order they joined
@@ -598,9 +623,12 @@ blob by design).
 
 ### Deletion
 
-`DELETE /v1/account` (password required) deletes, in order, the reader's
-community data, the profile, the state, every session, a pending reset, then
-the account. The community data is everything above that names them, in both
+`DELETE /v1/account` (password required) first notes the account's id in
+`deletions` (with the date, nothing else, for 45 days), then deletes, in
+order, the reader's community data, the profile, the state, the problem
+reports they sent signed in, every session, a pending reset, then the account (`deleteAccount` in `src/deletion.js`; the
+owner's tool for a request by email, below, and the restore tool go the
+same way). The community data is everything above that names them, in both
 directions (`deleteCommunityData` in `src/community.js`): follows and
 requests to follow, made and received; kudos sent and received; duels they
 are in; their uploaded library; their posts; gifts sent and received, claimed
@@ -632,8 +660,37 @@ The privacy policy should say both.
 `DELETE /v1/profile/me` removes the same community data along with the
 profile. Sessions go before the account so a failure part-way leaves an
 account the reader can still sign in to and delete again. Nothing else is
-kept afterwards (Atlas backups, if enabled on a paid tier, age out on their
-own schedule). Signing out on a device only deletes that device's session.
+kept afterwards, but for the nightly encrypted backups made before the
+deletion: they are kept 30 days at most, and a restore from one deletes the
+account again (`--deletions-from`; see [docs/backups.md](../docs/backups.md)).
+Signing out on a device only deletes that device's session.
+
+### Deleting an account on request
+
+For a reader who asks by email to have their account deleted (and so has no
+way, or no wish, to give the password): on the VM,
+
+```bash
+cd /opt/leaflet-api
+sudo node --env-file=/etc/leaflet-api.env src/tools/delete-account.js --email someone@example.com
+```
+
+shows the account (its id, `@handle`, when it was made, and how much it has:
+sync state, posts, follows, ...) and deletes nothing. Check it is the right
+one (answer from the address the account has, not another), then the same
+with `--yes`:
+
+```bash
+sudo node --env-file=/etc/leaflet-api.env src/tools/delete-account.js --email someone@example.com --yes
+```
+
+It deletes through `deleteAccount`, exactly as `DELETE /v1/account` does,
+so it is noted in `deletions` too. The address is normalised as at sign-up
+(trimmed, lower case). It runs as root only so that it can read
+`/etc/leaflet-api.env`; `--env-file` keeps the connection string out of the
+command line. A device that was signed in to the account may still be let in
+for up to a minute (the API remembers a session that long), and then gets
+`401` like any signed-out device.
 
 **Going private** (`PUT /v1/profile/me` with `visibility: "private"`) deletes
 less and hides the rest. Deleted at once: the reading figures on the profile
@@ -829,6 +886,12 @@ terminates HTTPS on a subdomain and proxies to it. Files are in `deploy/`.
 
 Logs: `journalctl -u leaflet-api -f`. Update: re-run `deploy.ps1`.
 
+**Backups.** Atlas's free tier keeps none. `deploy.ps1` also installs
+`leaflet-backup.service` and `leaflet-backup.timer` (a nightly, encrypted
+copy of the database to Google Drive, through an Apps Script web app) and
+switches the timer on once `/etc/leaflet-backup.env` exists. Setting it up,
+checking it, and restoring: [docs/backups.md](../docs/backups.md).
+
 ### Deploying 1.4.2's server (after 1.4.0's)
 
 One more thing to deploy, the same way (`deploy.ps1`, nothing else): the
@@ -910,7 +973,8 @@ make yourself the admin (see Moderation):
   deploy the same way. One more collection, `raids`, made empty on first
   start with its three indexes (`once_a_day` unique, `waiting`, `expiry`: the
   30-day TTL on `createdAt`). No migration: a profile without `raidable`
-  reads as on. An older app never meets a raid: it asks for none of the four
+  reads as off (since app 1.5.10: it read as on before, so every reader who
+  never chose is off from that deploy, and one who chose keeps their choice). An older app never meets a raid: it asks for none of the four
   routes, a raid makes no inbox event, and `raidable` on its own profile is
   an addition. A newer app on a server from before raids gets empty lists
   (the two `GET`s answer `404`, which it reads as "no raids here").
@@ -926,6 +990,25 @@ make yourself the admin (see Moderation):
   before; it meets only additions (`about` on a kudos event, `kudosFrom` and
   `kudosTo` on its own profile, two badge ids it does not know on a card),
   and a `kudos-` badge it sends back is dropped rather than refused.
+- **Backups, and remembering deletions** came after the kudos badges and
+  deploy the same way. One more collection, `deletions`, made empty on first
+  start with its index (`expiry`: the 45-day TTL on `at`); from then on every
+  deleted account leaves its id there. No migration, nothing an app can see.
+  `deploy.ps1` now also installs `leaflet-backup.service` and
+  `leaflet-backup.timer`, and switches the timer on only once
+  `/etc/leaflet-backup.env` exists ([docs/backups.md](../docs/backups.md));
+  without it, it says `Backups: off` and the API deploys as before. No new
+  npm dependencies.
+- **Problem reports** (`POST /v1/problems` and the four `/v1/admin/problems`
+  routes) came after backups and deploy the same way: no new environment
+  values, secrets or npm dependencies. One more collection, `problems`, made
+  empty on first start with its three indexes (`list`, `account`, `expiry`:
+  the 90-day TTL on `at`). No migration. An older app never sends one. A
+  1.5.7 app on a server from before them gets `404` when it sends, says it
+  could not, and offers to email the report instead (the diagnostics on the
+  clipboard), so nothing is lost before the deploy. Make sure your own
+  profile has `role: "admin"` (see Moderation): that is what shows the
+  app's Admin section in Settings, where the reports are read.
 
 ## Pointing a release build at the server
 

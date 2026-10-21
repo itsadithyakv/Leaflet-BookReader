@@ -33,6 +33,10 @@ const TOUCH_MAX_HEIGHT = 440;
 /** A pause this long in the typing keeps what is typed (the app can be sent away, and closed, at any moment). */
 export const NOTE_AUTOSAVE_MS = 700;
 
+/** The note's height: as tall as what is written, to a point; by the keyboard, at most `room`. */
+const noteHeight = (field: HTMLTextAreaElement, typing: boolean, room = 150) =>
+  Math.min(150, room, Math.max(typing ? 44 : 62, field.scrollHeight + 2));
+
 export const noteDate = (iso: string) => {
   const date = new Date(iso);
   return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
@@ -123,11 +127,14 @@ export const HighlightCard = ({
   // Back, while the note has the keyboard, puts the keyboard away; the card stays.
   useBackLayer(typing, () => field.current?.blur());
 
-  /** The note in sight in the card's scrolling middle (the caret is at its end, or in its own scroll). */
-  const keepFieldInView = () => {
+  /**
+   * The note in sight in the card's scrolling middle (the caret is at its end,
+   * or in its own scroll): while it has the keyboard, or, `always`, once.
+   */
+  const keepFieldInView = (always = false) => {
     const middle = body.current;
     const note = field.current;
-    if (!middle || !note || document.activeElement !== note) {
+    if (!middle || !note || (!always && document.activeElement !== note)) {
       return;
     }
     const room = middle.getBoundingClientRect();
@@ -176,6 +183,13 @@ export const HighlightCard = ({
       setTyping(nowTyping);
       const bar = dock.getBoundingClientRect();
       const toolbar = scope?.querySelector(".reader-toolbar")?.getBoundingClientRect();
+      // All it holds, the note at the height it takes with the keyboard away.
+      const middle = body.current;
+      const note = field.current;
+      const grows = note ? Math.max(0, noteHeight(note, false) - note.offsetHeight) : 0;
+      const wanted = middle
+        ? node.offsetHeight - middle.clientHeight + middle.scrollHeight + grows
+        : undefined;
       setPlace((before) => {
         const next = placeNoteCard({
           barTop: bar.top,
@@ -185,6 +199,7 @@ export const HighlightCard = ({
           windowWidth: window.innerWidth,
           selection: avoidRef.current?.() ?? null,
           tallest,
+          wanted,
           typing: nowTyping
         });
         return next.height === before.height && next.lift === before.lift && next.shift === before.shift ? before : next;
@@ -237,15 +252,20 @@ export const HighlightCard = ({
   }, []);
 
   // The note grows with what is written, up to a point: by the keyboard, no
-  // taller than the card's middle, so that it is all in sight.
+  // taller than the card's middle, so that it is all in sight. The keyboard
+  // put away, the card is placed again for all it holds, and the note just
+  // written is brought into sight in it, whole (it was left cut in half).
+  const typedRef = useRef(false);
   useLayoutEffect(() => {
     const node = field.current;
     if (node) {
       const room = typing && body.current ? Math.max(44, body.current.clientHeight - 6) : 150;
       node.style.height = "auto";
-      node.style.height = `${Math.min(150, room, Math.max(typing ? 44 : 62, node.scrollHeight + 2))}px`;
+      node.style.height = `${noteHeight(node, typing, room)}px`;
     }
-    keepFieldInViewRef.current();
+    const typed = typedRef.current && !typing;
+    typedRef.current = typing;
+    keepFieldInViewRef.current(typed);
   }, [draft, typing, place.height]);
 
   // Focus comes in, and goes back to where it was on the way out.

@@ -1,42 +1,53 @@
 import { useEffect, useRef } from "react";
 import { TAP_SLACK_PX, pressIsClick } from "../pageTurn";
-import { isPhoneShape, readLayoutFor, spreadFor, tapAction, tapZone, useTabletSideways, type TapAction } from "../touchLayout";
+import {
+  isPhoneShape, layoutAcrossTurn, runAction, spreadFor, tapAction, tapZone,
+  useTabletSideways, type TapAction
+} from "../touchLayout";
 import { inBookmarkCorner } from "../phoneReading";
-import { holdForSecondTap } from "../wordTap";
+import { endTapRun, holdTapRun, isNotTap } from "../tapRun";
 import { OWN_CLICK, textAt, within } from "./usePageTurning";
+import { raiseReaderVeil, turnSettleNow } from "../readerVeil";
 import type { Later, WithCover } from "./scope";
 
 /**
  * The text reader by finger (docs/android.md, "The reader"). With pages, the
- * taps are the page's own (usePageInput): the sides turn, the middle brings
- * the chrome. Scrolling has no page to turn, so a plain tap on the text shows
- * the toolbar and the dock, or sends them away: anywhere on a tablet, only in
- * the middle third on a phone (a tap at a side there only sends them away;
- * readers/touchLayout.ts, `tapAction`). One on a link, a note, a name or a
- * highlight is that thing's, and a scroll is reading.
+ * taps are the page's own (usePageInput): the sides turn, two taps in the
+ * middle bring the chrome. Scrolling has no page to turn: two taps anywhere
+ * bring the toolbar and the dock, or send them away, and three select the
+ * word (readers/tapRun.ts, useTapRuns.ts); one tap at a side of a phone's
+ * page only sends them away (readers/touchLayout.ts, `tapAction`,
+ * `runAction`). One on a link, a note, a name or a highlight is that
+ * thing's, and a scroll (or a touch that stops the page gliding) is reading.
  *
  * While something reads on by itself (docs/mobile.md, "Dotty on a phone") a
  * tap is its pause instead: SpeedRead pauses and carries on, Smart Read and
- * auto-scroll pause (the pace pill's play carries on, and the chrome comes
- * with the next tap).
+ * auto-scroll pause (the pace pill's play carries on); two taps pause it and
+ * bring the chrome.
  */
 export const useScrollTaps = (reader: WithCover & Later<"cornerBookmarkRef">) => {
   const { book, hideChrome, interruptedRef, layout, loading, renditionRef, selectionRef, shape, toggleChrome, viewerRef } = reader;
   const chromeRef = useRef({ toggle: toggleChrome, hide: hideChrome, immersive: isPhoneShape(shape) });
   chromeRef.current = { toggle: toggleChrome, hide: hideChrome, immersive: isPhoneShape(shape) };
-  const tapRef = useRef((_action: TapAction) => undefined as void);
-  tapRef.current = (action: TapAction) => {
-    if (reader.readingModeRef.current === "speed") {
-      reader.setReadingPaused((paused) => !paused);
+  const tapRef = useRef((_single: TapAction, _taps: number) => undefined as void);
+  tapRef.current = (single: TapAction, taps: number) => {
+    const action = runAction(single, taps);
+    if (taps >= 3) {
       return;
     }
-    if (reader.readingModeRef.current === "smart" && !reader.readingPausedRef.current) {
+    let paused = false;
+    if (reader.readingModeRef.current === "speed") {
+      reader.setReadingPaused((now) => !now);
+      paused = true;
+    } else if (reader.readingModeRef.current === "smart" && !reader.readingPausedRef.current) {
       reader.readingPausedRef.current = true;
       reader.setReadingPaused(true);
-      return;
-    }
-    if (reader.readingModeRef.current === "standard" && reader.autoScrollActiveRef.current) {
+      paused = true;
+    } else if (reader.readingModeRef.current === "standard" && reader.autoScrollActiveRef.current) {
       reader.setAutoScrollActive(false);
+      paused = true;
+    }
+    if (paused && action.kind !== "chrome") {
       return;
     }
     if (action.kind === "bookmark") {
@@ -70,7 +81,8 @@ export const useScrollTaps = (reader: WithCover & Later<"cornerBookmarkRef">) =>
     const onClick = (event: MouseEvent) => {
       const from = press;
       press = null;
-      if (!from) {
+      // (A scroll, a held finger or a touch that stopped the page gliding: useTapRuns.ts.)
+      if (!from || isNotTap(event)) {
         return;
       }
       const onto = event.target as Node | null;
@@ -104,6 +116,7 @@ export const useScrollTaps = (reader: WithCover & Later<"cornerBookmarkRef">) =>
         const footer = viewer?.parentElement?.querySelector<HTMLElement>(".reader-phone-footer");
         const footBox = footer && chromeRef.current.immersive && footer.closest(".reader-chrome-hidden") ? footer.getBoundingClientRect() : null;
         if (footer && footBox && footBox.width > 0 && x >= footBox.left && x <= footBox.right && y >= footBox.top - 4 && y <= footBox.bottom) {
+          endTapRun(rendition);
           footer.click();
           return;
         }
@@ -112,15 +125,11 @@ export const useScrollTaps = (reader: WithCover & Later<"cornerBookmarkRef">) =>
         const zone = frame ? tapZone(x, frame.left, frame.width) : 0;
         const pageBox = viewer?.parentElement?.getBoundingClientRect();
         const corner = chromeRef.current.immersive && pageBox ? inBookmarkCorner(x, y, pageBox) : false;
-        const action = tapAction(zone, "scroll", chromeRef.current.immersive, corner);
-        if (!under.text) {
-          tapRef.current(action);
-          return;
-        }
-        // On a word it waits a moment: a second tap selects the word instead (useWordDoubleTap.ts).
-        holdForSecondTap(rendition, () => {
+        const single = tapAction(zone, "scroll", chromeRef.current.immersive, corner);
+        // Done once the run of taps is over: a second may be coming, or a third (useTapRuns.ts).
+        holdTapRun(rendition, (taps) => {
           if (renditionRef.current === rendition && selectionRef.current === null && !selecting(doc)) {
-            tapRef.current(action);
+            tapRef.current(single, taps);
           }
         });
       }
@@ -151,12 +160,14 @@ export const useScrollTaps = (reader: WithCover & Later<"cornerBookmarkRef">) =>
 };
 
 /**
- * A phone turned: the layout kept for this way up (readers/touchLayout.ts).
- * Sideways defaults to pages as a spread; turned back, the upright choice
- * returns. A tablet keeps one layout, and its pages are a spread on its side.
- * Only a change of layout (or of spread) lays the book out again, round the
- * place; a turn that keeps the layout is a resize, which keeps the reading
- * line by itself (useResizeRelayout).
+ * A phone (or a tablet) turned: the layout stays the reader's
+ * (readers/touchLayout.ts, `layoutAcrossTurn`); pages become a spread of two
+ * columns on its side, or one column upright again, and only that lays the
+ * book out anew, round the place, under the veil (readers/readerVeil.ts). It
+ * waits for the window to keep its size (`TURN_SETTLE_MS`): a turn passes
+ * through sizes that are neither way up, and the book was drawn anew for
+ * each. A turn that keeps the layout is a resize, laid out once it has
+ * settled too (useResizeRelayout).
  */
 export const useShapeLayout = (reader: WithCover) => {
   const { relayout, shape } = reader;
@@ -164,8 +175,16 @@ export const useShapeLayout = (reader: WithCover) => {
   relayoutRef.current = relayout;
   const tabletSideways = useTabletSideways();
   useEffect(() => {
-    const next = readLayoutFor(shape);
-    relayoutRef.current(next, spreadFor(shape, next));
+    const layout = layoutAcrossTurn(reader.layoutRef.current);
+    if (spreadFor(shape, layout) === reader.spreadRef.current) {
+      return undefined;
+    }
+    raiseReaderVeil(reader.viewerRef.current);
+    const timer = window.setTimeout(() => {
+      const now = layoutAcrossTurn(reader.layoutRef.current);
+      relayoutRef.current(now, spreadFor(shape, now));
+    }, turnSettleNow());
+    return () => window.clearTimeout(timer);
   }, [shape, tabletSideways]);
 };
 

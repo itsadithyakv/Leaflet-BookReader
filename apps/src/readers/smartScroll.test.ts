@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { coverFromBottom, coverFromTop, planScrollStep, readingBand, stepDuration, type ReadingArea, screenStep, chapterEndTop, isPictureGap, pastPictureGap, isScrollCorrection, lineInArea } from "./smartScroll";
+import {
+  coverFromBottom, coverFromTop, planScrollStep, readingBand, settleDuration, stepDuration, type ReadingArea,
+  screenStep, chapterEndTop, isPictureGap, pastPictureGap, isScrollCorrection, lineInArea
+} from "./smartScroll";
 
 // 18px type at 1.8 line height.
 const LINE = 32.4;
@@ -161,11 +164,14 @@ describe("Smart Read on a phone", () => {
   // An upright phone: 844 px of text at 18 px type, the footer's strip and the pace pill at its foot.
   const phone: ReadingArea = { height: 844, lineHeight: LINE, topInset: 8, bottomInset: 100, phone: true };
 
-  it("lets Dotty walk down to about two thirds, and lands its line about a third down", () => {
+  it("lets Dotty read down to just above the foot, and lands its line two lines down", () => {
     const band = readingBand(phone);
-    const usable = phone.height - phone.topInset - phone.bottomInset;
-    expect((band.top - phone.topInset) / usable).toBeCloseTo(0.3, 2);
-    expect((band.turn - phone.topInset) / usable).toBeCloseTo(0.7, 2);
+    const foot = phone.height - phone.bottomInset;
+    const usable = foot - phone.topInset;
+    expect(band.top - phone.topInset).toBeCloseTo(Math.max(LINE * 2, usable * 0.06), 5);
+    expect(foot - band.turn).toBeLessThanOrEqual(LINE * 1.5);
+    // Most of the screen a glide: the 255 px (seven lines) of 1.5.7 was a third of it.
+    expect(band.turn - band.top).toBeGreaterThan(usable * 0.8);
   });
 
   it("never moves for a line or two: a step is several lines, and nothing until the turn", () => {
@@ -174,8 +180,8 @@ describe("Smart Read on a phone", () => {
       expect(planScrollStep(top, top + LINE, phone)).toBeNull();
     }
     const step = planScrollStep(band.turn, band.turn + LINE, phone)!;
-    expect(step).toBeGreaterThan(LINE * 8);
-    // The line lands about a third down, in one move.
+    expect(step).toBeGreaterThan(LINE * 15);
+    // The line lands near the top, in one move.
     expect(band.turn - step).toBeCloseTo(band.top, 5);
   });
 
@@ -194,13 +200,27 @@ describe("Smart Read on a phone", () => {
       expect(lineTop + LINE).toBeLessThanOrEqual(phone.height - phone.bottomInset);
       expect(lineTop).toBeGreaterThanOrEqual(phone.topInset);
     }
-    expect(steps).toBeLessThan(200 / 8);
+    expect(steps).toBeLessThan(200 / 15);
   });
 
-  it("keeps the whole-page turn on a computer", () => {
+  it("keeps a computer's turn as it was", () => {
     const desk = { ...phone, phone: false };
-    expect(readingBand(desk).turn).toBeGreaterThan(readingBand(phone).turn);
-    expect(readingBand(desk).top).toBeLessThan(readingBand(phone).top);
+    const usable = desk.height - desk.topInset - desk.bottomInset;
+    const top = desk.topInset + Math.max(LINE * 1.5, usable * 0.08);
+    expect(readingBand(desk).top).toBeCloseTo(top, 5);
+    expect(stepDuration(700, false)).toBe(505);
+    expect(settleDuration(700, false)).toBe(350);
+  });
+
+  it("glides most of a screen in 600 to 900 ms, and rests about a second after", () => {
+    expect(stepDuration(700, false, true)).toBeGreaterThanOrEqual(600);
+    expect(stepDuration(700, false, true)).toBeLessThanOrEqual(900);
+    expect(stepDuration(700, true, true)).toBe(0);
+    expect(settleDuration(700, true)).toBeGreaterThanOrEqual(1100);
+    expect(settleDuration(700, true)).toBeLessThanOrEqual(1300);
+    // A short move rests less, a long one no more than a second and a half.
+    expect(settleDuration(100, true)).toBeLessThan(settleDuration(700, true));
+    expect(settleDuration(3000, true)).toBe(1500);
   });
 
   it("falls back to the whole room when the type is very large", () => {

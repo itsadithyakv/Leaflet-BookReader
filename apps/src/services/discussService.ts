@@ -116,6 +116,36 @@ export type ReportGroup = {
 
 export type Counts = { likes: number; dislikes: number; myReaction: Reaction };
 
+export type ProblemStatus = "open" | "closed";
+
+/**
+ * A problem report as the owner's list shows it (`GET /v1/admin/problems`):
+ * the start of the message, never the diagnostics. Who sent it is a handle
+ * (signed in), an address they gave (signed out), or neither.
+ */
+export type ProblemRow = {
+  id: string;
+  at: string;
+  preview: string;
+  /** Whether the message goes on past the preview. */
+  cut: boolean;
+  hasDiagnostics: boolean;
+  version: string;
+  platform: string;
+  signedIn: boolean;
+  handle: string | null;
+  contact: string | null;
+  status: ProblemStatus;
+  note: string | null;
+};
+
+/** One report, whole (`GET /v1/admin/problems/:id`). */
+export type Problem = Omit<ProblemRow, "preview" | "cut" | "hasDiagnostics"> & {
+  message: string;
+  diagnostics: string | null;
+  closedAt: string | null;
+};
+
 /**
  * What the owner changes of a community: what it is called, who keeps it
  * (the handle of a member), a removed reader let back in (their handle), and
@@ -243,6 +273,14 @@ export const discussService = {
   suspend: (handle: string, days: number) => ask<unknown>("admin_suspend", { handle, days }),
   settings: () => ask<{ publicPosting: boolean }>("admin_settings"),
   setPublicPosting: (publicPosting: boolean) => ask<{ publicPosting: boolean }>("admin_set_settings", { publicPosting }),
+  /** Problem reports with this status, newest first: fifty after `before` (the last shown). */
+  problems: (status: ProblemStatus, before?: string) =>
+    ask<{ problems: ProblemRow[]; more: boolean }>("admin_problems", { status, before }),
+  problem: (id: string) => ask<Problem>("admin_problem", { id }),
+  /** Closes or reopens one, with the note as it now stands (empty takes it away). */
+  updateProblem: (id: string, status: ProblemStatus, note: string) =>
+    ask<Problem>("admin_problem_update", { id, status, note }),
+  deleteProblem: (id: string) => ask<unknown>("admin_problem_delete", { id }),
   /** Puts right what only the owner can in a community. Only what is in `change` changes; the community comes back as it now stands. */
   async adminCommunity(id: string, change: CommunityChange): Promise<BookCommunity> {
     return (await ask<{ community: BookCommunity }>("admin_community", { id, ...change })).community;

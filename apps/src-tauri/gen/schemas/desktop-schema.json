@@ -2379,10 +2379,10 @@
           "markdownDescription": "Denies the save command without any pre-configured scope."
         },
         {
-          "description": "Default plugin permissions.\n#### This default permission set includes:\n\n- `allow-keep-awake`\n- `allow-lock-rotation`\n- `allow-hide-system-bars`\n- `allow-pick-files`\n- `allow-share-target`\n- `allow-share-file`\n- `allow-share-text`\n- `allow-open-store`\n- `allow-request-review`\n- `allow-hold-for-sign-in`\n- `allow-set-continue-shortcut`\n- `allow-clear-continue-shortcut`\n- `allow-take-continue-shortcut`\n- `allow-volume-page-turns`\n- `allow-read-aloud`\n- `allow-set-brightness`",
+          "description": "Default plugin permissions.\n#### This default permission set includes:\n\n- `allow-keep-awake`\n- `allow-lock-rotation`\n- `allow-hide-system-bars`\n- `allow-set-bar-look`\n- `allow-set-night-mode`\n- `allow-pick-files`\n- `allow-share-target`\n- `allow-share-file`\n- `allow-share-text`\n- `allow-open-store`\n- `allow-request-review`\n- `allow-hold-for-sign-in`\n- `allow-set-continue-shortcut`\n- `allow-clear-continue-shortcut`\n- `allow-take-continue-shortcut`\n- `allow-volume-page-turns`\n- `allow-read-aloud`\n- `allow-set-brightness`",
           "type": "string",
           "const": "leaflet-device:default",
-          "markdownDescription": "Default plugin permissions.\n#### This default permission set includes:\n\n- `allow-keep-awake`\n- `allow-lock-rotation`\n- `allow-hide-system-bars`\n- `allow-pick-files`\n- `allow-share-target`\n- `allow-share-file`\n- `allow-share-text`\n- `allow-open-store`\n- `allow-request-review`\n- `allow-hold-for-sign-in`\n- `allow-set-continue-shortcut`\n- `allow-clear-continue-shortcut`\n- `allow-take-continue-shortcut`\n- `allow-volume-page-turns`\n- `allow-read-aloud`\n- `allow-set-brightness`"
+          "markdownDescription": "Default plugin permissions.\n#### This default permission set includes:\n\n- `allow-keep-awake`\n- `allow-lock-rotation`\n- `allow-hide-system-bars`\n- `allow-set-bar-look`\n- `allow-set-night-mode`\n- `allow-pick-files`\n- `allow-share-target`\n- `allow-share-file`\n- `allow-share-text`\n- `allow-open-store`\n- `allow-request-review`\n- `allow-hold-for-sign-in`\n- `allow-set-continue-shortcut`\n- `allow-clear-continue-shortcut`\n- `allow-take-continue-shortcut`\n- `allow-volume-page-turns`\n- `allow-read-aloud`\n- `allow-set-brightness`"
         },
         {
           "description": "Enables the clear_continue_shortcut command without any pre-configured scope.",
@@ -2439,6 +2439,12 @@
           "markdownDescription": "Enables the request_review command without any pre-configured scope."
         },
         {
+          "description": "Enables the set_bar_look command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:allow-set-bar-look",
+          "markdownDescription": "Enables the set_bar_look command without any pre-configured scope."
+        },
+        {
           "description": "Enables the set_brightness command without any pre-configured scope.",
           "type": "string",
           "const": "leaflet-device:allow-set-brightness",
@@ -2449,6 +2455,12 @@
           "type": "string",
           "const": "leaflet-device:allow-set-continue-shortcut",
           "markdownDescription": "Enables the set_continue_shortcut command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_night_mode command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:allow-set-night-mode",
+          "markdownDescription": "Enables the set_night_mode command without any pre-configured scope."
         },
         {
           "description": "Enables the share_file command without any pre-configured scope.",
@@ -2535,6 +2547,12 @@
           "markdownDescription": "Denies the request_review command without any pre-configured scope."
         },
         {
+          "description": "Denies the set_bar_look command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:deny-set-bar-look",
+          "markdownDescription": "Denies the set_bar_look command without any pre-configured scope."
+        },
+        {
           "description": "Denies the set_brightness command without any pre-configured scope.",
           "type": "string",
           "const": "leaflet-device:deny-set-brightness",
@@ -2545,6 +2563,12 @@
           "type": "string",
           "const": "leaflet-device:deny-set-continue-shortcut",
           "markdownDescription": "Denies the set_continue_shortcut command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_night_mode command without any pre-configured scope.",
+          "type": "string",
+          "const": "leaflet-device:deny-set-night-mode",
+          "markdownDescription": "Denies the set_night_mode command without any pre-configured scope."
         },
         {
           "description": "Denies the share_file command without any pre-configured scope.",

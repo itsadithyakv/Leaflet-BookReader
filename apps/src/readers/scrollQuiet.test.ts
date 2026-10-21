@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SCROLL_QUIET_MS, SCROLL_WAIT_MAX_MS, afterScrollSettles, createScrollQuiet, fetchAheadPx, reportWhileScrolling, settleDelay } from "./scrollQuiet";
+import { MOVING_FETCH_EVERY_MS, SCROLL_QUIET_MS, SCROLL_WAIT_MAX_MS, afterScrollSettles, createScrollQuiet, fetchAheadPx, fetchWhileMoving, reportWhileScrolling, settleDelay } from "./scrollQuiet";
 
 /** A clock and timers the test moves by hand. */
 const fakeTime = () => {
@@ -139,5 +139,22 @@ describe("where the page is, while it scrolls on", () => {
   it("is left for the end of a fling", () => {
     expect(reportWhileScrolling(1000, 3000)).toBe(false);
     expect(reportWhileScrolling(1200, -2500)).toBe(false);
+  });
+});
+
+describe("the next chapter asked for in a fling", () => {
+  it("is asked for once the end of what is loaded is within three windows", () => {
+    expect(fetchWhileMoving(3000, 812, 1000)).toBe(false);
+    expect(fetchWhileMoving(2400, 812, 1000)).toBe(true);
+    expect(fetchWhileMoving(0, 812, 1000)).toBe(true);
+  });
+
+  it("is asked for no more often than every so often", () => {
+    expect(fetchWhileMoving(500, 812, MOVING_FETCH_EVERY_MS - 1)).toBe(false);
+    expect(fetchWhileMoving(500, 812, MOVING_FETCH_EVERY_MS)).toBe(true);
+  });
+
+  it("is not asked for in a window with no height (the book closing)", () => {
+    expect(fetchWhileMoving(0, 0, 1000)).toBe(false);
   });
 });

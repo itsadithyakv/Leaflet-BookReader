@@ -50,7 +50,9 @@ pub struct Package {
   /// The series the book belongs to, and its number in it, when the book says
   /// (see `pick_series`).
   pub series: Option<String>,
-  pub series_index: Option<f32>
+  pub series_index: Option<f32>,
+  /// The first `dc:language`, as written (`en`, `en-GB`, `fre`...).
+  pub language: Option<String>
 }
 
 /// A `<meta property="...">` with text, EPUB 3's way of describing the book.
@@ -243,7 +245,8 @@ fn parse(opf_path: String, xml: &str) -> Package {
     spine: Vec::new(),
     cover_id: None,
     series: None,
-    series_index: None
+    series_index: None,
+    language: None
   };
   let mut reader = Reader::from_str(xml);
   reader.trim_text(true);
@@ -264,10 +267,11 @@ fn parse(opf_path: String, xml: &str) -> Package {
     let is_start = matches!(event, Ok(Event::Start(_)));
     match event {
       Ok(Event::Start(e)) | Ok(Event::Empty(e)) => match local(e.name().as_ref()).as_str() {
-        kind @ ("title" | "creator" | "subject") if is_start => {
+        kind @ ("title" | "creator" | "subject" | "language") if is_start => {
           let kind = match kind {
             "title" => "title",
             "creator" => "creator",
+            "language" => "language",
             _ => "subject"
           };
           capture = Some((kind, Named { id: attr(&e, "id"), role: attr(&e, "role"), text: String::new() }));
@@ -338,6 +342,9 @@ fn parse(opf_path: String, xml: &str) -> Package {
             match kind {
               "title" => titles.push(named),
               "creator" => creators.push(named),
+              "language" => {
+                package.language.get_or_insert(named.text);
+              }
               _ => package.subjects.push(named.text)
             }
           }
@@ -554,6 +561,10 @@ mod tests {
     assert!(!package.spine[1].linear);
     // EPUB 3's cover-image wins over EPUB 2's meta, and the href is decoded.
     assert_eq!(package.cover_path().as_deref(), Some("OEBPS/images/Cover Art.png"));
+    assert_eq!(package.language, None);
+    // The first language the book names.
+    let opf = OPF.replace("<dc:title>", "<dc:language> en-GB </dc:language><dc:language>fr</dc:language><dc:title>");
+    assert_eq!(parse("content.opf".into(), &opf).language.as_deref(), Some("en-GB"));
   }
 
   #[test]

@@ -1,14 +1,15 @@
 import type { CSSProperties } from "react";
 import type { Book } from "@shared/models/book";
-import { useCoverSrc } from "../../hooks/useCoverSrc";
+import { coverImgProps, useCoverSrc } from "../../hooks/useCoverSrc";
 import { inkFor } from "../shelf/spine";
 
 const TiltedCover = ({ book }: { book: Book }) => {
-  const { src, onError } = useCoverSrc(book, { thumb: true });
+  const cover = useCoverSrc(book, { thumb: true });
+  const { src } = cover;
   return (
     <span className="genre-tile-cover" aria-hidden="true">
       {src ? (
-        <img src={src} alt="" onError={onError} />
+        <img {...coverImgProps(cover, "96px")} alt="" />
       ) : (
         <span className="genre-tile-untitled">{book.title}</span>
       )}

@@ -19,9 +19,12 @@ export type ReadingArea = {
   /** Covered at the bottom (Smart Read's controls, the chapter bar). */
   bottomInset: number;
   /**
-   * A phone: Dotty walks down to about two thirds of the way and the page
-   * glides up a third or so, its line landing about a third from the top. A
-   * whole-screen turn on a small screen was a jolt the eye lost the line in.
+   * A phone: Dotty reads down to just above the foot of the text, and the
+   * page glides its line up to a couple of lines under the top, most of a
+   * screen at a time, more slowly than a computer's step, and then rests a
+   * moment (`settleDuration`). The glide used to be a third of the screen,
+   * seven lines every quarter of a minute, which wasted the screen and kept
+   * the page moving.
    */
   phone?: boolean;
 };
@@ -66,9 +69,10 @@ export const readingBand = (area: ReadingArea): ReadingBand => {
   const visibleBottom = Math.max(visibleTop + line, area.height - Math.max(0, area.bottomInset));
   const usable = visibleBottom - visibleTop;
   if (area.phone) {
-    const top = visibleTop + Math.max(line * 1.5, usable * 0.3);
-    const turn = visibleTop + Math.min(usable - line * 1.2, usable * 0.7);
-    if (turn - top >= line * 3) {
+    // Two lines of what was just read stay above Dotty after a glide.
+    const top = visibleTop + Math.max(line * 2, usable * 0.06);
+    const turn = visibleBottom - Math.max(line * 1.1, usable * 0.03);
+    if (turn - top >= line * 4) {
       return { top, turn };
     }
   }
@@ -103,8 +107,22 @@ export const planScrollStep = (lineTop: number, lineBottom: number, area: Readin
  * up, short enough not to hold the reader up. Instant when the reader has
  * asked for less motion.
  */
-export const stepDuration = (distance: number, reducedMotion: boolean) =>
-  reducedMotion ? 0 : Math.round(Math.min(720, Math.max(320, 260 + Math.abs(distance) * 0.35)));
+export const stepDuration = (distance: number, reducedMotion: boolean, phone = false) =>
+  reducedMotion
+    ? 0
+    : phone
+      ? // Longer on a phone, where the step is most of the screen: 600 to 900 ms for one.
+        Math.round(Math.min(950, Math.max(420, 380 + Math.abs(distance) * 0.7)))
+      : Math.round(Math.min(720, Math.max(320, 260 + Math.abs(distance) * 0.35)));
+
+/**
+ * How long Dotty rests on its line after a phone's glide, before reading on:
+ * time to find the line again, a little more the further the page moved
+ * (about 1.2 s for most of a screen). A computer's step rests a moment only.
+ * Dotty is waiting then, and the wait is not counted as reading.
+ */
+export const settleDuration = (distance: number, phone: boolean) =>
+  phone ? Math.round(Math.min(1500, 700 + Math.abs(distance) * 0.75)) : 350;
 
 /** Ease in and out, so a long scroll starts and lands gently. */
 export const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);

@@ -5,8 +5,8 @@
  * magpies come: the lookout sees further, the fence stands longer, the larder
  * takes more getting into. They take no ground of their own, which is the
  * point: a camp can have all seven and be no more crowded than it was. Each
- * has three ranks, bought with acorns and trained by reading, as a building
- * is.
+ * has three ranks, bought with acorns, training and all, as a building is
+ * (`guardCost` in rules.ts).
  *
  * What each does was chosen so that it always tells. The first draft gave
  * most of them a throw from their own building, and measured over eighty
@@ -42,7 +42,7 @@ export type Guardian = {
 
 export const GUARDIANS: readonly Guardian[] = [
   { id: 0, name: "Halvar Longstride", short: "Halvar", title: "a ranger out of the north, and there is a rumour about a crown", does: "The lookout sees, and throws, further", post: "tower" },
-  { id: 1, name: "Corwin Blackcloak", short: "Corwin", title: "who took an oath on a far colder wall than this", does: "Every piece of fence stands longer", post: "fence" },
+  { id: 1, name: "Corwin Blackcloak", short: "Corwin", title: "who took an oath on a far colder wall than this", does: "The wall and its gate stand longer", post: "fence" },
   { id: 2, name: "Mossgather", short: "Mossgather", title: "a shepherd of trees, and in no hurry about it", does: "Roots catch at their feet: raiders on foot come slower", post: "oak" },
   { id: 3, name: "Dame Berit Tallshield", short: "Dame Berit", title: "who has never once broken a promise", does: "Stands before the larder: it takes far more getting into", post: "burrow" },
   { id: 4, name: "Emberling", short: "Emberling", title: "a very small dragon who is sure she is a large one", does: "Scorches whoever is on the wing before anything else", post: "store" },
@@ -50,7 +50,10 @@ export const GUARDIANS: readonly Guardian[] = [
   { id: 6, name: "Ilsa Reedwhistle", short: "Ilsa", title: "an archer of the old wood, who says she does not miss", does: "Drills the camp: everything that throws, throws faster", post: "hut" }
 ];
 
-/** The top rank, and what each rank costs in acorns and in minutes of reading. */
+/**
+ * The top rank, and what each rank costs: its acorns, and the minutes of training it took when training was done by
+ * reading. Since 1.5.8 those are paid in acorns too (`guardCost`: half an acorn a minute), and a rank is had at once.
+ */
 export const GUARD_MOST = 3;
 export const GUARD_COSTS = [0, 120, 300, 600];
 export const GUARD_MINUTES = [0, 20, 45, 80];
@@ -84,7 +87,7 @@ export type Animal = {
 export const ANIMALS: readonly Animal[] = [
   { id: 0, name: "Hen", charm: 8, does: "An egg most mornings: a parcel a day" },
   { id: 1, name: "Cat", charm: 20, does: "One prowler in ten thinks better of it and stays in the wood" },
-  { id: 2, name: "Goat", charm: 35, does: "Two more pieces of fence to put down" },
+  { id: 2, name: "Goat", charm: 35, does: "Leans on the wall: it stands a quarter longer" },
   { id: 3, name: "Owl", charm: 55, does: "Keeps watch: mending what prowlers did costs a quarter less" },
   { id: 4, name: "Fox", charm: 80, does: "A tenth more from every raid" },
   { id: 5, name: "Tortoise", charm: 110, does: "The larder holds a tenth more" }
@@ -118,33 +121,38 @@ export const SCENERY: ReadonlyArray<{ name: string; cost: number; flat: boolean 
 export const LAND_MOST = 30;
 
 /**
- * Defensive constructs: one of each, set down where the reader wants it and
- * moved for nothing. Each changes how a night goes, rather than how hard
- * anything hits.
+ * Defensive constructs. Since 1.5.11 (the front, `front.ts`) there are seven, each with one job and one kind of
+ * prowler it beats: four traps that lie on the trail in front of the wall (thorn strip, tanglefoot, pitfall,
+ * thumper), two towers that stand on pads behind it (archer's nest, stone thrower), and the watch bell on the gate.
+ * The other five are kept in this list so that their numbers stay what they were (a camp kept from before reads
+ * them), marked `retired`: the hedge and caltrops are the thorn strip now, the ward stone and the hornet jar the
+ * archer's nest, and the smoke brazier and the dread totem are no more (paid back).
  */
 export type Work = {
   name: string;
   cost: number;
-  /** The burrow's level it can be had from. */
+  /** The burrow's level it could be had from, before chapters (the front goes by `front.ts` `WORK_CHAPTER`). */
   burrow: number;
   hp: number;
   /** How far about itself it acts; 0 for one that acts on the whole flock. */
   reach: number;
   does: string;
+  /** No longer had (1.5.11): what it became, if anything, is in `front.ts` `BECAME`. */
+  retired?: boolean;
 };
 export const WORKS: readonly Work[] = [
-  { name: "Ward stone", cost: 180, burrow: 3, hp: 150, reach: 34, does: "Nothing flies past it: inside its ring, whoever is on the wing has to walk" },
-  { name: "Whip-thorn hedge", cost: 140, burrow: 3, hp: 90, reach: 13, does: "Cuts whatever walks through it" },
-  { name: "Thumper", cost: 220, burrow: 4, hp: 240, reach: 30, does: "Its drumming draws whoever comes on foot to it before the larder, and brings up whatever is tunnelling near it" },
-  { name: "Smoke brazier", cost: 260, burrow: 4, hp: 120, reach: 0, does: "Its smoke hides the larder: they go for whatever is nearest instead of straight to it" },
-  { name: "Tanglefoot patch", cost: 90, burrow: 2, hp: 60, reach: 15, does: "Whoever walks through it goes at less than half their pace, and is thrown at for longer" },
-  { name: "Hornet jar", cost: 160, burrow: 3, hp: 70, reach: 26, does: "Stings whatever is on the wing near it, for as long as it is" },
-  { name: "Pitfall", cost: 200, burrow: 4, hp: 1, reach: 5, does: "The first three on foot to step on it are gone, sturdy or not. It is dug again by morning" },
-  { name: "Watch bell", cost: 280, burrow: 5, hp: 110, reach: 32, does: "Rings while anyone is near it, and everything in the camp that throws does so a third oftener" },
-  { name: "Caltrops", cost: 60, burrow: 2, hp: 40, reach: 8, does: "Whoever walks over them is the worse for it: a small hurt, and cheap" },
-  { name: "Stone thrower", cost: 240, burrow: 3, hp: 120, reach: 44, does: "Throws a long way and hard, and takes its time about the next one" },
-  { name: "Archer's nest", cost: 150, burrow: 2, hp: 80, reach: 30, does: "A second thing that throws, to put where the lookout does not reach: quick, and light" },
-  { name: "Dread totem", cost: 170, burrow: 4, hp: 100, reach: 24, does: "Whoever is near it has no heart for the work: they do half the harm, and some turn and run" }
+  { name: "Ward stone", cost: 180, burrow: 3, hp: 150, reach: 34, does: "Nothing flies past it: inside its ring, whoever is on the wing has to walk", retired: true },
+  { name: "Whip-thorn hedge", cost: 140, burrow: 3, hp: 90, reach: 13, does: "Cuts whatever walks through it", retired: true },
+  { name: "Thumper", cost: 220, burrow: 4, hp: 240, reach: 30, does: "Drums diggers up out of the ground near the wall, dazed" },
+  { name: "Smoke brazier", cost: 260, burrow: 4, hp: 120, reach: 0, does: "Its smoke hides the larder: they go for whatever is nearest instead of straight to it", retired: true },
+  { name: "Tanglefoot", cost: 90, burrow: 2, hp: 60, reach: 15, does: "Walkers cross it at under half their pace, under fire for longer" },
+  { name: "Hornet jar", cost: 160, burrow: 3, hp: 70, reach: 26, does: "Stings whatever is on the wing near it, for as long as it is", retired: true },
+  { name: "Pitfall", cost: 200, burrow: 4, hp: 1, reach: 6, does: "Swallows a brute who walks onto it (two a night; lighter ones walk over). Dug again by morning" },
+  { name: "Watch bell", cost: 280, burrow: 5, hp: 110, reach: 32, does: "Hangs on the gate: while anyone is at the wall, everything throws a third faster" },
+  { name: "Thorn strip", cost: 100, burrow: 2, hp: 40, reach: 8, does: "Cuts every walker crossing it, and runners three times as fast" },
+  { name: "Stone thrower", cost: 240, burrow: 3, hp: 120, reach: 44, does: "Slow and heavy, and hits a few at once. A stone sets a bomber off where he stands" },
+  { name: "Archer's nest", cost: 150, burrow: 2, hp: 80, reach: 30, does: "Quick and light, and shoots down fliers first, twice as hard" },
+  { name: "Dread totem", cost: 170, burrow: 4, hp: 100, reach: 24, does: "Whoever is near it has no heart for the work: they do half the harm, and some turn and run", retired: true }
 ];
 /** What caltrops do to whoever is on them, a second. */
 export const CALTROP_CUTS = 3;

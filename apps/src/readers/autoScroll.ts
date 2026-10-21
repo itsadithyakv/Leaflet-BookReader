@@ -31,3 +31,27 @@ export const readAutoScrollDefault = () => {
     return 35;
   }
 };
+
+/**
+ * How far auto-scroll moves the page this frame, out of what it has carried
+ * up (`carry`, in CSS pixels): whole pixels of the screen, not of the page.
+ * It used to move only by whole CSS pixels, and at a reading pace that is
+ * one step every third or fourth frame (36 lines a minute is 17 px a
+ * second): on a phone, where a CSS pixel is two or three of the screen's,
+ * the text moved in small, uneven jerks. A screen pixel at a time it moves
+ * on most frames, by a third as much. The page lands on screen pixels
+ * anyway (a step of one CSS pixel at 150% went 1.33).
+ */
+export const autoScrollStep = (carry: number, pixelRatio: number) => {
+  const ratio = Number.isFinite(pixelRatio) && pixelRatio >= 1 ? pixelRatio : 1;
+  // (A hair over, so 1 / 2.625 * 2.625 counts as the one screen pixel it is.)
+  return carry > 0 ? Math.floor(carry * ratio + 1e-6) / ratio : 0;
+};
+
+/**
+ * What a step counts as done: what the page really moved. A step the page
+ * did not take is counted only when it was a whole CSS pixel or more (the
+ * end of what is loaded, as before); a smaller one is kept, and goes into
+ * the next, where a page that does not scroll in screen pixels takes it.
+ */
+export const autoScrollCounted = (step: number, moved: number) => (moved > 0 ? moved : step >= 1 ? step : 0);

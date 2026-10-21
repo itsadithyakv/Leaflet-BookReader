@@ -125,9 +125,50 @@ export const placeBubble = (target: Rect, size: Size, bounds: Rect, avoid: reado
  * The pointing paw: over the target pointing down, or under it pointing up
  * where there is no room above. Whole pixels, so it bobs by whole pixels.
  */
-export const placePaw = (target: Rect, size: Size, bounds: Rect, gap = 2): { left: number; top: number; up: boolean } => {
+export const placePaw = (target: Rect, size: Size, bounds: Rect, gap = 2, prefer: "above" | "below" = "above"): { left: number; top: number; up: boolean } => {
   const left = Math.round(clamp(target.left + target.width / 2 - size.width / 2, bounds.left, bounds.left + bounds.width - size.width));
   const above = target.top - gap - size.height;
+  const below = target.top + target.height + gap;
+  // Under a key on a card (1.5.10), so the paw never sits on what the card says above it (the cost, the needs).
+  if (prefer === "below" && below + size.height <= bounds.top + bounds.height) return { left, top: Math.round(below), up: true };
   if (above >= bounds.top) return { left, top: Math.round(above), up: false };
   return { left, top: Math.round(Math.min(target.top + target.height + gap, bounds.top + bounds.height - size.height)), up: true };
+};
+
+/**
+ * Where the whole clearing is on the screen, from its canvas: the canvas's own rectangle where it shows the whole of
+ * it, or, where it is a window onto part of it (a phone held sideways, since 1.5.8: BaseScreen's camera), the
+ * rectangle the whole would have, as the canvas says in `data-cam-x`, `data-cam-y` (art pixels) and `data-scale`
+ * (CSS pixels to an art pixel). What `sceneToScreen` is handed.
+ */
+export const sceneRectOf = (canvas: HTMLCanvasElement): Pick<Rect, "left" | "top" | "width"> => {
+  const rect = canvas.getBoundingClientRect();
+  const scale = Number(canvas.dataset.scale);
+  if (!Number.isFinite(scale) || scale <= 0) return { left: rect.left, top: rect.top, width: rect.width };
+  const camX = Number(canvas.dataset.camX) || 0;
+  const camY = Number(canvas.dataset.camY) || 0;
+  return { left: rect.left - camX * scale, top: rect.top - camY * scale, width: GAME_W * scale };
+};
+
+/** How much of what it must keep clear of a bubble covers: the target, and the rest (`avoid`). */
+export const bubbleCovers = (bubble: Rect, target: Rect | null, avoid: readonly Rect[] = []) => ({
+  target: target ? overlap(bubble, target) : 0,
+  avoid: avoid.reduce((sum, rect) => sum + overlap(bubble, rect), 0)
+});
+
+/**
+ * Whether Pip's bubble, once it is up, may stay where it is: inside the bounds, and over no more of what it points
+ * at, or of anything it must keep clear of, than when it was put there (`was`: none, mostly). A bubble that moved
+ * while it was read (the camera easing to the basket, a panel shutting) moved its Next key from under the finger
+ * pressing it; so it is placed once, and moved again only when it no longer fits there.
+ */
+export const bubbleStays = (bubble: Rect, bounds: Rect, target: Rect | null, avoid: readonly Rect[] = [], was = { target: 0, avoid: 0 }) => {
+  const inside =
+    bubble.left >= bounds.left - 0.5 &&
+    bubble.top >= bounds.top - 0.5 &&
+    bubble.left + bubble.width <= bounds.left + bounds.width + 0.5 &&
+    bubble.top + bubble.height <= bounds.top + bounds.height + 0.5;
+  if (!inside) return false;
+  const now = bubbleCovers(bubble, target, avoid);
+  return now.target <= was.target + 0.5 && now.avoid <= was.avoid + 0.5;
 };

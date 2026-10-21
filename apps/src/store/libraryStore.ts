@@ -140,7 +140,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   async loadBooks() {
     set({ loading: true });
     const [books, finishedGone] = await Promise.all([bookService.list(), bookService.finishedRemoved().catch(() => [])]);
-    set({ books, finishedGone, loading: false });
+    // A list read while a book was being opened (a sync finishing late) does
+    // not take its opening back: the later of the two stands, as sync merges it.
+    set({ books: keepLaterOpened(books, get().books), finishedGone, loading: false });
     void get().refreshMissingMetadata(books);
     if (!seriesScanned) {
       // Books imported before series were read have theirs read once, here.
@@ -226,7 +228,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   },
   async refreshMetadata(id: string) {
     const updated = await bookService.refreshMetadata(id);
-    set({ books: replaceBook(get().books, updated) });
+    set({ books: takeLookup(get().books, updated) });
     scheduleSync(set, get);
   },
   async fetchCover(id: string) {
@@ -234,7 +236,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     if (!updated) {
       return;
     }
-    set({ books: replaceBook(get().books, updated) });
+    set({ books: takeLookup(get().books, updated) });
   },
   async savePageCover(id, image) {
     const updated = await bookService.savePageCover(id, image);
@@ -281,13 +283,15 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   },
 
   async openBook(book: Book) {
+    // The book being read from the moment it opens (the dock's Continue,
+    // one-tap Focus), not once the database has answered.
     const now = new Date().toISOString();
-    await bookService.updateProgress(book.id, book.progress);
     set({
       books: get().books.map((existing) =>
         existing.id === book.id ? { ...existing, lastOpened: now } : existing
       )
     });
+    await bookService.updateProgress(book.id, book.progress);
   },
   setFilter(partial) {
     set({ filters: { ...get().filters, ...partial } });
@@ -386,7 +390,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       tried = [];
       set({
         metadataDone: done,
-        books: batch.reduce((books, updated) => replaceBook(books, updated), get().books),
+        books: batch.reduce((books, updated) => takeLookup(books, updated), get().books),
         lookupTried: turns.length > 0 ? { ...get().lookupTried, ...Object.fromEntries(turns.map((id) => [id, true as const])) } : get().lookupTried
       });
     };
@@ -465,6 +469,38 @@ function replaceBook(books: Book[], updated: Book) {
   const next = books.slice();
   next[index] = updated;
   return next;
+}
+
+/**
+ * A metadata lookup's answer, taken for what a lookup changes. The backend
+ * read the book before a lookup that can take most of a minute: its progress
+ * and `lastOpened` are from then, and used to undo a book opened meanwhile
+ * (the dock went on offering the book before it).
+ */
+function takeLookup(books: Book[], updated: Book) {
+  const current = books.find((book) => book.id === updated.id);
+  if (!current) {
+    return books;
+  }
+  const { title, author, genres, coverUrl, metadataCheckedAt } = updated;
+  return replaceBook(books, { ...current, title, author, genres, coverUrl, metadataCheckedAt });
+}
+
+const openedAt = (book: Book | undefined) => (book?.lastOpened ? Date.parse(book.lastOpened) : NaN);
+
+/** The loaded books, each with the later `lastOpened` of the list and the store. */
+function keepLaterOpened(loaded: Book[], held: Book[]) {
+  if (held.length === 0) {
+    return loaded;
+  }
+  const byId = new Map(held.map((book) => [book.id, book]));
+  return loaded.map((book) => {
+    const before = byId.get(book.id);
+    const ours = openedAt(before);
+    // (Never opened in the list, NaN, loses to any time ours has.)
+    const oursLater = Number.isFinite(ours) && !(openedAt(book) >= ours);
+    return oursLater ? { ...book, lastOpened: before?.lastOpened ?? null } : book;
+  });
 }
 
 /** Books an import brought back, into the library: shown, backed up, and looked up. */

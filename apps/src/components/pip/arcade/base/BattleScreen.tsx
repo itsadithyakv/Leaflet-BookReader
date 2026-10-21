@@ -22,19 +22,22 @@ import { playSound } from "../../../../pip/sound";
 import { CountUp } from "../../../community/CountUp";
 import { gameArt, type GameArt } from "../gameArt";
 import { drawAt, fitPicture, screenRatio, type Fit } from "./fit";
+import { raidWords } from "./hollowRules";
 import { ART_FPS, inLight } from "./scene";
 import { Sprite } from "./Sprite";
 import { frameGate, runWhileShown } from "../frameGate";
 import { useTouchInput } from "../../../../platform/device";
 import { useBackLayer } from "../../../../platform/back";
+import { currentShellShape } from "../../../../platform/shape";
 
-const KIND_NAMES: Record<UnitKind, string> = { sprout: "Scout", slinger: "Slinger", mole: "Mole", hero: "Hero" };
+const KIND_NAMES: Record<UnitKind, string> = { sprout: "Scout", slinger: "Slinger", mole: "Mole", bomber: "Puffcap", hero: "Hero" };
 /** Each kind's picture, for its button. */
-const KIND_ART: Record<Exclude<UnitKind, "hero">, string> = { sprout: "scout", slinger: "slinger", mole: "mole" };
+const KIND_ART: Record<Exclude<UnitKind, "hero">, string> = { sprout: "scout", slinger: "slinger", mole: "mole", bomber: "puffcap" };
 const KIND_SAYS: Record<UnitKind, string> = {
   sprout: "Sturdy. Goes for the nearest thing and has to be at it.",
   slinger: "Frail. Throws from further off than most sentries reach.",
   mole: "Goes for the loot, and under a wall instead of through it.",
+  bomber: "Runs to the nearest wall and blows it open.",
   hero: ""
 };
 /** Longest real time folded into one frame, so a stall does not skip the fight. */
@@ -144,7 +147,7 @@ const RaidResult = ({ end, onClose }: { end: RaidEnd; onClose: () => void }) => 
           <Flag size={13} aria-hidden /> The month's banner is yours
         </p>
       )}
-      {end.fled && <p className="pip-base-chip is-good">The next stronghold emptied at the news</p>}
+      <p className="pip-base-result-says">{raidWords(end)}</p>
       {end.blade !== null && (
         <p className="pip-base-chip is-lit" title={`${BLADES[end.blade].title}. A hero can carry it: see who lives here.`}>
           <Sprite name="blade" variant={end.blade} box={18} /> {BLADES[end.blade].name} is the camp's
@@ -216,7 +219,7 @@ const unitArt = (unit: Unit, setup: Setup): { name: string; variant?: number; fa
     return unit.kind === "mole" ? { name: "magpie", facesLeft: true, lift: 7 } : { name: "raider", facesLeft: false, lift: 0 };
   }
   if (unit.kind === "hero") return { name: "hero", variant: setup.hero?.id ?? 0, facesLeft: false, lift: 0 };
-  return { name: unit.kind === "sprout" ? "scout" : unit.kind, facesLeft: false, lift: 0 };
+  return { name: unit.kind === "sprout" ? "scout" : unit.kind === "bomber" ? "puffcap" : unit.kind, facesLeft: false, lift: 0 };
 };
 
 const bar = (ctx: CanvasRenderingContext2D, x: number, y: number, part: number, ours: boolean, wide = 10) => {
@@ -475,7 +478,7 @@ export const BattleScreen = (props: Props) => {
   const [kind, setKind] = useState<UnitKind>(kinds[0] ?? "sprout");
   const kindRef = useRef(kind);
   kindRef.current = kind;
-  const [hud, setHud] = useState({ left: battle.left, hero: battle.heroLeft, seconds: battle.setup.seconds ?? RAID_SECONDS, stars: 0, destroyed: 0, over: false });
+  const [hud, setHud] = useState({ left: battle.left, hero: battle.heroLeft, bombers: battle.bombersLeft, seconds: battle.setup.seconds ?? RAID_SECONDS, stars: 0, destroyed: 0, over: false });
   // Android's Back: a raid under way is ended as it stands (its "End the raid"), a watched night is left; once it is
   // over, Back goes back to the camp.
   useBackLayer(!hud.over, () => {
@@ -498,8 +501,12 @@ export const BattleScreen = (props: Props) => {
       // Less the frame it hangs in, on each side (index.css).
       // (A phone on its side has its name above and the scouts below the field, and no more: 260 px kept for them left
       // a 360 px screen a field of 150.)
-      const kept = window.innerHeight <= 520 ? 150 : 260;
-      const next = fitPicture(FIELD_W, FIELD_H, wrap.clientWidth - 16, Math.max(180, window.innerHeight - kept), screenRatio());
+      // On a phone on its side (1.5.10) the field is as large as the screen, and the rest is laid over it.
+      const full = currentShellShape() === "sideways";
+      const kept = full ? 0 : 260;
+      const next = full
+        ? fitPicture(FIELD_W, FIELD_H, window.innerWidth, window.innerHeight, screenRatio(), 0.08)
+        : fitPicture(FIELD_W, FIELD_H, wrap.clientWidth - 16, Math.max(180, window.innerHeight - kept), screenRatio());
       setFit((was) => (was.css === next.css && was.backing === next.backing ? was : next));
     };
     measure();
@@ -570,10 +577,48 @@ export const BattleScreen = (props: Props) => {
       if (won && !view.cheer && !stillOnly()) confetti(view.bits);
       view.cheer = won;
     };
+    // Where scouts may go down, and may not: the camp's edge, as a dashed line of dots (1.5.10: "tap outside the camp"
+    // had nothing to show where the camp ended). Worked out again only when something falls or the scouts run out.
+    let edgeKey = "";
+    let edge: Array<[number, number]> = [];
+    const edgeOf = () => {
+      const hero = battle.left <= 0 && battle.heroLeft;
+      const key = `${battle.structures.filter((entry) => entry.hp > 0).length}|${battle.left > 0}|${hero}`;
+      if (key === edgeKey) return edge;
+      edgeKey = key;
+      const CELL = 2;
+      const cols = Math.ceil(FIELD_W / CELL);
+      const rows = Math.ceil(FIELD_H / CELL);
+      const shut: boolean[] = [];
+      // Only what the camp keeps clear: the field's own edges are not the camp's. (1.5.11) Down a trail, everything
+      // past the strip at its left is shut, to the field's edges, so the one line drawn is the strip's.
+      const strip = battle.setup.drop !== undefined && !battle.setup.raiders;
+      const inner = (x: number, y: number) => strip || (x > 8 && x < FIELD_W - 8 && y > 18 && y < FIELD_H - 8);
+      for (let row = 0; row < rows; row++) for (let col = 0; col < cols; col++) shut.push(inner(col * CELL + 1, row * CELL + 1) && !battle.canDeploy(col * CELL + 1, row * CELL + 1, hero) && (!strip || col * CELL + 1 > (battle.setup.drop ?? 0) - 1));
+      const at = (col: number, row: number) => (col < 0 || row < 0 || col >= cols || row >= rows ? strip : shut[row * cols + col]);
+      edge = [];
+      for (let row = 0; row < rows; row++)
+        for (let col = 0; col < cols; col++)
+          if (at(col, row) && (!at(col - 1, row) || !at(col + 1, row) || !at(col, row - 1) || !at(col, row + 1)) && ((col + row) >> 1) % 2 === 0) edge.push([col * CELL + 1, row * CELL + 1]);
+      return edge;
+    };
     const show = (frame: number, cursor: { x: number; y: number } | null, mark: { x: number; y: number } | null) => {
       // Set again each time: a canvas forgets it when its size changes.
       drawAt(ctx, fit);
       paint(ctx, art, battle, field, frame, cursor, mark, view);
+      if (raid && !battle.over && (battle.left > 0 || battle.heroLeft)) {
+        // The strip down the trail, where scouts go down: a little lighter than the rest of the field.
+        if (battle.setup.drop !== undefined) {
+          ctx.fillStyle = "rgba(255, 246, 194, 0.12)";
+          ctx.fillRect(0, 0, battle.setup.drop, FIELD_H);
+        }
+        for (const [x, y] of edgeOf()) {
+          ctx.fillStyle = "rgba(31, 42, 34, 0.55)";
+          ctx.fillRect(x, y + 1, 1, 1);
+          ctx.fillStyle = "#fff6c2";
+          ctx.fillRect(x, y, 1, 1);
+        }
+      }
     };
     // What has been heard so far, so each thing is heard once.
     const heard = { fallen: battle.structures.filter((entry) => entry.hp <= 0).length, stars: battle.result().stars, down: battle.units.filter((unit) => unit.hp <= 0).length };
@@ -599,6 +644,7 @@ export const BattleScreen = (props: Props) => {
       const next = {
         left: battle.left,
         hero: battle.heroLeft,
+        bombers: battle.bombersLeft,
         seconds: Math.max(0, Math.ceil(limit - battle.time)),
         stars: result.stars,
         destroyed: Math.round(result.destroyed * 100),
@@ -658,6 +704,10 @@ export const BattleScreen = (props: Props) => {
       } else if (kindRef.current === "hero") {
         // The hero goes once: back to the scouts after.
         playSound("whee", { volume: 0.8 });
+        setKind(raid.setup.kinds[0] ?? "sprout");
+      } else if (kindRef.current === "bomber" && battle.bombersLeft <= 0) {
+        // The last Puffcap is down: back to the scouts.
+        playSound("march", { pitch: 1.1 });
         setKind(raid.setup.kinds[0] ?? "sprout");
       } else {
         playSound("march", { pitch: kindRef.current === "mole" ? 0.75 : kindRef.current === "slinger" ? 1.25 : 1 });
@@ -727,7 +777,7 @@ export const BattleScreen = (props: Props) => {
   const hero = raid?.setup.hero ? HEROES[raid.setup.hero.id] : null;
 
   return (
-    <div className="pip-base mt-3">
+    <div className={`pip-base pip-battle mt-3 ${currentShellShape() === "sideways" ? "is-full" : ""}`}>
       <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
         <p className="font-semibold text-on-surface">
           {raid ? raid.plan.name : watched!.title}
@@ -763,14 +813,14 @@ export const BattleScreen = (props: Props) => {
           aria-label={
             raid
               ? touch
-                ? `${raid.plan.name}. Tap outside the camp to put a scout down.`
-                : `${raid.plan.name}. Click or tap outside the camp to put a scout down. Arrows move a marker, Space puts one down, 1 to 4 choose who.`
+                ? `${raid.plan.name}. Tap down the trail, left of the dashed line, to put a scout down.`
+                : `${raid.plan.name}. Click or tap down the trail, left of the dashed line, to put a scout down. Arrows move a marker, Space puts one down, 1 to 5 choose who.`
               : `${watched!.title}: your camp, and tonight's magpies coming at it.`
           }
         />
         {raid && !hud.over && hud.left === raid.setup.capacity && hud.hero === Boolean(raid.setup.hero) && (
           <p className="pip-base-hint" aria-hidden="true">
-            Tap outside the camp to put a scout down
+            Drop scouts left of the dashed line
           </p>
         )}
       </div>
@@ -799,7 +849,7 @@ export const BattleScreen = (props: Props) => {
                 className={`pip-base-tile ${entry === kind ? "is-chosen" : ""}`}
                 aria-pressed={entry === kind}
                 aria-label={entry === "hero" ? (hero?.name ?? "Hero") : KIND_NAMES[entry]}
-                disabled={entry === "hero" ? !hud.hero : hud.left === 0}
+                disabled={entry === "hero" ? !hud.hero : entry === "bomber" ? hud.bombers === 0 || hud.left === 0 : hud.left === 0}
                 title={`${entry === "hero" ? `${hero?.name ?? "Hero"}. ${hero?.does ?? ""}` : `${KIND_NAMES[entry]}. ${KIND_SAYS[entry]}`}${touch ? "" : ` (${index + 1})`}`}
                 onClick={() => {
                   setKind(entry);
@@ -808,6 +858,7 @@ export const BattleScreen = (props: Props) => {
                 }}
               >
                 {entry === "hero" ? <Sprite name="hero" variant={hero?.id ?? 0} box={30} /> : <Sprite name={KIND_ART[entry]} box={26} />}
+                {entry === "bomber" && <span className="pip-base-tile-count">{hud.bombers}</span>}
                 {!touch && <span className="pip-base-tile-level">{index + 1}</span>}
               </button>
             ))}

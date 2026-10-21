@@ -19,7 +19,10 @@
  * and moving it; the second level of the camp brings the prowlers, the
  * postcard and the fence, a tip each.
  */
-import { BUILDINGS, GATE_FROM, GUARDS_FROM, POSTCARD_FROM, bedsOf, gateOf, prowlersCome, residents, type BaseState } from "./rules";
+import { opened } from "./chapters";
+import { COUNTER, ROLES, ROLE_NAMES, type Role } from "./front";
+import { WORKS } from "./guards";
+import { BUILDINGS, GATE_FROM, bedsOf, gateOf, prowlersCome, residents, worksOpen, type BaseState } from "./rules";
 
 export type Tip = {
   id: string;
@@ -41,14 +44,14 @@ export const TIPS: readonly Tip[] = [
   },
   {
     id: "build",
-    text: "Acorns build things. Tap the next thing in my bubble, or open Camp below: a building is finished by reading, not by waiting.",
+    text: "Acorns build things. Tap a building to see what its next level brings and costs, and upgrade it there.",
     when: (state) => state.stats.gathered > 0,
     // (A camp begins with its burrow and its oak: it is the third thing that is the first one built.)
     did: (state) => state.jobs.length > 0 || built(state) > 2
   },
   {
     id: "move",
-    text: "Anything in the camp can be moved: drag it to where you want it.",
+    text: "Anything in the camp can be moved: hold it a moment, then drag it to where you want it.",
     when: (state) => built(state) >= 3
   },
   {
@@ -63,25 +66,31 @@ export const TIPS: readonly Tip[] = [
     did: (state) => state.stats.raids > 0 || state.camps > 0
   },
   {
+    // A camp brought onto the front (1.5.11): Pip says what she did about it, once.
+    id: "front",
+    text: "The prowlers found a trail through the Dark Wood. I put the fence across it, and our defences on the front!",
+    when: (state) => state.front.moved && prowlersCome(state)
+  },
+  {
     id: "prowler",
-    text: "Prowlers come out of the wood now, while you watch. What throws sees them off; one who gets through knocks a building about, or takes a few acorns.",
+    text: "Prowlers come down the trail from the Dark Wood. One who gets through knocks a building (tap it to fix) or grabs a few acorns, once a day.",
     when: (state) => prowlersCome(state)
   },
   {
     id: "postcard",
     text: "The camera at the top makes a postcard of your camp, to save or to send to somebody.",
-    when: (state) => state.levels.burrow >= POSTCARD_FROM
+    when: (state) => opened(state, undefined, "postcard")
   },
   {
     id: "fence",
-    text: "Fence is laid in Arrange: press the fence button and drag across the grass. Whoever comes on foot is held at it, under what throws.",
+    text: "The fence stands across the trail. Whoever comes on foot batters at it, under what throws. In Arrange you can slide it along the trail.",
     when: (state) => state.levels.fence > 0,
-    did: (state) => state.walls.length >= 3
+    did: (state) => state.front.set
   },
   {
     id: "works",
-    text: "Constructs are on the Defence shelf: traps and throwers, for where the lookout does not reach.",
-    when: (state) => state.levels.burrow >= 2 && state.levels.tower > 0,
+    text: "Traps go on the trail in front of the wall, towers on the pads behind it: the Defence shelf has them. Each beats one kind of prowler.",
+    when: (state) => worksOpen(state).length > 0,
     did: (state) => state.works.length > 0
   },
   {
@@ -92,21 +101,40 @@ export const TIPS: readonly Tip[] = [
   {
     id: "guard",
     text: "Guardians come now: each building's card has one to post. A guardian holds the ground about a signpost: drag it to where you want them.",
-    when: (state) => state.levels.burrow >= GUARDS_FROM,
+    when: (state) => opened(state, undefined, "guards"),
     did: (state) => state.guards.some((rank) => rank > 0)
   },
   {
     id: "gate",
-    text: "A fence can have a gate: in Arrange, press Gate and tap a piece. Whoever comes makes for it, and your own people walk through.",
-    when: (state) => state.levels.fence >= GATE_FROM && state.walls.length >= 4,
-    did: (state) => gateOf(state) !== null
+    text: "The wall has a gate now, where the trail meets it: the toughest part of it. Your own people walk through, and prowlers have to batter it down.",
+    when: (state) => state.levels.fence >= GATE_FROM && gateOf(state) !== null
   },
+  // The first time each kind of prowler gets through, a word about what beats it.
+  ...ROLES.filter((role) => COUNTER[role] !== null).map((role): Tip => ({
+    id: `through-${role}`,
+    text: throughWords(role),
+    when: (state) => state.front.through.includes(role)
+  })),
   {
     id: "beds",
     text: "More heroes have come than the hut has beds for: the rest are away on the road. Build the hut up, and more of them are about the camp.",
     when: (state) => residents(state).length > bedsOf(state)
   }
 ];
+
+/** What Pip says the first time a kind of prowler gets through: what it did, and what beats it. */
+function throughWords(role: Role): string {
+  const counter = WORKS[COUNTER[role] ?? 0]?.name.toLowerCase() ?? "a construct";
+  const said: Record<Role, string> = {
+    creeper: "",
+    runner: `A runner was over the wall in a bound! A ${counter} on the trail cuts them up.`,
+    flier: `A flier went straight over the wall! An ${counter} shoots them down.`,
+    brute: `A brute broke the gate! A ${counter} on the trail swallows one whole.`,
+    digger: `A digger came up inside the wall! A ${counter} drums them up early.`,
+    bomber: `A bomber blew the wall! A ${counter} sets them off out on the trail.`
+  };
+  return said[role] || `The ${ROLE_NAMES[role].many} got through.`;
+}
 
 /** A camp that has been told it wants no tips keeps this, and is told nothing more. */
 const NONE = "none";
@@ -116,9 +144,15 @@ export const tipNow = (state: BaseState): Tip | null =>
   // While Pip walks a new reader through the camp (`welcome.ts`), she is saying all there is to say.
   state.taught.includes(NONE) || (state.welcome?.given && !state.welcome.tutorial.done) ? null : (TIPS.find((tip) => !state.taught.includes(tip.id) && tip.when(state) && !(tip.did?.(state) ?? false)) ?? null);
 
-/** A tip has been seen to: by the reader saying so, or by their doing the thing. */
+/**
+ * Marks kept beside the tips, for things shown once that are not Pip's tips: the camp's three pointers to its phone
+ * layout (1.5.8, `mapCoach.ts`). Kept with the camp like a tip, so a second device does not show them again.
+ */
+export const MARKS = ["mapCoach"] as const;
+
+/** A tip has been seen to: by the reader saying so, or by their doing the thing. (Or one of the `MARKS` was shown.) */
 export const learnt = (state: BaseState, id: string): BaseState =>
-  state.taught.includes(id) || !TIPS.some((tip) => tip.id === id) ? state : { ...state, taught: [...state.taught, id] };
+  state.taught.includes(id) || !(TIPS.some((tip) => tip.id === id) || (MARKS as readonly string[]).includes(id)) ? state : { ...state, taught: [...state.taught, id] };
 
 /** No more tips, ever. */
 export const noTips = (state: BaseState): BaseState => (state.taught.includes(NONE) ? state : { ...state, taught: [...state.taught, NONE] });

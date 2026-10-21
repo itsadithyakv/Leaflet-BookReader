@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "
 import { Check, ChevronDown, ChevronRight } from "lucide-react";
 import { bookOfRow, bookStandings, listRows, type BookStanding, type ContentsRow, type InnerBook, type ListRow, type PlaceInSections } from "./innerBooks";
 import type { TocItem } from "./readerTypes";
+import { ListEdges } from "./ListEdges";
 import "./contentsList.css";
 
 type ContentsListProps = {
@@ -98,6 +99,8 @@ export const ContentsList = memo(({ toc, rows, books, bytes, active, place, fini
   const hands = { onWheel: touched, onPointerDown: touched, onTouchStart: touched, onKeyDown: touched };
   const madeLine = made ? <div className="reader-toc-made">Chapters found by Leaflet</div> : null;
 
+  /** Whether an entry holds the ones after it (a part with its chapters). */
+  const holdsEntries = (entry: number) => (rows[entry + 1]?.depth ?? 0) > (rows[entry]?.depth ?? 0);
   const rowButton = (item: TocItem, entry: number, extra = "", indent = 0) => {
     const current = entry === active;
     return (
@@ -108,6 +111,7 @@ export const ContentsList = memo(({ toc, rows, books, bytes, active, place, fini
           current ? "reader-chapter-active font-semibold" : ""
         } ${extra}`}
         style={indent > 0 ? { paddingLeft: `${12 + indent * 14}px` } : undefined}
+        data-depth={indent}
         aria-current={current ? "location" : undefined}
         onClick={() => onGo(item)}
       >
@@ -126,10 +130,13 @@ export const ContentsList = memo(({ toc, rows, books, bytes, active, place, fini
 
   if (books.length === 0) {
     return (
-      <div ref={scroller} className="mt-4 flex-1 overflow-y-auto pr-2" {...hands}>
-        {madeLine}
-        {toc.map((item, entry) => rowButton(item, entry))}
-      </div>
+      <ListEdges className="mt-4">
+        <div ref={scroller} className="flex-1 overflow-y-auto pr-2" {...hands}>
+          {madeLine}
+          {/* Parts, and their chapters set in under them (the depth the contents give each entry). */}
+          {toc.map((item, entry) => rowButton(item, entry, holdsEntries(entry) ? "reader-toc-part" : "", rows[entry]?.depth ?? 0))}
+        </div>
+      </ListEdges>
     );
   }
 
@@ -146,7 +153,8 @@ export const ContentsList = memo(({ toc, rows, books, bytes, active, place, fini
   const before = list.filter((row) => row.kind === "loose" && row.entry < books[0].firstRow);
   const after = list.filter((row) => row.kind === "loose" && row.entry > books[books.length - 1].lastRow);
   return (
-    <div ref={scroller} className="reader-toc-set mt-4 flex-1 overflow-y-auto pr-2" {...hands}>
+    <ListEdges className="reader-toc-set-edges mt-4">
+    <div ref={scroller} className="reader-toc-set flex-1 overflow-y-auto pr-2" {...hands}>
       {madeLine}
       {before.length > 0 && <div className="reader-toc-loose">{before.map(quiet)}</div>}
       {books.map((book, at) => {
@@ -208,6 +216,7 @@ export const ContentsList = memo(({ toc, rows, books, bytes, active, place, fini
       })}
       {after.length > 0 && <div className="reader-toc-loose reader-toc-after">{after.map(quiet)}</div>}
     </div>
+    </ListEdges>
   );
 });
 ContentsList.displayName = "ContentsList";

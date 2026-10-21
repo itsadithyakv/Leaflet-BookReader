@@ -128,4 +128,8 @@ export const PHONE_TEXT_CSS = `
   html[data-leaflet-phone] body p {
     hyphenate-limit-chars: 6 3 2;
   }
+  /* Two and three taps are the reader's (readers/tapRun.ts): never a zoom. */
+  html[data-leaflet-phone]:not([data-leaflet-layout="pages"]) {
+    touch-action: manipulation;
+  }
 `;

@@ -145,11 +145,11 @@ export const syncService = {
    * Where this device itself last stood in a book, apart from the place a
    * sync may have brought; null if it was never read here.
    */
-  async placeHere(bookId: string): Promise<Place | null> {
+  async placeHere(bookId: string): Promise<(Place & { at?: string | null }) | null> {
     if (!isTauri()) {
       return null;
     }
-    return invoke<Place | null>("place_here", { bookId });
+    return invoke<(Place & { at?: string | null }) | null>("place_here", { bookId });
   },
 
   /** Removes a book everywhere; the tombstone carries the removal to devices. */

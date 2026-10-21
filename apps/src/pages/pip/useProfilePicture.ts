@@ -1,9 +1,20 @@
 import { useEffect } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { ownPipAvatar } from "../../pip/avatars";
+import { profilePipAvatar, profileSkinAllowed } from "../../pip/avatars";
 import { useAccountStore } from "../../store/accountStore";
 import { FEATURES } from "../../constants/features";
-import { errorText } from "./common";
+import { errorText, storage } from "./common";
+
+/** The last skin Pip wore that the server takes on a profile picture (this device's). */
+const LAST_SKIN_KEY = "pip.lastProfileSkin";
+
+const lastProfileSkin = () => {
+  try {
+    return storage()?.getItem(LAST_SKIN_KEY) ?? null;
+  } catch {
+    return null;
+  }
+};
 
 type ProfilePictureOptions = {
   variant: string;
@@ -27,7 +38,16 @@ export const useProfilePicture = ({ variant, signature, outfit, play, showToast 
   useEffect(() => {
     if (FEATURES.accounts && !accountsLoaded) void loadAccount();
   }, [accountsLoaded, loadAccount]);
-  const myAvatar = ownPipAvatar(variant, signature, outfit);
+  // Remembered while Pip wears a skin the server takes, so one it refuses (an earned Golden Pip) can stand in for it.
+  useEffect(() => {
+    if (!profileSkinAllowed(variant)) return;
+    try {
+      storage()?.setItem(LAST_SKIN_KEY, variant);
+    } catch {
+      // The default skin stands in instead.
+    }
+  }, [variant]);
+  const myAvatar = profilePipAvatar(variant, signature, outfit, profileSkinAllowed(variant) ? variant : lastProfileSkin());
   const avatarInUse = account?.avatar === myAvatar;
   const useMyPip = async () => {
     try {

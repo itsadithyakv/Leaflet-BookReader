@@ -1,3 +1,6 @@
+import { coverDeco } from "./dress";
+import { hash } from "./hash";
+
 /**
  * How a book spine looks: its bookcloth, lettering and size.
  *
@@ -23,15 +26,7 @@ export const CLOTH = [
 
 export const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
-/** FNV-1a: small, stable, and the same on every screen. */
-export const hash = (value: string) => {
-  let h = 2166136261;
-  for (let i = 0; i < value.length; i += 1) {
-    h ^= value.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
-};
+export { hash };
 
 /** A book's own cloth when nothing else has claimed a colour first. */
 export const clothFor = (key: string) => CLOTH[hash(key) % CLOTH.length];
@@ -49,6 +44,14 @@ const DARK_INK = "#2a2016";
 const LIGHT_INK = "#f4ead8";
 const contrast = (a: number, b: number) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 
+/** Gilt lettering, for a leather binding whose cloth is dark enough to carry it. */
+export const GILT = "#e6c46c";
+const GILT_MIN_CONTRAST = 4.5;
+
+/** Gilt where it reads (at least 4.5:1 against the cloth), else the plain lettering. */
+export const giltOr = (hex: string) =>
+  contrast(luminance(hex), luminance(GILT)) >= GILT_MIN_CONTRAST ? GILT : inkFor(hex);
+
 /** Whichever lettering has the higher contrast ratio against the cloth. */
 export const inkFor = (hex: string) => {
   const cloth = luminance(hex);
@@ -65,5 +68,5 @@ export const spineWidth = (minutes: number) => Math.round(clamp(14 + minutes * 0
  */
 export const clothStyle = (key: string) => {
   const cloth = clothFor(key);
-  return { "--cloth": cloth, "--ink": inkFor(cloth) } as Record<string, string>;
+  return { "--cloth": cloth, "--ink": inkFor(cloth), "--cloth-deco": coverDeco(key) } as Record<string, string>;
 };

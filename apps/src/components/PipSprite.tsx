@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { LIB, SCENERY, SKINS, dress, renderFrame, resolve, type PipMove, type PipSkin } from "../pip/core";
 import { SPRITE_PX, artOf, portraitPlacement, type Art } from "../pip/portrait";
+import { picturePool, shownOnce } from "../pip/samePicture";
 import { currentTick, subscribeTick, TICKS_PER_SECOND } from "../pip/ticker";
 
 // Looked up by id, and re-indexed when LIB grows: the book scenes register
@@ -21,6 +22,12 @@ const SKIN_BY_ID: Record<string, PipSkin> = Object.fromEntries(SKINS.map((skin) 
 // guards against a session that plays every move in every skin.
 const frames = new Map<string, ImageData>();
 const FRAME_CAP = 4000;
+/**
+ * Frames with the same pixels are one ImageData (pip/samePicture.ts): her resting
+ * poses hold a frame here and there, and in the hand she shows two pictures in
+ * twelve. A sprite skips putting up the picture it already shows.
+ */
+const sameFrames = picturePool<ImageData>(FRAME_CAP);
 
 /**
  * A skin wearing an outfit. A dressed skin keeps its base's id, so the outfit
@@ -48,8 +55,9 @@ const frameFor = (move: PipMove, skin: PipSkin, outfitKey: string, frame: number
   if (!image) {
     if (frames.size >= FRAME_CAP) {
       frames.clear();
+      sameFrames.clear();
     }
-    image = renderFrame(move, looped, resolve(skin, looped));
+    image = sameFrames.same(renderFrame(move, looped, resolve(skin, looped)));
     frames.set(key, image);
   }
   return image;
@@ -213,12 +221,15 @@ export const PipSprite = ({
     const at = portrait
       ? portraitPlacement(canvas.width, artFor(definition, skinDefinition, outfitKey, posed))
       : { perPixel: canvas.width / SPRITE_PX, x: 0, y: 0 };
-    const draw = (frame: number) => {
-      source.putImageData(frameFor(definition, skinDefinition, outfitKey, frame), 0, 0);
-      context.imageSmoothingEnabled = false;
-      context.clearRect(0, 0, canvas.width, canvas.height);
-      context.drawImage(scratch as HTMLCanvasElement, at.x, at.y, at.perPixel * SPRITE_PX, at.perPixel * SPRITE_PX);
-    };
+    // (Begun again whenever this effect is, which a new size of canvas, a new move or a new look all do.)
+    const shown = shownOnce<ImageData>();
+    const draw = (frame: number) =>
+      shown.put(frameFor(definition, skinDefinition, outfitKey, frame), (image) => {
+        source.putImageData(image, 0, 0);
+        context.imageSmoothingEnabled = false;
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(scratch as HTMLCanvasElement, at.x, at.y, at.perPixel * SPRITE_PX, at.perPixel * SPRITE_PX);
+      });
     const totalFrames = loops ? loops * definition.loop : Infinity;
 
     // Reduced motion: one still pose. A finite move still "ends" on time, so

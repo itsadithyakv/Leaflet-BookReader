@@ -1,21 +1,34 @@
+import type { CSSProperties } from "react";
 import { FocusFlower, flowerLook } from "../../components/FocusFlower";
+import { SESSION_MARK_LOOK, sessionMarkSpot } from "../sessionMark";
 import type { ReaderScope } from "./scope";
 
-/** A focus session's mark in the corner (the flower or the mug) and its checkpoints. */
+/**
+ * A focus session's mark (the flower or the mug) and its checkpoints. The
+ * mark sits where the text never is (readers/sessionMark.ts): on a phone in
+ * the footer's strip, with pages in the room under the page's text.
+ */
 export const ReaderSessionMarks = ({ reader }: { reader: ReaderScope }) => {
   const {
     activeSession, checkpointLevel, checkpointOpen, checkpointTimerRef, coffeeProgress, handleCheckpointContinue,
-    handleCheckpointEnd, setCheckpointOpen
+    handleCheckpointEnd, layout, setCheckpointOpen, shape
   } = reader;
+  const spot = sessionMarkSpot(shape, layout);
+  const look = SESSION_MARK_LOOK[spot];
+  const place = {
+    "--session-mark-scale": look.scale,
+    "--session-mark-bottom": `${look.bottom}px`,
+    "--session-mark-opacity": look.opacity
+  } as CSSProperties;
   return (
     <>
       {activeSession?.flower ? (
         // A session started in full screen grows its flower here instead.
-        <div className="leaflet-flower">
+        <div className="leaflet-flower" data-spot={spot} style={place}>
           <FocusFlower kind={activeSession.flower.kind} {...flowerLook(activeSession.flower, coffeeProgress)} box={72} />
         </div>
       ) : activeSession && (
-        <div className={`leaflet-mug ${coffeeProgress >= 0.99 ? "leaflet-mug-done" : ""}`}>
+        <div className={`leaflet-mug ${coffeeProgress >= 0.99 ? "leaflet-mug-done" : ""}`} data-spot={spot} style={place}>
           <div className="leaflet-mug-cup">
             <div
               className="leaflet-mug-coffee"

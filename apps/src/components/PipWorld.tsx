@@ -10,10 +10,14 @@ import { hasMove } from "../pip/core";
 import { TOUR, tourLine, tourTarget, type TourStop } from "../pip/tour";
 import { useBackLayer } from "../platform/back";
 import { isTouchInput, useTouchInput } from "../platform/device";
+import { currentShellShape } from "../platform/shape";
 import { usePipPresence } from "../pip/usePipPresence";
 import { CLING_MS, HALF_W, clingX, meetWall } from "../pip/wall";
+import { BED_POSES, FOOTING_PAD, besideSurface, clearSpans, footprint, nearestClear, standsOnWords, strollTarget, type Span } from "../pip/footing";
+import { layoutCache, setStyle } from "../pip/layoutCache";
 import { PipSprite, pipCssSize } from "./PipSprite";
 import { PipSay, type PipSayTail } from "./PipSay";
+import { bubbleArea, type Area } from "./pipBubbleArea";
 import "./pip/touch.css";
 
 /**
@@ -291,19 +295,12 @@ const WHEE = ["wheee!", "put me down!", "whoa whoa whoa.", "i can see my house f
  * moves while Pip is carried, and a resize or a scroll forgets them at once.
  */
 const LAYOUT_KEPT_MS = 250;
-const layoutKept = new Map<string, { at: number; value: unknown }>();
-const keptLayout = <T,>(key: string, read: () => T): T => {
-  const now = performance.now();
-  const kept = layoutKept.get(key);
-  if (kept && now - kept.at < LAYOUT_KEPT_MS) {
-    return kept.value as T;
-  }
-  const value = read();
-  layoutKept.set(key, { at: now, value });
-  return value;
-};
+const layoutKept = layoutCache(LAYOUT_KEPT_MS);
+const keptLayout = <T,>(key: string, read: () => T): T => layoutKept.get(key, read);
+/** The window's size, kept: reading `innerWidth` after a write lays the page out again, as any measurement does. */
+const viewport = () => keptLayout("viewport", () => ({ width: window.innerWidth, height: window.innerHeight }));
 if (typeof window !== "undefined") {
-  const forget = () => layoutKept.clear();
+  const forget = () => layoutKept.forget();
   window.addEventListener("resize", forget);
   window.addEventListener("scroll", forget, { capture: true, passive: true });
 }
@@ -347,33 +344,98 @@ const readInsets = () => {
     const value = parseFloat(style.getPropertyValue(name));
     return Number.isFinite(value) ? value : 0;
   };
-  return { right: px("--inset-right"), bottom: px("--inset-bottom") };
+  return { top: px("--inset-top"), right: px("--inset-right"), bottom: px("--inset-bottom"), left: px("--inset-left") };
 };
+
+/** Somewhere `[data-pip-keep-clear]` (the Library's heading and count) that a box of the screen would cover. */
+const keepClearRects = () =>
+  keptLayout("keepClear", () =>
+    Array.from(document.querySelectorAll("[data-pip-keep-clear]"))
+      .map((el) => el.getBoundingClientRect())
+      .filter((r) => r.width > 0 && r.height > 0)
+      .map((r) => ({ left: r.left, top: r.top, right: r.right, bottom: r.bottom }))
+  );
+const coversKeepClear = (box: Area) =>
+  keepClearRects().some((r) => r.left < box.right && r.right > box.left && r.top < box.bottom && r.bottom > box.top);
 
 /**
  * Whether standing on this top would put Pip over something that must stay readable
  * (`data-pip-keep-clear`: on a phone, the Library's heading and its count, just over the first row).
+ * (The marks are measured a few times a second, not for every card on every frame.)
  */
 const crowded = (r: DOMRect) => {
-  const marked = document.querySelectorAll("[data-pip-keep-clear]");
-  if (marked.length === 0) return false;
   // Her height, and a little more for a hat or the bed she naps in.
   const tall = pipCssSize(SPRITE) + 8;
-  for (const el of Array.from(marked)) {
-    const c = el.getBoundingClientRect();
-    if (c.height > 0 && c.bottom > r.top - tall && c.top < r.top && c.right > r.left && c.left < r.right) return true;
-  }
-  return false;
+  return keepClearRects().some((c) => c.bottom > r.top - tall && c.top < r.top && c.right > r.left && c.left < r.right);
 };
 
 /**
  * A phone by a finger: Pip keeps to her lane at the foot of the page, along the top of the book being
  * read or of the tab bar. On the cards she stood over the search field, the covers and their ⋯, where a
- * thumb was about to go. (The same phone selectors as styles/touch-shell.css.)
+ * thumb was about to go. (The same phone as styles/touch-shell.css: by a finger, upright or sideways.)
  */
-const PHONE_LANE =
-  "(hover: none) and (pointer: coarse) and (max-width: 767px), (hover: none) and (pointer: coarse) and (max-height: 520px)";
-const inPhoneLane = () => typeof window.matchMedia === "function" && window.matchMedia(PHONE_LANE).matches;
+const inPhoneLane = () => isTouchInput() && currentShellShape() !== "wide";
+/**
+ * The words in the strip she stands in on a phone, as stretches of x: the page scrolls on under the
+ * top of the book being read, and resting there she stood over a card's title and author, or
+ * Social's badges. Read from the text itself (not the boxes round it), and only from what crosses
+ * the strip, so a long library costs a few boxes. Asked once the page is still, not every frame.
+ */
+const wordsUnderfoot = (b: Bounds, tall = HEIGHT): Span[] => {
+  const main = document.querySelector<HTMLElement>(".app-main-scroll");
+  if (!main) return [];
+  const top = b.floor - tall;
+  const bottom = b.floor;
+  const crosses = (r: DOMRect) => r.bottom > top && r.top < bottom && r.right > b.left && r.left < b.right;
+  // Standing on the book being read where it floats narrower than the page (a phone on its side): beside it she
+  // stood in the air over the highlights card and the Library's heading, so the lane beside it counts as words.
+  const dock = document.querySelector(".now-reading-dock .now-reading-bar")?.getBoundingClientRect();
+  const onDock = dock && dock.height > 0 && Math.abs(dock.top - 2 - b.floor) < 1;
+  const spans: Span[] = onDock ? besideSurface(b.left, b.right, [dock.left, dock.right]) : [];
+  const range = document.createRange();
+  const walker = document.createTreeWalker(main, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+    acceptNode: (node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        return node.nodeValue && node.nodeValue.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      }
+      const el = node as HTMLElement;
+      // (Not `aria-hidden`: a blank cover's lettering is hidden from a screen reader, not from her.)
+      if (el.hasAttribute("data-pip-scroll-layer")) return NodeFilter.FILTER_REJECT;
+      const r = el.getBoundingClientRect();
+      // (A box with no size may still hold what it lays out: `display: contents`.)
+      if (r.width === 0 && r.height === 0) return NodeFilter.FILTER_SKIP;
+      if (!crosses(r)) return NodeFilter.FILTER_REJECT;
+      // A small control (a card's ⋯, a switch) counts whole, words or not: an icon is no text.
+      // (Not a cover: that is a button too, but one she may stand in front of.)
+      if (r.width <= CONTROL_MAX && r.height <= CONTROL_MAX && el.matches(CONTROLS) && isShown(el)) {
+        spans.push([r.left, r.right]);
+        return NodeFilter.FILTER_REJECT;
+      }
+      return NodeFilter.FILTER_SKIP;
+    }
+  });
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const parent = node.parentElement;
+    if (parent && !isShown(parent)) continue;
+    range.selectNodeContents(node);
+    for (const r of Array.from(range.getClientRects())) {
+      if (r.width > 0 && crosses(r)) spans.push([r.left, r.right]);
+    }
+  }
+  return spans;
+};
+/** What counts as a control under her feet, and how big one may be (a cover is a button too). */
+const CONTROLS = 'button, a[href], input, select, textarea, [role="button"], [role="switch"], [role="checkbox"]';
+const CONTROL_MAX = 72;
+const isShown = (el: Element) =>
+  typeof el.checkVisibility !== "function" || el.checkVisibility({ opacityProperty: true, visibilityProperty: true });
+
+/** How much of her lane a pose takes (pip/footing.ts): her body standing, her bed lying in it. */
+const footprintOf = (move: string) => footprint(move, pipCssSize(SPRITE), HEIGHT);
+
+/** How often, at rest on a phone, she looks down at what is under her; and how long after a scroll stops. */
+const FOOTING_EVERY_MS = 2000;
+const FOOTING_SETTLE_MS = 350;
 
 /** Card tops Pip can stand on: any paper card in the page, or anything marked, with room over them (none on a phone). */
 const readLedges = (b: Bounds) =>
@@ -569,7 +631,9 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
     clingSide: 1 as -1 | 1,
     /** After the bedtime scene Pip stays tucked in until then (or until woken). */
     napUntil: 0,
-    nextStumble: 0
+    nextStumble: 0,
+    /** On a phone, when she next looks down to see whether she is standing on words (0: not until asked). */
+    footingAt: 0
   });
   const webRef = useRef<SVGSVGElement | null>(null);
   // Latest values for the loop and handlers, without re-subscribing them.
@@ -582,7 +646,10 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
   // Called every frame while Pip flies, so identical requests stop here rather
   // than queueing state updates for React to discard.
   const lastShown = useRef("");
+  /** The pose on show (her footprint on a phone depends on it: `footprintOf`). */
+  const shownMove = useRef("");
   const show = useCallback((move: string, loops?: number, key: string | number = move, still = false) => {
+    shownMove.current = move;
     const flip = st.current.facing < 0;
     const signature = `${move}|${loops}|${key}|${flip}|${still}`;
     if (signature === lastShown.current) {
@@ -617,6 +684,7 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
     s.vx = 0;
     s.vy = 0;
     s.nextWander = performance.now() + IDLE_MIN_MS + Math.random() * IDLE_JITTER_MS;
+    s.footingAt = performance.now() + FOOTING_SETTLE_MS;
     const pending = usePipStore.getState().reaction;
     if (pending && pending.id !== s.reactionId) {
       startReaction(pending.id, pending.move, pending.loops, pending.line);
@@ -1086,6 +1154,10 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
   const step = (dt: number, now: number) => {
     const s = st.current;
     if (live.current.away) {
+      // Pip is out of sight (a book is open): so is any web she was swinging on.
+      if (webRef.current) {
+        setStyle(webRef.current, "display", "none");
+      }
       return;
     }
     const b = readBounds();
@@ -1183,7 +1255,7 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
 
       // Coming out, Pip passes down through the header and the sidebar's
       // edge; only once it is clear of home do the walls and ceiling apply.
-      const homeSpot = readHome();
+      const homeSpot = keptLayout("home", readHome);
       if (!s.leftHome && (!homeSpot || Math.hypot(s.x - homeSpot.x, s.y - homeSpot.y) > 70) && s.y - HEIGHT > b.top) {
         s.leftHome = true;
       }
@@ -1217,7 +1289,8 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
       }
 
       if (s.vy > 0) {
-        for (const { el, r } of readLedges(b)) {
+        // (The cards as they were a moment ago: measured afresh after a scroll, or a quarter of a second on.)
+        for (const { el, r } of keptLayout("ledges", () => readLedges(b))) {
           if (prevY <= r.top + 1 && s.y >= r.top && s.x > r.left + 8 && s.x < r.right - 8) {
             land({ kind: "ledge", el }, r.top, s.vy);
             return;
@@ -1297,10 +1370,48 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
       return;
     }
 
+    // (Napping too: tucked up in her bed she lies wider than she stands, and the page goes on scrolling.)
+    if ((s.phase === "idle" || s.phase === "napping") && s.footingAt > 0 && now >= s.footingAt && s.ground?.kind !== "ledge" && !drag.current && inPhoneLane()) {
+      s.footingAt = now + FOOTING_EVERY_MS;
+      if (stepOffWords(b, minX, maxX)) {
+        return;
+      }
+    }
+
     if (s.phase === "idle" && now > s.nextWander) {
       s.nextWander = now + IDLE_MIN_MS + Math.random() * IDLE_JITTER_MS;
       pastime(now, minX, maxX);
     }
+  };
+
+  /**
+   * On a phone, resting on the top of the book being read: standing over a title or an author that
+   * the page scrolled under her, she walks to the nearest clear spot along it (with less motion, she
+   * is simply there). Where every bit of the edge has words under it she stays: the page's foot
+   * (`--pip-lane`, styles/phone-polish.css) is clear for her once it is scrolled to the end.
+   */
+  const stepOffWords = (b: Bounds, minX: number, maxX: number) => {
+    const s = st.current;
+    const { halfW, tall } = footprintOf(shownMove.current);
+    const words = wordsUnderfoot(b, tall);
+    if (!standsOnWords(s.x, words, halfW)) {
+      return false;
+    }
+    // A bed wider than she is stays inside her floor as well.
+    const room = Math.max(0, halfW - HALF_W);
+    const to = nearestClear(s.x, clearSpans(words, minX + room, maxX - room, FOOTING_PAD, halfW));
+    if (to === null || Math.abs(to - s.x) < 2) {
+      return false;
+    }
+    if (prefersReducedMotion()) {
+      s.x = to;
+      return true;
+    }
+    s.walkTo = to;
+    s.facing = to < s.x ? -1 : 1;
+    s.phase = "walking";
+    show("walk");
+    return true;
   };
 
   /**
@@ -1324,6 +1435,14 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
       let target = minX + Math.random() * (maxX - minX);
       if (Math.abs(target - s.x) < 50) {
         target = s.x < (minX + maxX) / 2 ? Math.min(maxX, s.x + 90) : Math.max(minX, s.x - 90);
+      }
+      // On a phone, a stroll ends somewhere with no words under her (see stepOffWords).
+      if (inPhoneLane() && s.ground?.kind !== "ledge") {
+        const clear = strollTarget(s.x, clearSpans(wordsUnderfoot(readBounds()), minX, maxX));
+        if (clear === null) {
+          return false;
+        }
+        target = clear;
       }
       s.walkTo = target;
       s.facing = target < s.x ? -1 : 1;
@@ -1354,7 +1473,7 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
     }
     // A third of the time, whatever the hour suggests.
     const hourly = hourlyPastime();
-    if (hourly && roll < 0.33) {
+    if (hourly && roll < 0.33 && bedRoom(hourly, minX, maxX)) {
       play(hourly, 1);
       return;
     }
@@ -1371,6 +1490,32 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
     } else {
       play(pick(hobbies.current), 2);
     }
+  };
+
+  /**
+   * Whether a scene may be played where she stands: on a phone her bed comes out only where it
+   * lies clear of words and controls. Where it would not, she walks to the nearest clear spot (the
+   * scene can come next time) and this says no; with nowhere clear, no bed.
+   */
+  const bedRoom = (move: string, minX: number, maxX: number) => {
+    const s = st.current;
+    if (!BED_POSES.has(move) || !inPhoneLane() || s.ground?.kind === "ledge") {
+      return true;
+    }
+    const { halfW, tall } = footprintOf(move);
+    const words = wordsUnderfoot(readBounds(), tall);
+    if (!standsOnWords(s.x, words, halfW)) {
+      return true;
+    }
+    const room = Math.max(0, halfW - HALF_W);
+    const to = nearestClear(s.x, clearSpans(words, minX + room, maxX - room, FOOTING_PAD, halfW));
+    if (to !== null && Math.abs(to - s.x) >= 2) {
+      s.walkTo = to;
+      s.facing = to < s.x ? -1 : 1;
+      s.phase = "walking";
+      show("walk");
+    }
+    return false;
   };
 
   /**
@@ -1583,29 +1728,81 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
 
     // Everything measured first, then everything written: a measurement taken
     // after a write made the browser lay the page out again for it, on every
-    // frame (and a frame on a phone has little time to spare).
+    // frame (and a frame on a phone has little time to spare). That includes the
+    // window's size (`innerWidth` is a measurement) and the tour's target.
     const body = bodyRef.current;
     const bubble = sayRef.current;
     const bodyOffset = body ? layerOffset(body) : null;
     const bubbleBox = bubble ? { w: bubble.offsetWidth, h: bubble.offsetHeight, o: layerOffset(bubble) } : null;
-
-    if (worldRef.current) {
-      const z = raised ? "57" : "35";
-      if (worldRef.current.style.zIndex !== z) {
-        worldRef.current.style.zIndex = z;
+    const bubbleScroller = bubble?.parentElement?.hasAttribute("data-pip-scroll-layer") ? (bubble.parentElement.parentElement as HTMLElement | null) : null;
+    const clipRect = bubbleScroller?.getBoundingClientRect();
+    const area = bubble
+      ? bubbleArea(
+          readBounds(),
+          keptLayout("insets", readInsets),
+          viewport(),
+          clipRect ? { left: clipRect.left, top: clipRect.top, right: clipRect.right, bottom: clipRect.bottom } : null
+        )
+      : null;
+    const webAnchor = s.phase === "webbing" && s.web && !live.current.away ? s.web.anchor() : null;
+    const spot = spotRef.current;
+    const spotRect = spot && s.phase === "guiding" && s.stop?.target ? document.querySelector(s.stop.target)?.getBoundingClientRect() ?? null : null;
+    // (Asked before anything is written, for the same reason: it measures the words that must stay readable.)
+    let bubbleAt: { left: number; top: number; tail: PipSayTail; tailAt: number } | null = null;
+    if (bubble && bubbleBox && area) {
+      const bw = bubbleBox.w;
+      const bh = bubbleBox.h;
+      // Beside Pip, so the bubble never covers what Pip is pointing at: where there is a side it fits on. A window
+      // narrower than the bubble and Pip together (under 650 px with her in the middle of it) has none, and the
+      // bubble, put to her left regardless, was off the window with its buttons (by 189 px at 380 wide): there it
+      // goes over her head, or under her feet, as her other lines do.
+      // Kept whole inside what shows it (bubbleArea).
+      const right = s.x + size * 0.46;
+      const fitsRight = right + 8 + bw <= area.right;
+      const fitsLeft = s.x - size * 0.46 - bw - 8 >= area.left;
+      const sideTop = Math.max(area.top, Math.min(area.bottom - bh, s.y - size * 0.62 - bh / 2));
+      const overLeft = Math.max(area.left, Math.min(area.right - bw, s.x - bw / 2));
+      const overTop = s.y - size * 0.92 - bh - 12;
+      // Over her head, unless that is off the top or over the words that must stay readable (the Library's count):
+      // then beside her where a side fits, else under her.
+      const overBlocked =
+        overTop < area.top || coversKeepClear({ left: overLeft, top: overTop, right: overLeft + bw, bottom: overTop + bh });
+      const beside = (fitsRight || fitsLeft) && (s.bubble === "side" || overBlocked);
+      if (beside) {
+        const top = sideTop;
+        bubbleAt = {
+          left: fitsRight ? right + 8 : s.x - size * 0.46 - bw - 8,
+          top,
+          tail: fitsRight ? "left" : "right",
+          tailAt: Math.max(15, Math.min(85, ((s.y - size * 0.62 - top) / bh) * 100))
+        };
+      } else {
+        let top = overTop;
+        let tail: PipSayTail = "down";
+        if (top < area.top) {
+          // Under her, and never past the foot of what shows it.
+          top = Math.max(area.top, Math.min(area.bottom - bh, s.y + 10));
+          tail = "up";
+        }
+        bubbleAt = { left: overLeft, top, tail, tailAt: Math.max(12, Math.min(88, ((s.x - overLeft) / bw) * 100)) };
       }
+    }
+
+    // Now the writes, each only when it changes something (a write of the same value still costs a restyle).
+    if (worldRef.current) {
+      setStyle(worldRef.current, "z-index", raised ? "57" : "35");
     }
 
     if (body && bodyOffset) {
       const o = bodyOffset;
       const originY = s.origin === "pivot" ? (size * 31) / 32 - HOLD_DROP : size * 0.55;
-      body.style.transformOrigin = `${size / 2}px ${originY}px`;
-      body.style.transform = `translate3d(${s.x - size / 2 - o.x}px, ${s.y - (size * 31) / 32 - o.y}px, 0) rotate(${s.angle}rad)`;
+      setStyle(body, "transform-origin", `${size / 2}px ${originY}px`);
+      setStyle(body, "transform", `translate3d(${s.x - size / 2 - o.x}px, ${s.y - (size * 31) / 32 - o.y}px, 0) rotate(${s.angle}rad)`);
     }
     const web = webRef.current;
     if (web) {
-      const a = s.phase === "webbing" && s.web ? s.web.anchor() : null;
-      if (a && s.web) {
+      if (webAnchor && s.web) {
+        const a = webAnchor;
         // Pip's end of the line is the leaf, where it hangs from.
         const px = s.x;
         const py = s.y - HOLD_DROP;
@@ -1613,7 +1810,7 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
         const t = Math.min(1, (performance.now() - s.web.shotAt) / WEB_SHOT_MS);
         const ex = px + (a.x - px) * t;
         const ey = py + (a.y - py) * t;
-        web.style.display = "block";
+        setStyle(web, "display", "block");
         web.querySelectorAll("line").forEach((line) => {
           line.setAttribute("x1", String(px));
           line.setAttribute("y1", String(py));
@@ -1621,54 +1818,26 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
           line.setAttribute("y2", String(ey));
         });
       } else {
-        web.style.display = "none";
+        setStyle(web, "display", "none");
       }
     }
-    if (bubble && bubbleBox) {
-      const bw = bubbleBox.w;
-      const bh = bubbleBox.h;
-      let left: number;
-      let top: number;
-      let tail: PipSayTail;
-      let tailAt: number;
-      // Beside Pip, so the bubble never covers what Pip is pointing at: where there is a side it fits on. A window
-      // narrower than the bubble and Pip together (under 650 px with her in the middle of it) has none, and the
-      // bubble, put to her left regardless, was off the window with its buttons (by 189 px at 380 wide): there it
-      // goes over her head, or under her feet, as her other lines do.
-      const right = s.x + size * 0.46;
-      const fitsRight = right + bw < window.innerWidth - 8;
-      const fitsLeft = s.x - size * 0.46 - bw - 8 >= 8;
-      if (s.bubble === "side" && (fitsRight || fitsLeft)) {
-        left = fitsRight ? right + 8 : s.x - size * 0.46 - bw - 8;
-        top = Math.max(8, Math.min(window.innerHeight - bh - 8, s.y - size * 0.62 - bh / 2));
-        tail = fitsRight ? "left" : "right";
-        tailAt = Math.max(15, Math.min(85, ((s.y - size * 0.62 - top) / bh) * 100));
-      } else {
-        left = Math.max(8, Math.min(window.innerWidth - bw - 8, s.x - bw / 2));
-        top = s.y - size * 0.92 - bh - 12;
-        tail = "down";
-        if (top < 8) {
-          // Under her, and never past the foot of the window.
-          top = Math.max(8, Math.min(window.innerHeight - bh - 8, s.y + 10));
-          tail = "up";
-        }
-        tailAt = Math.max(12, Math.min(88, ((s.x - left) / bw) * 100));
-      }
+    if (bubble && bubbleBox && bubbleAt) {
       const o = bubbleBox.o;
-      bubble.style.transform = `translate3d(${left - o.x}px, ${top - o.y}px, 0)`;
-      bubble.dataset.tail = tail;
-      bubble.style.setProperty("--tail-at", `${tailAt}%`);
+      setStyle(bubble, "transform", `translate3d(${bubbleAt.left - o.x}px, ${bubbleAt.top - o.y}px, 0)`);
+      if (bubble.dataset.tail !== bubbleAt.tail) {
+        bubble.dataset.tail = bubbleAt.tail;
+      }
+      setStyle(bubble, "--tail-at", `${Math.round(bubbleAt.tailAt * 10) / 10}%`);
     }
-    const spot = spotRef.current;
     if (spot) {
-      const r = s.phase === "guiding" && s.stop?.target ? document.querySelector(s.stop.target)?.getBoundingClientRect() : null;
-      if (r) {
-        spot.style.opacity = "1";
-        spot.style.transform = `translate3d(${r.left - 6}px, ${r.top - 6}px, 0)`;
-        spot.style.width = `${r.width + 12}px`;
-        spot.style.height = `${r.height + 12}px`;
+      if (spotRect) {
+        const r = spotRect;
+        setStyle(spot, "opacity", "1");
+        setStyle(spot, "transform", `translate3d(${r.left - 6}px, ${r.top - 6}px, 0)`);
+        setStyle(spot, "width", `${r.width + 12}px`);
+        setStyle(spot, "height", `${r.height + 12}px`);
       } else {
-        spot.style.opacity = "0";
+        setStyle(spot, "opacity", "0");
       }
     }
   };
@@ -1785,6 +1954,18 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [home, homeRequest, mode, waiting]);
+
+  // On a phone the page scrolls on under her: once it is still, she looks at what she stands on.
+  useEffect(() => {
+    const settle = () => {
+      const s = st.current;
+      if (s.phase === "idle" || s.phase === "napping") {
+        s.footingAt = performance.now() + FOOTING_SETTLE_MS;
+      }
+    };
+    document.addEventListener("scroll", settle, { capture: true, passive: true });
+    return () => document.removeEventListener("scroll", settle, { capture: true });
+  }, []);
 
   // The tour: each stop is a jump to a new perch.
   useEffect(() => {

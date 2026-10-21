@@ -11,6 +11,8 @@ import android.view.WindowManager
 import android.webkit.MimeTypeMap
 import android.webkit.WebView
 import androidx.activity.result.ActivityResult
+import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.FileProvider
 import androidx.core.content.IntentCompat
 import androidx.core.view.WindowCompat
@@ -43,6 +45,16 @@ class LockRotationArgs {
 @InvokeArg
 class SystemBarsArgs {
   var hidden: Boolean = false
+}
+
+@InvokeArg
+class BarLookArgs {
+  var light: Boolean = true
+}
+
+@InvokeArg
+class NightModeArgs {
+  var mode: String = "system"
 }
 
 @InvokeArg
@@ -171,6 +183,46 @@ class DevicePlugin(private val activity: Activity) : Plugin(activity) {
         controller.hide(WindowInsetsCompat.Type.systemBars())
       } else {
         controller.show(WindowInsetsCompat.Type.systemBars())
+      }
+      invoke.resolve()
+    }
+  }
+
+  /**
+   * The status and navigation bars' icons: dark over a light page (`light`),
+   * light over a dark one. Edge to edge, Android picks them by the phone's
+   * own dark mode, which Leaflet's theme (or the open book's page) need not
+   * match, and dark icons on a dark header could not be read.
+   */
+  @Command
+  fun setBarLook(invoke: Invoke) {
+    val args = invoke.parseArgs(BarLookArgs::class.java)
+    activity.runOnUiThread {
+      val controller = WindowCompat.getInsetsController(activity.window, activity.window.decorView)
+      controller.isAppearanceLightStatusBars = args.light
+      controller.isAppearanceLightNavigationBars = args.light
+      invoke.resolve()
+    }
+  }
+
+  /**
+   * Leaflet's theme as the activity's night mode ("light", "dark" or
+   * "system"), so what Android draws for the page (a `<select>`'s list) is
+   * light or dark with the app rather than with the phone. The manifest
+   * handles `uiMode`, so it is a configuration change, not a restart.
+   */
+  @Command
+  fun setNightMode(invoke: Invoke) {
+    val args = invoke.parseArgs(NightModeArgs::class.java)
+    activity.runOnUiThread {
+      val mode = when (args.mode) {
+        "light" -> AppCompatDelegate.MODE_NIGHT_NO
+        "dark" -> AppCompatDelegate.MODE_NIGHT_YES
+        else -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+      }
+      val delegate = (activity as? AppCompatActivity)?.delegate
+      if (delegate != null && delegate.localNightMode != mode) {
+        delegate.localNightMode = mode
       }
       invoke.resolve()
     }

@@ -201,9 +201,7 @@ export const ProfileButton = ({
               {account ? (
                 <p className="truncate text-[11px] text-on-surface-variant">{account.displayName ? account.email : "Leaflet account"}</p>
               ) : (
-                <p className="text-[11px] text-on-surface-variant">
-                  {accountsOn ? "An account puts you on the leaderboard." : `Everything works on this ${deviceNoun()}.`}
-                </p>
+                !accountsOn && <p className="text-[11px] text-on-surface-variant">Everything works on this {deviceNoun()}.</p>
               )}
             </div>
           </div>

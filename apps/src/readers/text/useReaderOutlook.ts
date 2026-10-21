@@ -10,7 +10,7 @@ import { chapterThrough, noteReadingPlace } from "../../pip/readingMoments";
 import { elementById } from "../footnotes";
 import { fractionAt, seekTarget } from "../seek";
 import { anchorElement } from "../contentsScan";
-import { beforeStory, chapterTail } from "../chapterSpan";
+import { beforeStory, chapterTail, entryOfPlace } from "../chapterSpan";
 import { bookOfSection, crossedStoryEnd, fractionOfBook, labelInBook } from "../innerBooks";
 import type { WithChapters } from "./scope";
 
@@ -61,10 +61,15 @@ export const useReaderOutlook = (reader: WithChapters) => {
    * hold several chapters; an entry's anchor counts once it is at the reading
    * line (or, with pages, on the page showing or before it).
    */
-  const noteChapterHere = (section: number | undefined) => {
-    if (typeof section !== "number") {
-      return;
-    }
+  /**
+   * The chapter the reading line is in, in file `section`: what the dock
+   * names, and what next and previous chapter go from (useChapters). In a
+   * chapter's epigraph, the chapter it opens (readers/chapterSpan.ts:
+   * entryOfPlace): one rule for the name and the arrows.
+   */
+  const entryHere = (section: number): number => chapterHere(section).entry;
+  /** The same, with the contents entry the reading line is under, and the book as the chapter rules see it. */
+  const chapterHere = (section: number) => {
     const container = (renditionRef.current?.manager as any)?.container as HTMLElement | undefined;
     const view = displayedViews().find((shown) => shown?.section?.index === section);
     const doc = view?.contents?.document as Document | undefined;
@@ -105,12 +110,23 @@ export const useReaderOutlook = (reader: WithChapters) => {
       const index = tocPlacesRef.current.findIndex((place) => place.spine === section && (place.anchor === anchor || place.cfi === anchor));
       return (tocWithinRef.current[index] ?? 0) <= 0 || at.top <= PAGE_TOP_PAD + linePx() * 1.5 || askedEntryRef.current?.entry === index;
     };
-    const entry = tocEntryAt(tocPlacesRef.current, section, reached);
+    const book = reader.chapterBookNow();
+    const under = tocEntryAt(tocPlacesRef.current, section, reached);
+    return { entry: entryOfPlace(book, section, under), under, book };
+  };
+  const noteChapterHere = (section: number | undefined) => {
+    if (typeof section !== "number") {
+      return;
+    }
+    const { entry, under, book } = chapterHere(section);
     chapterEntryRef.current = entry;
     setChapterEntry(entry);
     // In a set of books the chapter is named with its book: "Tyrion" is in all four.
     const inner = innerBooksRef.current[bookOfSection(innerBooksRef.current, section)];
-    const own = entry >= 0 ? (tocLabelsRef.current[entry] ?? "") : "";
+    const named = entry >= 0 ? (tocLabelsRef.current[entry] ?? "") : "";
+    // On a part's title page, counted as its first chapter's: both ("PART THREE: King · Chapter 28").
+    const part = under !== entry && under >= 0 && book.parts.has(under) ? (tocLabelsRef.current[under] ?? "") : "";
+    const own = part && named ? `${part} · ${named}` : named;
     setChapterLabel(labelInBook(inner?.label, own));
     // For the dock, which shows the two apart (the book's name gives way first on a narrow window).
     setChapterInBook(inner && labelInBook(inner.label, own) !== own ? { book: inner.label, chapter: own } : null);
@@ -256,7 +272,7 @@ export const useReaderOutlook = (reader: WithChapters) => {
   const outlookSectionRef = useRef<number | null>(null);
 
   return {
-    chapterEntry, chapterEntryRef, chapterLabel, chapterInBook, formatChapterDisplay, sectionWordsRef, wordRatioRef,
+    chapterEntry, chapterEntryRef, entryHere, chapterLabel, chapterInBook, formatChapterDisplay, sectionWordsRef, wordRatioRef,
     shownMinutesRef, outlook, updateOutlookRef
   };
 };

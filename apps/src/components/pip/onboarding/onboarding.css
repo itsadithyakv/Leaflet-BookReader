@@ -114,6 +114,17 @@
   max-width: 280px;
 }
 
+/* Not up until it has kept its place (Coach.tsx): never seen, or pressed, moving. It comes up with a quick fade. */
+.pip-coach-bubble {
+  transition: opacity 120ms ease-out;
+}
+
+.pip-coach-bubble.is-settling {
+  visibility: hidden;
+  opacity: 0;
+  transition: none;
+}
+
 /* Nothing in particular to point at: no tail. */
 .pip-coach-bubble .pip-say.is-tailless::after {
   display: none;

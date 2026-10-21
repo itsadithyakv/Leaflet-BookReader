@@ -107,7 +107,7 @@ export const QuoteCardDialog = () => {
       className="sheet-backdrop fixed inset-0 z-[95] flex items-center justify-center bg-black/55 px-4"
       {...backdropClose(() => closeQuoteCard())}
     >
-      <div ref={panel} role="dialog" aria-modal="true" aria-label="Share this passage as a picture" className="modal-surface confirm-pop share-dialog sheet-panel rounded-2xl p-5">
+      <div ref={panel} role="dialog" aria-modal="true" aria-label="Share this passage as a picture" className="modal-surface confirm-pop share-dialog share-dialog-pictured sheet-panel rounded-2xl p-5">
         <SheetHandle onClose={closeQuoteCard} />
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-xs uppercase tracking-widest text-on-surface-variant">Share as a picture</h2>

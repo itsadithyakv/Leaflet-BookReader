@@ -1,0 +1,19 @@
+# /etc/systemd/system/leaflet-backup.timer
+#
+# Runs leaflet-backup.service once a day, at a quiet hour for readers.
+# deploy.ps1 enables it only once /etc/leaflet-backup.env exists.
+# `systemctl list-timers leaflet-backup` shows the last and the next run.
+
+[Unit]
+Description=Nightly Leaflet database backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 UTC
+# Somewhere in the 20 minutes after, so it never lines up with anything else
+# that runs on the hour.
+RandomizedDelaySec=20min
+# A night the VM was off is made up for when it is back.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -10,6 +10,8 @@ import { gameArt, type GameArt } from "../gameArt";
 let shared: GameArt | null = null;
 /** The camp's art in Pip's plain colours: these pictures have no Pip in them, so one set serves everyone. */
 const art = () => (shared ??= gameArt("base", "", []));
+/** The same art, for a picture made of several of these (the guide's front: `NightCard.tsx`). */
+export const baseArt = art;
 
 type Props = {
   name: string;

@@ -15,6 +15,7 @@ import { SeriesDetail } from "../components/collections/SeriesDetail";
 import { BookPicker } from "../components/collections/BookPicker";
 import { askConfirm } from "../components/ConfirmDialog";
 import { UiIcon } from "../components/UiIcon";
+import { InfoTip } from "../components/ui/InfoTip";
 import { EYEBROW, SectionHeader } from "../components/ui/SectionHeader";
 
 export type CollectionsPageProps = {
@@ -238,7 +239,12 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
               </div>
             )}
           </div>
-          {shelf && <p className="text-sm text-on-surface-variant">{shelf.description}</p>}
+          {shelf && (
+            <p className="flex items-center gap-1.5 text-sm text-on-surface-variant">
+              {plural(shelf.books.length, "book")}
+              <InfoTip text={shelf.description} />
+            </p>
+          )}
           {collection && <p className="text-sm text-on-surface-variant">{plural(collectionBooks.length, "book")}</p>}
           {genre && <p className="text-sm text-on-surface-variant">{plural(genre.books.length, "book")}</p>}
         </div>
@@ -364,8 +370,7 @@ export const CollectionsPage = ({ onNavigate, onOpenBook, showToast }: Collectio
         <SectionHeader eyebrow="Found in your library" eyebrowOnPhone={false} title="Series" id="series-title" />
         {series.groups.length === 0 ? (
           <p className="paper-surface rounded-xl p-5 text-sm text-on-surface-variant">
-            No series yet. When you have two books of one (Harry Potter, The Expanse, Discworld…), they gather here
-            in order by themselves.
+            No series yet: two books of one gather here, in order.
           </p>
         ) : (
           <div className={CARD_GRID}>

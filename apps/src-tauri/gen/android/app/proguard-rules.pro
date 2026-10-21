@@ -26,3 +26,12 @@
   public static *** open(byte[]);
   public static native void attach();
 }
+
+# The Studio voice (StudioVoice.kt): sherpa-onnx's JNI library reads its config
+# classes' fields by name and calls back into the Kotlin lambda it is given
+# (com/k2fsa/sherpa/onnx/Tts.kt), so none of it may be renamed or removed.
+-keep class com.k2fsa.sherpa.onnx.** { *; }
+-keep interface kotlin.jvm.functions.Function1 { *; }
+-keepclassmembers class * implements kotlin.jvm.functions.Function1 {
+  public java.lang.Object invoke(java.lang.Object);
+}

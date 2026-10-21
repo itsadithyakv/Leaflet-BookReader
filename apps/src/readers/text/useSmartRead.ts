@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { type ReaderWord, type SmartSession } from "../readerTypes";
 import { paceLimits, plainFromWpm, setBookPace, wpmFromPlain } from "../paceModel";
-import { judgeCatchUp } from "../paceTracker";
-import { coverFromBottom, coverFromTop, easeInOutCubic, lineInArea, pastPictureGap, planScrollStep, readingBand, stepDuration, type ReadingArea } from "../smartScroll";
+import { aheadToastDue, autoRaise, judgeCatchUp, nudgedWpm } from "../paceTracker";
+import {
+  coverFromBottom, coverFromTop, easeInOutCubic, lineInArea, pastPictureGap,
+  planScrollStep, readingBand, settleDuration, stepDuration, type ReadingArea
+} from "../smartScroll";
 import { glideFrame, glideSet, startGlide } from "../glide";
+import { readsFromView } from "../dottyHold";
 import type { Later, WithAuto, WithKeys } from "./scope";
 
 /** What this reaches that hooks called after it add (scope.ts). */
@@ -99,10 +103,25 @@ export const useSmartRead = (reader: WithAuto & SmartLater) => {
     };
   };
 
+  /** Dotty resting on its line after a glide, lit softly for `ms` (touch.css, `.reader-dot-settling`). */
+  const settleTimerRef = useRef<number | null>(null);
+  const settleDotty = (ms: number) => {
+    const dot = reader.readerDotElementRef.current;
+    if (settleTimerRef.current) {
+      window.clearTimeout(settleTimerRef.current);
+    }
+    dot?.classList.add("reader-dot-settling");
+    settleTimerRef.current = window.setTimeout(() => {
+      settleTimerRef.current = null;
+      reader.readerDotElementRef.current?.classList.remove("reader-dot-settling");
+    }, ms);
+  };
+
   /**
    * Smart Read turns the page: one smooth step that brings Dotty's line up to
    * the top (see readers/smartScroll.ts). Dotty holds its word while the page
-   * moves, and a moment after, so the eye can find the line again.
+   * moves, and a moment after, so the eye can find the line again (on a
+   * phone a longer rest, Dotty softly lit: `settleDuration`).
    */
   const turnSmartPage = (container: HTMLElement, delta: number) => {
     const start = container.scrollTop;
@@ -113,10 +132,18 @@ export const useSmartRead = (reader: WithAuto & SmartLater) => {
       return;
     }
     const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-    const duration = stepDuration(distance, reduced);
+    const phone = Boolean(container.closest<HTMLElement>(".reader-scope")?.dataset.shape);
+    const duration = stepDuration(distance, reduced, phone);
+    const settle = settleDuration(distance, phone);
     const now = Date.now();
     programmaticScrollUntilRef.current = now + duration + 250;
-    smartStepHoldUntilRef.current = now + duration + 350;
+    smartStepHoldUntilRef.current = now + duration + settle;
+    if (phone) {
+      window.setTimeout(() => {
+        const left = smartStepHoldUntilRef.current - Date.now();
+        if (left > 0) settleDotty(left);
+      }, duration);
+    }
     if (smartScrollFrameRef.current) {
       window.cancelAnimationFrame(smartScrollFrameRef.current);
       smartScrollFrameRef.current = null;
@@ -216,12 +243,20 @@ export const useSmartRead = (reader: WithAuto & SmartLater) => {
     session.acceptedMs = 0;
   };
 
+  /** The word Dotty is beside: the word before the one to read next, or the one it was placed on. */
+  const dottyIndex = () => {
+    const anchor = reader.readerDotAnchorIndexRef.current;
+    const active = activeWordIndexRef.current;
+    return anchor !== null && anchor <= active && anchor >= active - 1 ? anchor : Math.max(0, active - 1);
+  };
+
   const moveSmartDotty = (index: number) => {
     const words = readerWordsRef.current;
     if (words.length === 0) {
       return;
     }
     const clamped = Math.min(words.length - 1, Math.max(0, index));
+    reader.forgetHeldPlace();
     activeWordIndexRef.current = clamped;
     reader.readerDotAnchorIndexRef.current = clamped;
     agreeWithReader(clamped);
@@ -267,9 +302,15 @@ export const useSmartRead = (reader: WithAuto & SmartLater) => {
     );
   };
 
+  /** − and + (`factor` under or over 1): to the next round pace down or up (`nudgedWpm`). */
   const nudgeSmartPace = (factor: number) => {
     if (readingModeRef.current === "smart") {
-      setSmartPace(smartWpmNow() * factor);
+      const next = nudgedWpm(smartWpmNow(), factor > 1);
+      setSmartPace(next);
+      // The reader's own choice: what an automatic raise may go a little over from now on.
+      if (smartSessionRef.current) {
+        smartSessionRef.current.baseWpm = next;
+      }
       setPaceTouched((count) => count + 1);
     }
   };
@@ -356,14 +397,19 @@ export const useSmartRead = (reader: WithAuto & SmartLater) => {
     }
     // Where Dotty is: the last line read when it rests at a picture (the word
     // to read next is then below the picture), otherwise the word it is on.
+    // (Not the word to read next: at the end of a line that is the line
+    // below, which the pause pill coming up could put under the reading area.)
     const resting = smartPictureRef.current;
-    const place = resting?.before ?? words[Math.min(activeWordIndexRef.current, words.length - 1)];
+    const place = resting?.before ?? words[Math.min(dottyIndex(), words.length - 1)];
     const rect = place ? getReaderWordRect(place) : null;
     if (!rect) {
       return false;
     }
     const area = readingArea(container);
-    if (lineInArea(rect.top - container.getBoundingClientRect().top, area) !== "below") {
+    // Only when the reader moved the page: Dotty moved off it any other way
+    // (the page laid out again at a new size) is carried on from, the page going to it.
+    const movedPage = smartRereadRef.current || Date.now() < smartManualOverrideUntilRef.current;
+    if (!readsFromView(rect.top - container.getBoundingClientRect().top, area, movedPage)) {
       return false;
     }
     // The same line a catch-up takes the reader to be on: near the top.
@@ -419,6 +465,11 @@ export const useSmartRead = (reader: WithAuto & SmartLater) => {
    * of their pace, which is learned too. Dotty used to crawl after them, capped
    * at a speed they had already passed, and never caught up.
    */
+  /** The pace "You're ahead of Dotty" last said, and in which reading session. */
+  const aheadSaidRef = useRef<{ session: object | null; wpm: number | null }>({
+    session: null,
+    wpm: null
+  });
   const catchUpToReader = () => {
     smartCatchUpTimerRef.current = null;
     smartReaderAheadRef.current = false;
@@ -441,18 +492,33 @@ export const useSmartRead = (reader: WithAuto & SmartLater) => {
     const read = readerIndex - session.anchorIndex;
     const activeMs = session.activeMs - session.anchorActiveMs;
     const verdict = judgeCatchUp({ words: read, activeMs, dottyWpm });
-    if (verdict.kind === "faster") {
-      // Most of the way; if that is still too slow, the next catch-up closes the rest.
-      const reached = dottyWpm + (verdict.wpm - dottyWpm) * 0.8;
-      smartPlainRef.current = plainFromWpm(paceProfileRef.current, reached, paceContext());
+    // Most of the way, as far as a raise may go now (`autoRaise`): reading
+    // ahead is often a skim, which is not reading faster.
+    const raised =
+      verdict.kind === "faster"
+        ? autoRaise({
+            dottyWpm,
+            wanted: dottyWpm + (verdict.wpm - dottyWpm) * 0.8,
+            base: session.baseWpm ?? dottyWpm,
+            raisedAt: session.raisedAtMs ?? null,
+            activeMs: session.activeMs
+          })
+        : null;
+    if (raised !== null) {
+      smartPlainRef.current = plainFromWpm(paceProfileRef.current, raised, paceContext());
       smartPaceFromModelRef.current = false;
-      learnPace(read, activeMs, "caught-up");
+      session.raisedAtMs = session.activeMs;
+      // Learned at the pace taken, not at the skim's.
+      learnPace(read, Math.round((read / raised) * 60_000), "caught-up");
       const pace = Math.round(smartWpmNow());
       setSmartWpm(pace);
-      showFocusToast(`You're ahead of Dotty. Speeding up to ${pace} wpm.`);
-    } else {
-      showFocusToast("Dotty caught up with you.");
+      const said = aheadSaidRef.current.session === session ? aheadSaidRef.current.wpm : null;
+      if (aheadToastDue(said, pace)) {
+        aheadSaidRef.current = { session, wpm: pace };
+        showFocusToast(`You're ahead of Dotty. Speeding up to ${pace} wpm.`);
+      }
     }
+    // (Dotty moving to the reader says it has caught up.)
     moveSmartDotty(readerIndex);
   };
 
@@ -464,7 +530,8 @@ export const useSmartRead = (reader: WithAuto & SmartLater) => {
    */
   const noteSmartScroll = () => {
     const container = ensureScrollContainer();
-    const word = readerWordsRef.current[activeWordIndexRef.current];
+    // Dotty's own word, which is what the reader sees.
+    const word = readerWordsRef.current[dottyIndex()];
     const rect = word ? getReaderWordRect(word) : null;
     // Resting at a picture: the word to read next is below it, off the foot
     // of the window (or in a chapter not yet on the page), which is not the
@@ -527,8 +594,19 @@ export const useSmartRead = (reader: WithAuto & SmartLater) => {
         activeMs: session.activeMs - session.anchorActiveMs,
         dottyWpm
       });
-      if (verdict.kind === "faster") {
-        setSmartPace(dottyWpm + (verdict.wpm - dottyWpm) * 0.6);
+      const raised =
+        verdict.kind === "faster"
+          ? autoRaise({
+              dottyWpm,
+              wanted: dottyWpm + (verdict.wpm - dottyWpm) * 0.6,
+              base: session.baseWpm ?? dottyWpm,
+              raisedAt: session.raisedAtMs ?? null,
+              activeMs: session.activeMs
+            })
+          : null;
+      if (raised !== null) {
+        session.raisedAtMs = session.activeMs;
+        setSmartPace(raised);
       }
     } else if (delta <= -10 && delta >= -40) {
       setSmartPace(smartWpmNow() / 1.06);

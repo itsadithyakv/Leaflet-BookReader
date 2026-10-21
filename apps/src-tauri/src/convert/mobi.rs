@@ -251,6 +251,65 @@ fn tidy_title(text: &str) -> Option<String> {
   Some(title).filter(|title| title.chars().any(char::is_alphanumeric))
 }
 
+/// The words of some written XHTML, its tags left out and its spaces closed up.
+fn words_of(xhtml: &str) -> String {
+  let mut text = String::with_capacity(xhtml.len());
+  let mut in_tag = false;
+  for letter in xhtml.chars() {
+    match letter {
+      '<' => in_tag = true,
+      '>' => in_tag = false,
+      _ if !in_tag => text.push(letter),
+      _ => {}
+    }
+  }
+  xhtml::decode_entities(&text).split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// A line that names a chapter as a chapter heading does: "12", "XII",
+/// "Chapter 12", "Prologue", "Epilogue". A number alone is "Chapter 12".
+fn chapter_heading(line: &str) -> Option<String> {
+  let bare = line.trim_end_matches('.');
+  if bare.len() <= 3 {
+    if let Ok(number) = bare.parse::<u16>() {
+      return Some(format!("Chapter {number}"));
+    }
+  }
+  if !bare.is_empty() && bare.len() <= 7 && bare.chars().all(|letter| "IVXLC".contains(letter)) {
+    return Some(format!("Chapter {bare}"));
+  }
+  let lower = line.to_lowercase();
+  let named = ["chapter ", "prologue", "epilogue", "interlude"].iter().any(|word| lower.starts_with(word));
+  (named && line.chars().count() <= 60).then(|| line.to_string())
+}
+
+/// The chapter heading a chapter's text opens with: its first paragraph,
+/// bold or centred, when that reads as one (`chapter_heading`).
+fn opening_heading(body: &str) -> Option<String> {
+  let mut from = 0;
+  let open = loop {
+    let at = from + body[from..].find("<p")?;
+    if matches!(body.as_bytes().get(at + 2), Some(b'>' | b' ')) {
+      break at;
+    }
+    from = at + 2;
+  };
+  // Nothing to read before it.
+  if !words_of(&body[..open]).is_empty() {
+    return None;
+  }
+  let inside_at = open + body[open..].find('>')? + 1;
+  let close = inside_at + body[inside_at..].find("</p>")?;
+  let tag = &body[open..inside_at];
+  let inside = body[inside_at..close].trim_start();
+  let set_apart = tag.contains("text-align:center") || inside.starts_with("<b>") || inside.starts_with("<strong>");
+  let line = words_of(inside);
+  if !set_apart || line.is_empty() {
+    return None;
+  }
+  chapter_heading(&line)
+}
+
 /// One chapter as it is being written.
 struct Part {
   page: Writer,
@@ -288,6 +347,9 @@ fn chapters(page: &[u8], utf8: bool, book_title: &str, mut picture: impl FnMut(u
         match &inner.kind {
           Kind::Close { name } if name == "a" => break,
           Kind::Text => words.push_str(&decode(&page[inner.start..inner.end], utf8)),
+          // A line broken inside the link is two words, not one run together
+          // ("THE WELL OF ASCENSION" over "BOOK TWO OF MISTBORN").
+          Kind::Open { name, .. } if matches!(name.as_str(), "br" | "p" | "div") => words.push(' '),
           _ => {}
         }
         if words.len() > 4 * MAX_TITLE_CHARS {
@@ -300,6 +362,23 @@ fn chapters(page: &[u8], utf8: bool, book_title: &str, mut picture: impl FnMut(u
     }
   }
 
+  // Whether nothing to be seen comes between each token and the next page
+  // break (or the token is one): a link's place there is the page after the
+  // break. Kindle books link a part or a chapter to the end of the page
+  // before it, just short of the break, and the place, marked in that page,
+  // gave its name (the contents' "Part Two") to the last chapter of the part
+  // before.
+  let mut blank_to_break = vec![false; tokens.len() + 1];
+  for index in (0..tokens.len()).rev() {
+    let token = &tokens[index];
+    blank_to_break[index] = match &token.kind {
+      Kind::Open { name, .. } if name == "mbp:pagebreak" => true,
+      Kind::Open { name, .. } if name == "img" => false,
+      Kind::Text => page[token.start..token.end].iter().all(u8::is_ascii_whitespace) && blank_to_break[index + 1],
+      _ => blank_to_break[index + 1]
+    };
+  }
+
   let mut parts: Vec<Part> = vec![Part::new()];
   // Which chapter each link's place came to be in.
   let mut landed: BTreeMap<usize, usize> = BTreeMap::new();
@@ -308,7 +387,7 @@ fn chapters(page: &[u8], utf8: bool, book_title: &str, mut picture: impl FnMut(u
   let mut hidden: Option<String> = None;
   let mut in_heading: Option<(String, String)> = None;
 
-  for token in &tokens {
+  for (index, token) in tokens.iter().enumerate() {
     // Inside a tag whose insides are not the book's text.
     if let Some(inside) = &hidden {
       if matches!(&token.kind, Kind::Close { name } if name == inside) {
@@ -316,8 +395,9 @@ fn chapters(page: &[u8], utf8: bool, book_title: &str, mut picture: impl FnMut(u
       }
       continue;
     }
-    // A link's place is marked just before whatever is written next.
-    while pending.last().is_some_and(|target| *target <= token.start) {
+    // A link's place is marked just before whatever is written next; one
+    // just short of a page break, after it (see `blank_to_break`).
+    while !blank_to_break[index] && pending.last().is_some_and(|target| *target <= token.start) {
       let target = pending.pop().unwrap_or_default();
       let part = parts.len() - 1;
       parts[part].page.raw(&format!("<a id=\"fp{target}\"></a>"));
@@ -408,15 +488,21 @@ fn chapters(page: &[u8], utf8: bool, book_title: &str, mut picture: impl FnMut(u
 
   let any_listed = kept.iter().any(|(_, part)| part.listed.is_some());
   let mut out = Vec::with_capacity(kept.len());
-  for (position, (_, part)) in kept.iter().enumerate() {
+  for (position, (_, part)) in kept.into_iter().enumerate() {
+    let body = part.page.finish();
     // The contents page's names when the book has one; its headings when not.
+    // A file that opens with a chapter's heading set as a line of its own
+    // (a number, bold and centred) is named by it when nothing else names
+    // it: a Kindle book's contents page often lists the parts alone, and its
+    // chapters were left out of the list.
     let title = if any_listed { part.listed.clone() } else { part.heading.clone() };
+    let title = title.or_else(|| opening_heading(&body));
     // The first chapter is always in the list, so the list is never empty.
     let title = title.or_else(|| (position == 0).then(|| book_title.to_string())).unwrap_or_default();
-    out.push(Chapter { title, body: String::new() });
+    out.push(Chapter { title, body });
   }
-  for ((_, part), chapter) in kept.into_iter().zip(out.iter_mut()) {
-    let body = part.page.finish();
+  for chapter in out.iter_mut() {
+    let body = std::mem::take(&mut chapter.body);
     // Each link now knows which chapter its place is in.
     let mut linked = String::with_capacity(body.len());
     let mut rest = body.as_str();
@@ -692,6 +778,76 @@ mod tests {
       assert_eq!(book.images.iter().map(|image| (image.name.as_str(), image.mime.as_str())).collect::<Vec<_>>(), vec![("img1.png", "image/png")]);
       let _ = std::fs::remove_file(&path);
     }
+  }
+
+  /// A Kindle novel's way: a contents page that lists the parts alone, an
+  /// epigraph on a page of its own before each chapter, each chapter headed
+  /// by its number in bold, and the link to Part Two going to the end of the
+  /// page before it, just short of the page break.
+  fn parts_only_book() -> Vec<u8> {
+    let page = "<html><body>\
+      <p><b>Contents</b></p><p><a filepos=PPPPPPPPPP>Part One</a><br><a filepos=QQQQQQQQQQ>Part Two</a></p><mbp:pagebreak/>\
+      <p align=\"center\"><b>PART ONE</b></p><mbp:pagebreak/>\
+      <p><i>An epigraph, in italics.</i></p><mbp:pagebreak/>\
+      <p align=\"center\"><b>1</b></p><p>The first chapter.</p><mbp:pagebreak/>\
+      <p><i>Another epigraph.</i></p><mbp:pagebreak/>\
+      <p align=\"center\"><b>2</b></p><p>The second chapter, the last of the part.</p><a></a> <br><mbp:pagebreak/>\
+      <p align=\"center\"><b>PART TWO</b></p><mbp:pagebreak/>\
+      <p align=\"center\"><b>3</b></p><p>The third chapter.</p></body></html>";
+    let at = |what: &str| format!("{:010}", page.find(what).expect(what));
+    page
+      .replace("PPPPPPPPPP", &at("<p align=\"center\"><b>PART ONE"))
+      .replace("QQQQQQQQQQ", &at("<a></a> <br><mbp:pagebreak/>"))
+      .into_bytes()
+  }
+
+  #[test]
+  fn a_link_just_short_of_a_page_break_is_to_the_page_after_it() {
+    let text = parts_only_book();
+    let path = Made::of(&text).written("parts-only.mobi");
+    let book = from_mobi(&path, "x").expect("read");
+    let two = text.windows(14).position(|w| w == b"<a></a> <br><m").expect("two");
+    // The place is marked at the head of Part Two's page, not at the foot of chapter 2's.
+    assert!(book.chapters[6].body.trim_start().starts_with(&format!("<a id=\"fp{two}\"></a>")), "{}", book.chapters[6].body);
+    assert!(!book.chapters[5].body.contains(&format!("fp{two}\"")), "{}", book.chapters[5].body);
+    assert!(book.chapters[0].body.contains(&format!("<a href=\"chapter7.xhtml#fp{two}\">Part Two</a>")), "{}", book.chapters[0].body);
+    assert!(book.chapters.iter().all(|chapter| well_formed(&chapter.body)));
+    let _ = std::fs::remove_file(&path);
+  }
+
+  #[test]
+  fn chapters_headed_by_their_number_are_named_when_the_contents_list_only_parts() {
+    let text = parts_only_book();
+    let path = Made::of(&text).written("parts-named.mobi");
+    let book = from_mobi(&path, "x").expect("read");
+    let titles: Vec<&str> = book.chapters.iter().map(|chapter| chapter.title.as_str()).collect();
+    // The parts by the contents page; the chapters by their headings; the epigraphs not at all.
+    assert_eq!(titles, vec!["A Made Book", "Part One", "", "Chapter 1", "", "Chapter 2", "Part Two", "Chapter 3"]);
+    let _ = std::fs::remove_file(&path);
+  }
+
+  #[test]
+  fn a_link_broken_over_two_lines_names_its_place_with_a_space_between() {
+    let page = "<html><body><p><a filepos=TTTTTTTTTT>THE WELL<br>BOOK TWO</a></p><mbp:pagebreak/><p align=\"center\"><b>THE WELL</b></p><p>Text.</p></body></html>";
+    let at = format!("{:010}", page.find("<p align").expect("title"));
+    let text = page.replace("TTTTTTTTTT", &at).into_bytes();
+    let path = Made::of(&text).written("broken-link.mobi");
+    let book = from_mobi(&path, "x").expect("read");
+    assert_eq!(book.chapters[1].title, "THE WELL BOOK TWO");
+    let _ = std::fs::remove_file(&path);
+  }
+
+  #[test]
+  fn a_heading_is_a_line_set_apart_that_reads_as_one() {
+    assert_eq!(opening_heading("<div><a><p style=\"text-align:center\"><b>12</b></p><p>Text.</p></a></div>"), Some("Chapter 12".to_string()));
+    assert_eq!(opening_heading("<p><b>XIV.</b></p><p>Text.</p>"), Some("Chapter XIV".to_string()));
+    assert_eq!(opening_heading("<p style=\"text-align:center\">Prologue</p>"), Some("Prologue".to_string()));
+    // Not set apart, not first, or not a heading's words.
+    assert_eq!(opening_heading("<p>12</p><p>Text.</p>"), None);
+    assert_eq!(opening_heading("<p>Some words first.</p><p><b>12</b></p>"), None);
+    assert_eq!(opening_heading("<p><b>Contents</b></p>"), None);
+    assert_eq!(opening_heading("<p><b>2024</b></p>"), None);
+    assert_eq!(opening_heading("<pre>12</pre>"), None);
   }
 
   #[test]

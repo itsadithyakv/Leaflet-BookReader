@@ -27,24 +27,26 @@ export const WALK: WalkStep[] = [
 ];
 
 /**
- * The first visit indoors shows the shop alone (since 1.5.5): Pip's guided
- * first session outside teaches the rest, and "Show me around" still plays
- * all of `WALK`.
+ * The first visit indoors (1.5.10): the seeds, and the shop, where Pip asks for
+ * a hat. These were the last steps of the Hollow's guided first visit until
+ * 1.5.10; the Hollow teaches acorns only now, and the house its own money.
+ * "Show me around" still plays all of `WALK`.
  */
-export const FIRST_WALK: WalkStep[] = WALK.filter((step) => step.target === "shop");
+export const FIRST_WALK: WalkStep[] = [
+  WALK.find((step) => step.target === "resources")!,
+  { target: "shop", line: "spend seeds on me in the shop! a hat, maybe… there are looks, decor and treats too.", side: "above" }
+];
 
 /** The camp's guided first session, as far as the first visit indoors cares (`CampWelcome.tutorial`). */
 export type FirstSession = { step: number; done: boolean; skipped: boolean } | null | undefined;
 
 /**
- * What the first visit indoors shows: null while the guided first session
- * is still running (it takes the reader through the shop itself; wait), none
- * when that session was finished (it showed the shop: only mark it seen),
- * and the shop's step otherwise (the session skipped, or a camp from before it).
+ * What the first visit indoors shows: null while the Hollow's guided first
+ * visit is still running (wait for it), and the seeds and the shop once it is
+ * over, finished or skipped (since 1.5.10 it never comes indoors itself).
  */
 export const firstWalk = (session: FirstSession): WalkStep[] | null => {
   if (session && !session.done) return null;
-  if (session && session.done && !session.skipped && session.step > 0) return [];
   return FIRST_WALK;
 };
 

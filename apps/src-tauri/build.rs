@@ -15,6 +15,19 @@ fn main() {
   // unless told. Said here rather than in .cargo/config.toml, because the
   // Tauri CLI sets each Android target's rustflags itself, which replaces the
   // config's. Check: llvm-readelf -l libleaflet_lib.so, each LOAD 0x4000.
+  // The Studio voice's engine (src/tts): Windows with the `studio-voice` feature.
+  // Its DLLs are delay-loaded, so Leaflet starts (and reads, with the system
+  // voices) when they are missing; src/tts/native.rs loads them by full path.
+  println!("cargo:rustc-check-cfg=cfg(studio_voice)");
+  let windows = std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows");
+  if windows && std::env::var_os("CARGO_FEATURE_STUDIO_VOICE").is_some() {
+    println!("cargo:rustc-cfg=studio_voice");
+    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+      println!("cargo:rustc-link-arg=/DELAYLOAD:sherpa-onnx-c-api.dll");
+      println!("cargo:rustc-link-lib=delayimp");
+    }
+  }
+
   if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("android") {
     println!("cargo:rustc-cdylib-link-arg=-Wl,-z,max-page-size=16384");
   }
@@ -28,6 +41,8 @@ fn main() {
       "keep_awake",
       "lock_rotation",
       "hide_system_bars",
+      "set_bar_look",
+      "set_night_mode",
       "pick_files",
       "share_target",
       "share_file",

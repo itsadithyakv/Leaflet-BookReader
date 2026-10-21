@@ -1117,7 +1117,9 @@ pub(crate) fn no_file_message(account_backup: bool) -> &'static str {
 #[serde(rename_all = "camelCase")]
 pub struct PlaceHere {
   pub progress: f32,
-  pub position: Option<String>
+  pub position: Option<String>,
+  /// When this device stood there (ISO); a books row unchanged since is not another device's place.
+  pub at: Option<String>
 }
 
 /// The reader opens a book here, and offers the other device's place when it
@@ -1127,9 +1129,9 @@ pub struct PlaceHere {
 pub fn place_here(book_id: String, state: State<'_, AppState>) -> Result<Option<PlaceHere>, String> {
   let db = state.db.guard();
   Ok(
-    db.place_here(&book_id)
+    db.place_here_at(&book_id)
       .map_err(|e| e.to_string())?
-      .map(|(progress, position)| PlaceHere { progress, position })
+      .map(|(progress, position, at)| PlaceHere { progress, position, at })
   )
 }
 

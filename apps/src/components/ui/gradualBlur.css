@@ -1,0 +1,22 @@
+/* components/ui/GradualBlur.tsx: the overlay never takes a pointer, and where
+   no blur is drawn its layers go, leaving the tint wash to fade the edge. */
+
+.gradual-blur {
+  pointer-events: none;
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .gradual-blur-layer {
+    display: none;
+  }
+}
+
+html.no-glass .gradual-blur-layer {
+  display: none;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .gradual-blur-layer {
+    display: none;
+  }
+}

@@ -8,6 +8,7 @@ import { KINDLE_TAG_ABOUT, isKindlePlace } from "../library/kindleClippings";
 import { noteDate } from "./HighlightCard";
 import { HIGHLIGHT_COLORS, HIGHLIGHT_COLOR_IDS } from "./highlightColors";
 import { useKeyboardOpen } from "./keyboardOpen";
+import { ListEdges } from "./ListEdges";
 import "./notes.css";
 
 type Tab = "highlights" | "bookmarks";
@@ -206,6 +207,7 @@ export const AnnotationsPanel = ({
         </div>
       )}
 
+      <ListEdges>
       <div ref={list} className="reader-notes-list">
         {tab === "highlights" && highlights.length === 0 && (
           <div className="reader-notes-empty">
@@ -377,6 +379,7 @@ export const AnnotationsPanel = ({
             </div>
           ))}
       </div>
+      </ListEdges>
     </div>
   );
 };

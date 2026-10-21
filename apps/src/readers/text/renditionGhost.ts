@@ -1,4 +1,4 @@
-import { readerShape, readLayoutFor, spreadFor } from "../touchLayout";
+import { layoutAcrossTurn, readerShape, spreadFor, steadyWindowHeight } from "../touchLayout";
 import { isTouchInput } from "../../platform/device";
 import type { ReaderLayout } from "../readerTypes";
 
@@ -107,20 +107,15 @@ export const freezeRendition = (rendition: any): Ghost | null => {
 /**
  * Whether the window at this size is laid out otherwise (readers/touchLayout.ts):
  * what a turn of the phone is about to do, known while the resize is still
- * being heard, before epub.js hears it.
+ * being heard. The layout itself is kept (`layoutAcrossTurn`): only pages
+ * becoming a spread, or one column again, lays the book out anew.
  */
-export const layoutChangesAt = (
-  width: number,
-  height: number,
-  touch: boolean,
-  now: { layout: ReaderLayout; spread: boolean },
-  layoutFor: typeof readLayoutFor = readLayoutFor
-) => {
+export const layoutChangesAt = (width: number, height: number, touch: boolean, now: { layout: ReaderLayout; spread: boolean }) => {
   const shape = readerShape(width, height, touch);
-  const layout = layoutFor(shape);
+  const layout = layoutAcrossTurn(now.layout);
   return layout !== now.layout || spreadFor(shape, layout, width, height) !== now.spread;
 };
 
 /** The same, for the window as it is now. */
 export const windowChangesLayout = (now: { layout: ReaderLayout; spread: boolean }) =>
-  typeof window !== "undefined" && layoutChangesAt(window.innerWidth, window.innerHeight, isTouchInput(), now);
+  typeof window !== "undefined" && layoutChangesAt(window.innerWidth, steadyWindowHeight(), isTouchInput(), now);

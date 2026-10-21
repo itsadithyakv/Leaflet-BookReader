@@ -89,7 +89,7 @@ import { useAutoHideChrome } from "../hooks/useAutoHideChrome";
 import { useReadingHeartbeat } from "../hooks/useReadingHeartbeat";
 import { PipExitGuard, useFocusLockExit } from "../hooks/useFocusLockExit";
 import { useBackFallback } from "../platform/back";
-import { android, onAndroid } from "../platform/android";
+import { android, holdBarLook, holdNightMode, onAndroid } from "../platform/android";
 import { isTouchInput, useTouchInput } from "../platform/device";
 import { isPhoneShape, readerShape, sidewaysPageView, systemBarsHidden, useReaderDevice, useReaderShape, useRotationLock, type SidewaysView } from "../readers/touchLayout";
 import { usePageGestures } from "../readers/pageGestures";
@@ -102,6 +102,9 @@ import { openAmbiencePopover, useAmbienceState } from "../ambience";
 import "../readers/pdfTextLayer.css";
 import "./PageReaderView.css";
 import "../readers/touch.css";
+// The reader's glass, after every reader stylesheet above, so it wins at equal weight.
+import "../readers/glass.css";
+import { useReadingMark } from "../platform/rootMarks";
 
 /** Which page-image kind this book is; decides the source and the wording. */
 export type PageReaderKind = "pdf" | "comic";
@@ -410,8 +413,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
     reveal: revealChrome,
     hover: hoverChrome,
     toggle: toggleChrome,
-    hide: hideChrome,
-    backHides: chromeBackHides
+    hide: hideChrome
   } = useAutoHideChrome(
     zoomPanelOpen || bookmarkPanelOpen || morePanelOpen || soundPanelOpen || searchOpen || goToOpen || Boolean(exitGuard.guardShown?.hold),
     // A phone: no chrome until a tap in the middle of the page asks for it.
@@ -1949,8 +1951,13 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
 
   // The screen stays on while the book is touched lately (readers/readerAwake.ts).
   useReaderAwake(false);
-  // The rotation lock, and the system's bars away under focus lock and on a phone on its side while the chrome is.
-  useReaderDevice(systemBarsHidden(shape, chromeVisible, exitGuard.locked), rotation);
+  // The rotation lock, and the system's bars away under focus lock and on a phone.
+  useReaderDevice(systemBarsHidden(shape, exitGuard.locked), rotation);
+  // Android's bar icons follow the reader's chrome, not the app's theme, while the book is open.
+  const chromeLight = readerChromeLight(displayMode, readerTheme);
+  useEffect(() => holdBarLook(chromeLight), [chromeLight]);
+  // And Android's night mode, so a `<select>`'s list is drawn dark on a dark page.
+  useEffect(() => holdNightMode(chromeLight ? "light" : "dark"), [chromeLight]);
 
   // Android's Back: the nearest thing open, one a press, then the book (through the exit guard).
   useBackFallback(() => {
@@ -1971,23 +1978,23 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
       closeAmbiencePopover();
     } else if (sidebarOpen) {
       setSidebarOpen(false);
-    } else if (chromeBackHides) {
-      // A phone: the chrome a middle tap brought goes before the book does.
-      hideChrome();
     } else {
       exitGuard.back();
     }
     return true;
   });
+  // `html[data-reading]` from this first frame: the app under the book steps aside (styles/glass.css).
+  useReadingMark();
 
   return (
     <div
       className={`reader-scope pdf-reader page-reader fixed inset-0 z-50 h-full w-full overflow-hidden reader-bg ${
         chromeVisible ? "" : "reader-chrome-hidden"
       } ${
-        readerChromeLight(displayMode, readerTheme) ? "reader-light" : ""
+        chromeLight ? "reader-light" : ""
       } ${displayModeClass}`}
       data-shape={phone ? shape : undefined}
+      data-chrome={chromeVisible ? "shown" : "hidden"}
     >
       <header
         className="reader-toolbar fixed left-0 right-0 top-0 z-50 flex w-full items-center justify-between px-6 py-5 md:px-8"
@@ -2007,7 +2014,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
         <div className="relative flex items-center gap-2 md:gap-4">
           <button
             type="button"
-            className="group flex items-center gap-2 transition-all reader-icon reader-hover-accent"
+            className="reader-exit-button group flex items-center gap-2 transition-all reader-icon reader-hover-accent"
             onClick={() => void exitGuard.requestClose()}
             onMouseEnter={() => exitGuard.guard()}
             title={exitGuard.locked ? "Focus lock is on: leaving ends the session" : undefined}

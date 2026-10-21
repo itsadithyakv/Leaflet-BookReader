@@ -257,8 +257,8 @@
    height of the page; while she plays, her eleven ways scroll in it, Done first. The room keeps
    its size whatever the rail is doing. useRoomFrame reads --rail-beside and keeps no room under
    the scene for the rail. */
-@media (orientation: landscape) and (max-height: 520px) {
-  .pip-house-page .pip-house {
+@media (orientation: landscape) {
+  :where(html[data-shape="sideways"]) .pip-house-page .pip-house {
     --rail-beside: 1;
     display: grid;
     align-items: start;
@@ -270,7 +270,7 @@
     grid-template-rows: auto minmax(0, 1fr);
   }
 
-  .pip-house-page .pip-house > .pip-hud-top {
+  :where(html[data-shape="sideways"]) .pip-house-page .pip-house > .pip-hud-top {
     grid-area: hud;
     width: auto;
     gap: 6px 8px;
@@ -280,26 +280,26 @@
   /* The HUD on one line over the room, or the room loses the height of a second: seeds and hearts
      closer, the hearts without their word (they say what they are when held), and the floor's name
      left to the lift, which shows it. */
-  .pip-house-page .pip-hud-top .pip-resource {
+  :where(html[data-shape="sideways"]) .pip-house-page .pip-hud-top .pip-resource {
     gap: 6px;
     padding: 4px 9px;
   }
 
-  .pip-house-page .pip-hud-top .pip-resource-value {
+  :where(html[data-shape="sideways"]) .pip-house-page .pip-hud-top .pip-resource-value {
     font-size: 19px;
   }
 
-  .pip-house-page .pip-hud-top .pip-resource-mood > .pip-resource-label,
-  .pip-house-page .pip-hud-top > .pip-floor-plate {
+  :where(html[data-shape="sideways"]) .pip-house-page .pip-hud-top .pip-resource-mood > .pip-resource-label,
+  :where(html[data-shape="sideways"]) .pip-house-page .pip-hud-top > .pip-floor-plate {
     display: none;
   }
 
-  .pip-house-page .pip-house > .pip-house-body {
+  :where(html[data-shape="sideways"]) .pip-house-page .pip-house > .pip-house-body {
     grid-area: body;
     min-width: 0;
   }
 
-  .pip-house-page .pip-house > .pip-rail {
+  :where(html[data-shape="sideways"]) .pip-house-page .pip-house > .pip-rail {
     grid-area: rail;
     align-self: stretch;
     width: auto;
@@ -309,7 +309,7 @@
     container-type: normal;
   }
 
-  .pip-house-page .pip-house > .pip-rail > .pip-rail-belt {
+  :where(html[data-shape="sideways"]) .pip-house-page .pip-house > .pip-rail > .pip-rail-belt {
     display: flex;
     height: 100%;
     max-height: calc(100dvh - max(6px, var(--inset-top, 0px)) - max(6px, var(--inset-bottom, 0px)));
@@ -324,11 +324,11 @@
   }
 
   /* What the rail is doing (decorating, playing) shows in its keys and their tooltips: no title over them. */
-  .pip-house-page .pip-house > .pip-rail .pip-rail-mode {
+  :where(html[data-shape="sideways"]) .pip-house-page .pip-house > .pip-rail .pip-rail-mode {
     display: none;
   }
 
-  .pip-house-page .pip-house > .pip-rail .pip-rail-key {
+  :where(html[data-shape="sideways"]) .pip-house-page .pip-house > .pip-rail .pip-rail-key {
     width: 68px;
     min-width: 68px;
     min-height: 44px;
@@ -336,7 +336,7 @@
     padding: 3px 1px;
   }
 
-  .pip-house-page .pip-house > .pip-rail .pip-rail-label {
+  :where(html[data-shape="sideways"]) .pip-house-page .pip-house > .pip-rail .pip-rail-label {
     max-width: 100%;
     overflow: hidden;
     font-size: 10px;
@@ -346,7 +346,7 @@
   }
 
   /* Done is the way back: first, where the thumb is, not under the fold of a list that scrolls. */
-  .pip-house-page .pip-house > .pip-rail .pip-rail-done {
+  :where(html[data-shape="sideways"]) .pip-house-page .pip-house > .pip-rail .pip-rail-done {
     order: -1;
   }
 }
@@ -354,8 +354,8 @@
 /* A drawer (Pip's things, the garden, decorating's sheets), sideways on a phone: beside the room, the
    whole height, where the rail was, not a sheet over the room's foot (which left 158 px for it and a
    room of 274 px). The rail steps away while it is open; its Close and Back shut it. */
-@media (orientation: landscape) and (max-height: 520px) {
-  .pip-house-page .pip-house[data-sheet] {
+@media (orientation: landscape) {
+  :where(html[data-shape="sideways"]) .pip-house-page .pip-house[data-sheet] {
     --drawer-width: min(340px, 54%);
     padding-right: calc(var(--drawer-width) + 8px);
     grid-template-areas:
@@ -364,16 +364,16 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .pip-house-page .pip-house[data-sheet] > .pip-rail {
+  :where(html[data-shape="sideways"]) .pip-house-page .pip-house[data-sheet] > .pip-rail {
     display: none;
   }
 
   /* Decorating's sheets (what goes on a pin, the wallpaper) are narrower: the room and its pins stay larger. */
-  .pip-house-page .pip-house[data-sheet]:has(> .pip-drawer[data-size="short"]) {
+  :where(html[data-shape="sideways"]) .pip-house-page .pip-house[data-sheet]:has(> .pip-drawer[data-size="short"]) {
     --drawer-width: min(250px, 44%);
   }
 
-  .pip-house-page .pip-house > .pip-drawer.pip-drawer {
+  :where(html[data-shape="sideways"]) .pip-house-page .pip-house > .pip-drawer.pip-drawer {
     position: absolute;
     top: 0;
     right: 0;
@@ -384,21 +384,21 @@
     animation-name: pip-drawer-in;
   }
 
-  .pip-house-page .pip-house > .pip-drawer .pip-drawer-head {
+  :where(html[data-shape="sideways"]) .pip-house-page .pip-house > .pip-drawer .pip-drawer-head {
     align-items: center;
     padding: 6px 8px 6px 12px;
   }
 
   /* Its name, smaller, and no line under it: the drawer's own shelves say what it holds. */
-  .pip-house-page .pip-house > .pip-drawer .pip-drawer-head h3 {
+  :where(html[data-shape="sideways"]) .pip-house-page .pip-house > .pip-drawer .pip-drawer-head h3 {
     font-size: 1.15rem;
   }
 
-  .pip-house-page .pip-house > .pip-drawer .pip-drawer-head p {
+  :where(html[data-shape="sideways"]) .pip-house-page .pip-house > .pip-drawer .pip-drawer-head p {
     display: none;
   }
 
-  .pip-house-page .pip-house > .pip-drawer .pip-drawer-body {
+  :where(html[data-shape="sideways"]) .pip-house-page .pip-house > .pip-drawer .pip-drawer-body {
     padding: 8px 10px 12px;
   }
 }
@@ -461,16 +461,14 @@
 /* ---- Pip in the reader, on a phone ----------------------------------------------------------
    Her peek (a celebration, a nod to the book) is smaller, clear of the gesture bar and a side notch;
    PipReaderPeek lifts it over the chapter dock when the dock is under it. */
-@media (max-width: 767px), (max-height: 520px) {
-  .pip-peek.pip-peek {
-    right: calc(10px + var(--inset-right, 0px));
-    bottom: calc(12px + var(--inset-bottom, 0px));
-  }
+:where(html:is([data-shape="upright"], [data-shape="sideways"])) .pip-peek.pip-peek {
+  right: calc(10px + var(--inset-right, 0px));
+  bottom: calc(12px + var(--inset-bottom, 0px));
+}
 
-  .pip-peek .pip-say-peek {
-    max-width: min(15rem, calc(100vw - 100px));
-    margin-bottom: 46px;
-  }
+:where(html:is([data-shape="upright"], [data-shape="sideways"])) .pip-peek .pip-say-peek {
+  max-width: min(15rem, calc(100vw - 100px));
+  margin-bottom: 46px;
 }
 
 /* ---- Pip's tab on a phone on its side ---------------------------------------------------
@@ -479,24 +477,24 @@
    the way to the rest of the app (pages/pip/PipMenu.tsx, PIP_FULL_SCREEN_QUERY: the same query).
    The page keeps only the system's bars clear (by a finger: a short desktop window keeps its
    header and rail). Everything below is laid out for 640-915 x 360-412. */
-@media (orientation: landscape) and (max-height: 520px) and (pointer: coarse) {
-  .app-shell:has(.pip-house-page) .app-header,
-  .app-shell:has(.pip-house-page) .sidebar-stage {
+@media (orientation: landscape) and (pointer: coarse) {
+  html[data-pip-page]:where([data-shape="sideways"]) .app-shell .app-header,
+  html[data-pip-page]:where([data-shape="sideways"]) .app-shell .sidebar-stage {
     display: none;
   }
 
-  .app-shell:has(.pip-house-page) .app-main-scroll {
+  html[data-pip-page]:where([data-shape="sideways"]) .app-shell .app-main-scroll {
     padding: max(6px, var(--inset-top, 0px)) max(8px, var(--inset-right, 0px)) max(6px, var(--inset-bottom, 0px)) max(8px, var(--inset-left, 0px));
   }
 
-  .app-shell .pip-house-page.pip-house-page {
+  :where(html[data-shape="sideways"]) .app-shell .pip-house-page.pip-house-page {
     min-height: 100%;
     margin: 0;
   }
 
   /* Out in the Hollow the picture goes to the screen's edges (BaseScreen fills the width); what is
      laid over it keeps clear of the system's bars and a notch (the rules below). */
-  .app-shell:has(.pip-house-page[data-place="hollow"]) .app-main-scroll {
+  html[data-pip-page="hollow"]:where([data-shape="sideways"]) .app-shell.app-shell .app-main-scroll {
     padding: 0;
   }
 }
@@ -610,184 +608,178 @@
 
 /* The Hollow, a stage on a phone on its side (BaseScreen): the picture is the page, and what is
    laid over it is smaller and closer to its edges than on a large screen. */
-@media (max-height: 520px) {
-  .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-head {
-    top: max(6px, var(--inset-top, 0px));
-    right: max(8px, var(--inset-right, 0px));
-    left: max(8px, var(--inset-left, 0px));
-  }
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-head {
+  top: max(6px, var(--inset-top, 0px));
+  right: max(8px, var(--inset-right, 0px));
+  left: max(8px, var(--inset-left, 0px));
+}
 
-  /* What the camp has and the keys share the top line; Pip's word goes under them, as wide as it reads well. */
-  .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-head {
-    display: grid;
-    align-items: start;
-    gap: 6px 8px;
-    grid-template-areas:
-      "stats keys"
-      "say say";
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
+/* What the camp has and the keys share the top line; Pip's word goes under them, as wide as it reads well. */
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-head {
+  display: grid;
+  align-items: start;
+  gap: 6px 8px;
+  grid-template-areas:
+    "stats keys"
+    "say say";
+  grid-template-columns: minmax(0, 1fr) auto;
+}
 
-  .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-head > .pip-base-head-left {
-    display: contents;
-  }
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-head > .pip-base-head-left {
+  display: contents;
+}
 
-  .pip-arcade .pip-base.is-stage[data-mode="stage"] .pip-base-stats {
-    grid-area: stats;
-    flex-wrap: wrap;
-    margin: 0;
-  }
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] .pip-base-stats {
+  grid-area: stats;
+  flex-wrap: wrap;
+  margin: 0;
+}
 
-  .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-head > .pip-base-head-right {
-    grid-area: keys;
-    flex-wrap: nowrap;
-    margin: 0;
-  }
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-head > .pip-base-head-right {
+  grid-area: keys;
+  flex-wrap: nowrap;
+  margin: 0;
+}
 
-  .pip-arcade .pip-base.is-stage[data-mode="stage"] .pip-base-head-left > .pip-camp-say {
-    grid-area: say;
-    width: min(440px, 100%);
-    max-width: none;
-  }
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] .pip-base-head-left > .pip-camp-say {
+  grid-area: say;
+  width: min(440px, 100%);
+  max-width: none;
+}
 
-  /* A panel open down the side covers what she said: it steps aside until the panel is shut. */
-  .pip-arcade .pip-base.is-stage[data-mode="stage"]:has(> .pip-base-side, > .pip-base-how, > .pip-base-sheet) .pip-camp-say {
-    visibility: hidden;
-  }
+/* A panel open down the side covers what she said: it steps aside until the panel is shut. */
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"]:has(> .pip-base-side, > .pip-base-how, > .pip-base-sheet) .pip-camp-say {
+  visibility: hidden;
+}
 
-  .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-under {
-    bottom: max(6px, var(--inset-bottom, 0px));
-    padding: 4px 6px 5px;
-  }
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-under {
+  bottom: max(6px, var(--inset-bottom, 0px));
+  padding: 4px 6px 5px;
+}
 
-  .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-side {
-    top: calc(46px + max(6px, var(--inset-top, 0px)));
-    right: max(8px, var(--inset-right, 0px));
-    bottom: calc(58px + max(6px, var(--inset-bottom, 0px)));
-    width: min(320px, 50%);
-  }
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-side {
+  top: calc(46px + max(6px, var(--inset-top, 0px)));
+  right: max(8px, var(--inset-right, 0px));
+  bottom: calc(58px + max(6px, var(--inset-bottom, 0px)));
+  width: min(320px, 50%);
+}
 
-  .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-sheet {
-    top: calc(46px + max(6px, var(--inset-top, 0px)));
-    right: max(8px, var(--inset-right, 0px));
-    bottom: max(8px, var(--inset-bottom, 0px));
-    left: max(8px, var(--inset-left, 0px));
-    padding: 8px 12px 12px;
-  }
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-sheet {
+  top: calc(46px + max(6px, var(--inset-top, 0px)));
+  right: max(8px, var(--inset-right, 0px));
+  bottom: max(8px, var(--inset-bottom, 0px));
+  left: max(8px, var(--inset-left, 0px));
+  padding: 8px 12px 12px;
+}
 
-  .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-how {
-    top: calc(46px + max(6px, var(--inset-top, 0px)));
-    right: max(8px, var(--inset-right, 0px));
-    bottom: max(8px, var(--inset-bottom, 0px));
-    overflow-y: auto;
-  }
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-how {
+  top: calc(46px + max(6px, var(--inset-top, 0px)));
+  right: max(8px, var(--inset-right, 0px));
+  bottom: max(8px, var(--inset-bottom, 0px));
+  overflow-y: auto;
+}
 
-  .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-edge {
-    top: 40%;
-  }
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-edge {
+  top: 40%;
+}
 
-  .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-edge.is-right {
-    right: max(10px, var(--inset-right, 0px));
-  }
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-edge.is-right {
+  right: max(10px, var(--inset-right, 0px));
+}
 
-  .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-edge.is-left {
-    left: max(10px, var(--inset-left, 0px));
-  }
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-edge.is-left {
+  left: max(10px, var(--inset-left, 0px));
 }
 
 /* ---- The arcade on a phone on its side ------------------------------------------------------
    Its name a thin line at the top, and the games three across, each its picture, its name and
    its line about it, smaller: the first row whole on a 360 px screen. */
-@media (max-height: 520px) {
-  .pip-arcade .pip-arcade-head {
-    padding-top: 6px;
-    padding-bottom: 6px;
-  }
-
-  .pip-arcade .pip-arcade-cards {
-    gap: 16px 12px;
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 176px), 1fr));
-    margin-top: 12px;
-  }
-
-  .pip-arcade .pip-arcade-card {
-    gap: 4px;
-    padding: 7px 7px 9px;
-  }
-
-  .pip-arcade .pip-arcade-card-name {
-    gap: 7px;
-    margin-top: 2px;
-    font-size: 1rem;
-  }
-
-  .pip-arcade .pip-arcade-card-icon {
-    width: 24px;
-    height: 24px;
-  }
-
-  .pip-arcade .pip-arcade-card-about {
-    min-height: 0;
-    font-size: 0.75rem;
-    line-height: 1.3;
-  }
+:where(html[data-shape="sideways"]) .pip-arcade .pip-arcade-head {
+  padding-top: 6px;
+  padding-bottom: 6px;
 }
 
-@media (max-height: 520px) {
-  /* Its name alone at the top (not "Attic Arcade" over it), so a game's screen has the height. */
-  .pip-arcade .pip-arcade-head > div > p:first-child {
-    display: none;
-  }
+:where(html[data-shape="sideways"]) .pip-arcade .pip-arcade-cards {
+  gap: 16px 12px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 176px), 1fr));
+  margin-top: 12px;
+}
 
-  .pip-arcade .pip-arcade-head .page-title {
-    font-size: 1.25rem;
-  }
+:where(html[data-shape="sideways"]) .pip-arcade .pip-arcade-card {
+  gap: 4px;
+  padding: 7px 7px 9px;
+}
+
+:where(html[data-shape="sideways"]) .pip-arcade .pip-arcade-card-name {
+  gap: 7px;
+  margin-top: 2px;
+  font-size: 1rem;
+}
+
+:where(html[data-shape="sideways"]) .pip-arcade .pip-arcade-card-icon {
+  width: 24px;
+  height: 24px;
+}
+
+:where(html[data-shape="sideways"]) .pip-arcade .pip-arcade-card-about {
+  min-height: 0;
+  font-size: 0.75rem;
+  line-height: 1.3;
+}
+
+/* Its name alone at the top (not "Attic Arcade" over it), so a game's screen has the height. */
+:where(html[data-shape="sideways"]) .pip-arcade .pip-arcade-head > div > p:first-child {
+  display: none;
+}
+
+:where(html[data-shape="sideways"]) .pip-arcade .pip-arcade-head .page-title {
+  font-size: 1.25rem;
 }
 
 /* ---- The shop on a phone on its side ------------------------------------------------------------
    The shelves and what is chosen side by side (under 700 px wide the chosen thing went under the
    shelves, which kept 70 px of them), its name and the tabs in less height, the chosen thing's
    picture smaller. */
-@media (orientation: landscape) and (max-height: 520px) {
-  .pip-shop-backdrop .pip-shop-head {
+@media (orientation: landscape) {
+  :where(html[data-shape="sideways"]) .pip-shop-backdrop .pip-shop-head {
     padding: 6px 12px 4px 16px;
   }
 
-  .pip-shop-backdrop .pip-shop-head h2 {
+  :where(html[data-shape="sideways"]) .pip-shop-backdrop .pip-shop-head h2 {
     font-size: 1.35rem;
   }
 
-  .pip-shop-backdrop .pip-shop-tabs {
+  :where(html[data-shape="sideways"]) .pip-shop-backdrop .pip-shop-tabs {
     padding: 2px 12px 6px;
   }
 
-  .pip-shop-backdrop .pip-shop-body {
+  :where(html[data-shape="sideways"]) .pip-shop-backdrop .pip-shop-body {
     grid-template-columns: minmax(0, 1fr) min(14rem, 40%);
     grid-template-rows: none;
   }
 
-  .pip-shop-backdrop .pip-shop-grid-wrap {
+  :where(html[data-shape="sideways"]) .pip-shop-backdrop .pip-shop-grid-wrap {
     padding: 10px 12px 14px;
   }
 
-  .pip-shop-backdrop .pip-shop-grid {
+  :where(html[data-shape="sideways"]) .pip-shop-backdrop .pip-shop-grid {
     gap: 8px;
     grid-template-columns: repeat(auto-fill, minmax(7.25rem, 1fr));
   }
 
-  .pip-shop-backdrop .pip-shop-detail {
+  :where(html[data-shape="sideways"]) .pip-shop-backdrop .pip-shop-detail {
     max-height: none;
     padding: 10px 10px 14px;
     border-top: 0;
     border-left: 1px solid rgb(var(--color-outline-variant) / 0.35);
   }
 
-  .pip-shop-backdrop .pip-shop-detail-art {
+  :where(html[data-shape="sideways"]) .pip-shop-backdrop .pip-shop-detail-art {
     width: 112px;
     height: 112px;
   }
 
-  .pip-shop-backdrop .pip-shop-detail-art > * {
+  :where(html[data-shape="sideways"]) .pip-shop-backdrop .pip-shop-detail-art > * {
     max-width: 96px;
     max-height: 96px;
   }
@@ -795,8 +787,8 @@
 
 /* A purchase's question sideways: the thing beside its name, price and keys, so it is never taller
    than a 360 px screen. */
-@media (orientation: landscape) and (max-height: 520px) {
-  .pip-confirm-backdrop .pip-confirm {
+@media (orientation: landscape) {
+  :where(html[data-shape="sideways"]) .pip-confirm-backdrop .pip-confirm {
     display: grid;
     width: min(500px, 100%);
     max-height: calc(100dvh - 16px);
@@ -808,11 +800,11 @@
     text-align: left;
   }
 
-  .pip-confirm-backdrop .pip-confirm > * {
+  :where(html[data-shape="sideways"]) .pip-confirm-backdrop .pip-confirm > * {
     grid-column: 2;
   }
 
-  .pip-confirm-backdrop .pip-confirm > .pip-confirm-art {
+  :where(html[data-shape="sideways"]) .pip-confirm-backdrop .pip-confirm > .pip-confirm-art {
     grid-column: 1;
     grid-row: 1 / span 8;
     align-self: center;
@@ -825,13 +817,13 @@
 /* A card from a thing in the room (the diary, the album, the radio) on a phone on its side: as tall
    as the screen allows (70 % of 360 px left the album a strip), and inside the side insets (the app's
    rail is not on Pip's tab there). */
-@media (orientation: landscape) and (max-height: 520px) {
-  .pip-room-card.pip-room-card,
-  .pip-room-card.pip-room-card[data-size="wide"] {
+@media (orientation: landscape) {
+  :where(html[data-shape="sideways"]) .pip-room-card.pip-room-card,
+  :where(html[data-shape="sideways"]) .pip-room-card.pip-room-card[data-size="wide"] {
     max-height: calc(100dvh - 16px);
   }
 
-  .pip-room-card.pip-room-card[data-size="wide"] {
+  :where(html[data-shape="sideways"]) .pip-room-card.pip-room-card[data-size="wide"] {
     width: min(560px, calc(100vw - var(--inset-left, 0px) - var(--inset-right, 0px) - 22px));
   }
 }
@@ -846,9 +838,9 @@
 /* ---- Pip's rail of tools on a phone ---------------------------------------------------------
    Not the app's leather: a strip of Pip's paper with her hard ink line and notched corners, as her
    other panels are, so the keys on it read as hers. No stitching. */
-@media (hover: none) and (pointer: coarse) and (max-width: 767px), (hover: none) and (pointer: coarse) and (max-height: 520px) {
-  .pip-house .pip-rail-belt.pip-rail-belt,
-  :root[data-theme="dark"] .pip-house .pip-rail-belt.pip-rail-belt {
+@media (hover: none) and (pointer: coarse) {
+  :where(html:is([data-shape="upright"], [data-shape="sideways"])) .pip-house .pip-rail-belt.pip-rail-belt,
+  :root:where(:is([data-shape="upright"], [data-shape="sideways"]))[data-theme="dark"] .pip-house .pip-rail-belt.pip-rail-belt {
     border-radius: 0;
     background: var(--hud-face-low);
     background-image: radial-gradient(rgb(31 42 34 / 0.09) 1px, transparent 1.2px);
@@ -861,7 +853,7 @@
       0 6px 0 0 var(--hud-drop);
   }
 
-  .pip-house .pip-rail-belt.pip-rail-belt::after {
+  :where(html:is([data-shape="upright"], [data-shape="sideways"])) .pip-house .pip-rail-belt.pip-rail-belt::after {
     display: none;
   }
 }

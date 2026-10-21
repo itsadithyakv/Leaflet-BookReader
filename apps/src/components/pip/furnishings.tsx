@@ -560,6 +560,16 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
     return true;
   };
 
+  /**
+   * Whether anything here moves from frame to frame (curtains gliding, a picture swinging or falling): the scene's
+   * loop takes every frame while it does, and rests between looks otherwise.
+   */
+  const busy = () =>
+    latest.current.things.some((thing) => {
+      const state = live.current.get(thing.key);
+      return Boolean(state) && ((thing.kind === "curtains" && state!.target !== null) || (thing.kind === "picture" && (state!.moving || state!.dragging)));
+    });
+
   /** What is moving, a frame later. Called by the scene's frame loop. */
   const step = (dt: number, still: boolean) => {
     for (const thing of latest.current.things) {
@@ -1075,5 +1085,5 @@ export const useFurnishings = ({ level, decor, scale, night, decorating, roomRef
     for (const thing of latest.current.things) draw(thing);
     shade();
   };
-  return { layer, step, state, lifted, unlit, fixtures, fridge, spots, pipUse, use, offsetOf, relight };
+  return { layer, step, busy, state, lifted, unlit, fixtures, fridge, spots, pipUse, use, offsetOf, relight };
 };

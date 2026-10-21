@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  moveWall,
-  wallMoveBlocked,
+  fronted,
+  slideWall,
+  wallRange,
   KNOCKS_A_DAY,
   THEFTS_A_DAY,
   GATE_FROM,
@@ -10,8 +11,7 @@ import {
   gateOf,
   openParcel,
   parcelGives,
-  removeWall,
-  setGate,
+
   storyRead,
   wallAt,
   TROPHY_GIVES,
@@ -50,16 +50,16 @@ import {
   isAsleep,
   isBroken,
   newBase,
-  placeWall,
   restMs,
   spotBlocked,
   woundFighter,
   type BaseState
 } from "./rules";
+import { beforeChapters } from "./testing";
 
 const DAY = "2026-10-13";
 const AT = 1_800_000_000_000;
-const mine = (more: Partial<BaseState> = {}): BaseState => ({ ...newBase(0, DAY), acorns: 500, levels: { burrow: 3, oak: 3, store: 3, fence: 2, tower: 2, hut: 3 }, ...more });
+const mine = (more: Partial<BaseState> = {}): BaseState => beforeChapters({ ...newBase(0, DAY), acorns: 500, levels: { burrow: 3, oak: 3, store: 3, fence: 2, tower: 2, hut: 3 }, ...more });
 // A knock a day: prowlers only do so much in one (`KNOCKS_A_DAY`).
 const knocked = (state: BaseState, site: "tower" | "store" | "oak" | "hut", times: number) =>
   Array.from({ length: times }).reduce<BaseState>((now, _, index) => harmSite(now, site, `2026-11-${String(index + 1).padStart(2, "0")}`), state);
@@ -110,13 +110,11 @@ describe("the campfire", () => {
 });
 
 describe("room for a wall", () => {
-  it("is six pieces of fence for every level of it, so that thirty go round a camp", () => {
-    expect(fencePieces(mine({ levels: { burrow: 5, oak: 1, store: 1, fence: 5, tower: 1, hut: 1 } }))).toBe(30);
+  it("is a wall across the trail, longer with every level of the fence, until it spans the whole approach", () => {
+    expect(fencePieces(mine({ levels: { burrow: 5, oak: 1, store: 1, fence: 5, tower: 1, hut: 1 } }))).toBe(7);
     expect(fencePieces(mine({ levels: { burrow: 2, oak: 1, store: 1, fence: 0, tower: 1, hut: 1 } }))).toBe(0);
-    // Put down along a line, as many as there are and no more.
-    let base = mine({ levels: { burrow: 5, oak: 1, store: 1, fence: 1, tower: 1, hut: 1 }, walls: [] });
-    for (let piece = 0; piece < 12; piece++) base = placeWall(base, 60 + piece * 10, 114);
-    expect(base.walls).toHaveLength(6);
+    const lengths = [1, 2, 3, 4, 5].map((fence) => fronted(mine({ levels: { burrow: 5, oak: 1, store: 1, fence, tower: 1, hut: 1 } })).walls.length);
+    expect(lengths).toEqual([3, 5, 6, 7, 7]);
   });
 
   it("is the ground a building takes: nothing is built within its foot and another's", () => {
@@ -358,10 +356,11 @@ describe("the story being read", () => {
     expect(storyRead(other, "other", 15, 121 + STRETCH_MINUTES, DAY).parcels).toBe(2);
   });
 
-  it("waits by the door, six at most, and is opened for a few acorns", () => {
+  it("waits by the door, up to 99 (six until 1.5.10), and is opened for a few acorns", () => {
     let full = storyRead(camp(), "book", 0, 0, DAY);
-    for (let chapter = 1; chapter <= 10; chapter++) full = storyRead(full, "book", chapter, chapter * STRETCH_MINUTES, DAY);
+    for (let chapter = 1; chapter <= 120; chapter++) full = storyRead(full, "book", chapter, chapter * STRETCH_MINUTES, DAY);
     expect(full.parcels).toBe(PARCELS_MOST);
+    expect(PARCELS_MOST).toBe(99);
     const opened = openParcel(full);
     expect([opened.parcels, opened.acorns]).toEqual([PARCELS_MOST - 1, parcelGives(full)]);
     expect(openParcel({ ...camp(), parcels: 0 }).acorns).toBe(0);
@@ -371,75 +370,55 @@ describe("the story being read", () => {
 });
 
 describe("the gate", () => {
-  const fenced = (fence: number) => {
-    let base = mine({ levels: { burrow: 4, oak: 1, store: 1, fence, tower: 1, hut: 1 }, walls: [] });
-    for (const x of [100, 110, 120]) base = placeWall(base, x, 114);
-    return base;
-  };
+  const fenced = (fence: number) => fronted(mine({ levels: { burrow: 4, oak: 1, store: 1, fence, tower: 1, hut: 1 } }));
 
-  it("is made of a piece of the fence, one at a time, from the second level of it", () => {
-    const base = fenced(GATE_FROM);
-    expect(base.walls).toHaveLength(3);
-    expect(gateOf(base)).toBeNull();
-    const gated = setGate(base, 110, 114);
-    expect(gateOf(gated)).toEqual([110, 114]);
-    // Another piece made the gate: the first is a piece again.
-    expect(gateOf(setGate(gated, 120, 114))).toEqual([120, 114]);
-    // The gate itself, asked again, is a piece again.
-    expect(gateOf(setGate(gated, 110, 114))).toBeNull();
-    // Nothing is made a gate where there is no fence; nor of a fence of the first level.
-    expect(setGate(base, 150, 80)).toBe(base);
-    expect(gateOf(setGate(fenced(1), 110, 114))).toBeNull();
+  it("is where the trail meets the wall, from the second level of the fence", () => {
+    expect(gateOf(fenced(1))).toBeNull();
+    const gated = fenced(GATE_FROM);
+    expect(gateOf(gated)).toEqual([gated.front.x, 84]);
+    expect(gated.walls).toContainEqual(gateOf(gated));
   });
 
-  it("goes with its piece when the piece is taken up", () => {
-    const gated = setGate(fenced(GATE_FROM), 110, 114);
-    const taken = removeWall(gated, wallAt(gated, 110, 114));
-    expect(taken.walls).toHaveLength(2);
-    expect(gateOf(taken)).toBeNull();
+  it("is down while a friend has knocked its section down, and back when it is put back", () => {
+    const gated = fenced(GATE_FROM);
+    const down = fronted({ ...gated, downed: [gateOf(gated)!] });
+    expect(gateOf(down)).toBeNull();
+    expect(down.walls).toHaveLength(gated.walls.length - 1);
+    expect(gateOf(fronted({ ...down, downed: [] }))).toEqual(gateOf(gated));
   });
 });
 
-describe("a piece of fence, moved", () => {
-  const fenced = () => {
-    let base = mine({ levels: { burrow: 4, oak: 1, store: 1, fence: 2, tower: 1, hut: 1 }, walls: [] });
-    for (const x of [100, 110, 120]) base = placeWall(base, x, 114);
-    return base;
-  };
+describe("the wall, slid", () => {
+  const fenced = () => fronted(mine({ levels: { burrow: 4, oak: 1, store: 1, fence: 3, tower: 1, hut: 1 } }));
 
-  it("goes to the square it is set down on, and the rest stay where they are", () => {
+  it("goes along the trail with its gate and every section, and stays where it is put", () => {
     const base = fenced();
-    const moved = moveWall(base, wallAt(base, 120, 114), 130, 114);
-    expect(moved.walls).toEqual([[100, 114], [110, 114], [130, 114]]);
-    // Onto the grid, wherever it is let go.
-    expect(moveWall(base, 0, 53, 97).walls[0]).toEqual([50, 94]);
-    // Set down where it was, nothing has happened.
-    expect(moveWall(base, 0, 100, 114).walls).toEqual(base.walls);
+    const [least] = wallRange(base);
+    const slid = slideWall(base, least);
+    expect(slid.front.x).toBe(least);
+    expect(slid.front.set).toBe(true);
+    expect(gateOf(slid)).toEqual([least, 84]);
+    expect(slid.walls.map(([, y]) => y)).toEqual(base.walls.map(([, y]) => y));
+    // Set where it already is, nothing has happened.
+    expect(slideWall(slid, least)).toBe(slid);
   });
 
-  it("is moved though every piece the fence allows is down, and not onto another piece or off the grass", () => {
-    let full = mine({ levels: { burrow: 4, oak: 1, store: 1, fence: 1, tower: 1, hut: 1 }, walls: [] });
-    // Along the back of the clearing, clear of every building.
-    for (let piece = 0; piece < 6; piece++) full = placeWall(full, 100 + piece * 10, 64);
-    expect(full.walls).toHaveLength(6);
-    // No more may be put down; one of them may still be moved.
-    expect(placeWall(full, 100, 114)).toBe(full);
-    expect(wallMoveBlocked(full, 0, 100, 114)).toBeNull();
-    expect(moveWall(full, 0, 100, 114).walls).toHaveLength(6);
-    // Not onto another piece.
-    expect(wallMoveBlocked(full, 0, 110, 64)).toBe("fence");
-    expect(moveWall(full, 0, 110, 64)).toBe(full);
-    // Nor up against a building.
-    expect(wallMoveBlocked(full, 0, full.spots.burrow[0], full.spots.burrow[1])).toBe("building");
-    // Nor a piece there is not.
-    expect(moveWall(full, 99, 100, 114)).toBe(full);
+  it("is never slid into the trees, nor past a building: nothing is left outside it", () => {
+    const base = fenced();
+    const [least, most] = wallRange(base);
+    expect(slideWall(base, -50).front.x).toBe(least);
+    expect(slideWall(base, 500).front.x).toBe(most);
+    // The leftmost building (the oak, where a camp begins) stands behind the wall at its furthest.
+    const far = slideWall(base, most);
+    const oak = far.spots.oak;
+    const at = far.walls.find(([, y]) => Math.abs(y - oak[1]) <= 5) ?? far.walls[0];
+    expect(oak[0]).toBeGreaterThan(at[0]);
   });
 
-  it("takes the gate with it when it is the gate", () => {
-    const gated = setGate(fenced(), 110, 114);
-    const moved = moveWall(gated, wallAt(gated, 110, 114), 110, 64);
-    expect(gateOf(moved)).toEqual([110, 64]);
-    // Another piece moved leaves the gate where it is.
-    expect(gateOf(moveWall(gated, wallAt(gated, 100, 114), 90, 114))).toEqual([110, 114]);
+  it("keeps buildings off the trail's side of it", () => {
+    const base = fenced();
+    const line = base.front.x;
+    expect(spotBlocked(base, "store", line - 10, 100)).toBe("fence");
+    expect(spotBlocked(base, "store", line + 40, 100)).toBeNull();
   });
 });

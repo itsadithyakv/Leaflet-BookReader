@@ -1,6 +1,9 @@
 import { useEffect, useRef } from "react";
 import { isTouchInput } from "../../platform/device";
-import { dropHeldTap, isQuickTap, isWordDoubleTap, letHeldTapGo, wordAround, type Tap } from "../wordTap";
+import { wordAround } from "../wordTap";
+import {
+  TAP_RUN_MAX, countTap, endTapRun, finishTapRun, glidingAt, isPageTap, markNotTap
+} from "../tapRun";
 import { OWN_CLICK, textAt, within } from "./usePageTurning";
 import type { WithCover } from "./scope";
 
@@ -64,14 +67,17 @@ export const wordRangeAt = (doc: Document, x: number, y: number): Range | null =
 };
 
 /**
- * By finger, a double tap on a word selects it (readers/wordTap.ts), and the
- * selection's bar comes up as for a press and hold: nothing is highlighted
- * until the bar is used. The first tap's own work, held by the scroll and
- * page taps (useTouchReading.ts, usePageTurning.ts), is dropped. A double tap
- * on a highlight, a name or a link is theirs: the first tap has opened it.
- * A mouse's double-click is the browser's own, as before.
+ * A finger's taps on the page (readers/tapRun.ts). Each click is first told
+ * from a scroll: a finger that moved or was held, a page that scrolled while
+ * it was down, or one still gliding when it came down (that touch only
+ * stopped it), is not a tap, and the page's own taps (useTouchReading.ts,
+ * usePageTurning.ts) pass it by. A tap is counted on the run of taps it
+ * lands with, and the third on a word selects that word, as a press and hold
+ * does: the selection's bar comes up, and nothing is highlighted until the
+ * bar is used. Three on a highlight, a name or a link are theirs: the first
+ * tap opened it. A mouse's clicks are the browser's own, as before.
  */
-export const useWordDoubleTap = (reader: WithCover) => {
+export const useTapRuns = (reader: WithCover) => {
   const { book, layout, loading, renditionRef, viewerRef } = reader;
   const latestRef = useRef(reader);
   latestRef.current = reader;
@@ -80,10 +86,31 @@ export const useWordDoubleTap = (reader: WithCover) => {
     if (loading || !rendition) {
       return undefined;
     }
-    let press: (Tap & { touch: boolean }) | null = null;
-    let last: (Tap & { doc: Document }) | null = null;
+    // When the page last scrolled. With pages it moves only for a turn, which
+    // a quick tap at a side makes on purpose: only scrolling is watched.
+    const frame = (rendition.manager as any)?.container as HTMLElement | undefined;
+    const scroller = layout === "scroll" ? frame : undefined;
+    let scrolledAt = Number.NEGATIVE_INFINITY;
+    const onScroll = () => {
+      scrolledAt = performance.now();
+    };
+    scroller?.addEventListener("scroll", onScroll, { passive: true });
+    let press: { at: number; x: number; y: number; touch: boolean; gliding: boolean } | null = null;
     const down = (event: PointerEvent) => {
-      press = event.isPrimary ? { at: performance.now(), x: event.clientX, y: event.clientY, touch: event.pointerType === "touch" } : null;
+      const at = performance.now();
+      // A finger on the page stops Smart Read's glide where it is: the page is theirs.
+      if (event.pointerType === "touch") {
+        latestRef.current.cancelSmartPageTurn();
+      }
+      press = event.isPrimary
+        ? {
+            at,
+            x: event.clientX,
+            y: event.clientY,
+            touch: event.pointerType === "touch",
+            gliding: glidingAt(at, scrolledAt)
+          }
+        : null;
     };
     const onClick = (event: MouseEvent) => {
       const from = press;
@@ -93,35 +120,38 @@ export const useWordDoubleTap = (reader: WithCover) => {
       }
       const now = performance.now();
       const doc = (event.target as Node | null)?.ownerDocument ?? null;
-      if (!doc || !isQuickTap(now - from.at, Math.hypot(event.clientX - from.x, event.clientY - from.y))) {
-        last = null;
-        letHeldTapGo(rendition);
+      const tapped = isPageTap({
+        moved: Math.hypot(event.clientX - from.x, event.clientY - from.y),
+        ms: now - from.at,
+        scrolled: scrolledAt > from.at,
+        gliding: from.gliding
+      });
+      if (!doc || !tapped) {
+        markNotTap(event);
+        finishTapRun(rendition);
         return;
       }
-      const tap = { at: now, x: event.clientX, y: event.clientY, doc };
-      const first = last && last.doc === doc ? last : null;
-      if (!isWordDoubleTap(first, tap)) {
-        last = tap;
-        letHeldTapGo(rendition);
-        return;
-      }
-      last = null;
-      const current = latestRef.current;
-      const onto = event.target as Node | null;
-      const target = onto?.nodeType === 1 ? (onto as Element) : (onto?.parentElement ?? null);
+      // In the window's coordinates: the taps of a run may fall in two chapters' frames.
       const frameBox = doc.defaultView?.frameElement?.getBoundingClientRect();
       const x = event.clientX + (frameBox?.left ?? 0);
       const y = event.clientY + (frameBox?.top ?? 0);
+      if (countTap(rendition, { at: now, x, y }) < TAP_RUN_MAX) {
+        return;
+      }
+      const current = latestRef.current;
+      const onto = event.target as Node | null;
+      const target = onto?.nodeType === 1 ? (onto as Element) : (onto?.parentElement ?? null);
       const viewer = viewerRef.current;
-      const onHighlight = viewer ? within(x, y, Array.from(viewer.querySelectorAll(".leaflet-highlight rect"), (mark) => mark.getBoundingClientRect()), 0) : false;
+      const marks = viewer
+        ? Array.from(viewer.querySelectorAll(".leaflet-highlight rect"), (mark) => mark.getBoundingClientRect())
+        : [];
       if (
         current.readingModeRef.current === "speed" ||
         event.defaultPrevented ||
         target?.closest?.(OWN_CLICK) ||
-        onHighlight ||
+        within(x, y, marks, 0) ||
         textAt(doc, event.clientX, event.clientY).name
       ) {
-        letHeldTapGo(rendition);
         return;
       }
       const range = wordRangeAt(doc, event.clientX, event.clientY);
@@ -133,11 +163,10 @@ export const useWordDoubleTap = (reader: WithCover) => {
         cfi = null;
       }
       if (!range || !cfi) {
-        letHeldTapGo(rendition);
         return;
       }
-      // The first tap's chrome, page turn or pause is not done; nor is this tap's.
-      dropHeldTap(rendition);
+      // What the first two taps would do (the chrome, a pause) is not done; nor is this tap's.
+      endTapRun(rendition);
       event.preventDefault();
       try {
         const picked = doc.defaultView?.getSelection?.();
@@ -159,7 +188,7 @@ export const useWordDoubleTap = (reader: WithCover) => {
         }
         bound.add(doc);
         doc.addEventListener("pointerdown", down, { passive: true });
-        // Ahead of the page's taps (the scroll's and the pages' are not capturing), so they find it taken.
+        // Ahead of the page's taps (theirs are not capturing), so they find it told.
         doc.addEventListener("click", onClick, true);
       });
     };
@@ -167,7 +196,8 @@ export const useWordDoubleTap = (reader: WithCover) => {
     rendition.on?.("rendered", bind);
     return () => {
       rendition.off?.("rendered", bind);
-      dropHeldTap(rendition);
+      scroller?.removeEventListener("scroll", onScroll);
+      endTapRun(rendition);
       (rendition.getContents?.() ?? []).forEach((contents: any) => {
         const doc = contents?.document as Document | undefined;
         doc?.removeEventListener("pointerdown", down);

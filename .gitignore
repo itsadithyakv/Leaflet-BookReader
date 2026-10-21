@@ -11,6 +11,8 @@ Thumbs.db
 # Tauri / Rust
 apps/src-tauri/target/
 apps/src-tauri/.tauri/
+# The Studio voice's engine, fetched once (apps/scripts/fetch-sherpa-onnx.mjs).
+apps/src-tauri/vendor/
 
 # Vite
 apps/node_modules/

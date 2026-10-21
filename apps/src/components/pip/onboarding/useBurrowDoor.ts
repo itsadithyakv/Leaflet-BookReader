@@ -1,7 +1,7 @@
 import { useEffect, useRef, type RefObject } from "react";
 import { pipEntry, pipExit, type CampLook } from "../arcade/base/scene";
 import { useCoachStore } from "./coachStore";
-import { doorBox, inDoor, sceneToScreen, whole } from "./geometry";
+import { doorBox, inDoor, sceneRectOf, sceneToScreen, whole } from "./geometry";
 import { STEP, doorOpen } from "./steps";
 import { welcome } from "./welcomeApi";
 
@@ -77,7 +77,7 @@ export const useBurrowDoor = ({
     const canvas = canvasRef.current;
     const seen = lookRef.current;
     if (!canvas || !seen) return null;
-    return whole(sceneToScreen(doorBox(seen.spots.burrow), canvas.getBoundingClientRect(), skyRef.current));
+    return whole(sceneToScreen(doorBox(seen.spots.burrow), sceneRectOf(canvas), skyRef.current));
   };
 
   const go = () => {

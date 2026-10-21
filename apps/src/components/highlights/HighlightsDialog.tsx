@@ -15,6 +15,7 @@ import { booksWithHighlights, countLabel, groupByChapter, orderHighlights } from
 import { KINDLE_TAG_ABOUT, isKindlePlace } from "../../library/kindleClippings";
 import { KindleImport } from "./KindleImport";
 import { SheetHandle } from "../ui/SheetHandle";
+import ScrollEdge from "../ui/ScrollEdge";
 import { useBackClose } from "../../hooks/useBackClose";
 import { backdropClose } from "../ui/backdrop";
 
@@ -135,6 +136,7 @@ const BooksView = () => {
         detail={listed.length > 0 ? `${countLabel(total, "highlight")} in ${countLabel(listed.length, "book")}` : undefined}
       />
       <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
+        <ScrollEdge edge="top" />
         {listed.length === 0 ? (
           <Empty>
             No highlights yet. Select some text while reading a book and Leaflet offers to highlight it or add a
@@ -149,6 +151,7 @@ const BooksView = () => {
             ))}
           </ul>
         )}
+        <ScrollEdge edge="bottom" />
       </div>
       <KindleImport />
     </>
@@ -333,6 +336,7 @@ const BookView = ({
         aria-labelledby={tabId(TABS_ID, tab)}
         className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1"
       >
+        <ScrollEdge edge="top" />
         {failed ? (
           <Empty>Leaflet couldn't read this book's highlights. Close this and try again.</Empty>
         ) : items === null ? (
@@ -428,6 +432,7 @@ const BookView = ({
             ))}
           </ul>
         )}
+        <ScrollEdge edge="bottom" />
       </div>
 
       {/* Always here, so a screen reader hears what is put into it. */}

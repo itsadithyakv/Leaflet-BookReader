@@ -72,8 +72,7 @@ export const useReaderChrome = (reader: WithKeys) => {
     reveal: revealChrome,
     hover: hoverChrome,
     toggle: toggleChrome,
-    hide: hideChrome,
-    backHides: chromeBackHides
+    hide: hideChrome
   } = useAutoHideChrome(
     fontPanelOpen ||
       bookmarkPanelOpen ||
@@ -98,5 +97,8 @@ export const useReaderChrome = (reader: WithKeys) => {
   const revealChromeRef = useRef(revealChrome);
   revealChromeRef.current = revealChrome;
 
-  return { people, peopleMarkedRef, chromeVisible, revealChrome, hoverChrome, toggleChrome, hideChrome, chromeBackHides, revealChromeRef };
+  return {
+    people, peopleMarkedRef, chromeVisible, revealChrome, hoverChrome, toggleChrome, hideChrome,
+    revealChromeRef
+  };
 };

@@ -38,6 +38,8 @@ export const LIFT_STOP = 34;
 export const LIFT_ARROW = 30;
 /** Under a finger each is a thumb's size (index.css gives them it on the same media query the hook asks). */
 export const LIFT_TOUCH = 44;
+/** The lift floating over a room that fills the screen: its two arrows and the floor it is on, drawn small (houseStage.css), pressed at a thumb's size. */
+export const LIFT_FLOATING = 104;
 
 /**
  * Whether every floor fits as its own stop in a lift this tall (with the up

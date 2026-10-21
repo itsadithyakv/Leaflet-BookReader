@@ -50,10 +50,11 @@ export const ReaderToolbar = ({ reader }: { reader: ReaderScope }) => {
           onClick={closeSheets}
         />
       )}
-      <div className="relative flex items-center gap-2 md:gap-4">
+      {/* The two groups of keys: on a wide screen each is a glass capsule over the page's edge (readers/glass.css). */}
+      <div className="reader-toolbar-group reader-toolbar-lead relative flex items-center gap-2 md:gap-4">
         <button
           type="button"
-          className="group flex items-center gap-2 transition-all reader-icon reader-hover-accent"
+          className="reader-exit-button group flex items-center gap-2 transition-all reader-icon reader-hover-accent"
           onClick={() => void exitGuard.requestClose()}
           onMouseEnter={() => exitGuard.guard()}
           title={exitGuard.locked ? "Focus lock is on: leaving ends the session" : undefined}
@@ -92,7 +93,7 @@ export const ReaderToolbar = ({ reader }: { reader: ReaderScope }) => {
           {book.author ?? "Unknown author"}
         </span>
       </div>
-      <div className="flex items-center gap-4 md:gap-6">
+      <div className="reader-toolbar-group reader-toolbar-trail flex items-center gap-4 md:gap-6">
         <div className="relative" ref={fontPanelRef}>
           <button
             className="reader-icon transition-colors reader-hover-accent"
@@ -200,5 +201,35 @@ export const ReaderToolbar = ({ reader }: { reader: ReaderScope }) => {
         <ReaderMoreMenu reader={reader} />
       </div>
     </header>
+  );
+};
+
+/**
+ * A phone's way back to the library, top left with the chrome (two taps on
+ * the page), as phones put it. It leaves as Android's Back does with nothing
+ * open (useReaderKeys): the place is saved as the book closes, and under
+ * focus lock Pip comes to the door with her "Hold to leave". It is not the
+ * way back after a jump ("Back to Chapter 3", readers/phoneReading.ts), and
+ * the bar's own arrow, which a phone does not show, is not drawn twice.
+ */
+export const ReaderPhoneBack = ({ reader }: { reader: ReaderScope }) => {
+  const { chromeVisible, exitGuard, shape } = reader;
+  if (!isPhoneShape(shape)) {
+    return null;
+  }
+  return (
+    <button
+      type="button"
+      className="reader-phone-back reader-icon"
+      onClick={() => exitGuard.back()}
+      aria-label="Back to library"
+      title="Back to library"
+      tabIndex={chromeVisible ? 0 : -1}
+      aria-hidden={chromeVisible ? undefined : true}
+    >
+      <span className="material-symbols-outlined" aria-hidden="true">
+        arrow_back
+      </span>
+    </button>
   );
 };

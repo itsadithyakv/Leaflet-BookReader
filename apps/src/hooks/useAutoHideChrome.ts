@@ -9,7 +9,7 @@ const LINGER_MS = 900;
 export type ChromeEvent =
   /** A tap in the middle of the page. */
   | "toggle"
-  /** A page turned by a finger, a tap at a side, text being selected, Android's Back. */
+  /** A page turned by a finger, a tap at a side, text being selected. */
   | "hide"
   /** The pointer at the top edge, keyboard focus into the bar. */
   | "reveal"
@@ -20,8 +20,9 @@ export type ChromeEvent =
  * Whether the chrome shows after `event`. `pinned`: one of its own panels is
  * open, and hiding the chrome would take the panel with it. `immersive`: a
  * phone (readers/touchLayout.ts, `isPhoneShape`), where the chrome comes only
- * for a tap in the middle of the page, and goes only for another, a page
- * turned or Back; nothing brings it by itself and no timer sends it away.
+ * for a tap in the middle of the page, and goes only for another or a page
+ * turned; nothing brings it by itself and no timer sends it away. (Android's
+ * Back leaves the book with it up: the chrome is not a thing open.)
  */
 export const chromeAfter = (visible: boolean, event: ChromeEvent, context: { pinned: boolean; immersive: boolean }): boolean => {
   switch (event) {
@@ -60,8 +61,7 @@ export const chromeAtOpen = (immersive: boolean) => !immersive;
  *
  * `immersive` (a phone): the book opens with no chrome at all, and only the
  * middle tap brings it (`chromeAfter`); it then stays, a panel opened from it
- * and closed again included, until another middle tap, a page turned, or
- * Android's Back, which sends it away before it leaves the book.
+ * and closed again included, until another middle tap or a page turned.
  */
 export const useAutoHideChrome = (pinned: boolean, immersive = false) => {
   const [visible, setVisible] = useState(() => chromeAtOpen(immersive));
@@ -156,13 +156,6 @@ export const useAutoHideChrome = (pinned: boolean, immersive = false) => {
     reveal,
     hover,
     toggle,
-    hide,
-    /**
-     * Android's Back sends the chrome away before it leaves the book (on a
-     * phone). Asked by the readers' own Back order once nothing else is open,
-     * so a panel or the chapter list closes first, then the chrome, then the
-     * book. Not while it is pinned: Back is the pinning panel's then.
-     */
-    backHides: immersive && visible && !pinned
+    hide
   };
 };

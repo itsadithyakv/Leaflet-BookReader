@@ -1,9 +1,12 @@
 import { UiIcon, type UiIconName } from "./UiIcon";
-import { useMediaQuery } from "../hooks/useMediaQuery";
+import { useShellShapeIs } from "../platform/shape";
 import { useTouchInput } from "../platform/device";
 
-/** Where the rail is shown (App.tsx: `md:block short:block`); elsewhere the bottom bar is the tour's "nav". */
-export const RAIL_QUERY = "(min-width: 768px), (max-height: 520px)";
+/**
+ * Whether the rail is shown (App.tsx: `md:block short:block`): every shape of window but upright
+ * (platform/shape.ts). Elsewhere the bottom bar is the tour's "nav".
+ */
+export const useRailShown = () => useShellShapeIs("wide", "sideways");
 
 const navItems = [
   { label: "Library", icon: "library" },
@@ -22,7 +25,7 @@ type SidebarProps = {
 };
 
 export const Sidebar = ({ activeItem, onNavigate, onStartReading, startDisabled, badge }: SidebarProps) => {
-  const shown = useMediaQuery(RAIL_QUERY);
+  const shown = useRailShown();
   // Under a finger (a phone or a tablet) the rail is the four places only: Settings is behind the
   // profile button in the header, and the book being read has its own bar with Continue on it.
   const touch = useTouchInput();

@@ -387,7 +387,10 @@ async fn the_apps_requests_fit_a_real_server() {
   assert_eq!(duels["duels"][0]["stake"], 25);
 
   // ---- a raid on a friend's camp, as the app's commands send and read it ----------------
-  // Ana and Ben follow each other by now, and each shows a camp.
+  // Ana and Ben follow each other by now, and each shows a camp. Raids are off
+  // until a reader turns them on (1.5.10), so Ben does.
+  let ben_on = server.save_profile(&ben, &cloud::ProfileUpdate { raidable: Some(true), ..cloud::ProfileUpdate::default() }).await;
+  assert_eq!(raidable_saved(&ben_on, true), Ok(()));
   let targets = list_or_none(Some(server.ok(Method::GET, "/v1/raids/targets", &ana, None).await), "targets");
   let bens = targets["targets"].as_array().expect("targets").iter().find(|target| target["handle"] == json!(ben.handle)).expect("a friend with a camp").clone();
   assert_eq!(bens["camp"], camp, "the camp to fight is the one on the profile");
@@ -410,7 +413,7 @@ async fn the_apps_requests_fit_a_real_server() {
   let off = server.save_profile(&ben, &cloud::ProfileUpdate { raidable: Some(false), ..cloud::ProfileUpdate::default() }).await;
   assert_eq!(raidable_saved(&off, false), Ok(()));
   let bens_own: cloud::Profile = serde_json::from_value(server.ok(Method::GET, "/v1/profile/me", &ben, None).await).expect("a profile");
-  assert!(!bens_own.raidable && mine.raidable, "off for Ben, and on for a reader who never touched it");
+  assert!(!bens_own.raidable && !mine.raidable, "off for Ben, and off for a reader who never touched it");
   let hidden = server.ok(Method::GET, "/v1/raids/targets", &ana, None).await;
   assert!(hidden["targets"].as_array().expect("targets").iter().all(|target| target["handle"] != json!(ben.handle)), "switched off, Ben is on nobody's list");
   let on = server.save_profile(&ben, &cloud::ProfileUpdate { raidable: Some(true), ..cloud::ProfileUpdate::default() }).await;

@@ -207,3 +207,61 @@ describe("removing a finished book", () => {
     expect(useLibraryStore.getState().books.map((entry) => [entry.id, entry.finishedAt])).toEqual([["a", "2026-03-01T10:00:00Z"]]);
   });
 });
+
+describe("the book being read", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    useLibraryStore.getState().resetAll();
+  });
+
+  const opened = (id: string) =>
+    useLibraryStore.getState().books.find((entry) => entry.id === id)?.lastOpened ?? null;
+
+  it("is the opened book at once, before the database answers", () => {
+    vi.spyOn(bookService, "updateProgress").mockReturnValue(new Promise(() => undefined));
+    useLibraryStore.setState({ books: [{ ...book("harbour"), lastOpened: null }] });
+    void useLibraryStore.getState().openBook(book("harbour"));
+    expect(opened("harbour")).not.toBeNull();
+  });
+
+  /**
+   * The bug this guards: a cover lookup started at launch answered with the
+   * book as it was read before the lookup, and its `lastOpened` (null) undid
+   * the opening, so the dock and one-tap Focus offered the book before it.
+   */
+  it("stays opened when a slow metadata lookup answers with the book as it was", async () => {
+    const lookup = held<Book>();
+    vi.spyOn(bookService, "refreshMetadata").mockReturnValue(lookup.promise);
+    vi.spyOn(bookService, "updateProgress").mockResolvedValue(undefined);
+    const before = { ...book("harbour"), genres: [], lastOpened: null, progress: 0 } as Book;
+    useLibraryStore.setState({ books: [before] });
+    const refreshing = useLibraryStore.getState().refreshMissingMetadata([before]);
+    await useLibraryStore.getState().openBook(before);
+    useLibraryStore.getState().updateBookProgress("harbour", 0.01);
+    lookup.finish({ ...before, genres: ["Sea"], metadataCheckedAt: "2026-10-17T10:00:00Z" });
+    await refreshing;
+    const now = useLibraryStore.getState().books[0];
+    expect(now.lastOpened).not.toBeNull();
+    expect(now.progress).toBe(0.01);
+    expect(now.genres).toEqual(["Sea"]);
+  });
+
+  it("keeps an opening a list read just before it would undo", async () => {
+    vi.spyOn(bookService, "list").mockResolvedValue([
+      { ...book("harbour"), lastOpened: null },
+      { ...book("garden"), lastOpened: "2026-10-17T09:00:00Z" }
+    ] as Book[]);
+    vi.spyOn(bookService, "finishedRemoved").mockResolvedValue([]);
+    vi.spyOn(bookService, "refreshMetadata").mockResolvedValue(null as unknown as Book);
+    useLibraryStore.setState({
+      books: [
+        { ...book("harbour"), lastOpened: "2026-10-17T10:40:00Z" },
+        { ...book("garden"), lastOpened: "2026-10-17T08:00:00Z" }
+      ]
+    });
+    await useLibraryStore.getState().loadBooks();
+    expect(opened("harbour")).toBe("2026-10-17T10:40:00Z");
+    // A later time from the database (another device's reading) stands.
+    expect(opened("garden")).toBe("2026-10-17T09:00:00Z");
+  });
+});

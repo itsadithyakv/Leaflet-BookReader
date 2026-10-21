@@ -13,7 +13,8 @@ import {
 import { sessionElapsedMs, useHabitStore } from "../store/habitStore";
 import { useLibraryStore } from "../store/libraryStore";
 import type { FocusSessionRecord } from "../services/habitService";
-import { clamp } from "./shelf/spine";
+import { clamp, giltOr } from "./shelf/spine";
+import { STICKER_TEXT } from "./shelf/dress";
 import {
   WEEKDAYS,
   buildRows,
@@ -43,6 +44,9 @@ import "./SessionShelf.css";
  * - loose pages are a day's reading outside any focus session (a free read)
  * - a gold bookend closes a week where the goal was met every day
  * - the wood itself levels up with the number of spines still standing
+ * - a sticker: a star for the week's longest session, a moon for a late-night
+ *   read, a coffee ring for an early-morning one (the binding, and a little
+ *   wear on older spines, are the book's and the years': `shelf/dress.ts`)
  *
  * What stands where is worked out in `shelf/rows.ts`.
  */
@@ -101,13 +105,14 @@ const prefersReducedMotion = () => {
 
 // ---- Popover ---------------------------------------------------------------
 
-type Tip =
+export type Tip =
   | { kind: "spine"; spine: Spine; x: number; y: number; below: boolean }
   | { kind: "bookend"; label: string; x: number; y: number; below: boolean };
 
 type ShowTip = (target: HTMLElement, content: { spine: Spine } | { bookend: string }) => void;
 
-const TipCard = ({ tip }: { tip: Tip }) => {
+/** The card a spine or bookend shows on hover, focus or tap. Exported for its tests. */
+export const TipCard = ({ tip }: { tip: Tip }) => {
   const style = { left: tip.x, top: tip.y } as CSSProperties;
   const className = `ss-tip${tip.below ? " is-below" : ""}`;
   if (tip.kind === "bookend") {
@@ -146,6 +151,7 @@ const TipCard = ({ tip }: { tip: Tip }) => {
           {spine.completed ? "Completed" : "Ended early"}
         </span>
       </p>
+      {spine.look?.sticker && <p className="ss-tip-meta">{STICKER_TEXT[spine.look.sticker]}</p>}
       {spine.bloomed && <p className="ss-tip-flower">A {spine.bloomed} bloomed: read to the end in full screen</p>}
       {session.notes && <p className="ss-tip-note">{session.notes}</p>}
       {spine.burned && <p className="ss-tip-burned">Burned when a streak broke · {burnedOn}. Streaks no longer burn books.</p>}
@@ -210,7 +216,14 @@ const WeekShelf = memo(({ row, dropId, showTip, hideTip }: WeekProps) => {
           if (spine.freeRead) classes.push("is-free");
           if (spine.loose) classes.push("is-loose");
           if (spine.id === dropId) classes.push("is-dropping");
+          const look = spine.look;
+          if (look) {
+            classes.push(`b-${look.binding}`);
+            if (look.sticker) classes.push("has-sticker");
+            if (look.wear) classes.push(`w-${look.wear}`);
+          }
           const tall = spine.height >= 84;
+          if (tall) classes.push("is-tall");
           return (
             <button
               key={spine.id}
@@ -221,7 +234,8 @@ const WeekShelf = memo(({ row, dropId, showTip, hideTip }: WeekProps) => {
                   "--h": `${spine.height}px`,
                   "--w": `${spine.width}px`,
                   "--cloth": spine.cloth,
-                  "--ink": spine.ink
+                  // Leather is lettered in gilt where the cloth carries it.
+                  "--ink": look?.binding === "leather" ? giltOr(spine.cloth) : spine.ink
                 } as CSSProperties
               }
               aria-label={spine.label}
@@ -238,6 +252,7 @@ const WeekShelf = memo(({ row, dropId, showTip, hideTip }: WeekProps) => {
                 {spine.completed && !spine.burned && <span className="ss-band" />}
                 <span className="ss-title">{spine.title}</span>
                 {tall && <span className="ss-day">{spine.start.getDate()}</span>}
+                {look?.sticker && <span className={`ss-sticker is-${look.sticker}`} />}
               </span>
               {session?.notes && !spine.burned && <span className="ss-ribbon" />}
               {spine.bloomed && !spine.burned && (

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { BATTLE_TICK, Battle } from "./battle";
 import { ANIMALS, GUARDIANS, GUARD_COSTS, GUARD_MINUTES, GUARD_MOST } from "./guards";
 import {
+  fronted,
   BUILDINGS,
   DECOR,
   DECOR_MOST,
@@ -18,6 +19,7 @@ import {
   fixCost,
   guardAt,
   guardBlocked,
+  guardCost,
   guardOf,
   hides,
   holds,
@@ -31,7 +33,6 @@ import {
   oakDrops,
   oakHolds,
   placeDecor,
-  placeWall,
   postOpen,
   readBase,
   removeDecor,
@@ -44,16 +45,17 @@ import {
   type BuildingId,
   type Now
 } from "./rules";
+import { beforeChapters } from "./testing";
 
 const DAY = "2026-10-12";
 const at = (minutes: number, day = DAY): Now => ({ minutes, day, lit: false });
 const camp = (change: Partial<BaseState> = {}, levels: Partial<Record<BuildingId, number>> = {}): BaseState => {
   const fresh = newBase(1000, DAY);
-  return { ...fresh, ...change, levels: { ...fresh.levels, ...levels } };
+  return beforeChapters({ ...fresh, ...change, levels: { ...fresh.levels, ...levels } });
 };
 /** A grown camp with a piece of fence down and a plot of the yard built: every guardian's post is there to be taken. */
 const grown = (change: Partial<BaseState> = {}) =>
-  placeWall(camp({ acorns: 5000, yard: [{ kind: "hive", level: 1 }, { kind: null, level: 0 }], ...change }, { burrow: 4, oak: 3, store: 3, fence: 2, tower: 3, hut: 3 }), 150, 94);
+  fronted(camp({ acorns: 5000, yard: [{ kind: "hive", level: 1 }, { kind: null, level: 0 }], ...change }, { burrow: 4, oak: 3, store: 3, fence: 2, tower: 3, hut: 3 }));
 const ranks = (rank: number, only?: number) => GUARDIANS.map((guard) => (only === undefined || guard.id === only ? rank : 0));
 const part = (state: BaseState, kind: string, name?: string) => campStructures(state, false).find((entry) => entry.kind === kind && (!name || entry.look?.name === name))!;
 
@@ -65,10 +67,10 @@ describe("every upgrade to a building", () => {
     };
     const levels = [1, 2, 3, 4, 5];
     rising(levels.map((to) => oakDrops(level("oak", to))), "what the oak drops");
-    rising(levels.map((to) => oakHolds(level("oak", to))), "what the oak holds");
-    rising(levels.map((to) => holds(level("store", to))), "what the larder holds");
+    rising(levels.map((to) => oakHolds(level("oak", to))), "how full the oak looks");
     rising(levels.map((to) => hides(level("store", to))), "what the larder hides");
-    rising(levels.map((to) => fencePieces(level("fence", to))), "pieces of fence");
+    // The wall (1.5.11): longer, then tougher, at every level.
+    rising(levels.map((to) => campStructures(fronted(level("fence", to)), false).filter((entry) => entry.kind === "wall").reduce((sum, entry) => sum + entry.max, 0)), "the wall, all told");
     rising(levels.map((to) => part(level("tower", to), "perch").range), "how far the lookout throws");
     rising(levels.map((to) => part(level("tower", to), "perch").hit), "how hard the lookout throws");
     rising(levels.map((to) => scoutsOf(level("hut", to))), "scouts");
@@ -108,31 +110,28 @@ describe("the guardians", () => {
     for (const guard of GUARDIANS) expect(postOpen(ready, guard.id), guard.name).toBe(true);
     // The lookout's needs a lookout worth standing on; the fence's a piece of fence down; the yard's a plot built.
     expect(postOpen({ ...ready, levels: { ...ready.levels, tower: 1 } }, 0)).toBe(false);
-    expect(postOpen({ ...ready, walls: [] }, 1)).toBe(false);
+    expect(postOpen({ ...ready, levels: { ...ready.levels, fence: 0 } }, 1)).toBe(false);
     expect(postOpen({ ...ready, yard: [{ kind: null, level: 0 }, { kind: null, level: 0 }] }, 5)).toBe(false);
   });
 
-  it("are paid for in acorns and trained by reading, one at a time, three ranks each", () => {
+  it("are paid for in acorns, training and all, and take up their post at once, three ranks each", () => {
     const ready = grown();
-    expect(guardBlocked({ ...ready, acorns: GUARD_COSTS[1] - 1 }, 0)).toBe("acorns");
-    const begun = trainGuard(ready, 0, 1000);
-    expect(begun.acorns).toBe(ready.acorns - GUARD_COSTS[1]);
-    expect(begun.drill).toEqual({ guard: 0, from: 1000, needs: GUARD_MINUTES[1] });
-    expect(guardOf(begun, 0)).toBe(0);
-    expect(guardBlocked(begun, 3)).toBe("busy");
-    expect(trainGuard(begun, 3, 1000)).toBe(begun);
-    expect(drillLeft(begun, 1005)).toBe(GUARD_MINUTES[1] - 5);
-    // Nothing but reading finishes it.
-    expect(guardOf(settle(begun, at(1000 + GUARD_MINUTES[1] - 1, "2026-12-01")), 0)).toBe(0);
-    const posted = settle(begun, at(1000 + GUARD_MINUTES[1]));
+    // A rank's price: its acorns and its training's minutes at half an acorn each (130, 323, 640).
+    expect([1, 2, 3].map(guardCost)).toEqual([1, 2, 3].map((rank) => GUARD_COSTS[rank] + Math.round(GUARD_MINUTES[rank] / 2)));
+    expect(guardBlocked({ ...ready, acorns: guardCost(1) - 1 }, 0)).toBe("acorns");
+    const paid = trainGuard(ready, 0, 1000);
+    expect(paid.acorns).toBe(ready.acorns - guardCost(1));
+    // No reading wanted: the next look at the camp (the store does it straight away) has them at their post.
+    expect(drillLeft(paid, 1000)).toBe(0);
+    const posted = settle(paid, at(1000));
     expect(guardOf(posted, 0)).toBe(1);
     expect(posted.drill).toBeNull();
     expect(posted.events[0].text).toBe("Halvar Longstride has taken up a post at the camp.");
     let top = posted;
-    for (let rank = 2; rank <= GUARD_MOST; rank++) top = settle(trainGuard(top, 0, 2000 * rank), at(2000 * rank + GUARD_MINUTES[rank]));
+    for (let rank = 2; rank <= GUARD_MOST; rank++) top = settle(trainGuard(top, 0, 1000), at(1000));
     expect(guardOf(top, 0)).toBe(GUARD_MOST);
     expect(guardBlocked(top, 0)).toBe("top");
-    expect(top.acorns).toBe(ready.acorns - GUARD_COSTS[1] - GUARD_COSTS[2] - GUARD_COSTS[3]);
+    expect(top.acorns).toBe(ready.acorns - guardCost(1) - guardCost(2) - guardCost(3));
   });
 
   it("each do one thing for the camp, and more of it at every rank", () => {
@@ -142,7 +141,7 @@ describe("the guardians", () => {
       for (let rank = 1; rank < numbers.length; rank++) expect(numbers[rank], `${who}, rank ${rank}`).toBeGreaterThan(numbers[rank - 1]);
     };
     rising(each((state) => part(state, "perch").range, 0), "Halvar: the lookout's reach");
-    rising(each((state) => part(state, "wall").max, 1), "Corwin: a piece of fence");
+    rising(each((state) => part(state, "wall").max, 1), "Corwin: a section of the wall");
     rising(each((state) => nightRaiders(state).slowed ?? 0, 2), "Mossgather: how much slower they come");
     rising(each((state) => part(state, "hoard").max, 3), "Dame Berit: the larder");
     rising(each((state) => part(state, "hoard").hit, 4), "Emberling: what the larder breathes");
@@ -222,7 +221,9 @@ describe("the animals", () => {
     expect(settle(egg, at(1000)).parcels).toBe(egg.parcels);
     expect(settle(egg, at(1000, "2026-10-13")).parcels).toBe(egg.parcels + 1);
     expect(nightRaiders(has(1)).capacity).toBe(nightRaiders(base).capacity - 1);
-    expect(fencePieces(has(2))).toBe(fencePieces(base) + 2);
+    // The goat leans on the wall (1.5.11: it was two more pieces of fence): a quarter tougher.
+    const wall = (state: BaseState) => part(fronted(state), "wall").max;
+    expect(wall(has(2))).toBe(Math.round(wall(base) * 1.25));
     expect(fencePieces({ ...has(2), levels: { ...base.levels, fence: 0 } })).toBe(0);
     expect(sideKnown(base)).toBe(false);
     expect(sideKnown(has(3))).toBe(true);

@@ -10,6 +10,11 @@
     <!-- Read aloud (ReadAloud.kt): the voice reads on with the screen off, in a
          media-playback service with its notification. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- The Studio voice (StudioVoice.kt): the phone kept awake while it makes
+         speech ahead of the voice with the screen off, and whether the network
+         is metered before its pack downloads. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!-- Read aloud speaks with the phone's text-to-speech engine, which has to
          be visible to Leaflet to be bound (Android 11 and on). -->

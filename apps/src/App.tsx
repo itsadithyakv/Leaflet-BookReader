@@ -1,4 +1,7 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,
+  type CSSProperties
+} from "react";
 import { useShallow } from "zustand/react/shallow";
 import { isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -27,6 +30,7 @@ import { loadBookScenes } from "./pip/core";
 const DUSTY_BOOK_DAYS = 30;
 import { MobileNav } from "./components/MobileNav";
 import { UiIcon } from "./components/UiIcon";
+import { clothStyle } from "./components/shelf/spine";
 import { LibraryPage } from "./pages/LibraryPage";
 import { useLibraryStore } from "./store/libraryStore";
 import { watchSyncMoments } from "./services/syncTiming";
@@ -45,13 +49,14 @@ import { DiscussDialogs } from "./components/discuss/DiscussDialogs";
 import { SeriesEditorDialog } from "./components/SeriesEditor";
 import { useHighlightsStore } from "./components/highlights/highlightsStore";
 import { useLibrarySearchStore } from "./components/search/librarySearchStore";
-import { RatePrompt, openStoreReview } from "./components/RatePrompt";
+import { RatePrompt, noteBookClosed, noteBookOpened, openStoreReview } from "./components/RatePrompt";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { ReminderOptIn } from "./components/ReminderOptIn";
 import { useLargeBookPrompt } from "./hooks/useLargeBookPrompt";
 import { usePageCovers } from "./hooks/usePageCovers";
 import { useReminders } from "./hooks/useReminders";
 import { useContinueShortcut } from "./platform/continueShortcut";
+import { followAppTheme } from "./platform/android";
 import { useAppearanceStore, watchSystemTheme } from "./store/appearanceStore";
 import { bookService } from "./services/bookService";
 import { converterOffer, converterService, type ConverterOffer } from "./services/converterService";
@@ -62,9 +67,13 @@ import { requestSettingsSection } from "./pages/settingsSection";
 import { useBackFallback } from "./platform/back";
 import { useVolumePageTurns } from "./platform/volumeKeys";
 import { useTouchInput } from "./platform/device";
+import { watchHeaderRoom } from "./platform/headerRoom";
 import { useBackClose } from "./hooks/useBackClose";
 import { TouchTips } from "./components/TouchTipLayer";
 import { SheetHandle } from "./components/ui/SheetHandle";
+import GradualBlur from "./components/ui/GradualBlur";
+import ScrollEdge, { PAGE_TINT } from "./components/ui/ScrollEdge";
+import LiquidGlassDefs from "./components/ui/LiquidGlassDefs";
 import { requestAddBooks } from "./hooks/useAddBooksRequest";
 import {
   findBookFormat,
@@ -125,6 +134,10 @@ const NODS_SEEN_KEY = "leaflet.pip.nodsSeen";
 const WELCOME_KEY = "leaflet.welcomed";
 /** Whether the bar at the foot of the page (the book being read) is made small. */
 const DOCK_SMALL_KEY = "leaflet.nowReading.small";
+/** The dock's cover with no picture: the book's cloth on a phone, as in the library. */
+const DOCK_CLOTH_CLASS =
+  "cloth-cover flex h-full w-full items-center justify-center " +
+  "bg-surface-container-high text-on-surface-variant";
 
 const tabLabels: Record<Tab, string> = {
   library: "Library",
@@ -188,6 +201,25 @@ const App = () => {
   // For long-lived listeners that need to know whether a book is open.
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
+  // A book on its way in (a pull, a converter check): shown at once, and further taps wait for it.
+  const [openingBook, setOpeningBook] = useState<Book | null>(null);
+  const openingRef = useRef(openingBook);
+  openingRef.current = openingBook;
+  // The reader's code is fetched once the app has settled, so the first book opens without waiting for it.
+  useEffect(() => {
+    const warm = () => void import("./pages/ReaderView").catch(() => undefined);
+    // Not every WebView has idle callbacks; a timer does as well.
+    const handle = window.setTimeout(warm, 2500);
+    return () => window.clearTimeout(handle);
+  }, []);
+  const openingVeil = (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90" role="status" aria-live="polite">
+      <div className="paper-surface flex items-center gap-3 rounded-xl px-5 py-4 text-sm">
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        Opening book…
+      </div>
+    </div>
+  );
 
   // With a book open, the library underneath is out of reach: Tab no longer
   // walks its hidden buttons, and Enter on one cannot reopen a book behind
@@ -251,6 +283,7 @@ const App = () => {
   const loadWardrobe = usePipWardrobeStore((state) => state.load);
   const fullscreenLockRef = useRef(false);
   const theme = useAppearanceStore((state) => state.theme);
+  const followSystem = useAppearanceStore((state) => state.followSystem);
   const highlightsOpen = useHighlightsStore((state) => state.view !== null);
   const librarySearchOpen = useLibrarySearchStore((state) => state.query !== null);
   const quoteOpen = useShareStore((state) => state.quote !== null);
@@ -278,6 +311,8 @@ const App = () => {
   }, []);
 
   useEffect(() => watchSystemTheme(), []);
+  // Android draws its bars and its pickers by the phone's dark mode: told the app's instead.
+  useEffect(() => followAppTheme(theme, followSystem), [theme, followSystem]);
 
   usePipReactions(selected !== null);
   // On Android, the volume keys turn the open book's pages (platform/volumeKeys.ts).
@@ -329,6 +364,7 @@ const App = () => {
   // Closing a book is the moment progress and the habit ledger have changed, so
   // it is when a backup is worth taking. Imports and deletes schedule their own.
   const closeReader = useCallback(() => {
+    noteBookClosed();
     setSelected(null);
     setOpenAt(null);
     requestBackup();
@@ -435,6 +471,7 @@ const App = () => {
     } else {
       showBookNod(book);
     }
+    noteBookOpened();
     setSelected(book);
     setOpenAt(at);
     // A session started on no book is of the one now opened.
@@ -457,11 +494,21 @@ const App = () => {
   };
 
   /** `at` is a place to open at (a highlight's) rather than the saved one; it rides along every way in. */
-  const handleOpenBook = (book: Book, at: string | null = null) => {
+  const handleOpenBook = (book: Book, at: string | null = null, resumed = false) => {
+    // A second tap while a book is still on its way in would open it twice.
+    if (openingRef.current && !resumed) {
+      return;
+    }
     // A pull first; then the book opens where this device left it, with
     // another device's place offered, never taken silently (services/placeElsewhere).
+    // The page shows the book opening at once: the pull can take a moment, and a
+    // tap with nothing to show for it looked missed (the owner, 2026-10-21).
     if (at === null && !placeChecked(book)) {
-      void withPlaceHere(book).then((ready) => handleOpenBookRef.current(ready, null));
+      setOpeningBook(book);
+      void withPlaceHere(book).then((ready) => {
+        setOpeningBook(null);
+        handleOpenBookRef.current(ready, null, true);
+      });
       return;
     }
     // Listed here (the account brought it) but with nowhere to fetch its file
@@ -510,9 +557,11 @@ const App = () => {
       return;
     }
 
+    setOpeningBook(book);
     bookService
       .needsConverter(book.id)
       .then(async (required) => {
+        setOpeningBook(null);
         if (required) {
           // Asked before the prompt opens, so it never shows the wrong offer.
           const info = await converterService.status().catch(() => null);
@@ -524,6 +573,7 @@ const App = () => {
         }
       })
       .catch(() => {
+        setOpeningBook(null);
         // Let the reader surface the backend's specific reason instead of
         // guessing that the converter is the problem.
         openPreparedBook(book, at);
@@ -721,7 +771,21 @@ const App = () => {
   // scroll, and the CSS confines all of this to small or short viewports, so a
   // desktop window keeps its fixed header.
   const [headerHidden, setHeaderHidden] = useState(false);
+  const headerHiddenRef = useRef(false);
   const lastScrollRef = useRef(0);
+  // There the header lies over the page, which scrolls up through its room
+  // (index.css): the shell is told how tall the header's body is, before the
+  // first paint; the status bar's part of it is CSS's (platform/headerRoom.ts).
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const headerRef = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    const shell = shellRef.current;
+    const header = headerRef.current;
+    if (!shell || !header) {
+      return;
+    }
+    return watchHeaderRoom(shell, header);
+  }, []);
 
   const handleMainScroll = useCallback((event: React.UIEvent<HTMLElement>) => {
     const top = event.currentTarget.scrollTop;
@@ -731,7 +795,12 @@ const App = () => {
     if (Math.abs(top - previous) > 6) {
       // The account panel is anchored to the header, so sliding the header away
       // would take the panel with it.
-      setHeaderHidden(!accountPanelOpen && top > previous && top > 72);
+      // Set only when it changes: this runs on every scroll event, and App is the whole shell.
+      const hide = !accountPanelOpen && top > previous && top > 72;
+      if (hide !== headerHiddenRef.current) {
+        headerHiddenRef.current = hide;
+        setHeaderHidden(hide);
+      }
       lastScrollRef.current = top;
     }
   }, [accountPanelOpen]);
@@ -1037,6 +1106,7 @@ const App = () => {
   };
 
   const resolvedNowReadingCover = nowReadingFallback ?? nowReadingCover;
+  const nowReadingCloth = clothStyle(nowReading?.id || nowReading?.title || "") as CSSProperties;
   // Page-image formats (PDF, comics) use the page reader; everything else is
   // reflowable text.
   const selectedDelivery = selected
@@ -1092,12 +1162,38 @@ const App = () => {
   pipActions.push({ id: "rate", label: "Rate Leaflet ★", run: () => void openStoreReview() });
 
   return (
-    <div className="app-shell flex flex-col font-body text-on-surface selection:bg-primary-container selection:text-on-primary-container">
+    <div
+      ref={shellRef}
+      className="app-shell flex flex-col font-body text-on-surface selection:bg-primary-container selection:text-on-primary-container"
+      // What the shell's rules key on (not `:has()`, which made every insertion restyle the whole page:
+      // styles/hasSelectors.test.ts): the book being read's bar at the foot, and the header away.
+      data-dock={nowReading && activeTab !== "pip" ? (dockSmall ? "small" : "full") : undefined}
+      data-header-hidden={headerHidden ? "" : undefined}
+    >
       <header
+        ref={headerRef}
         className={`app-header paper-toolbar sticky top-0 z-50 flex w-full shrink-0 items-center justify-between gap-2 border-x-0 border-t-0 py-3 md:gap-4 ${
           headerHidden ? "app-header-hidden" : ""
         }`}
       >
+        {/* Where the header floats over the page (a phone, a narrow window), this is its glass:
+            the page going up under it blurs and fades in a ramp, and only while some is there
+            (styles/glass.css, `.app-header-edge`; not drawn beside the rail on a desktop). */}
+        <GradualBlur
+          className="app-header-edge"
+          position="top"
+          height="calc(100% + 1.75rem)"
+          strength={2}
+          layers={6}
+          touchLayers={3}
+          curve="ease-out"
+          tint="rgb(var(--color-background) / 0.9)"
+          autoHide
+          container=".app-main-scroll"
+          duration={0.2}
+          zIndex={-1}
+          style={{ top: "-1px", left: "-1px", right: "-1px" }}
+        />
         <div className="flex shrink-0 items-center gap-3">
           {/* Pip is the logo, and the logo is Pip's home: it hops out of here
               into the app and comes back here to rest. */}
@@ -1111,7 +1207,7 @@ const App = () => {
         </div>
         {/* Below `md` the Library page carries search itself, full width and in
             context, which is a better home for it than a squeezed header. */}
-        <div className="hidden min-w-0 flex-1 md:block md:px-6">
+        <div className="header-search hidden min-w-0 flex-1 md:block md:px-6">
           <div className="relative mx-auto max-w-xl" data-tour="search">
             <UiIcon
               name="search"
@@ -1211,6 +1307,9 @@ const App = () => {
           className="app-main-scroll relative min-w-0 flex-1 overflow-y-auto overscroll-y-contain bg-transparent px-4 py-6 md:px-8 md:py-8"
           onScroll={handleMainScroll}
         >
+          {/* The page meets the toolbar beside the rail in a ramp of blur, not a hard line
+              (not on Pip's own page, which keeps its paper). */}
+          {activeTab !== "pip" && <ScrollEdge edge="top" className="app-main-edge" height="3rem" strength={1.25} tint={PAGE_TINT} />}
           {/* Pip stands in here while it is on a card, so it scrolls with the
               card natively instead of chasing it a frame behind. */}
           <div className="pip-scroll-layer" data-pip-scroll-layer />
@@ -1250,6 +1349,9 @@ const App = () => {
             )}
             {activeTab === "settings" && <SettingsPage showToast={showToast} />}
           </Suspense>
+          {activeTab !== "pip" && (
+            <ScrollEdge edge="bottom" className="app-main-edge" height="4.5rem" strength={1.75} touchLayers={2} tint={PAGE_TINT} />
+          )}
         </main>
       </div>
 
@@ -1267,8 +1369,9 @@ const App = () => {
               {resolvedNowReadingCover ? (
                 <img src={resolvedNowReadingCover} alt="" className="h-full w-full object-cover" onError={handleNowReadingError} />
               ) : (
-                <span className="flex h-full w-full items-center justify-center bg-surface-container-high text-on-surface-variant">
-                  <UiIcon name="book-open" size={15} strokeWidth={1.7} />
+                <span className={DOCK_CLOTH_CLASS} style={nowReadingCloth}>
+                  <UiIcon name="book-open" size={15} strokeWidth={1.7}
+                    className="cloth-cover-note" />
                 </span>
               )}
             </button>
@@ -1296,8 +1399,9 @@ const App = () => {
                   onError={handleNowReadingError}
                 />
               ) : (
-                <div className="flex h-full w-full items-center justify-center bg-surface-container-high text-on-surface-variant">
-                  <UiIcon name="book-open" size={19} strokeWidth={1.7} />
+                <div className={DOCK_CLOTH_CLASS} style={nowReadingCloth}>
+                  <UiIcon name="book-open" size={19} strokeWidth={1.7}
+                    className="cloth-cover-note" />
                 </div>
               )}
             </div>
@@ -1454,17 +1558,10 @@ const App = () => {
         </div>
       )}
 
+      {openingBook && !selected && openingVeil}
+
       {selected && (
-        <Suspense
-          fallback={
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90">
-              <div className="paper-surface flex items-center gap-3 rounded-xl px-5 py-4 text-sm">
-                <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                Opening book…
-              </div>
-            </div>
-          }
-        >
+        <Suspense fallback={openingVeil}>
           {selectedDelivery === "pdf" || selectedDelivery === "comic" ? (
             <PageReaderView
               key={selected.id}
@@ -1541,6 +1638,8 @@ const App = () => {
       <AccountHoldsSheet />
       {/* A held finger reads any tooltip (docs/android.md, rule 3). */}
       {touch && <TouchTips />}
+      {/* The lenses every liquid-glass surface bends what is behind it through. */}
+      <LiquidGlassDefs />
 
     </div>
   );

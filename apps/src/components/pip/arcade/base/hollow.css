@@ -1,0 +1,1907 @@
+/* ---- The Hollow, laid out for a finger (1.5.8) ------------------------------------------------------------
+   BaseScreen's sheets and lists, the chips' cards, the three pointers, and the camera's key: in Pip's paper (a hard
+   ink line, notched corners, the --hud-* and --whim-* colours), never the app's glass. Small text is fine here (the
+   owner asked for it so it fits), never under 11 px. On a phone held sideways (html[data-shape="sideways"], the
+   stage) the panel is a card down one side, at most 40 % of the width and 300 px, on whichever side keeps the chosen
+   thing in view (BaseScreen's `bring` keeps the same figures); the keys along the top and the foot are slimmer, so
+   the picture has the room. Nothing moves on hover but what is inside a control. */
+
+/* ---- The panel: a list of a shelf, or one thing's sheet --------------------------------------------------- */
+
+.pip-arcade .pip-base-side .pip-base-side-bar {
+  position: absolute;
+  top: 7px;
+  right: 9px;
+  left: 9px;
+  z-index: 3;
+  display: flex;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.pip-arcade .pip-base-side .pip-base-side-bar > * {
+  pointer-events: auto;
+}
+
+.pip-arcade .pip-base-side .pip-base-side-bar > .pip-base-side-close {
+  margin-left: auto;
+}
+
+/* The bar's keys are small and sit over the card's corners (a thumb's reach comes from the ring round them). */
+.pip-arcade .pip-base-side .pip-base-side-bar > .pip-base-round.pip-base-round {
+  position: relative;
+  width: 28px;
+  height: 28px;
+}
+
+.pip-arcade .pip-base-side .pip-base-side-bar > .pip-base-round::after {
+  position: absolute;
+  inset: -8px;
+  content: "";
+}
+
+.pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-side > .pip-base-side-scroll {
+  padding: 3px 3px 10px;
+}
+
+/* On the left, when what was chosen is on the right of the picture. */
+.pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-side.pip-base-side[data-side="left"] {
+  right: auto;
+  left: 12px;
+}
+
+/* A card: its header has room for the bar's keys at its corners. */
+.pip-arcade .pip-sheet {
+  margin-top: 0;
+  padding: 9px 11px 11px;
+  color: var(--hud-ink);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.pip-arcade .pip-base-side .pip-sheet-head,
+.pip-arcade .pip-base-side .pip-sheet > .pip-sheet-title:first-child {
+  padding-right: 30px;
+}
+
+.pip-arcade .pip-base-side:has(.pip-base-side-back) .pip-sheet-head,
+.pip-arcade .pip-base-side:has(.pip-base-side-back) .pip-sheet > .pip-sheet-title:first-child {
+  padding-left: 30px;
+}
+
+.pip-sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.pip-sheet-pic {
+  display: inline-flex;
+  width: 44px;
+  height: 42px;
+  flex: none;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 3px;
+  background: radial-gradient(ellipse 20px 5px at 50% calc(100% - 4px), var(--whim-leaf) 0 97%, transparent 100%);
+}
+
+.pip-arcade .pip-sheet-title {
+  display: flex;
+  align-items: center;
+  font-family: "ZT Nature", "Segoe UI", system-ui, sans-serif;
+  font-size: 0.9375rem;
+  font-weight: 800;
+  line-height: 1.2;
+  color: var(--hud-ink);
+}
+
+.pip-sheet-title[title] {
+  cursor: help;
+}
+
+/* What it does now: one short line, small. */
+.pip-sheet-now {
+  display: block;
+  color: var(--hud-ink-soft);
+  font-size: 0.75rem;
+  line-height: 1.3;
+}
+
+.pip-arcade .pip-sheet-label {
+  margin-top: 8px;
+  color: var(--hud-ink-soft);
+  font-size: 0.6875rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pip-sheet-label-more {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* The next level: what it brings, and what it needs. */
+.pip-sheet-next {
+  margin-top: 8px;
+  padding-top: 2px;
+  border-top: 2px dashed var(--hud-track);
+}
+
+.pip-sheet-next > .pip-sheet-label {
+  margin-top: 6px;
+}
+
+.pip-sheet-brings {
+  margin-top: 1px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+/* (What the Hollow's next level opens: the list's own row of pictures, without its heading, which the label says.) */
+.pip-sheet .pip-ladder-brings {
+  margin-top: 6px;
+  padding-top: 0;
+  border-top: 0;
+  font-size: 0.75rem;
+}
+
+.pip-sheet .pip-ladder-brings-at {
+  display: none;
+}
+
+.pip-sheet-needs {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 7px;
+  list-style: none;
+}
+
+.pip-sheet-needs > li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 6px;
+  background: var(--hud-face);
+  box-shadow: inset 0 0 0 2px var(--hud-track);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.pip-sheet-needs > li.is-short {
+  box-shadow: inset 0 0 0 2px var(--whim-bad, #e0806b);
+}
+
+.pip-sheet-need-icon {
+  display: inline-flex;
+  width: 16px;
+  flex: none;
+  justify-content: center;
+  color: var(--hud-ink-soft);
+}
+
+.pip-sheet-need-mark {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  background: var(--whim-bad, #e0806b);
+  color: var(--whim-bad-ink, #3b130b);
+}
+
+.pip-sheet-needs > li.is-ok .pip-sheet-need-mark {
+  background: var(--whim-leaf);
+  color: #10230f;
+}
+
+/* The keys: the one that builds first, and whatever else the building does. */
+.pip-sheet-keys {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+/* A key that cannot be pressed yet looks it, and says why when pressed (aria-disabled, so a tap still reaches it). */
+.pip-arcade .pip-sheet .tactile-button[aria-disabled="true"],
+.pip-arcade .pip-base-side .tactile-button[aria-disabled="true"] {
+  filter: grayscale(0.7);
+  opacity: 0.62;
+}
+
+.pip-sheet-why {
+  color: var(--hud-ink-soft);
+  font-size: 0.75rem;
+}
+
+.pip-sheet-why.is-said {
+  margin-top: 6px;
+  padding: 4px 7px;
+  background: var(--whim-butter);
+  color: var(--hud-ink);
+  font-weight: 700;
+  box-shadow: 0 0 0 2px var(--hud-line);
+}
+
+/* An empty plot: each thing it could be. */
+.pip-sheet-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 9px;
+  list-style: none;
+}
+
+.pip-sheet-choices > li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  background: var(--hud-face);
+  box-shadow: inset 0 0 0 2px var(--hud-track);
+}
+
+.pip-arcade .pip-sheet .pip-base-guard {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 2px dashed var(--hud-track);
+}
+
+.pip-arcade .pip-sheet .pip-base-guard.is-alone {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+/* ---- A list: one row a thing, its picture, its name, how it stands, its level ---------------------------- */
+
+.pip-base-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 7px;
+}
+
+.pip-arcade .pip-base-row {
+  position: relative;
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 7px 3px 4px;
+  background: var(--hud-face);
+  color: var(--hud-ink);
+  text-align: left;
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line);
+  transition: background-color 120ms ease;
+}
+
+.pip-arcade .pip-base-row + .pip-base-row {
+  margin-top: 4px;
+}
+
+.pip-arcade .pip-base-row:hover,
+.pip-arcade .pip-base-row.is-chosen {
+  background: var(--whim-butter);
+}
+
+.pip-arcade .pip-base-row:active {
+  background: var(--hud-face-hover);
+}
+
+.pip-arcade .pip-base-row:focus-visible {
+  outline: 2px solid var(--hud-line);
+  outline-offset: 3px;
+}
+
+.pip-base-row-pic {
+  display: inline-flex;
+  width: 34px;
+  height: 32px;
+  flex: none;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.pip-base-row-pic > svg {
+  align-self: center;
+}
+
+.pip-base-row-text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.pip-base-row-name {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.pip-base-row-status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--hud-ink-soft);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.pip-base-row-status.is-good {
+  color: var(--whim-good-ink, #1f5a2c);
+  font-weight: 800;
+}
+
+.pip-base-row-status.is-bad {
+  color: var(--whim-bad-ink, #8a2b1a);
+  font-weight: 800;
+}
+
+.pip-base-row-status .pip-base-acorns {
+  gap: 2px;
+}
+
+.pip-base-row-level {
+  flex: none;
+  padding: 1px 6px 2px;
+  background: var(--whim-butter);
+  font-size: 0.6875rem;
+  font-weight: 800;
+  box-shadow: 0 0 0 2px var(--hud-line);
+}
+
+/* The next thing on Pip's list is done here. */
+.pip-base-row > .pip-base-nudge {
+  top: -6px;
+  right: -6px;
+}
+
+/* ---- The chips along the top: tapped, each says what it is ------------------------------------------------ */
+
+.pip-arcade .pip-base-chip.pip-hud-chip {
+  cursor: pointer;
+}
+
+.pip-arcade .pip-base-chip.pip-hud-chip:focus-visible {
+  outline: 2px solid var(--hud-line);
+  outline-offset: 2px;
+}
+
+.pip-arcade .pip-base-chip.pip-hud-chip[aria-expanded="true"] {
+  background: var(--whim-butter);
+}
+
+.pip-hud-card {
+  position: absolute;
+  /* Under the row of chips (on a phone held sideways the row's own box is the head's, Pip's word under it). */
+  top: 42px;
+  left: 0;
+  z-index: 9;
+  display: flex;
+  width: min(320px, calc(100vw - 24px));
+  max-height: min(420px, calc(100dvh - 70px - var(--inset-top, 0px) - var(--inset-bottom, 0px)));
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 9px 11px 11px;
+  background: var(--hud-face);
+  color: var(--hud-ink);
+  font-size: 0.75rem;
+  line-height: 1.35;
+  white-space: normal;
+  pointer-events: auto;
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 6px 0 0 var(--hud-drop);
+  animation: pip-hud-card-in 180ms steps(3, end);
+}
+
+/* It drops in by whole pixels; it never hides itself, should the animation not run. */
+@keyframes pip-hud-card-in {
+  from {
+    transform: translateY(-6px);
+  }
+  to {
+    transform: none;
+  }
+}
+
+.pip-base-head-left {
+  position: relative;
+}
+
+.pip-hud-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pip-hud-card-lead {
+  margin-top: 2px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.pip-hud-card .pip-sheet-label {
+  margin-top: 9px;
+}
+
+.pip-hud-card-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 3px;
+  list-style: none;
+}
+
+.pip-hud-card-lines > li {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+}
+
+.pip-hud-card-lines > li > svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--hud-ink-soft);
+}
+
+.pip-hud-card-text {
+  margin-top: 2px;
+}
+
+.pip-hud-card-cap {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 9px;
+  padding: 5px 7px;
+  background: var(--hud-face-low);
+  font-weight: 700;
+  box-shadow: inset 0 0 0 2px var(--hud-track);
+}
+
+.pip-hud-card-cap > svg {
+  flex: none;
+}
+
+/* Pip's bubble steps aside under a chip's card. */
+.pip-base-head-left:has(.pip-hud-card) > .pip-camp-say {
+  visibility: hidden;
+}
+
+/* ---- The three pointers (mapCoach.ts): a bubble of Pip's paper, over the point it is about -------------------- */
+
+.pip-coach-mark {
+  position: absolute;
+  z-index: 8;
+  display: flex;
+  width: max-content;
+  max-width: min(240px, 70vw);
+  flex-direction: column;
+  gap: 6px;
+  padding: 7px 9px 8px;
+  background: var(--whim-butter);
+  color: var(--hud-ink);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  line-height: 1.3;
+  transform: translate(-50%, -100%);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 5px 0 0 var(--hud-drop);
+  animation: pip-hud-card-in 180ms steps(3, end);
+}
+
+.pip-coach-mark.is-under {
+  transform: translate(-50%, 0);
+}
+
+/* Its tail: a notch of ink under it (over it, when it hangs under a chip). */
+.pip-coach-mark::after {
+  position: absolute;
+  bottom: -8px;
+  left: calc(50% - 5px);
+  width: 10px;
+  height: 6px;
+  background: var(--hud-line);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  content: "";
+}
+
+.pip-coach-mark.is-under::after {
+  top: -8px;
+  bottom: auto;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+
+.pip-coach-mark.is-drag::after {
+  display: none;
+}
+
+.pip-coach-mark.is-drag {
+  transform: translate(-50%, -50%);
+}
+
+.pip-coach-mark-text {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pip-coach-mark-keys {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.pip-coach-mark-count {
+  margin-right: auto;
+  color: var(--hud-ink-soft);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.pip-coach-mark-skip {
+  min-height: 28px;
+  padding: 0 4px;
+  color: var(--hud-ink-soft);
+  font-size: 0.75rem;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+/* ---- The camera's key home, over the picture's right, above the keys at its foot -------------------------- */
+
+.pip-base-home {
+  display: none;
+}
+
+.pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-home {
+  position: absolute;
+  right: max(10px, calc(var(--inset-right, 0px) + 4px));
+  bottom: calc(max(6px, var(--inset-bottom, 0px)) + 52px);
+  z-index: 4;
+  display: inline-flex;
+  background: var(--hud-face);
+  color: var(--hud-ink);
+  box-shadow:
+    0 0 0 2px var(--hud-line),
+    0 4px 0 2px var(--hud-drop);
+}
+
+/* The canvas as a window onto the clearing: it is moved by a finger, never scrolled under one. */
+.pip-arcade .pip-base-scene .pip-arcade-canvas.is-camera {
+  cursor: grab;
+  touch-action: none;
+}
+
+/* ---- On a phone held sideways ------------------------------------------------------------------------------- */
+
+/* The panel: a card down one side, at most 40 % and 300 px wide, under the row along the top and above the keys. */
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-side.pip-base-side {
+  top: calc(44px + max(6px, var(--inset-top, 0px)));
+  right: max(8px, var(--inset-right, 0px));
+  bottom: calc(50px + max(6px, var(--inset-bottom, 0px)));
+  width: min(300px, 40%);
+}
+
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-side.pip-base-side[data-side="left"] {
+  right: auto;
+  left: max(8px, var(--inset-left, 0px));
+}
+
+/* The chips along the top: slimmer, as tall as Pip's house's (houseStage.css), small type. */
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] .pip-base-stats .pip-base-chip {
+  min-height: 32px;
+  gap: 4px;
+  padding: 1px 8px 2px;
+  font-size: 0.75rem;
+}
+
+/* The keys at the top right: the round ones a little smaller, hit at a thumb's size by their ring. */
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] .pip-base-head-right > .pip-base-round.pip-base-round {
+  position: relative;
+  width: 32px;
+  height: 32px;
+}
+
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] .pip-base-head-right > .pip-base-round::after {
+  position: absolute;
+  inset: -6px;
+  content: "";
+}
+
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] .pip-base-head-right > .tactile-button {
+  min-height: 32px;
+  padding: 2px 9px;
+  font-size: 0.75rem;
+}
+
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] .pip-base-head-right > .tactile-button > svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* The row of keys at the foot: slimmer, so the picture has the height. */
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-under.pip-base-under {
+  padding: 3px 5px 4px;
+}
+
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-under .pip-base-dock {
+  gap: 5px;
+}
+
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-under .pip-base-tile.is-key {
+  min-height: 34px;
+  height: 34px;
+  gap: 4px;
+  padding: 1px 9px 1px 7px;
+  font-size: 0.75rem;
+}
+
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-under .pip-base-tile.is-key > svg:first-child {
+  width: 14px;
+  height: 14px;
+}
+
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-under .pip-base-dock > .tactile-button {
+  min-height: 34px;
+  padding: 2px 9px;
+  font-size: 0.75rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pip-hud-card,
+  .pip-coach-mark {
+    animation: none;
+  }
+}
+
+/* ---- Clear of the system's bars by 8 px at least (the emulator, 2026-10-19: the row along the top and the keys at
+   the foot were 4 px from the status and gesture bars) ------------------------------------------------------------ */
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-head.pip-base-head.pip-base-head {
+  top: calc(var(--inset-top, 0px) + 8px);
+  right: calc(var(--inset-right, 0px) + 8px);
+  left: calc(var(--inset-left, 0px) + 8px);
+}
+
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-under.pip-base-under.pip-base-under {
+  bottom: calc(var(--inset-bottom, 0px) + 8px);
+}
+
+/* The panel between the two, 8 px from each (the row is 32 px tall; the keys' board about 44). */
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-side.pip-base-side.pip-base-side {
+  top: calc(var(--inset-top, 0px) + 48px);
+  bottom: calc(var(--inset-bottom, 0px) + 60px);
+}
+
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-home.pip-base-home {
+  bottom: calc(var(--inset-bottom, 0px) + 60px);
+}
+
+/* A chip's card ends above the keys at the foot. */
+:where(html[data-shape="sideways"]) .pip-arcade .pip-hud-card.pip-hud-card {
+  max-height: calc(100dvh - var(--inset-top, 0px) - var(--inset-bottom, 0px) - 8px - 42px - 60px);
+}
+
+/* Pip's word over the picture lets a drag through it to the picture (only its keys take a tap). */
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] .pip-camp-say,
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] .pip-camp-say-bubble {
+  pointer-events: none;
+}
+
+:where(html[data-shape="sideways"]) .pip-arcade .pip-base.is-stage[data-mode="stage"] .pip-camp-say-bubble :is(button, a) {
+  pointer-events: auto;
+}
+
+/* The pointers' keys: a thumb's height, and they do not move under the thumb when pressed (a key that slid away from
+   the finger on its press lost the first tap). */
+.pip-arcade .pip-coach-mark .tactile-button,
+.pip-arcade .pip-coach-mark .tactile-button:active {
+  min-height: 34px;
+  transform: none;
+}
+
+.pip-coach-mark-skip {
+  min-height: 34px;
+}
+
+/* Beside the building it points at, where there is no room above or under it: its tail on the side towards it. */
+.pip-coach-mark.is-beside-right {
+  transform: translate(0, -50%);
+}
+
+.pip-coach-mark.is-beside-left {
+  transform: translate(-100%, -50%);
+}
+
+.pip-coach-mark.is-beside-right::after,
+.pip-coach-mark.is-beside-left::after {
+  top: calc(50% - 5px);
+  bottom: auto;
+  width: 6px;
+  height: 10px;
+}
+
+.pip-coach-mark.is-beside-right::after {
+  left: -8px;
+  clip-path: polygon(100% 0, 100% 100%, 0 50%);
+}
+
+.pip-coach-mark.is-beside-left::after {
+  right: -8px;
+  left: auto;
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+}
+
+/* ---- Acorns coming in (collect.tsx) ------------------------------------------------------------------------
+   The count at the top moves by itself (a jump as acorns land, a sink as they are spent: transform and opacity
+   only, by the Web Animations API). The acorns on their way to it fly over the whole page, each moved by its
+   transform to the whole device pixel; none of it with reduced motion (collect.tsx sends nothing then). */
+
+.pip-acorn-count {
+  display: inline-block;
+  font-variant-numeric: tabular-nums;
+}
+
+.pip-acorn-trails {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  overflow: hidden;
+  pointer-events: none;
+  contain: strict;
+}
+
+.pip-acorn-trail {
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  display: grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+/* ==== 1.5.10: the top bar, the chapter bar, the dock's three keys, the chapter card, the raid board, the guide ==== */
+
+/* ---- The top bar (HollowTop.tsx): menu · chapter bar · acorns · parcels · (i), on one line, never over the picture */
+
+.pip-arcade .pip-base-stats.pip-hollow-top {
+  flex-wrap: nowrap;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.pip-arcade .pip-hollow-top > * {
+  flex: none;
+}
+
+/* The acorn count: a plain figure beside its acorn (the berry pill, .pip-base-count, is for what waits). */
+.pip-acorn-count {
+  font-weight: 800;
+}
+
+.pip-arcade .pip-hollow-acorns {
+  gap: 4px;
+}
+
+.pip-hollow-menu-key {
+  padding-right: 9px;
+  padding-left: 9px;
+}
+
+.pip-arcade .pip-hollow-parcels {
+  background: var(--whim-butter);
+}
+
+.pip-hollow-parcels-word {
+  font-weight: 700;
+}
+
+/* The chapter bar: one chip, the only one allowed to give way (its "Next:" is cut short first). */
+.pip-arcade .pip-hollow-top > .pip-chapter-bar {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.pip-chapter-bar {
+  white-space: nowrap;
+}
+
+.pip-chapter-bar-n {
+  font-family: "ZT Nature", "Segoe UI", system-ui, sans-serif;
+  font-weight: 800;
+}
+
+/* The bar: a sunken track of ink, filled with leaf as the chapter is read (a sliver once any of it is), with a
+   pixel of light along the top of the fill. Whole pixels only: it never shimmers. */
+.pip-chapter-meter {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  height: 10px;
+  margin: 0 3px;
+  overflow: hidden;
+  background: var(--hud-track);
+  box-shadow:
+    0 0 0 2px var(--hud-line),
+    inset 0 2px 0 0 var(--hud-drop);
+}
+
+.pip-chapter-meter-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  background: var(--whim-leaf);
+  box-shadow: inset 0 2px 0 0 rgba(255, 255, 255, 0.35);
+}
+
+.pip-chapter-bar-hours {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.pip-chapter-bar-of {
+  color: var(--hud-ink-soft);
+  font-weight: 600;
+}
+
+.pip-chapter-bar-next {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pip-chapter-bar-next::before {
+  margin: 0 4px 0 1px;
+  color: var(--hud-ink-soft);
+  content: "·";
+}
+
+.pip-chapter-bar-go {
+  flex: none;
+  color: var(--hud-ink-soft);
+}
+
+@media (max-width: 800px) {
+  .pip-hollow-parcels-word {
+    display: none;
+  }
+}
+
+/* ---- The dock: Build, Raid, Edit; and Edit's own bar ------------------------------------------------------ */
+
+.pip-arcade .pip-hollow-dock,
+.pip-arcade .pip-edit-dock {
+  flex-wrap: nowrap;
+}
+
+.pip-edit-left {
+  display: inline-flex;
+  min-width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3px;
+  background: var(--hud-face);
+  color: var(--hud-ink);
+  font-size: 0.6875rem;
+  font-weight: 800;
+  box-shadow: 0 0 0 1.5px var(--hud-line);
+}
+
+.pip-arcade .pip-edit-status {
+  max-width: 220px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 800px) {
+  .pip-arcade .pip-edit-status {
+    display: none;
+  }
+}
+
+/* The Build panel's tabs, at its head: clear of the panel's close key in its corner. */
+.pip-build-tabs {
+  display: flex;
+  gap: 5px;
+  margin: 0 0 8px;
+  padding: 2px 34px 3px 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.pip-build-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.pip-arcade .pip-build-tab {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  min-height: 30px;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: var(--hud-face);
+  color: var(--hud-ink-soft);
+  font-size: 0.75rem;
+  font-weight: 800;
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line);
+}
+
+.pip-arcade .pip-build-tab.is-chosen {
+  background: var(--whim-butter);
+  color: var(--hud-ink);
+}
+
+.pip-arcade .pip-build-tab:focus-visible {
+  outline: 2px solid var(--hud-line);
+  outline-offset: 3px;
+}
+
+.pip-build-tab-dot {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 8px;
+  height: 8px;
+  background: var(--whim-berry);
+  box-shadow: 0 0 0 1.5px var(--hud-line);
+}
+
+/* ---- The chapter card (ChapterCard.tsx): over the picture, Pip's paper, a big title ------------------------------ */
+
+.pip-chapter-shade {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(8px, var(--inset-top, 0px)) max(10px, var(--inset-right, 0px)) max(8px, var(--inset-bottom, 0px)) max(10px, var(--inset-left, 0px));
+  background: rgba(20, 28, 22, 0.28);
+}
+
+.pip-chapter-card {
+  position: relative;
+  display: flex;
+  width: min(440px, 100%);
+  max-height: 100%;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 12px 14px 14px;
+  background: var(--hud-face);
+  color: var(--hud-ink);
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 6px 0 0 var(--hud-drop);
+  animation: pip-hud-card-in 180ms steps(3, end);
+}
+
+.pip-arcade .pip-chapter-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+
+.pip-chapter-over {
+  color: var(--hud-ink-soft);
+  font-size: 0.6875rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* The title: big, in the camp's lettering, with a hard butter shadow two pixels down and right. */
+.pip-chapter-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 8px;
+  margin: 2px 26px 6px 0;
+  font-family: "ZT Nature", "Segoe UI", system-ui, sans-serif;
+  font-size: 1.5rem;
+  font-weight: 900;
+  line-height: 1.1;
+  text-shadow: 2px 2px 0 var(--whim-butter);
+  transform-origin: 0 100%;
+}
+
+.pip-chapter-title-dot {
+  color: var(--hud-ink-soft);
+}
+
+.pip-chapter-card.is-news .pip-chapter-title {
+  animation: pip-chapter-title-in 520ms steps(4, end) both;
+}
+
+@keyframes pip-chapter-title-in {
+  from {
+    transform: scale(0.6);
+  }
+  to {
+    transform: none;
+  }
+}
+
+.pip-chapter-note {
+  margin-bottom: 6px;
+  padding: 5px 8px;
+  background: var(--whim-butter);
+  font-weight: 700;
+  box-shadow: 0 0 0 2px var(--hud-line);
+}
+
+.pip-chapter-new {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0 8px;
+}
+
+.pip-chapter-new-pic {
+  display: inline-flex;
+  width: 64px;
+  height: 60px;
+  flex: none;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 4px;
+  background: radial-gradient(ellipse 28px 6px at 50% calc(100% - 5px), var(--whim-leaf) 0 97%, transparent 100%);
+}
+
+.pip-chapter-new-says {
+  display: block;
+  font-weight: 700;
+}
+
+.pip-chapter-things {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 4px;
+}
+
+.pip-chapter-thing {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--hud-ink-soft);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.pip-chapter-thing-pic {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+/* The chest: a key of its own; opened, its acorns fly to the count. */
+.pip-arcade .pip-chapter-chest {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 2px 8px;
+  padding: 6px 10px;
+  background: var(--whim-butter);
+  color: var(--hud-ink);
+  font-weight: 800;
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 4px 0 0 var(--hud-drop);
+}
+
+.pip-arcade .pip-chapter-chest.is-open {
+  background: var(--hud-face);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line);
+}
+
+.pip-chapter-chest:not(.is-open) .pip-chapter-chest-pic {
+  animation: pip-chapter-chest 1400ms steps(1, end) infinite;
+}
+
+/* A hop of whole pixels, then still: it asks to be opened, it does not twitch. */
+@keyframes pip-chapter-chest {
+  0%,
+  70%,
+  100% {
+    transform: none;
+  }
+  78% {
+    transform: translateY(-2px);
+  }
+  86% {
+    transform: none;
+  }
+  92% {
+    transform: translateY(-1px);
+  }
+}
+
+.pip-chapter-chest-pic {
+  display: inline-flex;
+}
+
+.pip-chapter-chest-text {
+  flex: 1;
+  text-align: left;
+}
+
+.pip-chapter-chest-n {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pip-chapter-card .pip-sheet-label {
+  margin-top: 4px;
+}
+
+.pip-chapter-card .pip-ladder-steps {
+  margin-top: 4px;
+}
+
+/* The next chapter: its thing as a silhouette, and the reading to go. */
+.pip-chapter-next {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 2px dashed var(--hud-track);
+}
+
+.pip-chapter-next-pic {
+  display: inline-flex;
+  width: 42px;
+  height: 38px;
+  flex: none;
+  align-items: flex-end;
+  justify-content: center;
+  filter: brightness(0) opacity(0.38);
+}
+
+.pip-chapter-next-when {
+  display: block;
+  font-weight: 800;
+}
+
+.pip-chapter-next-what {
+  display: block;
+  color: var(--hud-ink-soft);
+  font-size: 0.75rem;
+}
+
+:where(html[data-shape="sideways"]) .pip-chapter-title {
+  font-size: 1.25rem;
+}
+
+:where(html[data-shape="sideways"]) .pip-chapter-card {
+  width: min(560px, 100%);
+  padding: 9px 12px 11px;
+}
+
+/* ---- Friends' raids, said once (FriendNews.tsx): a card under the bar ------------------------------------------ */
+
+.pip-news-card {
+  position: absolute;
+  top: calc(var(--inset-top, 0px) + 50px);
+  left: 50%;
+  z-index: 9;
+  display: flex;
+  width: min(420px, calc(100% - 24px));
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 12px 10px;
+  background: var(--hud-face);
+  color: var(--hud-ink);
+  font-size: 0.8125rem;
+  transform: translateX(-50%);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 6px 0 0 var(--hud-drop);
+}
+
+.pip-arcade .pip-news-close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+}
+
+.pip-news-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-right: 24px;
+  list-style: none;
+}
+
+.pip-news-lines > li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pip-news-prize {
+  margin-left: 6px;
+  font-weight: 800;
+}
+
+.pip-news-more {
+  color: var(--hud-ink-soft);
+  font-size: 0.75rem;
+}
+
+.pip-news-keys {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+/* ---- The raid board (RaidBoard.tsx) ------------------------------------------------------------------------ */
+
+.pip-raid-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 2px 40px 10px 0;
+}
+
+.pip-raid-rest {
+  font-weight: 700;
+}
+
+.pip-raid-heroes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.pip-raid-sent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 2px 10px;
+  padding: 5px 9px;
+  background: var(--whim-butter);
+  font-weight: 700;
+  box-shadow: 0 0 0 2px var(--hud-line);
+}
+
+.pip-raid-sent.is-lost {
+  background: var(--hud-face);
+}
+
+.pip-raid-cards {
+  display: grid;
+  gap: 12px;
+  padding: 2px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr));
+}
+
+.pip-arcade .pip-raid-card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 11px 10px;
+  border: 0;
+  border-radius: 0;
+  background: var(--hud-face);
+  color: var(--hud-ink);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 4px 0 0 var(--hud-drop);
+}
+
+.pip-arcade .pip-raid-card.is-friend {
+  flex-direction: row;
+  align-items: center;
+}
+
+.pip-raid-card-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pip-raid-card-kind {
+  color: var(--hud-ink-soft);
+  font-size: 0.6875rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pip-raid-card-name {
+  overflow: hidden;
+  font-family: "ZT Nature", "Segoe UI", system-ui, sans-serif;
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1.2;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pip-raid-card-loot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+}
+
+.pip-raid-forecast {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.pip-raid-forecast > .pip-base-stars {
+  flex: none;
+  margin-top: 1px;
+}
+
+.pip-raid-card.is-hard .pip-raid-forecast {
+  color: var(--hud-ink-soft);
+}
+
+.pip-raid-keys {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+}
+
+.pip-raid-why {
+  color: var(--hud-ink-soft);
+  font-size: 0.75rem;
+}
+
+.pip-raid-friends {
+  margin-top: 16px;
+}
+
+.pip-raid-friends-head {
+  display: flex;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.pip-raid-ask {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin: 0 2px 10px;
+  padding: 8px 10px;
+  background: var(--whim-butter);
+  box-shadow: 0 0 0 2px var(--hud-line);
+}
+
+.pip-raid-ask-q {
+  flex: 1 1 220px;
+  font-weight: 800;
+}
+
+.pip-raid-ask-keys {
+  display: flex;
+  gap: 6px;
+}
+
+.pip-raid-none,
+.pip-raid-friend-camp {
+  color: var(--hud-ink-soft);
+  font-size: 0.75rem;
+}
+
+.pip-raid-friend-camp {
+  display: flex;
+  gap: 8px;
+}
+
+/* ---- The guide behind the (i) (HollowGuide.tsx) --------------------------------------------------------------- */
+
+.pip-guide-tabs {
+  display: flex;
+  gap: 5px;
+  margin: 0 40px 12px 0;
+  padding: 2px 2px 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.pip-guide-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.pip-arcade .pip-guide-tab {
+  display: inline-flex;
+  flex: none;
+  min-height: 30px;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 9px;
+  background: var(--hud-face);
+  color: var(--hud-ink-soft);
+  font-size: 0.75rem;
+  font-weight: 800;
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line);
+}
+
+.pip-arcade .pip-guide-tab.is-chosen {
+  background: var(--whim-butter);
+  color: var(--hud-ink);
+}
+
+.pip-guide-page {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 4px 4px 8px;
+}
+
+.pip-guide-pic {
+  display: inline-flex;
+  width: 84px;
+  height: 76px;
+  flex: none;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 6px;
+  background: radial-gradient(ellipse 34px 7px at 50% calc(100% - 6px), var(--whim-leaf) 0 97%, transparent 100%);
+}
+
+.pip-guide-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: "ZT Nature", "Segoe UI", system-ui, sans-serif;
+  font-size: 1.125rem;
+  font-weight: 900;
+}
+
+.pip-guide-locked {
+  padding: 0 6px;
+  background: var(--hud-face);
+  color: var(--hud-ink-soft);
+  font-family: inherit;
+  font-size: 0.6875rem;
+  font-weight: 800;
+  box-shadow: 0 0 0 1.5px var(--hud-line);
+}
+
+.pip-guide-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 0.875rem;
+  line-height: 1.4;
+  list-style: none;
+}
+
+.pip-guide-lines > li {
+  padding-left: 14px;
+  background: linear-gradient(var(--whim-leaf), var(--whim-leaf)) 2px 0.5em / 6px 6px no-repeat;
+}
+
+.pip-guide-index {
+  display: grid;
+  gap: 12px;
+  padding: 2px;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+}
+
+.pip-arcade .pip-guide-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 6px 9px;
+  background: var(--hud-face);
+  color: var(--hud-ink);
+  font-weight: 800;
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 4px 0 0 var(--hud-drop);
+}
+
+.pip-arcade .pip-guide-card:hover {
+  background: var(--whim-butter);
+}
+
+.pip-guide-card-pic {
+  display: inline-flex;
+  height: 54px;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.pip-arcade .pip-guide-back {
+  margin-top: 10px;
+}
+
+.pip-guide-journal {
+  font-size: 0.875rem;
+}
+
+:where(html[data-shape="sideways"]) .pip-guide-index {
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pip-chapter-card,
+  .pip-chapter-card.is-news .pip-chapter-title,
+  .pip-chapter-chest:not(.is-open) .pip-chapter-chest-pic {
+    animation: none;
+  }
+}
+
+/* On a short screen (a phone on its side) the chapter card is two columns: what came, and what is next. */
+:where(html[data-shape="sideways"]) .pip-chapter-card.pip-chapter-card {
+  width: min(700px, 100%);
+}
+
+:where(html[data-shape="sideways"]) .pip-chapter-body {
+  display: grid;
+  gap: 0 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+:where(html[data-shape="sideways"]) .pip-chapter-side > .pip-sheet-label:first-child {
+  margin-top: 0;
+}
+
+:where(html[data-shape="sideways"]) .pip-chapter-side .pip-chapter-next {
+  margin-top: 6px;
+}
+
+/* ---- A raid on a phone on its side (BattleScreen, 1.5.10): the field as large as the screen, the rest over it ---- */
+
+.pip-arcade .pip-base.pip-battle.is-full {
+  position: relative;
+  display: flex;
+  width: 100%;
+  height: 100dvh;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  overflow: hidden;
+}
+
+.pip-arcade .pip-battle.is-full > :first-child {
+  position: absolute;
+  top: calc(var(--inset-top, 0px) + 6px);
+  right: calc(var(--inset-right, 0px) + 8px);
+  left: calc(var(--inset-left, 0px) + 8px);
+  z-index: 3;
+  pointer-events: none;
+}
+
+.pip-arcade .pip-battle.is-full > :first-child > p:first-child {
+  padding: 2px 10px 3px;
+  background: var(--hud-face);
+  color: var(--hud-ink);
+  box-shadow: 0 0 0 2px var(--hud-line);
+}
+
+.pip-arcade .pip-battle.is-full > .pip-base-scene {
+  margin: 0;
+  padding: 0;
+}
+
+.pip-arcade .pip-battle.is-full > .pip-base-scene .pip-arcade-canvas {
+  box-shadow: none;
+}
+
+.pip-arcade .pip-battle.is-full > .mt-3:not(.pip-base-result) {
+  position: absolute;
+  right: calc(var(--inset-right, 0px) + 8px);
+  bottom: calc(var(--inset-bottom, 0px) + 6px);
+  left: calc(var(--inset-left, 0px) + 8px);
+  z-index: 3;
+  margin: 0;
+}
+
+.pip-arcade .pip-battle.is-full > .mt-3:not(.pip-base-result) > .pip-base-chip {
+  background: var(--hud-face);
+  box-shadow: 0 0 0 2px var(--hud-line);
+}
+
+.pip-arcade .pip-battle.is-full > .pip-base-result {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  width: min(420px, calc(100% - 24px));
+  height: fit-content;
+  max-height: calc(100% - 16px);
+  margin: auto;
+  overflow-y: auto;
+}
+
+.pip-arcade .pip-battle.is-full .pip-base-hint {
+  inset: calc(var(--inset-top, 0px) + 44px) 0 auto 0;
+}
+
+.pip-base-result-says {
+  max-width: 34ch;
+  margin: 2px auto 4px;
+  font-weight: 700;
+  text-align: center;
+}
+
+/* A narrow panel (a phone on its side): the Build tabs are their names alone, so all four fit beside the close key. */
+:where(html[data-shape="sideways"]) .pip-arcade .pip-build-tab {
+  padding: 2px 7px;
+  font-size: 0.6875rem;
+}
+
+:where(html[data-shape="sideways"]) .pip-arcade .pip-build-tab > svg {
+  display: none;
+}
+
+:where(html[data-shape="sideways"]) .pip-build-tabs {
+  gap: 4px;
+}
+
+/* The raid board is as tall as its cards, not the whole picture (a chapter-2 camp has one card), and the cards keep a
+   card's width rather than stretching across an empty sheet. */
+.pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-sheet.pip-raid-board.pip-raid-board {
+  bottom: auto;
+  width: fit-content;
+  min-width: min(420px, calc(100% - 24px));
+  max-width: calc(100% - 24px);
+  max-height: calc(100% - 64px - var(--inset-top, 0px) - var(--inset-bottom, 0px));
+  margin: 0 auto;
+}
+
+.pip-raid-board .pip-raid-cards {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 300px));
+}
+
+/* ==== The Front (1.5.11): tonight's chip and card, and the Defence shelf's trap spots and tower pads ================
+   Kept to this one block, apart from everything above (another session's styles are being worked on elsewhere). */
+
+/* Tonight, on the top bar: faces and counts, nothing more. */
+.pip-arcade .pip-night-chip {
+  gap: 6px;
+  background: #2a2336;
+  color: #f4e9c8;
+  box-shadow: 0 0 0 2px var(--hud-line);
+}
+
+.pip-arcade .pip-night-chip:hover {
+  background: #3a3048;
+}
+
+.pip-night-chip-one {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
+/* Tonight's card: a row a kind, with the construct that beats it (ringed red where it is not on the front). */
+.pip-night-card {
+  position: relative;
+  width: min(340px, calc(100vw - 24px));
+  margin-top: 8px;
+  padding: 9px 12px 11px;
+  background: var(--hud-face);
+  color: var(--hud-ink);
+  font-size: 0.8125rem;
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 6px 0 0 var(--hud-drop);
+  animation: pip-hud-card-in 180ms steps(3, end);
+}
+
+.pip-night-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.pip-night-card-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pip-night-card-row {
+  display: grid;
+  grid-template-columns: 30px 1fr auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.pip-night-card-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.pip-night-card-does {
+  color: var(--hud-ink-soft);
+  font-size: 0.6875rem;
+}
+
+.pip-arcade .pip-night-card-counter {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  background: var(--hud-face);
+  box-shadow: inset 0 0 0 2px var(--hud-track);
+  cursor: pointer;
+}
+
+.pip-arcade .pip-night-card-counter.is-missing {
+  box-shadow: inset 0 0 0 2px var(--whim-bad, #e0806b);
+  background: #fbe3dc;
+}
+
+/* The Defence shelf: a slot, and (chosen) what may go on it, a little in from the edge under it. */
+.pip-front-slot {
+  display: contents;
+}
+
+.pip-front-choose {
+  display: grid;
+  gap: 4px;
+  margin: 2px 0 6px 18px;
+  padding-left: 8px;
+  border-left: 2px dashed var(--hud-track);
+}
+
+.pip-front-empty {
+  display: inline-block;
+  width: 24px;
+  height: 10px;
+  margin-top: 8px;
+  background: #e2d6b8;
+  box-shadow: 0 2px 0 0 #a09274;
+}
+
+.pip-front-empty.is-pad {
+  background: #a0714a;
+  box-shadow: 0 2px 0 0 #5a3a22;
+}
+
+.pip-front-beats {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pip-front-shed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  color: var(--hud-ink-soft);
+  font-size: 0.6875rem;
+}
+
+.pip-front-shed-word {
+  margin-right: 2px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* (The Front, continued) A chapter's new prowler and what beats it, on the chapter's card. */
+.pip-chapter-pair-arrow {
+  margin: 0 2px;
+  color: var(--hud-ink-soft);
+  font-weight: 800;
+}
+
+/* (The Front, continued) The raid card's one hint, and the Puffcaps still to put down on their key. */
+.pip-raid-hint {
+  margin: -2px 0 2px;
+  color: var(--hud-ink-soft);
+  font-size: 0.6875rem;
+  line-height: 1.3;
+}
+
+.pip-base-tile-count {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 15px;
+  padding: 0 3px;
+  background: var(--whim-butter);
+  color: var(--hud-ink);
+  font-size: 0.625rem;
+  font-weight: 800;
+  line-height: 15px;
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--hud-line);
+}
+
+/* (The Front, continued) Tonight's chip keeps its night colours while its card is open. */
+.pip-arcade .pip-base-chip.pip-night-chip[aria-expanded="true"] {
+  background: #3a3048;
+  color: #fff2c8;
+  box-shadow: 0 0 0 2px var(--whim-butter);
+}

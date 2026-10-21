@@ -54,14 +54,15 @@ describe("showing it once", () => {
 });
 
 describe("the first visit indoors", () => {
-  it("shows the shop alone; the rest waits for Show me around", () => {
-    expect(FIRST_WALK.map((step) => step.target)).toEqual(["shop"]);
+  it("shows the seeds and the shop (with Pip's hat), the steps the Hollow's tour used to take indoors", () => {
+    expect(FIRST_WALK.map((step) => step.target)).toEqual(["resources", "shop"]);
+    expect(FIRST_WALK[1].line).toMatch(/hat/);
     expect(WALK.length).toBeGreaterThan(FIRST_WALK.length);
   });
 
-  it("waits while Pip's guided first session runs, and adds nothing after one that was finished", () => {
+  it("waits while Pip's guided first session runs, and shows the house's own first walk after it", () => {
     expect(firstWalk({ step: 3, done: false, skipped: false })).toBeNull();
-    expect(firstWalk({ step: 8, done: true, skipped: false })).toEqual([]);
+    expect(firstWalk({ step: 7, done: true, skipped: false })).toBe(FIRST_WALK);
   });
 
   it("shows the shop after a skipped session, and to a camp from before there was one", () => {

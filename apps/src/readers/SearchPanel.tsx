@@ -2,6 +2,7 @@ import { UiIcon } from "../components/UiIcon";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { FOLD_BOOKS_OVER, MIN_QUERY, groupByBook, searchBook, tally, type SearchHit } from "./searchBook";
+import { ListEdges } from "./ListEdges";
 
 type SearchPanelProps = {
   /** The open epub.js book. */
@@ -225,7 +226,8 @@ export const SearchPanel = ({ book, chapterOf, books, bookOf, chapterNameOf, rea
       {inSet ? (
         // A set of books: the results under a header for each book, with its
         // count; the book being read is unfolded and the others fold away.
-        <div className="reader-search-books mt-3 min-h-0 flex-1 overflow-y-auto pr-1">
+        <ListEdges className="mt-3">
+        <div className="reader-search-books min-h-0 flex-1 overflow-y-auto pr-1">
           {byBook.map((group, at) => {
             const title = group.book >= 0 ? (books?.[group.book] ?? "") : null;
             const open = title === null || isOpen(group.book);
@@ -254,8 +256,11 @@ export const SearchPanel = ({ book, chapterOf, books, bookOf, chapterNameOf, rea
             );
           })}
         </div>
+        </ListEdges>
       ) : (
-        <ol className="mt-3 min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">{hits.map((hit, index) => row(hit, index, false))}</ol>
+        <ListEdges className="mt-3">
+          <ol className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">{hits.map((hit, index) => row(hit, index, false))}</ol>
+        </ListEdges>
       )}
     </div>
   );

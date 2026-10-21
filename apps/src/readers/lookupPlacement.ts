@@ -36,6 +36,11 @@ type Room = {
   selection?: Box | null;
   /** The tallest the card may be (`CARD_HEIGHT`, the lookup card's). */
   tallest?: number;
+  /**
+   * What the card holds, in px, when it is known (a note written in it):
+   * under the words only if that much fits there, or nowhere has more room.
+   */
+  wanted?: number;
 };
 
 /**
@@ -43,8 +48,13 @@ type Room = {
  * the card is shortened to fit between the text and the bar; failing that it
  * moves above the text; and if neither leaves it room to be read, it stays
  * where it was (a long selection near the foot of the page cannot be cleared).
+ * A card that says what it holds (`wanted`) goes above the text when that
+ * does not fit under it and there is more room above: a note just written
+ * was cut in half in the scrolling middle of a card squeezed under its words.
  */
-export const placeCard = ({ barTop, barCentre, ceiling, cardWidth, windowWidth, selection, tallest = CARD_HEIGHT }: Room): CardPlace => {
+export const placeCard = ({
+  barTop, barCentre, ceiling, cardWidth, windowWidth, selection, tallest = CARD_HEIGHT, wanted
+}: Room): CardPlace => {
   const foot = barTop - CARD_GAP;
   const fit = (room: number) => Math.round(Math.max(Math.min(tallest, room), Math.min(CARD_MIN_HEIGHT, tallest)));
 
@@ -65,14 +75,16 @@ export const placeCard = ({ barTop, barCentre, ceiling, cardWidth, windowWidth, 
     return usual;
   }
   const under = foot - (selection.bottom + CARD_GAP);
-  if (under >= CARD_MIN_HEIGHT) {
-    return { height: fit(under), lift: CARD_GAP, shift };
-  }
   const over = selection.top - CARD_GAP - ceiling;
+  const enough = Math.min(tallest, Math.max(CARD_MIN_HEIGHT, wanted ?? 0));
+  const atUnder = { height: fit(under), lift: CARD_GAP, shift };
+  if (under >= enough || (under >= CARD_MIN_HEIGHT && under >= over)) {
+    return atUnder;
+  }
   if (over >= CARD_MIN_HEIGHT) {
     return { height: fit(over), lift: Math.round(barTop - (selection.top - CARD_GAP)), shift };
   }
-  return usual;
+  return under >= CARD_MIN_HEIGHT ? atUnder : usual;
 };
 
 /**

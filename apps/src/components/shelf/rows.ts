@@ -4,7 +4,8 @@ import {
   type FocusSessionRecord,
   type FreeReadRecord
 } from "../../services/habitService";
-import { CLOTH, hash, inkFor, spineHeight, spineWidth } from "./spine";
+import { CLOTH, clamp, hash, inkFor, spineHeight, spineWidth } from "./spine";
+import { BINDING_SIZE, STAR_MIN_SESSIONS, STICKER_TEXT, bindingFor, stickerFor, wearFor, type SpineLook } from "./dress";
 
 /**
  * What stands on the session shelf, worked out from the habit snapshot: a row
@@ -58,6 +59,8 @@ export type Spine = {
   start: Date;
   /** The focus flower that bloomed in this session, if one did. */
   bloomed: string | null;
+  /** Its binding, sticker and wear (`shelf/dress.ts`); null for loose pages and burned spines. */
+  look: SpineLook | null;
   label: string;
 };
 
@@ -159,6 +162,7 @@ const looseSpine = (free: FreeReadRecord, bookTitles: Map<string, string>): { at
     burned: false,
     start,
     bloomed: null,
+    look: null,
     label: [
       title,
       minutesText(free.minutes),
@@ -167,6 +171,31 @@ const looseSpine = (free: FreeReadRecord, bookTitles: Map<string, string>): { at
     ].join(", ")
   };
   return { at: addDays(start, 1).getTime() - 1, spine };
+};
+
+/**
+ * A week's stickers and wear: the longest session of a busy week gets a star,
+ * a late or early start its own sticker; an older spine without one may show a
+ * little wear. The label says what a sticker means.
+ */
+const dressWeek = (spines: Spine[], weeksAgo: number) => {
+  const books = spines.filter((spine) => spine.look);
+  let longest: Spine | null = null;
+  if (books.length >= STAR_MIN_SESSIONS) {
+    for (const spine of books) {
+      if (!longest || spine.minutes > longest.minutes) {
+        longest = spine;
+      }
+    }
+  }
+  for (const spine of books) {
+    const look = spine.look as SpineLook;
+    look.sticker = stickerFor(spine.start, spine === longest);
+    look.wear = look.sticker ? null : wearFor(spine.session?.styleSeed || spine.id, weeksAgo);
+    if (look.sticker) {
+      spine.label += `, ${STICKER_TEXT[look.sticker].toLowerCase()}`;
+    }
+  }
 };
 
 export const buildRows = (
@@ -215,6 +244,9 @@ export const buildRows = (
     if (bloomed) {
       parts.push(`a ${bloomed} bloomed`);
     }
+    // A burned spine keeps its charring alone; its sticker and wear are worked out per week below.
+    const binding = burned ? null : bindingFor(bookKey);
+    const size = binding ? BINDING_SIZE[binding] : { h: 0, w: 0 };
     const spine: Spine = {
       id: session.id,
       session,
@@ -224,12 +256,13 @@ export const buildRows = (
       loose: false,
       cloth,
       ink: inkFor(cloth),
-      height: spineHeight(session.minutes),
-      width: spineWidth(session.minutes),
+      height: clamp(spineHeight(session.minutes) + size.h, 58, 136),
+      width: clamp(spineWidth(session.minutes) + size.w, 17, 36),
       completed,
       burned,
       start,
       bloomed,
+      look: binding ? { binding, sticker: null, wear: null } : null,
       label: parts.join(", ")
     };
     shelve(session.dateKey, { at: start.getTime() || 0, spine });
@@ -284,6 +317,7 @@ export const buildRows = (
       rows.push({ kind: "gap", key: `gap-${gapKey}`, weeks: gap });
       gap = 0;
     }
+    dressWeek(spines, index);
     const sunday = addDays(monday, 6);
     const finished = getDateKey(sunday) < todayKey;
     let perfect = finished;

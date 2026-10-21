@@ -166,9 +166,10 @@ function ownView(profile) {
     kudosFrom: howMany(profile?.kudosFrom),
     kudosTo: howMany(profile?.kudosTo),
     sharesLibrary: profile?.shareLibrary === true,
-    // Whether friends may raid the camp (`routes/raids.js`): yes, until the
-    // reader says no.
-    raidable: profile?.raidable !== false,
+    // Whether friends may raid the camp (`routes/raids.js`): no, until the
+    // reader says yes (since app 1.5.10; it was yes until they said no). A
+    // reader who never touched the switch has no `raidable` at all.
+    raidable: profile?.raidable === true,
     // Where the reader stands for posting in public (`standing.js`): whether
     // they have accepted the guidelines, and until when an admin has
     // suspended them, if one has. `isAdmin` only tells the app to show the
@@ -493,7 +494,7 @@ export function socialRoutes(db, limits = defaultLimits()) {
       }
       if (body.raidable !== undefined) {
         // Another switch: whether friends may raid this reader's camp in the
-        // Hollow (`routes/raids.js`). On until it is turned off, and kept
+        // Hollow (`routes/raids.js`). Off until it is turned on, and kept
         // whatever the visibility, as the library's is.
         if (typeof body.raidable !== "boolean") {
           throw new HttpError(400, "raidable must be true or false.");

@@ -2,7 +2,6 @@ import { useEffect, type ReactNode } from "react";
 import { FEATURES } from "../../constants/features";
 import { useAccountStore } from "../../store/accountStore";
 import { useLibraryStore } from "../../store/libraryStore";
-import { PipSprite } from "../PipSprite";
 import { SectionHeader } from "../ui/SectionHeader";
 import { useCommunityStore } from "../community/communityStore";
 import { COPY, PROFILE_PLACE } from "../community/copy";
@@ -10,6 +9,7 @@ import { at } from "../community/format";
 import { AdminPanel } from "./AdminPanel";
 import { CommunitiesPanel } from "./Communities";
 import { DiscoverFeed } from "./DiscoverPanel";
+import { SignInPrompt } from "../account/SignInPrompt";
 
 type Toast = (message: string) => void;
 
@@ -41,16 +41,7 @@ const Gate = ({ name, onNavigate, children }: { name: string; onNavigate: (tab: 
   }
   if (!signedIn) {
     return (
-      <section className="paper-surface flex flex-wrap items-center gap-5 rounded-xl p-6">
-        <PipSprite move="welcome" size={64} still />
-        <div className="min-w-0 flex-1">
-          <SectionHeader eyebrow={name} title={COPY.signInTitle} />
-          <p className="mt-2 max-w-prose text-sm leading-6 text-on-surface-variant">{COPY.signIn}</p>
-        </div>
-        <button type="button" className="tactile-button tactile-button-primary px-4 py-2 text-xs" onClick={() => onNavigate("settings")}>
-          Sign in
-        </button>
-      </section>
+      <SignInPrompt line="Sign in to read and post." onSettings={() => onNavigate("settings")} />
     );
   }
   if (me && (me.visibility === "private" || !me.handle)) {

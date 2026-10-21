@@ -10,6 +10,7 @@ import { useHabitStore } from "../../store/habitStore";
 import { usePipWardrobeStore } from "../../store/pipWardrobeStore";
 import { UiIcon } from "../UiIcon";
 import { SheetHandle } from "../ui/SheetHandle";
+import ScrollEdge from "../ui/ScrollEdge";
 import { Burst, DayBubbleView, TickCount } from "./StreakArt";
 import { FlameSprite, IceCube } from "./sprites";
 import { flameState, nextMilestone, riskFrom, weekBubbles } from "./streakModel";
@@ -173,6 +174,7 @@ const PanelFrame = ({
       <div ref={panelRef} role="dialog" aria-label="Your streak" className="modal-surface sheet-panel streak-panel w-full p-4 text-on-surface">
         <SheetHandle onClose={onClose} />
         {children}
+        <ScrollEdge edge="bottom" scroller="parent" />
       </div>
     </div>,
     document.body
@@ -195,7 +197,9 @@ export const StreakPanel = ({ flame, onRead, readLabel, onOpenCalendar }: PanelP
   const cap = shop?.cap ?? 2;
   const held = Math.min(cap, snapshot.freezes);
   const refusal = freezeRefusal(shop, balance);
-  const left = Math.max(0, Math.ceil(snapshot.goalMinutes - snapshot.todayMinutes));
+  // A tap on a freeze that cannot be bought says why: a finger never sees the key's title.
+  const [askedWhy, setAskedWhy] = useState(false);
+  const left =Math.max(0, Math.ceil(snapshot.goalMinutes - snapshot.todayMinutes));
 
   // A cube that arrives while the panel is open (bought here, or earned by the streak) drops into its slot.
   const heldBefore = useRef(held);
@@ -266,9 +270,10 @@ export const StreakPanel = ({ flame, onRead, readLabel, onOpenCalendar }: PanelP
           <button
             type="button"
             className="pip-key pip-key-small"
-            disabled={busy || refusal !== null}
+            disabled={busy}
+            aria-disabled={refusal !== null || undefined}
             title={refusal ?? "A freeze covers one missed day, so the streak carries on"}
-            onClick={buy}
+            onClick={() => (refusal ? setAskedWhy(true) : buy())}
           >
             {busy ? "…" : (
               <>
@@ -279,6 +284,11 @@ export const StreakPanel = ({ flame, onRead, readLabel, onOpenCalendar }: PanelP
           </button>
         </div>
       </div>
+      {askedWhy && refusal && (
+        <p className="-mt-2 text-right text-xs text-on-surface-variant" role="status">
+          {refusal}
+        </p>
+      )}
       {error && <p className="rounded-lg bg-error-container/40 px-3 py-2 text-xs text-on-surface">{error}</p>}
 
       <div className="flex items-center gap-2">

@@ -1,6 +1,6 @@
-import { memo, useRef, type CSSProperties } from "react";
+import { memo, useRef, useSyncExternalStore, type CSSProperties } from "react";
 import type { Book } from "@shared/models/book";
-import { useCoverSrc } from "../hooks/useCoverSrc";
+import { coverImgProps, useCoverSrc } from "../hooks/useCoverSrc";
 import { isFinished } from "../constants/books";
 import { useSeriesInfo } from "../library/useSeries";
 import { seriesNumberLabel } from "../library/series";
@@ -16,10 +16,34 @@ type Props = {
   menuActions?: BookMenuAction[];
   /** Told the book's title once its menu has removed it. */
   onRemoved?: (title: string) => void;
+  /** How wide the cover is drawn (`<img sizes>`), from the grid's columns. */
+  coverSizes?: string;
 };
 
-const BookCardComponent = ({ book, onRefresh, onOpen, menuActions, onRemoved }: Props) => {
-  const { src: resolvedCover, onError: handleCoverError } = useCoverSrc(book, { thumb: true });
+/**
+ * Whether a finger is all there is (the query styles/phone-polish.css hides the
+ * hover layer by). There the card does not draw its hover layer at all: three
+ * elements fewer for every card a fling brings in. One list, watched once.
+ */
+const TOUCH_ONLY = "(hover: none) and (pointer: coarse)";
+const touchList = typeof window !== "undefined" && typeof window.matchMedia === "function" ? window.matchMedia(TOUCH_ONLY) : null;
+const touchListeners = new Set<() => void>();
+touchList?.addEventListener?.("change", () => touchListeners.forEach((listener) => listener()));
+const onTouchChange = (listener: () => void) => {
+  touchListeners.add(listener);
+  return () => {
+    touchListeners.delete(listener);
+  };
+};
+const useTouchOnly = () => useSyncExternalStore(onTouchChange, () => touchList?.matches ?? false, () => false);
+
+/** Two to a row on an upright phone, at most 270 px elsewhere (library/gridColumns.ts). */
+const DEFAULT_SIZES = "(max-width: 767px) 50vw, 270px";
+
+const BookCardComponent = ({ book, onRefresh, onOpen, menuActions, onRemoved, coverSizes = DEFAULT_SIZES }: Props) => {
+  const cover = useCoverSrc(book, { thumb: true });
+  const resolvedCover = cover.src;
+  const touchOnly = useTouchOnly();
   const series = useSeriesInfo(book.id);
   const progressPercent = Math.round(Math.min(1, Math.max(0, book.progress)) * 100);
   const finished = isFinished(book.progress);
@@ -55,10 +79,9 @@ const BookCardComponent = ({ book, onRefresh, onOpen, menuActions, onRemoved }: 
       >
         {resolvedCover ? (
           <img
-            src={resolvedCover}
+            {...coverImgProps(cover, coverSizes)}
             alt={book.title}
             className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
-            onError={handleCoverError}
           />
         ) : (
           <div
@@ -86,19 +109,23 @@ const BookCardComponent = ({ book, onRefresh, onOpen, menuActions, onRemoved }: 
             Cloud
           </div>
         )}
-        <div className="book-card-hover absolute inset-0 bg-gradient-to-t from-black/80 via-black/25 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
-        <div className="book-card-hover absolute inset-0 flex items-end p-4 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
-          <button
-            type="button"
-            className="tactile-button tactile-button-primary w-full py-2 text-sm font-bold"
-            onClick={(event) => {
-              event.stopPropagation();
-              onOpen(book);
-            }}
-          >
-            {needsDownload ? "Download" : "Resume Reading"}
-          </button>
-        </div>
+        {!touchOnly && (
+          <>
+            <div className="book-card-hover absolute inset-0 bg-gradient-to-t from-black/80 via-black/25 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+            <div className="book-card-hover absolute inset-0 flex items-end p-4 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+              <button
+                type="button"
+                className="tactile-button tactile-button-primary w-full py-2 text-sm font-bold"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onOpen(book);
+                }}
+              >
+                {needsDownload ? "Download" : "Resume Reading"}
+              </button>
+            </div>
+          </>
+        )}
       </div>
       <div className="book-card-meta flex flex-1 items-start gap-1 pt-4">
         <div className="min-w-0 flex-1">

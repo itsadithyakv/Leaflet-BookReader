@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { dotIsStranded, dragEdgeSpeed } from "../readerDot";
+import { dottyDrifted } from "../dottyHold";
 import { type ReaderWord } from "../readerTypes";
 import type { WithCover, WithSmart } from "./scope";
 
@@ -44,6 +45,7 @@ export const useReaderDot = (reader: WithSmart) => {
       readerDotOffscreenTimerRef.current = null;
     }
     const clampedIndex = Math.min(words.length - 1, Math.max(0, index));
+    reader.forgetHeldPlace();
     readerDotAnchorIndexRef.current = clampedIndex;
     readerDotUserAnchorUntilRef.current = Number.POSITIVE_INFINITY;
     activeWordIndexRef.current = clampedIndex;
@@ -254,13 +256,13 @@ export const useReaderDot = (reader: WithSmart) => {
     }
   };
 
-  const positionReaderDotAtWord = (index: number) => {
-    if (!readerDotEnabledRef.current) return;
+  /** Where Dotty sits beside word `index`: in the scrolling container, at a height in the book. */
+  const dotPlaceFor = (index: number) => {
     const word = readerWordsRef.current[index];
     const container = ensureScrollContainer();
-    if (!word || !container) return;
+    if (!word || !container) return null;
     const rect = getReaderWordRect(word);
-    if (!rect) return;
+    if (!rect) return null;
     const containerRect = container.getBoundingClientRect();
     const documentTop = rect.top - containerRect.top + container.scrollTop;
     const iframeRect = word.iframe.getBoundingClientRect();
@@ -270,12 +272,54 @@ export const useReaderDot = (reader: WithSmart) => {
     );
     const textLeft =
       iframeRect.left + (Number.isFinite(computedPadding) ? computedPadding : 24);
-    const left = Math.max(7, textLeft - containerRect.left - 18);
-    const dot = ensureReaderDot(container);
-    moveReaderDot(dot, container, Math.max(6, documentTop + rect.height / 2 - DOT_SIZE / 2), left);
+    return {
+      container,
+      top: Math.max(6, documentTop + rect.height / 2 - DOT_SIZE / 2),
+      left: Math.max(7, textLeft - containerRect.left - 18)
+    };
+  };
+
+  const positionReaderDotAtWord = (index: number) => {
+    if (!readerDotEnabledRef.current) return;
+    const place = dotPlaceFor(index);
+    if (!place) return;
+    const dot = ensureReaderDot(place.container);
+    moveReaderDot(dot, place.container, place.top, place.left);
     dot.setAttribute("aria-valuenow", `${index + 1}`);
     dot.setAttribute("aria-valuemax", `${readerWordsRef.current.length}`);
     readerDotAnchorIndexRef.current = index;
+  };
+
+  /**
+   * Smart Read paused or waiting: the text can move under Dotty while nothing
+   * reads on (a chapter fetched or let go above it, a picture loading, the
+   * page laid out again), and Dotty, placed at a height in the book, stayed
+   * where it was, beside another line or tucked away past the end of the
+   * page, until reading went on (readers/dottyHold.ts). It goes back beside
+   * its word. True when it moved.
+   */
+  const keepDottyOnItsWord = () => {
+    if (readingModeRef.current !== "smart" || !readerDotEnabledRef.current || reader.smartPictureRef.current) {
+      return false;
+    }
+    const index = readerDotAnchorIndexRef.current;
+    const dot = readerDotElementRef.current;
+    if (index === null || dot?.dataset.dragging === "true") {
+      return false;
+    }
+    const place = dotPlaceFor(index);
+    if (!place) {
+      return false;
+    }
+    const shown =
+      dot && place.container.contains(dot)
+        ? { top: Number.parseFloat(dot.style.top), left: Number.parseFloat(dot.style.left), visible: dot.style.opacity !== "0" }
+        : null;
+    if (!dottyDrifted(shown, place)) {
+      return false;
+    }
+    positionReaderDotAtWord(index);
+    return true;
   };
 
   const monitorUserReaderDotVisibility = (container: HTMLElement) => {
@@ -490,6 +534,10 @@ export const useReaderDot = (reader: WithSmart) => {
     if (!dot || dot.parentElement !== container) {
       return;
     }
+    // In Smart Read Dotty's word is known: it goes back beside it, if it is still on the page.
+    if (keepDottyOnItsWord() || (readingModeRef.current === "smart" && readerDotAnchorIndexRef.current !== null && dotPlaceFor(readerDotAnchorIndexRef.current))) {
+      return;
+    }
     const chapterEnds = Array.from(container.children)
       .filter((child) => child !== dot)
       .map((child) => (child as HTMLElement).offsetTop + (child as HTMLElement).offsetHeight);
@@ -548,6 +596,7 @@ export const useReaderDot = (reader: WithSmart) => {
 
   // Drops a user-placed Dotty pin so automatic tracking resumes.
   const releaseUserReadingAnchor = () => {
+    reader.forgetHeldPlace();
     readerDotUserAnchorUntilRef.current = 0;
     readerDotAnchorIndexRef.current = null;
     // Going elsewhere: the word that was being read is not looked for again
@@ -563,7 +612,7 @@ export const useReaderDot = (reader: WithSmart) => {
   return {
     readerDotDragFrameRef, readerDotOffscreenTimerRef, readerDotElementRef, readerDotEnabledRef,
     readerDotAnchorIndexRef, readerDotUserAnchorUntilRef, readerDotEnabled, setReaderDotEnabled, moveReaderDot,
-    positionReaderDotAtWord, monitorUserReaderDotVisibility, updateLastReadMarker, removeLastReadMarker,
+    positionReaderDotAtWord, keepDottyOnItsWord, monitorUserReaderDotVisibility, updateLastReadMarker, removeLastReadMarker,
     tuckAwayStrandedDot, refreshReaderDot, scheduleReaderDotUpdate, releaseUserReadingAnchor
   };
 };
@@ -582,7 +631,8 @@ export const useDotSwitch = (reader: WithCover) => {
       return;
     }
     if (readingModeRef.current === "smart") {
-      positionReaderDotAtWord(activeWordIndexRef.current);
+      // Beside the word it was on (the index is the word to read next).
+      positionReaderDotAtWord(reader.readerDotAnchorIndexRef.current ?? activeWordIndexRef.current);
       return;
     }
     if (readingModeRef.current === "speed") {

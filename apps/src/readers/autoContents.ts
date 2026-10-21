@@ -427,16 +427,21 @@ const plausible = (sections: ScannedSection[], count: number) => count >= 3 && t
  * very back. Its links are the entries, when they lead somewhere: to three
  * places or more, most of them found.
  */
+/** A page of links to elsewhere in the book: five or more, and most of what it says. */
+const isLinkPage = (section: ScannedSection) => {
+  const links = section.links.filter((link) => link.text.trim() && link.section !== section.index);
+  const linked = links.reduce((sum, link) => sum + link.text.length, 0);
+  return links.length >= 5 && linked >= section.chars * 0.5;
+};
+
 export const fromContentsPage = (sections: ScannedSection[]): Finding | null => {
   const near = sections.filter((section, position) => position < 20 || position >= sections.length - 4);
   let best: ScannedSection | null = null;
   for (const section of near) {
-    const links = section.links.filter((link) => link.text.trim() && link.section !== section.index);
-    const linked = links.reduce((sum, link) => sum + link.text.length, 0);
-    // A page of links: five or more, and most of what it says.
-    if (links.length < 5 || linked < section.chars * 0.5) {
+    if (!isLinkPage(section)) {
       continue;
     }
+    const links = section.links.filter((link) => link.text.trim() && link.section !== section.index);
     if (!best || /\b(toc|contents)\b/.test(section.type.toLowerCase()) || links.length > best.links.length) {
       best = section;
       if (/\b(toc|contents)\b/.test(section.type.toLowerCase())) {
@@ -834,9 +839,13 @@ export type ContentsDecision = {
   toc: TocItem[];
   /** The share of its section before each entry found that is not at the top of one (`placeKey` to 0..1). */
   within: Record<string, number>;
+  /** The book's own contents, kept, with names put right (`splitJoinedLabels`): `toc` is them, to be used and kept. */
+  retitled?: boolean;
 };
 
 const isStory = (entry: Found) => entry.kind === "chapter" || entry.kind === "part";
+/** A contents entry named as a part ("PART TWO: Ghosts in the Mist", "Book Three"). */
+const isPartLabel = (label: string) => readHeading(label)?.kind === "part";
 
 /**
  * Whether the book's own contents are kept, added to, or replaced.
@@ -909,34 +918,61 @@ export const treeOf = (entries: Found[], hrefs: readonly string[]): TocItem[] =>
 /**
  * The book's own contents with what was found beneath them: each chapter
  * found that the contents do not have goes under the top-level entry it
- * follows. The book's entries, their order and their names are untouched.
+ * follows. The book's entries, their order and their names are untouched,
+ * and so are their places, but for one kind (`partMoved`).
  */
 export const mergeContents = (
-  own: TocItem[],
+  given: TocItem[],
   placeOf: (href: string) => { section: number | undefined; anchor: string | null },
   entries: Found[],
   hrefs: readonly string[]
 ): TocItem[] => {
-  const flat: Array<{ section: number; anchor: string | null }> = [];
+  /**
+   * A part's entry on the file of a chapter, with that part's own title page
+   * found a file or two on: a Kindle conversion's (the book's link went to
+   * the end of the chapter before the part, and the part's name went to that
+   * chapter's file). It leads to the title page, and the chapter is named
+   * for itself: it used to be "Part Two" from its first line to its last.
+   */
+  const partMoved = (item: TocItem): TocItem => {
+    const at = placeOf(item.href);
+    if (!isPartLabel(item.label) || typeof at.section !== "number" || at.anchor !== null) {
+      return item;
+    }
+    const section = at.section;
+    if (!entries.some((entry) => entry.section === section && entry.anchor === null && entry.kind === "chapter")) {
+      return item;
+    }
+    const page = entries.find((entry) => entry.kind === "part" && entry.anchor === null && entry.section > section && entry.section - section <= 2);
+    const href = page ? hrefs[page.section] : undefined;
+    return href ? { ...item, href } : item;
+  };
+  const own = given.map(partMoved);
+  const flat: Array<{ section: number; anchor: string | null; part: boolean }> = [];
   const walk = (items: TocItem[]) =>
     items.forEach((item) => {
       const at = placeOf(item.href);
       if (typeof at.section === "number") {
-        flat.push({ section: at.section, anchor: at.anchor });
+        flat.push({ section: at.section, anchor: at.anchor, part: isPartLabel(item.label) });
       }
       walk(item.subitems ?? []);
     });
   walk(own);
   // What the book lists is the book's to name: a section it has an entry for (at its head), or the same anchor.
-  const has = (entry: Found) => flat.some((at) => at.section === entry.section && (entry.anchor === null || at.anchor === entry.anchor));
-  const tops = own.map((item) => ({ item: { ...item, subitems: [...(item.subitems ?? [])] }, section: placeOf(item.href).section }));
+  // Not a part's entry on a file that opens with a chapter heading: a Kindle
+  // conversion put the part's name on the last chapter before it (the link
+  // went to the end of that chapter's file), and the chapter went unnamed.
+  const claims = (at: { part: boolean }, entry: Found) => !(at.part && entry.kind === "chapter");
+  const has = (entry: Found) => flat.some((at) => at.section === entry.section && (entry.anchor === null || at.anchor === entry.anchor) && claims(at, entry));
+  const tops = own.map((item) => ({ item: { ...item, subitems: [...(item.subitems ?? [])] }, section: placeOf(item.href).section, part: isPartLabel(item.label) }));
   entries.forEach((entry, index) => {
     if (!isStory(entry) || has(entry)) {
       return;
     }
+    // (Such a chapter goes under the part before, which it ends.)
     let parent = -1;
     tops.forEach((top, position) => {
-      if (typeof top.section === "number" && top.section <= entry.section) {
+      if (typeof top.section === "number" && (top.section < entry.section || (top.section === entry.section && claims(top, entry)))) {
         parent = position;
       }
     });
@@ -944,7 +980,9 @@ export const mergeContents = (
     if (parent < 0 || matterByText(tops[parent].item.label)) {
       return;
     }
-    const item: TocItem = { id: `leaflet-auto-${index}`, label: entry.label, ...linkOf(hrefs, entry), subitems: [] };
+    // Under a part, a chapter headed by its number alone is called "Chapter 12", not "12".
+    const label = /^([0-9]{1,3}|[IVXLCDM]{1,8})$/.test(entry.label) ? `Chapter ${entry.label}` : entry.label;
+    const item: TocItem = { id: `leaflet-auto-${index}`, label, ...linkOf(hrefs, entry), subitems: [] };
     const siblings = tops[parent].item.subitems ?? [];
     // Among the entry's own children, in reading order.
     let before = siblings.length;
@@ -961,6 +999,86 @@ export const mergeContents = (
   return tops.map((top) => top.item);
 };
 
+/**
+ * A contents entry whose name is two lines of the page it leads to run
+ * together with nothing between ("THE WELL OF ASCENSIONBOOK TWO OF
+ * MISTBORN": a title page's two lines, joined by a Kindle book's link): the
+ * lines, with a dot between. Null when the name is not that.
+ */
+export const splitJoinedLabel = (label: string, lines: readonly string[]): string | null => {
+  const squash = (text: string) => text.replace(/\s+/g, "").toLowerCase();
+  const name = squash(label);
+  // One line of the page that is the name with its spaces (a line broken inside it).
+  const first = (lines[0] ?? "").replace(/\s+/g, " ").trim();
+  if (first && first !== label.replace(/\s+/g, " ").trim() && squash(first) === name && first.split(" ").length > label.trim().split(/\s+/).length) {
+    return first;
+  }
+  for (let count = 2; count <= Math.min(3, lines.length); count += 1) {
+    const run = lines.slice(0, count).map((line) => line.replace(/\s+/g, " ").trim());
+    if (run.every(Boolean) && squash(run.join("")) === name && !label.includes(" · ")) {
+      return run.join(" · ");
+    }
+  }
+  return null;
+};
+
+/** The book's own entries, each joined name (`splitJoinedLabel`) parted by the lines it leads to. The same tree when none is. */
+export const splitJoinedLabels = (
+  own: TocItem[],
+  placeOf: (href: string) => { section: number | undefined; anchor: string | null },
+  sections: ScannedSection[]
+): TocItem[] => {
+  const walk = (items: TocItem[]): TocItem[] => {
+    let changed = false;
+    const next = items.map((item) => {
+      const at = placeOf(item.href);
+      const page = typeof at.section === "number" && at.anchor === null ? sections.find((section) => section.index === at.section) : undefined;
+      const parted = page ? splitJoinedLabel(item.label, page.blocks.slice(0, 3).map((block) => block.text)) : null;
+      const subitems = item.subitems && item.subitems.length > 0 ? walk(item.subitems) : item.subitems;
+      if (parted === null && subitems === item.subitems) {
+        return item;
+      }
+      changed = true;
+      return { ...item, label: parted ?? item.label, subitems };
+    });
+    return changed ? next : items;
+  };
+  return walk(own);
+};
+
+/**
+ * A list with its parts and their chapters all at one level (a Kindle
+ * book's, as Leaflet converts it: "PART ONE", "Chapter 1", "Chapter 2"...):
+ * each part's chapters set under it, as a book's own nested contents have
+ * them. Only a flat list with two parts or more; an entry that is not a
+ * chapter (a map, an epilogue, an appendix) stays where it is, and ends the
+ * part before it. The same list when there is nothing to do.
+ */
+export const nestFlatParts = (tree: TocItem[]): TocItem[] => {
+  if (tree.some((item) => (item.subitems?.length ?? 0) > 0)) {
+    return tree;
+  }
+  const kind = (item: TocItem) => readHeading(item.label)?.kind ?? null;
+  if (tree.filter((item) => kind(item) === "part").length < 2) {
+    return tree;
+  }
+  const nested: TocItem[] = [];
+  let part: TocItem | null = null;
+  for (const item of tree) {
+    const what = kind(item);
+    if (what === "part") {
+      part = { ...item, subitems: [] };
+      nested.push(part);
+    } else if (part && (what === "chapter" || what === "numeral")) {
+      part.subitems = [...(part.subitems ?? []), item];
+    } else {
+      part = null;
+      nested.push(item);
+    }
+  }
+  return nested;
+};
+
 /** The contents the reader should show: the book's own, added to, or made. */
 export const decideContents = (
   own: TocItem[],
@@ -975,10 +1093,37 @@ export const decideContents = (
       walk(item.subitems ?? []);
     });
   walk(own);
-  const finding = findChapters(sections);
-  const { use, reason } = judgeContents(flat, sections, finding);
+  let finding = findChapters(sections);
+  let { use, reason } = judgeContents(flat, sections, finding);
+  // The book's own contents page can list no more than its contents do (a
+  // Kindle book's: the parts alone, the chapters only headed in the text).
+  // The headings in the text are then looked at too, and what they find is
+  // added beneath when they are sure of it; what they find on a page of
+  // links is that page's list, not chapters. Never more than an addition:
+  // the book's own entries stay as they are.
+  if (use === "own" && finding.source === "page") {
+    for (const other of [fromHeadings(sections), fromPatterns(sections), fromStyled(sections)]) {
+      if (!other?.confident) {
+        continue;
+      }
+      const inText = withMatter(sections, { ...other, entries: other.entries.filter((entry) => {
+        const page = sections.find((at) => at.index === entry.section);
+        return !(page && isLinkPage(page));
+      }) });
+      const verdict = judgeContents(flat, sections, inText);
+      if (verdict.use === "merged") {
+        finding = inText;
+        use = verdict.use;
+        reason = `${verdict.reason} (by its ${other.source}; its contents page lists no more)`;
+        break;
+      }
+    }
+  }
   if (use === "own") {
-    return { use, reason, source: null, toc: own, within: {} };
+    // The book's own, its names run together put right (a Kindle book's
+    // "THE WELL OF ASCENSIONBOOK TWO OF MISTBORN"), by the page each leads to.
+    const parted = splitJoinedLabels(own, placeOf, sections);
+    return parted === own ? { use, reason, source: null, toc: own, within: {} } : { use, reason, source: null, toc: parted, within: {}, retitled: true };
   }
   const within: Record<string, number> = {};
   finding.entries.forEach((entry) => {
@@ -987,7 +1132,7 @@ export const decideContents = (
     }
   });
   if (use === "merged") {
-    return { use, reason, source: finding.source, toc: mergeContents(own, placeOf, finding.entries, hrefs), within };
+    return { use, reason, source: finding.source, toc: mergeContents(splitJoinedLabels(own, placeOf, sections), placeOf, finding.entries, hrefs), within };
   }
   return { use, reason, source: finding.source, toc: treeOf(finding.entries, hrefs), within };
 };
@@ -995,7 +1140,7 @@ export const decideContents = (
 // ---- kept for the next time the book is opened ----------------------------------------
 
 /** Bumped when the finder changes what it would say of the same book. */
-export const CONTENTS_VERSION = 1;
+export const CONTENTS_VERSION = 4;
 export const CONTENTS_KEY_PREFIX = "leaflet.contents.";
 
 export type KeptContents = {
@@ -1015,7 +1160,7 @@ export const keepContents = (decision: ContentsDecision, spine: number, within: 
   spine,
   use: decision.use,
   source: decision.source,
-  toc: decision.use === "own" ? null : decision.toc,
+  toc: decision.use === "own" && !decision.retitled ? null : decision.toc,
   within
 });
 
@@ -1032,7 +1177,7 @@ export const readKept = (raw: string | null, spine: number): KeptContents | null
     if (kept.use !== "own" && !Array.isArray(kept.toc)) {
       return null;
     }
-    return { v: kept.v, spine, use: kept.use, source: kept.source ?? null, toc: kept.use === "own" ? null : (kept.toc as TocItem[]), within: kept.within && typeof kept.within === "object" ? kept.within : {} };
+    return { v: kept.v, spine, use: kept.use, source: kept.source ?? null, toc: kept.use === "own" ? (Array.isArray(kept.toc) ? (kept.toc as TocItem[]) : null) : (kept.toc as TocItem[]), within: kept.within && typeof kept.within === "object" ? kept.within : {} };
   } catch {
     return null;
   }

@@ -12,6 +12,7 @@ import {
 import { closeLibrarySearch, useLibrarySearchStore } from "./librarySearchStore";
 import { readPdfBook } from "./readPdfBook";
 import { SheetHandle } from "../ui/SheetHandle";
+import ScrollEdge from "../ui/ScrollEdge";
 import { useBackClose } from "../../hooks/useBackClose";
 import { backdropClose } from "../ui/backdrop";
 
@@ -313,11 +314,13 @@ export const LibrarySearchDialog = ({ onOpenInBook }: LibrarySearchDialogProps) 
         </div>
 
         <div className="mt-3 min-h-0 flex-1 overflow-y-auto pr-1">
+          <ScrollEdge edge="top" />
           <ul className="space-y-5">
             {results.map((result) => (
               <BookMatchesEntry key={result.book.id} result={result} onOpen={openMatch} />
             ))}
           </ul>
+          <ScrollEdge edge="bottom" />
         </div>
       </div>
     </div>

@@ -9,15 +9,25 @@
 /* ---- The system's bars --------------------------------------------------- */
 
 :root {
-  /* The bottom bar clears the gesture bar the Android side reports. */
-  --mobile-nav-height: calc(58px + var(--inset-bottom));
+  /* The room the tab bar takes at the foot: the capsule (54 px), the 8 px it floats above the
+     gesture bar the Android side reports, and 2 px of air (its look: styles/glass.css). */
+  --mobile-nav-height: calc(64px + var(--inset-bottom));
   /* The rail and what must stay clear of it. */
   --rail-width: calc(78px + var(--inset-left));
+  /* The header's top padding: the status bar and a little. A variable, so the room the page keeps
+     for the header (index.css, `--app-header-h`) is worked out from the same inset in the same frame:
+     the Android side sends the real inset after the first paint, and a measurement taken before it
+     left the header over the top of the page until something else made it measure again. */
+  --app-header-pad-top: calc(0.75rem + var(--inset-top));
+}
+
+:root[data-shape="sideways"] {
+  --app-header-pad-top: calc(6px + var(--inset-top));
 }
 
 /* Leaflet draws under the status bar; the header's controls do not. */
 .app-header.app-header {
-  padding-top: calc(0.75rem + var(--inset-top));
+  padding-top: var(--app-header-pad-top);
   padding-left: max(1rem, var(--inset-left));
   padding-right: max(1rem, var(--inset-right));
 }
@@ -29,17 +39,27 @@
   }
 }
 
-@media (max-height: 520px) {
-  .app-header.app-header {
-    padding-top: calc(6px + var(--inset-top));
-    padding-bottom: 6px;
-  }
+:where(html[data-shape="sideways"]) .app-header.app-header {
+  padding-top: var(--app-header-pad-top);
+  padding-bottom: 6px;
 }
 
-.mobile-nav.mobile-nav {
-  padding-bottom: calc(6px + var(--inset-bottom));
-  padding-left: max(4px, var(--inset-left));
-  padding-right: max(4px, var(--inset-right));
+/* (The tab bar floats clear of the gesture bar and the notch: styles/glass.css.) */
+
+/* The keyboard up (html[data-keyboard], platform/device.ts): the window ends at it, and the tab bar
+   and the book being read step away rather than ride up on it over the field, as Android's own
+   bottom bars do. What they kept clear of goes to the foot. Back when it goes. */
+html[data-keyboard="open"] {
+  --mobile-nav-height: 0px;
+}
+
+html[data-keyboard="open"] .mobile-nav.mobile-nav,
+html[data-keyboard="open"] .app-shell .now-reading-dock {
+  display: none;
+}
+
+html[data-keyboard="open"] :is(.mobile-nav-edge, .app-main-edge) {
+  display: none;
 }
 
 /* The rail, sideways: wide enough for a notch on its side as well. */
@@ -52,41 +72,46 @@
   padding-left: calc(15px + var(--inset-left));
 }
 
+/* The screen turning at the app's word (a rotation hold taken or let go: platform/shape.ts): neither
+   way about is drawn until the window has turned. The rail was the sideways frames' leather, flashed
+   coming back upright from Pip. Their room is kept, so nothing moves under them. */
+html[data-turning] .app-body .sidebar-stage,
+html[data-turning] .mobile-nav,
+html[data-turning] .mobile-nav-edge {
+  visibility: hidden;
+}
+
 /* What floats at the foot of the page (toasts, the book being read, the
    update card) stays clear of the gesture bar and a side notch wherever the
    bottom tab bar is not already doing it for them. */
-@media not all and (max-width: 767px) and (min-height: 521px) {
-  .app-toast,
-  .now-reading-dock,
-  .update-card {
-    margin-bottom: var(--inset-bottom);
-  }
+:where(html:not([data-shape="upright"])) .app-toast,
+:where(html:not([data-shape="upright"])) .now-reading-dock,
+:where(html:not([data-shape="upright"])) .update-card {
+  margin-bottom: var(--inset-bottom);
+}
 
-  .app-toast,
-  .update-card {
-    margin-right: var(--inset-right);
-  }
+:where(html:not([data-shape="upright"])) .app-toast,
+:where(html:not([data-shape="upright"])) .update-card {
+  margin-right: var(--inset-right);
 }
 
 /* Sideways phone: the dock is centred in the page beside the rail, not in
    the window, where it lay over the rail's foot. */
-@media (max-height: 520px) and (min-width: 520px) {
-  .now-reading-dock {
+@media (min-width: 520px) {
+  :where(html[data-shape="sideways"]) .now-reading-dock {
     left: calc(50% + var(--rail-width) / 2);
     max-width: min(36rem, calc(100vw - var(--rail-width) - var(--inset-right)));
   }
 }
 
 /* The update card rides above the tab bar on an upright phone. */
-@media (max-width: 767px) and (min-height: 521px) {
-  .update-card {
-    right: 1rem;
-    bottom: calc(var(--mobile-nav-height) + 0.75rem);
-  }
+:where(html[data-shape="upright"]) .update-card {
+  right: 1rem;
+  bottom: calc(var(--mobile-nav-height) + 0.75rem);
+}
 
-  .app-shell:has(.now-reading-dock) .update-card {
-    bottom: calc(var(--mobile-nav-height) + 104px);
-  }
+:where(html[data-shape="upright"]) .app-shell[data-dock] .update-card {
+  bottom: calc(var(--mobile-nav-height) + 104px);
 }
 
 /* ---- The rail under a finger -------------------------------------------- */
@@ -114,6 +139,12 @@
     scrollbar-width: none;
     transition: none;
     will-change: auto;
+  }
+
+  /* Where the header floats over the page (a phone, either way up) the rail's leather runs up
+     under it and its keys start below it (index.css): Library and Collections were under it. */
+  :where(html:is([data-shape="upright"], [data-shape="sideways"])) :is(.leaflet-sidebar, .leaflet-sidebar:hover, .leaflet-sidebar:focus-within) {
+    padding-top: calc(var(--app-header-h, 0px) + 10px);
   }
 
   .leaflet-sidebar nav {
@@ -174,13 +205,15 @@
     width: 100%;
     max-width: none;
     margin: 0;
+    /* Edge to edge: no line down the screen's sides or along its foot. */
+    border-inline-width: 0;
     border-bottom-width: 0;
-    border-radius: 22px 22px 0 0;
+    border-radius: 26px 26px 0 0;
     max-height: min(92dvh, calc(100dvh - var(--inset-top) - var(--inset-keyboard) - 8px));
     padding-bottom: calc(1.25rem + max(var(--inset-bottom) - var(--inset-keyboard), 0px));
     overflow-y: auto;
     overscroll-behavior: contain;
-    animation: sheet-rise 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: sheet-rise var(--dur-slow) var(--ease-out-soft) both;
   }
 
   /* Panels that hold a list of their own take the room they are given. */
@@ -206,14 +239,18 @@
   }
 
   /* A form's buttons stay at the foot of the sheet as it scrolls: with the
-     keyboard up, "Post" is above it, not under the fields. */
+     keyboard up, "Post" is above it, not under the fields. The strip runs
+     the sheet's full width (its 1.5 rem sides: every sheet with one is `p-6`)
+     down to its very foot: held, it sticks to the scroller's edge less its
+     padding, so `bottom` gives that padding back; it sat 12 px in from each
+     side and 20 px up, a box of its own. Its look is styles/glass.css's. */
   .sheet-panel .sheet-actions {
     position: sticky;
-    bottom: 0;
+    bottom: calc(-1.25rem - max(var(--inset-bottom) - var(--inset-keyboard), 0px));
     z-index: 1;
-    margin-inline: -0.75rem;
+    margin-inline: -1.5rem;
     margin-bottom: calc(-1.25rem - max(var(--inset-bottom) - var(--inset-keyboard), 0px));
-    padding: 0.625rem 0.75rem calc(0.625rem + max(var(--inset-bottom) - var(--inset-keyboard), 0px));
+    padding: 0.625rem 1.5rem calc(0.625rem + max(var(--inset-bottom) - var(--inset-keyboard), 0px));
     background: rgb(var(--color-surface));
   }
 
@@ -236,34 +273,55 @@
   min-height: 44px;
 }
 
-@media (hover: none) and (pointer: coarse) and (max-height: 520px) and (min-width: 640px) {
-  .sheet-backdrop-menu.sheet-backdrop-menu {
+@media (hover: none) and (pointer: coarse) and (min-width: 640px) {
+  :where(html[data-shape="sideways"]) .sheet-backdrop-menu.sheet-backdrop-menu {
     align-items: flex-end;
     justify-content: flex-end;
     padding: var(--inset-top) var(--inset-right) 0 0;
   }
 
-  .sheet-backdrop-menu > .book-menu-sheet,
-  .sheet-backdrop-menu > .profile-sheet,
-  .sheet-backdrop-menu > .phone-sheet {
+  :where(html[data-shape="sideways"]) .sheet-backdrop-menu > .book-menu-sheet,
+  :where(html[data-shape="sideways"]) .sheet-backdrop-menu > .profile-sheet,
+  :where(html[data-shape="sideways"]) .sheet-backdrop-menu > .phone-sheet {
     width: min(22rem, 60vw);
     overflow-y: auto;
     overscroll-behavior: contain;
     max-height: calc(100dvh - var(--inset-top) - 8px);
     margin-right: 8px;
     border-bottom-width: 0;
-    border-radius: 22px 22px 0 0;
+    border-radius: 26px 26px 0 0;
     padding-bottom: calc(0.75rem + var(--inset-bottom));
-    animation: sheet-rise 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: sheet-rise var(--dur-slow) var(--ease-out-soft) both;
+  }
+
+  /* Any other sheet from the header (the streak) is a card in the middle of the page, not a
+     sheet the screen's whole long side wide: as wide as it reads well, as tall as the screen
+     lets it be, scrolling inside with its edges (components/ui/SheetHandle.tsx). */
+  :where(html[data-shape="sideways"]) .sheet-backdrop-menu.sheet-backdrop-menu:has(> .sheet-panel:not(.book-menu-sheet, .profile-sheet, .phone-sheet)) {
+    align-items: center;
+    justify-content: center;
+    padding: max(8px, var(--inset-top)) max(8px, var(--inset-right)) max(8px, var(--inset-bottom)) max(8px, var(--inset-left));
+  }
+
+  :where(html[data-shape="sideways"]) .sheet-backdrop-menu > .sheet-panel:not(.book-menu-sheet, .profile-sheet, .phone-sheet) {
+    width: min(32rem, 100%);
+    max-height: 100%;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border-radius: 26px;
   }
 }
 
+/* Up from the foot, a blur clearing as it comes (the motion tokens and the
+   way back down are styles/glass.css's). */
 @keyframes sheet-rise {
   from {
     transform: translateY(100%);
+    filter: var(--motion-blur, blur(6px));
   }
   to {
     transform: none;
+    filter: none;
   }
 }
 
@@ -291,13 +349,13 @@
 /* Left out on a phone, by a finger: the header's light and dark key (Settings has the theme, and
    following the system's), and a heading's eyebrow where it only explains the heading
    (components/ui/SectionHeader.tsx, `eyebrowOnPhone`). */
-@media (hover: none) and (pointer: coarse) and (max-width: 767px), (hover: none) and (pointer: coarse) and (max-height: 520px) {
-  .header-theme-key.header-theme-key,
-  .phone-hidden.phone-hidden {
+@media (hover: none) and (pointer: coarse) {
+  :where(html:is([data-shape="upright"], [data-shape="sideways"])) .header-theme-key.header-theme-key,
+  :where(html:is([data-shape="upright"], [data-shape="sideways"])) .phone-hidden.phone-hidden {
     display: none;
   }
 
-  .phone-flush.phone-flush {
+  :where(html:is([data-shape="upright"], [data-shape="sideways"])) .phone-flush.phone-flush {
     margin-top: 0;
   }
 }
@@ -309,6 +367,7 @@
   z-index: 80;
   display: flex;
   background: rgb(0 0 0 / 0.45);
+  /* (Its blur and fade: styles/glass.css, "Scrims".) */
 }
 
 /* ---- Touch targets -------------------------------------------------------- */
@@ -448,41 +507,37 @@
   display: none;
 }
 
-@media (max-width: 767px) and (min-height: 521px) {
-  .add-books-fab {
-    position: fixed;
-    right: max(16px, calc(var(--inset-right) + 12px));
-    bottom: calc(var(--mobile-nav-height) + 14px);
-    z-index: 46;
-    display: inline-flex;
-    width: 56px;
-    height: 56px;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid rgb(var(--color-primary) / 0.78);
-    border-radius: 999px;
-    background: linear-gradient(145deg, rgb(var(--color-primary-deep) / 0.98), rgb(var(--color-primary-container) / 0.98));
-    color: rgb(var(--color-on-primary-container));
-    box-shadow:
-      inset 1px 1px 1px rgba(255, 255, 255, 0.24),
-      0 6px 16px rgba(0, 0, 0, 0.32);
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  .add-books-fab:active {
-    transform: translateY(1px) scale(0.97);
-  }
-
-  /* Over the bar of the book being read, not on it. */
-  .app-shell:has(.now-reading-dock:not(.is-small)) .add-books-fab {
-    bottom: calc(var(--mobile-nav-height) + 124px);
-  }
+:where(html[data-shape="upright"]) .add-books-fab {
+  position: fixed;
+  right: max(16px, calc(var(--inset-right) + 12px));
+  bottom: calc(var(--mobile-nav-height) + 14px);
+  z-index: 46;
+  display: inline-flex;
+  width: 56px;
+  height: 56px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(var(--color-primary) / 0.78);
+  border-radius: 999px;
+  background: linear-gradient(145deg, rgb(var(--color-primary-deep) / 0.98), rgb(var(--color-primary-container) / 0.98));
+  color: rgb(var(--color-on-primary-container));
+  box-shadow:
+    inset 1px 1px 1px rgba(255, 255, 255, 0.24),
+    0 6px 16px rgba(0, 0, 0, 0.32);
+  -webkit-tap-highlight-color: transparent;
 }
 
-@media (max-height: 520px) {
-  .header-add-books {
-    display: inline-flex;
-  }
+:where(html[data-shape="upright"]) .add-books-fab:active {
+  transform: translateY(1px) scale(0.97);
+}
+
+/* Over the bar of the book being read, not on it. */
+:where(html[data-shape="upright"]) .app-shell.app-shell[data-dock="full"] .add-books-fab {
+  bottom: calc(var(--mobile-nav-height) + 124px);
+}
+
+:where(html[data-shape="sideways"]) .header-add-books {
+  display: inline-flex;
 }
 
 /* By a finger on a phone, upright too: the + is in the header, and nothing floats over the shelf
@@ -661,9 +716,10 @@
 
 /* A quote card or a year in review on a phone on its side: the picture down
    the left as tall as the screen allows, its choices beside it, rather than
-   a 200 px picture in a box that scrolls. */
-@media (max-height: 520px) and (min-width: 640px) {
-  .share-dialog:has(> .share-canvas) {
+   a 200 px picture in a box that scrolls. (`.share-dialog-pictured`, set by the dialog while it holds
+   its picture: a `:has()` with `> *` after it restyled the whole page at every insertion.) */
+@media (min-width: 640px) {
+  :where(html[data-shape="sideways"]) .share-dialog.share-dialog-pictured {
     display: grid;
     width: min(46rem, calc(100vw - 2rem - var(--inset-left) - var(--inset-right)));
     grid-template-columns: auto minmax(0, 1fr);
@@ -672,18 +728,18 @@
     align-content: start;
   }
 
-  .share-dialog:has(> .share-canvas) > * {
+  :where(html[data-shape="sideways"]) .share-dialog.share-dialog-pictured > * {
     grid-column: 2;
   }
 
-  .share-dialog:has(> .share-canvas) > .share-canvas {
+  :where(html[data-shape="sideways"]) .share-dialog.share-dialog-pictured > .share-canvas {
     grid-column: 1;
     grid-row: 1 / span 6;
     height: calc(100dvh - 2rem - 2.5rem - 6px);
     margin: 0;
   }
 
-  .share-dialog:has(> .share-canvas) > .mt-4 {
+  :where(html[data-shape="sideways"]) .share-dialog.share-dialog-pictured > .mt-4 {
     margin-top: 12px;
   }
 }

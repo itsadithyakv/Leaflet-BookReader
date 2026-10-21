@@ -130,6 +130,14 @@ export type MoodRules = {
   bareFridge?: number;
 };
 
+/**
+ * One thing earned by reading, never sold (pip/earned.rs has the rules): done
+ * or not, and how far along, as `value` of `target` `unit` ("5" of "7"
+ * "days"; no unit for a thing that happens once). `earnable` is false for
+ * one this build cannot award yet. The done ones are in `owned`.
+ */
+export type EarnStatus = { kind: ShopKind; id: string; done: boolean; earnable: boolean; value: number; target: number; unit: string };
+
 export type PipOverview = {
   wallet: PipWallet;
   owned: Array<{ kind: ShopKind; id: string }>;
@@ -161,6 +169,8 @@ export type PipOverview = {
   level?: { level: number; earned: number; floor: number; next: number };
   /** Her fridge. Missing from an older Rust side: then it is for show, as it used to be. */
   fridge?: PipFridge;
+  /** Every thing earned by reading. Missing from an older Rust side and from the browser preview. */
+  earned?: EarnStatus[];
 };
 
 /**

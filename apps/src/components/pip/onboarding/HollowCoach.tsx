@@ -4,11 +4,15 @@ import { jobOn, type BaseState } from "../../../pip/base/rules";
 import { accessories } from "../../../pip/shop";
 import { basketSpot } from "../arcade/base/scene";
 import { PipFace } from "../arcade/base/Sprite";
+import { tapKey } from "./tapKey";
 import { Coach, passThrough } from "./Coach";
 import { useCoachStore } from "./coachStore";
 import { useSayDock } from "./useSayDock";
-import { doorBox, grow, overlap, sceneToScreen, siteBox, whole, type Rect, type SceneBox } from "./geometry";
-import { LINES, MORE, REPLAY_LINES, STEP, advancesBy, effectsOf, nextDemo, resolveStep, running, stepId, type World } from "./steps";
+import { doorBox, grow, overlap, sceneRectOf, sceneToScreen, siteBox, whole, type Rect, type SceneBox } from "./geometry";
+import { LINES, MORE, REPLAY_LINES, STEP, advancesBy, bridgeLine, effectsOf, nextDemo, nextOf, resolveStep, running, stepId, type World } from "./steps";
+import { chapterProgress, hoursWords } from "../../../pip/base/chapters";
+import { useHabitStore } from "../../../store/habitStore";
+import { nowFrom } from "../../../store/baseStore";
 import { welcome as api, useReplay, useWelcomeReady, welcomeOf } from "./welcomeApi";
 
 /** Seconds Pip's friends hammer at a build before it stands (a helping paw): long enough to see who did it. */
@@ -61,6 +65,10 @@ export const HollowCoach = ({ rootRef, skin, outfit }: { rootRef: RefObject<HTML
   const replay = useReplay();
   const demo = replay !== null;
   const oakTapped = useCoachStore((state) => state.oakTapped);
+  // The reading still to do before the first chapter ends, for the last step's line.
+  const snapshot = useHabitStore((state) => state.snapshot);
+  const read = nowFrom(snapshot).minutes;
+  const toGo = base ? hoursWords(chapterProgress(base, read).toGo) : null;
   const world = worldOf(base, ready, outfit, "hollow");
   const on = Boolean(base) && running(world, demo);
   const saved = world.welcome?.tutorial.step ?? 0;
@@ -147,7 +155,8 @@ export const HollowCoach = ({ rootRef, skin, outfit }: { rootRef: RefObject<HTML
       const canvas = root?.querySelector<HTMLCanvasElement>("canvas[data-sky]");
       if (!root || !live || !canvas) return;
       const bounds = rectOf(root);
-      const from = canvas.getBoundingClientRect();
+      // The whole clearing's rectangle: on a phone the canvas is a window onto part of it (BaseScreen's camera).
+      const from = sceneRectOf(canvas);
       const sky = Number(canvas.dataset.sky ?? 0) || 0;
       const onScreen = (box: SceneBox) => whole(sceneToScreen(box, from, sky));
       const button = (site: string) => root.querySelector<HTMLButtonElement>(`[data-coach="build"][data-site="${site}"]`);
@@ -175,7 +184,7 @@ export const HollowCoach = ({ rootRef, skin, outfit }: { rootRef: RefObject<HTML
           avoid = card ? [rectOf(card)] : [];
         } else {
           // A panel open on something else covers the clearing: its tile for the site is the way to it.
-          const tile = demo ? null : root.querySelector(`.pip-base-side .pip-base-tile[data-site="${site}"]`);
+          const tile = demo ? null : root.querySelector(`.pip-base-side :is(.pip-base-tile, .pip-base-row)[data-site="${site}"]`);
           hole = shown(tile) ? rectOf(tile) : onScreen(grow(siteBox(site, live.spots[site]), 2));
         }
       } else if (id === "basket") hole = onScreen(basketBox(live));
@@ -216,8 +225,9 @@ export const HollowCoach = ({ rootRef, skin, outfit }: { rootRef: RefObject<HTML
       else api.setStep(after);
       return;
     }
-    if (step === STEP.bridge) finish(false);
-    else api.setStep(step + 1);
+    const after = nextOf(step);
+    if (step === STEP.bridge || after === null) finish(false);
+    else api.setStep(after);
   };
 
   const hammering = !demo && ((id === "larder" && world.job === "store") || (id === "burrow" && world.job === "burrow"));
@@ -237,28 +247,28 @@ export const HollowCoach = ({ rootRef, skin, outfit }: { rootRef: RefObject<HTML
             : MORE.raise
           : demo
             ? REPLAY_LINES[id]
-            : id === "hat"
-              ? LINES.door
+            : id === "bridge"
+              ? bridgeLine(toGo)
               : LINES[id];
   const face = <PipFace skin={skin} outfit={outfit} box={coarse ? 30 : 40} move={celebrating || hammering ? "cheer" : step === STEP.hello ? "idle" : "idea"} />;
   const keys = asking ? (
     <span className="pip-coach-keys">
-      <button type="button" className="pip-say-button pip-say-button-primary" onClick={() => setAsking(false)}>
+      <button type="button" className="pip-say-button pip-say-button-primary" {...tapKey(() => setAsking(false))}>
         Stay
       </button>
-      <button type="button" className="pip-say-button pip-say-button-quiet" onClick={() => finish(true)}>
+      <button type="button" className="pip-say-button pip-say-button-quiet" {...tapKey(() => finish(true))}>
         Skip
       </button>
     </span>
   ) : (
     <span className="pip-coach-keys">
       {(byNext || view.disabled) && (
-        <button type="button" className="pip-say-button pip-say-button-primary" onClick={next}>
+        <button type="button" className="pip-say-button pip-say-button-primary" {...tapKey(next)}>
           {step === STEP.bridge ? "Got it" : demo && nextDemo(step) === null ? "Done" : "Next"}
         </button>
       )}
       {step !== STEP.bridge && (
-        <button type="button" className="pip-coach-skip" title={demo ? "Stop the tour" : "Skip the tour"} onClick={() => (demo ? finish(false) : setAsking(true))}>
+        <button type="button" className="pip-coach-skip" title={demo ? "Stop the tour" : "Skip the tour"} {...tapKey(() => (demo ? finish(false) : setAsking(true)))}>
           Skip
         </button>
       )}
@@ -275,6 +285,7 @@ export const HollowCoach = ({ rootRef, skin, outfit }: { rootRef: RefObject<HTML
       dim={!still && !bridge}
       ring={!still}
       paw={!still && !bridge}
+      pawBelow={view.onKey}
       through={!demo && !byNext && !still}
       open={view.open}
       float={bridge}

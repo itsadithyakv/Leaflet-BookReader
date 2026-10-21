@@ -1,0 +1,398 @@
+/* The desktop window: Windows 11's Mica showing through, and the chrome drawn
+   the way a well-made Mac or Windows 11 app draws it. Loaded last (main.tsx),
+   so at equal weight a rule here wins over index.css and glass.css.
+
+   Two scopes:
+   - The desktop, held by a mouse (html[data-platform="desktop"][data-input="mouse"],
+     platform/device.ts), in any window wide enough for the rail: quiet icon
+     keys, flat controls with a hairline, soft cards, native-looking focus
+     rings and thin scrollbars, whatever the window is made of. A phone, a
+     tablet and a finger are left alone (styles/touch-shell.css).
+   - html[data-window-material="mica"] (src-tauri/src/window_material.rs, set
+     before the page's own script runs): the window is see-through and Mica,
+     drawn by the compositor from the wallpaper, is behind it. The app's own
+     background goes, the rail becomes a translucent sidebar, and the page sits
+     on a content layer. "none" (Windows 10, a browser, a phone) paints the
+     background as before.
+
+   Mica is the blur behind the window; nothing large and always on screen adds
+   a `backdrop-filter` of its own over it. Glass stays for what floats over the
+   page (glass.css). The book being read is always opaque: the wallpaper never
+   shows through its text (the reader's own `.reader-bg`).
+
+   Pip's own surfaces (her house, the arcade, the drawer, the shop, the album)
+   keep their pixel paper and are left out by name. */
+
+/* ---- Tokens --------------------------------------------------------------- */
+
+:root {
+  --chrome-radius-control: 10px;
+  --chrome-radius-field: 12px;
+  --chrome-radius-panel: 20px;
+  --chrome-hairline: rgb(var(--color-outline-variant) / 0.42);
+  --chrome-hover: rgb(var(--color-on-surface) / 0.06);
+  --chrome-press: rgb(var(--color-on-surface) / 0.1);
+  --chrome-selected: rgb(var(--color-on-surface) / 0.075);
+  --chrome-field: rgb(var(--color-on-surface) / 0.04);
+  --chrome-focus: 0 0 0 3px rgb(var(--color-primary) / 0.32);
+  --chrome-card-shadow: 0 1px 2px rgb(28 30 36 / 0.05), 0 10px 28px -16px rgb(28 30 36 / 0.16);
+  --chrome-key-shadow: 0 1px 1.5px rgb(28 30 36 / 0.07);
+  /* Over Mica: the chrome is the window's own material, untinted, so the title
+     bar and the toolbar read as one surface; the pages lie on a content layer
+     of the app's paper (WCAG AA for body and muted text in both themes, worked
+     out over Mica's lightest and darkest fallbacks). */
+  --mica-shell: transparent;
+  --mica-content: rgb(var(--color-background) / 0.8);
+  --mica-content-edge: rgb(var(--color-outline-variant) / 0.38);
+  --mica-sidebar-selected: rgb(var(--color-on-surface) / 0.08);
+  --mica-sidebar-hover: rgb(var(--color-on-surface) / 0.05);
+  /* The sidebar widened over the page: nearly solid, so a title under it does not ghost through. */
+  --mica-sidebar-float: rgb(var(--color-surface-high) / 0.92);
+  --mica-field: rgb(var(--color-surface-high) / 0.62);
+  --mica-content-light: rgb(255 255 255 / 0.5);
+}
+
+:root[data-theme="dark"] {
+  --chrome-hairline: rgb(255 255 255 / 0.09);
+  --chrome-hover: rgb(255 255 255 / 0.06);
+  --chrome-press: rgb(255 255 255 / 0.1);
+  --chrome-selected: rgb(255 255 255 / 0.08);
+  --chrome-field: rgb(255 255 255 / 0.05);
+  --chrome-focus: 0 0 0 3px rgb(var(--color-primary) / 0.42);
+  --chrome-card-shadow: 0 1px 2px rgb(0 0 0 / 0.24), 0 12px 30px -16px rgb(0 0 0 / 0.5);
+  --chrome-key-shadow: 0 1px 1.5px rgb(0 0 0 / 0.3);
+  --mica-shell: transparent;
+  --mica-content: rgb(var(--color-background) / 0.74);
+  --mica-content-edge: rgb(255 255 255 / 0.07);
+  --mica-sidebar-selected: rgb(255 255 255 / 0.09);
+  --mica-sidebar-hover: rgb(255 255 255 / 0.05);
+  --mica-sidebar-float: rgb(var(--color-surface-high) / 0.93);
+  --mica-field: rgb(255 255 255 / 0.06);
+  --mica-content-light: rgb(255 255 255 / 0.04);
+}
+
+/* ---- The desktop's chrome --------------------------------------------------- */
+
+@media (min-width: 768px) {
+  /* Header keys (the theme, adding books), the streak and the profile: drops of liquid glass
+     on the toolbar, as a Mac's toolbar draws its items: nearly clear, light caught on the rim,
+     a soft shadow. No lens of their own (the toolbar lies on Mica, or is a glass bar already).
+     Under the pointer the glass brightens; pressed, it darkens a touch; nothing moves. */
+  :root[data-platform="desktop"][data-input="mouse"] .app-header :is(.key-button, .streak-chip, .profile-button) {
+    border-color: transparent;
+    background-color: var(--liquid-tint);
+    background-image: var(--liquid-sheen);
+    box-shadow: var(--liquid-rim), var(--liquid-shadow-small);
+    transform: none;
+    transition: background-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
+  }
+
+  :root[data-platform="desktop"][data-input="mouse"] .app-header .key-button {
+    width: 38px;
+    height: 38px;
+    border-radius: 9999px;
+    color: rgb(var(--color-on-surface-variant));
+  }
+
+  :root[data-platform="desktop"][data-input="mouse"] .app-header :is(.key-button, .streak-chip, .profile-button):hover,
+  :root[data-platform="desktop"][data-input="mouse"] .app-header .profile-button-open {
+    border-color: transparent;
+    background-image: linear-gradient(var(--liquid-hover), var(--liquid-hover)), var(--liquid-sheen);
+    color: rgb(var(--color-on-surface));
+    box-shadow: var(--liquid-rim), var(--liquid-shadow-small);
+    transform: none;
+  }
+
+  :root[data-platform="desktop"][data-input="mouse"] .app-header :is(.key-button, .streak-chip, .profile-button):active {
+    background-image: linear-gradient(var(--liquid-press), var(--liquid-press)), var(--liquid-sheen);
+    box-shadow: var(--liquid-rim);
+    transform: none;
+  }
+
+  :root[data-platform="desktop"][data-input="mouse"] .app-header :is(.streak-chip, .profile-button) {
+    height: 40px;
+  }
+
+  :root[data-platform="desktop"][data-input="mouse"] .app-header .profile-button {
+    width: 40px;
+  }
+
+  /* The search field in the toolbar: a capsule of the same glass, a soft ring on focus. */
+  :root[data-platform="desktop"][data-input="mouse"] .app-header .inset-field {
+    border-color: transparent;
+    border-radius: 9999px;
+    background-color: var(--liquid-tint);
+    background-image: var(--liquid-sheen);
+    box-shadow: var(--liquid-rim);
+  }
+
+  :root[data-platform="desktop"][data-input="mouse"] .app-header .inset-field:focus {
+    border-color: transparent;
+    outline: none;
+    box-shadow: var(--liquid-rim), var(--chrome-focus);
+  }
+
+  /* Keys on the pages: flat, a hairline and a breath of shadow. The colour
+     change under the pointer stays; the lift and the press-in go. */
+  :root[data-platform="desktop"][data-input="mouse"]
+    :is(.tactile-button, .key-button):not(:is(.pip-house-page, .pip-arcade, .pip-drawer, .pip-shop, .pip-album-dialog, .app-header) *) {
+    border-color: var(--chrome-hairline);
+    border-radius: var(--chrome-radius-control);
+    background: rgb(var(--color-surface-high));
+    box-shadow: var(--chrome-key-shadow);
+    transition: background-color 140ms ease, color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+  }
+
+  :root[data-platform="desktop"][data-input="mouse"]
+    :is(.tactile-button, .key-button):not(:is(.pip-house-page, .pip-arcade, .pip-drawer, .pip-shop, .pip-album-dialog, .app-header) *):hover {
+    border-color: rgb(var(--color-primary) / 0.45);
+    box-shadow: var(--chrome-key-shadow), 0 0 0 3px rgb(var(--color-primary) / 0.08);
+    transform: none;
+  }
+
+  :root[data-platform="desktop"][data-input="mouse"]
+    :is(.tactile-button, .key-button):not(:is(.pip-house-page, .pip-arcade, .pip-drawer, .pip-shop, .pip-album-dialog, .app-header) *):is(:active, [aria-pressed="true"]) {
+    background: color-mix(in srgb, rgb(var(--color-surface-high)), rgb(var(--color-on-surface)) 6%);
+    box-shadow: none;
+    transform: none;
+  }
+
+  /* The green key: one flat colour with a little light on its top edge. */
+  :root[data-platform="desktop"][data-input="mouse"]
+    .tactile-button.tactile-button-primary:not(:is(.pip-house-page, .pip-arcade, .pip-drawer, .pip-shop, .pip-album-dialog) *) {
+    border-color: rgb(var(--color-primary-container) / 0.6);
+    background: linear-gradient(180deg, rgb(var(--color-primary-deep)), rgb(var(--color-primary-container)));
+    color: rgb(var(--color-on-primary-container));
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18), 0 1px 2px rgb(var(--color-primary-container) / 0.3);
+  }
+
+  /* Fields: a tinted well with a hairline; focus is a soft ring, as the system draws it. */
+  :root[data-platform="desktop"][data-input="mouse"]
+    .inset-field:not(:is(.pip-house-page, .pip-arcade, .pip-drawer, .pip-shop, .pip-album-dialog, .app-header) *) {
+    border-color: var(--chrome-hairline);
+    border-radius: var(--chrome-radius-field);
+    background: var(--chrome-field);
+    box-shadow: none;
+    transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+  }
+
+  :root[data-platform="desktop"][data-input="mouse"]
+    .inset-field:not(:is(.pip-house-page, .pip-arcade, .pip-drawer, .pip-shop, .pip-album-dialog, .app-header) *):focus {
+    border-color: rgb(var(--color-primary) / 0.7);
+    outline: none;
+    box-shadow: var(--chrome-focus);
+  }
+
+  /* Cards on the page: a hairline and a soft shadow below, no light from the
+     upper left, no pressed-in edge. */
+  :root[data-platform="desktop"][data-input="mouse"]
+    :is(.paper-surface, .paper-surface-raised):not(:is(.pip-house-page, .pip-arcade, .pip-drawer, .pip-shop, .pip-album-dialog) *, .modal-surface) {
+    border-color: var(--chrome-hairline);
+    border-radius: var(--chrome-radius-panel);
+    background: rgb(var(--color-surface-high));
+    box-shadow: var(--chrome-card-shadow);
+  }
+
+  /* A dialog's buttons sit in the dialog, not on a strip of their own (the
+     strip is for a phone's sheet, where they stay put while the form scrolls). */
+  :root[data-platform="desktop"][data-input="mouse"] .sheet-panel .sheet-actions.sheet-actions {
+    background: transparent;
+    box-shadow: none;
+    animation: none;
+  }
+
+  /* Native-looking focus: the accent, close to the control, following its corners. */
+  :root[data-platform="desktop"][data-input="mouse"]
+    :is(button, input, select, textarea, [role="button"]):focus-visible:not(:is(.pip-house-page, .pip-arcade, .pip-drawer, .pip-shop, .pip-album-dialog) *, .inset-field) {
+    outline: 2px solid rgb(var(--color-primary));
+    outline-offset: 2px;
+  }
+
+  /* In a menu the item under the keyboard is lit, as a native menu lights it,
+     rather than ringed. */
+  :root[data-platform="desktop"][data-input="mouse"] [role="menu"] :is(button, [role="menuitem"]):focus-visible {
+    outline: none;
+    background: rgb(var(--color-primary) / 0.13);
+    box-shadow: inset 0 0 0 1px rgb(var(--color-primary) / 0.45);
+  }
+
+  /* Scrollbars: thin, rounded, nearly not there until wanted. (The reader's
+     page keeps its own, in its page's colours.) */
+  :root[data-platform="desktop"][data-input="mouse"] ::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+  }
+
+  :root[data-platform="desktop"][data-input="mouse"] ::-webkit-scrollbar-track,
+  :root[data-platform="desktop"][data-input="mouse"] ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  :root[data-platform="desktop"][data-input="mouse"] ::-webkit-scrollbar-thumb {
+    border: 3.5px solid transparent;
+    border-radius: 9999px;
+    background: rgb(var(--color-on-surface) / 0.2) padding-box;
+  }
+
+  :root[data-platform="desktop"][data-input="mouse"] ::-webkit-scrollbar-thumb:hover {
+    background-color: rgb(var(--color-on-surface) / 0.36);
+  }
+}
+
+/* ---- Mica: the window seen through ------------------------------------------- */
+
+:root[data-window-material="mica"],
+:root[data-window-material="mica"] body {
+  background: transparent;
+}
+
+/* The paper grain belongs to paper, not to the wallpaper's light. */
+:root[data-window-material="mica"] body::before {
+  display: none;
+}
+
+:root[data-window-material="mica"] .app-shell {
+  background: var(--mica-shell);
+}
+
+/* The header is the window's toolbar: it lies on Mica with the title bar above
+   it, one surface, no blur of its own (nothing moves under it on a desktop). */
+:root[data-window-material="mica"] .app-header.app-header {
+  border-color: transparent;
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+}
+
+:root[data-window-material="mica"] .app-header.app-header .inset-field {
+  background-color: var(--mica-field);
+}
+
+/* The rail: a sidebar of the window's own material, as in Finder or Notes.
+   No leather, no stitches; the place you are on is a soft rounded pill. */
+:root[data-window-material="mica"] .leaflet-sidebar.leather-surface {
+  --spine-ink: rgb(var(--color-on-surface-variant));
+  --spine-ink-strong: rgb(var(--color-on-surface));
+  border-right: 0;
+  border-radius: 0 16px 16px 0;
+  background: transparent;
+  color: var(--spine-ink);
+  box-shadow: none;
+  transition:
+    width 360ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 220ms ease,
+    box-shadow 220ms ease;
+}
+
+:root[data-window-material="mica"] .leaflet-sidebar.leather-surface::before,
+:root[data-window-material="mica"] .leaflet-sidebar.leather-surface::after {
+  display: none;
+}
+
+/* Widened over the page, it floats: liquid glass, as every surface over the page is (its lens
+   bends the page at its edge; nearly solid, so a title under it does not ghost through). */
+@media (hover: hover) {
+  :root[data-window-material="mica"] .leaflet-sidebar.leather-surface:is(:hover, :focus-within) {
+    background-color: var(--mica-sidebar-float);
+    background-image: var(--liquid-sheen);
+    -webkit-backdrop-filter: var(--liquid-filter-panel);
+    backdrop-filter: var(--liquid-filter-panel);
+    box-shadow: var(--liquid-rim), var(--liquid-shadow);
+  }
+}
+
+:root[data-window-material="mica"] .leaflet-sidebar .sidebar-nav-item {
+  border-color: transparent;
+  border-radius: var(--chrome-radius-field);
+  color: var(--spine-ink);
+  transition:
+    color 140ms ease,
+    background-color 140ms ease,
+    gap 310ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+:root[data-window-material="mica"] .leaflet-sidebar .sidebar-nav-item:hover {
+  border-color: transparent;
+  background: var(--mica-sidebar-hover);
+  color: var(--spine-ink-strong);
+}
+
+:root[data-window-material="mica"] .leaflet-sidebar .sidebar-nav-item[aria-current="page"] {
+  border-color: transparent;
+  background: var(--mica-sidebar-selected);
+  color: var(--spine-ink-strong);
+  box-shadow: none;
+}
+
+:root[data-window-material="mica"] .leaflet-sidebar .sidebar-icon-well {
+  border-color: transparent;
+  background: transparent;
+  color: inherit;
+  box-shadow: none;
+}
+
+/* The place you are on: its icon in the accent, as a Mac sidebar tints it. */
+:root[data-window-material="mica"] .leaflet-sidebar .sidebar-nav-item[aria-current="page"] .sidebar-icon-well {
+  color: rgb(var(--color-primary-deep));
+}
+
+:root[data-theme="dark"][data-window-material="mica"] .leaflet-sidebar .sidebar-nav-item[aria-current="page"] .sidebar-icon-well {
+  color: rgb(var(--color-primary));
+}
+
+/* Start Reading: the one coloured key in the sidebar, flat, nothing that jumps. */
+:root[data-window-material="mica"] .leaflet-sidebar .sidebar-start-button {
+  border-color: rgb(var(--color-primary-container) / 0.6);
+  border-radius: var(--chrome-radius-field);
+  background: linear-gradient(180deg, rgb(var(--color-primary-deep)), rgb(var(--color-primary-container)));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18), 0 2px 6px -2px rgb(var(--color-primary-container) / 0.45);
+}
+
+:root[data-window-material="mica"] .leaflet-sidebar .sidebar-start-button:hover {
+  filter: brightness(1.06);
+  transform: none;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.22), 0 3px 8px -2px rgb(var(--color-primary-container) / 0.5);
+}
+
+:root[data-window-material="mica"] .leaflet-sidebar .sidebar-start-button:active {
+  filter: brightness(0.96);
+  transform: none;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.12);
+}
+
+:root[data-window-material="mica"] .leaflet-sidebar .sidebar-start-button svg {
+  filter: none;
+}
+
+/* Behind a sheet or a dialog the scrim dims and blurs the window. A blur
+   reading the see-through window draws nothing there, dim included, so for as
+   long as one is open the window behind it is the app's own paper. (`html[data-sheet-open]`, kept by
+   components/ui/motion.ts: a `:has()` on the root made every insertion restyle the whole page.) */
+:root[data-window-material="mica"][data-sheet-open] .app-shell {
+  background: rgb(var(--color-background));
+}
+
+/* The pages lie on a content layer: nearly the app's paper, a rounded corner
+   where it meets the sidebar and the toolbar, a hairline round its edge. */
+:root[data-window-material="mica"]:where(:is([data-shape="wide"], [data-shape="sideways"])) .app-main-scroll {
+  border-top: 1px solid var(--mica-content-edge);
+  border-left: 1px solid var(--mica-content-edge);
+  border-top-left-radius: 14px;
+  background: var(--mica-content);
+  /* A breath of light along its top edge, as a Mac's content layer catches it. */
+  box-shadow: inset 0 1px 0 var(--mica-content-light);
+}
+
+/* A window narrow enough for the tab bar: the page is the whole window. */
+:root[data-window-material="mica"]:where([data-shape="upright"]) .app-main-scroll {
+  background: var(--mica-content);
+}
+
+/* High contrast: the system's own colours, on a solid window. */
+@media (forced-colors: active) {
+  :root[data-window-material="mica"],
+  :root[data-window-material="mica"] body {
+    background: Canvas;
+  }
+}

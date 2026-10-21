@@ -15,6 +15,11 @@ type Props = {
   onOpen: (level: HouseLevel) => void;
   /** The room's height: the lift is as tall as the room beside it. */
   height: number;
+  /**
+   * Floating over a room that fills the screen (a phone on its side): a small key of its own, its arrows and the
+   * floor it is on (the list from it reaches every floor), whatever its height; houseStage.css draws it smaller.
+   */
+  floating?: boolean;
   style?: CSSProperties;
 };
 
@@ -26,7 +31,7 @@ type Props = {
  * for every stop, the lift shows the floor it is on, and the others open as
  * a list from it.
  */
-export const FloorSwitch = ({ levels, current, unlocked, lockReason, priceOf, onOpen, height, style }: Props) => {
+export const FloorSwitch = ({ levels, current, unlocked, lockReason, priceOf, onOpen, height, floating = false, style }: Props) => {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLElement | null>(null);
   // Android's Back folds the list of floors, as Escape does.
@@ -37,8 +42,8 @@ export const FloorSwitch = ({ levels, current, unlocked, lockReason, priceOf, on
   // Under a finger every key is 44 px (index.css), so fewer fit: the lift folds to one floor sooner, and in a room
   // too short for three such keys it is the one key alone (its list reaches every floor, as the arrows did).
   const touch = useCoarsePointer();
-  const showAll = liftShowsAll(levels.length, height, touch);
-  const arrows = showAll || liftShowsArrows(height, touch);
+  const showAll = !floating && liftShowsAll(levels.length, height, touch);
+  const arrows = floating || showAll || liftShowsArrows(height, touch);
 
   useEffect(() => {
     if (!open) return;
@@ -101,6 +106,7 @@ export const FloorSwitch = ({ levels, current, unlocked, lockReason, priceOf, on
       style={{ ...style, height }}
       aria-label="Lift: the floors of Pip's house"
       data-compact={!showAll || undefined}
+      data-floating={floating || undefined}
     >
       {arrows && (
         <button

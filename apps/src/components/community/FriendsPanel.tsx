@@ -19,6 +19,7 @@ import { composePost, usePostStore } from "./postStore";
 import { at, errorText, minutesText, nameOf } from "./format";
 import { passOn } from "./passOn";
 import "./friends.css";
+import { SignInPrompt } from "../account/SignInPrompt";
 
 type Toast = (message: string) => void;
 
@@ -487,16 +488,7 @@ export const FriendsPanel = ({ showToast, onNavigate }: { showToast: Toast; onNa
   }
   if (!signedIn) {
     return (
-      <section className="paper-surface flex flex-wrap items-center gap-5 rounded-xl p-6">
-        <PipSprite move="welcome" size={64} still />
-        <div className="min-w-0 flex-1">
-          <SectionHeader eyebrow="Friends" title={COPY.signInTitle} />
-          <p className="mt-2 max-w-prose text-sm leading-6 text-on-surface-variant">{COPY.signIn}</p>
-        </div>
-        <button type="button" className="tactile-button tactile-button-primary px-4 py-2 text-xs" onClick={() => onNavigate("settings")}>
-          Sign in
-        </button>
-      </section>
+      <SignInPrompt line="Sign in to follow readers." onSettings={() => onNavigate("settings")} />
     );
   }
   if (me && (me.visibility === "private" || !me.handle)) {

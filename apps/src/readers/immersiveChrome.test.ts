@@ -78,18 +78,16 @@ describe("the chrome's state", () => {
 
 describe("the system's bars", () => {
   it("are away for the whole book on an upright phone, so the text never moves under a tap", () => {
-    expect(systemBarsHidden("upright", false, false)).toBe(true);
-    expect(systemBarsHidden("upright", true, false)).toBe(true);
+    expect(systemBarsHidden("upright", false)).toBe(true);
   });
 
-  it("come with the chrome on a phone on its side", () => {
-    expect(systemBarsHidden("sideways", false, false)).toBe(true);
-    expect(systemBarsHidden("sideways", true, false)).toBe(false);
+  it("are away for the whole book on its side too, so a tap never lays the pages out again", () => {
+    expect(systemBarsHidden("sideways", false)).toBe(true);
   });
 
   it("stay on a tablet and a desktop, except under focus lock", () => {
-    expect(systemBarsHidden("tablet", false, false)).toBe(false);
-    expect(systemBarsHidden("desktop", false, false)).toBe(false);
-    expect(systemBarsHidden("desktop", true, true)).toBe(true);
+    expect(systemBarsHidden("tablet", false)).toBe(false);
+    expect(systemBarsHidden("desktop", false)).toBe(false);
+    expect(systemBarsHidden("desktop", true)).toBe(true);
   });
 });

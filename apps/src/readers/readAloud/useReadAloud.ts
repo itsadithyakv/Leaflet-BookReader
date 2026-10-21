@@ -5,8 +5,12 @@ import { chapterSentences, sentenceAt, spokenText, type Sentence, type SpokenTex
 import { fakeEngine, type SpeechEngine, type SpeechVoice } from "./engine";
 import { androidEngine } from "./androidEngine";
 import { webSpeechAvailable, webSpeechEngine } from "./webSpeechEngine";
-import { createPlayer, DEFAULT_AHEAD, type PlayerStatus, type ReadAloudPlayer, type SentenceSource } from "./player";
-import { loadPrefs, nextRate, pickVoice, savePrefs, voicesFor, baseLanguage, type ReadAloudPrefs } from "./prefs";
+import { desktopEngine } from "./desktopEngine";
+import { sharedNeuralEngine } from "./neuralEngine";
+import { studioAvailable } from "./studioVoice";
+import { createPlayer, DEFAULT_AHEAD, type PlayerStatus, type ReadAloudPlayer, type SentenceSource, type SpokenWord } from "./player";
+import { loadPrefs, nextRate, pickVoice, savePrefs, snapRate, voicesFor, baseLanguage, type ReadAloudPrefs } from "./prefs";
+import type { RankOptions } from "./voiceRank";
 import { movedByReader, OWN_MOVE_MS, pageMove, scrollTarget } from "./follow";
 import type { WithPhoneReading } from "../text/scope";
 
@@ -15,21 +19,34 @@ import type { WithPhoneReading } from "../text/scope";
 
 /** The name the sentence being read is lit under (the CSS Custom Highlight API), in each chapter's frame. */
 export const READ_ALOUD_HIGHLIGHT = "leaflet-read-aloud";
+/** And the word being said, a little more, where the voice says which it is. */
+export const READ_ALOUD_WORD = "leaflet-read-aloud-word";
 const STYLE_ID = "leaflet-read-aloud-style";
 
-/** Sentences queued past the one being read: more on Android, and many more while Leaflet is out of sight. */
+/**
+ * Sentences queued past the one being read: more on Android, and many more
+ * while Leaflet is out of sight; as many as the engine asks for (a voice that
+ * prepares the chapter first wants the rest of it).
+ */
 const aheadFor = (engine: SpeechEngine) => () =>
-  typeof document !== "undefined" && document.visibilityState === "hidden" ? 80 : engine.kind === "android" ? 10 : DEFAULT_AHEAD;
+  Math.max(
+    engine.ahead?.() ?? 0,
+    typeof document !== "undefined" && document.visibilityState === "hidden" ? 80 : engine.kind === "android" ? 10 : DEFAULT_AHEAD
+  );
 
 /** The engine there is here: Android's own speech, the browser's, or (for the browser preview, by hand) the fake. */
-const makeEngine = (): SpeechEngine | null => {
+const makeEngine = (onFallback?: (voiceName: string | null) => void): SpeechEngine | null => {
   if (typeof window !== "undefined" && (window as any).__leafletReadAloudFake) {
-    return fakeEngine({ autoMs: Number((window as any).__leafletReadAloudFake) || 1600 });
+    const wordMs = Number((window as any).__leafletReadAloudFakeWordMs) || undefined;
+    return fakeEngine({ autoMs: Number((window as any).__leafletReadAloudFake) || 1600, wordMs });
   }
   if (onAndroid()) {
     return androidEngine();
   }
-  return webSpeechAvailable() ? webSpeechEngine() : null;
+  // Windows: its own voices, and the Studio voice where it is downloaded (desktopEngine.ts).
+  const web = webSpeechAvailable() ? webSpeechEngine() : null;
+  const neural = studioAvailable() ? sharedNeuralEngine() : null;
+  return web || neural ? desktopEngine({ web, neural, onFallback }) : null;
 };
 
 export type ReadAloudNotice = "noVoice" | null;
@@ -43,15 +60,28 @@ const storage = () => {
 };
 
 /** A colour from the reader's accent, soft enough to read through. */
-const litColour = (scope: Element | null) => {
+const litColour = (scope: Element | null, alpha = 0.24) => {
   const accent = scope ? getComputedStyle(scope).getPropertyValue("--reader-accent").trim() : "";
   const hex = /^#([0-9a-f]{6})$/i.exec(accent);
   if (hex) {
     const value = parseInt(hex[1], 16);
-    return `rgba(${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}, 0.24)`;
+    return `rgba(${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}, ${alpha})`;
   }
-  return "rgba(214, 160, 40, 0.26)";
+  return `rgba(214, 160, 40, ${alpha + 0.02})`;
 };
+
+/**
+ * How voices are ranked here: offline first on Android, and the phone's own
+ * voice before Leaflet's studio voices there (picked only by hand); the
+ * reader's own languages for the region.
+ */
+const rankOptions = (engine: SpeechEngine | null): RankOptions => ({
+  preferOffline: (engine?.kind ?? (onAndroid() ? "android" : "web")) === "android",
+  studioFirst: (engine?.kind ?? (onAndroid() ? "android" : "web")) !== "android",
+  // (Only "false" is to be trusted: "true" may be a network that goes nowhere.)
+  offline: typeof navigator !== "undefined" && navigator.onLine === false,
+  userLangs: typeof navigator === "undefined" ? [] : navigator.languages?.length ? navigator.languages : navigator.language ? [navigator.language] : []
+});
 
 /**
  * Read aloud in the text reader: from the first sentence on screen, on
@@ -68,6 +98,10 @@ export const useReadAloud = (reader: WithPhoneReading) => {
   const [voices, setVoices] = useState<SpeechVoice[]>([]);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [notice, setNotice] = useState<ReadAloudNotice>(null);
+  /** Seconds until a studio voice that prepares the chapter first can start (null: not waiting). */
+  const [preparing, setPreparing] = useState<number | null>(null);
+  /** A voice for this reading only ("Use phone voice now"), not kept in the prefs. */
+  const [voiceOverride, setVoiceOverride] = useState<string | null>(null);
 
   const engineRef = useRef<SpeechEngine | null>(null);
   const playerRef = useRef<ReadAloudPlayer | null>(null);
@@ -83,6 +117,8 @@ export const useReadAloud = (reader: WithPhoneReading) => {
   const drawnRef = useRef(new WeakMap<Document, SpokenText<Node>>());
   const paintedRef = useRef(new Set<Document>());
   const fallbackMarkRef = useRef<string | null>(null);
+  /** The word being said, where the voice says. */
+  const wordRef = useRef<SpokenWord | null>(null);
   const noticeTimerRef = useRef<number | null>(null);
   const latest = useRef(reader);
   latest.current = reader;
@@ -186,6 +222,7 @@ export const useReadAloud = (reader: WithPhoneReading) => {
     paintedRef.current.forEach((doc) => {
       try {
         (doc.defaultView as any)?.CSS?.highlights?.delete(READ_ALOUD_HIGHLIGHT);
+        (doc.defaultView as any)?.CSS?.highlights?.delete(READ_ALOUD_WORD);
       } catch {
         // A chapter since let go.
       }
@@ -216,10 +253,13 @@ export const useReadAloud = (reader: WithPhoneReading) => {
         style.id = STYLE_ID;
         (doc.head ?? doc.documentElement).appendChild(style);
       }
-      const rule = `::highlight(${READ_ALOUD_HIGHLIGHT}) { background-color: ${colour}; }`;
+      const word = litColour(document.querySelector(".reader-scope"), 0.2);
+      const rule = `::highlight(${READ_ALOUD_HIGHLIGHT}) { background-color: ${colour}; } ::highlight(${READ_ALOUD_WORD}) { background-color: ${word}; }`;
       if (style.textContent !== rule) style.textContent = rule;
       win.CSS.highlights.set(READ_ALOUD_HIGHLIGHT, new win.Highlight(range));
       paintedRef.current.add(doc);
+      // (The voice may already be a word in.)
+      if (wordRef.current?.sentence === sentence) paintWord(wordRef.current);
       return;
     }
     // No highlight API: epub.js's own mark, over the words.
@@ -232,6 +272,33 @@ export const useReadAloud = (reader: WithPhoneReading) => {
         // Not drawn: the voice reads on regardless.
       }
     });
+  };
+
+  /** The word being said, over the sentence's light (only where the highlight API is, and while Leaflet is in sight). */
+  const paintWord = (word: SpokenWord | null) => {
+    wordRef.current = word;
+    if (!word) {
+      paintedRef.current.forEach((doc) => {
+        try {
+          (doc.defaultView as any)?.CSS?.highlights?.delete(READ_ALOUD_WORD);
+        } catch {
+          // A chapter since let go.
+        }
+      });
+      return;
+    }
+    if (document.visibilityState === "hidden" || word.sentence !== currentRef.current || word.end <= word.start) return;
+    const contents = drawnContents(word.sentence.section);
+    const doc: Document | undefined = contents?.document;
+    const win = doc?.defaultView as any;
+    if (!doc || !paintedRef.current.has(doc) || !win?.CSS?.highlights || typeof win.Highlight !== "function") return;
+    const range = rangeOf(drawnText(doc) as unknown as TextIndex, word.start, word.end);
+    if (!range) return;
+    try {
+      win.CSS.highlights.set(READ_ALOUD_WORD, new win.Highlight(range));
+    } catch {
+      // Not drawn: the sentence stays lit.
+    }
   };
 
   // ---- keeping it on screen --------------------------------------------------
@@ -306,13 +373,20 @@ export const useReadAloud = (reader: WithPhoneReading) => {
 
   const ensurePlayer = () => {
     if (playerRef.current) return playerRef.current;
-    const engine = makeEngine();
+    const engine = makeEngine((name) =>
+      latest.current.showFocusToastRef.current(name ? `Studio voice stopped — reading on with ${name}` : "Studio voice stopped — reading on")
+    );
     if (!engine) return null;
     engineRef.current = engine;
+    engine.onEvent((event) => {
+      if (event.type === "preparing") setPreparing(event.seconds);
+      else if (event.type === "stopped") setPreparing(null);
+    });
     const player = createPlayer(engine, source, {
       ahead: aheadFor(engine),
       onChange: (state) => {
         setStatus(state.status);
+        if (state.status === "idle") setPreparing(null);
         const changedChapter = state.current && currentRef.current?.section !== state.current.section;
         currentRef.current = state.current;
         setCurrent(state.current);
@@ -320,8 +394,15 @@ export const useReadAloud = (reader: WithPhoneReading) => {
           tellChapter(state.current.section);
         }
       },
+      onWord: paintWord,
       onEnd: () => latest.current.showFocusToastRef.current("The end of the book"),
-      onStopped: () => setSheetOpen(false)
+      onStopped: () => setSheetOpen(false),
+      // (Several items in a row the voice could not say: one that needs the network, offline.)
+      onFailed: () => {
+        setSheetOpen(false);
+        unpaint();
+        latest.current.showFocusToastRef.current("The voice could not read here. Try another voice.");
+      }
     });
     playerRef.current = player;
     return player;
@@ -335,7 +416,7 @@ export const useReadAloud = (reader: WithPhoneReading) => {
     } catch {
       chapter = "";
     }
-    engineRef.current?.setInfo?.({ title: scope.book.title ?? "", author: scope.book.author ?? "", chapter });
+    engineRef.current?.setInfo?.({ title: scope.book.title ?? "", author: scope.book.author ?? "", chapter, bookId: String(scope.book.id ?? "") });
   };
 
   /**
@@ -387,14 +468,16 @@ export const useReadAloud = (reader: WithPhoneReading) => {
     }
     const all = await engine.voices().catch(() => [] as SpeechVoice[]);
     setVoices(all);
-    const offered = voicesFor(all, language());
+    const offered = voicesFor(all, language(), rankOptions(engine));
     if (offered.length === 0) {
       showNotice("noVoice");
       return;
     }
-    const voice = pickVoice(all, language(), prefs);
-    engine.setRate(prefs.rate);
-    engine.setVoice(voice?.id ?? null, voice?.lang ?? language());
+    setVoiceOverride(null);
+    setPreparing(null);
+    const voice = pickVoice(all, language(), prefs, rankOptions(engine));
+    player.setRate(prefs.rate);
+    player.setVoice(voice?.id ?? null, voice?.lang ?? language());
     const place = placeOnScreen();
     if (!place) return;
     const scope = latest.current;
@@ -423,7 +506,9 @@ export const useReadAloud = (reader: WithPhoneReading) => {
     else if (player.state.status === "paused") player.resume();
   };
 
-  const setRate = (rate: number) => {
+  const setRate = (value: number) => {
+    const rate = snapRate(value);
+    if (Math.abs(rate - prefs.rate) < 0.001) return;
     const next = { ...prefs, rate };
     setPrefs(next);
     savePrefs(storage(), next);
@@ -434,7 +519,40 @@ export const useReadAloud = (reader: WithPhoneReading) => {
     const next = { ...prefs, voices: { ...prefs.voices, [baseLanguage(language())]: voice.id } };
     setPrefs(next);
     savePrefs(storage(), next);
+    setVoiceOverride(null);
+    setPreparing(null);
     playerRef.current?.setVoice(voice.id, voice.lang);
+  };
+
+  /** While a studio voice prepares the chapter: the phone's best voice reads now instead (this time only). */
+  const usePhoneVoice = () => {
+    const phone = voicesFor(voices, language(), rankOptions(engineRef.current)).find((entry) => !entry.studio);
+    if (!phone) return;
+    setVoiceOverride(phone.id);
+    setPreparing(null);
+    playerRef.current?.setVoice(phone.id, phone.lang);
+  };
+
+  /**
+   * A studio voice chosen on a device too slow to read it live: the chapter
+   * from the place on screen is prepared quietly before reading starts (the
+   * engine prepares only while Leaflet is in front, not on a low battery), so
+   * pressing play is often at once.
+   */
+  const prepareAhead = async () => {
+    if (playerRef.current && playerRef.current.state.status !== "idle") return;
+    const player = ensurePlayer();
+    const engine = engineRef.current;
+    if (!player || !engine?.prepare || player.state.status !== "idle") return;
+    const all = await engine.voices().catch(() => [] as SpeechVoice[]);
+    const voice = pickVoice(all, language(), prefs, rankOptions(engine));
+    if (!voice?.studio || !voice.slow || player.state.status !== "idle") return;
+    const place = placeOnScreen();
+    if (!place) return;
+    player.setRate(prefs.rate);
+    player.setVoice(voice.id, voice.lang ?? language());
+    tellChapter(place.section);
+    await player.prepare(place.section, place.offset);
   };
 
   const follow = () => {
@@ -510,10 +628,36 @@ export const useReadAloud = (reader: WithPhoneReading) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reader.readingMode, reader.autoScrollActive]);
 
+  // A book open and the voice idle (on Android, with a studio voice that prepares first): the chapter on screen made ahead.
+  useEffect(() => {
+    if (active || !onAndroid()) return undefined;
+    let timer: number | null = null;
+    const later = (ms: number) => {
+      if (timer) window.clearTimeout(timer);
+      timer = window.setTimeout(() => void prepareAhead().catch(() => undefined), ms);
+    };
+    later(4000);
+    // Each time the reader settles on a new page.
+    const rendition = renditionRef.current;
+    const moved = () => later(15000);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") later(4000);
+    };
+    rendition?.on?.("relocated", moved);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      if (timer) window.clearTimeout(timer);
+      rendition?.off?.("relocated", moved);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, book.id, reader.reloadKey]);
+
   // The book closed (or another opened): the voice stops.
   useEffect(
     () => () => {
       playerRef.current?.stop();
+      engineRef.current?.forget?.();
       playerRef.current?.dispose();
       playerRef.current = null;
       engineRef.current = null;
@@ -524,8 +668,9 @@ export const useReadAloud = (reader: WithPhoneReading) => {
     [book.id]
   );
 
-  const offered = voicesFor(voices, language());
-  const voice = pickVoice(voices, language(), prefs);
+  const offered = voicesFor(voices, language(), rankOptions(engineRef.current));
+  const voice =
+    (voiceOverride ? offered.find((entry) => entry.id === voiceOverride) : null) ?? pickVoice(voices, language(), prefs, rankOptions(engineRef.current));
 
   return {
     readAloud: {
@@ -537,6 +682,8 @@ export const useReadAloud = (reader: WithPhoneReading) => {
       rate: prefs.rate,
       voices: offered,
       voiceId: voice?.id ?? null,
+      /** The one that sounds best here (first in the list). */
+      bestVoiceId: offered[0]?.id ?? null,
       sheetOpen,
       setSheetOpen,
       notice,
@@ -552,6 +699,10 @@ export const useReadAloud = (reader: WithPhoneReading) => {
       setRate,
       cycleRate: () => setRate(nextRate(prefs.rate)),
       chooseVoice,
+      /** Seconds until a studio voice preparing the chapter can start; null when it is not waiting. */
+      preparing: active ? preparing : null,
+      /** Reads on in the phone's own voice now, while a studio voice prepares (null: there is none). */
+      usePhoneVoice: offered.some((entry) => !entry.studio) ? usePhoneVoice : null,
       follow
     }
   };

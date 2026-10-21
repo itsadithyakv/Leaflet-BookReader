@@ -27,9 +27,6 @@ export const PROFILE_PLACE = "Social → Board → You";
 
 export const COPY = {
   signIn: "Sign in under Settings → Account to join in.",
-  signInTitle: "Join the community",
-  signInBody:
-    "Look around as much as you like. To appear on the board, follow readers, send kudos and duel, sign in or create an account under Settings → Account. A new account's profile is shared from the start, and you can make it private whenever you like.",
   goPublic: "Your profile is private. Share it to join in: the board lists readers whose profile is shared.",
   notConnected:
     "The community needs a Leaflet server, the only part of the app that has one. Add its address in Settings. Everything else, including backup, works without it.",

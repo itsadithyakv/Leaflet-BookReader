@@ -1,0 +1,242 @@
+/* Pip's house as the whole screen: a phone on its side, where Pip's tab is the whole window (pages/pip/PipMenu.tsx,
+   `usePipFullScreen`; PipPage marks the house `data-fill`). As the Hollow's picture is, the room is the page: its
+   walls and floor run on to the window's edges (HouseScene carries its own edges out), and the room itself is whole,
+   at whole device pixels, in the middle of what the controls leave clear, so nothing in it that can be tapped (a
+   poster, the calendar, the light switch, a ceiling lamp) is ever under one. Over the walls, in Pip's paper: the HUD
+   a slim row at the top, Show me around at its end, the tools a rail down the right that fits the height, and the
+   lift a small key at the left. They keep clear of the status and gesture bars and a notch (the --inset-*
+   variables); the walls do not.
+   Selectors carry `.pip-house.pip-house[data-fill]`, so they win over the sideways rules in touch.css and index.css
+   whatever the order the files load in. */
+
+/* The page has no margins: the room goes under the system's bars, as the Hollow does. */
+html[data-pip-fill] .app-shell.app-shell .app-main-scroll.app-main-scroll {
+  padding: 0;
+}
+
+.pip-house-page .pip-house.pip-house[data-fill] {
+  /* Where what is laid over the room keeps to: clear of the system's bars and a notch. */
+  --fill-top: calc(var(--inset-top, 0px) + 8px);
+  --fill-right: max(8px, var(--inset-right, 0px));
+  --fill-bottom: max(6px, var(--inset-bottom, 0px));
+  --fill-left: max(8px, var(--inset-left, 0px));
+  /* The HUD's row, and the rail of tools down the right (its keys and its edge): the room keeps clear of both. */
+  --fill-hud: 32px;
+  --fill-rail: 80px;
+  position: absolute;
+  inset: 0;
+  display: block;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* ---- The room ------------------------------------------------------------------------------- */
+
+.pip-house-page .pip-house.pip-house[data-fill] > .pip-house-body {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: block;
+}
+
+/* The room's place: under the HUD, beside the lift, and short of the rail (or of a drawer open beside it: Pip's
+   things, the garden, a pin's pieces). HouseScene fits the room in the stage's content box; the padding round it
+   shows the room's walls and floor, carried out. */
+.pip-house-page .pip-house.pip-house[data-fill] .pip-house-stage {
+  position: absolute;
+  inset: 0;
+  display: block;
+  margin: 0;
+  padding: calc(var(--fill-top) + var(--fill-hud) + 6px) calc(var(--fill-rail) + var(--fill-right) + 8px) var(--fill-bottom) var(--fill-left);
+  overflow: hidden;
+}
+
+/* Placed by HouseScene, and unframed: it runs on into its own edges, carried out. */
+.pip-house-page .pip-house.pip-house[data-fill] .pip-house-room {
+  position: absolute;
+}
+
+.pip-house-page .pip-house.pip-house[data-fill]:not([data-decorating]) .pip-house-room {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.pip-house-page .pip-house.pip-house[data-fill][data-sheet] .pip-house-stage {
+  padding-right: calc(var(--drawer-width, min(340px, 54%)) + var(--fill-right) + 8px);
+}
+
+.pip-house-page .pip-house.pip-house[data-fill] > .pip-house-body[data-lift] .pip-house-stage {
+  padding-left: calc(var(--fill-left) + 52px);
+}
+
+/* The drawer has the tools' place: the rail steps away until it is shut. */
+.pip-house-page .pip-house.pip-house[data-fill][data-sheet] > .pip-rail {
+  display: none;
+}
+
+.pip-house-page .pip-house.pip-house[data-fill] > .pip-drawer.pip-drawer {
+  top: var(--fill-top);
+  right: var(--fill-right);
+  bottom: var(--fill-bottom);
+  z-index: 7;
+}
+
+/* ---- The HUD: a slim row at the top, 8 px under the status bar --------------------------------------- */
+
+.pip-house-page .pip-house.pip-house[data-fill] > .pip-hud-top {
+  position: absolute;
+  top: var(--fill-top);
+  right: calc(var(--fill-right) + var(--fill-rail) + 8px);
+  left: var(--fill-left);
+  z-index: 6;
+  width: auto;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px 8px;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
+}
+
+.pip-house-page .pip-house.pip-house[data-fill][data-sheet] > .pip-hud-top {
+  right: calc(var(--drawer-width, min(340px, 54%)) + var(--fill-right) + 8px);
+}
+
+.pip-house-page .pip-house.pip-house[data-fill] > .pip-hud-top > :not(.pip-hud-spacer) {
+  pointer-events: auto;
+}
+
+.pip-house-page .pip-house.pip-house[data-fill] > .pip-hud-top .pip-resource:not(.pip-goals) {
+  min-height: var(--fill-hud);
+  gap: 5px;
+  padding: 2px 8px;
+}
+
+.pip-house-page .pip-house.pip-house[data-fill] > .pip-hud-top .pip-resources .pip-goals {
+  min-height: var(--fill-hud);
+  padding: 0;
+}
+
+.pip-house-page .pip-house.pip-house[data-fill] > .pip-hud-top .pip-resources .pip-goals-head {
+  position: relative;
+  min-height: var(--fill-hud);
+  padding: 1px 10px;
+}
+
+/* Drawn slim, pressed at a thumb's size. */
+.pip-house-page .pip-house.pip-house[data-fill] > .pip-hud-top .pip-resource:not(.pip-goals)::after,
+.pip-house-page .pip-house.pip-house[data-fill] > .pip-hud-top .pip-resources .pip-goals-head::after {
+  position: absolute;
+  inset: -6px 0;
+  content: "";
+}
+
+.pip-house-page .pip-house.pip-house[data-fill] > .pip-hud-top .pip-resource-value {
+  font-size: 15px;
+}
+
+.pip-house-page .pip-house.pip-house[data-fill] > .pip-hud-top .pip-resource-icon {
+  width: 24px;
+  height: 24px;
+}
+
+/* The menu and Show me around: small keys at the row's two ends, pressed at a thumb's size. */
+.pip-house-page .pip-house.pip-house[data-fill] > .pip-hud-top .pip-hud-help {
+  position: relative;
+  width: 36px;
+  min-width: 36px;
+  height: var(--fill-hud);
+}
+
+.pip-house-page .pip-house.pip-house[data-fill] > .pip-hud-top .pip-hud-help::after {
+  position: absolute;
+  inset: -6px -4px;
+  content: "";
+}
+
+/* ---- The tools: a rail down the right, as tall as its keys, in the middle of the height ------------- */
+
+.pip-house-page .pip-house.pip-house[data-fill] > .pip-rail {
+  position: absolute;
+  top: var(--fill-top);
+  right: var(--fill-right);
+  bottom: var(--fill-bottom);
+  z-index: 6;
+  display: flex;
+  width: auto;
+  flex-direction: column;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
+}
+
+.pip-house-page .pip-house.pip-house[data-fill] > .pip-rail > .pip-rail-belt {
+  height: auto;
+  max-height: 100%;
+  flex: none;
+  gap: 2px;
+  padding: 5px;
+  pointer-events: auto;
+}
+
+.pip-house-page .pip-house.pip-house[data-fill] > .pip-rail .pip-rail-key {
+  width: 66px;
+  min-width: 66px;
+  min-height: 44px;
+  padding: 3px 1px;
+}
+
+.pip-house-page .pip-house.pip-house[data-fill] > .pip-rail .pip-rail-label {
+  font-size: 11px;
+  letter-spacing: -0.02em;
+}
+
+/* Seven keys (the arcade's floor) still fit a 360 px phone under its bars: closer together. */
+.pip-house-page .pip-house.pip-house[data-fill] > .pip-rail > .pip-rail-belt:has(> .pip-rail-key:nth-of-type(7)) {
+  gap: 0;
+  padding-block: 2px;
+}
+
+/* ---- The lift: a small key under the menu, beside the room (never over it) ------------------------ */
+
+.pip-house-page .pip-house.pip-house[data-fill] .pip-lift[data-floating] {
+  top: calc(var(--fill-top) + var(--fill-hud) + 8px);
+  left: var(--fill-left);
+}
+
+/* Its arrows drawn short, pressed at a thumb's size out past its ends (the floor key keeps its own 44 px). */
+.pip-house-page .pip-house.pip-house[data-fill] .pip-lift[data-floating] .pip-lift-arrow {
+  position: relative;
+  height: 30px;
+}
+
+.pip-house-page .pip-house.pip-house[data-fill] .pip-lift[data-floating] .pip-lift-arrow::after {
+  position: absolute;
+  inset: -10px -6px 0;
+  content: "";
+}
+
+.pip-house-page .pip-house.pip-house[data-fill] .pip-lift[data-floating] .pip-lift-arrow:last-child::after {
+  inset: 0 -6px -10px;
+}
+
+/* ---- What comes and goes over the room --------------------------------------------------------- */
+
+/* A quick purchase's Undo, under the HUD in the middle. */
+.pip-house-page .pip-house.pip-house[data-fill] .pip-undo {
+  --toast-top: calc(var(--fill-top) + var(--fill-hud) + 14px);
+  --toast-left: 50%;
+}
+
+/* A look tried on from the shop: its bar at the foot, clear of the rail. */
+.pip-house-page .pip-house.pip-house[data-fill] > .pip-preview-bar {
+  position: absolute;
+  bottom: var(--fill-bottom);
+  left: 50%;
+  z-index: 6;
+  width: max-content;
+  max-width: calc(100% - 2 * (var(--fill-rail) + var(--fill-right) + 8px));
+  margin: 0;
+  transform: translateX(-50%);
+}

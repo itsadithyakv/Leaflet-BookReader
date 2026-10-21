@@ -3,9 +3,18 @@
  *
  * Its money is acorns, and they are its own: never seeds (those come only
  * from reading, and buy Pip's things), never anything a server
- * counts. The camp is built by reading. A building is paid for in acorns and
- * finished by so many minutes read after it was begun; the oak drops acorns
- * for every ten minutes read; a chapter read sends a parcel up the path.
+ * counts. The camp is built by reading, through acorns: the oak drops acorns
+ * for every ten minutes read, and a chapter read sends a parcel up the path.
+ * Acorns are the one thing a building costs, and it stands the moment it is
+ * paid for.
+ *
+ * (Until 1.5.8 a building was paid for in acorns and then finished by so
+ * many minutes of reading after it was begun, and a guardian trained the
+ * same way: two things to count. Since then the minutes are part of the
+ * price, at `ACORNS_A_MINUTE` (`workOf`), and whatever was still going up in
+ * a camp kept from before is finished at once when the camp is next brought
+ * up to now (`settle`), on whichever device that happens: a plain function of
+ * the camp, so every device does the same, and nothing paid for is lost.)
  * Nothing here is finished by waiting, and nothing is lost by being away.
  *
  * The point of it is a camp to show: your reading, built into a place your
@@ -29,7 +38,7 @@
  * needs a clock or a place to keep things, and all of it is tested.
  */
 
-import { SIDES, autoBest, runAuto, type Result, type Setup, type Side, type Structure, type UnitKind } from "./battle";
+import { DROP_STRONGHOLD, SIDES, autoBest, autoBestLane, layout, runAuto, type Result, type Setup, type Side, type Structure, type UnitKind } from "./battle";
 import {
   ANIMALS,
   BLADES,
@@ -59,6 +68,58 @@ import {
   type Guardian
 } from "./guards";
 import { CHAMPIONS, HEROES, KING_CHAMPION, heroOpen, heroTraits } from "./heroes";
+import {
+  CHAPTER_OF,
+  GOALS,
+  LEGACY_FROM,
+  NEW_WORKS,
+  WELCOME_CHEST,
+  burrowOfChapter,
+  chapterOf,
+  chapterOfBurrow,
+  chapterBrings,
+  chapterStartsAt,
+  hoursWords,
+  goalNow,
+  opened,
+  type Unlock
+} from "./chapters";
+import {
+  BELL,
+  COUNTER,
+  ROLES,
+  ROLE_DOES,
+  ROLE_FROM,
+  ROLE_NAMES,
+  FRONT_MARK,
+  FRONT_WORKS,
+  GATE_TOUGHER,
+  GOAT_TOUGHER,
+  LINE_DEFAULT,
+  TRAIL_Y,
+  WORK_CHAPTER,
+  bellSpot,
+  clampLine,
+  darkWood,
+  freshFront,
+  frontMark,
+  isTower,
+  isTrap,
+  lineRange,
+  mostOf,
+  nightBounty,
+  ownCount,
+  padsOpen,
+  readFrontMark,
+  sectionsAt,
+  seatOld,
+  wallXAt,
+  spotsOpen,
+  towerPads,
+  trapSpots,
+  type Front,
+  type Role
+} from "./front";
 
 export const BUILDINGS = ["burrow", "oak", "store", "fence", "tower", "hut"] as const;
 export type BuildingId = (typeof BUILDINGS)[number];
@@ -92,8 +153,11 @@ export type Job = {
   needs: number;
 };
 
-/** The three raids: a camp met on the road (new ones every day), the next stronghold on the ladder, and the month's King. */
-export type RaidKind = "wild" | "camp" | "king";
+/**
+ * The raids: a camp met on the road (new ones every day; not offered since 2026-10-15), the next stronghold on the
+ * ladder, the month's King, and (1.5.10) a rematch of the last stronghold taken.
+ */
+export type RaidKind = "wild" | "camp" | "king" | "rematch";
 
 /** Something set down in the clearing for its own sake: which thing, and where its foot is. */
 export type Decor = { kind: number; x: number; y: number };
@@ -163,7 +227,8 @@ export type BaseState = {
   scores: Record<PayingGame, number[]>;
   /** How far down Pip's list the camp is. */
   quest: number;
-  stats: { gathered: number; raids: number; stars: number; nights: number; wagers: number };
+  /** `seenOff`: prowlers seen off while the camp was watched (1.5.10; absent before, read as none). */
+  stats: { gathered: number; raids: number; stars: number; nights: number; wagers: number; seenOff?: number };
   /** Where each building stands. */
   spots: Record<Placed, Spot>;
   /** The pieces of fence put down, each where it is. */
@@ -238,7 +303,44 @@ export type BaseState = {
   stolen: Decor | null;
   /** Pip's welcome basket and the guided first session (see `welcome.ts`). */
   welcome: CampWelcome;
+  /**
+   * Chapters (1.5.10, `chapters.ts`). The minutes read in all, the most the
+   * camp has been told of (`settle` raises it, never lowers it): the chapter
+   * is worked out from it, so the rules that are not handed the minutes know
+   * the chapter too.
+   */
+  minutes: number;
+  /** The burrow's level when the camp was brought onto chapters (null for a camp begun on them): what it had opened stays open. */
+  legacy: { burrow: number } | null;
+  /** The last chapter whose card was shown (0: the "now counted in chapters" card is still to show; -1: not yet brought onto chapters). */
+  chapterSeen: number;
+  /** The last chapter whose chest is in the larder. */
+  chapterPaid: number;
+  /** The chapter goals ticked off, by id: paid, or marked done unpaid when the camp was brought onto chapters. */
+  goals: string[];
+  /** Friends' raids on this camp not yet looked at, newest first (`NEWS_KEPT` at most). */
+  news: RaidNews[];
+  /** The pieces of fence friends' raids knocked down, where they stood: `putBack` lays them again. */
+  downed: Spot[];
+  /**
+   * The front (1.5.11, `front.ts`): where the wall across the trail stands, the traps on their spots and the towers
+   * on their pads, the shed, and the nights. `walls`, `gate` and `works` are kept from it (`fronted`), so that what
+   * reads them (and an older build) sees the wall and the constructs where they are.
+   */
+  front: Front;
 };
+
+/** A friend's raid on this camp, for the card that tells of it: who, how it went, the fence it cost, and the day. */
+export type RaidNews = {
+  by: string;
+  /** 0: the camp held, and `prize` acorns came of it. */
+  stars: number;
+  /** Pieces of fence knocked down. */
+  down: number;
+  prize: number;
+  day: string;
+};
+export const NEWS_KEPT = 5;
 
 /**
  * Pip's welcome to a new camp (1.5.5): the oak shaken, a basket by the
@@ -305,38 +407,71 @@ const BUILD_MINUTES = [0, 5, 20, 40, 70, 100];
 
 const YARD_COST = [0, 60, 150, 300];
 const YARD_MINUTES = [0, 15, 35, 60];
+/**
+ * Acorns a minute of building work costs. A level of a building used to want
+ * so many minutes of reading after it was paid for (`BUILD_MINUTES`); those
+ * minutes are paid in acorns instead, at this rate, and it stands at once.
+ * Half an acorn a minute, not the oak's own rate (8 to 40 every ten minutes):
+ * the minutes used to run while the reader saved for the next thing, so
+ * paying for them in full would have slowed the camp by a fifth. At a half
+ * it is about a tenth more acorns over the whole camp, and no wait for a
+ * builder between one thing and the next.
+ */
+export const ACORNS_A_MINUTE = 0.5;
 /** A yard building of level n wants a burrow of n + 1. */
 const yardBurrow = (to: number) => to + 1;
 /**
- * The camp has one level, and it is the burrow's. Each level opens things,
- * and a plot of the yard is one of them: the first is staked out when the
- * camp is level 2, the second at level 3. Before that there is no plot, in
- * the clearing or on any list: nothing stands about waiting to be allowed.
+ * Since 1.5.10 the camp's level is its chapter (`chapters.ts`): what opens
+ * when is `CHAPTER_OF`, and every gate asks `opened`. The burrow's level
+ * follows the chapter, so a plot of the yard still comes with a level of the
+ * burrow, for a camp begun on chapters: the first at level 3 (chapter 5),
+ * the second at level 5 (chapter 9). A camp from before keeps the plots its
+ * level had opened then (`LEGACY_FROM`: level 2 and 3). Before its level
+ * there is no plot, in the clearing or on any list.
  */
-export const PLOT_FROM: Record<"yard0" | "yard1", number> = { yard0: 2, yard1: 3 };
-/** The level at which things can be set down for their own sake: decorations, and the lie of the land. */
-export const DECOR_FROM = 2;
+export const PLOT_FROM: Record<"yard0" | "yard1", number> = { yard0: 3, yard1: 5 };
 /**
- * Level 2 is where the camp has something to defend and to show: prowlers
- * come out of the wood from then (`scene.ts`), the fence can be built, and a
- * postcard of the camp can be made. A first camp is the burrow, the oak, the
- * larder, the hut and the lookout, and nothing else to think about.
+ * The burrow levels at which these came before chapters. Kept for the
+ * screens that still say a level (`opened` is the rule, and says a chapter):
+ * @deprecated ask `opened(state, minutes, thing)` and `CHAPTER_OF`.
  */
+export const DECOR_FROM = 3;
 export const PROWLERS_FROM = 2;
 export const FENCE_FROM = 2;
 export const POSTCARD_FROM = 2;
 
-/** Acorns the larder holds, and how many of them it keeps from the magpies, by its level. */
-const STORE_HOLDS = [60, 150, 300, 550, 900, 1400];
+/**
+ * How many of the camp's acorns the larder keeps from prowlers, by its
+ * level. It used to hold only so many as well (60 to 1400); since 1.5.10 it
+ * holds everything, and this is all a larder's level is: the camp's safe.
+ */
 const STORE_HIDES = [10, 40, 90, 160, 260, 400];
+/**
+ * The most acorns a camp kept by 1.5.9 could have, which it cuts a camp down
+ * to when it reads one: what is saved never has more in `acorns` than this,
+ * and the rest in `bank` (`keptForm`), so an older build that reads a camp
+ * from this one cuts nothing.
+ */
+export const ACORNS_KEPT_MOST = 1400;
+/** The most acorns a camp is read with, all told: far more than a lifetime of reading drops. */
+const ACORNS_MOST = 1_000_000_000;
 
-/** Acorns the oak drops for every ten minutes read, and how many it holds until gathered, by its level. */
+/**
+ * Acorns the oak drops for every ten minutes read, and how full the tree is
+ * drawn: at this many it looks laden. It used to hold no more than that, and
+ * what the reading dropped past it was lost; since 1.5.10 it keeps everything
+ * (`oakLooks`).
+ */
 const OAK_DROPS = [0, 8, 13, 20, 28, 40];
 const OAK_HOLDS = [0, 50, 80, 130, 200, 300];
 const OAK_EVERY = 10;
 
-/** By level: how much quicker a workshop makes building, what the bees leave a day, what a well adds to the oak, what a stall adds to a game's pay. */
-const WORKSHOP_QUICKER = [0, 0, 0.15, 0.3];
+/**
+ * By level: how much less a workshop makes everything cost to build, what the bees leave a day, what a well adds to the
+ * oak, what a stall adds to a game's pay. (The workshop was a second builder and quicker building, while buildings
+ * took reading to finish; since they stand at once, it makes them cheaper.)
+ */
+const WORKSHOP_OFF = [0, 0.05, 0.1, 0.15];
 const HIVE_HONEY = [0, 6, 12, 20];
 const WELL_MORE = [0, 0.15, 0.3, 0.45];
 const STALL_MORE = [0, 0.25, 0.5, 0.75];
@@ -352,16 +487,12 @@ const LIT_ADDS_LAMP = 0.5;
 const SLINGS_QUICKER = 0.7;
 /** How long the magpies have before the camp wakes: a night, as a battle. */
 export const NIGHT_SECONDS = 40;
-/** Pieces of fence to a level of the fence. */
-/** Six, so that a fence can be a fence: thirty pieces at the fifth level is a wall round a camp, where fifteen was a gesture at one. */
-const PIECES_A_LEVEL = 6;
 const SHELF_KINDS = 11;
 
 /** Where buildings may stand: on the grass, with room on every side for the magpies to come in. */
 export const LAND = { left: 22, right: 218, top: 62, bottom: 110 };
 /** Where fence may go: nearer the edges than a building may. */
 export const WALL_LAND = { left: 10, right: 230, top: 54, bottom: 116 };
-const WALL_GRID = 10;
 /** How far each building's foot reaches, in a fight: what a raider has to get to, and what throws from it. */
 const REACH: Record<Placed, number> = { burrow: 13, oak: 9, store: 9, tower: 6, hut: 9, yard0: 9, yard1: 9 };
 /**
@@ -373,13 +504,17 @@ const REACH: Record<Placed, number> = { burrow: 13, oak: 9, store: 9, tower: 6, 
 const FOOT = 0.64;
 /** The ground a building takes up, as a ring about the middle of its foot: nothing else is built within it. */
 export const footOf = (site: Placed) => REACH[site] * FOOT;
-/** Where each building is first set down: close about the burrow, in the little ground a new camp has. */
+/**
+ * Where each building is first set down: close about the burrow, in the little ground a new camp has. Since 1.5.11
+ * the lookout stands by the gate, over the trail, and the oak and the hut keep clear of the ground just behind the
+ * wall (where the towers' pads are); until then they stood at 76, 80 (the oak), 172, 106 (the lookout) and 80, 108.
+ */
 export const DEFAULT_SPOTS: Record<Placed, Spot> = {
-  oak: [76, 80],
+  oak: [96, 64],
   burrow: [120, 86],
   store: [164, 82],
-  tower: [172, 106],
-  hut: [80, 108],
+  tower: [88, 76],
+  hut: [112, 110],
   yard0: [140, 108],
   yard1: [196, 108]
 };
@@ -395,14 +530,27 @@ export const DEFAULT_SPOTS: Record<Placed, Spot> = {
 export const WOOD = [38, 38, 26, 14, 6, 0];
 export const woodAt = (burrow: number) => WOOD[Math.max(0, Math.min(WOOD.length - 1, Math.round(burrow)))];
 /** A stretch of the clearing, less the wood that still stands at each side of it for a camp of that level. */
-const cleared = <T extends { left: number; right: number }>(land: T, burrow: number): T => ({ ...land, left: land.left + woodAt(burrow), right: land.right - woodAt(burrow) });
+/**
+ * The wood still standing at each side of this camp's clearing. It follows the burrow, but its last widening (the
+ * whole clearing, `WOOD[5]`) waits for chapter 10 (`opened(.., "clearing")`; a camp from before chapters at level 5
+ * keeps it): until then a level-5 camp has a level-4 camp's ground, as the picture draws it. What already stands
+ * beyond it is never moved or taken away.
+ */
+export const woodOf = (state: Pick<BaseState, "levels" | "legacy" | "camps" | "minutes">) =>
+  woodAt(opened(state, undefined, "clearing") ? state.levels.burrow : Math.min(state.levels.burrow, MAX_LEVEL - 1));
+/** The wood on the left of this camp's clearing: the Dark Wood never clears (`front.ts`). */
+export const leftWoodOf = (state: Pick<BaseState, "levels" | "legacy" | "camps" | "minutes">) => darkWood(woodOf(state));
+const cleared = <T extends { left: number; right: number }>(land: T, state: BaseState): T => ({ ...land, left: land.left + leftWoodOf(state), right: land.right - woodOf(state) });
 
-/** Reading that rests the scouts for one raid, and how many raids' rest they can have in hand. */
+/** Reading that rests the scouts for one raid, and how many raids' rest they can have in hand (3 until 1.5.10). */
 export const RAID_EVERY = 15;
-export const RAIDS_IN_HAND = 3;
-/** Reading that earns one paid run at the arcade, and how many can be in hand. */
+export const RAIDS_IN_HAND = 10;
+/** Reading that earns one paid run at the arcade, and how many can be in hand (5 until 1.5.10). */
 export const PURSE_EVERY = 10;
-export const PURSE_IN_HAND = 5;
+export const PURSE_IN_HAND = 10;
+/** What a camp brought onto chapters is held to from before, so that it is not paid at once for reading the old rules let go. */
+const OLD_RAIDS_IN_HAND = 3;
+const OLD_PURSE_IN_HAND = 5;
 /** The most a paid run pays; points of score to the acorn. */
 export const PURSE_MOST = 8;
 const POINTS_PER_ACORN: Record<PayingGame, number> = { dash: 15, catch: 5, flap: 1 };
@@ -417,9 +565,17 @@ const SCOUTS_FIRST = 5;
 const SCOUTS_A_LEVEL = 2;
 const TIP_SCOUTS = 2;
 /** The hut level that trains each kind of scout. */
-const TRAINED_AT: Record<Exclude<UnitKind, "hero">, number> = { sprout: 1, slinger: 2, mole: 4 };
-/** Sent without the reader, a raid brings this much of the loot. */
-const SENT_BRINGS = 0.6;
+const TRAINED_AT: Record<Exclude<UnitKind, "hero">, number> = { sprout: 1, slinger: 2, bomber: 3, mole: 4 };
+/** Puffcaps the hut sends on a raid (1.5.11): one from its third level, two at its fifth. */
+export const bombersOf = (state: Pick<BaseState, "levels">) => (state.levels.hut >= 5 ? 2 : state.levels.hut >= TRAINED_AT.bomber ? 1 : 0);
+/** Where a friend's scouts come in on this camp: the trail's end of the field, before the traps (1.5.11). */
+const DROP_FRIEND = 20;
+/** Sent without the reader, a raid brings this much of the loot (0.6 until 1.5.10). */
+const SENT_BRINGS = 0.75;
+/** A stronghold taken with all three stars brings this much more of its loot (it used to empty the next one instead). */
+export const THREE_STAR_BONUS = 0.25;
+/** A rematch of the last stronghold taken brings this share of what that stronghold was worth. */
+const REMATCH_LOOT = 0.4;
 /** The King is not shown until this many strongholds have fallen (it was 3; 10 since 2026-10-15, so a new camp has one ladder to climb). */
 const KING_FROM_CAMPS = 10;
 
@@ -501,7 +657,7 @@ export const newBase = (minutesRead: number, day: string): BaseState => ({
   wager: null,
   scores: { dash: [], catch: [], flap: [] },
   quest: 0,
-  stats: { gathered: 0, raids: 0, stars: 0, nights: 0, wagers: 0 },
+  stats: { gathered: 0, raids: 0, stars: 0, nights: 0, wagers: 0, seenOff: 0 },
   spots: defaultSpots(),
   walls: [],
   gate: null,
@@ -540,7 +696,17 @@ export const newBase = (minutesRead: number, day: string): BaseState => ({
   rivals: { day: "", raided: [] },
   wreck: null,
   stolen: null,
-  welcome: freshWelcome(minutesRead)
+  welcome: freshWelcome(minutesRead),
+  // Begun on chapters: at the first, whatever has been read; the chests of any chapters the reading has already
+  // reached come with the first `settle`.
+  minutes: Math.max(0, Math.floor(minutesRead)),
+  legacy: null,
+  chapterSeen: 1,
+  chapterPaid: 1,
+  goals: [],
+  news: [],
+  downed: [],
+  front: freshFront(minutesRead)
 });
 
 /** The welcome as a new camp has it: nothing given yet (`welcome.ts` `giveWelcome`). */
@@ -570,7 +736,10 @@ export const WELCOMED: CampWelcome = {
 /** What the welcome gives: acorns shaken onto the oak, the basket, the paws; and the first reading's parcel, after so many minutes. */
 export const WELCOME_WINDFALL = 20;
 export const WELCOME_BASKET = 80;
-export const WELCOME_PAWS = 2;
+/** Helping paws the welcome gives: none since 1.5.10 (buildings stand at once since 1.5.8, so they had nothing to do). */
+export const WELCOME_PAWS = 0;
+/** The most a camp kept from before is read with (it was given two). */
+const PAWS_KEPT = 2;
 export const FIRST_READ_PARCEL = 40;
 export const FIRST_READ_MINUTES = 5;
 const TUTORIAL_STEPS_MOST = 20;
@@ -583,7 +752,7 @@ const readWelcome = (raw: unknown): CampWelcome => {
   const parcel = kept.firstReadParcel;
   return {
     given: kept.given === true,
-    paws: wholeOr(kept.paws, 0, WELCOME_PAWS, 0),
+    paws: wholeOr(kept.paws, 0, PAWS_KEPT, 0),
     basketOpened: kept.basketOpened === true,
     firstReadParcel: parcel === "waiting" || parcel === "sent" || parcel === "opened" ? parcel : null,
     tutorial: { step: wholeOr(tutorial.step, 0, TUTORIAL_STEPS_MOST, 0), done: tutorial.done === true, skipped: tutorial.skipped === true },
@@ -633,10 +802,15 @@ export const readBase = (raw: unknown): BaseState | null => {
     levels[building] = level;
   }
   levels.burrow = Math.max(1, levels.burrow);
-  const acorns = whole(from.acorns, 0, STORE_HOLDS[MAX_LEVEL]);
+  // What 1.5.10 keeps beside the acorns where an older build keeps whatever it does not know (`keptForm`).
+  const allTaught = texts(from.taught, 60);
+  const mark = readKeptMark(allTaught);
+  const kept = whole(from.acorns, 0, ACORNS_MOST);
   const oakFrom = whole(from.oakFrom, 0, Number.MAX_SAFE_INTEGER);
   const camps = whole(from.camps, 0, 100_000);
-  if (acorns === null || oakFrom === null || camps === null) return null;
+  if (kept === null || oakFrom === null || camps === null) return null;
+  // Acorns past what a 1.5.9 build could keep are in the bank: the camp has them all.
+  const acorns = Math.min(ACORNS_MOST, kept + (whole(from.bank, 0, ACORNS_MOST) ?? mark?.bank ?? 0));
 
   const yard = noYard();
   (Array.isArray(from.yard) ? from.yard : []).slice(0, 2).forEach((entry, index) => {
@@ -682,7 +856,7 @@ export const readBase = (raw: unknown): BaseState | null => {
     .slice(0, EVENTS_KEPT);
 
   const animals = [...new Set((Array.isArray(from.animals) ? from.animals : []).map((animal) => whole(animal, 0, ANIMALS.length - 1)).filter((animal): animal is number => animal !== null))];
-  return {
+  const read: BaseState = {
     v: 2,
     acorns,
     levels,
@@ -717,10 +891,12 @@ export const readBase = (raw: unknown): BaseState | null => {
       raids: wholeOr(stats.raids, 0, 1e9, 0),
       stars: wholeOr(stats.stars, 0, 1e9, 0),
       nights: wholeOr(stats.nights, 0, 1e9, 0),
-      wagers: wholeOr(stats.wagers, 0, 1e9, 0)
+      wagers: wholeOr(stats.wagers, 0, 1e9, 0),
+      seenOff: wholeOr(stats.seenOff, 0, 1e9, 0)
     },
     spots: readSpots(from.spots),
-    walls: readWalls(from.walls, levels.fence * PIECES_A_LEVEL + (levels.fence > 0 && animals.includes(2) ? GOAT_PIECES : 0)),
+    // (Made again from the fence's level by `readFront`: what pieces were laid where no longer matters.)
+    walls: readWalls(from.walls, 40),
     gate: spotOf(from.gate, WALL_LAND),
     story: (() => {
       const story = record(from.story);
@@ -730,7 +906,7 @@ export const readBase = (raw: unknown): BaseState | null => {
       return book && mark !== null && since !== null ? { book, mark, from: since } : null;
     })(),
     parcels: wholeOr(from.parcels, 0, PARCELS_MOST, 0),
-    taught: texts(from.taught, 60),
+    taught: allTaught.filter((entry) => !entry.startsWith(KEPT_MARK) && !entry.startsWith(FRONT_MARK)),
     prowled: (() => {
       const had = record(from.prowled);
       return { day: text(had.day) ?? "", knocks: wholeOr(had.knocks, 0, 1000, 0), thefts: wholeOr(had.thefts, 0, 1000, 0) };
@@ -804,8 +980,79 @@ export const readBase = (raw: unknown): BaseState | null => {
         ? { by: (record(from.wreck).by as string).slice(0, 40), stars: whole(record(from.wreck).stars, 1, 3)!, from: whole(record(from.wreck).from, 0, 1e9)!, needs: whole(record(from.wreck).needs, 1, MEND_MOST)! }
         : null,
     stolen: readDecor([from.stolen])[0] ?? null,
-    welcome: readWelcome(from.welcome)
+    welcome: readWelcome(from.welcome),
+    ...readChapters(from, levels.burrow, oakFrom, mark),
+    front: freshFront(0)
   };
+  return readFront(read, from.front, allTaught, from.works);
+};
+
+/**
+ * What 1.5.10 keeps that an older build would drop when it saves the camp:
+ * the bank, the burrow the camp was brought onto chapters with, the chapter
+ * last shown and paid, and the goals ticked. Kept as one entry of `taught`
+ * too (`KEPT_MARK`), since every build keeps the names there it does not
+ * know: so a camp saved by 1.5.9 and read here again has lost none of it
+ * (and its goals and chests are not paid twice). The fields win where both
+ * are there.
+ */
+const KEPT_MARK = "kept:";
+type KeptMark = { bank: number; legacy: number; seen: number; paid: number; goals: number };
+const readKeptMark = (taught: readonly string[]): KeptMark | null => {
+  const entry = taught.find((name) => name.startsWith(KEPT_MARK));
+  if (!entry) return null;
+  try {
+    const raw = record(JSON.parse(entry.slice(KEPT_MARK.length)));
+    return { bank: wholeOr(raw.b, 0, ACORNS_MOST, 0), legacy: wholeOr(raw.l, 0, MAX_LEVEL, 0), seen: wholeOr(raw.s, -1, 100_000, -1), paid: wholeOr(raw.p, 0, 100_000, 0), goals: wholeOr(raw.g, 0, 2 ** 30, 0) };
+  } catch {
+    return null;
+  }
+};
+const goalBits = (goals: readonly string[]) => GOALS.reduce((bits, goal, index) => (goals.includes(goal.id) && index < 30 ? bits + 2 ** index : bits), 0);
+const goalsOfBits = (bits: number) => GOALS.filter((_, index) => index < 30 && Math.floor(bits / 2 ** index) % 2 === 1).map((goal) => goal.id);
+
+/**
+ * The chapters' part of a kept camp. One with no word of chapters at all is
+ * from before them: its burrow is what stays open (`legacy`), and it is
+ * brought onto them at the next `settle` (`chapterSeen` -1).
+ */
+const readChapters = (from: Record<string, unknown>, burrow: number, oakFrom: number, mark: KeptMark | null): Pick<BaseState, "minutes" | "legacy" | "chapterSeen" | "chapterPaid" | "goals" | "news" | "downed"> => {
+  const before = from.legacy === undefined && mark === null;
+  const legacyBurrow = whole(record(from.legacy).burrow, 1, MAX_LEVEL);
+  const legacy = from.legacy === null ? null : legacyBurrow !== null ? { burrow: legacyBurrow } : mark ? (mark.legacy > 0 ? { burrow: mark.legacy } : null) : { burrow };
+  const goals = Array.isArray(from.goals) ? texts(from.goals, 100).filter((id) => GOALS.some((goal) => goal.id === id)) : mark ? goalsOfBits(mark.goals) : [];
+  return {
+    minutes: wholeOr(from.minutes, 0, 1e9, oakFrom),
+    legacy,
+    chapterSeen: before ? -1 : wholeOr(from.chapterSeen, -1, 100_000, mark?.seen ?? 1),
+    chapterPaid: before ? 0 : wholeOr(from.chapterPaid, 0, 100_000, mark?.paid ?? 1),
+    goals: [...new Set(goals)],
+    news: (Array.isArray(from.news) ? from.news : [])
+      .map((entry) => record(entry))
+      .filter((entry) => typeof entry.by === "string" && typeof entry.day === "string")
+      .map((entry) => ({
+        by: (entry.by as string).slice(0, 40),
+        stars: wholeOr(entry.stars, 0, 3, 0),
+        down: wholeOr(entry.down, 0, 100, 0),
+        prize: wholeOr(entry.prize, 0, 1000, 0),
+        day: (entry.day as string).slice(0, 10)
+      }))
+      .slice(0, NEWS_KEPT),
+    downed: readWalls(from.downed, 60)
+  };
+};
+
+/**
+ * The camp as it is saved: everything as it is, but no more than
+ * `ACORNS_KEPT_MOST` in `acorns` and the rest in `bank`, with the same
+ * written into `taught` as well (`KEPT_MARK`). A 1.5.9 build reads it and
+ * cuts nothing; `readBase` puts it back together.
+ */
+export const keptForm = (state: BaseState): BaseState & { bank: number } => {
+  const acorns = Math.max(0, Math.floor(state.acorns));
+  const bank = Math.max(0, acorns - ACORNS_KEPT_MOST);
+  const mark = `${KEPT_MARK}${JSON.stringify({ b: bank, l: state.legacy?.burrow ?? 0, s: state.chapterSeen, p: state.chapterPaid, g: goalBits(state.goals) })}`;
+  return { ...state, acorns: acorns - bank, bank, taught: [...state.taught.filter((entry) => !entry.startsWith(KEPT_MARK) && !entry.startsWith(FRONT_MARK)), mark, frontMark(state.front)] };
 };
 
 /** Things set down, of so many kinds, so many at most, inside a part of the clearing. */
@@ -875,14 +1122,23 @@ export const yardLevel = (state: BaseState, kind: YardKind) => {
 };
 const yardIndex = (site: Site): number => (site === "yard0" ? 0 : site === "yard1" ? 1 : -1);
 
-/** Acorns the camp can hold. */
-export const holds = (state: BaseState) => Math.round(STORE_HOLDS[state.levels.store] * (hasAnimal(state, 5) ? TORTOISE_MORE : 1));
-/** Acorns the larder keeps from the magpies. */
+/**
+ * Acorns the camp can hold: all of them, since 1.5.10 (the larder used to
+ * hold 60 to 1400, and what did not fit waited). Kept for the screens that
+ * asked; nothing in the rules waits for room any more.
+ * @deprecated nothing caps the acorns: there is no figure to show.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export const holds = (_state: BaseState) => Number.POSITIVE_INFINITY;
+/** Acorns the larder keeps from prowlers: what a prowler at the larder cannot take. The tortoise makes it a tenth more. */
 export const hides = (state: BaseState) =>
-  isBroken(state, "store") ? 0 : Math.round(STORE_HIDES[state.levels.store] * GUARD_GIVES.yard[guardOf(state, 5)] * (1 - harmOf(state, "store") * WEAR_A_KNOCK));
-const room = (state: BaseState) => Math.max(0, holds(state) - state.acorns);
-/** Acorns in, as far as there is room. */
-const give = (state: BaseState, acorns: number) => Math.min(Math.max(0, Math.round(acorns)), room(state));
+  isBroken(state, "store")
+    ? 0
+    : Math.round(STORE_HIDES[state.levels.store] * GUARD_GIVES.yard[guardOf(state, 5)] * (hasAnimal(state, 5) ? TORTOISE_MORE : 1) * (1 - harmOf(state, "store") * WEAR_A_KNOCK));
+/** What the larder hides at a level (for its card). */
+export const hidesAt = (level: number) => STORE_HIDES[Math.max(0, Math.min(MAX_LEVEL, Math.floor(level)))];
+/** Acorns in: all of them (since 1.5.10 there is always room). */
+const give = (_state: BaseState, acorns: number) => Math.max(0, Math.round(acorns));
 
 /** Scouts the hut sends on a raid, and the kinds it has trained. */
 export const scoutsOf = (state: BaseState) => (state.levels.hut === 0 ? 0 : SCOUTS_FIRST + state.levels.hut * SCOUTS_A_LEVEL);
@@ -903,7 +1159,10 @@ export const oakDrops = (state: BaseState) =>
 export const WEAR_A_KNOCK = 0;
 /** The share of its acorns a broken oak still drops: half. Never none, so that a camp with nothing can still get the acorns to mend it. */
 export const BROKEN_OAK = 0.5;
+/** How many acorns on the oak make it look laden (it keeps more than that: everything, since 1.5.10). */
 export const oakHolds = (state: BaseState) => Math.round(OAK_HOLDS[state.levels.oak] * (state.forks.oak === "a" ? 1.5 : 1));
+/** How full the oak looks, 0 to 1: for drawing it, and nothing else. */
+export const oakLooks = (state: BaseState, minutesRead: number) => (oakHolds(state) <= 0 ? 0 : Math.min(1, oakReady(state, minutesRead) / oakHolds(state)));
 
 // ---- words for the buildings --------------------------------------------------------
 
@@ -917,23 +1176,28 @@ export const BUILDING_NAMES: Record<BuildingId, string> = {
 };
 export const YARD_NAMES: Record<YardKind, string> = { workshop: "Workshop", hive: "Beehives", well: "Well", stall: "Market stall" };
 
+/** What the lookout does at each level, in words (its reach and its throw grow with every level). */
+const TOWER_SAYS = ["", "Throws at prowlers close by", "Throws further", "Throws further and harder", "Throws far and hard", "Throws farthest and hardest"];
+
 /** What each level of a building does, in a few words: for the building's own card. */
 export const does = (building: BuildingId, level: number): string => {
   switch (building) {
     case "burrow":
       return level >= MAX_LEVEL ? "Everything can reach its top level" : `Everything else can reach level ${level}`;
     case "oak":
-      return level === 0 ? "Drops acorns as you read" : `${OAK_DROPS[level]} acorns every ${OAK_EVERY} minutes read, holds ${OAK_HOLDS[level]}`;
+      return level === 0 ? "Drops acorns as you read" : `${OAK_DROPS[level]} acorns every ${OAK_EVERY} minutes read`;
     case "store":
-      return `Holds ${STORE_HOLDS[level]} acorns; ${STORE_HIDES[level]} of them are hidden from prowlers`;
+      return level === 0 ? "Keeps acorns safe from prowlers" : `Keeps ${STORE_HIDES[level]} acorns safe from prowlers`;
     case "fence":
-      return level === 0 ? "Pieces of fence to put in the prowlers' way" : `${level * PIECES_A_LEVEL} pieces of fence, each holding them longer`;
+      return level === 0
+        ? "A wall across the prowlers' trail"
+        : `${sectionsAt(level).length} sections across the trail${level >= GATE_FROM ? ", with a gate" : ""}${level >= 5 ? ": the whole way across, in stone, with battlements" : level >= 4 ? ": the whole way across, in stone" : level === 1 ? "" : ", sturdier than before"}`;
     case "tower":
-      return level === 0 ? "Keeps watch, and throws at whoever comes" : `Throws ${towerThrows(level).range} far, ${level === 1 ? "lightly" : level < 4 ? "hard" : "very hard"}; its lantern is lit on a day your reading goal is met`;
+      return level === 0 ? "Keeps watch, and throws at prowlers" : `${TOWER_SAYS[level]}; brighter on a day your reading goal is met`;
     case "hut":
       return level === 0
         ? "Scouts to raid with"
-        : `${SCOUTS_FIRST + level * SCOUTS_A_LEVEL} scouts${level >= TRAINED_AT.mole ? ", slingers and moles" : level >= TRAINED_AT.slinger ? " and slingers" : ""}, each ${level === 1 ? "green" : `${Math.round((level - 1) * 15)}% stronger`}; they raid, and throw at prowlers from the roof`;
+        : `${SCOUTS_FIRST + level * SCOUTS_A_LEVEL} scouts${level >= TRAINED_AT.mole ? ", slingers and moles" : level >= TRAINED_AT.slinger ? " and slingers" : ""} to raid with; they throw at prowlers from the roof`;
   }
 };
 
@@ -941,7 +1205,7 @@ export const yardDoes = (kind: YardKind, level: number): string => {
   const at = Math.max(1, level);
   switch (kind) {
     case "workshop":
-      return at === 1 ? "A second builder" : `A second builder, and building ${Math.round(WORKSHOP_QUICKER[at] * 100)}% quicker`;
+      return `Everything costs ${Math.round(WORKSHOP_OFF[at] * 100)}% less to build`;
     case "hive":
       return at === 1 ? "A parcel of honey each day" : `${at} parcels of honey each day`;
     case "well":
@@ -953,7 +1217,7 @@ export const yardDoes = (kind: YardKind, level: number): string => {
 
 /** The two paths of each forked building: a name, and what it does. */
 export const FORKS: Record<Forked, Record<ForkId, { name: string; does: string }>> = {
-  oak: { a: { name: "Wide crown", does: "Holds half as much again" }, b: { name: "Deep roots", does: "Drops a quarter more" } },
+  oak: { a: { name: "Wide crown", does: "Looks fuller, half as much again" }, b: { name: "Deep roots", does: "Drops a quarter more" } },
   tower: { a: { name: "The White Spire", does: "A lit lantern counts double" }, b: { name: "The Dark Watch", does: "Throws a third oftener, lit or not" } },
   hut: { a: { name: "Runners", does: "Scouts move a quarter faster" }, b: { name: "Packs", does: "Raids bring a quarter more" } }
 };
@@ -981,107 +1245,180 @@ export type OpenKind = "ground" | "plot" | "decor" | "meadow" | "guards" | "path
 export type Opened = { kind: OpenKind; name: string; says: string; which?: number };
 
 /**
- * What a level of the camp opens. Read off the gates themselves (the level
- * a plot comes at, the meadow's, the guardians', each construct's, each
- * kind of raider's), so that the list cannot say one thing and the camp do
- * another. A level brings trouble as well as room, and that is said too.
+ * What a level of the burrow brings, for a camp on chapters (1.5.10): the
+ * things of the two chapters of that level (level 2 is chapters 3 and 4,
+ * level 3 is 5 and 6, and so on: `burrowOfChapter`), read off `CHAPTERS`
+ * and the gates themselves, so that the list cannot say one thing and the
+ * camp do another. Chapter 2's hut and raids come at level 1, and the King
+ * (chapter 10) is not a thing of the clearing: neither is listed. A level
+ * brings trouble as well as room, and that is said too.
  */
 export const campOpens = (level: number): Opened[] => {
   const opens: Opened[] = [];
+  if (level < 2 || level > MAX_LEVEL) return opens;
+  const things = new Set<Unlock>([chapterOfBurrow(level), chapterOfBurrow(level) + 1].flatMap((chapter) => chapterBrings(chapter).things));
   if (woodAt(level) < woodAt(level - 1)) opens.push({ kind: "ground", name: woodAt(level) === 0 ? "The whole clearing" : "A wider clearing", says: "The trees are cleared further back: more ground to build on, fence and set things down in" });
-  const plots = (["yard0", "yard1"] as const).filter((site) => PLOT_FROM[site] === level).length;
-  if (plots > 0) opens.push({ kind: "plot", name: level === PLOT_FROM.yard0 ? "A plot in the yard" : "A second plot", says: "Room for a workshop, a hive, a well or a stall: one of each at most" });
-  if (level === DECOR_FROM) opens.push({ kind: "decor", name: "Things to set down", says: "Decorations, and ponds, knolls and trees to shape the ground with" });
-  if (level === MEADOW_FROM) opens.push({ kind: "meadow", name: "The meadow", says: "A second clearing, where the animals live" });
-  if (level === GUARDS_FROM) opens.push({ kind: "guards", name: "Guardians", says: "One for each building, posted and trained by reading" });
-  if (level === FENCE_FROM) opens.push({ kind: "fence", name: "The fence", says: "Pieces of fence to lay in the prowlers' way" });
-  if (level === POSTCARD_FROM) opens.push({ kind: "postcard", name: "A postcard", says: "A picture of your camp, to save or send" });
-  WORKS.forEach((work, which) => {
-    if (work.burrow === level) opens.push({ kind: "work", name: work.name, says: work.does, which });
-  });
-  // Who comes out of the wood (`scene.ts`, `prowlStart`): most kinds from level 2, the mole from 3, Fizzwick from 4.
-  if (level === PROWLERS_FROM) opens.push({ kind: "foe", name: "Prowlers", says: "They come out of the wood now and then, while you watch, after the larder, the oak or whatever is nearest" });
-  if (level === 3) opens.push({ kind: "foe", name: "The Rootgnaw", says: "A mole: he comes under the ground, under the fence, and up by the larder" });
-  if (level === 4) opens.push({ kind: "foe", name: "Fizzwick", says: "Slow, and he goes off with a pop when he gets there: two knocks" });
+  if (things.has("yard0")) opens.push({ kind: "plot", name: "A plot in the yard", says: "Room for a workshop, a hive, a well or a stall: one of each at most" });
+  if (things.has("yard1")) opens.push({ kind: "plot", name: "A second plot", says: "Room for a workshop, a hive, a well or a stall: one of each at most" });
+  if (things.has("decor")) opens.push({ kind: "decor", name: "Things to set down", says: "Decorations, and ponds, knolls and trees to shape the ground with" });
+  if (things.has("meadow")) opens.push({ kind: "meadow", name: "The meadow", says: "A second clearing, where the animals live" });
+  if (things.has("guards")) opens.push({ kind: "guards", name: "Guardians", says: "One for each building, posted and trained by reading" });
+  if (things.has("fence")) opens.push({ kind: "fence", name: "The fence", says: "A wall across the prowlers' trail, with a trap on the trail before it" });
+  if (things.has("postcard")) opens.push({ kind: "postcard", name: "A postcard", says: "A picture of your camp, to save or send" });
+  // The constructs come a chapter at a time since 1.5.11 (`front.ts` `WORK_CHAPTER`): those of this level's two chapters.
+  const chapters = [chapterOfBurrow(level), chapterOfBurrow(level) + 1];
+  for (const which of FRONT_WORKS.filter((kind) => chapters.includes(WORK_CHAPTER[kind]))) opens.push({ kind: "work", name: WORKS[which].name, says: WORKS[which].does, which });
+  // Who comes down the trail (`front.ts` `ROLES`): creepers first, and one more kind a chapter from the fourth.
+  if (things.has("prowlers")) opens.push({ kind: "foe", name: "Prowlers", says: "They come down a trail out of the Dark Wood: creepers first, and more kinds as the chapters go on" });
+  for (const role of ROLES.filter((entry) => entry !== "creeper" && chapters.includes(ROLE_FROM[entry]))) opens.push({ kind: "foe", name: `${ROLE_NAMES[role].many[0].toUpperCase()}${ROLE_NAMES[role].many.slice(1)}`, says: ROLE_DOES[role] });
   if (level === yardBurrow(YARD_MAX)) opens.push({ kind: "top", name: "The yard at its best", says: `What stands on a plot can reach level ${YARD_MAX}` });
   return opens;
 };
 
 // ---- building ---------------------------------------------------------------------
 
-/** Whether a plot of the yard is there yet, for a camp of that level with that on the plot. A plot once built on stays. */
-export const plotOpenAt = (burrow: number, slot: Yard | undefined, site: Placed | Site) =>
-  (site !== "yard0" && site !== "yard1") || burrow >= PLOT_FROM[site] || Boolean(slot && (slot.kind !== null || slot.level > 0));
-/** Whether a site is there to be built on: every building is, and a plot of the yard once its level has come. */
-export const plotOpen = (state: BaseState, site: Placed | Site) => plotOpenAt(state.levels.burrow, state.yard[yardIndex(site as Site)], site);
+/**
+ * Whether a plot of the yard is there yet, for a camp of that burrow level with that on the plot: a plot once built on
+ * stays. `legacy` is the burrow a camp from before chapters was brought onto them with (`state.legacy?.burrow`): the
+ * plots it had then stay too. (The burrow follows the chapter, so for a camp begun on chapters this is the chapter's
+ * own gate: `opened(state, minutes, "yard0")`.)
+ */
+export const plotOpenAt = (burrow: number, slot: Yard | undefined, site: Placed | Site, legacy = 0) =>
+  (site !== "yard0" && site !== "yard1") || burrow >= PLOT_FROM[site] || legacy >= LEGACY_FROM[site] || Boolean(slot && (slot.kind !== null || slot.level > 0));
+/** Whether a site is there to be built on: every building is, and a plot of the yard once its chapter has come. */
+export const plotOpen = (state: BaseState, site: Placed | Site) =>
+  (site !== "yard0" && site !== "yard1") || opened(state, undefined, site) || plotOpenAt(state.levels.burrow, state.yard[yardIndex(site as Site)], site, state.legacy?.burrow ?? 0);
 /** The buildings and plots that stand in the clearing now. */
 export const standing = (state: BaseState): Placed[] => PLACED.filter((site) => plotOpen(state, site));
-export const decorOpen = (state: BaseState) => state.levels.burrow >= DECOR_FROM;
+/** Whether decorations and landscape can be set down: from chapter 5. */
+export const decorOpen = (state: BaseState) => opened(state, undefined, "decor");
 
 /** The level a site is at. */
 export const levelOf = (state: BaseState, site: Site) => (yardIndex(site) >= 0 ? state.yard[yardIndex(site)].level : state.levels[site as BuildingId]);
 export const topOf = (site: Site) => (yardIndex(site) >= 0 ? YARD_MAX : MAX_LEVEL);
 
+/** The materials of a level: what it cost before its work was paid in acorns too (`priceOf` is what it costs). */
 export const costOf = (site: Site, to: number) => (yardIndex(site) >= 0 ? YARD_COST[to] : Math.round(BASE_COST[site as BuildingId] * COST_TIMES[to]));
-/** Minutes of reading a level takes in this camp (a workshop makes it quicker). */
-/** How much quicker Pip builds when she is happy at home: her mood there, 0 to 100, is what she brings to the camp. */
+/** How much less Pip's work costs when she is happy at home: her mood there, 0 to 100, is what she brings to the camp. */
 export const moodQuicker = (mood: number | undefined) => (mood === undefined ? 0 : mood >= 90 ? 0.2 : mood >= 75 ? 0.1 : 0);
 
-export const minutesOf = (state: BaseState, site: Site, to: number, mood?: number) =>
-  Math.max(1, Math.round((Math.max(1, Math.round((yardIndex(site) >= 0 ? YARD_MINUTES[to] : BUILD_MINUTES[to]) * (1 - WORKSHOP_QUICKER[yardLevel(state, "workshop")])))) * (1 - moodQuicker(mood))));
+/** The minutes of work in a level (what reading it used to take to finish), less what a happy Pip saves. */
+export const minutesOf = (_state: BaseState, site: Site, to: number, mood?: number) =>
+  Math.max(1, Math.round((yardIndex(site) >= 0 ? YARD_MINUTES[to] : BUILD_MINUTES[to]) * (1 - moodQuicker(mood))));
+/** The work in a level, in acorns: its minutes at `ACORNS_A_MINUTE`. */
+export const workOf = (state: BaseState, site: Site, to: number, mood?: number) => Math.max(1, Math.round(minutesOf(state, site, to, mood) * ACORNS_A_MINUTE));
+/** A workshop's discount, as a share. */
+export const workshopOff = (state: BaseState) => WORKSHOP_OFF[yardLevel(state, "workshop")] ?? 0;
+/**
+ * What the next level of a site costs, all told: its materials and its work, less what a workshop takes off. The one
+ * figure a building costs; it stands as soon as it is paid.
+ */
+export const priceOf = (state: BaseState, site: Site, to: number, mood?: number) =>
+  Math.max(1, Math.round((costOf(site, to) + workOf(state, site, to, mood)) * (1 - workshopOff(state))));
 
-/** Why a site cannot go up a level now, or null when it can. */
-export type Blocked = "top" | "busy" | "mend" | "harm" | "burrow" | "taken" | "room" | "acorns";
+/**
+ * Why a site cannot go up a level now, or null when it can. "chapter": it waits for a chapter (`chapterFor` says
+ * which): the burrow always does, since it follows the chapter and is never bought. (1.5.10: "room", a larder too
+ * small, is gone with the larder's cap, and "burrow" became "chapter".)
+ */
+export type Blocked = "top" | "busy" | "mend" | "harm" | "chapter" | "taken" | "acorns";
 
-export const blocked = (state: BaseState, site: Site, kind?: YardKind): Blocked | null => {
+/** The thing a site's first level waits for, if its chapter opens it. */
+const SITE_OPENS: Partial<Record<Site, Unlock>> = { hut: "hut", tower: "lookout", fence: "fence", yard0: "yard0", yard1: "yard1" };
+
+export const blocked = (state: BaseState, site: Site, kind?: YardKind, mood?: number): Blocked | null => {
   const to = levelOf(state, site) + 1;
   if (to > topOf(site)) return "top";
-  // After a friend's raid Pip is mending the fence they came through: it is not built on until that is read off.
-  // (It used to stop all building; since 2026-10-15 it is the fence alone.)
+  // The burrow is the camp's chapter: it goes up by reading, by itself.
+  if (site === "burrow") return "chapter";
+  // (After a friend's raid the fence used to wait to be mended by reading. Since 1.5.8 a raid knocks pieces down and
+  // that is all, and a camp kept from before is mended when it is next brought up to now: `wreck` is not there to see.)
   if (state.wreck && site === "fence") return "mend";
   // What a prowler has knocked about is put right before it is built on.
   if (harmOf(state, site) > 0) return "harm";
   if (state.jobs.some((job) => job.site === site) || state.jobs.length >= builders(state)) return "busy";
   const slot = yardIndex(site);
+  const opens = SITE_OPENS[site];
+  // A building whose chapter has not come is not there to build (one already standing stays, and goes up as the rest do).
+  if (to === 1 && opens && !opened(state, undefined, opens) && !(slot >= 0 && plotOpen(state, site))) return "chapter";
   if (slot >= 0) {
-    // The burrow leads the yard by a level, and a plot is not there at all until its level has come.
-    if (!plotOpen(state, site) || yardBurrow(to) > state.levels.burrow) return "burrow";
+    // The burrow leads the yard by a level, and a plot is not there at all until its chapter has come.
+    if (!plotOpen(state, site) || yardBurrow(to) > state.levels.burrow) return "chapter";
     const wanted = state.yard[slot].kind ?? kind;
     if (!wanted || state.yard.some((other, index) => index !== slot && other.kind === wanted)) return "taken";
-  } else if (site !== "burrow" && to > state.levels.burrow) {
-    // The burrow leads: nothing else is built past it.
-    return "burrow";
-  } else if (site === "fence" && to === 1 && state.levels.burrow < FENCE_FROM) {
-    // A first camp has nothing coming at it: the fence comes with the prowlers.
-    return "burrow";
+  } else if (to > state.levels.burrow) {
+    // The burrow leads: nothing else is built past it, and it goes up with the chapters.
+    return "chapter";
   }
-  // More than the larder could ever hold as it is: no saving up gets there.
-  if (costOf(site, to) > holds(state)) return "room";
-  if (state.acorns < costOf(site, to)) return "acorns";
+  const price = priceOf(state, site, to, mood);
+  if (state.acorns < price) return "acorns";
   return null;
 };
 
-/** The burrow level a site's next level wants. */
+/** The burrow level a site's next level wants (the burrow's own: the next). */
 export const burrowFor = (state: BaseState, site: Site) =>
-  yardIndex(site) >= 0
-    ? Math.max(yardBurrow(levelOf(state, site) + 1), plotOpen(state, site) ? 0 : PLOT_FROM[site as "yard0" | "yard1"])
-    : site === "fence"
-      ? Math.max(FENCE_FROM, levelOf(state, site) + 1)
-      : levelOf(state, site) + 1;
+  yardIndex(site) >= 0 ? Math.max(yardBurrow(levelOf(state, site) + 1), plotOpen(state, site) ? 0 : PLOT_FROM[site as "yard0" | "yard1"]) : levelOf(state, site) + 1;
+
+/**
+ * The chapter a site's next level waits for: the chapter that opens the building (for its first level) and the one
+ * that raises the burrow far enough. At or below the camp's chapter when it is not waiting for one.
+ */
+export const chapterFor = (state: BaseState, site: Site): number => {
+  const to = levelOf(state, site) + 1;
+  const opens = SITE_OPENS[site];
+  const first = to === 1 && opens && !opened(state, undefined, opens) && !(yardIndex(site) >= 0 && plotOpen(state, site)) ? CHAPTER_OF[opens] : 1;
+  const need = site === "burrow" ? to : burrowFor(state, site);
+  return Math.max(first, need > state.levels.burrow ? chapterOfBurrow(need) : 1);
+};
 
 /** Pays for the next level of a site and begins it; the state unchanged when it cannot be. */
-export const build = (state: BaseState, site: Site, minutesRead: number, kind?: YardKind, mood?: number): BaseState => {
-  if (blocked(state, site, kind)) return state;
+/**
+ * Pays for the next level of a site, and it stands: the state unchanged when it cannot be. It goes through a job that
+ * wants no more (`needs: 0`), finished here with `day` for the camp's news; without a day the job is left for the next
+ * `settle`, which finishes it the same way.
+ */
+export const build = (state: BaseState, site: Site, minutesRead: number, kind?: YardKind, mood?: number, day?: string): BaseState => {
+  if (blocked(state, site, kind, mood)) return state;
   const to = levelOf(state, site) + 1;
   const slot = yardIndex(site);
-  const job: Job = { site, to, from: Math.floor(minutesRead), needs: minutesOf(state, site, to, mood) };
+  const job: Job = { site, to, from: Math.floor(minutesRead), needs: 0 };
   let yard = state.yard;
   if (slot >= 0) {
     job.kind = state.yard[slot].kind ?? kind;
     // The plot is spoken for from the moment the first stake goes in.
     yard = state.yard.map((entry, index) => (index === slot ? { kind: job.kind ?? null, level: entry.level } : entry)) as [Yard, Yard];
   }
-  return { ...state, acorns: state.acorns - costOf(site, to), yard, jobs: [...state.jobs, job] };
+  const paid = { ...state, acorns: state.acorns - priceOf(state, site, to, mood), yard, jobs: [...state.jobs, job] };
+  return day === undefined ? paid : finishJobs(paid, minutesRead, day);
+};
+
+/**
+ * Everything going up is finished. Since 1.5.8 a building stands as soon as it is paid for, so a job is only ever
+ * there between paying and this, or in a camp kept from before, where it was waiting on reading: that one is finished
+ * too, whatever reading it still wanted (it was paid for). It hangs on the camp alone, so every device does the same.
+ */
+export const finishJobs = (state: BaseState, minutesRead: number, day: string): BaseState => {
+  const read = Math.floor(minutesRead);
+  let next = state;
+  for (const job of state.jobs) {
+    const slot = yardIndex(job.site);
+    next =
+      slot >= 0
+        ? { ...next, yard: next.yard.map((entry, index) => (index === slot ? { kind: job.kind ?? entry.kind, level: Math.max(entry.level, job.to) } : entry)) as [Yard, Yard] }
+        : { ...next, levels: { ...next.levels, [job.site]: Math.max(next.levels[job.site as BuildingId], job.to) } };
+    const opened = job.site === "burrow" ? campOpens(job.to).map((entry) => entry.name.toLowerCase()) : [];
+    next = {
+      ...next,
+      jobs: next.jobs.filter((entry) => entry !== job),
+      events: noted(next, day, job.site === "burrow" ? `The camp is level ${job.to}${opened.length > 0 ? `. New: ${opened.join(", ")}` : ""}.` : `${siteName(next, job.site)} reached level ${job.to}.`)
+    };
+    // A level of the camp may bring a plot: it is given ground of its own.
+    if (job.site === "burrow") next = seatPlots(next);
+    // A new oak starts dropping from the day it stands, not from the reading that built it.
+    if (job.site === "oak" && job.to === 1) next = { ...next, oakFrom: read };
+  }
+  // A fence level is a longer, sturdier wall; a building may have been the leftmost (`fronted`).
+  return state.jobs.length > 0 ? fronted(next) : next;
 };
 
 /** Clears a yard plot, for something else. Nothing comes back for it. */
@@ -1104,25 +1441,21 @@ export const siteName = (state: BaseState, site: Site) => {
 
 // ---- the oak ----------------------------------------------------------------------
 
-/** Acorns on the oak to gather now. */
-export const oakReady = (state: BaseState, minutesRead: number) => Math.min(oakHolds(state), oakRead(state, minutesRead) + windfallOf(state));
+/** Acorns on the oak to gather now: everything the reading dropped since it was last gathered (it holds it all), and Pip's shake. */
+export const oakReady = (state: BaseState, minutesRead: number) => oakRead(state, minutesRead) + windfallOf(state);
 /** What the reading has put on the oak, without what Pip shook onto it. */
 const oakRead = (state: BaseState, minutesRead: number) => {
   const read = Math.max(0, Math.floor(minutesRead) - state.oakFrom);
-  return Math.min(oakHolds(state), Math.floor((read / OAK_EVERY) * oakDrops(state)));
+  return Math.floor((read / OAK_EVERY) * oakDrops(state));
 };
 /** The welcome's shake still on the oak (a camp read before there was a welcome has none). */
 export const windfallOf = (state: BaseState) => state.welcome?.windfall ?? 0;
 
-/**
- * Gathers what the oak has, as far as the larder has room. What does not fit
- * stays on the tree, and only that: the oak's clock is set back by just the
- * reading those acorns took, however long the tree stood full.
- */
+/** Gathers everything on the oak (since 1.5.10 there is always room for it), with the streak's and the season's more. */
 export const gather = (state: BaseState, minutesRead: number, streak = 0, day: string | null = null): BaseState => {
   // What Pip shook onto the oak comes first, and as it is: no streak or season on it, and the oak's clock untouched,
   // since no reading stands behind it.
-  const shaken = Math.min(windfallOf(state), room(state));
+  const shaken = windfallOf(state);
   if (shaken > 0) {
     const shook = { ...state, acorns: state.acorns + shaken, stats: { ...state.stats, gathered: state.stats.gathered + shaken }, welcome: { ...state.welcome, windfall: state.welcome.windfall - shaken } };
     return oakRead(shook, minutesRead) > 0 ? gatherRead(shook, minutesRead, streak, day) : shook;
@@ -1130,12 +1463,13 @@ export const gather = (state: BaseState, minutesRead: number, streak = 0, day: s
   return gatherRead(state, minutesRead, streak, day);
 };
 const gatherRead = (state: BaseState, minutesRead: number, streak: number, day: string | null): BaseState => {
-  const ready = oakRead(state, minutesRead);
-  const taken = Math.min(ready, room(state));
+  const taken = oakRead(state, minutesRead);
   if (taken <= 0) return state;
+  // The clock goes on from what is left over of the last ten minutes, so no minute's acorns are lost to the rounding.
   const now = Math.floor(minutesRead);
-  const left = ready - taken;
-  const oakFrom = left === 0 ? now : now - Math.ceil((left * OAK_EVERY) / oakDrops(state));
+  const drops = oakDrops(state);
+  const spent = drops > 0 ? Math.ceil((taken * OAK_EVERY) / drops) : now - state.oakFrom;
+  const oakFrom = Math.min(now, state.oakFrom + spent);
   const gathered = { ...state, acorns: state.acorns + taken, oakFrom, stats: { ...state.stats, gathered: state.stats.gathered + taken } };
   // A streak makes the gathering richer: more for the same acorns off the tree.
   const streaked = { ...gathered, acorns: gathered.acorns + give(gathered, taken * streakAdds(streak)) };
@@ -1145,8 +1479,26 @@ const gatherRead = (state: BaseState, minutesRead: number, streak: number, day: 
   return day !== null && seasonOf(day) === 1 ? { ...streaked, acorns: streaked.acorns + give(streaked, taken * AUTUMN_OAK) } : streaked;
 };
 
-/** What a gathering would bring in now, every bonus counted and as far as the larder has room: what the screen says before the tap. */
+/** What a gathering would bring in now, every bonus counted: what the screen says before the tap. */
 export const gatherBrings = (state: BaseState, minutesRead: number, streak = 0, day: string | null = null) => gather(state, minutesRead, streak, day).acorns - state.acorns;
+
+/**
+ * Acorns the larder has room for: always all of them, since 1.5.10.
+ * @deprecated there is always room.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export const larderRoom = (_state: BaseState) => Number.POSITIVE_INFINITY;
+
+/**
+ * How the oak stands for a tap, so that the picture never says one thing
+ * and a tap does another (the owner, 2026-10-19: "the acorn does not
+ * disappear even when I collect it"): "ready", a tap takes acorns in;
+ * "bare", nothing on it yet. Read off `gather` itself, so the two cannot
+ * drift apart. (There was a "full", acorns on it and no room in the larder:
+ * since 1.5.10 there is always room.)
+ */
+export type OakStatus = "ready" | "bare";
+export const oakStatus = (state: BaseState, minutesRead: number): OakStatus => (gather(state, minutesRead).acorns > state.acorns ? "ready" : "bare");
 
 /** What a reading streak of so many days adds to what is gathered from the oak, as a share. */
 export const streakAdds = (streak: number) => STREAK_ADDS.find(([days]) => streak >= days)?.[1] ?? 0;
@@ -1155,19 +1507,21 @@ export const streakNext = (streak: number) => [...STREAK_ADDS].reverse().find(([
 
 // ---- where things stand ---------------------------------------------------------------
 
-/** Pieces of fence the camp has to put down. */
-export const fencePieces = (state: BaseState) => state.levels.fence * PIECES_A_LEVEL + (state.levels.fence > 0 && hasAnimal(state, 2) ? GOAT_PIECES : 0);
+/** The wall's sections, all told: as many as the fence's level gives (`front.ts`). (Until 1.5.11 it was pieces to lay by hand: six a level, and two for the goat.) */
+export const fencePieces = (state: BaseState) => sectionsAt(state.levels.fence).length;
 
 const snap = (value: number, to: number) => Math.round(value / to) * to;
 const apart = (a: Spot, b: Spot) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 
-/** Why a building cannot stand at a spot, or null when it can. */
+/** Why a building cannot stand at a spot, or null when it can. "fence": in the wall's way, or on the trail's side of it. */
 export const spotBlocked = (state: BaseState, site: Placed, x: number, y: number): "edge" | "building" | "fence" | null => {
   const at: Spot = [snap(x, 2), snap(y, 2)];
-  const land = cleared(LAND, state.levels.burrow);
+  const land = cleared(LAND, state);
   if (at[0] < land.left || at[0] > land.right || at[1] < land.top || at[1] > land.bottom) return "edge";
   // A plot that is not there yet is in nobody's way.
   if (standing(state).some((other) => other !== site && apart(at, state.spots[other]) < (REACH[site] + REACH[other]) * FOOT)) return "building";
+  // Once there is a trail, the ground in front of the wall is the prowlers': nothing is built there.
+  if (opened(state, undefined, "prowlers") && at[0] - REACH[site] * FOOT - 4 < wallXAt(state.front.x, at[1])) return "fence";
   return state.walls.some((wall) => apart(at, wall) < REACH[site] * FOOT + 4) ? "fence" : null;
 };
 
@@ -1183,7 +1537,7 @@ const seatPlots = (state: BaseState): BaseState => {
     const [x, y] = next.spots[site];
     if (!plotOpen(next, site) || !spotBlocked(next, site, x, y)) continue;
     let best: Spot | null = null;
-    const land = cleared(LAND, next.levels.burrow);
+    const land = cleared(LAND, next);
     for (let cy = land.top; cy <= land.bottom; cy += 2) {
       for (let cx = land.left; cx <= land.right; cx += 2) {
         if (spotBlocked(next, site, cx, cy)) continue;
@@ -1197,68 +1551,282 @@ const seatPlots = (state: BaseState): BaseState => {
 
 /** Moves a building: as often as the reader likes, for nothing. Unchanged where it cannot stand. */
 export const moveSite = (state: BaseState, site: Placed, x: number, y: number): BaseState =>
-  spotBlocked(state, site, x, y) ? state : { ...state, spots: { ...state.spots, [site]: [snap(x, 2), snap(y, 2)] } };
-
-const wallSpot = (x: number, y: number): Spot => [snap(x, WALL_GRID), snap(y - 4, WALL_GRID) + 4];
-
-/** Why a piece of fence cannot go down at a spot, or null when it can. */
-export const wallBlocked = (state: BaseState, x: number, y: number): "none" | "edge" | "building" | "fence" | null => {
-  if (state.walls.length >= fencePieces(state)) return "none";
-  const at = wallSpot(x, y);
-  const land = cleared(WALL_LAND, state.levels.burrow);
-  if (at[0] < land.left || at[0] > land.right || at[1] < land.top || at[1] > land.bottom) return "edge";
-  if (standing(state).some((site) => apart(at, state.spots[site]) < REACH[site] * FOOT + 4)) return "building";
-  return state.walls.some((wall) => wall[0] === at[0] && wall[1] === at[1]) ? "fence" : null;
-};
-
-/** Puts a piece of fence down, on the grid the pieces join up on. */
-export const placeWall = (state: BaseState, x: number, y: number): BaseState =>
-  wallBlocked(state, x, y) ? state : { ...state, walls: [...state.walls, wallSpot(x, y)] };
-
-/** The piece of fence at a point, or -1. */
-export const wallAt = (state: BaseState, x: number, y: number) => {
-  const at = wallSpot(x, y);
-  return state.walls.findIndex((wall) => wall[0] === at[0] && wall[1] === at[1]);
-};
-
-/** Takes a piece of fence up, to be put down somewhere else. */
-export const removeWall = (state: BaseState, index: number): BaseState =>
-  state.walls[index] ? { ...state, walls: state.walls.filter((_, at) => at !== index) } : state;
-
-/** Why a piece of fence cannot be moved to a spot, or null when it can: as for putting one down there, with the piece itself out of the reckoning. */
-export const wallMoveBlocked = (state: BaseState, index: number, x: number, y: number) =>
-  state.walls[index] ? wallBlocked({ ...state, walls: state.walls.filter((_, at) => at !== index) }, x, y) : "none";
-/** Moves a piece of fence to another square: taken hold of and set down, like anything else in the camp. The gate goes with its piece. */
-export const moveWall = (state: BaseState, index: number, x: number, y: number): BaseState => {
-  const piece = state.walls[index];
-  if (!piece || wallMoveBlocked(state, index, x, y)) return state;
-  const to = wallSpot(x, y);
-  const wasGate = state.gate !== null && state.gate[0] === piece[0] && state.gate[1] === piece[1];
-  return { ...state, walls: state.walls.map((wall, at) => (at === index ? to : wall)), gate: wasGate ? to : state.gate };
-};
+  spotBlocked(state, site, x, y) ? state : fronted({ ...state, spots: { ...state.spots, [site]: [snap(x, 2), snap(y, 2)] } });
 
 /**
- * The gate. A fence that goes all the way round has to be climbed, and is
- * climbed wherever whoever comes happens to meet it. A gate is the reader
- * saying where: one piece of the fence made the way in. Whoever comes on
- * foot and finds the fence in the way goes round to the gate if it is not
- * much further, and is longer getting through it than over a piece, since
- * it is barred; so the fight is where the reader put it, and what throws
- * can be stood over it. The camp's own people walk through it as they
- * please. One gate, from the second level of the fence.
+ * The fence is not laid by hand since 1.5.11: it is a wall across the trail, raised with the fence's level
+ * (`fronted`). These are kept for the screens and tests that still ask, and do nothing.
+ * @deprecated the wall is `fronted`; it is slid with `slideWall`.
+ */
+export const wallBlocked = (_state: BaseState, _x: number, _y: number): "none" | "edge" | "building" | "fence" | null => "none";
+/** @deprecated see `wallBlocked`. */
+export const placeWall = (state: BaseState, _x: number, _y: number): BaseState => state;
+/** The piece of the wall at a point (a section), or -1: what is taken hold of to slide the wall. */
+export const wallAt = (state: Pick<BaseState, "walls">, x: number, y: number) => state.walls.findIndex((wall) => Math.abs(wall[0] - x) <= 6 && y >= wall[1] - 14 && y <= wall[1] + 5);
+/** @deprecated see `wallBlocked`. */
+export const removeWall = (state: BaseState, _index: number): BaseState => state;
+/** @deprecated see `wallBlocked`. */
+export const wallMoveBlocked = (_state: BaseState, _index: number, _x: number, _y: number) => "none" as const;
+/** @deprecated see `wallBlocked`. */
+export const moveWall = (state: BaseState, _index: number, _x: number, _y: number): BaseState => state;
+
+/**
+ * The gate: where the trail meets the wall, from the fence's second level. Whoever comes on foot batters at it (or
+ * goes round a wall too short to stop them), and the camp's own walk through it.
  */
 export const GATE_FROM = 2;
 export const gateOf = (state: Pick<BaseState, "gate" | "walls" | "levels">): Spot | null =>
   state.gate && state.levels.fence >= GATE_FROM && state.walls.some((wall) => wall[0] === state.gate![0] && wall[1] === state.gate![1]) ? state.gate : null;
-/** Makes the gate of the piece at a point; of the piece that is the gate, an ordinary piece again. */
-export const setGate = (state: BaseState, x: number, y: number): BaseState => {
-  if (state.levels.fence < GATE_FROM) return state;
-  const piece = wallAt(state, x, y);
-  if (piece < 0) return state;
-  const spot = state.walls[piece];
-  const had = gateOf(state);
-  return { ...state, gate: had && had[0] === spot[0] && had[1] === spot[1] ? null : spot };
+/** @deprecated the gate is always where the trail meets the wall. */
+export const setGate = (state: BaseState, _x: number, _y: number): BaseState => state;
+
+// ---- the front: the wall across the trail, its traps and towers (1.5.11, `front.ts`) ----------------------------
+
+/** The buildings that stand in the clearing with something built on them (a plot with nothing on it is ground). */
+const builtSites = (state: BaseState): Placed[] =>
+  standing(state).filter((site) => site === "burrow" || (yardIndex(site) >= 0 ? state.yard[yardIndex(site)].kind !== null || state.yard[yardIndex(site)].level > 0 : state.levels[site as BuildingId] > 0));
+/** Just left of the leftmost building: where a wall stands with nothing outside it. */
+const leftmostEdge = (state: BaseState) =>
+  Math.floor(Math.min(...builtSites(state).map((site) => state.spots[site][0] - REACH[site] * FOOT - 6 - Math.max(0, wallXAt(0, state.spots[site][1])))) / 2) * 2;
+/** The chapter the front goes by: the camp's, or for a camp from before chapters, what its burrow had then. */
+export const frontChapter = (state: Pick<BaseState, "minutes" | "legacy">) => Math.max(chapterOf(state.minutes), state.legacy ? chapterOfBurrow(state.legacy.burrow) + 1 : 0);
+/** Whether a point behind the wall is clear for a tower: off the buildings' ground. */
+const padFree = (state: BaseState) => (x: number, y: number) =>
+  x <= DECOR_LAND.right - woodOf(state) && y >= DECOR_LAND.top + 4 && y <= DECOR_LAND.bottom && builtSites(state).every((site) => apart([x, y], state.spots[site]) >= REACH[site] * FOOT + 7);
+/** Where the trap spots and the tower pads are just now, open or not. */
+export const frontPlaces = (state: BaseState): { spots: Spot[]; pads: Spot[]; bell: Spot } => ({
+  spots: trapSpots(leftWoodOf(state), state.front.x),
+  pads: towerPads(state.front.x, padFree(state)),
+  bell: bellSpot(state.front.x)
+});
+/** How many trap spots and tower pads are open. */
+export const frontOpen = (state: Pick<BaseState, "minutes" | "legacy">) => ({ spots: spotsOpen(frontChapter(state)), pads: padsOpen(frontChapter(state)) });
+
+/**
+ * The camp's wall, traps and towers put where they are: the wall's line (following the camp until a fence is raised
+ * or the reader slides it), its sections at the fence's level (less any a friend knocked down: `downed`), the gate,
+ * and every construct on its spot or pad (one on a slot that is not open yet goes to the shed). `walls`, `gate` and
+ * `works` are made from it, so everything that reads them sees the front as it is.
+ */
+export const fronted = (state: BaseState): BaseState => {
+  const had = state.front;
+  const leftWood = leftWoodOf(state);
+  const x = had.set || state.levels.fence > 0 ? clampLine(had.x, leftWood) : clampLine(Math.min(LINE_DEFAULT, leftmostEdge(state)), leftWood);
+  const ys = sectionsAt(state.levels.fence);
+  const down = new Set(state.downed.map(([, y]) => y));
+  const open = frontOpen(state);
+  const shed = [...had.shed];
+  const fit = (list: readonly number[], most: number, ok: (kind: number) => boolean) =>
+    [0, 1, 2].map((index) => {
+      const kind = list[index] ?? -1;
+      if (kind < 0) return -1;
+      if (index >= most || !ok(kind)) {
+        shed.push(kind);
+        return -1;
+      }
+      return kind;
+    });
+  const spots = fit(had.spots, open.spots, isTrap);
+  const pads = fit(had.pads, open.pads, isTower);
+  const front: Front = { ...had, x, spots, pads, shed };
+  const places = frontPlaces({ ...state, front });
+  const works: Decor[] = [
+    ...spots.flatMap((kind, index) => (kind >= 0 ? [{ kind, x: places.spots[index][0], y: places.spots[index][1] }] : [])),
+    ...pads.flatMap((kind, index) => (kind >= 0 ? [{ kind, x: places.pads[index][0], y: places.pads[index][1] }] : [])),
+    ...(had.bell ? [{ kind: BELL, x: places.bell[0], y: places.bell[1] }] : [])
+  ];
+  const next = {
+    walls: ys.filter((y) => !down.has(y)).map((y): Spot => [wallXAt(x, y), y]),
+    downed: ys.filter((y) => down.has(y)).map((y): Spot => [wallXAt(x, y), y]),
+    gate: state.levels.fence >= GATE_FROM ? ([x, TRAIL_Y] as Spot) : null,
+    works,
+    front
+  };
+  // Nothing moved: the camp as it was (so that what keeps it, and the tests, can tell nothing changed).
+  const same = JSON.stringify([next.walls, next.downed, next.gate, next.works, next.front]) === JSON.stringify([state.walls, state.downed, state.gate, state.works, state.front]);
+  return same ? state : { ...state, ...next };
 };
+
+/** No more of a kind than a camp may have. */
+const trimOwned = (front: Front): Front => {
+  const count = new Map<number, number>();
+  const keep = (kind: number) => {
+    if (kind < 0) return -1;
+    const had = count.get(kind) ?? 0;
+    if (had >= mostOf(kind)) return -1;
+    count.set(kind, had + 1);
+    return kind;
+  };
+  const spots = front.spots.map(keep);
+  const pads = front.pads.map(keep);
+  const shed = front.shed.map(keep).filter((kind) => kind >= 0);
+  return { ...front, spots, pads, shed };
+};
+
+/** The camp's front as it was kept; or, for a camp saved by a build that knows nothing of it, from its mark; or, for a camp from before it, brought onto it. */
+const readFront = (state: BaseState, raw: unknown, taught: readonly string[], rawWorks: unknown): BaseState => {
+  const kept = record(raw);
+  const slots = (value: unknown) => [0, 1, 2].map((index) => (Array.isArray(value) ? (whole(value[index], -1, 15) ?? -1) : -1)).map((kind) => (FRONT_WORKS.includes(kind) ? kind : -1));
+  const works = readThings(rawWorks, WORKS.length, WORKS.length * 2, DECOR_LAND);
+  if (typeof kept.x === "number") {
+    const front: Front = {
+      x: wholeOr(kept.x, 0, 240, LINE_DEFAULT),
+      set: kept.set === true,
+      spots: slots(kept.spots),
+      pads: slots(kept.pads),
+      shed: (Array.isArray(kept.shed) ? kept.shed : []).map((kind) => whole(kind, 0, 15)).filter((kind): kind is number => kind !== null && FRONT_WORKS.includes(kind)).slice(0, 12),
+      bell: kept.bell === true,
+      watchedAt: wholeOr(kept.watchedAt, 0, 1e9, state.minutes),
+      held: wholeOr(kept.held, 0, 1e9, 0),
+      through: texts(kept.through, 12).filter((role) => role in COUNTER),
+      moved: kept.moved === true,
+      ...(kept.seat === true ? { seat: true } : {})
+    };
+    return fronted({ ...state, front: trimOwned(front) });
+  }
+  const mark = readFrontMark(taught);
+  if (mark) {
+    // Saved by a build that does not know the front. What it bought meanwhile (old kinds and all) goes to the shed.
+    let front: Front = trimOwned({ ...freshFront(state.minutes), ...mark });
+    let refund = 0;
+    const seen = new Map<number, number>();
+    for (const work of works) {
+      const kind = becomesNow(work.kind);
+      const counted = (seen.get(kind ?? -1) ?? 0) + 1;
+      seen.set(kind ?? -1, counted);
+      if (kind === null) continue;
+      if (counted <= ownCount(front, kind)) continue;
+      if (ownCount(front, kind) < mostOf(kind)) front = { ...front, shed: [...front.shed, kind] };
+      else refund += WORKS[work.kind]?.cost ?? 0;
+    }
+    return fronted({ ...state, acorns: state.acorns + refund, front });
+  }
+  return fronted(ontoFront(state, works));
+};
+/** What an old kind of construct is now: itself, what it became, or null for one that is no more. */
+const becomesNow = (kind: number): number | null => (kind === 0 || kind === 5 ? 10 : kind === 1 ? 8 : kind === 3 || kind === 11 ? null : FRONT_WORKS.includes(kind) ? kind : null);
+
+/**
+ * A camp from before the front, brought onto it: the wall goes just left of its leftmost building (so nothing it
+ * built is left outside), at the fence level it had, complete (what pieces it had laid, and where, no longer matter);
+ * pieces a friend had knocked down are that many sections down, beside the gate; and its constructs are what they
+ * became (`front.ts` `BECAME`), seated on the spots and pads nearest the trail first, the rest in the shed. A kind
+ * that is no more, or one too many of a kind, is paid back in full. Buildings and everything set about stay put.
+ */
+const ontoFront = (state: BaseState, works: readonly Decor[]): BaseState => {
+  const leftWood = leftWoodOf(state);
+  const edge = leftmostEdge(state);
+  const x = clampLine(state.levels.fence > 0 ? edge : Math.min(LINE_DEFAULT, edge), leftWood);
+  const chapter = frontChapter(state);
+  const seat = seatOld(works, (kind) => WORKS[kind]?.cost ?? 0, { spots: spotsOpen(chapter), pads: padsOpen(chapter) }, (wx, wy) => Math.hypot(wx - x, wy - TRAIL_Y));
+  const ys = sectionsAt(state.levels.fence).sort((a, b) => Math.abs(a - TRAIL_Y) - Math.abs(b - TRAIL_Y) || a - b);
+  const downed = ys.slice(0, Math.min(state.downed.length, ys.length)).map((y): Spot => [wallXAt(x, y), y]);
+  const names = [...new Set(seat.refunded.map((kind) => WORKS[kind]?.name.toLowerCase() ?? "a construct"))];
+  return {
+    ...state,
+    acorns: state.acorns + seat.refund,
+    downed,
+    front: {
+      ...freshFront(state.minutes),
+      x,
+      spots: seat.spots,
+      pads: seat.pads,
+      shed: seat.shed,
+      bell: seat.bell,
+      // Pip has a word to say about it, where there was anything to move.
+      moved: state.levels.fence > 0 || works.length > 0,
+      // Seated on the slots when the camp is next brought up to now (and its chapter is known): `seatShed`.
+      seat: true
+    },
+    events: seat.refund > 0 ? noted(state, state.night ?? "", `The ${names.join(" and the ")} ${names.length === 1 ? "is" : "are"} no more: ${seat.refund} acorns back.`) : state.events
+  };
+};
+
+/** How far the wall may slide: the trees on one side, and on the other the leftmost building (nothing is left outside it). */
+export const wallRange = (state: BaseState): [number, number] => {
+  const [least, most] = lineRange(leftWoodOf(state));
+  return [least, Math.max(least, Math.min(most, leftmostEdge(state)))];
+};
+/** Slides the wall along the trail, with its gate and its towers: for nothing, as often as the reader likes. */
+export const slideWall = (state: BaseState, x: number): BaseState => {
+  const [least, most] = wallRange(state);
+  const to = Math.round(Math.min(most, Math.max(least, x)));
+  return to === state.front.x && state.front.set ? state : fronted({ ...state, front: { ...state.front, x: to, set: true } });
+};
+
+/** A slot on the front: a trap spot or a tower pad, by its place. */
+export type FrontSlot = { at: "spot" | "pad"; index: number };
+/** What is on a slot just now, or -1. */
+export const onSlot = (state: BaseState, slot: FrontSlot) => (slot.at === "spot" ? state.front.spots : state.front.pads)[slot.index] ?? -1;
+/**
+ * Puts a construct on a slot: one from the shed (or from another slot), or one bought for it. Whatever was on the
+ * slot goes to the shed. `kind` -1 takes what is there off, to the shed. Unchanged where it cannot be: a trap on a pad,
+ * a slot not open, or one not owned that cannot be bought.
+ */
+export const seatWork = (state: BaseState, slot: FrontSlot, kind: number): BaseState => {
+  const open = frontOpen(state);
+  if (slot.index < 0 || slot.index >= (slot.at === "spot" ? open.spots : open.pads)) return state;
+  const list = slot.at === "spot" ? [...state.front.spots] : [...state.front.pads];
+  const had = list[slot.index] ?? -1;
+  if (kind === had) return state;
+  let next = state;
+  let shed = [...state.front.shed];
+  if (kind >= 0) {
+    if (slot.at === "spot" ? !isTrap(kind) : !isTower(kind)) return state;
+    const inShed = shed.indexOf(kind);
+    if (inShed >= 0) shed.splice(inShed, 1);
+    else {
+      // On another slot of the same sort: it moves here (and what was here goes to the shed).
+      const other = list.findIndex((entry, index) => index !== slot.index && entry === kind);
+      if (other >= 0) list[other] = -1;
+      else {
+        if (workBlocked(state, kind)) return state;
+        next = { ...next, acorns: next.acorns - WORKS[kind].cost };
+      }
+    }
+  }
+  if (had >= 0) shed = [...shed, had];
+  list[slot.index] = kind;
+  const front = slot.at === "spot" ? { ...next.front, spots: list, shed } : { ...next.front, pads: list, shed };
+  return fronted({ ...next, front });
+};
+/** Buys a construct and puts it to use: on the first free slot of its sort that is open, on the gate for the bell, else in the shed. */
+export const buyWork = (state: BaseState, kind: number): BaseState => {
+  if (workBlocked(state, kind)) return state;
+  const paid = { ...state, acorns: state.acorns - WORKS[kind].cost };
+  if (kind === BELL) return fronted({ ...paid, front: { ...paid.front, bell: true } });
+  const open = frontOpen(state);
+  const list = isTrap(kind) ? paid.front.spots : paid.front.pads;
+  const free = list.findIndex((entry, index) => entry < 0 && index < (isTrap(kind) ? open.spots : open.pads));
+  if (free < 0) return fronted({ ...paid, front: { ...paid.front, shed: [...paid.front.shed, kind] } });
+  const placed = [...list];
+  placed[free] = kind;
+  return fronted({ ...paid, front: isTrap(kind) ? { ...paid.front, spots: placed } : { ...paid.front, pads: placed } });
+};
+
+/** Whether a night is owed: prowlers come, and there has been reading since the last night that counted. */
+export const nightDue = (state: BaseState, minutesRead: number) => prowlersCome(state) && Math.floor(minutesRead) > state.front.watchedAt;
+/**
+ * A night has been watched to its end. The first after some reading counts: held, it is one more night held and a
+ * few acorns (`nightBounty`). Any other is for the show, and changes nothing. What got through was dealt with as it
+ * did (`harmSite`, `robSite`).
+ */
+export const nightOver = (state: BaseState, held: boolean, minutesRead: number, day: string): { state: BaseState; bounty: number } => {
+  if (!nightDue(state, minutesRead)) return { state, bounty: 0 };
+  const bounty = held ? give(state, nightBounty(frontChapter(state))) : 0;
+  return {
+    state: {
+      ...state,
+      acorns: state.acorns + bounty,
+      front: { ...state.front, watchedAt: Math.floor(minutesRead), held: state.front.held + (held ? 1 : 0) },
+      events: noted(state, day, held ? `The night held: ${bounty} acorns.` : "Something got through in the night.")
+    },
+    bounty
+  };
+};
+/** A kind of prowler got through: Pip says a word about what beats it, the first time. */
+export const gotThrough = (state: BaseState, role: Role): BaseState =>
+  state.front.through.includes(role) ? state : { ...state, front: { ...state.front, through: [...state.front.through, role] } };
 
 // ---- the nights ---------------------------------------------------------------------
 
@@ -1372,8 +1940,19 @@ export const campStructures = (state: BaseState, lit: boolean, at?: number): Str
     // What lies on the ground is a small thing to step on; the rest take the ground a thing of their size takes.
     add("other", [work.x, work.y], work.kind === 6 ? 4 : work.kind === 8 ? 3 : 6, made.hp, { name: "work", variant: work.kind }, throws, does);
   }
-  // The fence, with the watchman on it, stands longer.
-  state.walls.forEach((wall, index) => add("wall", wall, 5, (30 + levels.fence * 14) * GUARD_GIVES.fence[rank(1)], { name: "fencepiece", variant: levels.fence }, null, index === 0 ? posted(1) : {}));
+  // The wall, with the watchman on it, stands longer; the gate longer again, and the goat leans on all of it.
+  const gate = gateOf(state);
+  state.walls.forEach((wall, index) =>
+    add(
+      "wall",
+      wall,
+      5,
+      (30 + levels.fence * 14) * GUARD_GIVES.fence[rank(1)] * (gate && gate[0] === wall[0] && gate[1] === wall[1] ? GATE_TOUGHER : 1) * (hasAnimal(state, 2) ? GOAT_TOUGHER : 1),
+      { name: "fencepiece", variant: levels.fence },
+      null,
+      index === 0 ? posted(1) : {}
+    )
+  );
   // A building a prowler has broken throws at nobody until it is put right.
   for (const entry of made) {
     const name = entry.look?.name;
@@ -1481,9 +2060,10 @@ export const atRisk = (state: BaseState, day: string, lit: boolean) => nightOutc
  * the magpies are a nudge to come back, not a bill for having been gone.
  */
 export const settle = (state: BaseState, now: Now): BaseState => {
-  let next = state;
   const read = Math.floor(now.minutes);
   const day = now.day;
+  // The chapters first (1.5.10): what the reading has the camp on, a camp from before brought onto them, the chests.
+  let next = settleChapters(state, read, day);
   // A camp kept before trophies stood on reading: what was read until now stands behind the trophies it has, with
   // enough over for one more (whoever is half way through a book is not made to begin again). And a library
   // restored from an older day cannot have more behind its trophies than has been read.
@@ -1492,10 +2072,12 @@ export const settle = (state: BaseState, now: Now): BaseState => {
   // A library restored from before the training began: it starts from here.
   if (next.drill && next.drill.from > read) next = { ...next, drill: { ...next.drill, from: read } };
   // A guardian whose training has been read through takes up their post, or is surer of it.
-  if (next.wreck && read - next.wreck.from >= next.wreck.needs) {
+  // A friend's raid no longer leaves reading to be done (1.5.8): a camp still mending after one from before is mended.
+  if (next.wreck) {
     next = { ...next, wreck: null, events: noted(next, day, "The camp is mended.") };
   }
-  if (next.drill && read - next.drill.from >= next.drill.needs) {
+  // And a guardian trains at once, paid for in acorns (`trainGuard`): one still training from before has done.
+  if (next.drill) {
     const guard = next.drill.guard;
     const rank = Math.min(GUARD_MOST, guardOf(next, guard) + 1);
     next = {
@@ -1505,8 +2087,8 @@ export const settle = (state: BaseState, now: Now): BaseState => {
       events: noted(next, day, rank === 1 ? `${GUARDIANS[guard].name} has taken up a post at the camp.` : `${GUARDIANS[guard].short} is surer of the post: rank ${rank}.`)
     };
   }
-  // An animal comes to a camp that has grown charming enough for it, and stays.
-  for (const animal of ANIMALS) {
+  // An animal comes to a camp that has grown charming enough for it, and stays: once the meadow has come.
+  for (const animal of opened(next, read, "animals") ? ANIMALS : []) {
     if (!next.animals.includes(animal.id) && charm(next) >= animal.charm) {
       next = { ...next, animals: [...next.animals, animal.id], events: noted(next, day, `${/^[AEIOU]/.test(animal.name) ? "An" : "A"} ${animal.name.toLowerCase()} has wandered into the meadow, and means to stay.`) };
     }
@@ -1542,23 +2124,8 @@ export const settle = (state: BaseState, now: Now): BaseState => {
       wreck: next.wreck ? { ...next.wreck, from: Math.min(next.wreck.from, read) } : null
     };
   }
-  for (const job of next.jobs.filter((entry) => jobLeft(entry, read) === 0)) {
-    const slot = yardIndex(job.site);
-    next =
-      slot >= 0
-        ? { ...next, yard: next.yard.map((entry, index) => (index === slot ? { kind: job.kind ?? entry.kind, level: job.to } : entry)) as [Yard, Yard] }
-        : { ...next, levels: { ...next.levels, [job.site]: job.to } };
-    const opened = job.site === "burrow" ? campOpens(job.to).map((entry) => entry.name.toLowerCase()) : [];
-    next = {
-      ...next,
-      jobs: next.jobs.filter((entry) => entry.site !== job.site),
-      events: noted(next, day, job.site === "burrow" ? `The camp is level ${job.to}${opened.length > 0 ? `. New: ${opened.join(", ")}` : ""}.` : `${siteName(next, job.site)} reached level ${job.to}.`)
-    };
-    // A level of the camp may bring a plot: it is given ground of its own.
-    if (job.site === "burrow") next = seatPlots(next);
-    // A new oak starts dropping from the day it stands, not from the reading that built it.
-    if (job.site === "oak" && job.to === 1) next = { ...next, oakFrom: read };
-  }
+  // Whatever is going up stands (`finishJobs`): kept from before 1.5.8, it was waiting on reading.
+  next = finishJobs(next, read, day);
   next = settleWelcome(next, read, day);
   if (next.night !== day) {
     // A day has turned. The calendar night used to be fought here, out of sight (`nightOutcome`): since 2026-10-15
@@ -1571,7 +2138,24 @@ export const settle = (state: BaseState, now: Now): BaseState => {
     }
     next = { ...next, night: day, nightAt: read };
   }
-  return advanceList(next, day);
+  // A chapter may have opened a trap spot or a tower pad; a camp just brought onto the front has its constructs seated.
+  return seatShed(fronted(advanceList(next, day)));
+};
+/** A camp just brought onto the front: what is in its shed goes onto the free spots and pads that are open, in the order it was sorted (the nearest the trail first). */
+const seatShed = (state: BaseState): BaseState => {
+  if (!state.front.seat) return state;
+  const open = frontOpen(state);
+  const spots = [...state.front.spots];
+  const pads = [...state.front.pads];
+  const shed: number[] = [];
+  for (const kind of state.front.shed) {
+    const list = isTrap(kind) ? spots : isTower(kind) ? pads : null;
+    const free = list ? list.findIndex((entry, index) => entry < 0 && index < (isTrap(kind) ? open.spots : open.pads)) : -1;
+    if (list && free >= 0) list[free] = kind;
+    else shed.push(kind);
+  }
+  const { seat: _seated, ...front } = state.front;
+  return fronted({ ...state, front: { ...front, spots, pads, shed } });
 };
 
 /**
@@ -1594,8 +2178,53 @@ const settleWelcome = (state: BaseState, read: number, day: string): BaseState =
   return welcome === state.welcome ? next : { ...next, welcome };
 };
 
-/** Whether prowlers come out of the wood at this camp: from the second level, once a new camp's reader has read after the welcome. */
-export const prowlersCome = (state: BaseState) => state.levels.burrow >= PROWLERS_FROM && !state.welcome?.prowlersAfterRead;
+/** Whether prowlers come out of the wood at this camp: from chapter 3, once a new camp's reader has read after the welcome. */
+export const prowlersCome = (state: BaseState) => opened(state, undefined, "prowlers") && !state.welcome?.prowlersAfterRead;
+
+/** A prowler was seen off, while the camp was watched: counted, for the chapter's goal. */
+export const seenOff = (state: BaseState): BaseState => ({ ...state, stats: { ...state.stats, seenOff: (state.stats.seenOff ?? 0) + 1 } });
+
+/**
+ * The chapters, brought up to now (1.5.10): the minutes read are kept (the
+ * most the camp has been told of), a camp from before chapters is brought
+ * onto them once, a chapter newly reached pays its chest, and the burrow
+ * goes up with the chapter (never down).
+ *
+ * Brought onto chapters, a camp from before keeps everything (`legacy`), is
+ * paid one chest (`WELCOME_CHEST`) and none for the chapters its reading had
+ * already reached, has the goals it has already done ticked off without pay,
+ * and is held to what the oak, the scouts' rest and the arcade's runs could
+ * hold before: what the old rules let go is not paid out all at once.
+ */
+const settleChapters = (state: BaseState, read: number, day: string): BaseState => {
+  let next = read > state.minutes ? { ...state, minutes: read } : state;
+  const chapter = chapterOf(next.minutes);
+  if (next.chapterSeen < 0) {
+    const drops = oakDrops(next);
+    const oakMost = oakHolds(next);
+    const oakFrom = drops > 0 && oakRead(next, read) > oakMost ? read - Math.ceil((oakMost * OAK_EVERY) / drops) : next.oakFrom;
+    next = {
+      ...next,
+      legacy: next.legacy ?? { burrow: next.levels.burrow },
+      oakFrom: Math.min(read, Math.max(next.oakFrom, oakFrom)),
+      raidFrom: Math.max(next.raidFrom, read - RAID_EVERY * OLD_RAIDS_IN_HAND),
+      purseFrom: Math.max(next.purseFrom, read - PURSE_EVERY * OLD_PURSE_IN_HAND),
+      chapterSeen: 0,
+      chapterPaid: chapter,
+      goals: [...new Set([...next.goals, ...GOALS.filter((goal) => goal.done(next)).map((goal) => goal.id)])],
+      acorns: next.acorns + WELCOME_CHEST
+    };
+    next = { ...next, events: noted(next, day, `Your camp is counted in chapters now: chapter ${chapter}, ${hoursWords(next.minutes)} read. A chest of ${WELCOME_CHEST} acorns.`) };
+  }
+  for (let ch = next.chapterPaid + 1; ch <= chapter; ch++) {
+    const brings = chapterBrings(ch);
+    next = { ...next, chapterPaid: ch, acorns: next.acorns + brings.chest };
+    next = { ...next, events: noted(next, day, `${brings.title}. ${brings.says}.${brings.chest > 0 ? ` A chest of ${brings.chest} acorns.` : ""}`) };
+  }
+  const burrow = Math.max(next.levels.burrow, burrowOfChapter(chapter));
+  if (burrow > next.levels.burrow) next = seatPlots({ ...next, levels: { ...next.levels, burrow } });
+  return next;
+};
 
 /** The night has been looked at. */
 export const seenReport = (state: BaseState): BaseState => (state.report ? { ...state, report: null } : state);
@@ -1662,7 +2291,21 @@ export const nextCamp = (state: BaseState): RaidPlan => {
   const n = state.camps;
   // The last stronghold of each name is its lord's own.
   const champion = lordOf(n);
-  return { kind: "camp", n, seed: 0, name: CAMP_NAMES[tierOf(n)], tier: tierOf(n), cost: Math.min(80, 5 + n * 3), loot: Math.round((20 + n * 10) * lootTimes(state)), need: 1, champion };
+  // Supplies are free since 1.5.10 (they were 5 + 3 a stronghold): a raid lost costs the scouts' rest and nothing else.
+  return { kind: "camp", n, seed: 0, name: CAMP_NAMES[tierOf(n)], tier: tierOf(n), cost: 0, loot: strongholdLoot(state, n), need: 1, champion };
+};
+const strongholdLoot = (state: BaseState, n: number) => Math.round((20 + n * 10) * lootTimes(state));
+
+/**
+ * A rematch (1.5.10): the last stronghold taken, again. The magpies have not
+ * got over it, so it is a sure thing (★★★ whatever is sent, and the forecast
+ * says so), for a small share of what it was worth; it moves nothing on. An
+ * acorn top-up with nothing to judge. Null before any stronghold has fallen.
+ */
+export const rematchOf = (state: BaseState): RaidPlan | null => {
+  if (state.camps < 1) return null;
+  const n = state.camps - 1;
+  return { kind: "rematch", n, seed: 0, name: CAMP_NAMES[tierOf(n)], tier: tierOf(n), cost: 0, loot: Math.max(1, Math.round(strongholdLoot(state, n) * REMATCH_LOOT)), need: 1, champion: null };
 };
 
 /**
@@ -1676,7 +2319,7 @@ const KING_AT = [1, 1, 4, 7, 10, 13];
 /** This month's King: a roost, with a roost's worth more of everything than a stronghold of its size, and wanting two stars. */
 export const theKing = (state: BaseState): RaidPlan => {
   const n = KING_AT[Math.min(MAX_LEVEL, Math.max(0, state.levels.hut))];
-  return { kind: "king", n, seed: 0, name: "The Magpie King", tier: tierOf(n), cost: Math.min(80, 20 + state.camps * 2), loot: Math.round((80 + state.camps * 12) * lootTimes(state)), need: 2, champion: KING_CHAMPION };
+  return { kind: "king", n, seed: 0, name: "The Magpie King", tier: tierOf(n), cost: 0, loot: Math.round((80 + state.camps * 12) * lootTimes(state)), need: 2, champion: KING_CHAMPION };
 };
 export const KING_NEEDS_CAMPS = KING_FROM_CAMPS;
 
@@ -1734,7 +2377,7 @@ export const roadCamp = (state: BaseState, day: string, slot: number): RaidPlan 
     seed: 1 + (hashOf(`${day}|${slot}`) % 100_000),
     name: road.name,
     tier: tierOf(n),
-    cost: Math.min(40, 3 + along),
+    cost: 0,
     loot: Math.round((8 + along * 4) * road.loot * lootTimes(state)),
     need: 1,
     champion: null
@@ -1743,13 +2386,16 @@ export const roadCamp = (state: BaseState, day: string, slot: number): RaidPlan 
 /** Whether one of today's camps on the road has been raided. */
 export const roadDone = (state: BaseState, day: string, slot: number) => state.wild.day === day && state.wild.done.includes(slot);
 
-/** The raid of a kind, as things stand. */
+/** The raid of a kind, as things stand. (A rematch before any stronghold has fallen is the first stronghold's.) */
 export const planFor = (state: BaseState, kind: RaidKind, day: string, slot = 0): RaidPlan =>
-  kind === "king" ? theKing(state) : kind === "camp" ? nextCamp(state) : roadCamp(state, day, slot);
+  kind === "king" ? theKing(state) : kind === "camp" ? nextCamp(state) : kind === "rematch" ? (rematchOf(state) ?? { ...nextCamp(state), kind: "rematch", champion: null }) : roadCamp(state, day, slot);
 
-/** Why the King cannot be gone after today, or null when he can. */
-export const kingClosed = (state: BaseState, day: string): "camps" | "won" | "today" | null =>
-  state.camps < KING_FROM_CAMPS ? "camps" : state.banners.includes(monthOf(day)) ? "won" : state.kingDay === day ? "today" : null;
+/**
+ * Why the King cannot be gone after today, or null when he can. He comes with chapter 10 (1.5.10); a camp from before
+ * chapters still has him from ten strongholds, as it did. ("camps" is no longer said: "chapter" is.)
+ */
+export const kingClosed = (state: BaseState, day: string): "chapter" | "camps" | "won" | "today" | null =>
+  !opened(state, undefined, "king") ? "chapter" : state.banners.includes(monthOf(day)) ? "won" : state.kingDay === day ? "today" : null;
 
 /** Raids the scouts are rested for: one for every quarter hour read, a few in hand at most. */
 export const raidsReady = (state: BaseState, minutesRead: number) =>
@@ -1764,7 +2410,8 @@ const spend = (from: number, minutesRead: number, every: number, inHand: number)
   return now - from >= every * inHand ? now - every * (inHand - 1) : from + every;
 };
 
-export type RaidBlocked = "hut" | "rest" | "acorns" | "camps" | "won" | "today" | "done";
+/** Why a raid cannot set out. ("acorns" is never said since supplies are free; "none": there is no stronghold to rematch yet.) */
+export type RaidBlocked = "hut" | "rest" | "acorns" | "chapter" | "camps" | "won" | "today" | "done" | "none";
 
 /** Why a raid cannot set out, or null when it can. */
 export const raidBlocked = (state: BaseState, kind: RaidKind, now: Now, slot = 0): RaidBlocked | null => {
@@ -1774,6 +2421,7 @@ export const raidBlocked = (state: BaseState, kind: RaidKind, now: Now, slot = 0
     if (closed) return closed;
   }
   if (kind === "wild" && roadDone(state, now.day, slot)) return "done";
+  if (kind === "rematch" && state.camps < 1) return "none";
   if (raidsReady(state, now.minutes) < 1) return "rest";
   return state.acorns < planFor(state, kind, now.day, slot).cost ? "acorns" : null;
 };
@@ -1790,7 +2438,10 @@ const setupFor = (state: BaseState, plan: RaidPlan, tipped: boolean, at?: number
   fast: state.forks.hut === "a",
   seed: plan.seed,
   hero: heroWith(state, at),
-  champion: plan.champion
+  champion: plan.champion,
+  // (1.5.11) Down the trail, from the left; and the Puffcaps the hut has trained.
+  drop: DROP_STRONGHOLD,
+  bombers: bombersOf(state)
 });
 
 /** Trophies in all: what a hero may be brought by, whatever kind they are. */
@@ -1850,8 +2501,10 @@ export type RaidEnd = {
   loot: number;
   name: string;
   banner: string | null;
-  /** The next stronghold emptied at the news. */
+  /** The next stronghold emptied at the news. Never since 1.5.10 (the ladder moves one step at a time): kept for old screens. */
   fled: boolean;
+  /** Acorns more for taking a stronghold with all three stars (`THREE_STAR_BONUS`); already in `loot`. */
+  bonus: number;
   /** A blade won with it: a lord's, or the King's, the first time he falls. */
   blade: number | null;
   /** A thing the raiders had carried off, brought home: which kind. */
@@ -1924,13 +2577,25 @@ type Posted = {
   walls: ReadonlyArray<readonly [number, number]>;
   yard: ReadonlyArray<{ kind: YardKind | null; level: number }>;
   posts?: Partial<Record<number, readonly [number, number]>>;
+  /** (1.5.11) Where the wall across the trail stands: the guardians are posted on the front about it. */
+  line?: number | null;
+  front?: { x: number };
 };
+/**
+ * Where each guardian stands on the front by default (1.5.11), from the wall's line and the trail: Halvar on the wall
+ * by the gate, Corwin at the gate, Mossgather out on the trail, Dame Berit just inside the gate, Ilsa among the
+ * towers. (Pim keeps to the yard, and Emberling to the larder's roof.)
+ */
+const FRONT_POSTS: Partial<Record<number, readonly [number, number]>> = { 0: [5, -12], 1: [6, 8], 2: [-18, 9], 3: [16, 3], 6: [24, 12] };
 /** Where a guardian's signpost is: where it was carried to, or beside their building. Null for one with no post on the ground, or nowhere yet to stand it. */
 export const postSpotOf = (camp: Posted, guard: number): Spot | null => {
   const post = GUARDIANS[guard]?.post;
   if (!post || post === "store") return null;
   const moved = camp.posts?.[guard];
   if (moved) return [moved[0], moved[1]];
+  const onFront = FRONT_POSTS[guard];
+  const line = camp.line ?? camp.front?.x ?? null;
+  if (onFront && line !== null) return [Math.round(line + onFront[0]), TRAIL_Y + onFront[1]];
   // Beside the building, on the side away from the middle of the clearing.
   const beside = (site: Placed): Spot => {
     const [x, y] = camp.spots[site];
@@ -1947,7 +2612,7 @@ export const postSpotOf = (camp: Posted, guard: number): Spot | null => {
 /** Carries a posted guardian's signpost to somewhere else in the clearing: as often as the reader likes, for nothing. */
 export const movePost = (state: BaseState, guard: number, x: number, y: number): BaseState => {
   if (guardOf(state, guard) <= 0 || !GUARDIANS[guard] || GUARDIANS[guard].post === "store") return state;
-  const at = onLand(x, y, woodAt(state.levels.burrow));
+  const at = onLand(x, y, woodOf(state));
   return { ...state, posts: { ...state.posts, [guard]: [at.x, at.y] } };
 };
 
@@ -2109,19 +2774,21 @@ export const MEND_MOST = 20;
 
 /** A friend's camp as their card shows it, stood up as a camp: for fighting over and nothing else. */
 export const campOfShared = (camp: SharedCamp, day: string): BaseState => {
-  const blank = newBase(0, day);
-  return (
-    readBase({
-      ...blank,
-      levels: camp.levels,
+  const { front: _front, ...blank } = newBase(0, day);
+  // (1.5.11) Brought onto the front as any camp kept from before it is (a card does not say where its slots are):
+  // its wall across its trail at its fence's level, its constructs on the spots and pads its burrow would have.
+  const read = readBase({
+    ...blank,
+    legacy: { burrow: Math.max(1, Math.min(MAX_LEVEL, Math.floor(camp.levels.burrow ?? 1))) },
+    levels: camp.levels,
       yard: camp.yard,
       spots: { ...blank.spots, ...(camp.spots ?? {}) },
       walls: camp.walls ?? [],
       works: camp.works ?? [],
       guards: camp.guards ?? blank.guards,
-      posts: Object.fromEntries((Array.isArray(camp.posts) ? camp.posts : []).map((spot, guard) => [guard, spot] as const).filter((entry) => Array.isArray(entry[1])))
-    }) ?? blank
-  );
+    posts: Object.fromEntries((Array.isArray(camp.posts) ? camp.posts : []).map((spot, guard) => [guard, spot] as const).filter((entry) => Array.isArray(entry[1])))
+  });
+  return read ? seatShed(read) : newBase(0, day);
 };
 
 export type Friend = { handle: string; name: string };
@@ -2157,7 +2824,7 @@ export const startFriendRaid = (state: BaseState, camp: SharedCamp, friend: Frie
     raid: {
       plan,
       // Their constructs act on the scouts as they do on the night's raiders: a hedge cuts, a patch slows, a pit takes, a bell rings.
-      setup: { ...setupFor(state, plan, false, now.at), works: true },
+      setup: { ...setupFor(state, plan, false, now.at), works: true, drop: DROP_FRIEND },
       month: null,
       friend,
       structures: campStructures(theirs, false).map((entry) => ({ ...entry, hp: entry.hp * FRIEND_STURDY, max: entry.max * FRIEND_STURDY, hit: entry.hit * FRIEND_HITS }))
@@ -2172,7 +2839,7 @@ export const finishFriendRaid = (state: BaseState, raid: FriendRaid, result: Res
   const text = won ? `Raided ${raid.friend.name}'s camp: ${result.stars} ${result.stars === 1 ? "star" : "stars"}.` : `${raid.friend.name}'s camp held against the scouts.`;
   return {
     state: heroHome({ ...state, acorns: state.acorns + loot, events: noted(state, day, text) }, raid, result, day, at),
-    end: { won, stars: result.stars, loot, name: raid.plan.name, banner: null, fled: false, blade: null, home: null }
+    end: { won, stars: result.stars, loot, name: raid.plan.name, banner: null, fled: false, bonus: 0, blade: null, home: null }
   };
 };
 
@@ -2182,37 +2849,58 @@ export const wreckLeft = (state: BaseState, minutesRead: number) => (state.wreck
 /**
  * Friends' raids on this camp, as the server hands them over. One that took
  * no star is good news: the camp held, and there are acorns for it. One
- * that took any knocks down a piece of fence a star (to be put up again,
- * free) and leaves the camp to be mended by reading: four minutes a star,
- * and never more than twenty in all however many came. Nothing is taken
- * from the larder, and nothing gets worse for being left: this is a tease
- * between friends, not a bill.
+ * that took any knocks down a piece of fence a star (`putBack` lays them all
+ * again, for nothing). Each is news (`news`), for a card on the next look.
+ * Nothing is taken from the larder, nobody is put to sleep (two or three
+ * stars put the guardians to sleep until 1.5.10), and nothing gets worse for
+ * being left: this is a tease between friends, not a bill.
+ * (`minutesRead` and `at` are no longer asked.)
  */
-export const sufferRaids = (state: BaseState, raids: ReadonlyArray<{ name: string; stars: number }>, minutesRead: number, day: string, at?: number): BaseState => {
-  const read = Math.max(0, Math.floor(minutesRead));
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export const sufferRaids = (state: BaseState, raids: ReadonlyArray<{ name: string; stars: number }>, _minutesRead: number, day: string, _at?: number): BaseState => {
   let next = state;
   for (const raid of raids) {
     const stars = Math.max(0, Math.min(3, Math.round(Number(raid.stars) || 0)));
     const name = (typeof raid.name === "string" ? raid.name : "").trim().slice(0, 40) || "A friend";
     if (stars === 0) {
-      next = { ...next, acorns: next.acorns + give(next, HELD_PRIZE), events: noted(next, day, `The camp held against ${name}'s scouts.`) };
+      const prize = give(next, HELD_PRIZE);
+      next = { ...next, acorns: next.acorns + prize, news: [{ by: name, stars, down: 0, prize, day }, ...next.news].slice(0, NEWS_KEPT), events: noted(next, day, `The camp held against ${name}'s scouts.`) };
       continue;
     }
-    const needs = Math.min(MEND_MOST, wreckLeft(next, read) + stars * MEND_A_STAR);
-    next = {
+    // (It used to leave the fence to be mended by reading too, four minutes a star: `MEND_A_STAR`. Since 1.5.8 the
+    // pieces knocked down are all of it: put up again for nothing, as they always were.)
+    // A section of the wall a star, the nearest the gate first (the gate itself among them).
+    const fell = [...next.walls].sort((a, b) => Math.abs(a[1] - TRAIL_Y) - Math.abs(b[1] - TRAIL_Y) || a[1] - b[1]).slice(0, stars);
+    const down = fell.length;
+    next = fronted({
       ...next,
-      walls: next.walls.slice(0, Math.max(0, next.walls.length - stars)),
-      wreck: { by: name, stars: Math.max(stars, next.wreck?.stars ?? 0), from: read, needs },
-      // Two stars or three, and the guardians were beaten at their posts: they sleep it off like anyone worn out.
-      tired:
-        stars >= 2 && at !== undefined
-          ? { ...next.tired, ...Object.fromEntries(GUARDIANS.map((_, guard) => guard).filter((guard) => guardOf(next, guard) > 0 && GUARDIANS[guard].post !== "store").map((guard) => [guard, { wounds: WOUNDS_MOST, since: at, until: at + restMs(next, day) }])) }
-          : next.tired,
-      events: noted(next, day, `${name}'s scouts raided the camp: ${stars} ${stars === 1 ? "star" : "stars"}. ${needs} minutes of reading mends it.`)
-    };
+      // The gate goes back with its section; until then the camp has none.
+      downed: [...next.downed, ...fell].slice(-60),
+      news: [{ by: name, stars, down, prize: 0, day }, ...next.news].slice(0, NEWS_KEPT),
+      events: noted(next, day, `${name}'s scouts raided the camp: ${stars} ${stars === 1 ? "star" : "stars"}.${down > 0 ? ` ${down} ${down === 1 ? "section" : "sections"} of the wall came down.` : ""}`)
+    });
   }
   return next;
 };
+
+/** The friends' raids have been looked at: the card is not shown again. */
+export const seeNews = (state: BaseState): BaseState => (state.news.length === 0 ? state : { ...state, news: [] });
+
+/**
+ * Puts every section of the wall friends knocked down back up, in one go,
+ * for nothing.
+ */
+export const putBack = (state: BaseState): BaseState => (state.downed.length === 0 ? state : fronted({ ...state, downed: [] }));
+
+/**
+ * The one question about friends' raids (1.5.10): "Let friends raid your
+ * camp?" Raids are off on the server until the reader says yes; this says
+ * the camp has been asked, so it is asked once. Kept with the camp's marks,
+ * so a second device does not ask again.
+ */
+export const RAIDS_ASKED = "raidsAsked";
+export const raidsAsked = (state: BaseState) => state.taught.includes(RAIDS_ASKED);
+export const askedRaids = (state: BaseState): BaseState => (raidsAsked(state) ? state : { ...state, taught: [...state.taught, RAIDS_ASKED] });
 
 /** Whether a stronghold is its lord's own: the last of each name. */
 const lordOf = (n: number) => ((n + 1) % CAMPS_A_NAME === 0 ? tierOf(n) : null);
@@ -2252,24 +2940,29 @@ export const finishRaid = (state: BaseState, raid: Raid, result: Result, day: st
 const finishRaidPlain = (state: BaseState, raid: Raid, result: Result, day: string, brings = 1): { state: BaseState; end: RaidEnd } => {
   const { plan } = raid;
   const won = result.stars >= plan.need;
-  const loot = give(state, plan.loot * result.destroyed * brings);
+  // All three stars on a stronghold: a little more of its loot (1.5.10; it used to empty the next stronghold, which
+  // moved the ladder two steps without a word of why).
+  const bonus = won && plan.kind === "camp" && result.stars === 3 ? give(state, plan.loot * THREE_STAR_BONUS * brings) : 0;
+  const loot = give(state, plan.loot * result.destroyed * brings) + bonus;
   const king = plan.kind === "king";
   const month = raid.month ?? monthOf(day);
   const what = plan.kind === "wild" ? plan.name : `Stronghold ${plan.n + 1}`;
-  const fled = won && plan.kind === "camp" && result.stars === 3 && lordOf(plan.n + 1) === null;
+  const fled = false;
   const line = king
     ? won
       ? `The Magpie King fell. ${monthName(month)}'s banner flies over the camp.`
       : "The Magpie King kept his nest."
-    : won
-      ? `${what} taken with ${result.stars} ${result.stars === 1 ? "star" : "stars"}: ${loot} acorns.${fled ? " The next one emptied at the news." : ""}`
-      : `The raid on ${what[0].toLowerCase()}${what.slice(1)} was beaten back${loot > 0 ? `, with ${loot} acorns carried off` : ""}.`;
+    : plan.kind === "rematch"
+      ? `${what} again: ${loot} acorns.`
+      : won
+        ? `${what} taken with ${result.stars} ${result.stars === 1 ? "star" : "stars"}: ${loot} acorns.`
+        : `The raid on ${what[0].toLowerCase()}${what.slice(1)} was beaten back${loot > 0 ? `, with ${loot} acorns carried off` : ""}.`;
   const next: BaseState = {
       ...state,
       acorns: state.acorns + loot,
       // The pack is for a raid won: a lost one leaves it for the next.
       pack: won ? false : state.pack,
-      camps: won && plan.kind === "camp" ? state.camps + (fled ? 2 : 1) : state.camps,
+      camps: won && plan.kind === "camp" ? state.camps + 1 : state.camps,
       banners: won && king && !state.banners.includes(month) ? [...state.banners, month] : state.banners,
       // (A hero brought home from a raid won was noted for their daily want; wants are not asked since 2026-10-15.)
       stats: { ...state.stats, raids: state.stats.raids + (won ? 1 : 0), stars: state.stats.stars + result.stars },
@@ -2291,7 +2984,7 @@ const finishRaidPlain = (state: BaseState, raid: Raid, result: Result, day: stri
             ? noted({ ...next, events: next.events.slice(1) }, day, `${line} The ${DECOR[home.kind].name.toLowerCase()} is home again.`)
             : next.events
     },
-    end: { won, stars: result.stars, loot, name: plan.name, banner: won && king ? month : null, fled, blade, home: home?.kind ?? null }
+    end: { won, stars: result.stars, loot, name: plan.name, banner: won && king ? month : null, fled, bonus, blade, home: home?.kind ?? null }
   };
 };
 
@@ -2305,16 +2998,104 @@ export const SENT_SHARE = SENT_BRINGS;
  * should get. It is there so nobody pays for a raid that cannot be won
  * without being told.
  */
-export const scoutsSay = (state: BaseState, plan: RaidPlan): Result | null => (state.levels.hut < 1 ? null : autoBest(setupFor(state, plan, false)));
+export const scoutsSay = (state: BaseState, plan: RaidPlan): Result | null =>
+  state.levels.hut < 1 ? null : plan.kind === "rematch" ? SURE_WIN : autoBest(setupFor(state, plan, false));
+/** A rematch's result, whoever goes: the magpies of a stronghold already taken do not stand. */
+const SURE_WIN: Result = { stars: 3, destroyed: 1, hoards: 1 };
+
+/** What the scouts say of a raid, in a plain sentence and stars, and whether they can be sent to it. */
+export type Forecast = {
+  stars: 0 | 1 | 2 | 3;
+  /** "Your scouts take it whole", "Too strong for now: bring a hero or build up the hut". */
+  words: string;
+  /** Whether "Send" is there: not for a raid the scouts would lose. ("Fight it" always is.) */
+  canSend: boolean;
+  /** A rematch: nothing to judge. */
+  sure: boolean;
+  /** What sending them would bring, all told (before the season's more). */
+  brings: number;
+  /** (1.5.11) Where it is not taken whole: the one thing that would help most, in a few words; null otherwise. */
+  hint: string | null;
+};
+const FORECAST_WORDS = [
+  "Too strong for now: bring a hero or build up the hut",
+  "Your scouts can just about take it",
+  "Your scouts take it, though not all of it",
+  "Your scouts take it whole"
+];
+export const raidForecast = (state: BaseState, plan: RaidPlan): Forecast => {
+  const said = scoutsSay(state, plan);
+  const stars = (said?.stars ?? 0) as Forecast["stars"];
+  const won = said !== null && stars >= plan.need;
+  const sure = plan.kind === "rematch";
+  const bonus = won && plan.kind === "camp" && stars === 3 ? Math.round(plan.loot * THREE_STAR_BONUS * SENT_BRINGS) : 0;
+  const brings = said ? Math.round(plan.loot * said.destroyed * SENT_BRINGS) + bonus : 0;
+  const words = sure
+    ? "A sure thing: they have not got over the last time"
+    : plan.need > 1 && stars > 0 && !won
+      ? "Not enough to take him: he needs two stars"
+      : FORECAST_WORDS[stars];
+  return { stars, words, canSend: won, sure, brings, hint: sure || stars === 3 || state.levels.hut < 1 ? null : raidHint(state, plan) };
+};
+/**
+ * One thing that would help with a raid not taken whole (1.5.11): their wall, and the Puffcaps that open it; a flank
+ * their wall leaves open; a hero; or, failing all of those, a better hut.
+ */
+const raidHint = (state: BaseState, plan: RaidPlan): string => {
+  const setup = setupFor(state, plan, false);
+  const walled = plan.kind !== "rematch" && layout(plan.n, plan.kind === "king", plan.seed).some((entry) => entry.kind === "wall");
+  if (walled && bombersOf(state) === 0) return `Their wall is strong: Puffcaps come with the hut's level ${TRAINED_AT.bomber}`;
+  const lane = autoBestLane(setup).side;
+  if (walled && lane !== "left") return `Go round the ${lane === "top" ? "top" : "foot"} of their wall`;
+  if (!setup.hero && HEROES.some((hero) => heroHere(state, hero.id))) return "Bring a hero";
+  return state.levels.hut < MAX_LEVEL ? "A better hut sends more, and stronger" : "Bring a hero, or come back stronger";
+};
 
 /**
  * Sends the scouts without the reader, for a reader who would rather not
  * fight the raid (or cannot): it goes as the scouts said it would, and brings
- * less of the loot for it.
+ * less of the loot for it (`SENT_SHARE`). Null when they cannot set out, and
+ * (1.5.10) when they would lose: "Send" is not a way to throw a raid's rest
+ * away.
  */
 export const sendRaid = (state: BaseState, kind: RaidKind, now: Now, slot = 0): { state: BaseState; end: RaidEnd } | null => {
+  if (raidBlocked(state, kind, now, slot)) return null;
+  if (!raidForecast(state, planFor(state, kind, now.day, slot)).canSend) return null;
   const begun = startRaid(state, kind, now, false, slot);
-  return begun ? finishRaid(begun.state, begun.raid, autoBest(begun.raid.setup), now.day, SENT_BRINGS) : null;
+  return begun ? finishRaid(begun.state, begun.raid, kind === "rematch" ? SURE_WIN : autoBest(begun.raid.setup), now.day, SENT_BRINGS) : null;
+};
+
+/** One of the raid board's cards: what it is, the raid, what the scouts say, and why it cannot set out (null when it can). */
+export type BoardCard = { kind: "rematch" | "camp" | "king"; plan: RaidPlan; forecast: Forecast; blocked: RaidBlocked | null };
+/**
+ * The raid board (1.5.10): the rematch (once a stronghold has fallen), the
+ * next stronghold, and the King (from chapter 10, while this month's banner
+ * is still his). Nothing on it costs acorns.
+ */
+export const raidBoard = (state: BaseState, now: Now): BoardCard[] => {
+  const cards: BoardCard[] = [];
+  const rematch = rematchOf(state);
+  if (rematch) cards.push({ kind: "rematch", plan: rematch, forecast: raidForecast(state, rematch), blocked: raidBlocked(state, "rematch", now) });
+  const next = nextCamp(state);
+  cards.push({ kind: "camp", plan: next, forecast: raidForecast(state, next), blocked: raidBlocked(state, "camp", now) });
+  if (opened(state, now.minutes, "king") && !state.banners.includes(monthOf(now.day))) {
+    const king = theKing(state);
+    cards.push({ kind: "king", plan: king, forecast: raidForecast(state, king), blocked: raidBlocked(state, "king", now) });
+  }
+  return cards;
+};
+
+/** How a raid went, in plain words, for the result screen. */
+export const raidSummary = (end: RaidEnd): string => {
+  const acorns = (count: number) => `${count} ${count === 1 ? "acorn" : "acorns"}`;
+  if (end.banner) return `The Magpie King fell: his banner is yours, and ${acorns(end.loot)}.`;
+  if (!end.won)
+    return end.loot > 0 ? `Beaten back, with ${acorns(end.loot)} carried off. Nothing else lost but the scouts' rest.` : "Beaten back. Nothing lost but the scouts' rest.";
+  const blade = end.blade !== null ? ` ${BLADES[end.blade].name} is the camp's.` : "";
+  const whole = end.bonus > 0 ? ` All three stars: ${acorns(end.bonus)} of that is for taking it whole.` : "";
+  // Inside a sentence a stronghold's own "The" is lower case: "You took the Twig Nest". Its name keeps its capitals.
+  const name = end.name.replace(/^The /, "the ");
+  return `You took ${name}: ${acorns(end.loot)}.${whole}${blade}`;
 };
 
 // ---- the arcade's other games ------------------------------------------------------------
@@ -2434,9 +3215,7 @@ export const offers = (state: BaseState, day: string): Offer[] | null => {
 
 /** Why an offer would be wasted on this camp, or null. */
 export const offerWasted = (state: BaseState, id: OfferId): string | null =>
-  id === "sack" && room(state) === 0
-    ? "The larder is full"
-    : id === "tip" && state.intel >= INTEL_MOST
+  id === "tip" && state.intel >= INTEL_MOST
       ? "You have all the tips you can carry"
       : id === "hand" && state.jobs.length === 0
         ? "Nothing is going up"
@@ -2527,24 +3306,32 @@ const onLand = (x: number, y: number, wood = 0) => ({
 /** The camp's two clearings: the one that is lived in and fought over, and the meadow beyond it. */
 export type Place = "camp" | "meadow";
 /** The burrow's level at which the path to the meadow is cleared. */
+/** The burrow's level the meadow came at before chapters. @deprecated it comes with chapter 7: `meadowOpen`. */
 export const MEADOW_FROM = 3;
-export const meadowOpen = (state: BaseState) => state.levels.burrow >= MEADOW_FROM;
+/** Whether the path to the meadow is cleared: from chapter 7. */
+export const meadowOpen = (state: BaseState) => opened(state, undefined, "meadow");
 const setIn = (state: BaseState, place: Place) => (place === "meadow" ? state.meadow : state.decor);
 const withSet = (state: BaseState, place: Place, things: Decor[]): BaseState => (place === "meadow" ? { ...state, meadow: things } : { ...state, decor: things });
 
-/** Why a thing cannot be bought and set down, or null when it can. Each clearing takes so many, and no more. */
-export const decorBlocked = (state: BaseState, kind: number, place: Place = "camp"): "full" | "acorns" | null =>
-  setIn(state, place).length >= DECOR_MOST ? "full" : state.acorns < (DECOR[kind]?.cost ?? Infinity) ? "acorns" : null;
+/** Why a thing cannot be bought and set down, or null when it can. Each clearing takes so many, and no more; and none before chapter 5. */
+export const decorBlocked = (state: BaseState, kind: number, place: Place = "camp"): "chapter" | "full" | "acorns" | null =>
+  !decorOpen(state) || (place === "meadow" && !meadowOpen(state))
+    ? "chapter"
+    : setIn(state, place).length >= DECOR_MOST
+      ? "full"
+      : state.acorns < (DECOR[kind]?.cost ?? Infinity)
+        ? "acorns"
+        : null;
 
 /** Buys a thing and sets it down where the reader pointed. */
 export const placeDecor = (state: BaseState, kind: number, x: number, y: number, place: Place = "camp"): BaseState =>
   !DECOR[kind] || decorBlocked(state, kind, place) || (place === "meadow" && !meadowOpen(state))
     ? state
-    : { ...withSet(state, place, [...setIn(state, place), { kind, ...onLand(x, y, place === "camp" ? woodAt(state.levels.burrow) : 0) }]), acorns: state.acorns - DECOR[kind].cost };
+    : { ...withSet(state, place, [...setIn(state, place), { kind, ...onLand(x, y, place === "camp" ? woodOf(state) : 0) }]), acorns: state.acorns - DECOR[kind].cost };
 
 /** Moves a thing already bought: as often as the reader likes, for nothing. */
 export const moveDecor = (state: BaseState, index: number, x: number, y: number, place: Place = "camp"): BaseState =>
-  setIn(state, place)[index] ? withSet(state, place, setIn(state, place).map((entry, at) => (at === index ? { ...entry, ...onLand(x, y, place === "camp" ? woodAt(state.levels.burrow) : 0) } : entry))) : state;
+  setIn(state, place)[index] ? withSet(state, place, setIn(state, place).map((entry, at) => (at === index ? { ...entry, ...onLand(x, y, place === "camp" ? woodOf(state) : 0) } : entry))) : state;
 
 /** Takes a thing away. Nothing comes back for it. */
 export const removeDecor = (state: BaseState, index: number, place: Place = "camp"): BaseState =>
@@ -2560,34 +3347,64 @@ const onGround = (x: number, y: number, wood = 0) => ({
 });
 
 /** Why a piece of landscape cannot be bought and set down, or null when it can. */
-export const landBlocked = (state: BaseState, kind: number, place: Place = "camp"): "full" | "acorns" | null =>
-  landIn(state, place).length >= LAND_MOST ? "full" : state.acorns < (SCENERY[kind]?.cost ?? Infinity) ? "acorns" : null;
+export const landBlocked = (state: BaseState, kind: number, place: Place = "camp"): "chapter" | "full" | "acorns" | null =>
+  !decorOpen(state) || (place === "meadow" && !meadowOpen(state))
+    ? "chapter"
+    : landIn(state, place).length >= LAND_MOST
+      ? "full"
+      : state.acorns < (SCENERY[kind]?.cost ?? Infinity)
+        ? "acorns"
+        : null;
 
 /** Buys a piece of landscape and sets it down. It is there for its own sake: nothing about the camp counts it. */
 export const placeLand = (state: BaseState, kind: number, x: number, y: number, place: Place = "camp"): BaseState =>
   !SCENERY[kind] || landBlocked(state, kind, place) || (place === "meadow" && !meadowOpen(state))
     ? state
-    : { ...withLand(state, place, [...landIn(state, place), { kind, ...onGround(x, y, place === "camp" ? woodAt(state.levels.burrow) : 0) }]), acorns: state.acorns - SCENERY[kind].cost };
+    : { ...withLand(state, place, [...landIn(state, place), { kind, ...onGround(x, y, place === "camp" ? woodOf(state) : 0) }]), acorns: state.acorns - SCENERY[kind].cost };
 export const moveLand = (state: BaseState, index: number, x: number, y: number, place: Place = "camp"): BaseState =>
-  landIn(state, place)[index] ? withLand(state, place, landIn(state, place).map((entry, at) => (at === index ? { ...entry, ...onGround(x, y, place === "camp" ? woodAt(state.levels.burrow) : 0) } : entry))) : state;
+  landIn(state, place)[index] ? withLand(state, place, landIn(state, place).map((entry, at) => (at === index ? { ...entry, ...onGround(x, y, place === "camp" ? woodOf(state) : 0) } : entry))) : state;
 export const removeLand = (state: BaseState, index: number, place: Place = "camp"): BaseState =>
   landIn(state, place)[index] ? withLand(state, place, landIn(state, place).filter((_, at) => at !== index)) : state;
 
 // ---- the constructs: one of each, set down where the reader wants it ------------------------------------------
 
-/** Why a construct cannot be had, or null when it can. One that is already here can always be moved. */
-export const workBlocked = (state: BaseState, kind: number): "burrow" | "acorns" | null => {
-  const work = WORKS[kind];
-  if (!work || state.works.some((entry) => entry.kind === kind)) return null;
-  return state.levels.burrow < work.burrow ? "burrow" : state.acorns < work.cost ? "acorns" : null;
+/**
+ * Whether a kind of construct can be had in this camp (1.5.11): the seven of the front (`front.ts` `FRONT_WORKS`),
+ * each from its chapter (`WORK_CHAPTER`; a camp from before chapters goes by what its burrow had: `frontChapter`);
+ * and one the camp already has, always. The kinds that were folded into others (`BECAME`) are no more.
+ */
+export const workOpen = (state: BaseState, kind: number): boolean => {
+  if (!WORKS[kind] || !FRONT_WORKS.includes(kind)) return false;
+  // (A camp from before chapters keeps what its burrow had opened, by the burrow level each came at then.)
+  return ownCount(state.front, kind) > 0 || frontChapter(state) >= WORK_CHAPTER[kind] || (state.legacy !== null && state.legacy.burrow >= WORKS[kind].burrow);
 };
-/** Sets a construct down: bought the first time, and moved for nothing after. */
-export const placeWork = (state: BaseState, kind: number, x: number, y: number): BaseState => {
+/** The kinds of construct this camp can have, in `WORKS` order. */
+export const worksOpen = (state: BaseState): number[] => WORKS.map((_, kind) => kind).filter((kind) => workOpen(state, kind));
+/** The kinds a camp could ever have: the front's seven, in the order they come (for the shelf to list). */
+export const worksOffered = (_state: BaseState): number[] => [...FRONT_WORKS];
+
+/** Why one more of a construct cannot be had, or null when it can. "most": the camp has as many as it may (two of a tower, one of anything else). */
+export const workBlocked = (state: BaseState, kind: number): "chapter" | "acorns" | "most" | null => {
   const work = WORKS[kind];
-  if (!work) return state;
-  const at = onLand(x, y, woodAt(state.levels.burrow));
-  if (state.works.some((entry) => entry.kind === kind)) return { ...state, works: state.works.map((entry) => (entry.kind === kind ? { kind, ...at } : entry)) };
-  return workBlocked(state, kind) ? state : { ...state, acorns: state.acorns - work.cost, works: [...state.works, { kind, ...at }] };
+  if (!work || !FRONT_WORKS.includes(kind)) return "chapter";
+  if (ownCount(state.front, kind) >= mostOf(kind)) return "most";
+  return !workOpen(state, kind) ? "chapter" : state.acorns < work.cost ? "acorns" : null;
+};
+/**
+ * Puts a construct on the front near a point: on the trap spot or tower pad nearest it (bought, the first time; moved
+ * there from the shed or another slot after). Kept for what still sets constructs down by a point: `seatWork` and
+ * `buyWork` are the front's own.
+ */
+export const placeWork = (state: BaseState, kind: number, x: number, y: number): BaseState => {
+  if (!WORKS[kind] || !FRONT_WORKS.includes(kind)) return state;
+  if (kind === BELL) return state.front.bell ? state : buyWork(state, kind);
+  const places = frontPlaces(state);
+  const open = frontOpen(state);
+  const at: FrontSlot["at"] = isTrap(kind) ? "spot" : "pad";
+  const list = at === "spot" ? places.spots.slice(0, open.spots) : places.pads.slice(0, open.pads);
+  if (list.length === 0) return ownCount(state.front, kind) > 0 ? state : buyWork(state, kind);
+  const index = list.reduce((best, spot, here) => (Math.hypot(spot[0] - x, spot[1] - y) < Math.hypot(list[best][0] - x, list[best][1] - y) ? here : best), 0);
+  return seatWork(state, { at, index }, kind);
 };
 
 // ---- the blades: won from the lords of the magpies, carried by a hero --------------------------------------------
@@ -2618,7 +3435,11 @@ export const hasAnimal = (state: BaseState, animal: number) => state.animals.inc
 /** Whether the side tonight's magpies come from is known beforehand: a lookout sees it, and so does an owl. */
 export const sideKnown = (state: BaseState) => state.levels.tower > 0 || hasAnimal(state, 3);
 
-/** The burrow's level from which guardians will come at all, and the level a building has to be for one to be posted at it. */
+/**
+ * The burrow's level from which guardians came before chapters (they come with chapter 6: `opened(.., "guards")`),
+ * and the level a building has to be for one to be posted at it.
+ * @deprecated for the gate: ask `opened`.
+ */
 export const GUARDS_FROM = 3;
 const POST_FROM = 2;
 
@@ -2628,9 +3449,9 @@ export const guardAt = (site: Site): Guardian | null => GUARDIANS.find((guard) =
 /** Whether a guardian's post is there to be taken up: the burrow grown enough, and the building itself. */
 export const postOpen = (state: BaseState, guard: number): boolean => {
   const post = GUARDIANS[guard]?.post;
-  if (!post || state.levels.burrow < GUARDS_FROM) return false;
+  if (!post || !opened(state, undefined, "guards")) return false;
   if (post === "yard") return state.yard.some((slot) => slot.kind !== null && slot.level > 0);
-  if (post === "fence") return state.levels.fence > 0 && state.walls.length > 0;
+  if (post === "fence") return state.levels.fence > 0;
   return state.levels[post] >= (post === "burrow" ? GUARDS_FROM : POST_FROM);
 };
 
@@ -2641,16 +3462,23 @@ export const guardBlocked = (state: BaseState, guard: number): GuardBlocked | nu
   if (to > GUARD_MOST) return "top";
   if (!postOpen(state, guard)) return "post";
   if (state.drill) return "busy";
-  return state.acorns < GUARD_COSTS[to] ? "acorns" : null;
+  return state.acorns < guardCost(to) ? "acorns" : null;
 };
-export const guardCost = (to: number) => GUARD_COSTS[Math.min(GUARD_MOST, Math.max(0, to))];
+/** What a rank costs, all told: its acorns, and its training (what reading it used to take) at `ACORNS_A_MINUTE`. */
+export const guardCost = (to: number) => {
+  const rank = Math.min(GUARD_MOST, Math.max(0, to));
+  return rank === 0 ? 0 : GUARD_COSTS[rank] + Math.round(GUARD_MINUTES[rank] * ACORNS_A_MINUTE);
+};
 export const guardMinutes = (to: number) => GUARD_MINUTES[Math.min(GUARD_MOST, Math.max(0, to))];
 
-/** Begins a guardian's training to their next rank: paid for in acorns now, and done when the minutes have been read. */
+/**
+ * Trains a guardian to their next rank, paid for in acorns, training and all (`guardCost`). The rank is theirs at
+ * once: it goes through a drill that wants no more, which `settle` (straight after, in the store) sees done.
+ */
 export const trainGuard = (state: BaseState, guard: number, minutesRead: number): BaseState => {
   if (guardBlocked(state, guard)) return state;
   const to = guardOf(state, guard) + 1;
-  return { ...state, acorns: state.acorns - GUARD_COSTS[to], drill: { guard, from: Math.max(0, Math.floor(minutesRead)), needs: GUARD_MINUTES[to] } };
+  return { ...state, acorns: state.acorns - guardCost(to), drill: { guard, from: Math.max(0, Math.floor(minutesRead)), needs: 0 } };
 };
 /** Minutes of reading until the guardian in training is done; null when none is. */
 export const drillLeft = (state: BaseState, minutesRead: number) => (state.drill ? Math.max(0, state.drill.needs - Math.max(0, Math.floor(minutesRead) - state.drill.from)) : null);
@@ -2675,7 +3503,8 @@ export const drillLeft = (state: BaseState, minutesRead: number) => (state.drill
  * already behind the bookmark.
  */
 export const STRETCH_MINUTES = 8;
-export const PARCELS_MOST = 6;
+/** The most parcels that wait (6 until 1.5.10: past it a parcel was not sent). Nothing a reader can read in a while. */
+export const PARCELS_MOST = 99;
 /** What a parcel has in it: a few acorns, more in a bigger camp, and one more for every 30 of the camp's charm (the most charming camps get the best parcels: this was the hedgehog's sack, before 2026-10-15). */
 export const parcelGives = (state: BaseState) => 4 + 2 * Math.max(1, state.levels.burrow) + Math.floor(Math.min(150, charm(state)) / 30);
 export const storyRead = (state: BaseState, bookId: string, stretch: number, minutesRead: number, day: string, title = ""): BaseState => {
@@ -2699,11 +3528,10 @@ export const storyRead = (state: BaseState, bookId: string, stretch: number, min
 /**
  * Opens a parcel: its acorns, all of them, and every other parcel a tale
  * Pip found while you read (what her walks used to bring, before
- * 2026-10-15). Without room in the larder for the whole of it, it is left
- * for later: nothing in a parcel is lost to a full larder.
+ * 2026-10-15). (Until 1.5.10 one the larder had no room for waited.)
  */
 export const openParcel = (state: BaseState): BaseState => {
-  if (state.parcels <= 0 || room(state) < parcelNext(state)) return state;
+  if (state.parcels <= 0) return state;
   // The first reading's parcel is the first opened: it has its own acorns in it, and nothing else.
   if (state.welcome?.firstReadParcel === "sent") return { ...state, parcels: state.parcels - 1, acorns: state.acorns + FIRST_READ_PARCEL, welcome: { ...state.welcome, firstReadParcel: "opened" } };
   const opened = { ...state, parcels: state.parcels - 1, acorns: state.acorns + parcelGives(state) };
@@ -2712,22 +3540,15 @@ export const openParcel = (state: BaseState): BaseState => {
 };
 /** What the next parcel opened has in it: the first reading's, while it waits, or an ordinary one. */
 export const parcelNext = (state: BaseState) => (state.welcome?.firstReadParcel === "sent" ? FIRST_READ_PARCEL : parcelGives(state));
-/** How many of the parcels waiting the larder has room for, each whole. */
-export const parcelsOpenable = (state: BaseState) => {
-  let left = room(state);
-  let count = 0;
-  for (let at = 0; at < state.parcels; at++) {
-    const gives = at === 0 ? parcelNext(state) : parcelGives(state);
-    if (left < gives) break;
-    left -= gives;
-    count++;
-  }
-  return count;
-};
-/** The acorns in the parcels the larder has room for: what "Open all" brings. */
-export const parcelsBring = (state: BaseState) => {
-  const count = parcelsOpenable(state);
-  return count === 0 ? 0 : parcelNext(state) + (count - 1) * parcelGives(state);
+/** How many of the parcels waiting can be opened: all of them (since 1.5.10 there is always room). */
+export const parcelsOpenable = (state: BaseState) => state.parcels;
+/** The acorns in every parcel waiting: what "Open all" brings. */
+export const parcelsBring = (state: BaseState) => openParcels(state).acorns - state.acorns;
+/** Opens every parcel waiting, at once ("Open all"). */
+export const openParcels = (state: BaseState): BaseState => {
+  let next = state;
+  for (let left = state.parcels; left > 0; left--) next = openParcel(next);
+  return next;
 };
 /** The tale the next parcel opened has in it, if it has one: every other parcel, while there are tales not yet told. */
 export const parcelTale = (state: BaseState): number | null => {
@@ -3028,7 +3849,7 @@ const basketDone = (state: BaseState) => state.welcome?.basketOpened !== false;
 export const QUESTS: readonly Quest[] = [
   { id: "oak", text: "Read 10 minutes, then tap the oak", short: "Tap the oak", reward: 10, done: (state) => state.stats.gathered > 0, at: "oak" },
   { id: "larder", text: "Build a larder", short: "Larder", reward: 10, done: (state) => state.levels.store >= 1, at: "store" },
-  { id: "basket", text: "Open Pip's welcome basket", short: "Basket", reward: 0, done: basketDone, at: "burrow" },
+  { id: "basket", text: "Open Pip's welcome basket", short: "Pip's basket", reward: 0, done: basketDone, at: "burrow" },
   { id: "burrow2", text: "Raise the burrow to level 2", short: "Burrow 2", reward: 25, done: (state) => state.levels.burrow >= 2, at: "burrow", raise: 2 },
   { id: "hut", text: "Build a scouts' hut", short: "Scouts' hut", reward: 15, done: (state) => state.levels.hut >= 1, at: "hut" },
   { id: "lookout", text: "Build a lookout", short: "Lookout", reward: 15, done: (state) => state.levels.tower >= 1, at: "tower" },
@@ -3078,11 +3899,11 @@ export const questNow = (state: BaseState): { quest: Quest; done: boolean; index
 /** Where the thing on the list now is done, for showing the reader. */
 export const questAt = (state: BaseState): QuestAt | null => questNow(state)?.quest.at ?? null;
 
-/** Ticks the thing off by hand, for its acorns, as far as there is room (`advanceList` does it by itself). */
+/** Ticks the thing off by hand (`advanceList` does it by itself). Since 1.5.10 the old list pays nothing: the chapter's goals do. */
 export const claimQuest = (state: BaseState, day: string): BaseState => {
   const now = questNow(state);
   if (!now || !now.done) return state;
-  const reward = give(state, rewardOf(state, now.quest));
+  const reward = 0;
   return {
     ...state,
     acorns: state.acorns + reward,
@@ -3093,10 +3914,16 @@ export const claimQuest = (state: BaseState, day: string): BaseState => {
 const doneLine = (quest: Quest, paid: number) => `Done: ${quest.text[0].toLowerCase()}${quest.text.slice(1)}.${paid > 0 ? ` ${paid} acorns.` : ""}`;
 
 /**
- * The list moves on by itself: a thing done is ticked off and its acorns go
- * in, and the next is shown. Its acorns go in only whole: while the larder
- * has no room for them the thing waits, ticked (`nextStep` says so), and
- * nothing is promised that would not arrive. Unchanged, the same object.
+ * The list moves on by itself, and so do the chapter's goals. Unchanged, the
+ * same object.
+ *
+ * Since 1.5.10 Pip's list is the chapter's goals (`GOALS`, `chapters.ts`): a
+ * goal of this chapter or an earlier one that the camp has done is ticked off
+ * and its acorns go in. The old list (`QUESTS`) is still kept up, ticked off
+ * as it is done, but pays nothing: it is there for older builds, so that one
+ * reading this camp finds its list already done and pays nothing twice.
+ * (Goals wait for a camp to be brought onto chapters, `settle`, which ticks
+ * off what it has already done without paying.)
  */
 export const advanceList = (state: BaseState, day: string): BaseState => {
   let next = state;
@@ -3107,58 +3934,65 @@ export const advanceList = (state: BaseState, day: string): BaseState => {
       const paid = new Set(LIST2.slice(0, had));
       let at = 0;
       while (at < QUESTS.length && paid.has(QUESTS[at].id)) at++;
-      return { ...next, quest: at, taught: [...next.taught, `${LIST_MARK}:${had}`] };
+      next = { ...next, quest: at, taught: [...next.taught, `${LIST_MARK}:${had}`] };
+    } else {
+      let at = Math.min(next.quest, QUESTS.length);
+      while (QUESTS[at]?.done(next)) at++;
+      next = { ...next, quest: at, taught: [...next.taught, LIST_MARK] };
     }
-    let at = Math.min(next.quest, QUESTS.length);
-    while (QUESTS[at]?.done(next)) at++;
-    return { ...next, quest: at, taught: [...next.taught, LIST_MARK] };
   }
-  for (let step = 0; step < QUESTS.length; step++) {
-    const quest = QUESTS[next.quest];
-    const reward = quest ? rewardOf(next, quest) : 0;
-    if (!quest || !quest.done(next) || room(next) < reward) break;
-    next = {
-      ...next,
-      acorns: next.acorns + reward,
-      quest: next.quest + 1,
-      events: noted(next, day, doneLine(quest, reward))
-    };
+  // The old list, ticked off unpaid.
+  let at = next.quest;
+  while (at < QUESTS.length && QUESTS[at].done(next)) at++;
+  if (at !== next.quest) next = { ...next, quest: at };
+  if (next.chapterSeen < 0) return next;
+  const chapter = chapterOf(next.minutes);
+  for (const goal of GOALS) {
+    if (goal.chapter > chapter || next.goals.includes(goal.id) || !goal.done(next)) continue;
+    const reward = give(next, goal.reward);
+    next = { ...next, acorns: next.acorns + reward, goals: [...next.goals, goal.id] };
+    next = { ...next, events: noted(next, day, `Done: ${goal.text[0].toLowerCase()}${goal.text.slice(1)}.${reward > 0 ? ` ${reward} acorns.` : ""}`) };
   }
   return next;
 };
 
-/** The one next thing, as the camp shows it: what to do, where, and what it brings (null when nothing is promised). */
+/**
+ * The one next thing, as the camp shows it: what to do, where, and what it brings (null when nothing is promised).
+ * (`full` is always false since 1.5.10: nothing waits for room. Kept for old screens.)
+ */
 export type NextStep = { text: string; at: QuestAt; reward: number | null; full: boolean };
 
 /**
- * What Pip says to do next. There is always something: the list while it
- * lasts (said as reading while what it asks for is going up), and after it
- * whatever is building, the cheapest thing that can be built, or reading.
+ * What Pip says to do next. There is always something: the chapter's next goal
+ * (`goalNow`), or whatever is building, the cheapest thing that can be built,
+ * or the reading to the next chapter. (Since 1.5.10: it was the old list.)
  */
 export const nextStep = (state: BaseState, minutesRead: number): NextStep => {
-  const quest = QUESTS[state.quest];
   const reading = (site: Site): string | null => {
     const job = jobOn(state, site);
     if (!job) return null;
     const left = jobLeft(job, minutesRead);
     return left > 0 ? `Read ${left} more ${left === 1 ? "minute" : "minutes"}: the ${siteName(state, site).toLowerCase()} is finished` : null;
   };
-  if (quest) {
-    const paid = rewardOf(state, quest) || null;
-    if (quest.done(state)) return { text: `Done: ${quest.text[0].toLowerCase()}${quest.text.slice(1)}. The larder is full`, at: "store", reward: paid, full: true };
-    if (state.quest === 0 && oakReady(state, minutesRead) > 0) return { text: "Tap the oak to take in its acorns", at: "oak", reward: paid, full: false };
-    const building = quest.at !== "raids" && quest.at !== "meadow" ? reading(quest.at) : null;
-    return { text: building ?? quest.text, at: quest.at, reward: paid, full: false };
+  const goal = goalNow(state, minutesRead)?.goal;
+  if (goal) {
+    // The goal's own place, as the list's places were (Edit's two are the fence's and the burrow's on an old screen).
+    const at: QuestAt = goal.at === "arrange" ? "fence" : goal.at === "decor" ? "burrow" : goal.at;
+    if (goal.id === "oak" && oakStatus(state, minutesRead) === "ready") return { text: "Tap the oak to take in its acorns", at: "oak", reward: goal.reward || null, full: false };
+    return { text: goal.text, at, reward: goal.reward || null, full: false };
   }
   const going = state.jobs.map((job) => job.site).find((site) => reading(site) !== null);
   if (going) return { text: reading(going)!, at: going, reward: null, full: false };
-  const can = SITES.filter((site) => blocked(state, site) === null).sort((a, b) => costOf(a, levelOf(state, a) + 1) - costOf(b, levelOf(state, b) + 1))[0];
+  const can = SITES.filter((site) => blocked(state, site) === null).sort((a, b) => priceOf(state, a, levelOf(state, a) + 1) - priceOf(state, b, levelOf(state, b) + 1))[0];
   if (can) {
     const to = levelOf(state, can) + 1;
     const name = siteName(state, can).toLowerCase();
     return { text: to === 1 ? `Build ${/^[aeiou]/.test(name) ? "an" : "a"} ${name}` : `Raise the ${name} to level ${to}`, at: can, reward: null, full: false };
   }
-  return { text: `Read on: every ten minutes the oak drops ${Math.round(oakDrops(state))} acorns`, at: "oak", reward: null, full: false };
+  const read = Math.max(state.minutes, Math.floor(minutesRead));
+  const ahead = chapterBrings(chapterOf(read) + 1);
+  const toGo = Math.max(0, chapterStartsAt(chapterOf(read) + 1) - read);
+  return { text: `Read ${hoursWords(toGo)}: ${ahead.title} is next`, at: "oak", reward: null, full: false };
 };
 
 // ---- what the camp has to say elsewhere ----------------------------------------------------------
@@ -3185,12 +4019,15 @@ export const campWaits = (state: BaseState, now: Now): boolean =>
   // Only what reading has brought and is ready to be taken in: never a day's visitor or a list to keep up with
   // (since 2026-10-15), so the dot on the way in is never a nudge to come back for its own sake.
   state.jobs.some((job) => jobLeft(job, now.minutes) === 0) ||
+  // A full oak, when a tap would take something from it: with the larder full, nothing is waiting to be done.
   (state.levels.oak > 0 && oakReady(state, now.minutes) >= oakHolds(state)) ||
-  (state.parcels > 0 && room(state) >= parcelNext(state)) ||
+  state.parcels > 0 ||
+  // A chapter reached, and its card not yet seen.
+  (state.chapterSeen >= 0 && state.chapterSeen < Math.min(chapterOf(Math.max(state.minutes, now.minutes)), state.chapterPaid)) ||
   // And what Pip gave in welcome, while it waits: the oak she shook, the basket by the door.
-  (windfallOf(state) > 0 && room(state) > 0) ||
+  windfallOf(state) > 0 ||
   basketOpens(state);
 
-/** Pip's basket waits by the door until it is opened; it opens when the larder has room for the whole of it. */
+/** Pip's basket waits by the door until it is opened (since 1.5.10 there is always room for it). */
 export const basketWaits = (state: BaseState) => Boolean(state.welcome?.given && !state.welcome.basketOpened);
-export const basketOpens = (state: BaseState) => basketWaits(state) && room(state) >= WELCOME_BASKET;
+export const basketOpens = (state: BaseState) => basketWaits(state);

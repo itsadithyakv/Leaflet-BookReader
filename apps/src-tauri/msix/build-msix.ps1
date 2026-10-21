@@ -117,6 +117,22 @@ $outDir = Join-Path $tauriDir "target\msix"
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Force -Path (Join-Path $stage "Assets") | Out-Null
 Copy-Item $exe (Join-Path $stage "leaflet.exe")
+# The Studio voice's engine (src\tts\native.rs): sherpa-onnx and onnxruntime, put
+# next to the exe by the sherpa-onnx crate's build. Leaflet loads them by full
+# path from its own folder (never System32's onnxruntime.dll) and starts without
+# them, so a missing one only means the Studio voice is not offered.
+# sherpa-onnx 1.x has espeak-ng (GPL-3.0) compiled in: packed only when
+# LEAFLET_STUDIO_VOICE=1, which a Store build must not set until Leaflet moves
+# to sherpa-onnx 2.0 (docs\studio-voice.md; the same switch as the Android build).
+if ($env:LEAFLET_STUDIO_VOICE -eq "1") {
+  foreach ($dll in "sherpa-onnx-c-api.dll", "onnxruntime.dll") {
+    $source = Join-Path $tauriDir "target\$Configuration\$dll"
+    if (-not (Test-Path $source)) { throw "No $dll at $source. Build with the studio-voice feature (the default)." }
+    Copy-Item $source (Join-Path $stage $dll)
+  }
+} else {
+  Write-Host "Studio voice runtime left out (set LEAFLET_STUDIO_VOICE=1 to pack it)."
+}
 
 $icons = Join-Path $tauriDir "icons"
 foreach ($logo in "StoreLogo.png", "Square44x44Logo.png", "Square150x150Logo.png", "Square310x310Logo.png", "Wide310x150Logo.png") {

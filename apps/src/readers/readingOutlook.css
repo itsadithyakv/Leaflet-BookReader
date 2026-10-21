@@ -87,9 +87,14 @@
    moment after a jump too, so "Back" is seen. */
 .reader-chapter-dock.is-awake,
 .reader-chapter-dock.is-open {
-  opacity: 0.94;
   transform: translateX(-50%) scale(1);
-  filter: saturate(1);
+}
+
+/* (The pill fades, not the dock: index.css, "The dock places itself".) */
+.reader-chapter-dock.is-awake > div,
+.reader-chapter-dock.is-open > div {
+  opacity: 1;
+  filter: none;
 }
 
 .reader-outlook-short {
@@ -107,5 +112,87 @@
 
   .reader-outlook-time {
     max-width: calc(100vw - 13rem);
+  }
+}
+
+/* The way back after a jump: in the row with the mouse (it reads as one
+   strip); by finger, see below. */
+.reader-dock-way {
+  display: contents;
+}
+
+/* ---- By finger: the arrows stay where the thumb left them ----------------
+   A tap is a hover on a touch screen, and it sticks: the first tap on the
+   dock showed the time left beside the percentage ("15 min in chapter ·
+   12 h in book"), the centred dock grew by it, and › moved some 85 px left
+   from under the thumb, which landed on the time instead. The way back
+   coming after a jump moved it too, and so did each chapter's name being
+   longer or shorter than the last. By finger nothing in the row changes its
+   width: the time left is not shown on a hover or a focus (the phone's
+   footer says it), and when the percentage is pressed for it, it opens
+   above the row; the name has a width of its own; the way back sits outside
+   the row, above its left end (a phone's dock is as wide as the screen). */
+html[data-input="touch"] .reader-chapter-dock:hover .reader-outlook-time,
+html[data-input="touch"] .reader-chapter-dock:focus-within .reader-outlook-time {
+  display: none;
+}
+
+html[data-input="touch"] .reader-chapter-dock > div {
+  position: relative;
+}
+
+html[data-input="touch"] .reader-chapter-dock.is-open .reader-outlook-time {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  max-width: calc(100vw - 2rem);
+  transform: translateX(-50%);
+  border: inherit;
+  border-radius: inherit;
+  padding: 4px 10px;
+  background: inherit;
+  -webkit-backdrop-filter: inherit;
+  backdrop-filter: inherit;
+}
+
+html[data-input="touch"] .reader-dock-label {
+  flex: none;
+  width: min(42vw, 11rem);
+  max-width: none;
+  text-align: center;
+}
+
+html[data-input="touch"] .reader-outlook-percent {
+  min-width: 3.2em;
+}
+
+html[data-input="touch"] .reader-dock-pages {
+  min-width: 6.5em;
+  text-align: center;
+}
+
+html[data-input="touch"] .reader-dock-way {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border: inherit;
+  border-radius: inherit;
+  padding: 0 4px;
+  background: inherit;
+  -webkit-backdrop-filter: inherit;
+  backdrop-filter: inherit;
+}
+
+@media (hover: none) {
+  .reader-chapter-dock:hover .reader-outlook-time,
+  .reader-chapter-dock:focus-within .reader-outlook-time {
+    display: none;
+  }
+
+  .reader-chapter-dock.is-open .reader-outlook-time {
+    display: block;
   }
 }

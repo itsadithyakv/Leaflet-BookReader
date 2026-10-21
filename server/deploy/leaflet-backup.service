@@ -1,0 +1,59 @@
+# /etc/systemd/system/leaflet-backup.service
+#
+# The nightly database backup (src/backup/run.js): reads the whole of the
+# Atlas database, encrypts it to the owner's public key and sends it to the
+# Apps Script receiver, which puts it in the leafletmail Drive. Started by
+# leaflet-backup.timer; `sudo systemctl start leaflet-backup` runs it now.
+# See docs/backups.md.
+
+[Unit]
+Description=Leaflet database backup to Google Drive
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=leaflet
+Group=leaflet
+WorkingDirectory=/opt/leaflet-api
+# MONGO_URI and MONGO_DB from the API's file; BACKUP_URL, BACKUP_SECRET and
+# BACKUP_PUBLIC_KEY from the backup's own. Both root:root 600.
+EnvironmentFile=/etc/leaflet-api.env
+EnvironmentFile=/etc/leaflet-backup.env
+Environment=NODE_ENV=production
+Environment=NODE_OPTIONS=--max-old-space-size=160
+ExecStart=/usr/bin/node src/backup/run.js
+# A small database takes seconds; a slow Google day, minutes.
+TimeoutStartSec=30min
+
+# Memory: at most one 8 MB part is held at a time (and its base64 for the
+# request), next to the driver's buffers. The API keeps its own 256 MB.
+MemoryMax=256M
+MemorySwapMax=0
+
+# The website and the API come first.
+CPUWeight=20
+IOWeight=20
+Nice=10
+
+# Hardening (as leaflet-api.service). It writes nothing to disk.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+ReadOnlyPaths=/opt/leaflet-api
+UMask=0077

@@ -17,11 +17,10 @@ import {
   MAX_LEVEL,
   QUESTS,
   blocked,
-  burrowFor,
+  chapterFor,
   campOpens,
   charm,
-  costOf,
-  holds,
+  priceOf,
   jobLeft,
   jobOn,
   levelOf,
@@ -93,14 +92,12 @@ export const stepWhy = (state: BaseState, quest: Quest, minutesRead: number): st
       return left > 0 ? `Going up: ${plural(left, "more minute")} of reading` : null;
     }
     const to = levelOf(state, site) + 1;
-    const cost = costOf(site, to);
+    const cost = priceOf(state, site, to);
     switch (blocked(state, site)) {
-      case "room":
-        return `Needs a larder that holds ${cost}: it holds ${holds(state)}`;
       case "acorns":
         return `${plural(cost - state.acorns, "more acorn")}`;
-      case "burrow":
-        return `Needs the burrow at level ${burrowFor(state, site)}`;
+      case "chapter":
+        return `Comes with chapter ${chapterFor(state, site)}`;
       case "busy":
         return "Pip is building something else";
       case "harm":
@@ -181,7 +178,7 @@ export type Ladder = {
   total: number;
   /** The step the list is on. */
   next: LadderStep | null;
-  /** The step is done, but the larder has no room for what it pays: it waits. */
+  /** Always false since 1.5.10 (nothing waits for room); kept for old screens. */
   full: boolean;
   /** What the level the group raises the burrow to brings: three named things at most. */
   brings: Brought[];
@@ -204,7 +201,7 @@ export const ladderOf = (state: BaseState, minutesRead: number): Ladder => {
       })
     : [];
   const now = steps.find((step) => step.index === state.quest) ?? null;
-  const full = Boolean(now && now.quest.done(state) && now.reward > 0);
+  const full = false;
   return {
     level: state.levels.burrow,
     group,
@@ -217,9 +214,12 @@ export const ladderOf = (state: BaseState, minutesRead: number): Ladder => {
   };
 };
 
-/** The chip's words: "Burrow 2 · 2/5 · next: Lookout" (the reward goes beside it, with an acorn). */
+/**
+ * The chip's words: "Pip's list 2/5 · next: Lookout" (the reward goes beside it, with an acorn). (It was "Burrow 2 ·
+ * 2/5 · Lookout" until 1.5.8, which on a phone read as a riddle: the Hollow's level has a chip of its own now.)
+ */
 export const chipLine = (ladder: Ladder): string =>
-  ladder.next ? `Burrow ${ladder.level} · ${ladder.done}/${ladder.total} · next: ${ladder.next.quest.short}` : `Burrow ${ladder.level}`;
+  ladder.next ? `Pip's list ${ladder.done}/${ladder.total} · next: ${ladder.next.quest.short}` : "Pip's list: all done";
 
 /**
  * Whether Pip's guided first session is running in this camp (`welcome` is

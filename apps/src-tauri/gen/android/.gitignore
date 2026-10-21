@@ -21,3 +21,5 @@ keystore.properties
 
 /.tauri
 /tauri.settings.gradle
+# The Studio voice's native libraries (msix/fetch-sherpa-onnx.ps1; checked by SHA-256 in app/build.gradle.kts).
+/vendor/

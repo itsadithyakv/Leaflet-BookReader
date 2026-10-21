@@ -6,13 +6,22 @@ import { ProfileFace } from "../../components/ProfileButton";
 import { backdropClose } from "../../components/ui/backdrop";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useBackLayer } from "../../platform/back";
+import { useShellShapeIs } from "../../platform/shape";
 
 /**
- * Where Pip's tab is the whole screen: a phone on its side, by a finger. The app's header and
- * its rail step away there (components/pip/touch.css, the same query), and this menu is the way
- * to the rest of the app. Keep the two in step.
+ * Where Pip's tab is the whole screen: a phone on its side, by a finger: this query, with the
+ * window's shape sideways (`html[data-shape="sideways"]`, platform/shape.ts). The app's header and
+ * its rail step away there (components/pip/touch.css, the same query and shape), and this menu is
+ * the way to the rest of the app. Keep the two in step.
  */
-export const PIP_FULL_SCREEN_QUERY = "(orientation: landscape) and (max-height: 520px) and (pointer: coarse)";
+export const PIP_FULL_SCREEN_QUERY = "(orientation: landscape) and (pointer: coarse)";
+
+/** Whether Pip's tab is the whole screen now (the query and the shape above): her house fills it there too (PipPage). */
+export const usePipFullScreen = () => {
+  const query = useMediaQuery(PIP_FULL_SCREEN_QUERY);
+  const sideways = useShellShapeIs("sideways");
+  return query && sideways;
+};
 
 export type PipMenuPlace = "library" | "collections" | "social";
 
@@ -39,7 +48,7 @@ type PipMenuProps = {
  * A tap outside or Back closes it.
  */
 export const PipMenu = ({ onNavigate, onOpenProfile, className, always = false }: PipMenuProps) => {
-  const fullScreen = useMediaQuery(PIP_FULL_SCREEN_QUERY);
+  const fullScreen = usePipFullScreen();
   const [at, setAt] = useState<{ top: number; left: number } | null>(null);
   const keyRef = useRef<HTMLButtonElement | null>(null);
   const firstRef = useRef<HTMLButtonElement | null>(null);

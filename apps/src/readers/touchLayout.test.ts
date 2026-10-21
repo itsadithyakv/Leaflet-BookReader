@@ -1,11 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  floatsAway,
+  layoutAcrossTurn,
   layoutForShape,
-  layoutKeyFor,
   readerShape,
+  readLayoutFor,
+  saveLayout,
   selectionDockFoot,
   sidewaysPageView,
   spreadFor,
+  steadyHeight,
   tapAction,
   tapZone,
   SIDEWAYS_LAYOUT_KEY
@@ -25,6 +29,21 @@ describe("the shape of the screen", () => {
     expect(readerShape(740, 360, true)).toBe("sideways");
     expect(readerShape(1024, 768, true)).toBe("tablet");
     expect(readerShape(800, 1280, true)).toBe("tablet");
+  });
+
+  it("does not turn on its side for a keyboard (ours, or another app's over a notification)", () => {
+    const heights = { width: 0, height: 0 };
+    const shape = (width: number, height: number) => readerShape(width, steadyHeight(heights, width, height), true);
+    expect(shape(360, 740)).toBe("upright");
+    // A reply typed into a notification: the window 330px tall, wider than it is tall.
+    expect(shape(360, 330)).toBe("upright");
+    expect(shape(360, 740)).toBe("upright");
+    // A tablet on its side, a keyboard up: still a tablet, not a phone.
+    expect(shape(1280, 800)).toBe("tablet");
+    expect(shape(1280, 420)).toBe("tablet");
+    // A real turn (a new width) is followed.
+    expect(shape(740, 360)).toBe("sideways");
+    expect(shape(360, 740)).toBe("upright");
   });
 });
 
@@ -57,10 +76,42 @@ describe("a tap on the page", () => {
 
 });
 
-describe("the layout each way up", () => {
-  it("defaults to scrolling upright and to a spread of pages sideways", () => {
-    expect(layoutForShape("upright", { upright: null, sideways: null })).toBe("scroll");
-    expect(layoutForShape("sideways", { upright: null, sideways: null })).toBe("pages");
+describe("the layout, kept as the phone turns", () => {
+  const never = { chosen: null, sideways: null };
+
+  it("is the reader's one choice whichever way up: a turn never swaps scrolling for pages", () => {
+    for (const chosen of ["scroll", "pages"] as const) {
+      for (const shape of ["upright", "sideways", "tablet", "desktop"] as const) {
+        expect(layoutForShape(shape, { chosen, sideways: null })).toBe(chosen);
+      }
+    }
+    // Scrolling upright, and pages kept apart for on its side by an older Leaflet: scrolling both ways.
+    expect(layoutForShape("sideways", { chosen: "scroll", sideways: "pages" })).toBe("scroll");
+    expect(layoutForShape("upright", { chosen: "pages", sideways: "scroll" })).toBe("pages");
+  });
+
+  it("is the layout the book is in after a turn, both ways", () => {
+    expect(layoutAcrossTurn("scroll")).toBe("scroll");
+    expect(layoutAcrossTurn("pages")).toBe("pages");
+    // Upright scrolling (the default), turned on its side and back: scrolling all the way.
+    let layout = layoutForShape("upright", never);
+    layout = layoutAcrossTurn(layout);
+    expect(layout).toBe("scroll");
+    expect(spreadFor("sideways", layout)).toBe(false);
+    layout = layoutAcrossTurn(layout);
+    expect(layout).toBe("scroll");
+  });
+
+  it("has a default for the shape a book opens in only while the reader has never chosen", () => {
+    expect(layoutForShape("upright", never)).toBe("scroll");
+    expect(layoutForShape("desktop", never)).toBe("scroll");
+    expect(layoutForShape("sideways", never)).toBe("pages");
+    expect(layoutForShape("sideways", { chosen: null, sideways: "scroll" })).toBe("scroll");
+    // The old sideways key never reaches an upright phone.
+    expect(layoutForShape("upright", { chosen: null, sideways: "pages" })).toBe("scroll");
+  });
+
+  it("pages are a spread on a phone's side, one column upright", () => {
     expect(spreadFor("sideways", "pages")).toBe(true);
     expect(spreadFor("sideways", "scroll")).toBe(false);
     expect(spreadFor("upright", "pages")).toBe(false);
@@ -74,23 +125,38 @@ describe("the layout each way up", () => {
     expect(spreadFor("desktop", "pages", 1280, 800)).toBe(false);
   });
 
-  it("remembers each way up apart", () => {
-    const stored = { upright: "pages", sideways: "scroll" };
-    expect(layoutForShape("upright", stored)).toBe("pages");
-    expect(layoutForShape("sideways", stored)).toBe("scroll");
-    expect(layoutForShape("desktop", stored)).toBe("pages");
-    expect(layoutForShape("tablet", stored)).toBe("pages");
-  });
-
   it("ignores what is not a layout", () => {
-    expect(layoutForShape("sideways", { upright: null, sideways: "columns" })).toBe("pages");
-    expect(layoutForShape("upright", { upright: "", sideways: null })).toBe("scroll");
+    expect(layoutForShape("sideways", { chosen: null, sideways: "columns" })).toBe("pages");
+    expect(layoutForShape("upright", { chosen: "", sideways: null })).toBe("scroll");
   });
 
-  it("keeps a sideways choice under its own key, and every other under the device's", () => {
-    expect(layoutKeyFor("sideways")).toBe(SIDEWAYS_LAYOUT_KEY);
-    expect(layoutKeyFor("upright")).toBe(LAYOUT_KEY);
-    expect(layoutKeyFor("desktop")).toBe(LAYOUT_KEY);
+  describe("kept on the device", () => {
+    afterEach(() => vi.unstubAllGlobals());
+    const store = (initial: Record<string, string>) => {
+      const items = new Map(Object.entries(initial));
+      vi.stubGlobal("localStorage", {
+        getItem: (key: string) => items.get(key) ?? null,
+        setItem: (key: string, value: string) => void items.set(key, value),
+        removeItem: (key: string) => void items.delete(key)
+      });
+      return items;
+    };
+
+    it("chosen on a phone's side, is kept for upright too, and the old sideways key goes", () => {
+      const items = store({ [SIDEWAYS_LAYOUT_KEY]: "pages" });
+      saveLayout("scroll");
+      expect(items.get(LAYOUT_KEY)).toBe("scroll");
+      expect(items.has(SIDEWAYS_LAYOUT_KEY)).toBe(false);
+      expect(readLayoutFor("upright")).toBe("scroll");
+      expect(readLayoutFor("sideways")).toBe("scroll");
+    });
+
+    it("chosen upright, opens a book on its side in it", () => {
+      store({});
+      saveLayout("pages");
+      expect(readLayoutFor("sideways")).toBe("pages");
+      expect(readLayoutFor("upright")).toBe("pages");
+    });
   });
 
   it("gives a PDF on its side fit-width scrolling until chosen, and a comic its pages", () => {
@@ -108,5 +174,27 @@ describe("the selection's bar at the foot", () => {
     expect(selectionDockFoot(true, false, 0)).toBe(8);
     expect(selectionDockFoot(true, false, 300)).toBe(308);
     expect(selectionDockFoot(true, true, 0)).toBe(68);
+  });
+});
+
+describe("what floats over a phone's page", () => {
+  const clear = { keyboard: false, card: false, drawer: false, sheet: false };
+
+  it("stays while nothing is over the page", () => {
+    expect(floatsAway("upright", clear)).toBe(false);
+    expect(floatsAway("sideways", clear)).toBe(false);
+  });
+
+  it("goes for the keyboard, a card, the chapter list and a sheet", () => {
+    for (const over of ["keyboard", "card", "drawer", "sheet"] as const) {
+      expect(floatsAway("upright", { ...clear, [over]: true })).toBe(true);
+      expect(floatsAway("sideways", { ...clear, [over]: true })).toBe(true);
+      expect(floatsAway("tablet", { ...clear, [over]: true })).toBe(true);
+    }
+  });
+
+  it("stays on a desktop, where the pill is not under any of them", () => {
+    const everything = { keyboard: true, card: true, drawer: true, sheet: true };
+    expect(floatsAway("desktop", everything)).toBe(false);
   });
 });

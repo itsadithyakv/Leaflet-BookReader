@@ -1,0 +1,6 @@
+# The Studio voice's engine (sherpa-onnx, src/tts/native.rs): its build script
+# would download a prebuilt archive from GitHub on every clean build. Pointed
+# here instead, at a copy fetched once and checked against its SHA-256
+# (`node apps/scripts/fetch-sherpa-onnx.mjs`; git-ignored). See docs/studio-voice.md.
+[env]
+SHERPA_ONNX_ARCHIVE_DIR = { value = "vendor/sherpa-onnx", relative = true }

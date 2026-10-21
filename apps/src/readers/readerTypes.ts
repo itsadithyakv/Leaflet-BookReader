@@ -62,6 +62,10 @@ export type SmartSession = {
   /** Read at Dotty's pace since then with no correction: a sign the pace suits. */
   acceptedWords: number;
   acceptedMs: number;
+  /** The pace an automatic raise may go a little over (readers/paceTracker.ts, `autoRaise`). */
+  baseWpm?: number;
+  /** `activeMs` at the last automatic raise. */
+  raisedAtMs?: number;
 };
 
 /** Scrolling through a chapter, or turning pages. */

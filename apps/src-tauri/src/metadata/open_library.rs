@@ -125,7 +125,7 @@ fn best_match<'a>(title: &str, author: Option<&str>, docs: &'a [SearchDoc]) -> O
 }
 
 /// Lower-case words, punctuation and a few filler words dropped.
-fn words(value: &str) -> Vec<String> {
+pub(crate) fn words(value: &str) -> Vec<String> {
   const FILLER: [&str; 6] = ["the", "a", "an", "of", "and", "&"];
   value
     .to_lowercase()

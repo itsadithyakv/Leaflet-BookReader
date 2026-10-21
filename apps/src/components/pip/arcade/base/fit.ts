@@ -39,3 +39,18 @@ export const drawAt = (ctx: CanvasRenderingContext2D, fit: Fit) => {
   ctx.setTransform(fit.backing, 0, 0, fit.backing, 0, 0);
   ctx.imageSmoothingEnabled = false;
 };
+
+/**
+ * A pixel picture that covers the room, a little larger than it (`zoom`): on a phone held sideways the clearing is
+ * drawn so that `1 / zoom` of its width fills the screen's, and at least its whole height does, and the rest is
+ * there to be moved to (camera.ts). At a whole number of screen pixels to each art pixel where that still covers the
+ * room and is near the size asked for; otherwise exactly that size, drawn at the next whole size up.
+ */
+export const coverPicture = (artWidth: number, artHeight: number, boxWidth: number, boxHeight: number, ratio = 1, zoom = 1): Fit => {
+  const scale = ratio > 0 ? ratio : 1;
+  const exact = Math.max(0.1, (boxWidth * scale * zoom) / artWidth, (boxHeight * scale) / artHeight);
+  const whole = Math.floor(exact + 1e-6);
+  const covers = whole * artWidth >= boxWidth * scale && whole * artHeight >= boxHeight * scale;
+  if (whole >= 1 && covers && whole >= exact * 0.9) return { css: whole / scale, backing: whole, crisp: true };
+  return { css: exact / scale, backing: Math.max(1, Math.ceil(exact - 1e-6)), crisp: false };
+};

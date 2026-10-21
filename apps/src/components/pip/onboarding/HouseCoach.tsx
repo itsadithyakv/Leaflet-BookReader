@@ -3,6 +3,7 @@ import { useBaseStore } from "../../../store/baseStore";
 import { accessories } from "../../../pip/shop";
 import { priceOf } from "../../../pages/pip/common";
 import { PipFace } from "../arcade/base/Sprite";
+import { tapKey } from "./tapKey";
 import { Coach } from "./Coach";
 import { useCoachStore } from "./coachStore";
 import { whole, type Rect } from "./geometry";
@@ -136,10 +137,10 @@ export const HouseCoach = ({
         <span className="pip-coach-keys">
           {asking ? (
             <>
-              <button type="button" className="pip-say-button pip-say-button-primary" onClick={() => setAsking(false)}>
+              <button type="button" className="pip-say-button pip-say-button-primary" {...tapKey(() => setAsking(false))}>
                 Stay
               </button>
-              <button type="button" className="pip-say-button pip-say-button-quiet" onClick={finish}>
+              <button type="button" className="pip-say-button pip-say-button-quiet" {...tapKey(finish)}>
                 Skip
               </button>
             </>
@@ -147,11 +148,11 @@ export const HouseCoach = ({
             <>
               {/* No hat she can be bought (seeds spent elsewhere): on without it. */}
               {!hat && !world.hatOn && (
-                <button type="button" className="pip-say-button pip-say-button-primary" onClick={() => api.setStep(STEP.bridge)}>
+                <button type="button" className="pip-say-button pip-say-button-primary" {...tapKey(() => api.setStep(STEP.bridge))}>
                   Next
                 </button>
               )}
-              <button type="button" className="pip-coach-skip" title="Skip the tour" onClick={() => setAsking(true)}>
+              <button type="button" className="pip-coach-skip" title="Skip the tour" {...tapKey(() => setAsking(true))}>
                 Skip
               </button>
             </>

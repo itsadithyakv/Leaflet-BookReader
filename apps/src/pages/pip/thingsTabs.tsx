@@ -1,12 +1,13 @@
 import { SKINS, type PipAccessory, type PipSkin, type PipTreat } from "../../pip";
 import { accessories, isEarnedOnly, slotCovered, treats, type ShopKind } from "../../pip/shop";
-import type { PipLook } from "../../services/pipService";
+import type { EarnStatus, PipLook } from "../../services/pipService";
 import type { ShopRequest } from "../../components/pip/PipShop";
 import type { ThingsTab } from "../../components/pip/PipThings";
 import { Empty, Group, Hint, Hints, MoveCard, PriceTag, Status, Tile } from "../../components/pip/shopParts";
 import type { Tally } from "../../components/pip/collection";
 import { PipSprite } from "../../components/PipSprite";
 import { moveName, priceOf } from "./common";
+import { earnedHint } from "./earned";
 
 const SLOTS: Array<{ slot: PipAccessory["slot"]; label: string; covered: string }> = [
   { slot: "head", label: "Head", covered: "has its own hat" },
@@ -28,6 +29,8 @@ type ThingsTabsOptions = {
   withAccessory: (id: string, from?: readonly string[]) => string[];
   /** How much of each kind is Pip's (the shop's tallies). */
   tallies: Record<string, Tally>;
+  /** The things earned by reading, done or not and how far along (the overview's). */
+  earned?: readonly EarnStatus[];
   /** Every move: the free signatures, then the ones sold. */
   moveList: Array<{ id: string; price: number }>;
   /** Seeds to spend now. */
@@ -54,6 +57,7 @@ export const pipThingsTabs = ({
   wearing,
   withAccessory,
   tallies,
+  earned = [],
   moveList,
   spendable,
   change,
@@ -67,20 +71,22 @@ export const pipThingsTabs = ({
   const wardrobeTile = (entry: PipSkin) => {
     const owned = owns("skin", entry.id);
     const worn = entry.id === shownVariant;
-    const earned = isEarnedOnly(entry);
+    const earnedOnly = isEarnedOnly(entry);
+    // A locked one says how far along it is: "Keep a 7-day streak. 5/7 days".
+    const goal = earnedOnly && !owned ? earnedHint(entry.unlock, earned.find((status) => status.kind === "skin" && status.id === entry.id)) : undefined;
     return (
       <Tile
         key={entry.id}
         selected={worn}
         name={entry.name}
-        hint={entry.blurb ?? entry.unlock}
-        label={`${entry.name}. ${worn ? "Wearing." : owned ? "Select to wear it." : `Locked. Earned by reading: ${entry.unlock}`}`}
+        hint={goal ?? entry.blurb ?? entry.unlock}
+        label={`${entry.name}. ${worn ? "Wearing." : owned ? "Select to wear it." : `Locked. Earned by reading: ${goal ?? entry.unlock}`}`}
         art={(hot) => <PipSprite move="idle" still={!hot && !worn} size={72} snap="nearest" skin={entry.id} outfit={outfit} />}
         status={worn ? <Status icon="check">Wearing</Status> : owned ? <Status>Wear</Status> : <Status icon="lock">Locked</Status>}
         onSelect={() => {
           if (worn) return;
           if (owned) void change({ variant: entry.id });
-          else if (earned) showToast(`${entry.name} is earned, not bought: ${entry.unlock}`);
+          else if (earnedOnly) showToast(`${entry.name} is earned, not bought: ${goal ?? entry.unlock}`);
         }}
       />
     );

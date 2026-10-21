@@ -5,7 +5,8 @@ import { ALIGN_KEY, LINE_HEIGHT, MEASURE_KEY, MEASURE_PADDING, SPACING_KEY, TYPE
 import { applyCustomFont, customFontFaceCss, customFontId, type CustomFontFace } from "../customFonts";
 import { fontService } from "../../services/fontService";
 import { getReaderFinish, getReaderFinishBackground, PAGE_TOP_PAD, readerChromeLight } from "../finish";
-import { readLayoutFor, saveLayoutFor, spreadFor, useReaderShape, useRotationLock } from "../touchLayout";
+import { readLayoutFor, saveLayout, spreadFor, useReaderShape, useRotationLock } from "../touchLayout";
+import { raiseReaderVeil } from "../readerVeil";
 import type { Later, WithCover, WithPace } from "./scope";
 
 /** Room left below the last line of the book, as a share of the window: how far up that line can be brought. */
@@ -36,9 +37,9 @@ export const useReaderLook = (reader: WithPace & Later<"setAutoScrollActive" | "
   const toggleTheme = useAppearanceStore((state) => state.toggleTheme);
 
   // Scrolling (the default) or turning pages. A preference of this device,
-  // shared by every book; changing it rebuilds the page. A phone keeps one
-  // for each way up (readers/touchLayout.ts): sideways it defaults to pages,
-  // and its pages are a spread of two columns.
+  // shared by every book and kept as the phone turns (readers/touchLayout.ts);
+  // changing it rebuilds the page. On a phone's side pages are a spread of two
+  // columns.
   const shape = useReaderShape();
   const [layout, setLayout] = useState<ReaderLayout>(() => readLayoutFor(shape));
   const layoutRef = useRef<ReaderLayout>(layout);
@@ -119,6 +120,9 @@ export const useReaderLook = (reader: WithPace & Later<"setAutoScrollActive" | "
       reader.setAutoScrollActive(false);
       setReadingMode("standard");
     }
+    // The page is covered in its own colour while the book is drawn anew,
+    // and uncovered once it is up at the place (readers/readerVeil.ts).
+    raiseReaderVeil(viewerRef.current);
     // The place goes with the book into the new layout (useReaderPlace).
     reader.holdPlaceForRelayout();
     layoutRef.current = next;
@@ -132,8 +136,8 @@ export const useReaderLook = (reader: WithPace & Later<"setAutoScrollActive" | "
     if (next === layout) {
       return;
     }
-    // Kept for this way up of a phone, or for the device.
-    saveLayoutFor(shape, next);
+    // The device's, whichever way up (a turn keeps it).
+    saveLayout(next);
     relayout(next, spreadFor(shape, next));
   };
 
@@ -438,11 +442,14 @@ export const useTypeChange = (reader: WithCover) => {
         } else {
           measurePagesAgain();
         }
+        reader.beginJump();
         void rendition.display(anchor).then(
           () => {
             if (renditionRef.current === rendition) {
               clearToolbar(anchor, lineBefore?.below ?? 0);
               settleOnPage(anchor);
+              // Held at the line while the chapters round it are laid out anew (readers/jumpSettle.ts).
+              reader.pinJump(() => reader.placeTopFor(anchor, lineBefore?.below ?? 0));
               typeAnchorRef.current = layoutRef.current === "scroll" ? { cfi: anchor, below: lineBefore?.below ?? 0 } : null;
             }
           },

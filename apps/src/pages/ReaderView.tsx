@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { Book } from "@shared/models/book";
 import { useReaderCore } from "../readers/text/useReaderCore";
 import { useReadingPace, usePaceKeeping } from "../readers/text/useReadingPace";
@@ -25,10 +26,15 @@ import { useReaderCover } from "../readers/text/useReaderCover";
 import { useBookOpening } from "../readers/text/useBookOpening";
 import { useKindlePlacing } from "../readers/text/useKindlePlacing";
 import { useScrollTaps, useSelectionHidesChrome, useShapeLayout } from "../readers/text/useTouchReading";
-import { useWordDoubleTap } from "../readers/text/useWordDoubleTap";
-import { isPhoneShape, systemBarsHidden, useReaderDevice } from "../readers/touchLayout";
+import { useTapRuns } from "../readers/text/useTapRuns";
+import {
+  floatsAway, isPhoneShape, systemBarsHidden, useReaderDevice
+} from "../readers/touchLayout";
+import { useKeyboardOpen } from "../readers/keyboardOpen";
+import { dottyShows } from "../readers/readerDot";
+import { holdBarLook, holdNightMode } from "../platform/android";
 import "../readers/touch.css";
-import { ReaderToolbar } from "../readers/text/ReaderToolbar";
+import { ReaderPhoneBack, ReaderToolbar } from "../readers/text/ReaderToolbar";
 import { ReaderContentsPanel } from "../readers/text/ReaderContentsPanel";
 import { ReaderPage } from "../readers/text/ReaderPage";
 import { ReaderDialogs } from "../readers/text/ReaderDialogs";
@@ -41,6 +47,9 @@ import { useReadAloud } from "../readers/readAloud/useReadAloud";
 import { ReadAloudPill } from "../readers/readAloud/ReadAloudPill";
 import { useReadingLightSwipes } from "../readers/text/useReadingLightSwipes";
 import { ReadingLight } from "../readers/ReaderLight";
+// The reader's glass, after every reader stylesheet above (and touch.css), so it wins at equal weight.
+import "../readers/glass.css";
+import { useReadingMark } from "../platform/rootMarks";
 
 type ReaderViewProps = {
   book: Book;
@@ -109,7 +118,7 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
   useAwakeWhileReading(reader);
   Object.assign(reader, useSelectionDock(reader));
   useScrollTaps(reader);
-  useWordDoubleTap(reader);
+  useTapRuns(reader);
   // Brightness and warmth by a swipe at the page's edges (readers/readingLight.ts).
   useReadingLightSwipes(reader);
   useSelectionHidesChrome(reader);
@@ -120,9 +129,38 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
   // Read aloud, lit and followed on the page (readers/readAloud).
   Object.assign(reader, useReadAloud(reader));
 
-  const { chromeVisible, displayMode, exitGuard, focusToast, hoverChrome, isLight, pageStyle, readingMode, rotation, shape } = reader;
-  // The system's bars hide for a focus-lock session, on a phone held upright, and on one on its side while the chrome is away.
-  useReaderDevice(systemBarsHidden(shape, chromeVisible, exitGuard.locked), rotation);
+  const {
+    chromeVisible, displayMode, exitGuard, focusToast, hoverChrome, isLight, pageStyle, people,
+    readingMode, rotation, shape
+  } = reader;
+  // The system's bars hide for a focus-lock session, and on a phone while the book is open.
+  useReaderDevice(systemBarsHidden(shape, exitGuard.locked), rotation);
+  // By finger the pills and Dotty keep out of the way of the keyboard, a card, a list, a sheet.
+  const keyboard = useKeyboardOpen();
+  const away = floatsAway(shape, {
+    keyboard,
+    card:
+      people.cardOpen ||
+      (reader.notesFocus !== null && !reader.bookmarkPanelOpen) ||
+      reader.lookUpShowing ||
+      reader.note !== null ||
+      reader.recap !== null,
+    drawer: reader.contentsOver,
+    sheet:
+      reader.fontPanelOpen ||
+      reader.morePanelOpen ||
+      reader.soundPanelOpen ||
+      reader.searchOpen ||
+      reader.bookmarkPanelOpen ||
+      reader.shortcutsOpen ||
+      people.panelOpen
+  });
+  // Android's bar icons follow the reader's chrome, not the app's theme, while the book is open.
+  useEffect(() => holdBarLook(isLight), [isLight]);
+  // And Android's night mode, so a `<select>`'s list is drawn dark on a dark page.
+  useEffect(() => holdNightMode(isLight ? "light" : "dark"), [isLight]);
+  // `html[data-reading]` from this first frame: the app under the book steps aside (styles/glass.css).
+  useReadingMark();
 
   return (
     <div
@@ -138,11 +176,18 @@ export const ReaderView = ({ book, onClose, openAt = null }: ReaderViewProps) =>
         displayMode === "true-black" ? "reader-true-black-finish" : ""
       } ${
         readingMode === "speed" ? "reader-speed-active" : ""
+      } ${away ? "reader-floats-away" : ""} ${
+        reader.readAloud?.active ? "reader-reading-aloud" : ""
       }`}
       style={pageStyle}
       data-shape={isPhoneShape(shape) ? shape : undefined}
+      data-chrome={chromeVisible ? "shown" : "hidden"}
+      data-dotty={
+        dottyShows(readingMode, reader.tourOpen && reader.tourStep === 0) ? "shown" : "hidden"
+      }
     >
       <ReaderToolbar reader={reader} />
+      <ReaderPhoneBack reader={reader} />
       {/* The top edge of the window: resting the pointer here brings the bar
           back. The page is an iframe, so the bar cannot see the pointer
           arrive over the text; this strip can. */}

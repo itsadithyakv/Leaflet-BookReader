@@ -396,24 +396,30 @@ pub fn signed_in_account_id(db: &Database) -> Option<String> {
   cached_account(db).map(|account| account.id).filter(|id| !id.trim().is_empty())
 }
 
+/// Whether a profile of this visibility is shown to anyone: to everyone
+/// ("public") or to the readers it accepted ("followers"). Anything else the
+/// server might say is private.
+pub fn visibility_shown(visibility: &str) -> bool {
+  matches!(visibility, "public" | "followers")
+}
+
 /// Whether the signed-in reader shares their profile, as this device last
-/// heard it from the server: `Some(true)` public, `Some(false)` private, and
-/// `None` when it has not heard (a new sign-in, another device made the
-/// choice, a fresh install).
+/// heard it from the server: `Some(true)` public or followers-only,
+/// `Some(false)` private, and `None` when it has not heard (a new sign-in,
+/// another device made the choice, a fresh install).
 ///
 /// A copy only. The server holds the truth; this is what lets the app decide
 /// to publish nothing for a private reader without asking every time.
 pub fn known_visibility(db: &Database) -> Option<bool> {
   match db.get_setting(PROFILE_VISIBILITY_SETTING).ok().flatten().as_deref() {
-    Some("public") => Some(true),
-    Some("private") => Some(false),
-    _ => None
+    Some("") | None => None,
+    Some(value) => Some(visibility_shown(value))
   }
 }
 
 /// Keeps what the server said about the profile's visibility.
 pub fn remember_visibility(db: &Database, visibility: &str) {
-  let value = if visibility == "public" { "public" } else { "private" };
+  let value = if visibility_shown(visibility) { visibility } else { "private" };
   let _ = db.set_setting(PROFILE_VISIBILITY_SETTING, value);
 }
 
@@ -1298,9 +1304,9 @@ pub struct Profile {
   /// What a newer server adds; each is absent from an older one.
   #[serde(default)]
   pub shares_library: bool,
-  /// Whether friends may raid the camp: yes until the reader says no, so
-  /// yes from a server that does not say.
-  #[serde(default = "raids_allowed")]
+  /// Whether friends may raid the camp: no until the reader says yes (1.5.10;
+  /// it was yes until they said no), so no from a server that does not say.
+  #[serde(default)]
   pub raidable: bool,
   #[serde(default)]
   pub reading: Option<serde_json::Value>,
@@ -1334,9 +1340,6 @@ fn private_visibility() -> String {
   "private".to_string()
 }
 
-fn raids_allowed() -> bool {
-  true
-}
 
 pub async fn get_profile(db_mutex: &std::sync::Mutex<Database>) -> Result<Profile> {
   let (base, token) = session_token(db_mutex)?;
@@ -1436,6 +1439,37 @@ pub async fn community_call_if_there(
     return Err(community_failure(db_mutex, response).await);
   }
   Ok(Some(response.json().await?))
+}
+
+/// Sends a problem report (`POST /v1/problems`), signed in or not: with the
+/// session when there is one, so the server knows whom to answer. The body
+/// is `commands::diagnostics::problem_body`'s. Each failure says why in a
+/// sentence, and the page then offers to send it by email instead.
+pub async fn send_problem(
+  db_mutex: &std::sync::Mutex<Database>,
+  body: serde_json::Value
+) -> Result<()> {
+  let method = reqwest::Method::POST;
+  let auth = CommunityAuth::Optional;
+  let response = community_send(db_mutex, method, "/v1/problems", &[], Some(body), auth).await?;
+  let status = response.status();
+  if status.is_success() {
+    return Ok(());
+  }
+  if status == reqwest::StatusCode::NOT_FOUND {
+    return Err(anyhow!("This Leaflet server can't take problem reports yet."));
+  }
+  // The server's own words for a limit, a full list or a refused field.
+  let said = response
+    .json::<serde_json::Value>()
+    .await
+    .ok()
+    .and_then(|json| json.get("error").and_then(|error| error.as_str()).map(str::to_string));
+  let plain = status.is_client_error() || status == reqwest::StatusCode::SERVICE_UNAVAILABLE;
+  Err(match said {
+    Some(message) if plain => anyhow!(message),
+    _ => anyhow!("The Leaflet server had a problem ({status}). Try again later.")
+  })
 }
 
 async fn community_send(
@@ -1813,7 +1847,10 @@ mod tests {
     assert_eq!(known_visibility(&db), Some(true));
     remember_visibility(&db, "private");
     assert_eq!(known_visibility(&db), Some(false));
-    // Anything the server might say that is not "public" is private.
+    // Kept to followers is shared too: their board still shows the figures.
+    remember_visibility(&db, "followers");
+    assert_eq!(known_visibility(&db), Some(true));
+    // Anything else the server might say is private.
     remember_visibility(&db, "friends-only");
     assert_eq!(known_visibility(&db), Some(false));
 

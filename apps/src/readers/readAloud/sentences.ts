@@ -1,14 +1,17 @@
 /**
- * A paragraph cut into sentences, for reading aloud: each one is spoken as
- * an utterance of its own and lit on the page while it is.
+ * A paragraph cut into sentences, for reading aloud: each one is lit on the
+ * page while it is spoken (the voice says a paragraph at a time, where it
+ * can, so its tune carries across them: `units.ts`).
  *
  * A full stop ends a sentence unless it belongs to a word ("Mr.", "e.g.",
  * an initial, "3.5"); a question or exclamation mark, or an ellipsis, ends
  * one when what follows starts a new one (not a lower-case word: "Stop!" he
  * said is one sentence). Closing quotes and brackets stay with the sentence
  * they close. Scripts without spaces (Chinese, Japanese) end at their own
- * stops. A sentence too long to speak or light comfortably is cut again at a
- * semicolon, a colon, a dash or a comma near the middle.
+ * stops. A sentence too long to light comfortably is cut again at a
+ * semicolon, a colon or a dash near the middle (never at a comma, nor between
+ * two words): the first part is marked as going on (`cont`), so the voice
+ * never says it as an ending.
  */
 
 /** Words that end in a full stop without ending the sentence. Lower case, without the stop. */
@@ -33,7 +36,12 @@ const WIDE_STOPS = /[。！？｡]/u;
 /** Longer than this, a sentence is cut again (see `cutLong`). */
 export const LONG_SENTENCE = 320;
 
-export type Span = { start: number; end: number };
+export type Span = {
+  start: number;
+  end: number;
+  /** Not the end of its sentence: a long one cut for lighting, which goes on in the next span. */
+  cont?: boolean;
+};
 
 const isSpace = (char: string | undefined) => char !== undefined && /\s/u.test(char);
 const isLower = (char: string | undefined) => char !== undefined && /\p{Ll}/u.test(char);
@@ -143,7 +151,11 @@ export const splitSentences = (text: string): Span[] => {
   return spans.flatMap((span) => cutLong(text, span));
 };
 
-/** A sentence too long for one utterance, cut at the best break near its middle (and again, as often as it takes). */
+/**
+ * A sentence too long to light comfortably, cut at the best break near its
+ * middle (and again, as often as it takes): a semicolon, a colon or a dash.
+ * One with none of those stays whole. Every part but the last goes on.
+ */
 export const cutLong = (text: string, span: Span, limit = LONG_SENTENCE): Span[] => {
   if (span.end - span.start <= limit) {
     return [span];
@@ -154,8 +166,10 @@ export const cutLong = (text: string, span: Span, limit = LONG_SENTENCE): Span[]
   let bestScore = -Infinity;
   for (let at = span.start + 20; at < span.end - 20; at += 1) {
     const char = text[at];
-    const rank = char === ";" ? 4 : char === ":" ? 3 : char === "—" || char === "–" ? 3 : char === "," ? 2 : char === " " ? 0 : -1;
-    if (rank < 0 || !isSpace(text[at + 1]) && char !== "—" && char !== "–") {
+    const dash = char === "—" || char === "–";
+    const rank = char === ";" ? 3 : char === ":" ? 2 : dash ? 2 : -1;
+    // A semicolon or colon before a space; a dash with or without one.
+    if (rank < 0 || (!dash && !isSpace(text[at + 1]))) {
       continue;
     }
     const distance = Math.abs(at - middle);
@@ -169,11 +183,12 @@ export const cutLong = (text: string, span: Span, limit = LONG_SENTENCE): Span[]
     }
   }
   if (best < 0) {
-    best = middle;
+    return [span];
   }
   let secondStart = best;
   while (secondStart < span.end && isSpace(text[secondStart])) secondStart += 1;
   let firstEnd = best;
   while (firstEnd > span.start && isSpace(text[firstEnd - 1])) firstEnd -= 1;
-  return [...cutLong(text, { start: span.start, end: firstEnd }, limit), ...cutLong(text, { start: secondStart, end: span.end }, limit)];
+  const first = cutLong(text, { start: span.start, end: firstEnd }, limit).map((part) => ({ ...part, cont: true }));
+  return [...first, ...cutLong(text, { start: secondStart, end: span.end, cont: span.cont }, limit)];
 };

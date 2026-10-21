@@ -1,5 +1,4 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { MailWarning } from "lucide-react";
 import type { SocialProfile } from "@shared/sync/types";
 import { useAccountStore } from "../../store/accountStore";
 import { accountService, errorMessage, type AccountStatus } from "../../services/accountService";
@@ -7,7 +6,6 @@ import { socialService } from "../../services/socialService";
 import { FEATURES } from "../../constants/features";
 import { PRIVACY_URL, TERMS_URL } from "../../constants/links";
 import { randomAvatar } from "../../pip/avatars";
-import { AvatarPicker } from "../AvatarPicker";
 import { useCommunityStore } from "../community/communityStore";
 import { COPY } from "../community/copy";
 import { at } from "../community/format";
@@ -15,8 +13,11 @@ import { handleProblem, suggestHandle } from "../community/handle";
 import { HandleField } from "../community/HandleField";
 import { emailHint } from "./emailHint";
 import { asksForEmailCode, emailCodeReady, signUpWithProfile } from "./signUpFlow";
-import { deviceNoun, isAndroid } from "../../platform/device";
+import { deviceNoun } from "../../platform/device";
 import { InfoTip } from "../ui/InfoTip";
+import { SegmentedTabs, panelId, tabId } from "../ui/SegmentedTabs";
+import { PasswordInput } from "./PasswordInput";
+import { FieldError, fieldClass, linkClass, primaryClass, useKeepInView } from "./formParts";
 
 export type AccountFormMode = "signin" | "signup" | "reset";
 
@@ -24,29 +25,53 @@ type Props = {
   initialMode?: AccountFormMode;
   /** After a sign-in, sign-up or reset: a line for a toast. */
   onDone: (message: string) => void;
-  /** Under the heading when signing in or up; the default says it is optional. */
-  intro?: ReactNode;
-  /** Say "Create your account" rather than "Create an account" (first run). */
-  welcoming?: boolean;
+  /** Room on the right of the top line for a dialog's close button. */
+  besideClose?: boolean;
 };
 
-const fieldClass = "inset-field mt-1 w-full px-3 py-2 text-xs text-on-surface";
-const labelClass = "mt-3 block text-[10px] uppercase tracking-[0.2em] text-on-surface-variant";
+/** What an account is for, behind the (i) by the switch: the form itself says nothing about it. */
+export const ACCOUNT_WHY =
+  "Optional: everything works without one. An account keeps your reading in step across your devices and puts you on the weekly leaderboard.";
+
+const MIN_PASSWORD = 8;
+const looksLikeEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+/** A server's complaint about the address goes under the email; any other under the password. */
+const aboutEmail = (message: string) => /email|address/i.test(message) && !/password is/i.test(message);
+/**
+ * Which field a failed call's message is shown under. With an emailed code on the form (a reset), a complaint about
+ * the code is the code's ("That code is wrong or has expired" was shown under the new password, 2026-10-20).
+ */
+export const errorField = (message: string, withCode = false): "email" | "password" | "code" =>
+  withCode && /\bcode\b/i.test(message) ? "code" : aboutEmail(message) ? "email" : "password";
+
+const title = "font-headline text-lg font-bold text-on-surface";
+const note = "mt-1 text-xs text-on-surface-variant";
+
+/** "Code sent to x. Not there? Check Spam." (the mail is often taken for spam: the owner asked for it said, 2026-10-14). */
+const CodeSent = ({ email, extra }: { email: string | undefined; extra?: string }) => (
+  <p className={note}>
+    Code sent to <span className="break-all font-semibold text-on-surface">{email}</span>. Not there? Check{" "}
+    <span className="font-semibold text-on-surface">Spam</span>.{extra && <InfoTip text={extra} className="ml-1 align-[-2px]" />}
+  </p>
+);
 
 /**
  * Signing in, creating an account, and a forgotten password, in one form.
- * Used by Settings → Account, the first-run account step and the profile menu,
- * so the three can never drift apart.
+ * Used by Settings → Account and the account dialog (the first-run offer, the
+ * profile menu, Social's "Sign in"), so they can never drift apart.
  *
- * A new account's profile is shared with other readers unless the switch on
- * the form is turned off: the form asks for a handle, says what becomes
- * visible, and saves the profile straight after the account (`signUpFlow.ts`).
+ * The switch between signing in and creating an account is the form's top
+ * line, so it is in sight before anything else (it was under the whole
+ * sign-up form, below the fold of a phone's sheet: the owner, 1.5.9).
  *
- * Where the server confirms addresses, one step follows a sign-up: the code
- * it emailed, or "Later" (Settings → Account keeps a row for it). The account
- * works either way. Signing in never asks.
+ * Creating an account asks for an email and a password, which is all the
+ * server needs. Then, in a build with the community, one short step: a handle,
+ * to share the profile (the default the button offers), or "Not now", which
+ * leaves it private (`signUpFlow.ts`). Where the server confirms addresses,
+ * the emailed code is asked for once after that, or "Later" (Settings →
+ * Account keeps a row for it). Signing in never asks.
  */
-export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming = false }: Props) => {
+export const AccountForm = ({ initialMode = "signin", onDone, besideClose = false }: Props) => {
   const createAccount = useAccountStore((state) => state.createAccount);
   const adopt = useAccountStore((state) => state.adopt);
   const setMe = useCommunityStore((state) => state.setMe);
@@ -60,17 +85,11 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
   const [code, setCode] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  // Preselected at random, so a reader who skips past it still gets a Pip of their own.
-  const [avatar, setAvatar] = useState(() => randomAvatar().id);
-  // The handle starts as a suggestion and follows the name and email until
-  // the reader types one of their own.
+  // Preselected at random, so every new reader has a Pip of their own; changed any time on their profile.
+  const [avatar] = useState(() => randomAvatar().id);
+  // The handle starts as a suggestion from the email until the reader types one of their own.
   const [typedHandle, setTypedHandle] = useState<string | null>(null);
-  // On unless the reader turns it off. (A build without the community has
-  // nothing to share a profile with, so there it is off and not shown.)
-  const [share, setShare] = useState(FEATURES.community);
-  // The account exists and this device is signed in, but its profile is not
-  // shared yet (the handle was taken, the connection dropped): one step left.
+  // The account exists and this device is signed in; its profile is not shared yet: the handle step.
   const [created, setCreated] = useState<AccountStatus | null>(null);
   const createdRef = useRef<AccountStatus | null>(null);
   // The account and its profile are settled, and the address is not yet
@@ -83,12 +102,25 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
   // it does not come and go with every letter.
   const [hint, setHint] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Each error under the field it is about.
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const handleId = useId();
-  const handleNoteId = useId();
-  const shareNoteId = useId();
   // Ties each label to its field (the form can be on a page and in a dialog at once).
   const fieldId = useId();
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const submitRef = useRef<HTMLButtonElement | null>(null);
+  useKeepInView(rootRef, submitRef);
+  // A step that follows another (the handle, the emailed code): the key pressed went with the step it was on, and the
+  // focus with it, to the page (a keyboard's next Tab, a screen reader, started from the top of the app). It is put
+  // on the new step's heading, which says what is asked now, without raising a phone's keyboard.
+  const stepRef = useRef<HTMLHeadingElement | null>(null);
+  const step = confirming ? "confirm" : created ? "handle" : mode === "reset" && codeSent ? "reset-code" : null;
+  useEffect(() => {
+    if (!step || typeof document === "undefined") return;
+    const active = document.activeElement;
+    if (!active || active === document.body || !document.body.contains(active) || rootRef.current?.contains(active)) stepRef.current?.focus();
+  }, [step]);
 
   // Closed half-way (the dialog's X, another page): the account is real and
   // signed in, so the app is told, with a profile that stayed private.
@@ -104,10 +136,24 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
     [adopt, setMe]
   );
 
-  const handle = typedHandle ?? (share ? suggestHandle(displayName, email) : "");
-  // Needed to share; optional (but still a real handle, if given) otherwise.
+  const clearErrors = () => {
+    setError(null);
+    setEmailError(null);
+    setPasswordError(null);
+  };
+  /** A failed call's message, under the field it is about. */
+  const fail = (cause: unknown, withCode = false) => {
+    const message = errorMessage(cause);
+    // (On the reset's second form the line under the code is the email's: the address is not asked again there.)
+    if (errorField(message, withCode) === "password") {
+      setPasswordError(message);
+    } else {
+      setEmailError(message);
+    }
+  };
+
+  const handle = typedHandle ?? suggestHandle("", email);
   const handleFault = handle ? handleProblem(handle) : null;
-  const handleReady = handle ? handleFault === null : !share;
 
   /** The sign-up is over: say who is signed in, and close. */
   const finish = (status: AccountStatus, profile: SocialProfile | null, message: string) => {
@@ -141,77 +187,49 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
     setPassword("");
     setCode("");
     setResent(false);
-    setError(null);
+    clearErrors();
     setConfirming({ status, profile, message });
   };
 
-  const sharedMessage = (shared: string | null) => `Account created. You're signed in, and your profile is shared as ${at(shared)}.`;
-
   const submitSignUp = () => {
     setBusy(true);
-    setError(null);
+    clearErrors();
+    // The account alone: a handle (and sharing) is the next step's, where there is a community.
     signUpWithProfile(
       { create: createAccount, saveProfile: (update) => socialService.saveProfile(update) },
-      { email: email.trim(), password, name: displayName, avatar, handle, share }
+      { email: email.trim(), password, name: "", avatar, handle: "", share: false }
     )
       .then((outcome) => {
-        if (outcome.kind === "created") {
+        setPassword("");
+        if (FEATURES.community) {
           createdRef.current = outcome.status;
+          setTypedHandle(null);
           setCreated(outcome.status);
-          setTypedHandle(handle);
-          setPassword("");
-          setError(outcome.reason);
           return;
         }
-        conclude(
-          outcome.status,
-          outcome.profile,
-          outcome.shared
-            ? sharedMessage(outcome.profile?.handle ?? handle)
-            : `Account created. You are signed in. Your profile is private.${outcome.note ? ` ${outcome.note}` : ""}`
-        );
+        conclude(outcome.status, null, "Account created. You're signed in.");
       })
-      .catch((cause) => setError(errorMessage(cause)))
+      .catch(fail)
       .finally(() => setBusy(false));
   };
 
-  /** The step left over: share the profile of the account just created. */
+  /** The handle step: share the profile of the account just created. */
   const shareCreated = () => {
     if (!created) {
       return;
     }
     setBusy(true);
-    setError(null);
+    clearErrors();
     socialService
-      .saveProfile({ handle, displayName: displayName.trim(), visibility: "public" })
-      .then((profile) => conclude(created, profile, sharedMessage(profile.handle ?? handle)))
+      .saveProfile({ handle, displayName: "", visibility: "public" })
+      .then((profile) => conclude(created, profile, `Account created. Your profile is shared as ${at(profile.handle ?? handle)}.`))
       .catch((cause) => setError(errorMessage(cause)))
       .finally(() => setBusy(false));
   };
 
-  const handleField = (
-    <>
-      <label htmlFor={handleId} className={labelClass}>
-        Handle{share || created ? "" : " (optional)"}
-      </label>
-      <HandleField
-        id={handleId}
-        value={handle}
-        onChange={setTypedHandle}
-        describedBy={handleNoteId}
-        invalid={Boolean(handleFault)}
-        disabled={busy}
-        className="text-xs"
-      />
-      <p id={handleNoteId} className="mt-1 text-[11px] text-on-surface-variant">
-        {handleFault ?? (handle ? `Other readers find you as ${at(handle)}.` : COPY.handleHint)}
-      </p>
-    </>
-  );
-
-  const attempt = (action: () => Promise<void>, done: string) => {
+  const attempt = (action: () => Promise<void>, done: string, withCode = false) => {
     setBusy(true);
-    setError(null);
+    clearErrors();
     action()
       .then(() => {
         setPassword("");
@@ -220,20 +238,43 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
         setMode("signin");
         onDone(done);
       })
-      .catch((cause) => setError(errorMessage(cause)))
+      .catch((cause) => fail(cause, withCode))
       .finally(() => setBusy(false));
   };
 
-  const errorBox = error && (
-    <p className="mt-3 rounded-lg bg-error-container/40 px-3 py-2 text-xs text-on-surface" role="alert">
-      {error}
-    </p>
+  const codeField = (id: string, enterKeyHint: "done" | "next") => (
+    <>
+      <label htmlFor={id} className="sr-only">
+        Code from the email
+      </label>
+      <input
+        id={id}
+        autoComplete="one-time-code"
+        autoCapitalize="characters"
+        autoCorrect="off"
+        enterKeyHint={enterKeyHint}
+        spellCheck={false}
+        placeholder="Code (ABCD-EFGH)"
+        maxLength={12}
+        value={code}
+        onChange={(event) => setCode(event.target.value.toUpperCase())}
+        className={`${fieldClass} mt-3 font-mono tracking-[0.15em]`}
+      />
+    </>
   );
+
+  const submitButton = (label: string, disabled = false) => (
+    <button ref={submitRef} type="submit" className={`${primaryClass} mt-4`} disabled={busy || disabled}>
+      {busy ? "One moment…" : label}
+    </button>
+  );
+
+  let body: ReactNode;
 
   if (confirming) {
     const confirmCode = () => {
       setBusy(true);
-      setError(null);
+      clearErrors();
       accountService
         .confirmEmail(code)
         .then((status) => finish(status, confirming.profile, `${confirming.message} Email confirmed.`))
@@ -242,7 +283,7 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
     };
     const resend = () => {
       setBusy(true);
-      setError(null);
+      clearErrors();
       setResent(false);
       accountService
         .requestEmailCode()
@@ -259,415 +300,370 @@ export const AccountForm = ({ initialMode = "signin", onDone, intro, welcoming =
         .catch((cause) => setError(errorMessage(cause)))
         .finally(() => setBusy(false));
     };
-    return (
-      <div>
-        <p className="font-headline text-2xl font-bold text-on-surface">Confirm your email</p>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (emailCodeReady(code) && !busy) {
-              confirmCode();
-            }
-          }}
-        >
-          <p
-            className="mt-2 text-xs leading-relaxed text-on-surface-variant"
-            title="A password reset can only reach an address that works."
+    body = (
+      <form
+        noValidate
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (emailCodeReady(code) && !busy) {
+            confirmCode();
+          }
+        }}
+      >
+        <h2 ref={stepRef} tabIndex={-1} className={`${title} focus:outline-none`}>
+          Confirm your email
+        </h2>
+        <CodeSent email={confirming.status.account?.email} extra="A password reset can only reach an address that works." />
+        {codeField(`${fieldId}-confirm-code`, "done")}
+        <FieldError>{error}</FieldError>
+        {resent && !error && (
+          <p className={note} role="status">
+            New code sent.
+          </p>
+        )}
+        {submitButton("Confirm", !emailCodeReady(code))}
+        <div className="mt-2 flex items-center justify-between gap-3">
+          <button type="button" className={linkClass} disabled={busy} onClick={resend}>
+            Resend code
+          </button>
+          <button
+            type="button"
+            className={linkClass}
+            disabled={busy}
+            title="Confirm it any time under Settings → Account."
+            onClick={() => finish(confirming.status, confirming.profile, confirming.message)}
           >
-            Enter the code we emailed to{" "}
-            <span className="break-all font-semibold text-on-surface">{confirming.status.account?.email}</span>
-          </p>
-          {/* Said, not left to a tooltip: the mail is often taken for spam (the owner, 2026-10-14). */}
-          <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-surface-container-high/50 px-2.5 py-1.5 text-[11px] leading-snug text-on-surface-variant">
-            <MailWarning size={13} className="mt-px shrink-0 text-primary" aria-hidden />
-            <span>
-              Not in your inbox? Look in <span className="font-semibold text-on-surface">Spam</span> or <span className="font-semibold text-on-surface">Junk</span>: it often lands there. Marking it "not spam" helps the next one arrive.
-            </span>
-          </p>
-          <input
-            aria-label="Code from the email"
-            autoComplete="one-time-code"
-            autoCapitalize="characters"
-            autoCorrect="off"
-            enterKeyHint="done"
-            spellCheck={false}
-            placeholder="ABCD-EFGH"
-            maxLength={12}
-            value={code}
-            onChange={(event) => setCode(event.target.value.toUpperCase())}
-            className={`${fieldClass} font-mono tracking-[0.2em]`}
-          />
-          {errorBox}
-          {resent && !error && (
-            <p className="mt-2 text-[11px] text-on-surface-variant" role="status">
-              New code sent.
-            </p>
-          )}
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <button
-              type="submit"
-              className="tactile-button tactile-button-primary px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={busy || !emailCodeReady(code)}
-            >
-              {busy ? "One moment…" : "Confirm"}
-            </button>
-            <button type="button" className="py-1 text-xs text-on-surface-variant underline" disabled={busy} onClick={resend}>
-              Resend
-            </button>
-            <button
-              type="button"
-              className="py-1 text-xs text-on-surface-variant underline"
-              disabled={busy}
-              title="Confirm it any time under Settings → Account."
-              onClick={() => finish(confirming.status, confirming.profile, confirming.message)}
-            >
-              Later
-            </button>
-          </div>
-        </form>
-      </div>
+            Later
+          </button>
+        </div>
+      </form>
     );
-  }
-
-  if (created) {
-    return (
-      <div>
-        <p className="font-headline text-2xl font-bold text-on-surface">One thing left</p>
-        <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
-          Your account is created and you are signed in. Your profile isn't shared yet, so nobody else can see you.
-        </p>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (handleReady && handle && !busy) {
-              shareCreated();
-            }
-          }}
-        >
-          {errorBox}
-          {handleField}
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <button
-              type="submit"
-              className="tactile-button tactile-button-primary px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={busy || !handle || !handleReady}
-            >
-              {busy ? "One moment…" : "Share my profile"}
-            </button>
-            <button
-              type="button"
-              className="py-1 text-xs text-on-surface-variant underline"
-              disabled={busy}
-              onClick={() => conclude(created, null, `Account created. You are signed in. Your profile is private. ${COPY.shareLater}`)}
-            >
-              Keep it private for now
-            </button>
-          </div>
-        </form>
-      </div>
+  } else if (created) {
+    const handleId = `${fieldId}-handle`;
+    body = (
+      <form
+        noValidate
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (handle && !handleFault && !busy) {
+            shareCreated();
+          }
+        }}
+      >
+        <h2 ref={stepRef} tabIndex={-1} className={`${title} flex items-center gap-1.5 focus:outline-none`}>
+          Pick a handle
+          <InfoTip text={COPY.shareAtSignUp} />
+        </h2>
+        <label htmlFor={handleId} className="sr-only">
+          Handle
+        </label>
+        <HandleField
+          id={handleId}
+          value={handle}
+          onChange={setTypedHandle}
+          invalid={Boolean(handleFault)}
+          disabled={busy}
+          className="text-sm"
+          indent="pl-8"
+          atClassName="left-3.5"
+          wrapperClassName="mt-3"
+        />
+        <FieldError>{handleFault ?? error}</FieldError>
+        {submitButton("Share my profile", !handle || Boolean(handleFault))}
+        <div className="mt-2 flex justify-center">
+          <button
+            type="button"
+            className={linkClass}
+            disabled={busy}
+            title={COPY.privateAtSignUp}
+            onClick={() => conclude(created, null, "Account created. Your profile is private.")}
+          >
+            Not now
+          </button>
+        </div>
+      </form>
     );
-  }
-
-  if (mode === "reset") {
+  } else if (mode === "reset") {
     const leave = () => {
       setMode("signin");
       setCodeSent(null);
       setCode("");
       setPassword("");
-      setError(null);
+      clearErrors();
     };
     const sendCode = () => {
+      if (!looksLikeEmail(email.trim())) {
+        setEmailError(email.trim() ? "That doesn't look like an email address." : "Enter your email.");
+        return;
+      }
       setBusy(true);
-      setError(null);
+      clearErrors();
       requestReset(email.trim())
         .then((minutes) => {
           setCodeSent({ email: email.trim(), minutes });
           setCode("");
         })
-        .catch((cause) => setError(errorMessage(cause)))
+        .catch(fail)
         .finally(() => setBusy(false));
     };
-    const codeReady = code.replace(/[^a-z0-9]/gi, "").length === 8 && password.length >= 8;
-    return (
-      <div>
-        <p className="font-headline text-2xl font-bold text-on-surface">Reset your password</p>
-        {!codeSent ? (
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (email.trim() && !busy) {
-                sendCode();
-              }
-            }}
-          >
-            <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
-              We'll email you a code to set a new password. Your library on this {deviceNoun()} is not affected.
-            </p>
-            <label htmlFor={`${fieldId}-reset-email`} className={labelClass}>Email</label>
-            <input
-              id={`${fieldId}-reset-email`}
-              name="email"
-              type="email"
-              inputMode="email"
-              autoComplete="username"
-              enterKeyHint="send"
-              autoCapitalize="none"
-              spellCheck={false}
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              className={fieldClass}
-            />
-            {errorBox}
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <button
-                type="submit"
-                className="tactile-button tactile-button-primary px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={busy || !email.trim()}
-              >
-                {busy ? "One moment…" : "Email me a code"}
-              </button>
-              <button type="button" className="py-1 text-xs text-on-surface-variant underline" onClick={leave}>
-                Back to sign in
-              </button>
-            </div>
-          </form>
-        ) : (
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (codeReady && !busy) {
-                attempt(() => resetPassword(codeSent.email, code, password), "Password changed. You are signed in.");
-              }
-            }}
-          >
-            <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
-              If <span className="font-semibold text-on-surface">{codeSent.email}</span> has a Leaflet account, a code
-              is on its way. It works for {codeSent.minutes} minutes. Not there after a minute? Look in <span className="font-semibold text-on-surface">Spam</span> or <span className="font-semibold text-on-surface">Junk</span>: it often lands there. (An
-              account can be reset three times a year.)
-            </p>
-            <label htmlFor={`${fieldId}-reset-code`} className={labelClass}>Code from the email</label>
-            <input
-              id={`${fieldId}-reset-code`}
-              autoComplete="one-time-code"
-              autoCapitalize="characters"
-              autoCorrect="off"
-              enterKeyHint="next"
-              spellCheck={false}
-              placeholder="ABCD-EFGH"
-              maxLength={12}
-              value={code}
-              onChange={(event) => setCode(event.target.value.toUpperCase())}
-              className={`${fieldClass} font-mono tracking-[0.2em]`}
-            />
-            <label htmlFor={`${fieldId}-reset-password`} className={labelClass}>New password</label>
-            <input
-              id={`${fieldId}-reset-password`}
-              name="new-password"
-              type="password"
-              enterKeyHint="go"
-              autoComplete="new-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className={fieldClass}
-            />
-            <p className="mt-1 text-[11px] text-on-surface-variant">
-              At least 8 characters. Every device signed in to this account is signed out.
-            </p>
-            {errorBox}
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <button
-                type="submit"
-                className="tactile-button tactile-button-primary px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={busy || !codeReady}
-              >
-                {busy ? "One moment…" : "Set password and sign in"}
-              </button>
-              <button type="button" className="py-1 text-xs text-on-surface-variant underline" disabled={busy} onClick={sendCode}>
-                Send a new code
-              </button>
-              <button type="button" className="py-1 text-xs text-on-surface-variant underline" onClick={leave}>
-                Back to sign in
-              </button>
-            </div>
-          </form>
-        )}
-      </div>
-    );
-  }
-
-  const signingUp = mode === "signup";
-  /** To the reset form, keeping the email already typed. */
-  const forgotPassword = () => {
-    setMode("reset");
-    setCodeSent(null);
-    setPassword("");
-    setError(null);
-  };
-  const canSubmit = email.trim().length > 0 && password.length >= (signingUp ? 8 : 1) && (!signingUp || handleReady);
-  const submit = () => (signingUp ? submitSignUp() : attempt(() => signIn(email.trim(), password), "Signed in."));
-
-  return (
-    <div>
-      <p className="font-headline text-2xl font-bold text-on-surface">
-        {signingUp ? (welcoming ? "Create your account" : "Create an account") : "Sign in"}
-      </p>
-      <div className="mt-2 text-xs leading-relaxed text-on-surface-variant">
-        {intro ?? "Optional. Everything works without one. An account keeps your reading in step across your devices, and lets you join the leaderboard and share your shelf."}
-      </div>
+    body = !codeSent ? (
       <form
+        noValidate
         onSubmit={(event) => {
           event.preventDefault();
-          if (canSubmit && !busy) {
-            submit();
+          if (!busy) {
+            sendCode();
           }
         }}
       >
-        <label htmlFor={`${fieldId}-email`} className={labelClass}>Email</label>
+        <h2 className={`${title} flex items-center gap-1.5`}>
+          Reset password
+          <InfoTip text={`We email you a code to set a new one. Your library on this ${deviceNoun()} is not affected.`} />
+        </h2>
+        <label htmlFor={`${fieldId}-reset-email`} className="sr-only">
+          Email
+        </label>
         <input
-          id={`${fieldId}-email`}
+          id={`${fieldId}-reset-email`}
           name="email"
           type="email"
           inputMode="email"
-          // The email is the account's name: "username" is what a phone's password manager pairs with the password.
           autoComplete="username"
-          enterKeyHint="next"
+          enterKeyHint="send"
           autoCapitalize="none"
           spellCheck={false}
+          placeholder="Email"
+          aria-invalid={Boolean(emailError) || undefined}
           value={email}
           onChange={(event) => {
             setEmail(event.target.value);
-            setHint(null);
+            setEmailError(null);
           }}
-          onBlur={() => setHint(emailHint(email))}
-          className={fieldClass}
+          className={`${fieldClass} mt-3`}
         />
-        {signingUp && hint && (
-          <button
-            type="button"
-            className="mt-1 block text-left text-[11px] text-on-surface-variant hover:text-on-surface"
-            onClick={() => {
-              setEmail(hint);
-              setHint(null);
-            }}
-          >
-            Did you mean <span className="break-all font-semibold underline">{hint}</span>?
-          </button>
-        )}
-        {signingUp && (
-          <>
-            <label htmlFor={`${fieldId}-name`} className={labelClass}>Name (optional)</label>
-            <input
-              id={`${fieldId}-name`}
-              autoComplete="nickname"
-              maxLength={40}
-              value={displayName}
-              onChange={(event) => setDisplayName(event.target.value)}
-              className={fieldClass}
-            />
-            {FEATURES.community && handleField}
-            <p className={`${labelClass} mb-2`}>Your Pip</p>
-            <AvatarPicker value={avatar} onChange={setAvatar} disabled={busy} label="Your Pip" />
-          </>
-        )}
-        <label htmlFor={`${fieldId}-password`} className={labelClass}>Password</label>
-        <input
-          id={`${fieldId}-password`}
-          name="password"
-          type="password"
-          enterKeyHint="go"
-          autoComplete={signingUp ? "new-password" : "current-password"}
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          className={fieldClass}
-        />
-        {signingUp ? (
-          <>
-            <p className="mt-1 text-[11px] text-on-surface-variant">At least 8 characters.</p>
-            {FEATURES.community && (
-            <>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={share}
-              aria-describedby={shareNoteId}
-              className="inset-field mt-4 flex w-full items-center justify-between gap-4 px-3 py-2.5 text-xs text-on-surface disabled:cursor-not-allowed disabled:opacity-60"
-              onClick={() => setShare((on) => !on)}
-              disabled={busy}
-            >
-              <span className="font-semibold">Share my profile</span>
-              <span
-                aria-hidden
-                className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${share ? "bg-primary" : "bg-surface-container-highest"}`}
-              >
-                <span
-                  className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-[left] ${share ? "left-[18px]" : "left-0.5"}`}
-                />
-              </span>
-            </button>
-            <p id={shareNoteId} className="mt-1.5 text-[11px] leading-relaxed text-on-surface-variant">
-              {share ? COPY.shareAtSignUp : COPY.privateAtSignUp}
-            </p>
-            </>
-            )}
-          </>
-        ) : (
-          <div className="mt-1 flex justify-end">
-            <button type="button" className="py-1 text-[11px] font-semibold text-primary hover:underline" onClick={forgotPassword}>
-              Forgot password?
-            </button>
-          </div>
-        )}
-
-        {error && (
-          <div className="mt-3 rounded-lg bg-error-container/40 px-3 py-2 text-xs text-on-surface" role="alert">
-            <p>{error}</p>
-            {/* A failed sign-in is exactly when a reset is wanted. */}
-            {!signingUp && (
-              <button type="button" className="mt-1 font-semibold text-primary underline" onClick={forgotPassword}>
-                Reset your password with an emailed code
-              </button>
-            )}
-          </div>
-        )}
-
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <button
-            type="submit"
-            className="tactile-button tactile-button-primary px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={busy || !canSubmit}
-          >
-            {busy ? "One moment…" : signingUp ? "Create account" : "Sign in"}
-          </button>
-          <button
-            type="button"
-            className="py-1 text-xs text-on-surface-variant underline"
-            onClick={() => {
-              setMode(signingUp ? "signin" : "signup");
-              setError(null);
-            }}
-          >
-            {signingUp ? "I have an account" : "Create an account"}
+        <FieldError>{emailError ?? passwordError}</FieldError>
+        {submitButton("Email me a code")}
+        <div className="mt-2 flex justify-center">
+          <button type="button" className={linkClass} onClick={leave}>
+            Back to sign in
           </button>
         </div>
       </form>
-      {signingUp && (PRIVACY_URL || TERMS_URL) && (
-        <p className="mt-3 text-[11px] leading-relaxed text-on-surface-variant">
-          <InfoTip text="Your reading, highlights and notes are kept with your account." className="mr-1.5 align-[-2px]" />
-          By creating an account you agree to the{" "}
-          {TERMS_URL && (
-            <button type="button" className="underline" onClick={() => void accountService.openLink(TERMS_URL)}>
-              terms
+    ) : (
+      <form
+        noValidate
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (busy) {
+            return;
+          }
+          if (!emailCodeReady(code)) {
+            setEmailError("Enter the 8-character code from the email.");
+            return;
+          }
+          if (password.length < MIN_PASSWORD) {
+            setPasswordError(`Use at least ${MIN_PASSWORD} characters.`);
+            return;
+          }
+          attempt(() => resetPassword(codeSent.email, code, password), "Password changed. You're signed in.", true);
+        }}
+      >
+        <h2 ref={stepRef} tabIndex={-1} className={`${title} focus:outline-none`}>
+          Reset password
+        </h2>
+        <CodeSent
+          email={codeSent.email}
+          extra={`If it has a Leaflet account. The code works for ${codeSent.minutes} minutes; an account can be reset three times a year.`}
+        />
+        {codeField(`${fieldId}-reset-code`, "next")}
+        <FieldError>{emailError}</FieldError>
+        <label htmlFor={`${fieldId}-reset-password`} className="sr-only">
+          New password
+        </label>
+        <span className="mt-2 block">
+          <PasswordInput
+            id={`${fieldId}-reset-password`}
+            name="new-password"
+            enterKeyHint="go"
+            autoComplete="new-password"
+            placeholder={`New password (${MIN_PASSWORD}+ characters)`}
+            aria-invalid={Boolean(passwordError) || undefined}
+            value={password}
+            onChange={(event) => {
+              setPassword(event.target.value);
+              setPasswordError(null);
+            }}
+            className={fieldClass}
+          />
+        </span>
+        <FieldError>{passwordError}</FieldError>
+        {submitButton("Set password")}
+        <div className="mt-2 flex items-center justify-between gap-3">
+          <button type="button" className={linkClass} disabled={busy} onClick={sendCode}>
+            Resend code
+          </button>
+          <button type="button" className={linkClass} onClick={leave}>
+            Back to sign in
+          </button>
+        </div>
+      </form>
+    );
+  } else {
+    const signingUp = mode === "signup";
+    /** To the reset form, keeping the email already typed. */
+    const forgotPassword = () => {
+      setMode("reset");
+      setCodeSent(null);
+      setPassword("");
+      clearErrors();
+    };
+    const submit = () => {
+      const address = email.trim();
+      const emailProblem = !address ? "Enter your email." : looksLikeEmail(address) ? null : "That doesn't look like an email address.";
+      const passwordProblem = !password
+        ? "Enter your password."
+        : signingUp && password.length < MIN_PASSWORD
+          ? `Use at least ${MIN_PASSWORD} characters.`
+          : null;
+      setEmailError(emailProblem);
+      setPasswordError(passwordProblem);
+      setError(null);
+      if (emailProblem || passwordProblem) {
+        return;
+      }
+      if (signingUp) {
+        submitSignUp();
+      } else {
+        attempt(() => signIn(address, password), "Signed in.");
+      }
+    };
+    const prefix = `${fieldId}-switch`;
+    body = (
+      <>
+        <div className={`flex items-center gap-2 ${besideClose ? "pr-9" : ""}`}>
+          <div className="min-w-0 flex-1">
+            <SegmentedTabs<"signin" | "signup">
+              label="Sign in or create an account"
+              idPrefix={prefix}
+              tabs={[
+                { id: "signin", label: "Sign in" },
+                { id: "signup", label: "Create account" }
+              ]}
+              value={signingUp ? "signup" : "signin"}
+              size="md"
+              onChange={(next) => {
+                setMode(next);
+                clearErrors();
+              }}
+              className="account-switch w-full [&>.segmented-tab]:!flex-auto [&>.segmented-tab]:whitespace-nowrap"
+            />
+          </div>
+          <InfoTip text={ACCOUNT_WHY} />
+        </div>
+        <form
+          id={panelId(prefix, signingUp ? "signup" : "signin")}
+          role="tabpanel"
+          aria-labelledby={tabId(prefix, signingUp ? "signup" : "signin")}
+          noValidate
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!busy) {
+              submit();
+            }
+          }}
+        >
+          <label htmlFor={`${fieldId}-email`} className="sr-only">
+            Email
+          </label>
+          <input
+            id={`${fieldId}-email`}
+            name="email"
+            type="email"
+            inputMode="email"
+            // The email is the account's name: "username" is what a phone's password manager pairs with the password.
+            autoComplete="username"
+            enterKeyHint="next"
+            autoCapitalize="none"
+            spellCheck={false}
+            placeholder="Email"
+            aria-invalid={Boolean(emailError) || undefined}
+            aria-describedby={emailError ? `${fieldId}-email-error` : undefined}
+            value={email}
+            onChange={(event) => {
+              setEmail(event.target.value);
+              setHint(null);
+              setEmailError(null);
+            }}
+            onBlur={() => setHint(emailHint(email))}
+            className={`${fieldClass} mt-4`}
+          />
+          <FieldError id={`${fieldId}-email-error`}>{emailError}</FieldError>
+          {signingUp && hint && !emailError && (
+            <button
+              type="button"
+              className="mt-1 block text-left text-xs text-on-surface-variant hover:text-on-surface"
+              onClick={() => {
+                setEmail(hint);
+                setHint(null);
+              }}
+            >
+              Did you mean <span className="break-all font-semibold underline">{hint}</span>?
             </button>
           )}
-          {TERMS_URL && PRIVACY_URL && " and "}
-          {PRIVACY_URL && (
-            <button type="button" className="underline" onClick={() => void accountService.openLink(PRIVACY_URL)}>
-              privacy policy
-            </button>
+          <label htmlFor={`${fieldId}-password`} className="sr-only">
+            Password
+          </label>
+          <span className="mt-2 block">
+            <PasswordInput
+              id={`${fieldId}-password`}
+              name="password"
+              enterKeyHint="go"
+              autoComplete={signingUp ? "new-password" : "current-password"}
+              placeholder={signingUp ? `Password (${MIN_PASSWORD}+ characters)` : "Password"}
+              aria-invalid={Boolean(passwordError) || undefined}
+              aria-describedby={passwordError ? `${fieldId}-password-error` : undefined}
+              value={password}
+              onChange={(event) => {
+                setPassword(event.target.value);
+                setPasswordError(null);
+              }}
+              className={fieldClass}
+            />
+          </span>
+          <div className="flex items-start justify-between gap-3">
+            <FieldError id={`${fieldId}-password-error`}>{passwordError}</FieldError>
+            {!signingUp && (
+              <button type="button" className={`${linkClass} ml-auto shrink-0`} onClick={forgotPassword}>
+                Forgot password?
+              </button>
+            )}
+          </div>
+          {submitButton(signingUp ? "Create account" : "Sign in")}
+          {signingUp && (TERMS_URL || PRIVACY_URL) && (
+            <p className="mt-3 text-center text-[11px] text-on-surface-variant">
+              By continuing you agree to the{" "}
+              {TERMS_URL && (
+                <button type="button" className="underline hover:text-on-surface" onClick={() => void accountService.openLink(TERMS_URL)}>
+                  Terms
+                </button>
+              )}
+              {TERMS_URL && PRIVACY_URL && " and "}
+              {PRIVACY_URL && (
+                <button type="button" className="underline hover:text-on-surface" onClick={() => void accountService.openLink(PRIVACY_URL)}>
+                  Privacy Policy
+                </button>
+              )}
+              .
+            </p>
           )}
-          .
-        </p>
-      )}
+        </form>
+      </>
+    );
+  }
+
+  return (
+    <div ref={rootRef} className="account-form">
+      {body}
     </div>
   );
 };

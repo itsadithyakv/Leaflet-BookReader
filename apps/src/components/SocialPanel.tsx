@@ -7,7 +7,6 @@ import { socialService } from "../services/socialService";
 import { FEATURES } from "../constants/features";
 import { useAccountStore } from "../store/accountStore";
 import { useHabitStore } from "../store/habitStore";
-import { PipSprite } from "./PipSprite";
 import { SectionHeader } from "./ui/SectionHeader";
 import { useCommunityStore } from "./community/communityStore";
 import { COPY } from "./community/copy";
@@ -17,6 +16,7 @@ import { DuelCards } from "./community/DuelCards";
 import { Inbox } from "./community/Inbox";
 import { ReaderSearch } from "./community/ReaderSearch";
 import { ProfileCard } from "./community/ProfileCard";
+import { SignInPrompt } from "./account/SignInPrompt";
 
 /** Where the community sends a reader: to set up an account, dress Pip, or pick a book. */
 export type SocialNavTarget = "settings" | "pip" | "library";
@@ -208,16 +208,7 @@ export const SocialPanel = ({ configured, showToast, nowReading, onReadNow, onNa
           onOpenPip={() => onNavigate("pip")}
         />
       ) : (
-        <section className="paper-surface flex flex-wrap items-center gap-5 rounded-xl p-6">
-          <PipSprite move="welcome" size={64} still />
-          <div className="min-w-0 flex-1">
-            <SectionHeader eyebrow="You" title={COPY.signInTitle} />
-            <p className="mt-2 max-w-prose text-sm leading-6 text-on-surface-variant">{COPY.signInBody}</p>
-          </div>
-          <button type="button" className="tactile-button tactile-button-primary px-4 py-2 text-xs" onClick={() => onNavigate("settings")}>
-            Sign in
-          </button>
-        </section>
+        <SignInPrompt line="Sign in to join the board." onSettings={() => onNavigate("settings")} />
       )}
 
       <Leaderboard

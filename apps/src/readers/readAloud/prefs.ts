@@ -3,13 +3,16 @@
  * and the voice picked for each language.
  */
 import type { SpeechVoice } from "./engine";
+import { rankVoices, type RankOptions } from "./voiceRank";
 
 export const READ_ALOUD_KEY = "leaflet.readAloud";
 
-/** The speeds offered, slowest first. */
-export const RATES = [0.75, 1, 1.25, 1.5, 1.75, 2] as const;
+/** The speeds offered, slowest first: 0.75x, then 0.8x to 2x a tenth at a time. */
+export const RATES: readonly number[] = [0.75, ...Array.from({ length: 13 }, (_, step) => Math.round((0.8 + step * 0.1) * 10) / 10)];
 export const MIN_RATE = RATES[0];
 export const MAX_RATE = RATES[RATES.length - 1];
+/** What the pill's speed button steps through. */
+export const QUICK_RATES: readonly number[] = [0.8, 1, 1.2, 1.5, 1.8, 2];
 
 export type ReadAloudPrefs = {
   rate: number;
@@ -21,10 +24,17 @@ const DEFAULTS: ReadAloudPrefs = { rate: 1, voices: {} };
 
 type Store = Pick<Storage, "getItem" | "setItem">;
 
-const clampRate = (rate: unknown) => {
+/** A speed made one of those offered: the nearest (1.25x, kept from before, is 1.2x). */
+export const snapRate = (rate: unknown) => {
   const value = typeof rate === "number" && Number.isFinite(rate) ? rate : 1;
-  return Math.min(MAX_RATE, Math.max(MIN_RATE, Math.round(value * 100) / 100));
+  let best = RATES[0];
+  for (const step of RATES) {
+    if (Math.abs(step - value) < Math.abs(best - value) - 1e-9) best = step;
+  }
+  return best;
 };
+
+const clampRate = snapRate;
 
 export const loadPrefs = (store: Store | null | undefined): ReadAloudPrefs => {
   try {
@@ -54,29 +64,18 @@ export const savePrefs = (store: Store | null | undefined, prefs: ReadAloudPrefs
 /** The main part of a language tag, lower case: "en-GB" and "en_gb" are "en". */
 export const baseLanguage = (tag: string | null | undefined) => (tag ?? "").trim().toLowerCase().split(/[-_]/)[0] ?? "";
 
-/** The voices for a language ("en" matches "en-US"); all of them when the book's language is not known. */
-export const voicesFor = (voices: readonly SpeechVoice[], lang: string | null | undefined): SpeechVoice[] => {
-  const base = baseLanguage(lang);
-  const matching = base ? voices.filter((voice) => baseLanguage(voice.lang) === base) : [...voices];
-  // The same region first ("en-GB" for a British book), then the engine's own pick, then by name.
-  const region = (lang ?? "").toLowerCase().replace("_", "-");
-  return matching.sort(
-    (a, b) =>
-      Number(b.lang.toLowerCase().replace("_", "-") === region) - Number(a.lang.toLowerCase().replace("_", "-") === region) ||
-      Number(Boolean(b.preferred)) - Number(Boolean(a.preferred)) ||
-      Number(Boolean(a.online)) - Number(Boolean(b.online)) ||
-      a.name.localeCompare(b.name)
-  );
-};
+/** The voices for a language ("en" matches "en-US"), the best sounding first; all of them when the book's language is not known. */
+export const voicesFor = (voices: readonly SpeechVoice[], lang: string | null | undefined, options: RankOptions = {}): SpeechVoice[] =>
+  rankVoices(voices, lang, options);
 
-/** The voice to read a book in: the one picked for its language, if it is still there, or the best match. */
-export const pickVoice = (voices: readonly SpeechVoice[], lang: string | null | undefined, prefs: ReadAloudPrefs): SpeechVoice | null => {
-  const offered = voicesFor(voices, lang);
+/** The voice to read a book in: the one picked for its language, if it is still there (and, offline, needs no network), or the best. */
+export const pickVoice = (voices: readonly SpeechVoice[], lang: string | null | undefined, prefs: ReadAloudPrefs, options: RankOptions = {}): SpeechVoice | null => {
+  const offered = voicesFor(voices, lang, options);
   const chosen = prefs.voices[baseLanguage(lang)];
-  return offered.find((voice) => voice.id === chosen) ?? offered[0] ?? null;
+  return offered.find((voice) => voice.id === chosen && !(options.offline && voice.online)) ?? offered[0] ?? null;
 };
 
-/** The speed after this one, round to the slowest after the fastest. */
-export const nextRate = (rate: number) => RATES.find((step) => step > rate + 0.001) ?? RATES[0];
+/** The pill's next speed, round to the slowest after the fastest. */
+export const nextRate = (rate: number) => QUICK_RATES.find((step) => step > rate + 0.001) ?? QUICK_RATES[0];
 
-export const rateLabel = (rate: number) => `${Number.isInteger(rate) ? rate.toFixed(0) : String(rate)}×`;
+export const rateLabel = (rate: number) => `${Number.isInteger(rate) ? rate.toFixed(0) : String(Math.round(rate * 100) / 100)}×`;

@@ -1,0 +1,79 @@
+/* ---- A series' covers being looked for: blank paper covers ----------------
+   Each stands for a book of the series. A sheen crosses them in little steps
+   while Open Library is asked; a book once looked up is stamped, so the row
+   fills in as the look goes on (SeriesCovers.tsx). */
+
+.cover-ghost {
+  position: relative;
+  overflow: hidden;
+  background: rgb(var(--color-surface-high));
+  border: 1px dashed rgb(var(--color-outline-variant) / 0.7);
+  border-radius: 12px 17px 17px 12px;
+}
+
+.cover-ghost::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 25%,
+    rgb(var(--color-surface-bright) / 0.65) 50%,
+    transparent 75%
+  );
+  transform: translateX(-110%);
+  animation: cover-ghost-sheen 1.6s steps(8, end) infinite;
+  animation-delay: var(--ghost-delay, 0ms);
+}
+
+/* A book looked up: the blank turns to paper with a leaf on its spine. */
+.cover-ghost.is-found {
+  background: rgb(var(--color-primary) / 0.16);
+  border-style: solid;
+  border-color: rgb(var(--color-primary) / 0.45);
+  animation: cover-ghost-stamp 380ms ease-out;
+}
+
+.cover-ghost.is-found::after {
+  animation: none;
+  transform: none;
+  background: none;
+  inset: auto auto 10px 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 1px 6px 1px 6px;
+  background-color: rgb(var(--color-primary));
+}
+
+.cover-ghost-bar {
+  height: 10px;
+  border-radius: 4px;
+  background: rgb(var(--color-surface-high));
+}
+
+@keyframes cover-ghost-sheen {
+  to {
+    transform: translateX(110%);
+  }
+}
+
+@keyframes cover-ghost-stamp {
+  0% {
+    transform: scale(0.9) rotate(-2deg);
+  }
+
+  60% {
+    transform: scale(1.05) rotate(1deg);
+  }
+
+  100% {
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cover-ghost::after,
+  .cover-ghost.is-found {
+    animation: none;
+  }
+}

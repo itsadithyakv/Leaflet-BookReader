@@ -1,4 +1,4 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
+import { Channel, convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
 import type { Book } from "@shared/models/book";
 import { ensureBookPermissions, pickBookFiles } from "../platform";
 import type { BookFormat } from "../constants/bookFormats";
@@ -24,6 +24,9 @@ export type ImportOutcome = { asked: number; books: Book[]; failed: Array<{ name
 
 /** One publisher's covers for some of a series' books (`metadata::editions` in the backend). */
 export type CoverSet = { name: string; covers: Array<{ bookId: string; coverId: number }> };
+
+/** How far a look for a series' covers has got: `done` of its `total` books. */
+export type CoverProgress = { done: number; total: number };
 
 export const bookService = {
   async list(): Promise<Book[]> {
@@ -128,11 +131,22 @@ export const bookService = {
    * The sets of covers a series could wear: each publisher's cover for the
    * books it published, the fullest set first (Open Library's editions).
    */
-  async seriesCoverSets(books: Array<{ bookId: string; title: string; author: string | null }>): Promise<CoverSet[]> {
+  async seriesCoverSets(
+    books: Array<{ bookId: string; title: string; author: string | null }>,
+    onProgress: (progress: CoverProgress) => void = () => undefined
+  ): Promise<CoverSet[]> {
     if (!isTauri()) {
       return [];
     }
-    return invoke<CoverSet[]>("series_cover_sets", { books });
+    const channel = new Channel<CoverProgress>();
+    channel.onmessage = onProgress;
+    return invoke<CoverSet[]>("series_cover_sets", { books, onProgress: channel });
+  },
+  /** Stops a look for a series' covers that is running: nobody is waiting for it any more. */
+  cancelSeriesCoverSets(): void {
+    if (isTauri()) {
+      void invoke("series_cover_sets_cancel").catch(() => undefined);
+    }
   },
   /** One cover on offer, small, as a data URL. */
   async coverPreview(coverId: number): Promise<string> {
@@ -151,6 +165,19 @@ export const bookService = {
       return null;
     }
     return invoke<Book | null>("fetch_cover", { bookId });
+  },
+  /**
+   * The URL of a book's cover at a card's size (240 or 480 px wide), served by
+   * the backend's `cover:` scheme from the thumbnails it keeps (`cover_protocol.rs`).
+   * `v` is the cover's own file name, so a new cover is a new URL. Null outside
+   * the app, or for a book whose cover is not a file here.
+   */
+  coverThumbUrl(book: Pick<Book, "id" | "coverUrl">, width: number): string | null {
+    if (!isTauri() || !book.coverUrl || book.coverUrl.startsWith("http")) {
+      return null;
+    }
+    const name = book.coverUrl.split(/[\\/]/).pop() ?? "";
+    return `${convertFileSrc(book.id, "cover")}?w=${width}&v=${encodeURIComponent(name)}`;
   },
   /** The cover as a data URL; `thumb` asks for the library's small version. */
   async coverData(bookId: string, options: { thumb?: boolean } = {}): Promise<string | null> {

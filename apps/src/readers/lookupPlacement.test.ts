@@ -214,6 +214,28 @@ describe("placing the highlight card", () => {
     expect(short).toEqual({ height: 400 - CARD_GAP - 40, lift: CARD_GAP, shift: 0 });
   });
 
+  it("goes above the words, the keyboard away, when what it holds does not fit under them", () => {
+    // 412 x 915 with the system's bars away: the note just written, 300 px of card in all,
+    // and the highlight at 447 with the bar's top at 698. Under the words it was 211 px
+    // tall and the note was cut in half in its scrolling middle.
+    const after = { ...phone, barTop: 698, ceiling: 8, selection: line(447, 30, 120) };
+    const squeezed = placeNoteCard({ ...after, typing: false });
+    expect(squeezed.height).toBeLessThan(300);
+    const whole = placeNoteCard({ ...after, typing: false, wanted: 300 });
+    expect(whole.height).toBeGreaterThanOrEqual(300);
+    expect(overlaps(cardBox(whole, after), after.selection)).toBe(false);
+    expect(cardBox(whole, after).top).toBeGreaterThanOrEqual(after.ceiling);
+  });
+
+  it("stays under the words when what it holds fits there, or there is no more room above", () => {
+    const after = { ...phone, barTop: 698, ceiling: 8, selection: line(447, 30, 120) };
+    const under = placeNoteCard({ ...after, typing: false });
+    expect(placeNoteCard({ ...after, typing: false, wanted: 200 })).toEqual(under);
+    // Halfway up: less room over the words than under them, though neither holds it all.
+    const high = { ...after, selection: line(300, 30, 120) };
+    expect(placeNoteCard({ ...high, typing: false, wanted: 600 }).lift).toBe(CARD_GAP);
+  });
+
   it("leaves the lookup card's own height as it was", () => {
     expect(placeCard(room).height).toBe(CARD_HEIGHT);
   });

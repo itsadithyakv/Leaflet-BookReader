@@ -401,6 +401,14 @@ body::before {
   color: var(--reader-text);
 }
 
+/* A book being opened: its page's colour already, as under the status bar, not the chrome's
+   (a dark panel under a paper strip). */
+.reader-loading {
+  background: var(--reader-page-bg, var(--reader-shell-bg));
+  background-image: var(--reader-page-texture, none);
+  color: color-mix(in srgb, var(--reader-page-ink, var(--reader-text)) 62%, transparent);
+}
+
 .reader-pill {
   background: var(--reader-pill);
   color: var(--reader-text);
@@ -1947,6 +1955,8 @@ body::before {
 
 .reader-true-white-finish .reader-page-frame,
 .reader-true-black-finish .reader-page-frame {
+  /* Every edge the page's own colour: a grey line down a true black page lit up on an OLED. */
+  border-inline: 0;
   box-shadow: none;
 }
 
@@ -2227,25 +2237,30 @@ body::before {
   box-shadow: inset 0 1px var(--chapter-active-lip, rgba(255, 255, 255, 0.08));
 }
 
+/* The dock places itself; the glass pill in it fades and dims. (A fade or a
+   filter on the dock would make it the pill's backdrop root, and the pill's
+   blur would show nothing until the fade ended: readers/glass.css.) */
 .reader-chapter-dock {
-  opacity: 0.34;
   transform: translateX(-50%) scale(0.84);
   transform-origin: bottom center;
-  filter: saturate(0.75);
-  transition: opacity 0.22s ease, transform 0.22s ease, filter 0.22s ease;
+  transition: transform 0.22s ease;
 }
 
 .reader-chapter-dock:hover,
 .reader-chapter-dock:focus-within {
-  opacity: 0.94;
   transform: translateX(-50%) scale(1);
-  filter: saturate(1);
 }
 
 .reader-chapter-dock > div {
-  background: color-mix(in srgb, var(--reader-panel) 72%, transparent);
-  backdrop-filter: blur(8px);
-  box-shadow: 0 5px 13px rgba(0, 0, 0, 0.16);
+  opacity: 0.34;
+  filter: saturate(0.75);
+  transition: opacity 0.22s ease, filter 0.22s ease;
+}
+
+.reader-chapter-dock:hover > div,
+.reader-chapter-dock:focus-within > div {
+  opacity: 1;
+  filter: none;
 }
 
 .reader-speed-active .reader-container {
@@ -2982,6 +2997,11 @@ body::before {
     0 2px 7px rgba(2, 3, 5, 0.24);
 }
 
+/* Sheets and dialogs, the header, the book being read and the tab bar are
+   liquid glass: styles/glass.css (tokens, the `.glass` utility, where it
+   goes, and the motion in and out). Pip's own pixel-paper surfaces keep
+   their look. */
+
 .paper-surface-raised {
   border: 1px solid rgb(var(--color-outline-variant) / 0.3);
   border-radius: 17px;
@@ -3317,6 +3337,28 @@ body::before {
   display: none;
   overflow: visible;
   pointer-events: none;
+}
+
+/* Pip hidden (a book open, the tab out of sight): her web goes with her. */
+.pip-world[aria-hidden="true"] .pip-web {
+  display: none !important;
+}
+
+/* A book open (or opening): Pip's world, her web and all, is gone in the reader's first frame. `aria-hidden` and
+   PipWorld's loop wait for a render and a frame that a book being laid out holds up (half a second on a phone: the
+   web swung on over the page). Her peek in the reader is not in it (PipReaderPeek). */
+html[data-reading] .pip-world .pip-web {
+  display: none !important;
+}
+
+/* Her body by name, not `.pip-world *`: the body is the one thing in her world that says
+   `visibility: visible` (inline, PipWorld); everything else inherits the hidden. (When this hung on
+   `html:has(.reader-scope)`, the `*` made the browser restyle the whole page each time the library
+   added a row of cards as it scrolled: Chrome keeps one invalidation set for every `:has()` rule, so
+   no `:has()` rule anywhere should end in `*`.) */
+html[data-reading] .pip-world,
+html[data-reading] .pip-world .pip-body {
+  visibility: hidden !important;
 }
 
 .pip-web-edge {
@@ -4151,12 +4193,12 @@ body::before {
   border-radius: 18px;
   padding: 16px;
   text-align: left;
-  box-shadow: var(--shadow-raised);
 }
 
+/* Flat, like the rest of Settings: the one chosen is ringed, not pressed in. */
 .theme-choice[aria-pressed="true"] {
-  border-color: rgb(var(--color-primary) / 0.42);
-  box-shadow: var(--shadow-inset);
+  border-color: rgb(var(--color-primary) / 0.6);
+  box-shadow: inset 0 0 0 1px rgb(var(--color-primary) / 0.6);
 }
 
 .reader-page-frame {
@@ -4221,10 +4263,8 @@ textarea:focus-visible,
   justify-content: space-around;
   gap: 2px;
   padding: 6px 4px calc(6px + env(safe-area-inset-bottom, 0px));
-  /* Near enough opaque that the shelf scrolling under it does not show. It
-     had a backdrop blur too, which at 97% cover changed nothing on screen
-     but had the phone blur the strip under the bar again on every frame of
-     a scroll. */
+  /* Solid where no blur is drawn; glass otherwise (styles/glass.css): the
+     shelf scrolling under it blurs rather than ghosting through. */
   background-color: rgb(var(--color-surface-container) / 0.97);
   border-top: 1px solid rgb(var(--color-outline-variant) / 0.5);
   box-shadow: 0 -6px 20px rgb(0 0 0 / 0.22);
@@ -4286,19 +4326,15 @@ textarea:focus-visible,
 
 /* Content has to clear the fixed bar, or the last row of books sits under it
    and cannot be tapped. */
-@media (max-width: 767px) and (min-height: 521px) {
-  .app-main-scroll {
-    padding-bottom: calc(var(--mobile-nav-height) + 16px);
-  }
+:where(html[data-shape="upright"]) .app-main-scroll {
+  padding-bottom: calc(var(--mobile-nav-height) + 16px);
 }
 
 /* Landscape phone: the header is the thing to shrink, because height is what
    is scarce. The sidebar rail takes over navigation duty here. */
-@media (max-height: 520px) {
-  .app-header {
-    padding-top: 6px;
-    padding-bottom: 6px;
-  }
+:where(html[data-shape="sideways"]) .app-header {
+  padding-top: 6px;
+  padding-bottom: 6px;
 }
 
 /* Keep the header clear of a notch in landscape, where the inset is on the
@@ -4318,14 +4354,68 @@ textarea:focus-visible,
 /* The header follows the scroll, but only where screen height is scarce. A
    desktop window has room to spare and a header that moved would just be
    distracting, so the class does nothing there. */
-@media (max-width: 767px), (max-height: 520px) {
-  .app-header {
-    transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1);
-    will-change: transform;
-  }
+:where(html:is([data-shape="upright"], [data-shape="sideways"])) .app-header {
+  transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
 
-  .app-header-hidden {
-    transform: translateY(-100%);
+:where(html:is([data-shape="upright"], [data-shape="sideways"])) .app-header-hidden {
+  transform: translateY(-100%);
+  box-shadow: none;
+}
+
+/* The header lies over the page rather than above it, and the page scrolls
+   up through its room (`--app-header-h`). Moved out of the way with a
+   transform alone, it used to leave its slot behind: a blank band with the
+   page cut off at its edge. Nothing moves when it comes back.
+   The room is the header's top padding, from the same variables the header
+   uses (the status bar's inset: styles/touch-shell.css), plus its body below
+   that, measured (App.tsx, platform/headerRoom.ts). So when Android sends the
+   real inset after the first paint the room follows at once: measured whole,
+   it kept the inset it was measured with and the header covered the top of
+   the page (the Library's search field) until a change of tab. */
+:where(html:is([data-shape="upright"], [data-shape="sideways"])) .app-shell {
+  position: relative;
+  --app-header-h: calc(var(--app-header-pad-top, 0px) + var(--app-header-body-h, 0px));
+}
+
+:where(html:is([data-shape="upright"], [data-shape="sideways"])) .app-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+
+/* (The class twice: the main's own `py-6 md:py-8` weigh the same, and which came last differed
+   between the dev server and a build; sideways at 768 px and wider, `md:py-8` won and the page
+   began under the header.) */
+:where(html:is([data-shape="upright"], [data-shape="sideways"])) .app-main-scroll.app-main-scroll {
+  padding-top: calc(var(--app-header-h, 0px) + 1.5rem);
+  scroll-padding-top: var(--app-header-h, 0px);
+}
+
+/* The rail's leather goes up under the header; its keys start below it. */
+:where(html:is([data-shape="upright"], [data-shape="sideways"])) .leaflet-sidebar {
+  padding-top: calc(var(--app-header-h, 0px) + 1.25rem);
+}
+
+/* The status bar's strip keeps the header's colour while the header is
+   away, so the page does not scroll on under the clock (0 off Android). */
+:where(html:is([data-shape="upright"], [data-shape="sideways"])) .app-shell::before {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 49;
+  height: var(--inset-top, 0px);
+  background: rgb(var(--color-surface));
+  content: "";
+  pointer-events: none;
+}
+
+@media (min-width: 768px) {
+  :where(html[data-shape="sideways"]) .app-main-scroll.app-main-scroll {
+    padding-top: calc(var(--app-header-h, 0px) + 2rem);
   }
 }
 
@@ -4333,22 +4423,20 @@ textarea:focus-visible,
 
 /* On a phone the floating bar would sit on top of the navigation, so it rides
    above it instead. */
-@media (max-width: 767px) and (min-height: 521px) {
-  .now-reading-dock {
-    bottom: calc(var(--mobile-nav-height) + 10px);
-  }
+:where(html[data-shape="upright"]) .now-reading-dock {
+  bottom: calc(var(--mobile-nav-height) + 10px);
 }
 
 /* The bar floats over the foot of the page, so a page that scrolls leaves
    room under its last row: the bottom book's title and the last setting used
    to end up beneath it. (The Pip tab fills the window and has nothing there.) */
-.app-shell:has(.now-reading-dock) .dock-clear {
+.app-shell[data-dock] .dock-clear {
   /* The bar's 108 px, less the page's own 32 px foot, and 8 px of air. */
   padding-bottom: 84px;
 }
 
 /* Made small it is 50 px tall. */
-.app-shell:has(.now-reading-dock.is-small) .dock-clear {
+.app-shell.app-shell[data-dock="small"] .dock-clear {
   padding-bottom: 40px;
 }
 
@@ -4356,18 +4444,28 @@ textarea:focus-visible,
 
 /* Never wider than the window (a 200-character title in "Removed ...") and
    clear of the bottom bar. In a window too narrow to have room beside the
-   "now reading" bar, it sits above that as well. */
+   "now reading" bar, it sits above that as well.
+   Over everything that floats, Pip included wherever she is (her layer is 35,
+   57 while she is carried or flying, her cards and the reader's peek up to
+   75): "Freed 8 MB." showed behind her standing over it. It is only words, so
+   a tap goes through it to what is under it. */
 .app-toast {
   position: fixed;
   right: 2rem;
   bottom: 2rem;
-  z-index: 50;
+  z-index: 97;
+  pointer-events: none;
   max-width: min(28rem, calc(100vw - 2rem));
   overflow-wrap: anywhere;
 }
 
+/* A book open: under it, as before (the reader has toasts of its own, and Pip waits hidden). */
+html[data-reading] .app-shell .app-toast {
+  z-index: 50;
+}
+
 @media (max-width: 1535px) {
-  .app-shell:has(.now-reading-dock) .app-toast {
+  .app-shell[data-dock] .app-toast {
     bottom: 7.5rem;
   }
 }
@@ -4378,14 +4476,12 @@ textarea:focus-visible,
   }
 }
 
-@media (max-width: 767px) and (min-height: 521px) {
-  .app-toast {
-    bottom: calc(var(--mobile-nav-height) + 0.75rem);
-  }
+:where(html[data-shape="upright"]) .app-toast {
+  bottom: calc(var(--mobile-nav-height) + 0.75rem);
+}
 
-  .app-shell:has(.now-reading-dock) .app-toast {
-    bottom: calc(var(--mobile-nav-height) + 104px);
-  }
+:where(html[data-shape="upright"]) .app-shell[data-dock] .app-toast {
+  bottom: calc(var(--mobile-nav-height) + 104px);
 }
 
 /* --- touch targets ------------------------------------------------------ */
@@ -4443,28 +4539,26 @@ textarea:focus-visible,
 
 /* --- reader ------------------------------------------------------------- */
 
-@media (max-width: 767px), (max-height: 520px) {
-  /* Declared on `.reader-scope`, which is where the reader defines it — an
-     override on `:root` is shadowed by that closer ancestor, and the layout
-     would keep reserving 76px for a 56px bar. */
-  .reader-scope {
-    /* The 76px desktop toolbar is a quarter of a landscape phone's height. */
-    --reader-toolbar-height: 56px;
-  }
+/* Declared on `.reader-scope`, which is where the reader defines it — an
+   override on `:root` is shadowed by that closer ancestor, and the layout
+   would keep reserving 76px for a 56px bar. */
+:where(html:is([data-shape="upright"], [data-shape="sideways"])) .reader-scope {
+  /* The 76px desktop toolbar is a quarter of a landscape phone's height. */
+  --reader-toolbar-height: 56px;
+}
 
-  .reader-toolbar {
-    padding-left: max(0.75rem, env(safe-area-inset-left));
-    padding-right: max(0.75rem, env(safe-area-inset-right));
-    padding-top: 0.35rem;
-    padding-bottom: 0.35rem;
-    /* A fixed height rather than a floor. The page's top padding and the
-       chapter list assume exactly `--reader-toolbar-height`, so a toolbar
-       that grows past it (44px touch targets plus padding plus the border
-       did) hides the first lines of the page behind itself. */
-    height: var(--reader-toolbar-height);
-    min-height: 0;
-    box-sizing: border-box;
-  }
+:where(html:is([data-shape="upright"], [data-shape="sideways"])) .reader-toolbar {
+  padding-left: max(0.75rem, env(safe-area-inset-left));
+  padding-right: max(0.75rem, env(safe-area-inset-right));
+  padding-top: 0.35rem;
+  padding-bottom: 0.35rem;
+  /* A fixed height rather than a floor. The page's top padding and the
+     chapter list assume exactly `--reader-toolbar-height`, so a toolbar
+     that grows past it (44px touch targets plus padding plus the border
+     did) hides the first lines of the page behind itself. */
+  height: var(--reader-toolbar-height);
+  min-height: 0;
+  box-sizing: border-box;
 }
 
 /* The chapter list is a slide-over on a phone rather than a docked column:
@@ -4819,8 +4913,8 @@ button.pip-shop-tile:hover,
 /* A short, narrow window keeps the sidebar (the app's window at its smallest,
    380 x 480): the page takes back its side margins there too, or a floor at
    one pixel a pixel (240 px) does not fit beside the lift. */
-@media (max-width: 767px) and (max-height: 520px) {
-  .pip-house-page {
+@media (max-width: 767px) {
+  :where(html[data-shape="sideways"]) .pip-house-page {
     margin-inline: -12px;
   }
 }
@@ -6574,8 +6668,8 @@ button.pip-shop-tile:hover,
    than the sheet does (1024 x 768: 480 x 240 beside it, 360 x 180 over it),
    and on a short window (520 px or less) the sheet has nowhere to go but over
    the room and the rail (844 x 390 lost 113 px of a 180 px room to it), so
-   there the drawer stands beside the house from 768 px. */
-@media (max-width: 767px), (max-width: 899px) and (min-height: 521px) {
+   there the drawer stands beside the house from 768 px (html[data-shape], platform/shape.ts). */
+@media (max-width: 767px) {
   .pip-house[data-sheet] {
     padding-right: 0;
   }
@@ -6597,6 +6691,28 @@ button.pip-shop-tile:hover,
   }
 }
 
+@media (min-width: 768px) and (max-width: 899px) {
+  :where(html:not([data-shape="sideways"])) .pip-house[data-sheet] {
+    padding-right: 0;
+  }
+
+  :where(html:not([data-shape="sideways"])) .pip-drawer {
+    position: fixed;
+    top: auto;
+    right: max(8px, calc(50% - 380px));
+    bottom: 8px;
+    left: max(86px, calc(50% - 380px));
+    width: auto;
+    /* 44, not 46: at 800 x 600 and 480 x 800 the last 2% was over the room's foot. */
+    max-height: 44dvh;
+  }
+
+  /* Decorating: a low sheet, so the room and its pins stay in view above it. */
+  :where(html:not([data-shape="sideways"])) .pip-drawer[data-size="short"] {
+    max-height: min(34dvh, 300px);
+  }
+}
+
 /* No rail beside the page on a phone: the sheet takes the width. */
 @media (max-width: 767px) {
   .pip-drawer {
@@ -6606,15 +6722,13 @@ button.pip-shop-tile:hover,
 }
 
 /* Above the phone's bottom bar, not under it. */
-@media (max-width: 767px) and (min-height: 521px) {
-  .pip-drawer {
-    bottom: calc(var(--mobile-nav-height) + 8px);
-  }
+:where(html[data-shape="upright"]) .pip-drawer {
+  bottom: calc(var(--mobile-nav-height) + 8px);
 }
 
 /* A short, narrow window has the sidebar, not the bottom bar: beside it. */
-@media (max-width: 767px) and (max-height: 520px) {
-  .pip-drawer {
+@media (max-width: 767px) {
+  :where(html[data-shape="sideways"]) .pip-drawer {
     left: 86px;
   }
 }
@@ -7103,8 +7217,8 @@ button.pip-shop-tile:hover,
   }
 }
 
-@media (max-width: 560px) and (min-height: 521px) {
-  .pip-undo {
+@media (max-width: 560px) {
+  :where(html:not([data-shape="sideways"])) .pip-undo {
     bottom: calc(var(--mobile-nav-height) + 12px);
   }
 }
@@ -9616,8 +9730,14 @@ button.pip-shop-tile:hover,
 }
 
 /* Where it is a sheet (the same windows as above), it rises from the bottom instead. */
-@media (max-width: 767px), (max-width: 899px) and (min-height: 521px) {
+@media (max-width: 767px) {
   .pip-drawer {
+    animation-name: pip-sheet-in;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 899px) {
+  :where(html:not([data-shape="sideways"])) .pip-drawer {
     animation-name: pip-sheet-in;
   }
 }
@@ -9974,7 +10094,7 @@ button.pip-shop-tile:active,
 /* Moving between the app's pages: the new page fades in, briefly. Opacity
    only, and no fill: a transform, or an animation left holding, would make
    every fixed dialog inside the page position and stack against the page. */
-.app-main-scroll > :not(.pip-scroll-layer) {
+.app-main-scroll > :not(.pip-scroll-layer, .scroll-edge) {
   animation: app-page-in 200ms ease-out;
 }
 
@@ -10008,7 +10128,7 @@ button.pip-shop-tile:active,
   .pip-shop,
   .pip-shop-card,
   .pip-shop-detail > *,
-  .app-main-scroll > :not(.pip-scroll-layer) {
+  .app-main-scroll > :not(.pip-scroll-layer, .scroll-edge) {
     animation: none;
   }
 
@@ -10086,8 +10206,8 @@ button.pip-shop-tile:active,
 /* A short window with a drawer open beside the house: the top bar has 400 px
    left, and with the first steps in it took three rows (136 px of a 390 px
    window, and the rail ended 30 px under it). They wait for the drawer. */
-@media (min-width: 768px) and (max-height: 520px) {
-  .pip-house[data-sheet] .pip-resources .pip-goals {
+@media (min-width: 768px) {
+  :where(html[data-shape="sideways"]) .pip-house[data-sheet] .pip-resources .pip-goals {
     display: none;
   }
 }

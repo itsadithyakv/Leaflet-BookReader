@@ -1,10 +1,9 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import { DoorOpen, Gamepad2 } from "lucide-react";
 import { useBaseStore } from "../../../../store/baseStore";
 import { BaseScreen, type CampGarden } from "./BaseScreen";
 import { TipLayer } from "./Tips";
 import { HollowCoach } from "../../onboarding/HollowCoach";
-import { useCoachStore } from "../../onboarding/coachStore";
+import type { HollowNav } from "./HollowMenu";
 
 type HollowPlaceProps = {
   skin: string;
@@ -17,8 +16,10 @@ type HollowPlaceProps = {
   onArcade: () => void;
   /** The garden: its bed lies by the burrow, and this is the way to it. */
   garden?: CampGarden;
-  /** First in the row of chips: the way to the rest of the app, where the tab fills the screen. */
+  /** First in the row of chips: the way to the rest of the app, where the tab fills the screen. (Since 1.5.10: `nav`, in the Hollow's menu.) */
   lead?: ReactNode;
+  /** The rest of the app, in the Hollow's menu, where the tab fills a phone on its side. */
+  nav?: HollowNav;
 };
 
 /**
@@ -32,7 +33,7 @@ type HollowPlaceProps = {
  * corner), the garden through its bed beside it, and the cabinet keeps the
  * games that are games.
  */
-export const HollowPlace = ({ skin, outfit, mood, onInside, onArcade, garden, lead }: HollowPlaceProps) => {
+export const HollowPlace = ({ skin, outfit, mood, onInside, onArcade, garden, lead, nav }: HollowPlaceProps) => {
   const rootRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     void useBaseStore.getState().open();
@@ -50,22 +51,7 @@ export const HollowPlace = ({ skin, outfit, mood, onInside, onArcade, garden, le
           onArcade={onArcade}
           garden={garden}
           lead={lead}
-          corner={
-            <>
-              <button type="button" className="tactile-button flex items-center gap-1.5 px-3 py-1.5 text-xs" title="The cabinet in Pip's attic: three games and the word quiz" onClick={onArcade}>
-                <Gamepad2 size={14} aria-hidden /> Arcade
-              </button>
-              <button
-                type="button"
-                className="pip-house-key tactile-button tactile-button-primary flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold"
-                title="Pip's rooms, her things, and the shop. A tap on the burrow's door goes in too."
-                // Pip walks in ahead, as from a tap on her door (onboarding/useBurrowDoor.ts).
-                onClick={() => useCoachStore.getState().askEnter()}
-              >
-                <DoorOpen size={14} aria-hidden /> Pip's house
-              </button>
-            </>
-          }
+          nav={nav}
         />
       </div>
       <TipLayer rootRef={rootRef} />

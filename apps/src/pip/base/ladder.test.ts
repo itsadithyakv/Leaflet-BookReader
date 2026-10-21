@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { chipLine, groupAt, ladderGroups, ladderOf, levelBrings, stepWhy, tutorialRunning } from "./ladder";
-import { MAX_LEVEL, QUESTS, WELCOMED, newBase, type BaseState, type BuildingId } from "./rules";
+import { MAX_LEVEL, QUESTS, WELCOMED, advanceList, newBase, type BaseState, type BuildingId } from "./rules";
+import { beforeChapters } from "./testing";
 
 const DAY = "2026-10-16";
 /** A camp past its welcome (the basket opened), unless a test says otherwise. */
 const camp = (change: Partial<BaseState> = {}, levels: Partial<Record<BuildingId, number>> = {}): BaseState => {
   const fresh = newBase(1000, DAY);
-  return { ...fresh, welcome: { ...fresh.welcome, given: true, basketOpened: true }, ...change, levels: { ...fresh.levels, ...levels } };
+  return beforeChapters({ ...fresh, welcome: { ...fresh.welcome, given: true, basketOpened: true }, ...change, levels: { ...fresh.levels, ...levels } });
 };
 const quest = (id: string) => QUESTS.find((entry) => entry.id === id)!;
 const at = (id: string) => QUESTS.findIndex((entry) => entry.id === id);
@@ -26,7 +27,7 @@ describe("the ladder's groups", () => {
   });
 
   it("puts the first camp's steps under level 2: the oak, the larder, the basket, the burrow", () => {
-    expect(QUESTS.slice(ladderGroups()[0].from, ladderGroups()[0].end).map((entry) => entry.short)).toEqual(["Tap the oak", "Larder", "Basket", "Burrow 2"]);
+    expect(QUESTS.slice(ladderGroups()[0].from, ladderGroups()[0].end).map((entry) => entry.short)).toEqual(["Tap the oak", "Larder", "Pip's basket", "Burrow 2"]);
     expect(groupAt(at("lookout"))?.to).toBe(3);
     expect(groupAt(QUESTS.length)).toBeNull();
   });
@@ -52,7 +53,7 @@ describe("where the camp is on it", () => {
     expect(ladder.next?.quest.id).toBe("oak");
     expect(ladder.next?.reward).toBe(10);
     expect(ladder.steps.map((step) => step.state)).toEqual(["now", "later", "later", "later"]);
-    expect(chipLine(ladder)).toBe("Burrow 1 · 0/4 · next: Tap the oak");
+    expect(chipLine(ladder)).toBe("Pip's list 0/4 · next: Tap the oak");
   });
 
   it("a camp at level 2 with the hut built: 1 of 5, the lookout next for 15", () => {
@@ -61,42 +62,44 @@ describe("where the camp is on it", () => {
     expect(ladder.group?.to).toBe(3);
     expect(ladder.done).toBe(1);
     expect(ladder.total).toBe(5);
-    expect(chipLine(ladder)).toBe("Burrow 2 · 1/5 · next: Lookout");
+    expect(chipLine(ladder)).toBe("Pip's list 1/5 · next: Lookout");
     expect(ladder.next?.reward).toBe(15);
     // The last step raises the burrow.
     expect(ladder.steps[ladder.steps.length - 1].quest.raise).toBe(3);
   });
 
-  it("counts a step ahead that is already done, and says when the larder has no room for what the next pays", () => {
+  it("counts a step ahead that is already done, and never says the larder is full (1.5.10: it has no brim)", () => {
     const ahead = ladderOf(camp({ quest: at("hut") }, { burrow: 2, store: 1, tower: 1 }), 1000);
     expect(ahead.steps.find((step) => step.quest.id === "lookout")?.state).toBe("done");
     expect(ahead.done).toBe(1);
     const full = ladderOf(camp({ quest: at("hut"), acorns: 150 }, { burrow: 2, store: 1, hut: 1 }), 1000);
-    expect(full.full).toBe(true);
+    expect(full.full).toBe(false);
   });
 
   it("is done at the end of the list", () => {
     const ladder = ladderOf(camp({ quest: QUESTS.length }, { burrow: 5 }), 1000);
     expect(ladder.next).toBeNull();
     expect(ladder.steps).toEqual([]);
-    expect(chipLine(ladder)).toBe("Burrow 5");
+    expect(chipLine(ladder)).toBe("Pip's list: all done");
   });
 });
 
 describe("why a step waits", () => {
-  it("raising the burrow to 2 needs a larder that holds 100", () => {
-    expect(stepWhy(camp({ acorns: 50 }), quest("burrow2"), 1000)).toBe("Needs a larder that holds 100: it holds 60");
+  it("raising the burrow waits for its chapter: it is never bought (1.5.10)", () => {
+    expect(stepWhy(camp({ acorns: 50_000 }), quest("burrow2"), 1000)).toBe("Comes with chapter 3");
   });
 
-  it("says how many acorns are missing, and what is going up", () => {
-    expect(stepWhy(camp({ acorns: 20 }), quest("larder"), 1000)).toBe("5 more acorns");
+  it("says how many acorns are missing (of the whole price, work and all), and what is going up", () => {
+    // The larder: 25 of materials and 3 of work.
+    expect(stepWhy(camp({ acorns: 20 }), quest("larder"), 1000)).toBe("8 more acorns");
     expect(stepWhy(camp({ acorns: 30 }), quest("larder"), 1000)).toBeNull();
+    // (A job still waiting on reading is only ever one kept from before 1.5.8, until the camp is next brought up to now.)
     const building = camp({ acorns: 0, jobs: [{ site: "store", to: 1, from: 1000, needs: 5 }] });
     expect(stepWhy(building, quest("larder"), 1002)).toBe("Going up: 3 more minutes of reading");
   });
 
   it("the fence waits for the burrow, and strongholds are counted", () => {
-    expect(stepWhy(camp({ acorns: 50 }), quest("fence"), 1000)).toBe("Needs the burrow at level 2");
+    expect(stepWhy(camp({ acorns: 50 }), quest("fence"), 1000)).toBe("Comes with chapter 4");
     expect(stepWhy(camp({ camps: 2 }, { burrow: 3 }), quest("strongholds5"), 1000)).toBe("2 of 5 taken");
   });
 
@@ -121,9 +124,9 @@ describe("what a level brings", () => {
     }
   });
 
-  it("level 2 is a bigger clearing, a plot in the yard and a fence; level 3 brings the guardians", () => {
-    expect(levelBrings(2).map((entry) => entry.name)).toEqual(["A bigger clearing", "A plot in the yard", "A fence"]);
-    expect(levelBrings(3).map((entry) => entry.name)).toEqual(["A bigger clearing", "Guardians", "A second plot"]);
+  it("level 2 is a bigger clearing, a fence and the prowlers; level 3 brings the guardians and the yard", () => {
+    expect(levelBrings(2).map((entry) => entry.name)).toEqual(["A bigger clearing", "A fence", "Visitors from the wood"]);
+    expect(levelBrings(3).map((entry) => entry.name)).toEqual(["A bigger clearing", "Guardians", "A plot in the yard"]);
     expect(levelBrings(1)).toEqual([]);
     expect(levelBrings(MAX_LEVEL + 1)).toEqual([]);
   });
@@ -141,5 +144,19 @@ describe("Pip's guided first session", () => {
     expect(tutorialRunning(null)).toBe(false);
     expect(tutorialRunning({ ...camp(), welcome: { tutorial: { step: 2, done: false } } } as BaseState)).toBe(true);
     expect(tutorialRunning({ ...camp(), welcome: { tutorial: { step: 8, done: true } } } as BaseState)).toBe(false);
+  });
+});
+
+describe("the chip after the oak is tapped into a full larder (the emulator, 2026-10-19)", () => {
+  it("names the next thing, Build a larder, not the oak again", () => {
+    // No larder (60 at most), the oak tapped to the brim: 60 of 60, the first step done.
+    const tapped = { ...camp({ acorns: 60, stats: { gathered: 40, raids: 0, stars: 0, nights: 0, wagers: 0 } }), quest: 0 };
+    const moved = advanceList(tapped, "2026-10-19");
+    expect(moved.quest).toBe(1);
+    // The old list pays nothing since 1.5.10 (the chapter's goals do).
+    expect(moved.acorns).toBe(60);
+    const ladder = ladderOf(moved, 1000);
+    expect(ladder.full).toBe(false);
+    expect(chipLine(ladder)).toMatch(/· next: Larder$/);
   });
 });

@@ -5,6 +5,7 @@ import { pixelsPerArtPixel } from "../PixelImage";
 import { UiIcon } from "../../UiIcon";
 import { useTouchInput } from "../../../platform/device";
 import { useBackLayer } from "../../../platform/back";
+import { currentShellShape } from "../../../platform/shape";
 
 /**
  * One of the arcade's games on its screen: the canvas in its old television
@@ -93,7 +94,7 @@ export const GameScreen = ({ game, skin, outfit, best, onFinished, onExit, betwe
     // On a phone on its side 70 % of the height was more than was left under the arcade's name and the score: the set
     // ran off the foot of the screen. There it has what is left, less its frame.
     const tall = () => {
-      if (window.innerHeight > 520) return Math.max(180, window.innerHeight * 0.7);
+      if (currentShellShape() !== "sideways") return Math.max(180, window.innerHeight * 0.7);
       const scroller = wrap.closest<HTMLElement>(".pip-arcade");
       if (!scroller) return Math.max(150, window.innerHeight * 0.6);
       const top = wrap.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;

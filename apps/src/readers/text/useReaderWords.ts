@@ -7,6 +7,7 @@ import { estimateTextDifficulty } from "../paceModel";
 import { firstTextFrom } from "../lineAt";
 import { indexOfPlace, wordPlace, type WordPlace } from "../wordPlace";
 import { settleDelay } from "../scrollQuiet";
+import { dottyAfterReindex } from "../dottyHold";
 import type { Later, WithScroll } from "./scope";
 
 /** The most words indexed at once: the chapters on screen, and a neighbour or two. */
@@ -37,6 +38,16 @@ export const useReaderWords = (reader: WithScroll & WordsLater) => {
   // when the page is laid out afresh (readers/wordPlace.ts).
   const wordSectionIdsRef = useRef<number[]>([]);
   const keptWordPlaceRef = useRef<{ active: WordPlace | null; anchor: WordPlace | null } | null>(null);
+  // Hands-free reading paused or waiting, and the page indexed while the word
+  // being read was not on it (the page half laid out again after a resize or a
+  // new type size): where it was, held until its chapter is back. The guess
+  // made meanwhile (the line 38% down the window) used to become the place,
+  // and reading carried on from a wrong line. Let go of once Dotty is placed
+  // deliberately (a drag, a catch-up, a jump) or reads on (`forgetHeldPlace`).
+  const heldPlaceRef = useRef<{ place: WordPlace; lag: number } | null>(null);
+  const forgetHeldPlace = () => {
+    heldPlaceRef.current = null;
+  };
   const readingPaceScaleRef = useRef({ speed: 1, smart: 1 });
   const activeWordIndexRef = useRef(0);
   const sectionWordDifficultyRef = useRef(1);
@@ -196,6 +207,10 @@ export const useReaderWords = (reader: WithScroll & WordsLater) => {
     // while the word stays where it is.
     const previousActive = activeWordIndexRef.current;
     const previousActiveWord = Math.min(previousActive, previousWordCount - 1);
+    // Smart Read's index is the word to read next; Dotty is beside the one
+    // before it (or, placed by hand, on it). Kept as that through the re-index.
+    const handsFreeBefore = readingModeRef.current;
+    const anchorLag = handsFreeBefore === "smart" && previousAnchor !== null ? previousAnchor - previousActive : 0;
     const activeWordBefore = previousWords[previousActiveWord];
     const anchorWordBefore = previousAnchor !== null ? previousWords[previousAnchor] : undefined;
     // The same two as places in the book (readers/wordPlace.ts), for when the
@@ -411,7 +426,19 @@ export const useReaderWords = (reader: WithScroll & WordsLater) => {
     // on screen. Its old number, kept, named some unrelated word.
     const lost = !sameText && refound < 0 && (previousWordCount > 0 || keptPlace !== null);
     const lastIndex = Math.max(0, words.length - 1);
-    if (keepReadingPosition) {
+    const handsFree = readingModeRef.current !== "standard";
+    const held = handsFree ? heldPlaceRef.current : null;
+    const heldIndex = held ? indexOfPlace(held.place, sectionStarts, sectionIds, words.length) : -1;
+    if (handsFree && lost && !held && keptPlace?.active) {
+      heldPlaceRef.current = { place: keptPlace.active, lag: anchorLag };
+    }
+    let dottyLag = anchorLag;
+    if (heldIndex >= 0 && held) {
+      // The word that was being read is back on the page: reading is there again.
+      heldPlaceRef.current = null;
+      activeWordIndexRef.current = Math.min(heldIndex, lastIndex);
+      dottyLag = held.lag;
+    } else if (keepReadingPosition) {
       // One past the last word means "all of it is read": kept as that.
       activeWordIndexRef.current = Math.min(words.length, activeNow + (previousActive - previousActiveWord));
     } else {
@@ -427,9 +454,16 @@ export const useReaderWords = (reader: WithScroll & WordsLater) => {
                 : activeWordIndexRef.current;
       activeWordIndexRef.current = Math.min(Math.max(0, nextIndex), lastIndex);
     }
-    reader.readerDotAnchorIndexRef.current = Math.min(activeWordIndexRef.current, lastIndex);
+    // In Smart Read Dotty stays beside the word it was on (`dottyAfterReindex`):
+    // set on the word to read next, it stepped a word on with every re-index,
+    // at the end of a line onto the line below. A guess (the place was lost)
+    // or a pin found again puts it on the word itself.
+    const keptDotty = handsFreeBefore === "smart" && (heldIndex >= 0 || keepReadingPosition || (refound >= 0 && anchorNow < 0));
+    reader.readerDotAnchorIndexRef.current = keptDotty
+      ? dottyAfterReindex(activeWordIndexRef.current, dottyLag, words.length)
+      : Math.min(activeWordIndexRef.current, lastIndex);
     if (smartSession) {
-      if (sameText) {
+      if (sameText && heldIndex < 0) {
         // Where the reader and Dotty last agreed moved along with the rest.
         smartSession.anchorIndex = Math.max(0, smartSession.anchorIndex + (activeNow - previousActiveWord));
       } else {
@@ -505,7 +539,7 @@ export const useReaderWords = (reader: WithScroll & WordsLater) => {
   };
 
   return {
-    wordIndexTimerRef, readerWordsRef, wordFramesRef, wordSectionIdsRef, keptWordPlaceRef, readingPaceScaleRef,
+    wordIndexTimerRef, readerWordsRef, wordFramesRef, wordSectionIdsRef, keptWordPlaceRef, forgetHeldPlace, readingPaceScaleRef,
     activeWordIndexRef, sectionWordDifficultyRef, readingWord, setReadingWord, getReaderWordRect, findNearestWordIndex,
     buildReadingWordState, wordIndexMissesView, prepareReaderWords, readerWordsStale, sectionSpan,
     scheduleReaderWordIndex

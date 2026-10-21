@@ -255,6 +255,30 @@ pub(crate) fn ask_for(route: &str, args: &serde_json::Value) -> Result<Ask, Stri
     // The update notice: the newest version and a line about it; no version takes it down.
     "admin_set_notice" => Ask::send(Method::PUT, "/v1/admin/notice", Some(serde_json::json!({ "version": text(args, "version"), "note": text(args, "note") }))),
 
+    // The problem reports readers sent from Settings: open or closed, fifty
+    // at a time (`before` the last one shown); one whole; closed or reopened
+    // with the owner's note (none takes it away); deleted.
+    "admin_problems" => {
+      let status = if text(args, "status").as_deref() == Some("closed") { "closed" } else { "open" };
+      let before = match text(args, "before") {
+        Some(_) => Some(hex(args, "before", "report")?),
+        None => None
+      };
+      Ask::get("/v1/admin/problems").with("status", Some(status.to_string())).with("before", before)
+    }
+    "admin_problem" => Ask::get(format!("/v1/admin/problems/{}", hex(args, "id", "report")?)),
+    "admin_problem_update" => {
+      let status = match text(args, "status").as_deref() {
+        Some(status @ ("open" | "closed")) => status.to_string(),
+        _ => return Err("Close it or reopen it.".to_string())
+      };
+      let body = serde_json::json!({ "status": status, "note": text(args, "note") });
+      Ask::send(Method::POST, format!("/v1/admin/problems/{}", hex(args, "id", "report")?), Some(body))
+    }
+    "admin_problem_delete" => {
+      Ask::send(Method::DELETE, format!("/v1/admin/problems/{}", hex(args, "id", "report")?), None)
+    }
+
     _ => return Err("No such request.".to_string())
   })
 }
@@ -401,6 +425,33 @@ mod tests {
     assert_eq!(notice.body, Some(json!({ "version": "1.4.2", "note": "Fixes." })));
     // Nothing given: the notice comes down.
     assert_eq!(ask("admin_set_notice", json!({})).body, Some(json!({ "version": null, "note": null })));
+  }
+
+  /// The owner's problem reports: a status that is one of two, ids that are
+  /// ids, and a note that is the field's words or nothing.
+  #[test]
+  fn the_owners_problem_reports_ask_for_what_the_server_has() {
+    let open = ask("admin_problems", json!({}));
+    assert_eq!((open.method.clone(), open.path.as_str()), (Method::GET, "/v1/admin/problems"));
+    assert_eq!(open.query, vec![("status", "open".to_string())]);
+    let closed = ask("admin_problems", json!({ "status": "closed", "before": ID.to_uppercase() }));
+    assert_eq!(closed.query, vec![("status", "closed".to_string()), ("before", ID.to_string())]);
+    assert!(ask_for("admin_problems", &json!({ "before": "../x" })).is_err());
+    assert_eq!(ask("admin_problems", json!({ "status": "everything" })).query[0].1, "open");
+
+    assert_eq!(ask("admin_problem", json!({ "id": ID })).path, format!("/v1/admin/problems/{ID}"));
+    assert!(ask_for("admin_problem", &json!({ "id": "nope" })).is_err());
+
+    let close = ask("admin_problem_update", json!({ "id": ID, "status": "closed", "note": " Fixed. " }));
+    assert_eq!(close.method, Method::POST);
+    assert_eq!(close.path, format!("/v1/admin/problems/{ID}"));
+    assert_eq!(close.body, Some(json!({ "status": "closed", "note": "Fixed." })));
+    let reopen = ask("admin_problem_update", json!({ "id": ID, "status": "open", "note": "" }));
+    assert_eq!(reopen.body, Some(json!({ "status": "open", "note": null })));
+    assert!(ask_for("admin_problem_update", &json!({ "id": ID, "status": "gone" })).is_err());
+
+    let gone = ask("admin_problem_delete", json!({ "id": ID }));
+    assert_eq!((gone.method, gone.body), (Method::DELETE, None));
   }
 
   /// The server changes whatever is in the body, so nothing goes that was not given.

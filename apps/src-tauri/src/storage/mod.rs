@@ -20,6 +20,8 @@ pub mod epub;
 pub mod library_copy;
 pub mod mobi;
 pub mod pdf;
+pub mod sweep;
+pub mod thumbs;
 pub mod tidy;
 #[cfg(test)]
 mod library_probe;
@@ -1037,6 +1039,10 @@ pub fn store_cover_bytes(bytes: &[u8], hash: &str) -> Result<PathBuf> {
   if dest.exists() {
     return Ok(dest);
   }
+  // A print-sized cover (some EPUBs carry several megabytes of one) is kept
+  // at a size a screen can use.
+  let fitted = sweep::fit_cover(bytes);
+  let bytes = fitted.as_deref().unwrap_or(bytes);
   // Write via a temp file so an interrupted write cannot leave a truncated
   // cover behind that the `dest.exists()` short-circuit would then trust.
   let staging = dir.join(format!("{}-cover.part", hash));
@@ -1045,6 +1051,8 @@ pub fn store_cover_bytes(bytes: &[u8], hash: &str) -> Result<PathBuf> {
     let _ = fs::remove_file(&staging);
     return Err(error.into());
   }
+  // The library's small copies, made in the background (`thumbs`).
+  thumbs::request(&dir, &dest, hash);
   Ok(dest)
 }
 
@@ -1081,47 +1089,20 @@ fn page_cover_into(dir: &Path, bytes: &[u8], hash: &str) -> Result<PathBuf> {
   Ok(dest)
 }
 
-/// Takes a stand-in away once the book has a real cover, and the thumbnail
-/// made from it, so the next one asked for is made from the real one.
+/// Takes a stand-in away once the book has a real cover, and the thumbnails
+/// made from it, so the next ones asked for are made from the real one.
 pub fn drop_page_cover(hash: &str) {
   if let Ok(dir) = covers_dir() {
     let _ = fs::remove_file(dir.join(format!("{hash}{PAGE_COVER_SUFFIX}")));
-    let _ = fs::remove_file(dir.join(format!("{hash}-thumb.jpg")));
+    thumbs::drop_all(&dir, hash);
   }
 }
 
-/// Widest a library thumbnail is drawn: a grid card is about 180 px wide, so
-/// this covers a 2x display with room to spare.
-const THUMB_WIDTH: u32 = 360;
-
-/// A small JPEG of a book's cover for the library grid, made once and kept
-/// beside the cover. Full covers are often 100 to 300 KB, and the grid used to
-/// load every one of them in full, as base64, for every card.
+/// The library's small cover (240 px wide), made now if need be: for a
+/// caller already off the window's thread. The grid asks for its sizes by
+/// URL instead (`cover_protocol`); see `thumbs`.
 pub fn cover_thumbnail(cover: &Path, hash: &str) -> Result<PathBuf> {
-  thumbnail_into(&covers_dir()?, cover, hash)
-}
-
-fn thumbnail_into(dir: &Path, cover: &Path, hash: &str) -> Result<PathBuf> {
-  let dest = dir.join(format!("{}-thumb.jpg", hash));
-  if dest.exists() {
-    return Ok(dest);
-  }
-  let image = image::load_from_memory(&fs::read(cover)?)?;
-  let small = if image.width() > THUMB_WIDTH {
-    image.thumbnail(THUMB_WIDTH, THUMB_WIDTH * 3)
-  } else {
-    image
-  };
-  let mut bytes = Vec::new();
-  let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 82);
-  small.to_rgb8().write_with_encoder(encoder)?;
-  let staging = dir.join(format!("{}-thumb.part", hash));
-  fs::write(&staging, &bytes)?;
-  if let Err(error) = fs::rename(&staging, &dest) {
-    let _ = fs::remove_file(&staging);
-    return Err(error.into());
-  }
-  Ok(dest)
+  thumbs::get(&covers_dir()?, cover, hash, thumbs::WIDTHS[0])
 }
 
 /// A cover the reader chose for a book (from the series page's sets) is kept
@@ -1144,13 +1125,14 @@ fn chosen_cover_into(dir: &Path, bytes: &[u8], hash: &str, cover_id: i64) -> Res
   fs::create_dir_all(dir)?;
   let dest = dir.join(format!("{hash}{CHOSEN_COVER_MARK}{cover_id}.jpg"));
   let staging = dir.join(format!("{hash}-chosen.part"));
-  fs::write(&staging, bytes)?;
+  let fitted = sweep::fit_cover(bytes);
+  fs::write(&staging, fitted.as_deref().unwrap_or(bytes))?;
   if let Err(error) = fs::rename(&staging, &dest) {
     let _ = fs::remove_file(&staging);
     return Err(error.into());
   }
   drop_chosen_covers(dir, hash, Some(&dest));
-  let _ = fs::remove_file(dir.join(format!("{hash}-thumb.jpg")));
+  thumbs::drop_all(dir, hash);
   Ok(dest)
 }
 
@@ -1176,7 +1158,7 @@ pub fn remove_book_extras(hash: &str, book_path: &Path) {
     drop_chosen_covers(&dir, hash, None);
     let _ = fs::remove_file(dir.join(format!("{}-cover.jpg", hash)));
     let _ = fs::remove_file(dir.join(format!("{hash}{PAGE_COVER_SUFFIX}")));
-    let _ = fs::remove_file(dir.join(format!("{}-thumb.jpg", hash)));
+    thumbs::drop_all(&dir, hash);
   }
   if let Ok(converted) = converted_epub_path(hash) {
     if converted != book_path {
@@ -1269,12 +1251,14 @@ mod tests {
     image::RgbImage::from_pixel(8, 12, image::Rgb([40, 90, 60]))
       .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
       .expect("png");
-    for kept in ["h-cover.jpg", "h-thumb.jpg", "other-chosen-7.jpg", "h-page.jpg"] {
+    for kept in ["h-cover.jpg", "h-thumb.jpg", "h-thumb-240.jpg", "h-thumb-480.jpg", "other-chosen-7.jpg", "h-page.jpg"] {
       fs::write(dir.join(kept), &png).expect("file");
     }
     let first = chosen_cover_into(&dir, &png, "h", 101).expect("first");
     assert!(first.ends_with("h-chosen-101.jpg"));
-    assert!(!dir.join("h-thumb.jpg").exists(), "the thumbnail of the old cover is dropped");
+    for gone in ["h-thumb.jpg", "h-thumb-240.jpg", "h-thumb-480.jpg"] {
+      assert!(!dir.join(gone).exists(), "the thumbnails of the old cover are dropped: {gone}");
+    }
     let second = chosen_cover_into(&dir, &png, "h", 202).expect("second");
     assert!(second.ends_with("h-chosen-202.jpg") && second.exists());
     assert!(!first.exists(), "one chosen cover a book");
@@ -1315,14 +1299,14 @@ mod tests {
     image::RgbImage::from_pixel(1200, 1800, image::Rgb([180, 60, 40]))
       .save(&cover)
       .expect("cover");
-    let thumb = thumbnail_into(&dir, &cover, "h").expect("thumbnail");
+    let thumb = thumbs::get(&dir, &cover, "h", thumbs::WIDTHS[0]).expect("thumbnail");
     let bytes = fs::read(&thumb).expect("read");
     assert_eq!(sniff_image_mime(&bytes), Some("image/jpeg"));
     let small = image::load_from_memory(&bytes).expect("decode");
-    assert_eq!((small.width(), small.height()), (THUMB_WIDTH, THUMB_WIDTH * 3 / 2), "keeps the shape");
+    assert_eq!((small.width(), small.height()), (240, 360), "keeps the shape");
     assert!(bytes.len() < fs::metadata(&cover).expect("meta").len() as usize || bytes.len() < 60_000);
     // Made once: a second call returns the same file untouched.
-    let again = thumbnail_into(&dir, &cover, "h").expect("again");
+    let again = thumbs::get(&dir, &cover, "h", thumbs::WIDTHS[0]).expect("again");
     assert_eq!(again, thumb);
     let _ = fs::remove_dir_all(&dir);
   }

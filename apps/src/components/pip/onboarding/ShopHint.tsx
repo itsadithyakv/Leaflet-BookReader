@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { PipFace } from "../arcade/base/Sprite";
 import { Coach } from "./Coach";
+import { tapKey } from "./tapKey";
 import { whole, type Rect } from "./geometry";
 
 const LOOK_MS = 200;
@@ -50,7 +51,7 @@ export const ShopHint = ({ line, skin, outfit, onDone }: { line: string; skin: s
       avoid={rail ? [whole(rail.getBoundingClientRect())] : []}
       keys={
         <span className="pip-coach-keys">
-          <button type="button" className="pip-say-button pip-say-button-primary" onClick={onDone}>
+          <button type="button" className="pip-say-button pip-say-button-primary" {...tapKey(onDone)}>
             Got it
           </button>
         </span>

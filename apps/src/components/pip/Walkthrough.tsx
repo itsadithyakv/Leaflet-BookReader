@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { PipSay } from "../PipSay";
 import { placeNear, type Rect } from "./layout";
 import { nextStep, type WalkStep, type WalkTarget } from "./walkSteps";
+import { tapKey } from "./onboarding/tapKey";
 import { useBackLayer } from "../../platform/back";
 
 type WalkthroughProps = {
@@ -131,11 +132,11 @@ export const Walkthrough = ({ steps, find, prepare, onClose }: WalkthroughProps)
       />
       <div ref={bubbleRef} className="pip-walk-bubble" style={spot && bubble ? { left: bubble.left, top: bubble.top } : { left: -9999, top: 0 }}>
         <PipSay key={step.target} text={step.line} tail={bubble?.side === "below" ? "up" : "down"} tailAt={bubble?.tailAt ?? 50}>
-          <button ref={nextRef} type="button" className="pip-say-button pip-say-button-primary" onClick={() => goTo(nextStep(index, any, steps))}>
+          <button ref={nextRef} type="button" className="pip-say-button pip-say-button-primary" {...tapKey(() => goTo(nextStep(index, any, steps)))}>
             {last ? "Let's go!" : "Next"}
           </button>
           {!last && (
-            <button type="button" className="pip-say-button pip-say-button-quiet" onClick={close}>
+            <button type="button" className="pip-say-button pip-say-button-quiet" {...tapKey(close)}>
               Skip
             </button>
           )}

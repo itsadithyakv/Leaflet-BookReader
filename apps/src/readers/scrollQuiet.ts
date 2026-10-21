@@ -144,3 +144,22 @@ export const fetchAheadPx = (scrollTop: number, clientHeight: number, screens = 
   const ahead = Math.round(clientHeight * screens);
   return clientHeight > 0 && ahead > 500 && scrollTop > ahead ? ahead : null;
 };
+
+/** Scrolling down in a fling, the next chapter is asked for this many windows ahead of the end of what is loaded. */
+export const MOVING_FETCH_SCREENS = 3;
+/** And asked for no more often than this while the fling lasts (each ask measures every chapter on the page). */
+export const MOVING_FETCH_EVERY_MS = 150;
+
+/**
+ * Whether to ask for the next chapter now, in the middle of a fling. epub.js
+ * looks for one only once the scrolling has paused (30ms without a scroll
+ * event), which a fling never does: on a phone it ran into the end of the
+ * chapter and stopped dead there, then waited while the next was fetched and
+ * laid out. A file of a few lines between (an epigraph, a part's title) made
+ * that twice a chapter. `gapPx` is how much of what is loaded is left below
+ * the window, `sinceLastMs` how long since the last ask. Only chapters below
+ * are fetched then (a chapter put above needs a scroll to keep the text
+ * still, which stops a fling): useBookOpening's watch over epub.js.
+ */
+export const fetchWhileMoving = (gapPx: number, clientHeight: number, sinceLastMs: number, screens = MOVING_FETCH_SCREENS, everyMs = MOVING_FETCH_EVERY_MS) =>
+  clientHeight > 0 && sinceLastMs >= everyMs && gapPx < clientHeight * screens;

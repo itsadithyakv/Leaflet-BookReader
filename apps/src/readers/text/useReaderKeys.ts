@@ -16,7 +16,7 @@ import type { Later, WithSession } from "./scope";
  * The keyboard: which key does what (readers/readerKeys.ts), and what Escape
  * closes first (readers/escapeOrder.ts).
  */
-export const useReaderKeys = (reader: WithSession & Later<"people" | "chromeBackHides" | "hideChrome" | "readAloud">) => {
+export const useReaderKeys = (reader: WithSession & Later<"people" | "readAloud">) => {
   const {
     addBookmarkRef, autoScrollActive, autoScrollActiveRef, autoScrollSpeedRef, autoScrollYieldUntilRef,
     bookmarkPanelOpen, clearSelection, closeNoteRef, closeSearch, contentsOver, contentsPeekRef, exitGuard,
@@ -378,13 +378,11 @@ export const useReaderKeys = (reader: WithSession & Later<"people" | "chromeBack
 
   // Android's Back (platform/back.ts) walks the same order, one thing a
   // press; with nothing left open it leaves the book, through the exit guard
-  // (under focus lock, Pip and her "Hold to leave").
+  // (under focus lock, Pip and her "Hold to leave"). The chrome is not a thing
+  // open: with only the bars up, one press goes back to the library.
   useBackFallback(() => {
     const layer = nearestLayer();
-    if (layer === "exit" && reader.chromeBackHides) {
-      // A phone: the chrome a middle tap brought goes before the book does (hooks/useAutoHideChrome.ts).
-      reader.hideChrome();
-    } else if (layer === "exit") {
+    if (layer === "exit") {
       exitGuard.back();
     } else {
       closeLayer(layer);

@@ -23,3 +23,193 @@
     #eadfc4;
   box-shadow: inset 0 0 0 1px rgba(70, 50, 25, 0.3);
 }
+
+/* ---- Bindings, stickers and wear (shelf/dress.ts) ----
+   All drawn with gradients on a pseudo-element of the cloth, so a spine stays
+   a couple of painted boxes: no filters, no images, nothing that moves. */
+
+.ss-spine .ss-title {
+  position: relative;
+  z-index: 1;
+}
+
+.ss-spine[class*=" b-"] .ss-cloth::before,
+.ss-spine[class*=" w-"] .ss-cloth::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Cloth: striped headbands at head and tail */
+.ss-spine.b-cloth .ss-cloth::before {
+  background:
+    repeating-linear-gradient(90deg, rgba(196, 64, 58, 0.7) 0 2px, rgba(240, 228, 204, 0.7) 2px 4px) top / 100% 2px no-repeat,
+    repeating-linear-gradient(90deg, rgba(196, 64, 58, 0.7) 0 2px, rgba(240, 228, 204, 0.7) 2px 4px) bottom / 100% 2px no-repeat;
+}
+
+/* Leather: raised bands across the tail with a gilt rule between, gilt lettering on dark hide */
+.ss-spine.b-leather .ss-cloth {
+  border-radius: 3px 3px 2px 2px;
+}
+
+.ss-spine.b-leather .ss-cloth::before {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(0, 0, 0, 0.42)) left 0 bottom 13px / 100% 3px no-repeat,
+    linear-gradient(90deg, #9c7628, #f2d688 45%, #b88f34) left 0 bottom 18px / 100% 1px no-repeat,
+    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(0, 0, 0, 0.42)) left 0 bottom 21px / 100% 3px no-repeat,
+    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(0, 0, 0, 0.42)) left 0 top 2px / 100% 3px no-repeat;
+}
+
+.ss-spine.b-leather .ss-title {
+  max-height: calc(var(--h) - 46px);
+  font-family: Georgia, "Times New Roman", serif;
+  letter-spacing: 0.06em;
+}
+
+/* Paperback: flatter, glossy, with the creases of a spine that has been opened */
+.ss-spine.b-paperback .ss-cloth {
+  border-radius: 1px;
+}
+
+.ss-spine.b-paperback .ss-cloth::before {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.16), transparent 34%),
+    linear-gradient(0deg, transparent 0 30%, rgba(255, 255, 255, 0.26) 30% calc(30% + 1px), transparent calc(30% + 1px)),
+    linear-gradient(0deg, transparent 0 58%, rgba(255, 255, 255, 0.18) 58% calc(58% + 1px), transparent calc(58% + 1px));
+}
+
+.ss-spine.b-paperback .ss-title {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 8.5px;
+}
+
+/* Library binding: a call-number label at the tail, which carries the day */
+.ss-spine.b-library .ss-cloth::before {
+  background: linear-gradient(#f2e9d4, #e6dbc0) center bottom 3px / calc(100% - 6px) 12px no-repeat;
+}
+
+.ss-spine.b-library .ss-day {
+  bottom: 5.5px;
+  color: #2a2016;
+  opacity: 0.85;
+}
+
+.ss-spine.b-library .ss-title {
+  max-height: calc(var(--h) - 40px);
+}
+
+/* Clothbound with a paper title label */
+.ss-spine.b-label .ss-title {
+  padding: 4px 1.5px;
+  border-radius: 1px;
+  background: #efe5cc;
+  color: #2a2016;
+  box-shadow: inset 0 0 0 1px rgba(42, 32, 22, 0.2);
+}
+
+/* A sticker: low on the spine, with room kept for it under the title */
+.ss-spine.has-sticker .ss-title {
+  max-height: calc(var(--h) - 50px);
+}
+
+.ss-spine.b-leather.has-sticker .ss-title,
+.ss-spine.b-library.has-sticker .ss-title {
+  max-height: calc(var(--h) - 64px);
+}
+
+.ss-sticker {
+  position: absolute;
+  left: 50%;
+  bottom: 6px;
+  z-index: 1;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+}
+
+.ss-spine.is-tall .ss-sticker {
+  bottom: 15px;
+}
+
+.ss-spine.b-leather .ss-sticker {
+  bottom: 27px;
+}
+
+.ss-spine.b-library .ss-sticker {
+  bottom: 19px;
+}
+
+/* Longest of the week: a die-cut gold star */
+.ss-sticker.is-star {
+  background: #fbf3dc;
+  clip-path: polygon(50% 0, 63% 35%, 100% 38%, 71% 60%, 81% 97%, 50% 76%, 19% 97%, 29% 60%, 0 38%, 37% 35%);
+  transform: rotate(-8deg);
+}
+
+.ss-sticker.is-star::after {
+  content: "";
+  position: absolute;
+  inset: 1.6px;
+  background: linear-gradient(160deg, #f8dc7c, #d29a24);
+  clip-path: inherit;
+}
+
+/* Late night: a round moon sticker */
+.ss-sticker.is-moon {
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 64% 38%, #27335c 0 2.7px, transparent 3px),
+    radial-gradient(circle at 50% 50%, #f3dc8a 0 3.1px, transparent 3.4px),
+    #27335c;
+  box-shadow: 0 0 0 1px #fbf3dc;
+}
+
+/* Early morning: the ring a coffee cup left, half off the spine's edge */
+.ss-sticker.is-cup {
+  left: 0;
+  width: 16px;
+  height: 16px;
+  margin-left: -5px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(150, 96, 40, 0.1) 0 52%,
+    rgba(226, 182, 116, 0.55) 57%,
+    rgba(120, 72, 26, 0.7) 63%,
+    rgba(120, 72, 26, 0.25) 68%,
+    transparent 73%
+  );
+}
+
+/* Wear, on spines a few weeks old */
+.ss-spine.w-dogear .ss-cloth {
+  clip-path: polygon(0 0, calc(100% - 5px) 0, 100% 5px, 100% 100%, 0 100%);
+}
+
+.ss-spine.w-dogear .ss-cloth::after {
+  background: linear-gradient(225deg, transparent 0 3.5px, rgba(255, 246, 226, 0.4) 3.5px 5px, transparent 5px) top right / 7px 7px no-repeat;
+}
+
+.ss-spine.w-watermark .ss-cloth::after {
+  background: radial-gradient(ellipse 80% 9% at 40% 66%, transparent 62%, rgba(255, 248, 232, 0.16) 76%, transparent 90%);
+}
+
+.ss-spine.w-scuff .ss-cloth::after {
+  background:
+    radial-gradient(circle at 100% 100%, rgba(255, 248, 232, 0.3), transparent 6px),
+    radial-gradient(circle at 0 0, rgba(255, 248, 232, 0.2), transparent 5px);
+}
+
+.ss-spine.w-faded .ss-cloth::after {
+  background: linear-gradient(180deg, rgba(255, 244, 222, 0.2), rgba(255, 244, 222, 0.08) 55%, transparent 85%);
+}
+
+.ss-key.ss-key-sticker {
+  width: 10px;
+  height: 10px;
+  background: linear-gradient(160deg, #f8dc7c, #d29a24);
+  clip-path: polygon(50% 0, 63% 35%, 100% 38%, 71% 60%, 81% 97%, 50% 76%, 19% 97%, 29% 60%, 0 38%, 37% 35%);
+}

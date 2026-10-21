@@ -3,7 +3,6 @@ import {
   FIRST_READ_MINUTES,
   FIRST_READ_PARCEL,
   PARCELS_MOST,
-  QUESTS,
   TROPHY_MINUTES,
   WELCOMED,
   WELCOME_BASKET,
@@ -13,9 +12,9 @@ import {
   campNews,
   campWaits,
   gather,
-  holds,
   newBase,
   oakReady,
+  priceOf,
   openParcel,
   prowlersCome,
   raise,
@@ -28,6 +27,7 @@ import {
   type Site
 } from "./rules";
 import { tipNow } from "./tips";
+import { GOALS, chestOf } from "./chapters";
 import { finishTutorial, giveWelcome, openWelcomeBasket, pawFinish, setTutorialStep, tutorialOn } from "./welcome";
 
 // Autumn, and a week's streak: the oak gives more of what is read in both, and the gift must not.
@@ -40,8 +40,8 @@ const act = (state: BaseState, change: (base: BaseState, now: Now) => BaseState,
   const now = nowAt(minutes);
   return advanceList(change(settle(state, now), now), now.day);
 };
-/** The list's rewards paid between two camps. */
-const listPaid = (before: BaseState, after: BaseState) => QUESTS.slice(before.quest, after.quest).reduce((sum, quest) => sum + quest.reward, 0);
+/** The chapter goals' rewards paid between two camps (since 1.5.10 the old list pays nothing). */
+const goalsPaid = (before: BaseState, after: BaseState) => GOALS.filter((goal) => after.goals.includes(goal.id) && !before.goals.includes(goal.id)).reduce((sum, goal) => sum + goal.reward, 0);
 
 /** A reader with five hours of reading behind them and no camp yet: the camp is made, opened, and welcomed. */
 const welcomed = () => act(settle(newBase(READ, DAY), nowAt()), (base, now) => giveWelcome(base, now.minutes));
@@ -50,47 +50,44 @@ const welcomed = () => act(settle(newBase(READ, DAY), nowAt()), (base, now) => g
 const walk = () => {
   const start = welcomed();
   const shaken = act(start, (base, now) => gather(base, now.minutes, now.streak, now.day));
-  const larder = act(shaken, (base, now) => settle(pawFinish(base, "store", now.minutes), now));
+  // (Each build stands as soon as it is paid for since 1.5.8: the paws that used to finish these two have nothing to do.)
+  const larder = act(shaken, (base, now) => build(base, "store", now.minutes, undefined, undefined, now.day));
   const basket = act(larder, (base, now) => openWelcomeBasket(base, now.day));
-  const burrow = act(basket, (base, now) => settle(pawFinish(base, "burrow", now.minutes), now));
-  return { start, shaken, larder, basket, burrow };
+  // (The burrow is not built since 1.5.10: five hours read is chapter 3, and the burrow is at level 2 already.)
+  return { start, shaken, larder, basket, burrow: basket };
 };
 
 describe("Pip's welcome basket: the walk through", () => {
-  it("holds the proposal's figures: 20, 50 of 60, 35 of 150, 115, 15 (before the list pays for the burrow)", () => {
-    const { start, shaken, larder, basket, burrow } = walk();
-    expect([start.acorns, holds(start)]).toEqual([20, 60]);
+  it("holds the walk's figures at 1.5.10: the chapters' chests, 20 shaken, the larder, the basket, and the goals' acorns", () => {
+    const { start, shaken, larder, basket } = walk();
+    // Five hours read before the camp was made: chapter 3, with the chests of chapters 2 and 3, and the burrow at 2.
+    expect(start.levels.burrow).toBe(2);
+    expect(start.acorns).toBe(20 + chestOf(2) + chestOf(3));
     expect(oakReady(start, READ)).toBe(WELCOME_WINDFALL);
 
-    expect(shaken.acorns - start.acorns - listPaid(start, shaken)).toBe(WELCOME_WINDFALL);
-    expect(listPaid(start, shaken)).toBe(10);
-    expect([shaken.acorns, holds(shaken)]).toEqual([50, 60]);
+    expect(shaken.acorns - start.acorns - goalsPaid(start, shaken)).toBe(WELCOME_WINDFALL);
+    expect(goalsPaid(start, shaken)).toBe(10);
     expect(oakReady(shaken, READ)).toBe(0);
 
     expect(larder.levels.store).toBe(1);
-    expect(listPaid(shaken, larder)).toBe(10);
-    expect([larder.acorns, holds(larder)]).toEqual([35, 150]);
+    expect(goalsPaid(shaken, larder)).toBe(10);
+    expect(priceOf(shaken, "store", 1)).toBe(28);
 
-    expect(basket.acorns - larder.acorns - listPaid(larder, basket)).toBe(WELCOME_BASKET);
-    expect(basket.acorns).toBe(115);
-
-    expect(burrow.levels.burrow).toBe(2);
-    expect(burrow.acorns - listPaid(basket, burrow)).toBe(15);
-    expect(burrow.welcome.paws).toBe(0);
+    expect(basket.acorns - larder.acorns - goalsPaid(larder, basket)).toBe(WELCOME_BASKET);
+    // No paw was given (1.5.10), and none was wanted.
+    expect(basket.welcome.paws).toBe(0);
   });
 
-  it("loses nothing to a full larder anywhere on the way", () => {
-    const steps = Object.values(walk());
-    for (const step of steps) expect(step.acorns).toBeLessThanOrEqual(holds(step));
-    const { start, burrow } = walk();
-    // Everything given or paid came in: the gift, the list, less what was spent on the larder and the burrow.
-    expect(burrow.acorns).toBe(start.acorns + WELCOME_WINDFALL + WELCOME_BASKET + listPaid(start, burrow) - 25 - 100);
+  it("loses nothing anywhere on the way", () => {
+    const { start, basket } = walk();
+    // Everything given or paid came in: the gift, the goals, less what was spent on the larder.
+    expect(basket.acorns).toBe(start.acorns + WELCOME_WINDFALL + WELCOME_BASKET + goalsPaid(start, basket) - 28);
   });
 
-  it("keeps the basket until the larder has room for the whole of it", () => {
+  it("opens the basket whenever it is opened: there is always room for it", () => {
     const { shaken } = walk();
-    expect(openWelcomeBasket(shaken, DAY)).toBe(shaken);
-    expect(campWaits(shaken, nowAt())).toBe(false);
+    expect(openWelcomeBasket(shaken, DAY).acorns).toBe(shaken.acorns + WELCOME_BASKET);
+    expect(campWaits(shaken, nowAt())).toBe(true);
   });
 
   it("opens the basket once, and gives the welcome once", () => {
@@ -100,13 +97,14 @@ describe("Pip's welcome basket: the walk through", () => {
     expect(giveWelcome(basket, READ)).toBe(basket);
   });
 
-  it("has two paws and no more: the third build waits for reading", () => {
+  it("has paws with nothing to do: a paw only finishes what was going up, and nothing goes up any more", () => {
     const { burrow } = walk();
     const hut = act(burrow, (base, now) => pawFinish(base, "hut", now.minutes));
     expect(hut).toBe(advanceList(settle(burrow, nowAt()), DAY));
-    const built = act(burrow, (base, now) => build(base, "hut", now.minutes));
-    expect(built.levels.hut).toBe(0);
-    expect(built.jobs.find((job) => job.site === "hut")?.needs).toBeGreaterThan(0);
+    // Paid for, it stands: no reading wanted.
+    const built = act({ ...burrow, acorns: 100 }, (base, now) => build(base, "hut", now.minutes, undefined, undefined, now.day));
+    expect(built.levels.hut).toBe(1);
+    expect(built.jobs).toEqual([]);
   });
 
   it("spends no paw where nothing can go up", () => {
@@ -177,10 +175,10 @@ describe("the first reading's parcel", () => {
     expect(settle(camp, nowAt(READ + 30)).welcome.firstReadParcel).toBe("waiting");
   });
 
-  it("waits, whole, for a larder with room for it", () => {
+  it("is opened whole, however many acorns the camp has", () => {
     const came = settle(ended(), nowAt(READ + FIRST_READ_MINUTES));
-    const full = { ...came, acorns: holds(came) - FIRST_READ_PARCEL + 1 };
-    expect(openParcel(full)).toBe(full);
+    const full = { ...came, acorns: 1400 };
+    expect(openParcel(full).acorns).toBe(1400 + FIRST_READ_PARCEL);
   });
 
   it("never comes to a camp from before the welcome", () => {
@@ -200,7 +198,8 @@ describe("prowlers wait for the reading", () => {
   });
 
   it("come to a camp from before the welcome as they always did", () => {
-    const old = readBase({ ...JSON.parse(JSON.stringify(newBase(0, DAY))), welcome: undefined, levels: { burrow: 2, oak: 1, store: 1, fence: 0, tower: 0, hut: 0 } })!;
+    // (From before chapters too: its level 2 had brought them, and it keeps them.)
+    const old = readBase({ ...JSON.parse(JSON.stringify(newBase(0, DAY))), welcome: undefined, legacy: undefined, levels: { burrow: 2, oak: 1, store: 1, fence: 0, tower: 0, hut: 0 } })!;
     expect(prowlersCome(old)).toBe(true);
   });
 });

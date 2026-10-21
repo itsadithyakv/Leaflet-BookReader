@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { GATE_FROM, newBase, placeWall, setGate, type BaseState } from "./rules";
+import { GATE_FROM, fronted, newBase, type BaseState } from "./rules";
 import { TIPS, learnt, noTips, tipNow } from "./tips";
+import { beforeChapters } from "./testing";
 
 const DAY = "2026-10-13";
-const camp = (more: Partial<BaseState> = {}): BaseState => ({ ...newBase(0, DAY), ...more });
+const camp = (more: Partial<BaseState> = {}): BaseState => beforeChapters({ ...newBase(0, DAY), ...more });
 const levels = (burrow: number, others: Partial<BaseState["levels"]> = {}) => ({ burrow, oak: 1, store: 0, fence: 0, tower: 0, hut: 0, ...others });
 
 describe("Pip's tips", () => {
@@ -37,8 +38,6 @@ describe("Pip's tips", () => {
       guards: [1, 0, 0, 2, 0, 0, 0],
       works: [{ kind: 4, x: 100, y: 100 }]
     });
-    for (const x of [100, 110, 120, 130]) old = placeWall(old, x, 114);
-    old = setGate(old, 110, 114);
     const said: string[] = [];
     for (let turn = 0; turn < TIPS.length + 2; turn++) {
       const tip = tipNow(old);
@@ -46,8 +45,9 @@ describe("Pip's tips", () => {
       said.push(tip.id);
       old = learnt(old, tip.id);
     }
-    // Only the things the camp cannot show it knows: that things are dragged, what a prowler is, and the postcard.
-    expect(said).toEqual(["move", "prowler", "postcard"]);
+    // Only the things the camp cannot show it knows: that things are dragged, what a prowler is, and the postcard; and
+    // (1.5.11) that the fence is a wall across the trail now, which can be slid.
+    expect(said).toEqual(["move", "prowler", "postcard", "fence"]);
     expect(tipNow(old)).toBeNull();
   });
 
@@ -59,14 +59,13 @@ describe("Pip's tips", () => {
     // A fence built, and not yet laid.
     expect(tipNow({ ...small, levels: levels(1, { store: 1, fence: 1 }) })?.id).toBe("fence");
     // The second level: the prowlers, then the postcard, a tip each.
-    const second = { ...small, levels: levels(2, { store: 1 }) };
+    const second = { ...small, levels: levels(2, { store: 1 }), legacy: { burrow: 2 } };
     expect(tipNow(second)?.id).toBe("prowler");
     expect(tipNow(learnt(second, "prowler"))?.id).toBe("postcard");
     // The gate, only once there is fence enough for one and the fence is good enough.
-    let fenced: BaseState = { ...small, levels: levels(2, { store: 1, fence: GATE_FROM }), taught: [...small.taught, "prowler", "postcard"] };
-    for (const x of [100, 110, 120, 130]) fenced = placeWall(fenced, x, 114);
+    const fenced: BaseState = fronted({ ...small, levels: levels(2, { store: 1, fence: GATE_FROM }), legacy: { burrow: 2 }, taught: [...small.taught, "prowler", "postcard", "fence", "works"] });
     expect(tipNow(fenced)?.id).toBe("gate");
-    expect(tipNow(setGate(fenced, 110, 114))).toBeNull();
+    expect(tipNow(learnt(fenced, "gate"))).toBeNull();
     // Something knocked about.
     expect(tipNow({ ...small, harm: { store: 1 } })?.id).toBe("broken");
   });

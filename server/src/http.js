@@ -40,6 +40,9 @@ export const stateJson = express.json({ limit: "3mb" });
 export const libraryJson = express.json({ limit: "2mb" });
 // Up to 500 book keys of up to 160 characters: more than `smallJson` holds.
 export const keysJson = express.json({ limit: "256kb" });
+// A problem report: 64 KB of diagnostics, 2000 characters of message, and
+// what JSON adds to them (an escaped line break is two bytes, not one).
+export const problemJson = express.json({ limit: "160kb" });
 
 // The marks and overrides that turn the text after them right-to-left, and
 // zero-width spaces: characters that show nothing themselves.

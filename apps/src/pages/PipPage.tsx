@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 // The house and arcade art load with this page, not with the app.
 import "../pip/houseArt";
@@ -15,6 +15,8 @@ import { bump, capture, centerOf, clearEffects, collect, floatText, reducedMotio
 import { playSound } from "../pip/sound";
 import type { PlayKind } from "../pip/play";
 import { FloorSwitch } from "../components/pip/FloorSwitch";
+import { LIFT_FLOATING } from "../components/pip/layout";
+import "../components/pip/houseStage.css";
 import { PipDrawer } from "../components/pip/PipDrawer";
 import { PipShop, type PreviewLook, type ShopEntry, type ShopRequest } from "../components/pip/PipShop";
 import { PipThings } from "../components/pip/PipThings";
@@ -26,6 +28,7 @@ import { PacketPicker } from "../components/pip/PacketPicker";
 import { Walkthrough } from "../components/pip/Walkthrough";
 import { WALK, firstWalk, markWalkSeen, walkSeen, type WalkStep, type WalkTarget } from "../components/pip/walkSteps";
 import { useBaseStore } from "../store/baseStore";
+import { useRootMark } from "../platform/rootMarks";
 import { ArcadeOverlay, type ArcadePage } from "../components/pip/arcade/ArcadeOverlay";
 import { HollowPlace } from "../components/pip/arcade/base/HollowPlace";
 import { DoorIris, throughDoor } from "../components/pip/onboarding/DoorIris";
@@ -35,6 +38,7 @@ import { comingOut } from "../components/pip/onboarding/useBurrowDoor";
 import { useCoachStore } from "../components/pip/onboarding/coachStore";
 import type { GameId } from "../components/pip/arcade/games";
 import { MOOD_LOW, aOrAn, errorText, moodWord, pickOne, priceOf, storage, wait, type Drawer, type FinishPanel } from "./pip/common";
+import { markEarnedSeen, newlyEarned } from "./pip/earned";
 import { usePipActs } from "./pip/usePipActs";
 import { usePipWorld } from "./pip/usePipWorld";
 import { Visitors, prepareVisitorProfile } from "../components/pip/Visitors";
@@ -55,7 +59,7 @@ import { pipThingsTabs } from "./pip/thingsTabs";
 import { useResourceBumps } from "./pip/useResourceBumps";
 import { useRoomFrame } from "./pip/useRoomFrame";
 import { PipHud } from "./pip/PipHud";
-import { PipMenu, type PipMenuPlace } from "./pip/PipMenu";
+import { PipMenu, usePipFullScreen, type PipMenuPlace } from "./pip/PipMenu";
 import { PreviewBar } from "./pip/PreviewBar";
 import { PipRail } from "./pip/PipRail";
 import { GardenPanel } from "./pip/GardenPanel";
@@ -148,6 +152,9 @@ export const PipPage = ({ showToast, openSocial, onNavigate, onOpenProfile }: Pi
     }))
   );
   const books = useLibraryStore((state) => state.books);
+  // A phone on its side, where the tab is the whole screen: the room is too, with the HUD, the rail and the lift
+  // laid over it (houseStage.css), as the Hollow's picture is.
+  const fullScreen = usePipFullScreen();
   // Today's reading, for the mood's reasons (read only: the streak engine owns it).
   const habit = useHabitStore((state) => state.snapshot);
   const [drawer, setDrawer] = useState<Drawer | null>(null);
@@ -161,6 +168,8 @@ export const PipPage = ({ showToast, openSocial, onNavigate, onOpenProfile }: Pi
   // The spot being decorated when the shop was opened for it: a piece bought then goes there.
   const [shopSlot, setShopSlot] = useState<string | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
+  // A skin just earned by reading, worn for a moment while Pip shows it off (once a thing, on this device).
+  const [showingOff, setShowingOff] = useState<string | null>(null);
   const [slotFocus, setSlotFocus] = useState<string | null>(null);
   const [pickerPlot, setPickerPlot] = useState<number | null>(null);
   // Where in Pip's world the tab is: out in the Hollow, which is where it opens, or in through the burrow's door to her rooms.
@@ -220,8 +229,10 @@ export const PipPage = ({ showToast, openSocial, onNavigate, onOpenProfile }: Pi
   }, [setOnStage]);
 
   // Pip's world is drawn sideways: on a phone it stays sideways while the tab is open (a book opened from here holds
-  // its own way up on top, and gives the screen back when it closes). Off Android, nothing.
-  useEffect(() => holdRotation("landscape"), []);
+  // its own way up on top, and gives the screen back when it closes). Off Android, nothing. Taken and let go as the
+  // page is put on the screen and taken off it, before either is drawn: the turn's veil (platform/shape.ts) is down
+  // in the same frame, so the library is never drawn on its side, nor Pip's world upright.
+  useLayoutEffect(() => holdRotation("landscape"), []);
 
   // Leaving the tab leaves no seed mid-air, and makes a quick purchase not taken back.
   useEffect(() => {
@@ -274,7 +285,7 @@ export const PipPage = ({ showToast, openSocial, onNavigate, onOpenProfile }: Pi
     variant,
     outfit,
     setLook,
-    preview: preview?.look ?? null,
+    preview: preview?.look ?? (showingOff ? { variant: showingOff } : null),
     pendingLook: standIns.pendingLook
   });
 
@@ -564,6 +575,7 @@ export const PipPage = ({ showToast, openSocial, onNavigate, onOpenProfile }: Pi
     wearing,
     withAccessory,
     tallies,
+    earned: overview?.earned,
     moveList,
     spendable,
     change,
@@ -593,6 +605,26 @@ export const PipPage = ({ showToast, openSocial, onNavigate, onOpenProfile }: Pi
 
   // The first visit indoors: once the house has loaded, and not over the app's own tour.
   const loaded = overview !== null;
+
+  // Something earned by reading since this device last showed one: indoors, with nothing else going on, Pip puts it
+  // on for a moment and cheers, once. It stays in her things.
+  const earnedList = overview?.earned;
+  useEffect(() => {
+    if (place !== "home" || !loaded || walking || tour !== null || suspended || shopOpen || preview || standIns.pendingLook) return;
+    const fresh = newlyEarned(earnedList, storage());
+    if (fresh.length === 0) return;
+    markEarnedSeen(fresh, storage());
+    const names = fresh.map((status) => (status.kind === "skin" ? SKINS.find((entry) => entry.id === status.id)?.name : null) ?? status.id);
+    const skin = fresh.find((status) => status.kind === "skin");
+    if (skin) setShowingOff(skin.id);
+    play("cheer", 2, `${names[0]}! earned by reading.`);
+    showToast(names.length === 1 ? `${names[0]} earned. It's in Pip's things.` : `${names.join(", ")} earned. They're in Pip's things.`);
+  }, [place, loaded, walking, tour, suspended, shopOpen, preview, standIns.pendingLook, earnedList, play, showToast]);
+  useEffect(() => {
+    if (!showingOff) return;
+    const timer = window.setTimeout(() => setShowingOff(null), 4500);
+    return () => window.clearTimeout(timer);
+  }, [showingOff]);
   useEffect(() => {
     if (place !== "home" || !loaded || walking || tour !== null || suspended || walkSeen(storage())) return;
     // Pip's guided first session shows the shop itself: wait for it, and after it there is nothing to add.
@@ -819,12 +851,15 @@ export const PipPage = ({ showToast, openSocial, onNavigate, onOpenProfile }: Pi
   const heartRefs = useResourceBumps({ loaded, spendable, heldSeeds, seedChipRef, hearts });
 
   const { roomBox, reserve } = useRoomFrame({ bodyRef, railRef, drawerRef, sheetKey: sheet?.key ?? null, decorating });
+  // The whole screen: the room is whole in what the HUD, the rail (or a drawer) and the lift leave clear, so nothing
+  // in it that can be tapped is under them, and its walls and floor run on to the screen's edges (houseStage.css).
+  const fill = fullScreen;
 
   // The top bar and the rail line up with the room and its lift. Not while a
   // sheet is open: the sheet shrinks the room, and a HUD that followed it
   // could wrap onto another line, taking height that shrinks the room again.
   const frame =
-    roomBox && !sheet
+    roomBox && !sheet && !fill
       ? ({ "--frame-left": `${roomBox.left}px`, "--frame-width": `${roomBox.width + (levels.length > 1 ? LIFT_GAP + 44 : 0)}px` } as CSSProperties)
       : undefined;
   const plots = level.garden ? scenePlots : undefined;
@@ -833,6 +868,11 @@ export const PipPage = ({ showToast, openSocial, onNavigate, onOpenProfile }: Pi
   // The way out to the rest of the app, at the start of the row of chips in the Hollow and in the house.
   const menu = (className: string) =>
     onNavigate && onOpenProfile ? <PipMenu className={className} onNavigate={onNavigate} onOpenProfile={onOpenProfile} /> : null;
+
+  // For the shell's rules (styles/houseStage.css, components/pip/touch.css): `html[data-pip-page]`, its place, and
+  // `html[data-pip-fill]` while the house fills the window (not `.app-shell:has(…)`: platform/rootMarks.ts).
+  useRootMark("pipPage", place);
+  useRootMark("pipFill", fill ? "" : null);
 
   return (
     <div
@@ -851,7 +891,8 @@ export const PipPage = ({ showToast, openSocial, onNavigate, onOpenProfile }: Pi
           // In through the burrow's door: Pip has walked in ahead (useBurrowDoor), and the page closes on the door.
           onInside={() => throughDoor("in", () => setPlace("home"), useCoachStore.getState().doorAt)}
           onArcade={() => openArcade()}
-          lead={menu("pip-base-chip")}
+          // The way to the rest of the app is in the Hollow's own menu (1.5.10), with its sound, postcard, arcade and house.
+          nav={onNavigate && onOpenProfile ? { onNavigate, onOpenProfile } : undefined}
           garden={
             garden
               ? {
@@ -880,6 +921,7 @@ export const PipPage = ({ showToast, openSocial, onNavigate, onOpenProfile }: Pi
         data-decorating={decorating || undefined}
         data-sheet={sheet ? "open" : undefined}
         data-small-room={(roomBox && roomBox.width < 420) || undefined}
+        data-fill={fill || undefined}
       >
         <PipHud
           lead={place === "home" ? menu("pip-hud-help") : null}
@@ -947,11 +989,13 @@ export const PipPage = ({ showToast, openSocial, onNavigate, onOpenProfile }: Pi
             onArcade={openArcade}
             onJukebox={danceWithPip}
             hidePip={arcadeOpen || place === "hollow"}
+            still={arcadeOpen || place === "hollow"}
             plots={plots}
             onPlot={level.garden ? onPlot : undefined}
             onEmptyPlot={level.garden ? (plot) => setPickerPlot(plot.plot) : undefined}
             plotLabel={plotLabel}
             reserveBelow={reserve}
+            fill={fill}
             world={world}
             onWelcomed={markSeen}
             onFridgeBare={() => void onFridgeBare()}
@@ -976,7 +1020,7 @@ export const PipPage = ({ showToast, openSocial, onNavigate, onOpenProfile }: Pi
             label={`The ${level.name}, with Pip in ${SKINS.find((entry) => entry.id === shownVariant)?.name ?? "its"} outfit. ${moodWord(feltMood)}.`}
           />
 
-          {levels.length > 1 && roomBox && (
+          {levels.length > 1 && (fill || roomBox) && (
             <FloorSwitch
               levels={levels}
               current={level}
@@ -984,15 +1028,18 @@ export const PipPage = ({ showToast, openSocial, onNavigate, onOpenProfile }: Pi
               lockReason={lockReason}
               priceOf={(entry) => priceOf("level", entry.id)}
               onOpen={openFloor}
-              height={roomBox.height}
-              style={{ left: roomBox.left + roomBox.width + LIFT_GAP, top: roomBox.top }}
+              // Over a room that fills the screen, a small key at its side (houseStage.css places it); beside a framed room, as tall as it.
+              height={fill || !roomBox ? LIFT_FLOATING : roomBox.height}
+              floating={fill}
+              style={fill || !roomBox ? undefined : { left: roomBox.left + roomBox.width + LIFT_GAP, top: roomBox.top }}
             />
           )}
 
           <UndoToast
             item={toast}
             onUndo={undo}
-            style={roomBox ? ({ "--toast-left": `${roomBox.left + roomBox.width / 2}px`, "--toast-top": `${roomBox.top + 12}px` } as CSSProperties) : undefined}
+            // (Over a room that fills the screen, under the HUD: houseStage.css.)
+            style={roomBox && !fill ? ({ "--toast-left": `${roomBox.left + roomBox.width / 2}px`, "--toast-top": `${roomBox.top + 12}px` } as CSSProperties) : undefined}
           />
 
         </div>

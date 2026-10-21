@@ -129,18 +129,21 @@ pub struct Applied {
 /// twenty seconds with a year's reading in it; and a run that fails part way
 /// now leaves the library as it was rather than half merged.
 pub fn apply(db: &Database, doc: &SyncDoc) -> Result<Applied> {
-  let mut gone: Vec<String> = Vec::new();
+  let mut gone: Vec<(String, String)> = Vec::new();
   let result = db.in_transaction(|| write(db, doc, &mut gone))?;
   // Only once their rows say so: a file cannot be put back by a rollback.
-  for path in gone {
-    let _ = std::fs::remove_file(path);
+  for (path, hash) in gone {
+    let _ = std::fs::remove_file(&path);
+    // And its cover, thumbnail and converted copy, as a removal here takes
+    // (`commands::delete_book`): they stayed behind on every other device.
+    storage::remove_book_extras(&hash, Path::new(&path));
   }
   Ok(result)
 }
 
 /// `apply`'s rows. The files of books removed elsewhere are named in `gone`
 /// for the caller to delete once the rows are kept.
-fn write(db: &Database, doc: &SyncDoc, gone: &mut Vec<String>) -> Result<Applied> {
+fn write(db: &Database, doc: &SyncDoc, gone: &mut Vec<(String, String)>) -> Result<Applied> {
   let mut result = Applied::default();
   let existing: std::collections::HashMap<String, crate::db::BookRecord> = db
     .list_books_for_sync()?
@@ -160,7 +163,7 @@ fn write(db: &Database, doc: &SyncDoc, gone: &mut Vec<String>) -> Result<Applied
       // Removed here by this run, if this device still had it.
       let was_here = local.is_some_and(|book| book.deleted_at.is_none());
       if let (true, Some(book)) = (was_here, local) {
-        gone.push(book.local_path.clone());
+        gone.push((book.local_path.clone(), book.file_hash.clone()));
         result.removed.push(entry.id.clone());
       }
       // A removed book that was finished is still a book finished: its row is

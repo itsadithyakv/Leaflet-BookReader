@@ -1,6 +1,8 @@
 import type { CSSProperties } from "react";
 import type { ShelfBook } from "@shared/sync/types";
-import { clothFor, hash, inkFor, spineHeight, spineWidth } from "../shelf/spine";
+import { bindingFor } from "../shelf/dress";
+import "../SessionShelf.css";
+import { clothFor, giltOr, hash, inkFor, spineHeight, spineWidth } from "../shelf/spine";
 
 /**
  * A reader's shelf as others see it, in the same bookcase, cloth and lettering
@@ -24,19 +26,20 @@ export const SharedShelf = ({ shelf, emptyText = "No books on this shelf yet." }
               const cloth = clothFor(key);
               const minutes = 15 + (hash(key) % 40);
               const label = book.author ? `${book.title} by ${book.author}` : book.title;
+              const binding = bindingFor(key);
               return (
                 <span
                   key={`${key}-${index}`}
                   role="listitem"
                   aria-label={label}
                   title={label}
-                  className="ss-spine"
+                  className={`ss-spine b-${binding}`}
                   style={
                     {
                       "--h": `${spineHeight(minutes)}px`,
                       "--w": `${spineWidth(minutes)}px`,
                       "--cloth": cloth,
-                      "--ink": inkFor(cloth)
+                      "--ink": binding === "leather" ? giltOr(cloth) : inkFor(cloth)
                     } as CSSProperties
                   }
                 >

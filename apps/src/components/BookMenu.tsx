@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import ScrollEdge from "./ui/ScrollEdge";
 import type { Book } from "@shared/models/book";
 import { useCollectionStore } from "../store/collectionStore";
 import { useLibraryStore } from "../store/libraryStore";
@@ -29,7 +30,7 @@ type Props = {
   className?: string;
 };
 
-const MENU_WIDTH = 248;
+export const MENU_WIDTH = 248;
 
 /** The entries the arrow keys walk: every one that can be chosen, top to bottom. */
 const menuItemsOf = (menu: HTMLElement | null) =>
@@ -47,12 +48,59 @@ const menuItemsOf = (menu: HTMLElement | null) =>
  * On a phone it is a sheet from the bottom instead, and opens by holding a
  * finger on the book too (the card clicks this button: `data-book-menu`).
  */
-export const BookMenu = ({ book, actions = [], onRemoved, className = "" }: Props) => {
+export const BookMenu = ({ book, actions, onRemoved, className = "" }: Props) => {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const highlightable = isHighlightableFormat(getBookExtension(book.localPath));
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`More for ${book.title}`}
+        title={highlightable ? "Collections, series and highlights" : "Collections and series"}
+        data-book-menu=""
+        className={`book-menu-trigger relative flex h-8 w-8 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface ${className}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          setOpen((value) => !value);
+        }}
+        onKeyDown={(event) => event.stopPropagation()}
+      >
+        <UiIcon name="more" size={18} />
+      </button>
+      {open && (
+        <BookMenuPanel book={book} actions={actions} onRemoved={onRemoved} triggerRef={triggerRef} onDismiss={() => setOpen(false)} />
+      )}
+    </>
+  );
+};
+
+type PanelProps = Omit<Props, "className"> & {
+  triggerRef: MutableRefObject<HTMLButtonElement | null>;
+  onDismiss: () => void;
+};
+
+/**
+ * The open menu. Apart from its button so that a card in a long library pays
+ * for a button, not for the menu: the stores it watches (collections,
+ * highlights, the account, the backup), its listeners and its phone check
+ * are taken up only while it is open, and a card mounts in a fraction of the
+ * time as it scrolls into view.
+ */
+const BookMenuPanel = ({ book, actions = [], onRemoved, triggerRef, onDismiss }: PanelProps) => {
+  // Drawn only while open; `setOpen(false)` is its closing.
+  const open = true;
+  const setOpen = (value: boolean) => {
+    if (!value) {
+      onDismiss();
+    }
+  };
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [place, setPlace] = useState<{ top?: number; bottom?: number; left: number } | null>(null);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   // A phone's menus are sheets: they hang from nothing, so a scroll or a turn
   // of the phone does not take them away.
@@ -340,25 +388,7 @@ export const BookMenu = ({ book, actions = [], onRemoved, className = "" }: Prop
 
   return (
     <>
-      <button
-        ref={triggerRef}
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={`More for ${book.title}`}
-        title={highlightable ? "Collections, series and highlights" : "Collections and series"}
-        data-book-menu=""
-        className={`book-menu-trigger relative flex h-8 w-8 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface ${className}`}
-        onClick={(event) => {
-          event.stopPropagation();
-          setOpen((value) => !value);
-        }}
-        onKeyDown={(event) => event.stopPropagation()}
-      >
-        <UiIcon name="more" size={18} />
-      </button>
-      {open &&
-        (sheet || place) &&
+      {(sheet || place) &&
         createPortal(
           <MenuFrame
             sheet={sheet}
@@ -556,8 +586,11 @@ type FrameProps = {
   children: ReactNode;
 };
 
-/** The menu hanging from its button, or, on a phone, a sheet rising from the bottom with the book's name on it. */
-const MenuFrame = ({ sheet, menuRef, place, label, title, onClose, children }: FrameProps) => {
+/**
+ * The menu hanging from its button, or, on a phone, a sheet rising from the bottom with the
+ * book's name on it. The series page's ⋯ menu is drawn in it too (collections/SeriesMenu.tsx).
+ */
+export const MenuFrame = ({ sheet, menuRef, place, label, title, onClose, children }: FrameProps) => {
   if (!sheet) {
     return (
       <div
@@ -568,7 +601,9 @@ const MenuFrame = ({ sheet, menuRef, place, label, title, onClose, children }: F
         style={{ ...place, width: MENU_WIDTH }}
         onClick={(event) => event.stopPropagation()}
       >
+        <ScrollEdge edge="top" height="1.75rem" />
         {children}
+        <ScrollEdge edge="bottom" height="2rem" />
       </div>
     );
   }

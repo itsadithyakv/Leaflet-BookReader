@@ -189,3 +189,82 @@ export const judgeCatchUp = (options: { words: number; activeMs: number; dottyWp
   }
   return { kind: "faster", wpm };
 };
+
+/** A pace this much over the last one said aloud is worth saying again. */
+export const AHEAD_TOAST_RISE = 1.15;
+
+/**
+ * Whether "You're ahead of Dotty. Speeding up to N wpm." is said for a pace
+ * of `wpm`, given the last pace it was said for in this reading session
+ * (null: not yet). Once a session, and again only for a real rise: said at
+ * every catch-up, it was a chore. (Dotty caught up is said by Dotty moving.)
+ */
+export const aheadToastDue = (lastSaid: number | null, wpm: number) =>
+  lastSaid === null || wpm >= lastSaid * AHEAD_TOAST_RISE;
+
+/** An automatic raise of Dotty's pace goes up this much at most. */
+export const AUTO_RAISE_STEP = 1.12;
+/** And comes no oftener than once in this much reading. */
+export const AUTO_RAISE_EVERY_MS = 2 * 60_000;
+/** And never takes it this far over the reader's own pace for the book. */
+export const AUTO_RAISE_CEILING = 1.2;
+
+/**
+ * The pace an automatic raise takes Dotty to (the reader was ahead of it, or
+ * dragged it on), or null for none now. `wanted` is what the reading ahead
+ * measured; `base` the reader's own pace for the book as the session began
+ * (or as they last set it with − and +); `raisedAt` the reading time of the
+ * last raise. Reading ahead is often skimming, or scrolling to look, which is
+ * not reading faster: one catch-up took most of the gap at once, and a few of
+ * them took a reader from about 250 to 400 words a minute. Now a step of
+ * 12 % at most, once in two minutes, and never past 20 % over their own pace.
+ * The reader can still go as fast as they like with +.
+ */
+export const autoRaise = (options: {
+  dottyWpm: number;
+  wanted: number;
+  base: number;
+  raisedAt: number | null;
+  activeMs: number;
+}): number | null => {
+  const { dottyWpm, wanted, base, raisedAt, activeMs } = options;
+  if (raisedAt !== null && activeMs - raisedAt < AUTO_RAISE_EVERY_MS) {
+    return null;
+  }
+  const next = Math.min(wanted, dottyWpm * AUTO_RAISE_STEP, base * AUTO_RAISE_CEILING);
+  return next >= dottyWpm + 1 ? next : null;
+};
+
+/**
+ * The pace one press of − or + goes to: the next round number down or up, in
+ * steps that suit the pace (10 words a minute under 200, 20 under 400, 25
+ * above), so the pill reads 375, 400, 425 rather than 397, 429, 463.
+ */
+export const nudgedWpm = (wpm: number, up: boolean) => {
+  const step = wpm < 200 ? 10 : wpm < 400 ? 20 : 25;
+  const at = wpm / step;
+  const near = Math.abs(at - Math.round(at)) < 0.05;
+  const next = up
+    ? near ? Math.round(at) + 1 : Math.ceil(at)
+    : near ? Math.round(at) - 1 : Math.floor(at);
+  return next * step;
+};
+
+/**
+ * A tick of Smart Read's reading clock (`SmartSession`): the time since the
+ * last tick counts as reading only when Dotty was not waiting (a hand on the
+ * page, a reread, a page step and the pause after it, a panel over the text).
+ * Waiting, the clock is only brought up to now, so the wait is never learned
+ * as reading slowly. Returns the time counted.
+ */
+export const tickReading = (
+  session: { activeMs: number; lastTickAt: number },
+  now: number,
+  waiting: boolean,
+  cap = 2500
+) => {
+  const step = waiting ? 0 : Math.min(cap, Math.max(0, now - session.lastTickAt));
+  session.activeMs += step;
+  session.lastTickAt = now;
+  return step;
+};

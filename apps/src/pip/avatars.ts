@@ -12,7 +12,7 @@
  */
 
 import { ACCESSORIES, LIB, SKINS } from "./core";
-import { visibleOutfit } from "./shop";
+import { DEFAULT_VARIANT, isEarnedOnly, visibleOutfit } from "./shop";
 
 export type Avatar = {
   /** `skin.move`, as stored on the account. */
@@ -98,6 +98,27 @@ export const parseAvatar = (id: string | null | undefined): AvatarLook | null =>
 export const ownPipAvatar = (variant: string, signature: string, outfit: readonly string[]) => {
   const worn = visibleOutfit(variant, outfit);
   return worn.length > 0 ? `${variant}.${signature}.${worn.join("+")}` : `${variant}.${signature}`;
+};
+
+/**
+ * Whether the server takes this skin on a profile picture: any skin the shop
+ * sells or gives, and the earned ones offered at signup (`AVATARS`). The other
+ * earned skins (Champ, Golden, Prism) it refuses, since it cannot check them
+ * (`server/src/avatars.js`); Pip still wears them in the app.
+ */
+export const profileSkinAllowed = (skin: string) => {
+  const known = SKINS.find((entry) => entry.id === skin);
+  return known !== undefined && (!isEarnedOnly(known) || AVATARS.some((avatar) => avatar.skin === skin));
+};
+
+/**
+ * The profile picture for the reader's own Pip: as `ownPipAvatar`, except in
+ * a skin the server refuses, where the last skin it took (`lastAllowed`) or
+ * the default one stands in, with the same move and what shows of the outfit.
+ */
+export const profilePipAvatar = (variant: string, signature: string, outfit: readonly string[], lastAllowed?: string | null) => {
+  const skin = profileSkinAllowed(variant) ? variant : lastAllowed && profileSkinAllowed(lastAllowed) ? lastAllowed : DEFAULT_VARIANT;
+  return ownPipAvatar(skin, signature, outfit);
 };
 
 /** A random avatar, to preselect in the signup form. */

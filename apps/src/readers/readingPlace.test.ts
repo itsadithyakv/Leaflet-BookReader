@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LINE_TOLERANCE, PICTURE_SHOWING, firstAtLine, placeToSave, readingLineIn, type LinePiece } from "./readingPlace";
+import { LINE_TOLERANCE, PICTURE_SHOWING, firstAtLine, placeOnLeaving, placeToSave, readingLineIn, type LinePiece } from "./readingPlace";
 
 const PAD = 80;
 const WINDOW = 768;
@@ -122,5 +122,33 @@ describe("the first word at the reading line", () => {
   it("finds nothing past the end of the chapter", () => {
     expect(firstAtLine([text(0, 3)], 500)).toBeNull();
     expect(firstAtLine([], 0)).toBeNull();
+  });
+});
+
+describe("the place saved across a turn of the layout", () => {
+  it("is the place carried into the new layout until a page holding it has come up", () => {
+    // The pages opened at their chapter's top first: not saved as the place.
+    expect(placeToSave("pages", null, "cfi-chapter-top", "cfi-carried")).toBe("cfi-carried");
+    expect(placeToSave("scroll", "cfi-line", "cfi-top", "cfi-carried")).toBe("cfi-carried");
+    expect(placeToSave("pages", null, "cfi-page", null)).toBe("cfi-page");
+  });
+});
+
+describe("the place saved as the reader leaves", () => {
+  const base = { layout: "scroll" as const, readingLine: "cfi-line", pagePlace: null, carried: null, settling: false, relaying: false };
+
+  it("is the reading line scrolling, the page's place with pages", () => {
+    expect(placeOnLeaving(base)).toBe("cfi-line");
+    expect(placeOnLeaving({ ...base, layout: "pages", pagePlace: "cfi-page" })).toBe("cfi-page");
+  });
+
+  it("keeps the place last saved while the page is between places", () => {
+    expect(placeOnLeaving({ ...base, settling: true })).toBeNull();
+    expect(placeOnLeaving({ ...base, relaying: true })).toBeNull();
+    expect(placeOnLeaving({ ...base, readingLine: null })).toBeNull();
+  });
+
+  it("is a carried place not yet shown", () => {
+    expect(placeOnLeaving({ ...base, layout: "pages", pagePlace: "cfi-chapter-top", carried: "cfi-carried" })).toBe("cfi-carried");
   });
 });

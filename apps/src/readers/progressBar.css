@@ -96,9 +96,14 @@
   text-overflow: ellipsis;
 }
 
-.reader-progress.is-active ~ .reader-chapter-dock {
-  opacity: 0;
+/* (Its pill fades, not the dock, which is the pill's backdrop: readers/glass.css.) */
+.reader-progress.is-active ~ .reader-chapter-dock,
+.reader-progress.is-active ~ .reader-chapter-dock > div {
   pointer-events: none;
+}
+
+.reader-progress.is-active ~ .reader-chapter-dock > div.reader-pill {
+  opacity: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -5,11 +5,14 @@
 .DESCRIPTION
   Packs server/ (without node_modules, .env, tests or logs), copies it to the VM
   with scp, then over ssh unpacks it into /opt/leaflet-api, runs
-  `npm ci --omit=dev`, installs the systemd unit and restarts the service.
+  `npm ci --omit=dev`, installs the systemd units and restarts the service.
+  The nightly backup's timer (leaflet-backup.timer) is installed too, and
+  switched on only when /etc/leaflet-backup.env exists (docs/backups.md).
 
   Idempotent: safe to run again for every release. It never touches /var/www,
   the Caddyfile or any existing Caddy site block, and it never writes
-  /etc/leaflet-api.env (create that once by hand; see server/README.md).
+  /etc/leaflet-api.env or /etc/leaflet-backup.env (create those once by hand;
+  see server/README.md and docs/backups.md).
 
 .EXAMPLE
   ./deploy.ps1 -Host 203.0.113.10 -KeyPath ~/.ssh/oracle.key
@@ -70,9 +73,20 @@ sudo chmod -R go-w "`$DEST"
 sudo chmod -R o+rX "`$DEST"
 
 sudo install -m 644 "`$DEST/deploy/leaflet-api.service" /etc/systemd/system/leaflet-api.service
+sudo install -m 644 "`$DEST/deploy/leaflet-backup.service" /etc/systemd/system/leaflet-backup.service
+sudo install -m 644 "`$DEST/deploy/leaflet-backup.timer" /etc/systemd/system/leaflet-backup.timer
 sudo systemctl daemon-reload
 sudo systemctl enable leaflet-api >/dev/null
 sudo systemctl restart leaflet-api
+
+# The nightly backup runs only once it has been set up (docs/backups.md).
+if test -f /etc/leaflet-backup.env; then
+  sudo systemctl enable --now leaflet-backup.timer >/dev/null 2>&1 || echo 'Note: leaflet-backup.timer could not be enabled: sudo systemctl status leaflet-backup.timer' >&2
+  test -r /etc/leaflet-backup.pub || echo 'Note: /etc/leaflet-backup.pub is missing; the backup will fail until it is copied there (docs/backups.md).' >&2
+  echo "Backups: on, next run `$(systemctl show leaflet-backup.timer -p NextElapseUSecRealtime --value 2>/dev/null)"
+else
+  echo 'Backups: off (no /etc/leaflet-backup.env; see docs/backups.md).'
+fi
 
 rm -rf "`$STAGE" "`$ARCHIVE"
 

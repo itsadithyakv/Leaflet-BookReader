@@ -16,6 +16,8 @@ type SegmentedTabsProps<T extends string> = {
   value: T;
   onChange: (id: T) => void;
   size?: "sm" | "md";
+  /** Added to the tray (the account form's switch fills its row). */
+  className?: string;
 };
 
 /** The id of the panel a tab controls, for `aria-labelledby` on that panel. */
@@ -27,7 +29,7 @@ export const panelId = (idPrefix: string, id: string) => `${idPrefix}-panel-${id
  * chosen tab is the only one in the Tab order, and the arrow keys (plus Home
  * and End) move between the others.
  */
-export const SegmentedTabs = <T extends string>({ label, idPrefix, tabs, value, onChange, size = "sm" }: SegmentedTabsProps<T>) => {
+export const SegmentedTabs = <T extends string>({ label, idPrefix, tabs, value, onChange, size = "sm", className = "" }: SegmentedTabsProps<T>) => {
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
   const enabled = tabs.map((tab, index) => (tab.disabled ? -1 : index)).filter((index) => index >= 0);
 
@@ -73,7 +75,7 @@ export const SegmentedTabs = <T extends string>({ label, idPrefix, tabs, value, 
       ref={list}
       role="tablist"
       aria-label={label}
-      className="segmented-tabs flex max-w-full flex-wrap gap-1 rounded-[1.4rem] bg-surface-container p-1"
+      className={`segmented-tabs flex max-w-full flex-wrap gap-1 rounded-[1.4rem] bg-surface-container p-1 ${className}`}
       onKeyDown={onKeyDown}
     >
       {tabs.map((tab, index) => {

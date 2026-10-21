@@ -1,3 +1,4 @@
+import java.security.MessageDigest
 import java.util.Properties
 
 plugins {
@@ -87,7 +88,64 @@ android {
     buildFeatures {
         buildConfig = true
     }
+    // The Studio voice's native code (StudioVoice.kt), from vendor/ (see below):
+    // arm64 for every debug build, x86_64 too for the emulator's; release
+    // builds only with LEAFLET_STUDIO_VOICE=1. Each flavor's abiFilters keep
+    // only its own ABI, so a build carries one ABI's copy.
+    sourceSets {
+        getByName("debug").jniLibs.srcDirs(sherpaDir.resolve("arm64-v8a"), sherpaDir.resolve("x86_64"))
+        if (studioVoiceInRelease) getByName("release").jniLibs.srcDir(sherpaDir.resolve("arm64-v8a"))
+    }
 }
+
+// ---- the Studio voice's native libraries -----------------------------------
+// sherpa-onnx 1.13.8 and its ONNX Runtime, out of the official AAR by
+// msix/fetch-sherpa-onnx.ps1 into gen/android/vendor/ (git-ignored): nothing
+// is downloaded by the build. Every build checks them against these SHA-256s
+// (the script's list); without them the app builds with no Studio voice.
+// sherpa-onnx 1.x compiles espeak-ng (GPL-3.0) in, so a release build leaves
+// them out unless LEAFLET_STUDIO_VOICE=1 (or -PstudioVoice=true): not for the
+// Store before sherpa-onnx 2.0 (docs/android.md, "Studio voice").
+val sherpaDir: File get() = rootProject.file("vendor/sherpa-onnx-1.13.8")
+val studioVoiceInRelease: Boolean get() =
+    System.getenv("LEAFLET_STUDIO_VOICE") == "1" || (findProperty("studioVoice") as? String) == "true"
+val sherpaLibs = mapOf(
+    "arm64-v8a/arm64-v8a/libonnxruntime.so" to "33847ad43bffe204699fd4a27f7f3603452a8cdaf2f9a44983a0bc31ffcf2da1",
+    "arm64-v8a/arm64-v8a/libsherpa-onnx-jni.so" to "3c6492ea91ea68fd3b72b9495efdde6dd913f6b58c387e3b07389cf335f4d26f",
+    "x86_64/x86_64/libonnxruntime.so" to "087e84297cad64acb823c3d901d6e0cc934e91add7cdb20da802cd1c0bea5c3e",
+    "x86_64/x86_64/libsherpa-onnx-jni.so" to "1dc24c88fb364f1022a5217b70ab3bc3c9cae3120ae2e1ed358e1f68ed120b04",
+)
+val verifyStudioVoiceLibs by tasks.registering {
+    description = "Checks the vendored sherpa-onnx libraries against their SHA-256s."
+    val root = sherpaDir
+    val expected = sherpaLibs
+    inputs.files(expected.keys.map { root.resolve(it) }.filter { it.isFile })
+    doLast {
+        val missing = mutableListOf<String>()
+        for ((path, sha) in expected) {
+            val file = root.resolve(path)
+            if (!file.isFile) {
+                missing.add(path)
+                continue
+            }
+            val digest = MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { input ->
+                val buffer = ByteArray(1 shl 16)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    digest.update(buffer, 0, read)
+                }
+            }
+            val got = digest.digest().joinToString("") { "%02x".format(it) }
+            if (got != sha) throw GradleException("vendor/sherpa-onnx-1.13.8/$path is not the expected file (SHA-256 $got). Run msix/fetch-sherpa-onnx.ps1 again.")
+        }
+        if (missing.any { it.startsWith("arm64") }) {
+            logger.lifecycle("Studio voice: no sherpa-onnx libraries in vendor/ (msix/fetch-sherpa-onnx.ps1); building without it.")
+        }
+    }
+}
+tasks.named("preBuild") { dependsOn(verifyStudioVoiceLibs) }
 
 rust {
     rootDirRel = "../../../"

@@ -64,9 +64,20 @@ import { MongoClient } from "mongodb";
  *             (30 minutes). (`accounts.emailConfirmedAt` is when the address
  *             was confirmed: null until then, and absent on accounts made
  *             before confirmation existed.)
+ * `problems`  one per problem report a reader sent from Settings (signed in
+ *             or not): their words, the app's diagnostics if they chose to
+ *             send them, the version and platform, and who (the account) or
+ *             an address for a reply. Expires 90 days after it was sent.
+ * `deletions` one per deleted account: its id and when (`at`), nothing else,
+ *             for 45 days (TTL). A restore from backup reads it from the live
+ *             database to delete again what was deleted after the backup
+ *             (`deletion.js`, `backup/restore.js --deletions-from`). Backups
+ *             are kept 30 days at most, so 45 covers every one of them.
  */
 
 const DAY_SECONDS = 24 * 60 * 60;
+/** How long a problem report is kept (`routes/problems.js`). */
+export const PROBLEM_DAYS = 90;
 
 let client = null;
 let database = null;
@@ -207,6 +218,18 @@ export async function ensureIndexes(db) {
 
   await resets(db).createIndex({ expiresAt: 1 }, { name: "expiry", expireAfterSeconds: 0 });
   await confirmations(db).createIndex({ expiresAt: 1 }, { name: "expiry", expireAfterSeconds: 0 });
+  // A deleted account is remembered (by id alone) for longer than any backup
+  // is kept, and then forgotten.
+  await deletions(db).createIndex({ at: 1 }, { name: "expiry", expireAfterSeconds: 45 * DAY_SECONDS });
+
+  // Problem reports: the admin's list (open or closed, newest first, and how
+  // many are open), deleting an account's own, and gone after 90 days.
+  await problems(db).createIndex({ status: 1, _id: -1 }, { name: "list" });
+  await problems(db).createIndex({ accountId: 1 }, { name: "account", sparse: true });
+  await problems(db).createIndex(
+    { at: 1 },
+    { name: "expiry", expireAfterSeconds: PROBLEM_DAYS * DAY_SECONDS }
+  );
 
   await ensureCommunityIndexes(db);
 }
@@ -385,6 +408,8 @@ export const tallies = (db) => db.collection("tallies");
 export const suspensions = (db) => db.collection("suspensions");
 export const resets = (db) => db.collection("resets");
 export const confirmations = (db) => db.collection("confirmations");
+export const deletions = (db) => db.collection("deletions");
+export const problems = (db) => db.collection("problems");
 
 export async function close() {
   if (client) {
