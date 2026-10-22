@@ -173,6 +173,15 @@ pub fn absorb(db: &Database, incoming: &ReadingProfile) -> Result<ReadingProfile
   Ok(merged)
 }
 
+/// Keeps `profile` as this device's, as it is: for `store::apply`, which has
+/// already merged it with the stored one inside its transaction.
+pub fn keep(db: &Database, profile: &ReadingProfile) -> Result<()> {
+  if load(db)?.as_ref() != Some(profile) {
+    db.set_setting(SETTING, &serde_json::to_string(profile)?)?;
+  }
+  Ok(())
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;

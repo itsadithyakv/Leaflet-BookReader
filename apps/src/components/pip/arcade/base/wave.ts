@@ -1,9 +1,10 @@
 /**
  * A night on the front (1.5.11), fought out ahead: everyone who comes down the
  * trail together, so that what one of them does is there for the next. A
- * bomber's gap lets the creepers behind him through; a gate battered by three
- * goes down three times as fast; a thrower that is throwing at one is not
- * throwing at another; a pitfall that has swallowed a brute is full.
+ * bomber's gap lets the creepers behind him through; two can batter a section
+ * at once, and the rest wait behind them under the gatehouse's stones; a
+ * thrower that is throwing at one is not throwing at another (and finishes one
+ * it has begun on); a pitfall that has swallowed a brute is full.
  *
  * It is worked out once, when the night is first wanted, in tenths of a
  * second, and after that the clock says where everyone is (the picture draws
@@ -18,9 +19,9 @@
  *
  * What comes down the trail (`front.ts` `ROLES`):
  *   - creepers walk the trail and batter whatever wall is in their way;
- *   - runners are quick, frail, and over the wall in a bound;
+ *   - runners are quick, and over the wall in a bound;
  *   - fliers come straight over everything, for the larder;
- *   - brutes are sturdy and batter the gate twice as hard;
+ *   - brutes are sturdy (a stone is one knock to them, however hard) and batter the gate four times as hard;
  *   - diggers go under it all and come up near what they are after;
  *   - bombers walk to the wall beside the gate and blow it open.
  * A first fence (a few stakes, below `SEALED_FROM`) is short: whoever is on
@@ -44,9 +45,9 @@ export const offBy = (dx: number, dy: number) => Math.hypot(dx, dy / SQUAT);
 export const TICK = 0.1;
 /** How fast a prowler walks, in art pixels a second; each role goes at so many times that. */
 export const PROWL_SPEED = 13;
-const PACE: Readonly<Record<Role, number>> = { creeper: 1, runner: 2.6, flier: 1.6, brute: 0.7, digger: 0.9, bomber: 0.8 };
+const PACE: Readonly<Record<Role, number>> = { creeper: 1, runner: 3.4, flier: 1.8, brute: 0.7, digger: 0.9, bomber: 0.8 };
 /** How hard each role batters a wall: so much toughness a second. */
-const BATTERS: Readonly<Record<Role, number>> = { creeper: 1, runner: 1, flier: 0, brute: 2, digger: 0, bomber: 0 };
+const BATTERS: Readonly<Record<Role, number>> = { creeper: 1, runner: 1, flier: 0, brute: 4, digger: 0, bomber: 0 };
 /** Seconds between two stones from the same thrower, and how long one is in the air. */
 const THROW_EVERY = 1.35;
 const THROW_FLIES = 0.5;
@@ -56,16 +57,16 @@ const RUN_SECONDS = 0.55;
 const RUN_SPEED = 38;
 /** How long one who has got to a building is at it before it is the worse for it; a bomber's fuse; a runner's bound. */
 export const KNOCK_SECONDS = 4.4;
-export const FIZZ_SECONDS = 1.8;
+export const FIZZ_SECONDS = 3.2;
 const BOUND_SECONDS = 0.3;
 /** How near what he is after a digger comes up of his own accord; and how near a thumper brings him up, dazed for so long. */
-const MOLE_UP = 24;
+const MOLE_UP = 34;
 const THUMP_REACH = 30;
 const DAZED = 2;
 /** Traps: how near, how often a thorn strip cuts (a runner, how often), how much a tanglefoot keeps of the pace, how many brutes a pitfall holds. */
 const THORN_REACH = 9;
 const THORN_EVERY = 1.2;
-const THORN_RUNNER = 0.3;
+const THORN_RUNNER = 0.1;
 const TANGLE_REACH = 15;
 const TANGLE_KEEPS = 0.45;
 const PIT_REACH = 6;
@@ -75,6 +76,11 @@ const BELL_REACH = 32;
 const BELL_QUICKER = 0.7;
 /** The stone thrower's stone hurts whoever stands this near where it lands; and a bomber it hits goes off there. */
 const SPLASH = 8;
+/** The gatehouse's watch: seconds between two stones off it at whoever is in front of the wall, by the fence's level (none without a gate); how near. */
+export const GATE_THROWS = [0, 0, 4.6, 3.6, 2.8, 2.2];
+const GATE_REACH = 20;
+/** How many can batter one section at once: the rest wait their turn behind them. */
+const BATTER_MOST = 2;
 /** Where whoever is on foot stands to batter a section: this far in front of the wall. */
 const AT_WALL = 5;
 /** How much further than the straight way someone on foot goes to get round the end of a short wall rather than batter it. */
@@ -146,8 +152,13 @@ export type FrontSetup = {
   /** The gate's section, if there is a gate. */
   gate: number | null;
   level: number;
-  /** How much tougher every section is: the watchman, the goat. */
+  /** How much tougher every section is: the watchman (Corwin). */
   tough: number;
+  /**
+   * (1.5.11) The goat leaning on the wall: so much longer every section stands. The gate swings, and she leans on
+   * it only half as much: so a brute at the gate is still a brute (the Front's simulation, `waveSim.ts`).
+   */
+  goat?: number;
   /** The trail, from out of sight in the wood to the front of the wall. */
   trail: ReadonlyArray<readonly [number, number]>;
   /** What stands in the way on the camp's side of the wall: for whoever goes round or comes through. */
@@ -165,20 +176,29 @@ export type NightPlan = {
   end: number;
 };
 
-/** Health a prowler has: more in a bigger camp. */
-export const prowlHealth = (burrow: number) => 1 + Math.max(1, burrow);
+/** How much is in a prowler, by the burrow's level (a bigger camp is come at by bigger prowlers), before his role. */
+const STOUT = [2, 2, 3, 4.5, 4.8, 5];
+/** Health a plain prowler (a creeper) has: more in a bigger camp. */
+export const prowlHealth = (burrow: number) => Math.floor(STOUT[Math.max(0, Math.min(STOUT.length - 1, burrow))]);
+/** Health a prowler of a role has: a brute three times a creeper's, a flier and a digger somewhat more. */
 export const healthOf = (role: Role, burrow: number) => {
-  const plain = prowlHealth(burrow);
+  const stout = STOUT[Math.max(0, Math.min(STOUT.length - 1, burrow))];
+  const plain = Math.floor(stout);
   return role === "runner"
-    ? Math.max(2, Math.ceil(plain * 0.75))
+    ? plain + RUNNER_MORE
     : role === "brute"
-      ? plain * 2
+      ? Math.ceil(stout * 3)
       : role === "bomber"
-        ? plain * 2
-        : role === "digger"
-          ? Math.ceil(plain * 1.4)
-          : plain;
+        ? plain
+        : role === "flier"
+          ? Math.ceil(stout * 1.4)
+          : role === "digger"
+            ? Math.ceil(stout * 1.2)
+            : plain;
 };
+const RUNNER_MORE = 1;
+/** How much of the goat's lean the gate gets. */
+export const GOAT_AT_GATE = 0.5;
 /** How tough a section of a wall of a level is: the gate half as much again. */
 export const toughOf = (level: number, gate: boolean, tough = 1) => SECTION_TOUGH[Math.max(0, Math.min(SECTION_TOUGH.length - 1, level))] * tough * (gate ? GATE_TOUGHER : 1);
 
@@ -269,7 +289,8 @@ export const planNight = (walkers: readonly Walker[], fronts: ReadonlyArray<{ at
     hp.clear();
     if (!from.wall) return;
     for (const y of from.all) {
-      const most = toughOf(from.level, from.gate === y, from.tough);
+      const goat = from.goat ?? 1;
+      const most = toughOf(from.level, from.gate === y, from.tough * (from.gate === y ? 1 + (goat - 1) * GOAT_AT_GATE : goat));
       const had = before.get(y);
       // A section that was standing when the night began stands; one a friend knocked down is a gap. A section the
       // night has already had down stays down whatever is done to the front.
@@ -288,6 +309,18 @@ export const planNight = (walkers: readonly Walker[], fronts: ReadonlyArray<{ at
     breaks.push({ y, at });
   };
   const ready = new Map<string, number>();
+  /** What throws, as the front stands: what the camp has, and the gatehouse's watch over the front of the wall. */
+  const watches = new Map<FrontSetup, readonly Ring[]>();
+  const watchOf = (from: FrontSetup): readonly Ring[] => {
+    let had = watches.get(from);
+    if (!had) {
+      const every = GATE_THROWS[Math.max(0, Math.min(GATE_THROWS.length - 1, from.level))];
+      const gate = from.wall && from.gate !== null && every > 0 ? from.gate : null;
+      had = gate === null ? from.watch : [...from.watch, { x: wallXAt(from.line, gate), y: gate + 6, r: GATE_REACH, every, hurts: 1, site: "gate", top: gate - 15 }];
+      watches.set(from, had);
+    }
+    return had;
+  };
   /** The ground with the wall standing on it, as it stood (the way round a first fence is found on it). */
   const rounds = new Map<string, Block[]>();
   /** Where each of them is, this tick: worked out once, for every thrower to look at. */
@@ -449,6 +482,16 @@ export const planNight = (walkers: readonly Walker[], fronts: ReadonlyArray<{ at
       const [x, y] = along(live.path, live.lens, live.far);
       return near(7, x, y, BELL_REACH);
     });
+    // Who is at a section with room to batter it: the first two there; the rest wait behind them.
+    const battering = new Set<Live>();
+    const atSection = new Map<number, number>();
+    for (const live of lives
+      .filter((one) => one.phase === "wall" && one.at?.doing === "batter")
+      .sort((a, b) => a.at!.from - b.at!.from || a.spec.start - b.spec.start)) {
+      const there = atSection.get(live.at!.y) ?? 0;
+      if (there < BATTER_MOST) battering.add(live);
+      atSection.set(live.at!.y, there + 1);
+    }
     let anyone = false;
     for (const live of lives) {
       if (live.phase === "done") continue;
@@ -536,7 +579,7 @@ export const planNight = (walkers: readonly Walker[], fronts: ReadonlyArray<{ at
           const gap = gapsNow().filter((y) => Math.abs(y - live.at!.y) <= 10)[0];
           live.breaks.push([live.at.from - live.spec.start, local]);
           goIn(live, gap);
-        } else {
+        } else if (battering.has(live)) {
           section.left -= BATTERS[live.role] * TICK;
           if (section.left <= 0) breakAt(live.at.y, t);
         }
@@ -594,9 +637,11 @@ export const planNight = (walkers: readonly Walker[], fronts: ReadonlyArray<{ at
     // What throws: each thrower at one of them at a time, the nearest (an archer's nest at whoever flies first).
     lives.forEach((live, index) => (spots[index] = live.phase === "wait" || live.phase === "done" ? [-999, -999] : along(live.path, live.lens, live.far)));
     const spotOf = (live: Live) => spots[lives.indexOf(live)];
-    for (const ring of setup.watch) {
+    for (const ring of watchOf(setup)) {
       const key = ringKey(ring);
       if ((ready.get(key) ?? 0) > t + 1e-9) continue;
+      // A gatehouse whose gate is down throws no more.
+      if (ring.site === "gate" && setup.gate !== null && (hp.get(setup.gate)?.left ?? 0) <= 0) continue;
       const marks = lives.filter((live) => {
         if (live.phase === "wait" || live.phase === "done" || doomed(live) || far12(live)) return false;
         if (live.digger && live.rose === null) return false;
@@ -605,8 +650,11 @@ export const planNight = (walkers: readonly Walker[], fronts: ReadonlyArray<{ at
       });
       if (marks.length === 0) continue;
       const archer = ring.work === 10;
+      // The one nearest, but one already the worse for a stone first: a thrower finishes what it has begun.
       const mark = marks.sort((a, b) => {
         if (archer && a.flier !== b.flier) return a.flier ? -1 : 1;
+        const worse = a.health - a.hurts.length - (b.health - b.hurts.length);
+        if (worse !== 0 && (a.hurts.length > 0 || b.hurts.length > 0)) return worse;
         const [ax, ay] = spotOf(a);
         const [bx, by] = spotOf(b);
         return offBy(ax - ring.x, ay - ring.y) - offBy(bx - ring.x, by - ring.y) || a.spec.start - b.spec.start;
@@ -618,7 +666,8 @@ export const planNight = (walkers: readonly Walker[], fronts: ReadonlyArray<{ at
       const [aimX, aimY] = along(mark.path, mark.lens, aimFar);
       const rise = ring.rise ?? 0;
       mark.shots.push({ from: local, lands: local + THROW_FLIES, fx: ring.x, fy: ring.top ?? ring.y - 12, tx: aimX, ty: aimY - 6, work: ring.work ?? null, foot: ring.y, rise });
-      const hits = (ring.hurts ?? 1) * (archer && mark.flier && mark.arrived < 0 ? 2 : 1);
+      // A brute is sturdy: a stone or an arrow is one knock to him, however hard it is thrown (the pitfall is his match).
+      const hits = mark.role === "brute" ? 1 : (ring.hurts ?? 1) * (archer && mark.flier && mark.arrived < 0 ? 2 : 1);
       for (let hit = 0; hit < hits; hit++) mark.hurts.push(local + THROW_FLIES);
       if (ring.work === 9) {
         // The stone thrower's stone: a bomber it hits goes off, and whoever stands by where it lands is hurt too.
@@ -627,7 +676,7 @@ export const planNight = (walkers: readonly Walker[], fronts: ReadonlyArray<{ at
           if (other === mark || other.phase === "wait" || other.phase === "done" || doomed(other) || (other.flier && other.arrived < 0) || (other.digger && other.rose === null)) continue;
           const [ox, oy] = spotOf(other);
           if (Math.hypot(ox - aimX, oy - aimY) <= SPLASH) {
-            other.hurts.push(t - other.spec.start + THROW_FLIES);
+            if (other.role !== "brute") other.hurts.push(t - other.spec.start + THROW_FLIES);
             if (other.role === "bomber" && other.blew === null) other.stonedAt = t - other.spec.start + THROW_FLIES;
           }
         }
@@ -678,5 +727,5 @@ export const planNight = (walkers: readonly Walker[], fronts: ReadonlyArray<{ at
   }
 };
 
-/** The walks of a night that are over by a time (seconds into it), and how each ended. */
-export const nightHeld = (plan: NightPlan) => plan.walks.every((walk) => walk.harms === null || walk.blew !== null);
+/** A night held: nobody got to what he came for, and no section of the wall was blown open. */
+export const nightHeld = (plan: NightPlan) => plan.walks.every((walk) => walk.harms === null && walk.blew === null);

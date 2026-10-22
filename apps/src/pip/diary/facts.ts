@@ -58,6 +58,8 @@ export type DiarySource = {
   freeReads: FreeReadRecord[];
   books: DiaryBookRow[];
   marks: DiaryMarkRow[];
+  /** What Pip did with visiting friends' Pips (pip/playdates.ts): kept on this device only, so only its diary has it. */
+  playdates?: ReadonlyArray<{ day: string; handle: string; kind: "highfive" | "dance" | "ball" | "chase" }>;
 };
 
 /** Where an instant falls for the reader: their own calendar day and hour. */
@@ -120,6 +122,8 @@ export type DayFacts = {
   late: boolean;
   /** Something happened between 04:00 and 07:00. */
   early: boolean;
+  /** What she did with a visiting friend's Pip that day (this device's own record), the first friend's things first. */
+  company: Array<{ handle: string; kind: "highfive" | "dance" | "ball" | "chase" }>;
 };
 
 export type DiaryFacts = {
@@ -193,6 +197,10 @@ export const diaryFacts = (source: DiarySource, todayKey: string, clock: Clock =
     }
   }
   const freeOn = new Map(source.freeReads.map((entry) => [entry.dateKey, entry.minutes]));
+  const companyOn = new Map<string, DayFacts["company"]>();
+  for (const entry of source.playdates ?? []) {
+    companyOn.set(entry.day, [...(companyOn.get(entry.day) ?? []), { handle: entry.handle, kind: entry.kind }]);
+  }
 
   // Marks, and the books that moved or were opened, by the day they fall on.
   const marksOn = new Map<string, DiaryMarkRow[]>();
@@ -351,7 +359,8 @@ export const diaryFacts = (source: DiarySource, todayKey: string, clock: Clock =
       people,
       words,
       late: read && hours.some(LATE),
-      early: read && hours.some(EARLY)
+      early: read && hours.some(EARLY),
+      company: companyOn.get(dateKey) ?? []
     });
     if (read) {
       lastRead = day;

@@ -422,7 +422,7 @@ fn page_cover_bytes(image: &str) -> Result<Vec<u8>, String> {
 
 /// How large a book's file is, in bytes; `None` when it is not on this
 /// device. The library asks before reading a whole PDF for its cover.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn book_file_size(book_id: String, state: State<'_, AppState>) -> Result<Option<u64>, String> {
   let db = state.db.guard();
   let book = db

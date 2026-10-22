@@ -1180,6 +1180,8 @@ describe("a camp kept before the simplifying (2026-10-15)", () => {
         guards: [2, 0, 1, 0, 0, 0, 0],
         drill: { guard: 2, from: 995, needs: 45 },
         animals: [0, 3],
+        animalsFrom: [0, -1, -1, 0, -1, -1],
+        seenAt: 0,
         meadow: [{ kind: 1, x: 60, y: 90 }],
         eggDay: "2026-10-11",
         land: [{ kind: 0, x: 200, y: 80 }],

@@ -2,7 +2,9 @@
    `usePipFullScreen`; PipPage marks the house `data-fill`). As the Hollow's picture is, the room is the page: its
    walls and floor run on to the window's edges (HouseScene carries its own edges out), and the room itself is whole,
    at whole device pixels, in the middle of what the controls leave clear, so nothing in it that can be tapped (a
-   poster, the calendar, the light switch, a ceiling lamp) is ever under one. Over the walls, in Pip's paper: the HUD
+   poster, the calendar, the light switch, a ceiling lamp) is ever under one; its picture is drawn on past it to the
+   window's edges (house.js, drawn wide: one picture, its pattern and light), and Pip has all the floor that shows,
+   short of the rail (sceneFit.ts `floorSpan`). Over the walls, in Pip's paper: the HUD
    a slim row at the top, Show me around at its end, the tools a rail down the right that fits the height, and the
    lift a small key at the left. They keep clear of the status and gesture bars and a notch (the --inset-*
    variables); the walls do not.
@@ -40,8 +42,8 @@ html[data-pip-fill] .app-shell.app-shell .app-main-scroll.app-main-scroll {
 }
 
 /* The room's place: under the HUD, beside the lift, and short of the rail (or of a drawer open beside it: Pip's
-   things, the garden, a pin's pieces). HouseScene fits the room in the stage's content box; the padding round it
-   shows the room's walls and floor, carried out. */
+   things, the garden, a pin's pieces). HouseScene fits the room in the stage's content box; round it, under the
+   padding, the room's own picture runs on (drawn wide), and Pip walks there too. */
 .pip-house-page .pip-house.pip-house[data-fill] .pip-house-stage {
   position: absolute;
   inset: 0;
@@ -51,9 +53,29 @@ html[data-pip-fill] .app-shell.app-shell .app-main-scroll.app-main-scroll {
   overflow: hidden;
 }
 
-/* Placed by HouseScene, and unframed: it runs on into its own edges, carried out. */
+/* Placed by HouseScene, and unframed: its picture (and Pip, and what she plays with) runs on past it. */
 .pip-house-page .pip-house.pip-house[data-fill] .pip-house-room {
   position: absolute;
+  overflow: visible;
+}
+
+/* Decorating: the room's own part of the picture (where pieces go) is edged in gold, as a framed room is; drawn over
+   the picture, which runs on past the room and would cover a shadow of the room's own. */
+.pip-house-page .pip-house.pip-house[data-fill][data-decorating] .pip-house-room[data-wide]::after {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  box-shadow:
+    0 0 0 3px var(--hud-line),
+    0 0 0 7px #ffd23f,
+    0 0 0 9px var(--hud-line);
+  content: "";
+  pointer-events: none;
+}
+
+/* Drawn curtains shade the whole picture, not the room's part of it: as far as it is drawn on (--room-pad-*). */
+.pip-house-page .pip-house.pip-house[data-fill] .pip-house-room[data-wide] .pip-room-shade {
+  inset: calc(-1 * var(--room-pad-top, 0px)) calc(-1 * var(--room-pad-right, 0px)) calc(-1 * var(--room-pad-bottom, 0px)) calc(-1 * var(--room-pad-left, 0px));
 }
 
 .pip-house-page .pip-house.pip-house[data-fill]:not([data-decorating]) .pip-house-room {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { MOUTH_Y, ROLE_OF, TRAIL_Y, sectionsAt, trailOf, trailYAt, wallXAt, waveKinds } from "../../../../pip/base/front";
 import { newBase } from "../../../../pip/base/rules";
 import { lookOfBase, nightKinds, nightPlanOf, nightStart, walksAt, type CampLook } from "./scene";
-import { TICK, healthOf, offBy, planNight, prowlHealth, type FrontSetup, type Ring, type Walker } from "./wave";
+import { GATE_THROWS, TICK, healthOf, offBy, planNight, prowlHealth, toughOf, type FrontSetup, type Ring, type Walker } from "./wave";
 
 /** A front as a camp of the fourth chapter or so has it: the wall at 64, the trail out of a Dark Wood 14 deep. */
 const front = (level: number, more: Partial<FrontSetup> = {}): FrontSetup => ({
@@ -53,12 +53,16 @@ describe("a night's prowlers", () => {
     }
   });
 
-  it("have the health of their kind: more in a bigger camp, a brute far more, a runner less", () => {
+  it("have the health of their kind: more in a bigger camp, a brute three times a creeper's, the rest a little more", () => {
     expect(prowlHealth(5)).toBeGreaterThan(prowlHealth(2));
-    expect(healthOf("brute", 3)).toBe(2 * healthOf("creeper", 3));
-    expect(healthOf("bomber", 3)).toBeGreaterThan(healthOf("creeper", 3));
-    expect(healthOf("runner", 3)).toBeLessThan(healthOf("creeper", 3));
-    expect(healthOf("digger", 3)).toBeGreaterThanOrEqual(healthOf("creeper", 3));
+    for (const burrow of [1, 2, 3, 4, 5]) {
+      const creeper = healthOf("creeper", burrow);
+      expect(healthOf("brute", burrow)).toBeGreaterThanOrEqual(3 * creeper);
+      expect(healthOf("bomber", burrow)).toBeGreaterThanOrEqual(creeper);
+      expect(healthOf("runner", burrow)).toBeGreaterThan(creeper);
+      expect(healthOf("flier", burrow)).toBeGreaterThan(creeper);
+      expect(healthOf("digger", burrow)).toBeGreaterThanOrEqual(creeper);
+    }
   });
 
   it("get to the larder of a camp with no wall and nothing that throws, and knock at it", () => {
@@ -91,18 +95,38 @@ describe("the wall across the trail", () => {
 
   it("has to be broken, from its first level: the brambles hem the trail in, and nobody goes round it", () => {
     for (const level of [1, 2, 5]) {
-      const walk = at(front(level), [one(0)]).walks[0];
+      const walk = at(front(level), [one(1)]).walks[0];
       expect(walk.breaks.length, `level ${level}`).toBeGreaterThan(0);
       expect(walk.path.some(([x, y]) => Math.abs(x - 64) < 10 && (y < 59 || y > 109)), `level ${level}`).toBe(false);
     }
   });
 
-  it("holds a creeper up longer the better it is, and a gate longer than a section", () => {
-    const held = (level: number) => at(front(level), [one(0)]).walks[0].breaks.reduce((sum, [from, to]) => sum + (to - from), 0);
+  it("holds a brute up longer the better it is, and a gate longer than a section", () => {
+    const held = (level: number) => at(front(level), [one(1)]).walks[0].breaks.reduce((sum, [from, to]) => sum + (to - from), 0);
     expect(held(3)).toBeGreaterThan(held(2));
     expect(held(5)).toBeGreaterThan(held(3));
-    // At the gate: 7 a level-2 section, half as much again for the gate.
-    expect(held(2)).toBeGreaterThan(7 * 1.4);
+    for (const level of [2, 3, 4, 5]) expect(toughOf(level, true)).toBeGreaterThan(toughOf(level, false));
+    // A brute batters four a second: a level-2 gate is four and a half seconds of it.
+    expect(held(2)).toBeGreaterThan(toughOf(2, true) / 4 - 0.5);
+  });
+
+  it("lets two batter a section at once, and the rest wait their turn behind them", () => {
+    const two = at(front(3), [one(1, 0, -1), one(1, 0, 1)]).breaks[0]?.at ?? Infinity;
+    const four = at(front(3), [one(1, 0, -1), one(1, 0, 1), one(1, 0.1, 0), one(1, 0.1, 2)]).breaks[0]?.at ?? Infinity;
+    expect(two).toBeLessThan(Infinity);
+    expect(four).toBeGreaterThanOrEqual(two - 0.2);
+  });
+
+  it("has a gatehouse that throws at whoever is at the wall, quicker the higher the wall, and not once the gate is down", () => {
+    expect(GATE_THROWS[1]).toBe(0);
+    for (let level = 3; level <= 5; level++) expect(GATE_THROWS[level]).toBeLessThan(GATE_THROWS[level - 1]);
+    const brute = at(front(3), [one(1)]).walks[0];
+    const fromGate = brute.shots.filter((shot) => Math.abs(shot.fx - wallXAt(64, TRAIL_Y)) < 1);
+    expect(fromGate.length).toBeGreaterThan(0);
+    // Every stone off it is thrown while the gate stands.
+    const down = at(front(3), [one(1)]).breaks.find((entry) => entry.y === TRAIL_Y)?.at ?? Infinity;
+    for (const shot of fromGate) expect(brute.start + shot.from).toBeLessThanOrEqual(down + 1e-6);
+    expect(at(front(1), [one(1)]).walks[0].shots).toHaveLength(0);
   });
 
   it("goes down sooner under three than under one, and sooner under a brute than a creeper", () => {
@@ -150,8 +174,8 @@ describe("what beats each kind", () => {
     const creeper = at(strip, [one(0)]).walks[0];
     const runner = at(strip, [one(5)]).walks[0];
     expect(creeper.hurts.length).toBeGreaterThanOrEqual(1);
-    // A runner is three times as quick through it and cut three times as often: as many cuts for less time in it.
-    expect(runner.falls).not.toBeNull();
+    // A runner is three times as quick through it and cut far oftener: more cuts for less time in it.
+    expect(runner.hurts.length).toBeGreaterThan(creeper.hurts.length);
   });
 
   it("a pitfall swallows a brute whole, two a night, and the lighter ones walk over it", () => {
@@ -160,6 +184,14 @@ describe("what beats each kind", () => {
     expect(at(pit, [one(0)]).walks[0].falls).toBeNull();
     const brutes = at(pit, [one(1, 0), one(1, 3), one(1, 6)]).walks;
     expect(brutes.filter((walk) => walk.falls !== null)).toHaveLength(2);
+  });
+
+  it("a brute is sturdy: a stone is one knock to him however hard it is thrown, and the splash does not touch him", () => {
+    const brute = at(front(0, { watch: [{ x: 50, y: 84, r: 60, every: 1.35, hurts: 3, work: 9 }] }), [one(1)]).walks[0];
+    const creeper = at(front(0, { watch: [{ x: 50, y: 84, r: 60, every: 1.35, hurts: 3, work: 9 }] }), [one(0)]).walks[0];
+    expect(brute.shots.length).toBeGreaterThan(0);
+    expect(brute.hurts.length).toBeLessThanOrEqual(brute.shots.length);
+    expect(creeper.hurts.length).toBeGreaterThan(creeper.shots.length);
   });
 
   it("a thumper drums a digger up early, inside its ring, and he is dazed there", () => {
@@ -185,8 +217,8 @@ describe("what beats each kind", () => {
   });
 
   it("a lookout covering the trail sees off a creeper a palisade holds, and one too far from it does not", () => {
-    const near = at(front(2, { watch: [LOOKOUT] }), [one(0)]).walks[0];
-    const away = at(front(2, { watch: [{ x: 200, y: 110, r: 42 }] }), [one(0)]).walks[0];
+    const near = at(front(1, { watch: [LOOKOUT] }), [one(0)]).walks[0];
+    const away = at(front(1, { watch: [{ x: 200, y: 110, r: 42 }] }), [one(0)]).walks[0];
     expect(near.falls).not.toBeNull();
     expect(away.harms).not.toBeNull();
   });

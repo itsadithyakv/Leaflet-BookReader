@@ -8,6 +8,8 @@ import { FoeFace } from "./NightCard";
 import { COUNTER, ROLE_DOES, ROLE_NAMES, rolesNewAt } from "../../../../pip/base/front";
 import { WORKS } from "../../../../pip/base/guards";
 import type { ChapterCardView } from "./hollowRules";
+import type { Arrival } from "./arrival";
+import { hoursText } from "./chapterWords";
 import "./ladder.css";
 
 /** A thing a chapter opens, as a picture: the camp's own sprites (a camera and arrows where there is none). */
@@ -48,7 +50,8 @@ export const unlockPicture = (thing: Unlock | "clearing0", box: number): ReactNo
     case "clearing":
       return <Sprite name="burrow" variant={5} box={box} />;
     case "volumes":
-      return <Sprite name="trophy" variant={0} box={box} />;
+      // (1.5.11) A standing stone of the meadow's ring.
+      return <Sprite name="standing" variant={1} box={box} />;
     default:
       return <Sprite name="burrow" variant={1} box={box} />;
   }
@@ -104,6 +107,29 @@ type ChapterCardProps = {
   /** The chest is opened: its acorns fly from it to the count (they are in the larder already). */
   onChest: (from: Element, acorns: number) => void;
   onClose: () => void;
+  /** (1.5.11) What came of the reading since the camp was last arrived at (`arrival.ts`): the card says it first. */
+  since?: Arrival["since"] | null;
+};
+
+/** "Since you were last here": the reading, and what came of it, a row each with its picture. Said for a screen reader too. */
+const SinceBlock = ({ since }: { since: NonNullable<Arrival["since"]> }) => {
+  const rows: Array<{ key: string; pic: ReactNode; text: string }> = [{ key: "read", pic: <Sprite name="page" box={14} />, text: `${hoursText(since.minutes)} read` }];
+  if (since.oakFull) rows.push({ key: "oak", pic: <Sprite name="acorn" box={14} />, text: "Oak: full, waiting for you" });
+  else if (since.oak > 0) rows.push({ key: "oak", pic: <Sprite name="acorn" box={14} />, text: `Oak: +${since.oak} waiting` });
+  if (since.raids > 0) rows.push({ key: "raids", pic: <Sprite name="scout" box={14} />, text: `Scouts: +${since.raids} rested${since.restIn > 0 ? ` · next in ${hoursText(since.restIn)}` : ""}` });
+  rows.push({ key: "chapter", pic: <Sprite name="standing" variant={0} box={14} />, text: `${hoursText(since.toChapter)} to the next chapter` });
+  rows.push({ key: "bloom", pic: <Sprite name="bud" variant={2} box={14} />, text: since.toBloom > 0 ? `${hoursText(since.toBloom)} to your next bloom` : "Your next bloom is ready" });
+  return (
+    <div className="pip-chapter-since" role="status" aria-live="polite">
+      <p className="pip-chapter-since-title">Since you were last here</p>
+      {rows.map((row) => (
+        <p key={row.key} className="pip-chapter-since-row">
+          <span aria-hidden="true">{row.pic}</span>
+          {row.text}
+        </p>
+      ))}
+    </div>
+  );
 };
 
 const firstThing = (chapter: number): Unlock | "clearing0" => thingsOf(chapter).find((thing) => thing !== "prowlers") ?? thingsOf(chapter)[0] ?? "clearing0";
@@ -113,7 +139,7 @@ const firstThing = (chapter: number): Unlock | "clearing0" => thingsOf(chapter).
  * pixel title, the one new thing with its picture, the acorn chest, the chapter's goals (each a way to where it is
  * done), and the next chapter's thing as a silhouette with the reading still to do.
  */
-export const ChapterCard = ({ view, news, onGo, onChest, onClose }: ChapterCardProps) => {
+export const ChapterCard = ({ view, news, onGo, onChest, onClose, since = null }: ChapterCardProps) => {
   useBackLayer(true, onClose);
   const chapter = news?.chapter ?? view.chapter;
   const brings = news?.brings ?? view.current;
@@ -152,6 +178,7 @@ export const ChapterCard = ({ view, news, onGo, onChest, onClose }: ChapterCardP
             </>
           )}
         </h3>
+        {since && <SinceBlock since={since} />}
         {news?.kind === "welcome" && <p className="pip-chapter-note">Your camp is now counted in chapters: {volume ? brings.title : `Chapter ${chapter}`}, {hoursWords(view.read)} read.</p>}
         <div className="pip-chapter-body">
         <div className="pip-chapter-main">

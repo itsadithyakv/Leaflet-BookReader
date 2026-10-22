@@ -7,7 +7,7 @@ type Root = { dataset: Record<string, string>; style: Record<string, string> };
 
 /** Just enough of a page: <html> with its dataset, and a window that may carry Rust's word. */
 const page = (material?: string) => {
-  const root: Root = { dataset: {}, style: {} };
+  const root: Root & { classList: unknown } = { dataset: {}, style: {}, classList: { toggle: () => false, contains: () => false } };
   const win: Record<string, unknown> = {};
   if (material !== undefined) win.__LEAFLET_WINDOW_MATERIAL__ = material;
   vi.stubGlobal("document", { documentElement: root, querySelector: () => null });
@@ -15,11 +15,13 @@ const page = (material?: string) => {
   return root;
 };
 
-const load = async () => {
+const load = async (effects: "auto" | "full" | "lite" = "full") => {
   vi.resetModules();
+  const tier = await import("../perfTier");
+  tier.setEffectsChoice(effects);
   const store = await import("../../store/appearanceStore");
   const material = await import("./windowMaterial");
-  return { ...store, ...material };
+  return { ...store, ...material, ...tier };
 };
 
 describe("the window's material, on the page", () => {
@@ -44,6 +46,31 @@ describe("the window's material, on the page", () => {
 
     useAppearanceStore.getState().setTheme("dark");
     expect(invoke).toHaveBeenLastCalledWith("window_material_theme", { theme: "dark" });
+  });
+
+  it("is none on a Mica window under Smooth (the page paints itself opaque), and Rust keeps the choice for the next launch", async () => {
+    const root = page("mica");
+    const { installWindowMaterial, setEffectsChoice } = await load("auto");
+    installWindowMaterial();
+    expect(root.dataset.windowMaterial).toBe("none");
+    expect(invoke).toHaveBeenCalledWith("window_material_effects", { full: false });
+
+    setEffectsChoice("full");
+    expect(root.dataset.windowMaterial).toBe("mica");
+    expect(invoke).toHaveBeenLastCalledWith("window_material_effects", { full: true });
+
+    setEffectsChoice("lite");
+    expect(root.dataset.windowMaterial).toBe("none");
+    expect(invoke).toHaveBeenLastCalledWith("window_material_effects", { full: false });
+  });
+
+  it("stays none on an opaque window when Full is chosen (Mica comes at the next launch)", async () => {
+    const root = page("none");
+    const { installWindowMaterial, setEffectsChoice } = await load("auto");
+    installWindowMaterial();
+    setEffectsChoice("full");
+    expect(root.dataset.windowMaterial).toBe("none");
+    expect(invoke).toHaveBeenLastCalledWith("window_material_effects", { full: true });
   });
 
   it("follows Windows when the reader follows Windows (no theme forced on the window)", async () => {

@@ -3,7 +3,10 @@ import { GUARDIANS, SCENERY } from "../../../../pip/base/guards";
 import { findWay, onWalk, planWalk, shuffled, wayRound, type Block, type Plan, type Stop } from "./walks";
 import type { GameArt } from "../gameArt";
 import { GAME_H, GAME_W } from "../games";
-import { GOAT_TOUGHER, LINE_DEFAULT, MOUTH_Y, ROLE_FROM, TRAIL_Y, WALL_LEAN, darkWood, sectionsAt, trailOf, wallXAt, waveKinds } from "../../../../pip/base/front";
+import { LINE_DEFAULT, MOUTH_Y, ROLE_FROM, ROLE_OF, TRAIL_Y, WALL_LEAN, darkWood, sectionsAt, trailOf, wallXAt, waveKinds } from "../../../../pip/base/front";
+import { CAT_STAYS, GOAT_WALL, HEARTS_MOST } from "../../../../pip/base/fondness";
+import { BUD_AT, PATH_BLOOMS, READING_PATH, bloomPlaces } from "../../../../pip/base/trophies";
+import { RING_AT, RING_SPOTS, stonesOf, type Stone } from "../../../../pip/base/stones";
 import { GUARD_GIVES } from "../../../../pip/base/guards";
 import {
   FIZZ_SECONDS,
@@ -108,6 +111,12 @@ export type CampLook = {
   area?: "camp" | "meadow";
   /** The animals that live in the meadow, and what is set about it. */
   animals?: readonly number[];
+  /** (1.5.11) Each animal's hearts, by its number (`fondness.ts`): at three, its good thing is twice what it was. */
+  hearts?: readonly number[];
+  /** (1.5.11) The meadow's record of the reading: each trophy's bloom (its kind), in the order raised; your next bloom's stage (null: none shown); minutes read, for the Reading Stones. */
+  blooms?: readonly number[];
+  bud?: number | null;
+  read?: number;
   meadow?: readonly Decor[];
   /** Landscape set about the camp, and about the meadow; and the constructs. */
   land?: readonly Decor[];
@@ -339,11 +348,15 @@ export type CampExtras = {
   oakShake?: { kind: "gather" | "full"; age: number } | null;
   /** The hedgehog trundling in: how far along, 0 to 1. */
   arriving?: number;
+  /** (1.5.11) The reading's pages are on their way up the path to the oak: its waiting acorn is not there until the first lands. */
+  pagesComing?: boolean;
   /** While things are moved about: how far each thing that throws reaches, and the line the magpies will take to the larder. */
   rings?: ReadonlyArray<{ x: number; y: number; r: number; /** How far it would reach a level up (a building sheet): a dashed line of butter, no wash. */ next?: boolean }>;
   path?: { from: readonly [number, number]; to: readonly [number, number] } | null;
-  /** An animal just petted: where, and how many seconds ago. */
-  petted?: { x: number; y: number; age: number } | null;
+  /** An animal just petted: where, how many seconds ago, and (1.5.11) its hearts, as many going up. */
+  petted?: { x: number; y: number; age: number; hearts?: number } | null;
+  /** (1.5.11) A trophy raised since the meadow was last seen: the bud opens, a burst of it. How many seconds ago. */
+  bloomBurst?: number | null;
   /** The building pointed at, or chosen: any fence standing in front of it is drawn thin, so that the building can be seen and got at. */
   through?: Placed | null;
   /** Where the pointer is resting in the scene: fence under it is drawn thin too, for whatever small thing stands behind it. */
@@ -1211,14 +1224,14 @@ export const GENRE_FOE: ReadonlyArray<number | null> = [null, 1, FIZZER, MOLE, F
 export const prowlSpot = (plan: Pick<ProwlPlan, "path" | "lens">, far: number) => alongWay(plan.path, plan.lens, far);
 
 /**
- * When in the camp's day the night's prowlers set out (a little after dusk begins), and how: in bands of two at most,
- * a band every `BAND_EVERY` seconds, and the prowlers of a band a moment apart. So a night is a minute or two of bands
+ * When in the camp's day the night's prowlers set out (a little after dusk begins), and how: in bands of three at most,
+ * a band every `BAND_EVERY` seconds, and the prowlers of a band a moment apart. So a night is a minute or so of bands
  * coming down the trail, and two at a gate batter it down twice as fast as one.
  */
 export const NIGHT_FROM = DUSK_AT + 10;
 export const NIGHT_EVERY = 1.8;
-export const BAND_EVERY = 15;
-const BAND_MOST = 2;
+export const BAND_EVERY = 10;
+const BAND_MOST = 3;
 /** When the prowler of a night's place in it sets out, in seconds into the night. */
 export const setsOutAt = (index: number) => Math.floor(index / BAND_MOST) * BAND_EVERY + (index % BAND_MOST) * NIGHT_EVERY;
 /** The night a moment of the camp's clock is in, or the last one before it: its number, from 0. -1 before the first. */
@@ -1427,7 +1440,8 @@ const setupOf = (look: CampLook, watch: readonly Ring[]): FrontSetup => {
     standing: look.walls.filter(([x, y]) => Math.abs(x - wallXAt(line, y)) < 1).map(([, y]) => y),
     gate: look.gate ? TRAIL_Y : null,
     level,
-    tough: GUARD_GIVES.fence[corwin] * ((look.animals ?? []).includes(2) ? GOAT_TOUGHER : 1),
+    tough: GUARD_GIVES.fence[corwin],
+    goat: (look.animals ?? []).includes(2) ? GOAT_WALL[(look.hearts ?? [])[2] >= HEARTS_MOST ? 1 : 0] : 1,
     trail: trailOf(leftWoodOfLook(look), line),
     blocks: prowlBlocks(look, null),
     burrow: look.levels.burrow
@@ -1443,12 +1457,23 @@ const frontKey = (setup: FrontSetup) =>
     setup.wall,
     setup.standing,
     setup.level,
-    setup.tough
+    setup.tough,
+    setup.goat ?? 1
   ]);
 
 /** Who comes on a night of this camp, in order: none before prowlers come, or on a camp's card. */
-export const nightKinds = (look: CampLook, night: number): number[] =>
-  !look.wave || look.prowlers === false || look.levels.burrow < PROWLERS_FROM || night < 0 ? [] : waveKinds(look.wave.chapter, look.wave.seed, night, look.season % 4 === 2, favouredOf(look));
+export const nightKinds = (look: CampLook, night: number): number[] => {
+  if (!look.wave || look.prowlers === false || look.levels.burrow < PROWLERS_FROM || night < 0) return [];
+  const kinds = waveKinds(look.wave.chapter, look.wave.seed, night, look.season % 4 === 2, favouredOf(look));
+  // The cat: so many of the creepers think better of it and stay in the wood (the others are not put off by a cat;
+  // one at least still comes).
+  const stays = catStays(look);
+  if (stays <= 0) return kinds;
+  const come = kinds.filter((kind, index) => ROLE_OF[kind] !== "creeper" || scatter(night * 7.13 + index * 1.71 + look.wave!.seed * 0.37 + 3.3) >= stays);
+  return come.length > 0 ? come : kinds.slice(0, 1);
+};
+/** The share of prowlers the cat keeps in the wood: none without her, more once she is fond of the camp. */
+const catStays = (look: CampLook) => ((look.animals ?? []).includes(1) ? CAT_STAYS[(look.hearts ?? [])[1] >= HEARTS_MOST ? 1 : 0] : 0);
 
 /**
  * The nights planned in this visit, by the visit's seed and the night's number: who comes (fixed when the night is
@@ -1488,8 +1513,6 @@ export const nightPlanOf = (look: CampLook, watch: readonly Ring[], night: numbe
 const DAYS = new WeakMap<CampLook, Map<number, WalkPlan | null>>();
 const dayPlanOf = (look: CampLook, watch: readonly Ring[], slot: number): WalkPlan | null => {
   if (look.prowlers === false || look.levels.burrow < PROWLERS_FROM || slot < 0 || !daySets(slot, look.season % 4 === 2)) return null;
-  // The cat: one in ten thinks better of it and stays in the wood.
-  if ((look.animals ?? []).includes(1) && scatter(slot * 3.31 + 9.1) < 0.1) return null;
   let plans = DAYS.get(look);
   if (!plans) DAYS.set(look, (plans = new Map()));
   if (plans.has(slot)) return plans.get(slot) ?? null;
@@ -1497,6 +1520,11 @@ const dayPlanOf = (look: CampLook, watch: readonly Ring[], slot: number): WalkPl
   const favoured = favouredOf(look);
   const creeper = look.season % 4 === 2 ? 3 : favoured === 2 || favoured === 0 ? favoured : 0;
   const kind = chapter >= ROLE_FROM.runner && scatter(slot * 5.9 + 2.2) < 0.35 ? SQUIRREL : creeper;
+  // The cat: one creeper in ten thinks better of it and stays in the wood (one in five once she is fond of the camp).
+  if (kind !== SQUIRREL && scatter(slot * 3.31 + 9.1) < catStays(look)) {
+    plans.set(slot, null);
+    return null;
+  }
   const site = prowlTarget(look, watch, kind, slot);
   const plan = planNight([{ kind, start: 0, site, target: look.spots[site], lane: (slot % 5) - 2 }], [{ at: 0, setup: setupOf(look, watch) }], slot).walks[0] ?? null;
   plans.set(slot, plan);
@@ -2080,13 +2108,14 @@ const turned = (ctx: CanvasRenderingContext2D, image: CanvasImageSource, w: numb
 };
 
 /** Where the meadow's animals go between: a round each, spread about the grass. */
+// (1.5.11) Kept off the Reading Path, the stones and the homes.
 const MEADOW_STOPS: ReadonlyArray<ReadonlyArray<readonly [number, number]>> = [
-  [[40, 96], [92, 108], [70, 84], [28, 110]],
-  [[150, 100], [118, 86], [176, 112], [204, 94]],
-  [[96, 76], [140, 78], [186, 74], [120, 96]],
-  [[214, 70], [200, 70], [214, 70], [222, 72]],
-  [[60, 70], [24, 82], [110, 112], [168, 88]],
-  [[130, 112], [160, 114], [196, 112], [100, 114]]
+  [[40, 108], [92, 112], [66, 104], [30, 114]],
+  [[150, 102], [124, 108], [172, 110], [204, 94]],
+  [[96, 74], [132, 70], [146, 66], [120, 104]],
+  [[232, 88], [226, 104], [232, 88], [236, 108]],
+  [[60, 72], [26, 80], [110, 110], [168, 92]],
+  [[130, 114], [160, 116], [196, 112], [100, 116]]
 ];
 
 /** Where each of the meadow's animals is at a time, and which way it faces: for drawing them, and for finding the one under a finger. */
@@ -2105,6 +2134,273 @@ export const animalAt = (time: number | null, animals: readonly number[], x: num
     .filter((spot) => Math.abs(x - spot.x) <= 9 * THINGS && y >= spot.y - 15 * THINGS && y <= spot.y + 2)
     .sort((a, b) => b.y - a.y)[0];
   return found ? { animal: found.animal, x: found.x, y: found.y } : null;
+};
+
+// ---- the meadow's record of the reading (1.5.11: your reading, made visible) ----------------------------------
+
+/** Where each animal's home stands in the meadow, by its number: it is there from its first heart. Off the path. */
+export const HOME_SPOTS: ReadonlyArray<readonly [number, number]> = [
+  [16, 110],
+  [186, 116],
+  [120, 72],
+  [232, 96],
+  [14, 80],
+  [112, 116]
+];
+/** The Reading Path's worn earth, a little paler than the trail's, by the season. */
+const PATH_TONES: ReadonlyArray<readonly [string, string]> = [
+  ["#c4a46e", "#d8bd8a"],
+  ["#b89060", "#d0a46a"],
+  ["#dfe3ea", "#c4cbd6"],
+  ["#a8845a", "#c2a070"]
+];
+/** The path, the blooms along it, the older books gone wild, and the bud: one layer, drawn again only when they change. */
+const MEADOW_LAYERS = new Map<string, HTMLCanvasElement | null>();
+export const meadowLayer = (on: CanvasRenderingContext2D, art: GameArt, look: CampLook, px: number) => {
+  const season = ((look.season % 4) + 4) % 4;
+  const blooms = look.blooms ?? [];
+  const key = `${px}|${season}|${look.bud ?? "-"}|${blooms.join(",")}`;
+  if (!MEADOW_LAYERS.has(key)) {
+    if (MEADOW_LAYERS.size > 6) MEADOW_LAYERS.clear();
+    MEADOW_LAYERS.set(key, typeof document === "undefined" ? null : drawMeadowLayer(art, blooms, look.bud ?? null, season, px));
+  }
+  const canvas = MEADOW_LAYERS.get(key);
+  if (canvas) on.drawImage(canvas, 0, 0, GAME_W, GAME_H);
+};
+/** How many times the meadow's layer has been drawn (for the tests: it is drawn once, not every frame). */
+export let meadowLayersDrawn = 0;
+const drawMeadowLayer = (art: GameArt, blooms: readonly number[], bud: number | null, season: number, px: number): HTMLCanvasElement | null => {
+  const canvas = document.createElement("canvas");
+  canvas.width = GAME_W * px;
+  canvas.height = GAME_H * px;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  meadowLayersDrawn++;
+  ctx.imageSmoothingEnabled = false;
+  ctx.scale(px, px);
+  // The path: worn earth, a pixel or two of paler edge, the odd fleck.
+  const [middle, edge] = PATH_TONES[season];
+  for (let piece = 1; piece < READING_PATH.length; piece++) {
+    const [ax, ay] = READING_PATH[piece - 1];
+    const [bx, by] = READING_PATH[piece];
+    for (let x = ax; x <= bx; x++) {
+      const y = Math.round(ay + ((by - ay) * (x - ax)) / Math.max(1, bx - ax));
+      ctx.fillStyle = edge;
+      ctx.fillRect(x, y - 2, 1, 5);
+      ctx.fillStyle = middle;
+      ctx.fillRect(x, y - 1, 1, 3);
+      if ((x * 7 + y * 3) % 11 === 0) {
+        ctx.fillStyle = edge;
+        ctx.fillRect(x, y, 1, 1);
+      }
+    }
+  }
+  const laid = bloomPlaces(blooms.map((kind) => ({ kind })));
+  // The older books, wild at the back: small, at their own size.
+  for (const place of laid.wild) {
+    const sprite = art.sprite("wildflower", 0, { variant: place.kind });
+    if (sprite) ctx.drawImage(sprite.image, place.x - 1, place.y - sprite.h + 1);
+  }
+  // Along the path, at the size of everything else in the clearing, the back ones first; and the bud at its end.
+  const small = smallAt(px);
+  const stand = (name: string, variant: number, x: number, y: number) => {
+    const sprite = art.sprite(name, 0, { variant });
+    if (!sprite) return;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(small, small);
+    ctx.drawImage(sprite.image, -Math.round(sprite.w / 2), -sprite.h + 1);
+    ctx.restore();
+  };
+  for (const place of [...laid.path].sort((a, b) => a.y - b.y)) stand("bloom", place.kind, place.x, place.y);
+  if (bud !== null) stand("bud", bud, BUD_AT[0], BUD_AT[1]);
+  return canvas;
+};
+
+/** The bloom under a point of the meadow (its number in `look.blooms`), the nearest within six pixels; -1 for none. */
+export const bloomAt = (look: Pick<CampLook, "blooms">, x: number, y: number): number => {
+  const laid = bloomPlaces((look.blooms ?? []).map((kind) => ({ kind })));
+  let found = -1;
+  let best = 6;
+  for (const place of laid.path) {
+    const off = Math.hypot(x - place.x, y - (place.y - 3));
+    if (off <= best) {
+      best = off;
+      found = place.bloom;
+    }
+  }
+  return found;
+};
+/** The bud, under a point; and the band of wild flowers at the back. */
+export const budAt = (look: Pick<CampLook, "bud">, x: number, y: number) => look.bud !== undefined && look.bud !== null && Math.hypot(x - BUD_AT[0], y - (BUD_AT[1] - 3)) <= 6;
+export const wildAt = (look: Pick<CampLook, "blooms">, x: number, y: number) => (look.blooms ?? []).length > PATH_BLOOMS && x >= 6 && x <= 164 && y >= 52 && y <= 63;
+/**
+ * What a tap on the meadow is on, in the order it is asked: an animal first (they are petted, whatever they stand
+ * on), then a stone, a bloom (the nearest), the bud, and the band of wild flowers. Null for none of them.
+ */
+export type MeadowTap = { kind: "animal"; animal: number; x: number; y: number } | { kind: "stone"; stone: Stone } | { kind: "bloom"; index: number } | { kind: "bud" } | { kind: "wild" };
+export const meadowTapAt = (look: Pick<CampLook, "animals" | "blooms" | "bud" | "read">, time: number | null, x: number, y: number): MeadowTap | null => {
+  const animal = animalAt(time, look.animals ?? [], x, y);
+  if (animal) return { kind: "animal", ...animal };
+  const stone = stoneAt(look, x, y);
+  if (stone) return { kind: "stone", stone };
+  const bloom = bloomAt(look, x, y);
+  if (bloom >= 0) return { kind: "bloom", index: bloom };
+  if (budAt(look, x, y)) return { kind: "bud" };
+  if (wildAt(look, x, y)) return { kind: "wild" };
+  return null;
+};
+/** The Reading Stone under a point of the meadow; null for none. */
+export const stoneAt = (look: Pick<CampLook, "read">, x: number, y: number): Stone | null => {
+  const { stones } = stonesOf(look.read ?? 0);
+  return (
+    stones
+      .filter((stone) => Math.abs(x - stone.x) <= 5 && y >= stone.y - (stone.tall ? 13 : 6) && y <= stone.y + 2)
+      .sort((a, b) => b.y - a.y)[0] ?? null
+  );
+};
+
+/** Digits for carving, 3 x 5 (the one is a single stroke). */
+const DIGITS: Record<string, readonly string[]> = {
+  "0": ["###", "#.#", "#.#", "#.#", "###"],
+  "1": ["#", "#", "#", "#", "#"],
+  "2": ["###", "..#", "###", "#..", "###"],
+  "3": ["###", "..#", "###", "..#", "###"],
+  "4": ["#.#", "#.#", "###", "..#", "..#"],
+  "5": ["###", "#..", "###", "..#", "###"],
+  "6": ["###", "#..", "###", "#.#", "###"],
+  "7": ["###", "..#", "..#", "..#", "..#"],
+  "8": ["###", "#.#", "###", "#.#", "###"],
+  "9": ["###", "#.#", "###", "..#", "###"]
+};
+/** Carves a number on a stone, centred on `cx`, its top at `top`. */
+const carve = (on: CanvasRenderingContext2D, figure: number, cx: number, top: number) => {
+  const text = String(Math.max(0, Math.min(999, Math.floor(figure))));
+  const glyphs = [...text].map((digit) => DIGITS[digit]);
+  const wide = glyphs.reduce((sum, glyph) => sum + glyph[0].length, 0) + Math.max(0, glyphs.length - 1) * (glyphs.length > 2 ? 0 : 1);
+  let x = Math.round(cx - wide / 2);
+  on.fillStyle = CARVED;
+  for (const glyph of glyphs) {
+    glyph.forEach((row, j) => {
+      for (let i = 0; i < row.length; i++) if (row[i] === "#") on.fillRect(x + i, top + j, 1, 1);
+    });
+    x += glyph[0].length + (glyphs.length > 2 ? 0 : 1);
+  }
+};
+
+/** Cut into the stone: a shade darker than it. */
+const CARVED = "#76684f";
+/** Carved above the figure: a leaf on a chapter's stone, an open book on a volume's. */
+const MARKS: Record<"leaf" | "book", readonly string[]> = {
+  leaf: [".##", "##."],
+  book: ["##.##", "#####"]
+};
+const carveMark = (on: CanvasRenderingContext2D, mark: keyof typeof MARKS, cx: number, top: number) => {
+  const rows = MARKS[mark];
+  const x = Math.round(cx - rows[0].length / 2);
+  on.fillStyle = mark === "leaf" ? "#5f7a46" : CARVED;
+  rows.forEach((row, j) => {
+    for (let i = 0; i < row.length; i++) if (row[i] === "#") on.fillRect(x + i, top + j, 1, 1);
+  });
+};
+
+/** The stones and the volumes' sets, standing, for the meadow to draw among everything else. */
+const standingStones = (on: CanvasRenderingContext2D, art: GameArt, look: CampLook, time: number | null, dusk: number, standing: Standing[]) => {
+  if (look.read === undefined) return;
+  const { stones, sets } = stonesOf(look.read);
+  const put = (name: string, variant: number, x: number, y: number, after?: (left: number, top: number) => void) =>
+    standing.push({
+      y,
+      x,
+      shade: 4,
+      draw: () => {
+        const sprite = art.sprite(name, 0, { variant });
+        if (!sprite) return;
+        const left = Math.round(x - sprite.w / 2);
+        const top = y - sprite.h + 1;
+        on.drawImage(sprite.image, left, top);
+        after?.(left, top);
+      }
+    });
+  for (const stone of stones) {
+    put("standing", stone.tall ? Math.min(4, stone.round) : 0, stone.x, stone.y, (left, top) => {
+      // A menhir: the book (or, on a chapter's low stone, the leaf) above the figure carved in it.
+      if (stone.tall) {
+        carveMark(on, "book", left + 6, top + 4);
+        carve(on, stone.carved, left + 6, top + 7);
+      } else {
+        carveMark(on, "leaf", left + 6, top + 10);
+        carve(on, stone.carved, left + 6, top + 12);
+      }
+      // Winter lights (the sixth set): a twinkle on every tall stone.
+      if (sets.includes(6) && stone.tall) {
+        const on1 = time === null ? 0 : Math.floor(time * 2 + stone.place) % 3;
+        on.fillStyle = ["#ffe36b", "#ff8fb0", "#9fe8ff"][on1];
+        on.fillRect(left + 3 + (stone.place % 3) * 2, top + 2, 1, 1);
+      }
+    });
+  }
+  const [cx, cy] = RING_AT;
+  if (sets.includes(1)) {
+    // Lanterns either side of the way into the ring, in front of it; lit by night.
+    for (const x of [cx - 8, cx + 8]) {
+      put("decor", 1, x, cy + 20);
+      if (dusk > 0.4) {
+        standing.push({
+          y: cy + 21,
+          draw: () => {
+            on.globalAlpha = Math.min(0.35, (dusk - 0.4) * 0.6);
+            on.fillStyle = "#ffe36b";
+            on.fillRect(x - 3, cy + 9, 7, 4);
+            on.globalAlpha = 1;
+          }
+        });
+      }
+    }
+  }
+  // Pip in stone, in the middle, seen through the way in.
+  if (sets.includes(2)) put("statue", 0, cx, cy);
+  if (sets.includes(3)) {
+    // Bunting along the back arc, from the first stone to the last.
+    const [x0] = RING_SPOTS[6];
+    const [x1] = RING_SPOTS[11];
+    standing.push({
+      y: cy - 12,
+      draw: () => {
+        const flags = ["#f0492f", "#ffd23f", "#3ec1f0", "#7ccb5e"];
+        const span = x1 - x0;
+        for (let x = x0; x <= x1; x++) {
+          const sag = Math.round(Math.sin(((x - x0) / span) * Math.PI) * 3);
+          on.fillStyle = "#fff6df";
+          on.fillRect(x, cy - 24 + sag, 1, 1);
+          if ((x - x0) % 5 === 2) {
+            on.fillStyle = flags[Math.floor((x - x0) / 5) % flags.length];
+            on.fillRect(x - 1, cy - 23 + sag, 3, 1);
+            on.fillRect(x, cy - 22 + sag, 1, 1);
+          }
+        }
+      }
+    });
+  }
+  if (sets.includes(4)) put("bookstall", 0, 168, 58);
+  if (sets.includes(5)) put("readtree", 0, 146, 56);
+};
+
+/** Each animal's home, once it has a heart. */
+const standingHomes = (on: CanvasRenderingContext2D, art: GameArt, look: CampLook, standing: Standing[]) => {
+  (look.animals ?? []).forEach((animal) => {
+    if (((look.hearts ?? [])[animal] ?? 0) < 1) return;
+    const [x, y] = HOME_SPOTS[animal] ?? HOME_SPOTS[0];
+    standing.push({
+      y,
+      x,
+      shade: 5,
+      draw: () => {
+        const sprite = art.sprite("animalhome", 0, { variant: animal });
+        if (sprite) on.drawImage(sprite.image, Math.round(x - sprite.w / 2), y - sprite.h + 1);
+      }
+    });
+  });
 };
 
 /**
@@ -2135,7 +2431,11 @@ const paintMeadow = (ctx: CanvasRenderingContext2D, art: GameArt, look: CampLook
     dusk,
     (on) => {
       const standing: Standing[] = [];
+      // (1.5.11) The record of the reading, first and flat: the path, its blooms, the wild ones, the bud.
+      meadowLayer(on, art, look, px);
       layLand(on, art, look.meadowLand ?? [], time, standing, px);
+      standingStones(on, art, look, time, dusk, standing);
+      standingHomes(on, art, look, standing);
       if (extras.setting) {
         const setting = extras.setting;
         standing.push({ y: setting.y, x: setting.x, draw: () => ghost(on, art, setting, frame) });
@@ -2169,6 +2469,15 @@ const paintMeadow = (ctx: CanvasRenderingContext2D, art: GameArt, look: CampLook
             const top = snap(spot.y - sprite.h + 1 + hop);
             if (spot.faceLeft) turned(on, sprite.image, sprite.w, left, top);
             else on.drawImage(sprite.image, left, top);
+            // (1.5.11) Fond of the camp: a ribbon (a bell for the cat and the goat) at the neck.
+            if (((look.hearts ?? [])[spot.animal] ?? 0) >= HEARTS_MOST) {
+              const neck = spot.faceLeft ? left + 3 : left + sprite.w - 6;
+              const bell = spot.animal === 1 || spot.animal === 2;
+              on.fillStyle = bell ? "#ffd23f" : "#e8303c";
+              on.fillRect(neck, top + 6, 2, bell ? 2 : 1);
+              on.fillStyle = bell ? "#e0a800" : "#ff7a7a";
+              on.fillRect(neck + (bell ? 1 : 0), top + (bell ? 7 : 7), 1, 1);
+            }
           }
         });
       }
@@ -2191,8 +2500,8 @@ const paintMeadow = (ctx: CanvasRenderingContext2D, art: GameArt, look: CampLook
         if (!plan) {
           const blocks: Block[] = things.map((entry) => ({ x: entry.x, y: entry.y - 1, rx: 4.5, ry: 2.2 }));
           const stops: Stop[] = [
-            { x: 60, y: 96, act: "pet", rest: 3 },
-            { x: 122, y: 84, act: "look", rest: 2.4 },
+            { x: 60, y: 106, act: "pet", rest: 3 },
+            { x: 126, y: 100, act: "look", rest: 2.4 },
             { x: 184, y: 100, act: "water", rest: 3.2 },
             { x: 100, y: 110, act: "cheer", rest: 2.2 },
             { x: 204, y: 80, act: "pet", rest: 3 }
@@ -2224,16 +2533,42 @@ const paintMeadow = (ctx: CanvasRenderingContext2D, art: GameArt, look: CampLook
     if (night) fireflies(ctx, time, snap);
     else drift(ctx, look.season, time, snap);
   }
-  // An animal just petted: a heart goes up from it.
+  // An animal just petted: its hearts go up from it (1.5.11: as many as it has; one, faint, before its first).
   if (extras.petted && extras.petted.age < 0.9) {
     const heart = art.sprite("heart", frame);
-    ctx.globalAlpha = Math.max(0, 1 - extras.petted.age / 0.9);
-    const x = snap(extras.petted.x - 3);
-    const y = snap(extras.petted.y - 18 - extras.petted.age * 14);
-    if (heart) ctx.drawImage(heart.image, x, y);
-    else {
-      ctx.fillStyle = "#e2557a";
-      ctx.fillRect(x, y, 5, 4);
+    const count = Math.max(1, Math.min(HEARTS_MOST, extras.petted.hearts ?? 1));
+    const faint = (extras.petted.hearts ?? 1) < 1;
+    ctx.globalAlpha = Math.max(0, 1 - extras.petted.age / 0.9) * (faint ? 0.5 : 1);
+    for (let one = 0; one < count; one++) {
+      const x = snap(extras.petted.x - 3 + (one - (count - 1) / 2) * 7);
+      const y = snap(extras.petted.y - 18 - extras.petted.age * 14 - (one % 2) * 2);
+      if (heart) ctx.drawImage(heart.image, x, y);
+      else {
+        ctx.fillStyle = "#e2557a";
+        ctx.fillRect(x, y, 5, 4);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+  // Your next bloom, ready to open: a glow about it, brighter and fainter by whole steps.
+  if (look.bud === 3) {
+    const step = time === null ? 1 : Math.floor(time * 2.5) % 4;
+    ctx.globalAlpha = [0.18, 0.32, 0.45, 0.32][step];
+    ctx.fillStyle = "#fff6c2";
+    const [bx, by] = BUD_AT;
+    for (const [dx, dy] of [[0, -9], [-4, -7], [4, -7], [-5, -3], [5, -3], [-3, 0], [3, 0]] as const) ctx.fillRect(bx + dx, by + dy, 1, 1);
+    ctx.globalAlpha = 1;
+  }
+  // A trophy raised since the meadow was last seen: the bud opens, in a burst of petals.
+  if (extras.bloomBurst !== undefined && extras.bloomBurst !== null && extras.bloomBurst < 1) {
+    const age = extras.bloomBurst;
+    const [bx, by] = BUD_AT;
+    ctx.globalAlpha = Math.max(0, 1 - age);
+    const petals = ["#ffc4da", "#ffd23f", "#ffffff", "#c9a8ff"];
+    for (let one = 0; one < 10; one++) {
+      const turn = (one / 10) * Math.PI * 2;
+      ctx.fillStyle = petals[one % petals.length];
+      ctx.fillRect(snap(bx + Math.cos(turn) * (2 + age * 12)), snap(by - 4 + Math.sin(turn) * (2 + age * 8) - age * 4), 1, 1);
     }
     ctx.globalAlpha = 1;
   }
@@ -2451,58 +2786,86 @@ const trailYAtLook = (trail: ReadonlyArray<readonly [number, number]>, x: number
 };
 
 /**
- * The trail's mouth: where it comes out of the Dark Wood, a dark hollow between two gnarled trunks, brambles either
- * side of the way, and a crooked post with a warning on it (an acorn, struck through). Drawn among everything that
- * stands, by its foot.
+ * The trail's mouth: where it comes out of the Dark Wood, an arch in the trees. Two old trunks lean together over
+ * the way and their crowns meet in a ragged round over it; under it the trail goes on into the dark, dimming as it
+ * goes. Brambles either side of the way, and a crooked post with a warning on it (an acorn, struck through). Drawn
+ * among everything that stands, by its foot.
  */
+const MOUTH_W = 5;
+const MOUTH_H = 15;
+const DOME = 8;
 const trailMouth = (on: CanvasRenderingContext2D, look: CampLook) => {
   const x0 = Math.round(leftWoodOfLook(look));
   const y0 = MOUTH_Y + 1;
-  // The hollow: the way going on into the dark under the trees, an arch with the dark deepest at its heart.
-  for (let row = 0; row < 15; row++) {
-    const up = 15 - row;
-    const wide = Math.round(Math.min(7, 2 + row * 0.55)) + (row > 11 ? 1 : 0);
-    const middle = x0 - 6 - Math.round(row * 0.15);
-    on.fillStyle = "#2b2236";
-    on.fillRect(middle - wide, y0 - up, wide * 2 + 1, 1);
-    if (wide > 2) {
-      on.fillStyle = row > 4 ? "#120d19" : "#1b1424";
-      on.fillRect(middle - wide + 2, y0 - up, wide * 2 - 3, 1);
+  const cx = x0 - 5;
+  /** How far either side of the middle an arch of a width and height is, so far up it: straight legs, a tall round top. */
+  const halfAt = (up: number, wide: number, tall: number) => {
+    const legs = tall - DOME;
+    return up < legs ? wide : Math.round(wide * Math.sqrt(Math.max(0, 1 - ((up - legs + 0.5) / DOME) ** 2)));
+  };
+  // The trunks: two old boles either side of the way, leaning in, knobbled, lit on the camp's side; their roots splay.
+  const legs = MOUTH_H - DOME;
+  for (let up = -1; up < legs + 4; up++) {
+    const half = halfAt(Math.max(0, up), MOUTH_W, MOUTH_H);
+    const thick = 2 + (up % 5 === 1 ? 1 : 0) + (up < 1 ? 1 : 0);
+    for (const side of [-1, 1]) {
+      const inner = cx + side * (half + 1);
+      const from = side < 0 ? inner - thick + 1 : inner;
+      on.fillStyle = "#3a2b1e";
+      on.fillRect(from, y0 - 1 - up, thick, 1);
+      on.fillStyle = "#6a4f35";
+      if (side > 0) on.fillRect(from + thick - 1, y0 - 1 - up, 1, 1);
+      else if (up % 4 === 2) on.fillRect(from + thick - 1, y0 - 1 - up, 1, 1);
     }
   }
-  // Gnarled roots and trunks either side, leaning in.
-  on.fillStyle = "#2b2219";
-  on.fillRect(x0 - 15, y0 - 10, 2, 11);
-  on.fillRect(x0 - 14, y0 - 14, 2, 5);
-  on.fillRect(x0 - 12, y0 - 17, 2, 4);
-  on.fillRect(x0 + 1, y0 - 9, 2, 10);
-  on.fillRect(x0 + 0, y0 - 13, 2, 5);
-  on.fillRect(x0 - 2, y0 - 16, 2, 4);
-  on.fillRect(x0 - 17, y0, 4, 1);
-  on.fillRect(x0 + 2, y0, 3, 1);
-  on.fillStyle = "#3d3024";
-  on.fillRect(x0 - 15, y0 - 5, 1, 5);
-  on.fillRect(x0 + 2, y0 - 4, 1, 4);
-  // Their crowns, meeting over it: ragged, not a lid.
-  const leaves: ReadonlyArray<readonly [number, number, number, number]> = [
-    [-19, -21, 7, 4],
-    [-14, -24, 8, 4],
-    [-8, -23, 7, 3],
-    [-3, -21, 7, 4],
-    [-17, -18, 5, 2],
-    [-1, -18, 5, 2],
-    [-10, -20, 4, 2]
-  ];
-  on.fillStyle = "#16221c";
-  for (const [dx, dy, w, h] of leaves) on.fillRect(x0 + dx, y0 + dy, w, h);
-  on.fillStyle = "#223229";
-  on.fillRect(x0 - 13, y0 - 24, 3, 1);
-  on.fillRect(x0 - 6, y0 - 23, 2, 1);
-  on.fillRect(x0 - 18, y0 - 21, 2, 1);
-  // A few hanging down into the mouth.
-  on.fillStyle = "#16221c";
-  on.fillRect(x0 - 11, y0 - 17, 1, 3);
-  on.fillRect(x0 - 5, y0 - 18, 1, 2);
+  on.fillStyle = "#3a2b1e";
+  for (const side of [-1, 1]) {
+    const foot = cx + side * (MOUTH_W + 2);
+    on.fillRect(side < 0 ? foot - 4 : foot + 2, y0, 3, 1);
+    on.fillRect(side < 0 ? foot - 2 : foot + 1, y0 - 1, 2, 1);
+  }
+  // Their crowns, grown together over it in a round: clumps hugging the top of the arch, lit from above.
+  const crownY = y0 - 1 - legs;
+  for (let k = 0; k <= 12; k++) {
+    const angle = Math.PI * ((k / 12) * 1.1 - 0.05);
+    const out = 1 + ((k * 7) % 3);
+    const x = Math.round(cx + Math.cos(angle) * (MOUTH_W + 1 + out));
+    const y = Math.round(crownY - Math.sin(angle) * (DOME + out));
+    const w = 3 + ((k * 5) % 3);
+    on.fillStyle = "#1f3226";
+    on.fillRect(x - (w >> 1), y - 1, w, 3);
+    on.fillStyle = "#33533a";
+    on.fillRect(x - (w >> 1), y - 2, w, 2);
+    on.fillStyle = "#4a7449";
+    on.fillRect(x - (w >> 1) + 1, y - 2, Math.max(1, w - 2), 1);
+  }
+  // Leaves filling in between the clumps and the arch, so no light shows through its top.
+  for (let up = legs; up < MOUTH_H + 2; up++) {
+    const outer = halfAt(up, MOUTH_W + 2, MOUTH_H + 2);
+    const inner = halfAt(up, MOUTH_W, MOUTH_H);
+    if (outer <= 0) continue;
+    on.fillStyle = "#1f3226";
+    on.fillRect(cx - outer, y0 - 1 - up, outer - inner + (inner > 0 ? 0 : outer + 1), 1);
+    if (inner > 0) on.fillRect(cx + inner + 1, y0 - 1 - up, outer - inner, 1);
+  }
+  // The way in: the trail going on into the dark at its foot, dimming, and the dark deepest under the top of the arch.
+  for (let up = 0; up < MOUTH_H; up++) {
+    const half = halfAt(up, MOUTH_W, MOUTH_H);
+    if (half <= 0) continue;
+    on.fillStyle = up < 1 ? "#5a4732" : up < 3 ? "#3a2e2c" : up < 6 ? "#241c2c" : up < 10 ? "#18121f" : "#100b16";
+    on.fillRect(cx - half, y0 - 1 - up, half * 2 + 1, 1);
+  }
+  // The trail itself going on in, narrowing and dimming into the dark: the way is seen to go somewhere.
+  const TRAIL_IN = ["#7a6248", "#5e4b38", "#46382f", "#33292c", "#251d29"];
+  TRAIL_IN.forEach((colour, up) => {
+    on.fillStyle = colour;
+    const half = Math.max(1, 4 - up);
+    on.fillRect(cx - half + (up >> 1), y0 - 1 - up, half * 2, 1);
+  });
+  // A few strands hanging down into the mouth.
+  on.fillStyle = "#2b4231";
+  on.fillRect(cx - 2, y0 - MOUTH_H, 1, 3);
+  on.fillRect(cx + 2, y0 - MOUTH_H + 1, 1, 2);
   // Brambles either side of the way.
   on.fillStyle = "#2c3a26";
   for (const [bx, by] of [
@@ -3692,7 +4055,7 @@ export const paintCamp = (ctx: CanvasRenderingContext2D, art: GameArt, look: Cam
 
   // Acorns waiting on the oak: one bobbing over it, when a tap will take them in. With the larder full it sits still
   // and low in the leaves, a little faded: there, but asking nothing (a tap says why, BaseScreen's `gatherOak`).
-  if ((look.oakReady || look.oakFull) && look.levels.oak > 0) {
+  if ((look.oakReady || look.oakFull) && look.levels.oak > 0 && !extras.pagesComing) {
     const acorn = art.sprite("acorn", frame);
     const oak = boxOf("oak", look.spots.oak);
     const shake = extras.oakShake ? oakShakeOffset(extras.oakShake.kind, extras.oakShake.age) : 0;

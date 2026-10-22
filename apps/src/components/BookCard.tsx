@@ -72,10 +72,12 @@ const BookCardComponent = ({ book, onRefresh, onOpen, menuActions, onRemoved, co
       }}
       className="book-card group flex h-full w-full cursor-pointer flex-col text-left transition-transform duration-200 hover:-translate-y-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
     >
-      {/* Pip can stand on a cover, and hops between them (PipWorld). */}
+      {/* Pip can stand on a cover, and hops between them (PipWorld). Its edge takes the accent
+          under the pointer at once: eased, the cover and its shadow were painted again on every
+          frame of every hover (with `transition-all`, two thirds of the GPU's time over a shelf). */}
       <div
         data-pip-ledge="book"
-        className="book-cover-frame relative aspect-[2/3] w-full overflow-hidden transition-all duration-200 group-hover:border-primary/50"
+        className="book-cover-frame relative aspect-[2/3] w-full overflow-hidden group-hover:border-primary/50"
       >
         {resolvedCover ? (
           <img

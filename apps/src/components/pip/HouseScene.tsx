@@ -79,6 +79,13 @@ import {
   gazeMove,
   goodbyeLine,
   greetVisitor,
+  besideVisitor,
+  chaseTurn,
+  landedBy,
+  VISITOR_CLEAR,
+  togetherPlan,
+  TOGETHER_VERB,
+  type TogetherKind,
   innocentLine,
   knockedLine,
   morningFridge,
@@ -153,7 +160,7 @@ import { usePipStore } from "../../store/pipStore";
 import { PipSprite } from "../PipSprite";
 import { PipSay } from "../PipSay";
 import { UiIcon } from "../UiIcon";
-import { BAND_ART, edgeBands, edgePattern, fillPlace, sceneScale } from "./sceneFit";
+import { NO_PAD, fillPlace, floorSpan, outOfNotch, roomPad, roomSpan, sceneScale, type Edges, type FloorSpan, type RoomPad } from "./sceneFit";
 import { watchPixelRatio } from "./pixelRatio";
 import { floorPoint } from "./layout";
 import { fixtureKey, useFurnishings, type FurnishPip, type Fridge, type RoomChange } from "./furnishings";
@@ -201,6 +208,10 @@ import { getDateKey } from "../../services/habitService";
 import type { GameId } from "./arcade/games";
 import type { ArcadePage } from "./arcade/ArcadeOverlay";
 import { GardenSky } from "./GardenSky";
+import { useVisitorStore } from "../../pip/useVisitors";
+import { CATCH_MS, TOGETHER_MS, TUMBLE_MS, chaseMs, type VisitorAct } from "../../pip/visitors";
+import { recordPlaydate } from "../../pip/playdates";
+import { currentTier } from "../../platform/perfTier";
 import { currentShellShape } from "../../platform/shape";
 import "./pipLife.css";
 import { banner, burst, centerOf, confetti, dropSeed, floatText, popOff, puff, rain, seedPixel, tossSeed, type Box, type Captured, type Point } from "./fx";
@@ -544,6 +555,12 @@ export type HouseSceneHandle = {
   playWith: (how: PlayKey) => void;
   /** A visitor has knocked, has reached their place, or has left: she answers, if she is free to. */
   visitor: (what: "knocked" | "arrived" | "left") => void;
+  /**
+   * Something with the visitor (a high five, a dance, the ball, a chase), as the visit's own plan or the reader asks:
+   * she does it if she is free to, and the visitor does its part with her (pip/visitors.ts, `VisitorAct`). `asked`:
+   * the reader asked (a huff says no out loud). False when she could not.
+   */
+  together: (kind: TogetherKind, asked?: boolean) => boolean;
   /** Something kind the page did with her that the scene cannot see for itself (a dance together, a game in the arcade): pip/temper.ts. */
   kindness: (what: "dance" | "game") => void;
 };
@@ -558,6 +575,11 @@ export type RoomFrame = {
   scale: number;
   /** The floor, in floor pixels. */
   w: number;
+  /**
+   * The floor that shows (floor pixels; where the room fills the screen it runs on past the room's walls, short of
+   * the rail): where Pip and a visitor can be, and (`edge`) where the picture ends, to come in from past.
+   */
+  span: FloorSpan;
   h: number;
   /** Where feet stand. */
   walkY: number;
@@ -597,97 +619,6 @@ const clockHour = (date = new Date()) => date.getHours() + Math.floor(date.getMi
  */
 const ROOM_STATES_KEPT = 4;
 const roomFrames = new Map<string, Map<number, HTMLCanvasElement>>();
-/** A canvas pixel as a CSS colour. */
-const cssColour = (data: Uint8ClampedArray, at: number) =>
-  data[at + 3] === 255 ? `rgb(${data[at]},${data[at + 1]},${data[at + 2]})` : `rgba(${data[at]},${data[at + 1]},${data[at + 2]},${(data[at + 3] / 255).toFixed(3)})`;
-
-/** The room's edges, read from its picture (`roomEdges`). */
-type RoomEdges = {
-  /** A colour an art row, each side: carried out above and below the room, as one colour a row. */
-  left: string[];
-  right: string[];
-  /** Each side carried on past the room in the pattern it is drawn in (sceneFit.ts `edgePattern`), BAND_ART wide. */
-  bands: { left: Uint32Array; right: Uint32Array } | null;
-};
-
-/**
- * The room's left and right columns, a colour an art row, to carry out past its edges; null where the picture
- * cannot be read. Above the skirting both are the wall's colour (the commonest in the two), so a shelf or a
- * picture that touches the edge is not carried out with it; from the skirting down, the rows as drawn (the
- * skirting, the floor's boards). And beside the room, each row in its own repeat where it has one (the dots of the
- * wallpaper, the shade under the ceiling): a band of one colour beside a patterned wall showed a seam at the edge.
- */
-const roomEdges = (image: HTMLCanvasElement, floorY: number): RoomEdges | null => {
-  try {
-    const context = image.getContext("2d");
-    if (!context || image.width < 1 || image.height < 1) return null;
-    const wallTo = Math.max(0, Math.min(image.height, floorY - 2));
-    const column = (x: number) => {
-      const data = context.getImageData(x, 0, 1, image.height).data;
-      return Array.from({ length: image.height }, (_, row) => cssColour(data, row * 4));
-    };
-    const left = column(0);
-    const right = column(image.width - 1);
-    // One wall colour for both sides, so the two halves meet without a seam over and under the room.
-    const counts = new Map<string, number>();
-    for (const colour of [...left.slice(0, wallTo), ...right.slice(0, wallTo)]) counts.set(colour, (counts.get(colour) ?? 0) + 1);
-    let wall: string | null = null;
-    for (const [colour, count] of counts) if (wall === null || count > (counts.get(wall) ?? 0)) wall = colour;
-    const walled = (rows: string[]) => (wall === null ? rows : rows.map((colour, row) => (row < wallTo ? (wall as string) : colour)));
-    let bands: RoomEdges["bands"] = null;
-    try {
-      const whole = new Uint32Array(context.getImageData(0, 0, image.width, image.height).data.buffer.slice(0));
-      const width = image.width;
-      const rowsFrom = (side: "left" | "right") =>
-        Array.from({ length: image.height }, (_, row) => {
-          const line = new Uint32Array(Math.min(width, 96));
-          for (let k = 0; k < line.length; k++) line[k] = whole[row * width + (side === "left" ? k : width - 1 - k)];
-          return line;
-        });
-      // A row with no repeat: the wall's one colour above the skirting (as the bands above and below), as drawn under it.
-      const wallPacked = (() => {
-        if (wall === null) return null;
-        for (let row = 0; row < wallTo; row++) {
-          if (left[row] === wall) return whole[row * width];
-          if (right[row] === wall) return whole[row * width + width - 1];
-        }
-        return null;
-      })();
-      const flatFor = (side: "left" | "right") =>
-        Array.from({ length: image.height }, (_, row) => (row < wallTo && wallPacked !== null ? wallPacked : whole[row * width + (side === "left" ? 0 : width - 1)]));
-      bands = { left: edgePattern(rowsFrom("left"), flatFor("left"), "left", BAND_ART, wallTo), right: edgePattern(rowsFrom("right"), flatFor("right"), "right", BAND_ART, wallTo) };
-    } catch {
-      bands = null;
-    }
-    return { left: walled(left), right: walled(right), bands };
-  } catch {
-    return null;
-  }
-};
-
-/** One side of the room carried on past it (`RoomEdges.bands`), drawn at the room's own scale, flush with its edge. */
-const EdgeBand = ({ pixels, height, scale, left, top }: { pixels: Uint32Array; height: number; scale: number; left: number; top: number }) => {
-  const ref = useRef<HTMLCanvasElement | null>(null);
-  useLayoutEffect(() => {
-    const canvas = ref.current;
-    const context = canvas?.getContext("2d");
-    if (!canvas || !context) return;
-    const data = context.createImageData(BAND_ART, height);
-    data.data.set(new Uint8ClampedArray(pixels.buffer, pixels.byteOffset, pixels.byteLength));
-    context.putImageData(data, 0, 0);
-  }, [pixels, height]);
-  return (
-    <canvas
-      ref={ref}
-      width={BAND_ART}
-      height={height}
-      className="pip-sprite pip-house-band"
-      aria-hidden="true"
-      style={{ position: "absolute", left, top, width: BAND_ART * scale, height: height * scale, pointerEvents: "none" }}
-    />
-  );
-};
-
 /**
  * A room state's frames by their pixels (pip/samePicture.ts): a room whose
  * only motion is a lamp that flickers now and then is the same picture most of
@@ -743,10 +674,21 @@ const bedBox = (level: HouseLevel, decor: LevelDecor) => {
   return slot ? itemBox(BED_ID, slot) : null;
 };
 
-/** The air Pip can be thrown through: in from the walls, under the ceiling, down to where she walks. */
-const airBounds = (level: HouseLevel) => ({ left: 12, right: level.w - 12, top: 30, floor: level.walkY });
-/** The room the ball flies in: the walls, the ceiling, and the floor its middle rests above. (It is in front of the furniture, where Pip walks, so nothing else is in its way.) */
-const ballRoom = (level: HouseLevel): Room => ({ left: 6, right: level.w - 6, top: 6, floor: level.walkY - BALL_RADIUS });
+/**
+ * The air Pip can be thrown through: in from the walls (where the room fills the screen, the ends of the floor that
+ * shows: `FloorSpan`; there she is kept whole on screen, and out of the lift's corner besides, `outOfNotch`), under
+ * the ceiling, down to where she walks.
+ */
+const airBounds = (level: HouseLevel, span: FloorSpan) => {
+  const wall = span.notch || span.left < 0 ? 16 : 12;
+  return { left: span.left + wall, right: span.right - wall, top: 30, floor: level.walkY };
+};
+/**
+ * The room the ball flies in: the walls, the ceiling, and the floor its middle rests above. (It is in front of the
+ * furniture, where Pip walks, so nothing else is in its way.) Where the room fills the screen, its walls are the
+ * ends of the floor that shows, the left one clear of the lift at any height.
+ */
+const ballRoom = (level: HouseLevel, span: FloorSpan): Room => ({ left: Math.max(span.left, span.notch?.x ?? -Infinity) + 6, right: span.right - 6, top: 6, floor: level.walkY - BALL_RADIUS });
 
 /** What each piece of decor is to Pip: somewhere to take a book from, to sit, to look out of. */
 const SPOT_OF: Record<string, SpotKind> = {
@@ -984,9 +926,10 @@ export type HouseSceneProps = {
   reserveBelow?: number;
   /**
    * Where Pip's tab is the whole screen (a phone on its side): the room is whole in its stage's content box (the
-   * page pads the stage clear of the HUD, the rail and the lift), and its edges are carried out to the stage's
-   * edges, which are the window's. Left out, the room fills the stage's width and the window's height under it,
-   * framed.
+   * page pads the stage clear of the HUD, the rail and the lift), and its picture is drawn on past it to the stage's
+   * edges, which are the window's: walls, floor and ceiling, one picture (house.js, drawn wide). Pip has all the
+   * floor that shows, short of the rail (`FloorSpan`). Left out, the room fills the stage's width and the window's
+   * height under it, framed.
    */
   fill?: boolean;
   /** What she knows of the reader's books and the world outside the room (pip/behaviour.ts, `World`): it colours what she does. */
@@ -1019,7 +962,7 @@ const TOUCHABLE: ReadonlySet<Phase> = new Set<Phase>(["rest", "walk", "doing", "
  * catch it. `speed`: how fast it left the hand that threw it. `touched`: when
  * the reader last had a hand on it; `rested`: when it last came to rest.
  */
-type Ball = { body: BallBody; state: "air" | "roll" | "still" | "held" | "carried"; by: "reader" | "pip" | null; live: boolean; speed: number; touched: number; rested: number };
+type Ball = { body: BallBody; state: "air" | "roll" | "still" | "held" | "carried"; by: "reader" | "pip" | null; live: boolean; speed: number; touched: number; rested: number; friend?: boolean };
 /**
  * A small thing she is doing in a game of catch, until `until`: winding up
  * with the ball, the throw's follow-through, a header or a kick, sat down
@@ -1111,13 +1054,15 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
   // The two are kept together: the scaling can change on its own (the window dragged to another monitor), and a
   // room that read it afresh at each render kept its old size until something else made it render.
   // (And, where the room fills its stage, the stage's size, which places it.)
-  const [{ per, ratio, box }, setFit] = useState<{ per: number; ratio: number; box: { left: number; top: number; width: number; height: number } | null }>(() => ({
+  // (And, where the room fills the screen: how far its picture is drawn on past it, to the stage's edges, and the
+  // lift's box over the wall, for Pip to keep out of.)
+  const [{ per, ratio, box, pad: fillPad, lift }, setFit] = useState<{ per: number; ratio: number; box: { left: number; top: number; width: number; height: number } | null; pad: RoomPad; lift: Edges | null }>(() => ({
     per: 3,
     ratio: window.devicePixelRatio || 1,
-    box: null
+    box: null,
+    pad: NO_PAD,
+    lift: null
   }));
-  // The room's left and right edges, a colour an art row, carried out to the stage's where the room fills it.
-  const [edges, setEdges] = useState<RoomEdges | null>(null);
   // Out of the house altogether (an expedition): no Pip, a note where she sleeps.
   const out = Boolean(world?.away);
   const outRef = useRef(out);
@@ -1163,23 +1108,36 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
         };
         if (box.width <= 0 || box.height <= 0) return;
         const fits = sceneScale(level.w, level.h, box.width, box.height, now);
-        setFit((was) =>
-          was.per === fits &&
-          was.ratio === now &&
-          was.box?.left === box.left &&
-          was.box.top === box.top &&
-          was.box.width === box.width &&
-          was.box.height === box.height
-            ? was
-            : { per: fits, ratio: now, box }
-        );
+        // The room's picture is drawn on to the stage's edges (house.js, drawn wide): how far, at this scale.
+        const k = fits / now;
+        const place = fillPlace(level.w * k, level.h * k, box.width, box.height, now);
+        const room = { left: box.left + place.left, top: box.top + place.top, width: level.w * k, height: level.h * k };
+        const stageBox = { width, height: stage.clientHeight };
+        // The lift, a key over the wall at the top-left (FloorSwitch, beside the stage): its box in the stage.
+        const liftNode = stage.parentElement?.querySelector(".pip-lift[data-floating]");
+        const at = stage.getBoundingClientRect();
+        const liftBox = liftNode?.getBoundingClientRect();
+        const lift = liftBox && liftBox.width > 0 ? { left: liftBox.left - at.left, top: liftBox.top - at.top, right: liftBox.right - at.left, bottom: liftBox.bottom - at.top } : null;
+        setFit((was) => {
+          const pad = roomPad(stageBox, room, k, was.per === fits && was.ratio === now && was.box ? was.pad : null);
+          const same =
+            was.per === fits &&
+            was.ratio === now &&
+            was.box?.left === box.left &&
+            was.box.top === box.top &&
+            was.box.width === box.width &&
+            was.box.height === box.height &&
+            JSON.stringify(was.pad) === JSON.stringify(pad) &&
+            JSON.stringify(was.lift) === JSON.stringify(lift);
+          return same ? was : { per: fits, ratio: now, box, pad, lift };
+        });
         return;
       }
       const top = stage.getBoundingClientRect().top;
       // (A phone on its side has less than 220 px under the HUD: there the room is what the height allows.)
       const height = Math.max(currentShellShape() === "sideways" ? 140 : 220, window.innerHeight - Math.max(0, top) - reserveBelow);
       const fits = sceneScale(level.w, level.h, width, height, now);
-      setFit((was) => (was.per === fits && was.ratio === now && was.box === null ? was : { per: fits, ratio: now, box: null }));
+      setFit((was) => (was.per === fits && was.ratio === now && was.box === null ? was : { per: fits, ratio: now, box: null, pad: NO_PAD, lift: null }));
     };
     measure();
     const observer = new ResizeObserver(measure);
@@ -1195,6 +1153,17 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
   }, [level.w, level.h, reserveBelow, fill]);
 
   const scale = per / ratio;
+  // Where the room fills its stage: where it sits in it (the stage's content box, which the controls leave clear),
+  // how far its picture runs on past it to the stage's edges, and the floor Pip has: all of it that shows, short
+  // of the rail. (A floor another module draws, the fallback garden, is drawn alone.)
+  const inBox = fill && box ? fillPlace(level.w * scale, level.h * scale, box.width, box.height, ratio) : null;
+  const roomAt = inBox && box ? { left: inBox.left + box.left, top: inBox.top + box.top } : null;
+  const pad = roomAt && !level.fallback ? fillPad : NO_PAD;
+  const padKey = `${pad.left},${pad.right},${pad.top},${pad.bottom}`;
+  const span =
+    roomAt && box
+      ? floorSpan({ left: box.left, top: box.top, right: box.left + box.width, bottom: box.top + box.height }, lift, roomAt, scale, level.w, pad)
+      : roomSpan(level.w);
 
   // Pip's own state, and what the loop and the effects read without re-rendering.
   const st = useRef({
@@ -1231,6 +1200,11 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     wakeAt: Infinity,
     /** The activity under way, and the step it is on. */
     plan: null as null | { activity: Activity; index: number },
+    /**
+     * Something with the visitor, under way (`together`): what, and until when (scene time). Her walks go through
+     * the visitor's place while it lasts. `started`: the visitor's part has begun.
+     */
+    together: null as null | { kind: TogetherKind; until: number; started: boolean },
     /** What she did last, newest first: never the same thing twice running. */
     recent: [] as ActivityId[],
     /** Small things left to do before the next activity, and the last one done. */
@@ -1335,8 +1309,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
   /** The room is out of sight: its picture is not drawn again until it is back. */
   const stillRef = useRef(still);
   stillRef.current = still;
-  const live = useRef({ scale, level, base, repertoire, mood, onActDone, onPoke, onPlayed, ownBall, attentive, decor, plots, decorating, world, onWelcomed, onFridgeBare, onTemper });
-  live.current = { scale, level, base, repertoire, mood, onActDone, onPoke, onPlayed, ownBall, attentive, decor, plots, decorating, world, onWelcomed, onFridgeBare, onTemper };
+  const live = useRef({ scale, level, span, base, repertoire, mood, onActDone, onPoke, onPlayed, ownBall, attentive, decor, plots, decorating, world, onWelcomed, onFridgeBare, onTemper });
+  live.current = { scale, level, span, base, repertoire, mood, onActDone, onPoke, onPlayed, ownBall, attentive, decor, plots, decorating, world, onWelcomed, onFridgeBare, onTemper };
   /** The world as she knows it now: the page's, under anything set by hand (pip/worldStub.ts; the page lays it over too, a render later). */
   const worldNow = (): World | undefined => {
     const stub = worldStub();
@@ -1410,8 +1384,6 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
   const arriving = useRef(new Map<string, number>());
   const [arrivals, setArrivals] = useState<Arrival[]>([]);
   const redraw = useRef<(() => void) | null>(null);
-  // The room as its edges were last read (`stands`, in the draw below).
-  const edgeKey = useRef<string | null>(null);
   // By night: the lights the room is drawn by just now (and the room and moment they are of), and how bright Pip and
   // her ball were last told to be (`lightThings`).
   const roomLights = useRef<{ key: string; glows: Glow[] | null; dark: boolean }>({ key: "", glows: null, dark: false });
@@ -1523,6 +1495,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       snapshot.width = canvas.width;
       snapshot.height = canvas.height;
       snapshot.className = "pip-sprite pip-house-canvas pip-house-wipe";
+      // (Drawn wide, where the canvas is placed by hand: the snapshot over it, where it is.)
+      snapshot.style.cssText = canvas.style.cssText;
       snapshot.getContext("2d")?.drawImage(canvas, 0, 0);
       canvas.after(snapshot);
       const wipe = snapshot.animate(
@@ -1559,7 +1533,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       const hidden = `${[...out].sort().join(",")}|${[...unlit].sort().join(",")}|${(fixtures ?? []).map(fixtureKey).join(",")}`;
       hour = now;
       // The frames drawn so far for the room as it stands (`roomFrames`).
-      const stands = `${level.id}|${decorKey}|${hour}|${openSky ? 1 : 0}|${hidden}`;
+      const stands = `${level.id}|${decorKey}|${hour}|${openSky ? 1 : 0}|${hidden}|${padKey}`;
       const frames = roomFramesFor(stands);
       const shown = {
         ...decor,
@@ -1590,7 +1564,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       if (!image) {
         try {
           // The garden's glass is left clear: the living sky (GardenSky) shows through it.
-          const art = renderHouseLevel(level, next, shown, isEvening(Math.floor(hour)), hour, openSky) ?? renderGardenFloor(level.w, level.h, level.floorY, next);
+          // Drawn wide where the room fills the screen: its walls, floor and ceiling on to the stage's edges.
+          const art = renderHouseLevel(level, next, shown, isEvening(Math.floor(hour)), hour, openSky, pad) ?? renderGardenFloor(level.w, level.h, level.floorY, next);
           let alike = samePixelsOf.get(frames);
           if (!alike) {
             alike = new Map();
@@ -1614,20 +1589,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       drawnRoom.width = canvas.width;
       drawnRoom.front = frontRef.current;
       context.imageSmoothingEnabled = false;
-      context.clearRect(0, 0, level.w, level.h);
+      context.clearRect(0, 0, canvas.width, canvas.height);
       context.drawImage(image, 0, 0);
-      // The room's edges, for the stage to carry out where the room fills the screen: read again only when the room changes.
-      if (edgeKey.current !== stands) {
-        edgeKey.current = stands;
-        const read = roomEdges(image, level.floorY);
-        const sameBand = (a: Uint32Array | undefined, b: Uint32Array | undefined) => a === b || (a !== undefined && b !== undefined && a.length === b.length && a.every((value, at) => value === b[at]));
-        if (read)
-          setEdges((was) =>
-            was && was.left.join() === read.left.join() && was.right.join() === read.right.join() && sameBand(was.bands?.left, read.bands?.left) && sameBand(was.bands?.right, read.bands?.right)
-              ? was
-              : read
-          );
-      }
       // The bed's front over a sleeping Pip: the room's own pixels, lamps and
       // night light included, copied from the frame just drawn.
       const front = frontRef.current;
@@ -1635,7 +1598,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       if (front && region && frontContext) {
         frontContext.imageSmoothingEnabled = false;
         frontContext.clearRect(0, 0, region.w, region.h);
-        frontContext.drawImage(canvas, region.x, region.y, region.w, region.h, 0, 0, region.w, region.h);
+        frontContext.drawImage(canvas, region.x + pad.left, region.y + pad.top, region.w, region.h, 0, 0, region.w, region.h);
         // His head on the pillow shows through.
         frontContext.clearRect(BED_PILLOW.x, 0, BED_PILLOW.w, BED_PILLOW.h);
       }
@@ -1647,9 +1610,9 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     return subscribeTick((tick) => {
       if (!stillRef.current) draw(tick % ROOM_LOOP);
     });
-    // decorKey stands in for decor, a new object on every render.
+    // decorKey stands in for decor, a new object on every render; padKey for pad.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [level, decorKey]);
+  }, [level, decorKey, padKey]);
 
   // Away from Pip's page only the room as it was left is kept (about 5 MB of frames a state).
   useEffect(() => () => trimRoomFrames(1), []);
@@ -1844,7 +1807,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       }
       if (count) {
         // Up and to one side of the ball, whole pixels at a time; on the other side by the right-hand wall.
-        const side = ball.body.x > lv.w - 24 ? -1 : 1;
+        const side = ball.body.x > live.current.span.right - 24 ? -1 : 1;
         tally.style.transform = `translate(${snap((Math.round(ball.body.x) + side * 8 - 16) * k)}px, ${snap((Math.max(10, Math.round(ball.body.y) - 9) - 16) * k)}px)`;
       }
     }
@@ -1885,7 +1848,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       // (The mood she is in is laid over the long one here too: sulking she chooses as a glummer Pip would, glad as a brighter.)
       mood: Math.max(0, Math.min(100, feeling + (temper.current ? heartsOff(temper.current, wallMs()) : 0))),
       hour: new Date().getHours(),
-      floor: { w: lv.w, garden: lv.garden, arcade: lv.arcade },
+      // (Where the room fills the screen, all the floor that shows: `left` is where it starts, `w` where it ends.)
+      floor: { w: live.current.span.right, left: live.current.span.left, garden: lv.garden, arcade: lv.arcade },
       x: s.x,
       spots: [...roomSpots(lv, dc, shown), ...(furnishRef.current?.spots() ?? [])],
       toys: can.toys,
@@ -1996,7 +1960,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     s.touch = null;
     dropPlan();
     s.fidgets = 0;
-    s.plan = { activity: tantrumPlan(cause, { x: s.x, floorW: lv.w, bed: bedBox(lv, dc) ? BED_ID : null, reduced: prefersReducedMotion() }, Math.random), index: -1 };
+    s.plan = { activity: tantrumPlan(cause, { x: s.x, floorW: live.current.span.right, floorLeft: live.current.span.left, bed: bedBox(lv, dc) ? BED_ID : null, reduced: prefersReducedMotion() }, Math.random), index: -1 };
     playSound("squeak", { pitch: 0.55 });
     nextStep();
   };
@@ -2073,11 +2037,11 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
         return;
       }
       s.target = step.x;
-      s.pace = (step.pace ? TIPTOE_SPEED : WALK_SPEED) * paceNow();
+      s.pace = (step.pace === "run" ? RUN_SPEED : step.pace ? TIPTOE_SPEED : WALK_SPEED) * paceNow();
       face(step.x < s.x ? -1 : 1);
       s.phase = "walk";
-      // Her stroll, unless the activity walks its own way (bent over a trail, on the march).
-      show(step.as ?? (step.pace === "tiptoe" ? "tiptoe" : strollMove()), undefined, "walk");
+      // Her stroll, unless the activity walks its own way (bent over a trail, on the march), or runs (a chase).
+      show(step.as ?? (step.pace === "run" ? "scamper" : step.pace === "tiptoe" ? "tiptoe" : strollMove()), undefined, "walk");
     } else if (step.kind === "face") {
       face(step.dir);
       nextStep();
@@ -2103,6 +2067,10 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     } else if (step.kind === "use" && step.what === "thing" && step.verb.startsWith("bounce:")) {
       // A trampoline: that is hers to do, not the thing's. The plan goes on when she is down again (see `onSpriteDone`).
       bounceOn(Number(step.verb.slice(7)) || 1);
+    } else if (step.kind === "use" && step.what === "thing" && step.verb.startsWith(TOGETHER_VERB)) {
+      // With the visitor: their part starts now, in step with hers (see "together with the visitor").
+      startTogether(step.verb.slice(TOGETHER_VERB.length) as TogetherKind);
+      nextStep();
     } else if (step.kind === "use" && step.what === "thing") {
       // A thing in the room she is about to use: it is told, in its own word (the furnishings know what to do).
       (furnishRef.current?.pipUse as undefined | ((key: string, what: string) => void))?.(step.id, step.verb);
@@ -2176,7 +2144,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     if (text) setOwnLine(text);
   };
 
-  const clampX = (x: number) => Math.max(18, Math.min(live.current.level.w - 18, x));
+  /** Where she can stand: on the floor, whole (where the room fills the screen, all of it that shows: `FloorSpan`). */
+  const clampX = (x: number) => Math.max(live.current.span.left + 18, Math.min(live.current.span.right - 18, x));
 
   /**
    * Out of bed (woken, dragged, or the floor changed), standing beside it,
@@ -2320,7 +2289,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       sleepIn(bed);
       return;
     }
-    if (stopForVisitor(worldNow()?.visitor, s.x, bed.x + BED_PIP_X) !== null) {
+    if (stopForVisitor(inTheWay(), s.x, bed.x + BED_PIP_X) !== null) {
       // A visitor stands between her and her bed: she does not leap over them. Bed can wait.
       s.pendingScroll = null;
       s.hiding = false;
@@ -2441,8 +2410,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     const fromLeft = Math.abs(middle - 17 - s.x) <= Math.abs(middle + 17 - s.x);
     let x = fromLeft ? middle - 17 : middle + 17;
     let face: 1 | -1 = fromLeft ? 1 : -1;
-    if (x < 18) [x, face] = [middle + 17, -1];
-    else if (x > lv.w - 18) [x, face] = [middle - 17, 1];
+    if (x < live.current.span.left + 18) [x, face] = [middle + 17, -1];
+    else if (x > live.current.span.right - 18) [x, face] = [middle - 17, 1];
     // Said the first time only; after that the pointing says it.
     const line = s.saidRipe ? null : pickOne(RIPE_LINES);
     s.saidRipe = true;
@@ -2757,7 +2726,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
         const next = s.x + dir * s.pace * dt;
         // Not through a visitor: she stops at their side. What she was on her way to is beyond them, so it
         // is given up (a plan, the fridge, her bed: see `tuck`); a thing she can do from where she stands, she does.
-        const stop = stopForVisitor(worldNow()?.visitor, s.x, dir < 0 ? Math.max(next, s.target) : Math.min(next, s.target));
+        const stop = stopForVisitor(inTheWay(), s.x, dir < 0 ? Math.max(next, s.target) : Math.min(next, s.target));
         if (stop !== null) {
           s.x = stop;
           if (s.errand && !s.errand.fridge) {
@@ -2777,9 +2746,15 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       } else if (s.phase === "fall") {
         // Dropped or thrown: an arc, off the walls and the ceiling, a bounce or two on the floor.
         // (On a trampoline the floor is its mat, once she is on her way down: she jumps up onto it from the floor.)
-        const air = airBounds(lv);
+        const air = airBounds(lv, live.current.span);
         const flight = flyStep({ x: s.x, y: s.y, vx: s.vx, vy: s.vy, angle: s.angle, spin: s.spin }, dt, s.bounce && s.vy >= 0 ? { ...air, floor: s.bounce.floor } : air, PIP_BOUNCE, true);
         ({ x: s.x, y: s.y, vx: s.vx, vy: s.vy, angle: s.angle, spin: s.spin } = flight.body);
+        // Where the room fills the screen: off the lift's corner, as off a wall or the ceiling, never up under it.
+        const offLift = outOfNotch({ x: s.x, y: s.y, vx: s.vx, vy: s.vy }, live.current.span.notch);
+        if (offLift) {
+          ({ x: s.x, y: s.y, vx: s.vx, vy: s.vy } = offLift);
+          s.spin *= -0.6;
+        }
         const sprung = s.bounce !== null && flight.impact > 0;
         if (s.bounce && sprung) {
           // Down on the trampoline: up she goes again, as many times as she came for, and then a small hop off it.
@@ -2818,6 +2793,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
             show("land", 1);
           }
           playSound("place", { pitch: 1.2, volume: 0.5 });
+          // Down on the visitor: caught, or a heap of the two of them (and then out of their place).
+          landOnVisitor(hard || s.giddy);
           // (A whirl is a kind of toss, as far as cheering her up goes, even when she was only set down after it.)
           if (s.tossed || s.giddy) played("toss");
           s.tossed = false;
@@ -2890,7 +2867,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
           const next = clampX(s.x + dir * Math.min(Math.abs(gap), pace * dt));
           // (At the floor's edge, as near as she can get is near enough.)
           const there = Math.abs(gap) <= (flying ? 2 : 6) || next === s.x;
-          if (!there && stopForVisitor(worldNow()?.visitor, s.x, next) !== null) {
+          if (!there && stopForVisitor(inTheWay(), s.x, next) !== null) {
             // The ball is beyond the visitor: she leaves it where it is, rather than run through them.
             ball.by = null;
             ball.rested = time;
@@ -2922,8 +2899,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
           const dir = gap < 0 ? -1 : 1;
           const next = clampX(s.x + dir * Math.min(Math.abs(gap), CATCH_RUN * (halfHearted() ? HALF_PACE : 1) * paceNow() * dt));
           // (With a visitor in the way she throws from where she has got to.)
-          if (Math.abs(gap) <= 1 || next === s.x || stopForVisitor(worldNow()?.visitor, s.x, next) !== null) {
-            if (ball.by === "reader") {
+          if (Math.abs(gap) <= 1 || next === s.x || stopForVisitor(inTheWay(), s.x, next) !== null) {
+            if (ball.by === "reader" && !ball.friend) {
               // Fetched and brought back: that is the old game, and still counts as it.
               please("fetch");
               played("fetch");
@@ -3074,6 +3051,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       // Called away from the fridge she had open (picked up, poked, a ball thrown): the door goes to behind her.
       const hold = s.fridgeHold;
       if (hold && !(hold.why === "snack" ? s.phase === "errand" && s.errand?.kind === "snack" : hold.why === "eating" ? s.phase === "act" : s.plan?.activity.id === "fridge")) shutFridge();
+      mindTogether(time);
       stepBall(time, dt);
       furnishRef.current?.step(dt, reduced);
     };
@@ -3152,6 +3130,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
           y: Math.round(s.y),
           facing: s.facing,
           doing: s.plan?.activity.id ?? null,
+          together: s.together ? `${s.together.kind}${s.together.started ? "" : " (on the way)"}` : null,
           step: s.plan?.index ?? null,
           recent: s.recent.join(","),
           errand: s.errand?.kind ?? null,
@@ -3277,6 +3256,11 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
         company(what);
         return hook.state();
       },
+      /** Something with the visitor, as the reader would ask from their card. */
+      together: (kind: TogetherKind) => {
+        together(kind, true);
+        return hook.state();
+      },
       /** Starts an activity by name, from where she stands, as if she had chosen it. */
       choose: (id: ActivityId) => {
         const s = st.current;
@@ -3340,7 +3324,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     s.touch = null;
     s.fidgets = 0;
     const to = clampX(Math.round(lv.w * 0.7));
-    s.x = reduced ? to : lv.w + DOOR_BEYOND;
+    // (From past the picture's right-hand edge: where the room fills the screen, the screen's.)
+    s.x = reduced ? to : live.current.span.edge + DOOR_BEYOND;
     s.y = lv.walkY;
     s.vy = 0;
     s.facing = -1;
@@ -3424,6 +3409,214 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       s.queue = [...s.queue.filter((errand) => errand.kind !== "cue" || errand.move !== "welcome"), { kind: "cue", x: null, face: 1, move: "welcome", loops: 1, line: goodbyeLine(Math.random), after }];
       if (s.phase === "rest") s.nextFree = Math.min(s.nextFree, after);
     }
+  };
+
+  // ---- together with the visitor --------------------------------------------------------------
+  // Now and then over a visit the two do something together (the visit's own plan, pip/visitors.ts
+  // `togetherBeats`, or the reader asking from the visitor's card): a high five, a dance, the ball, a chase.
+  // Her part is a plan (pip/behaviour.ts, `togetherPlan`); its step on the visitor sets the visitor's part going
+  // (`VisitorAct`, by the visit's clock), so the two are in step. Thrown onto the visitor, she is caught, or the
+  // two go over in a heap. For show, like the visit: none of it counts as play, and none of it moves her mood.
+
+  /**
+   * The visitor in her way, for her walks: nobody while she is on her way to (or round, or after) them for
+   * something together; her plan for it ends with her clear of them. (A game of ball, once under way, is her own
+   * running about: round them, as ever.)
+   */
+  const inTheWay = () => (st.current.together && st.current.plan?.activity.id === "together" ? null : worldNow()?.visitor);
+
+  /** The visitor's part, from now (the visit's clock is the wall clock), or none. */
+  const setVisitorAct = (act: VisitorAct | null) => useVisitorStore.getState().setAct(act);
+
+  /** The visitor is in the room and sitting (not knocking, walking in or out): there to do something with. */
+  const visitorHere = () => {
+    const phase = useVisitorStore.getState().phase;
+    return Boolean(worldNow()?.visitor) && (phase === "read" || phase === "hello");
+  };
+
+  /** Her middle is in the visitor's place (their box, and a little either side). */
+  const onVisitor = (x: number) => {
+    const visitor = worldNow()?.visitor;
+    return visitor ? x > visitor.x - VISITOR_CLEAR && x < visitor.x + visitor.w + VISITOR_CLEAR : false;
+  };
+
+  /** Steps out to beside the visitor, a moment from now: she is never left standing in their place. */
+  const stepAside = (move = "look") => {
+    const s = st.current;
+    const visitor = worldNow()?.visitor;
+    if (!visitor) return;
+    const out = besideVisitor(visitor, s.x, live.current.span.right, live.current.span.left);
+    const after = nowMs() + 250;
+    s.queue = [...s.queue.filter((errand) => errand.kind !== "visit"), { kind: "visit", x: out.x, face: out.face, move, loops: 1, after }];
+    if (s.phase === "rest") s.nextFree = Math.min(s.nextFree, after);
+  };
+
+  /** It is over (done, the visitor gone, she was called away): the visitor sits back down, and her walks keep clear of them again. */
+  const endTogether = () => {
+    const s = st.current;
+    if (!s.together) return;
+    const was = s.together;
+    s.together = null;
+    const act = useVisitorStore.getState().act;
+    if (act && act.kind === was.kind) setVisitorAct(null);
+    if (s.plan?.activity.id === "together") {
+      dropPlan(true);
+      rest();
+    }
+    // Left standing in the visitor's place (called away mid-chase): she steps out beside them.
+    if (TOUCHABLE.has(s.phase) && s.phase !== "sleep" && s.phase !== "tuck" && onVisitor(s.x)) stepAside();
+  };
+
+  /** Each look of the loop: is what the two were doing over? */
+  const mindTogether = (time: number) => {
+    const s = st.current;
+    const t = s.together;
+    if (!t) return;
+    const gone = !worldNow()?.visitor;
+    // Her plan is over (or was dropped), unless it was a game of ball, which goes on by itself until its time. (A
+    // greeting's high five is part of her reading with them: `company`.)
+    const ours = s.plan?.activity.id === "together" || s.plan?.activity.id === "company";
+    const planOver = !ours && (t.kind !== "ball" || !t.started);
+    if (gone || time > t.until || planOver) endTogether();
+  };
+
+  /** Sparks where two hands meet, and the clap: a high five. Not on the lightest tier, nor without motion. */
+  const handsMeet = (at: number) => {
+    playSound("clap");
+    if (prefersReducedMotion() || currentTier() === "minimal") return;
+    const room = roomRef.current?.getBoundingClientRect();
+    if (!room) return;
+    const k = live.current.scale;
+    burst({ x: room.left + at * k, y: room.top + (live.current.level.walkY - 20) * k }, { px: k, count: 7, sprite: "spark", spread: 40, lift: 12, fall: 8, duration: 520 });
+  };
+
+  /** The step of her plan on the visitor: their part starts now, and the day's diary hears of it. */
+  const startTogether = (kind: TogetherKind) => {
+    const s = st.current;
+    const visitor = worldNow()?.visitor;
+    if (!visitor || !visitorHere()) {
+      // Gone (or never quite here): nothing to do with them.
+      endTogether();
+      return;
+    }
+    const middle = visitor.x + visitor.w / 2;
+    const now = Date.now();
+    const far = kind === "chase" ? chaseTurn(visitor, outlook(nowMs(), prefersReducedMotion())) : undefined;
+    const lasts = kind === "chase" ? chaseMs(middle, far ?? middle) : TOGETHER_MS[kind];
+    setVisitorAct({ kind, from: now, until: now + lasts, ...(far !== undefined ? { far } : {}) });
+    // (Her plan goes on past the visitor's part: a little longer, so the end is hers.)
+    s.together = { kind, until: nowMs() + lasts + 8000, started: true };
+    if (kind === "highfive") handsMeet((s.x + middle) / 2);
+    if (kind === "ball") later(450, () => visitorThrow());
+    const handle = useVisitorStore.getState().visit?.visitor.handle;
+    if (handle) recordPlaydate({ day: getDateKey(), handle, kind });
+  };
+
+  /**
+   * Something with the visitor, now, if she can: in the room with them, awake, her own (not in the hand, not in a
+   * huff), and nothing else with them under way. `asked`: the reader asked; a huff says no to them out loud.
+   */
+  const together = (kind: TogetherKind, asked = false): boolean => {
+    const s = st.current;
+    if (outRef.current || live.current.decorating || !visitorHere()) return false;
+    if (!TOUCHABLE.has(s.phase) || s.phase === "sleep" || s.phase === "tuck" || s.phase === "petted") return false;
+    if (s.together) return false;
+    // Not as the visit is ending: the visitor would be up and away in the middle of it.
+    const visit = useVisitorStore.getState().visit;
+    if (!visit || visit.record.until - Date.now() < (kind === "ball" || kind === "chase" ? 30_000 : 15_000)) return false;
+    // A game of ball with the reader under way: the visit's own plan waits for another time.
+    if (s.ball && !asked) return false;
+    if (inHuff()) {
+      if (asked) rebuff();
+      return false;
+    }
+    const reduced = prefersReducedMotion();
+    s.errand = null;
+    s.touch = null;
+    dropPlan();
+    s.fidgets = 0;
+    s.together = { kind, until: nowMs() + 30_000, started: false };
+    s.plan = { activity: togetherPlan(kind, outlook(nowMs(), reduced), Math.random), index: -1 };
+    nextStep();
+    wakeLoop.current();
+    return true;
+  };
+
+  /** Where the visitor's hands are, for a ball thrown to them (floor pixels); null with nobody to throw to. */
+  const visitorHands = () => {
+    const visitor = worldNow()?.visitor;
+    return visitor && st.current.together?.kind === "ball" ? { x: visitor.x + visitor.w / 2, y: live.current.level.walkY - 14 } : null;
+  };
+
+  /** The visitor's toss to her: underarm, as the Ball key's, from their hands (a friend's throw: nothing she earns). */
+  const visitorThrow = () => {
+    const s = st.current;
+    const hands = visitorHands();
+    if (!hands) {
+      // Gone with it in their hands: it is left on the floor where they stood.
+      if (s.ball && s.ball.state === "held" && s.ball.friend) {
+        s.ball.body = ballDown(s.ball.body.x, ballRoom(live.current.level, live.current.span), s.ball.body.angle);
+        s.ball.state = "still";
+        s.ball.by = null;
+        s.ball.friend = false;
+        s.ball.rested = nowMs();
+        placeBall();
+      }
+      return;
+    }
+    const { level: lv } = live.current;
+    const room = ballRoom(lv, live.current.span);
+    const start = { x: Math.max(room.left, Math.min(room.right, hands.x)), y: hands.y, seed: s.play.rally.seed };
+    const toss = underarm(start, { x: s.x, y: lv.walkY + HANDS.y }, room, start.seed);
+    s.play.rally = { ...s.play.rally, seed: toss.seed };
+    readerThrow(start, toss, true);
+    const act = useVisitorStore.getState().act;
+    if (act?.kind === "ball") setVisitorAct({ ...act, move: "fling", moveUntil: Date.now() + 500 });
+  };
+
+  /** Her throw has come to the visitor: caught (a pose of their own), and back it comes after a moment. */
+  const visitorCatch = () => {
+    const s = st.current;
+    const ball = s.ball;
+    const hands = visitorHands();
+    if (!ball || !hands) return;
+    playSound("caught", { pitch: 1.05 + Math.min(12, s.play.rally.count) * 0.03 });
+    // The rally goes on (her count over the ball), but a friend's catch is nothing she earns.
+    setRally(readerCaught(s.play.rally).rally);
+    ball.state = "held";
+    ball.live = false;
+    ball.friend = true;
+    ball.touched = nowMs();
+    ball.body = { ...ball.body, x: hands.x, y: hands.y, vx: 0, vy: 0, spin: 0, down: false, rem: 0 };
+    s.play.goal = null;
+    s.play.impact = null;
+    placeBall();
+    const act = useVisitorStore.getState().act;
+    if (act?.kind === "ball") setVisitorAct({ ...act, move: "caught", moveUntil: Date.now() + 700 });
+    later(750, () => visitorThrow());
+  };
+
+  /**
+   * Thrown (or dropped) and down at `x`: on the visitor, they catch her, or (a hard landing) the two of them go
+   * over in a heap; then she steps out beside them. True when it was the visitor she came down on.
+   */
+  const landOnVisitor = (hard: boolean): boolean => {
+    const s = st.current;
+    if (!visitorHere() || s.together) return false;
+    const met = landedBy(worldNow()?.visitor, s.x, hard, live.current.span.right, live.current.span.left);
+    if (!met) return false;
+    const now = Date.now();
+    setVisitorAct({ kind: met.react, from: now, until: now + (met.react === "tumble" ? TUMBLE_MS : CATCH_MS) });
+    say(met.react === "tumble" ? pickOne(["oof. sorry!", "we're fine. we're fine.", "pile-up!"]) : pickOne(["caught me!", "nice catch!", "my hero."]));
+    playSound(met.react === "tumble" ? "bounce" : "caught", { pitch: met.react === "tumble" ? 0.8 : 1.1, volume: 0.5 });
+    // Out of their place once she is back on her feet.
+    const visitor = worldNow()?.visitor;
+    if (visitor) {
+      const out = met.stand;
+      const after = nowMs() + (met.react === "tumble" ? TUMBLE_MS : 900);
+      s.queue = [...s.queue.filter((errand) => errand.kind !== "visit"), { kind: "visit", x: out.x, face: out.face, move: "laugh", loops: 1, after }];
+    }
+    return true;
   };
 
   // ---- "you stopped there?" ----------------------------------------------------------------
@@ -3567,6 +3760,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       banner(box, title, note);
     },
     visitor: (what) => company(what),
+    together: (kind, asked = false) => together(kind, asked),
     playWith: (how) => {
       // Out of the house: there is nobody to play with.
       if (outRef.current) return;
@@ -3866,9 +4060,13 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
    */
   const countCatch = (tally: Tally, half: boolean) => {
     setRally(tally.rally);
-    if (tally.rally.count === 1) please("fetch");
-    if (tally.game) please("game");
-    played("fetch");
+    // A game with the visitor is for show: nothing in it counts as play with the reader.
+    const forShow = st.current.ball?.friend === true || st.current.together?.kind === "ball";
+    if (!forShow) {
+      if (tally.rally.count === 1) please("fetch");
+      if (tally.game) please("game");
+      played("fetch");
+    }
     if (!tally.cheer || half) return;
     playSound("chime", { pitch: 1.3, volume: 0.4 });
     say(`${tally.rally.count}!`);
@@ -3881,7 +4079,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
   const aimForBall = () => {
     const s = st.current;
     const ball = s.ball;
-    s.play.goal = ball && ball.state === "air" ? landing(ball.body, ballRoom(live.current.level)).x : null;
+    s.play.goal = ball && ball.state === "air" ? landing(ball.body, ballRoom(live.current.level, live.current.span)).x : null;
   };
 
   /** After the ball: to where it will come down, or to where it lies. `why`: to fetch it (at a run), or one of the ways she asks to play (at a trot). */
@@ -3906,8 +4104,9 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     const s = st.current;
     const ball = s.ball;
     if (!ball) return;
-    const room = ballRoom(live.current.level);
-    const to = throwTarget(s.reader, s.x, room);
+    const room = ballRoom(live.current.level, live.current.span);
+    // (In a game with the visitor, to the visitor's hands.)
+    const to = throwTarget(visitorHands() ?? s.reader, s.x, room);
     const start = { x: Math.max(room.left, Math.min(room.right, from.x)), y: Math.max(room.top, Math.min(room.floor - 1, from.y)) };
     const toss = lob(start, to, room, half ? 1.12 : 1);
     ball.body = { ...ballAt(start.x, start.y, toss.vx, toss.vy), angle: ball.body.angle };
@@ -3927,7 +4126,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     const s = st.current;
     const { level: lv, ownBall: own } = live.current;
     const half = halfHearted();
-    const to = throwTarget(s.reader, s.x, ballRoom(lv));
+    const to = throwTarget(visitorHands() ?? s.reader, s.x, ballRoom(lv, live.current.span));
     if (Math.abs(to.x - s.x) > 3) face(to.x < s.x ? -1 : 1);
     catchAct("windup", windupMs(s.play.rally.count, half), own ? "windup" : "windup-paper");
     // Well into a rally she cannot keep her feet on the floor.
@@ -4005,7 +4204,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     ball.state = "carried";
     ball.live = false;
     playSound("pop", { pitch: 1.3 });
-    s.play.spot = throwSpot(s.x, throwTarget(s.reader, s.x, ballRoom(lv)).x, 18, lv.w - 18);
+    s.play.spot = throwSpot(s.x, throwTarget(visitorHands() ?? s.reader, s.x, ballRoom(lv, live.current.span)).x, live.current.span.left + 18, live.current.span.right - 18);
     s.play.act = null;
     s.phase = "carry";
     if (Math.abs(s.play.spot - s.x) > 1) face(s.play.spot < s.x ? -1 : 1);
@@ -4017,7 +4216,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     const s = st.current;
     const ball = s.ball;
     if (!ball) return;
-    const room = ballRoom(live.current.level);
+    const room = ballRoom(live.current.level, live.current.span);
     const to = throwTarget(s.reader, s.x, room);
     const gap = to.x - ball.body.x;
     const dir = Math.abs(gap) < 4 ? s.facing : gap < 0 ? -1 : 1;
@@ -4037,7 +4236,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     const s = st.current;
     const ball = s.ball;
     if (!ball) return;
-    const to = throwTarget(s.reader, s.x, ballRoom(live.current.level));
+    const to = throwTarget(s.reader, s.x, ballRoom(live.current.level, live.current.span));
     if (Math.abs(to.x - s.x) > 3) face(to.x < s.x ? -1 : 1);
     ball.state = "carried";
     ball.live = false;
@@ -4108,8 +4307,8 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       patBall();
     } else if (act.kind === "handback" && ball) {
       // Without motion: the ball is put down beside her, the reader's to take.
-      const room = ballRoom(lv);
-      const side = s.reader ? (s.reader.x < s.x ? -1 : 1) : s.x <= lv.w / 2 ? 1 : -1;
+      const room = ballRoom(lv, live.current.span);
+      const side = s.reader ? (s.reader.x < s.x ? -1 : 1) : s.x <= (live.current.span.left + live.current.span.right) / 2 ? 1 : -1;
       ball.body = ballDown(s.x + side * 16, room, ball.body.angle);
       ball.state = "still";
       ball.by = "pip";
@@ -4187,15 +4386,16 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
    * (nothing: a drop). Whatever she was doing can wait, there is a ball;
    * unless she is in a huff, and will not look at it.
    */
-  const readerThrow = (from: { x: number; y: number }, velocity: { vx: number; vy: number }) => {
+  const readerThrow = (from: { x: number; y: number }, velocity: { vx: number; vy: number }, friend = false) => {
     const s = st.current;
     const { level: lv } = live.current;
-    const room = ballRoom(lv);
+    const room = ballRoom(lv, live.current.span);
     const now = nowMs();
     const was = s.ball;
     const x = Math.max(room.left, Math.min(room.right, from.x));
     const y = Math.max(room.top, Math.min(room.floor, from.y));
-    s.ball = { body: { ...ballAt(x, y, velocity.vx, velocity.vy), angle: was?.body.angle ?? 0 }, state: "air", by: "reader", live: false, speed: Math.hypot(velocity.vx, velocity.vy), touched: now, rested: now };
+    // (`friend`: the visitor's throw, in a game with them: what she does with it counts for nothing.)
+    s.ball = { body: { ...ballAt(x, y, velocity.vx, velocity.vy), angle: was?.body.angle ?? 0 }, state: "air", by: "reader", live: false, speed: Math.hypot(velocity.vx, velocity.vy), touched: now, rested: now, friend };
     const play = s.play;
     play.passed = false;
     play.goal = null;
@@ -4238,7 +4438,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     // (She has it, and is about to throw it: it is hers. From under her chin, or on its way to being put away, it is taken: that is what she was asking for.)
     const asking = s.phase === "catch" && (s.play.act?.kind === "chin" || s.play.act?.kind === "away");
     if (ball?.state === "carried" && !asking) return;
-    const room = ballRoom(lv);
+    const room = ballRoom(lv, live.current.span);
     const start = ball ? { x: ball.body.x, y: Math.min(ball.body.y, room.floor - 5), seed: s.play.rally.seed } : tossFrom(s.x, room, s.play.rally.seed);
     const toss = underarm(start, { x: s.x, y: lv.walkY + HANDS.y }, room, start.seed);
     s.play.rally = { ...s.play.rally, seed: toss.seed };
@@ -4286,7 +4486,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     const ball = s.ball;
     if (!ball) return;
     const { level: lv } = live.current;
-    const room = ballRoom(lv);
+    const room = ballRoom(lv, live.current.span);
     const play = s.play;
     if (ball.state === "carried") {
       const act = s.phase === "catch" ? play.act : null;
@@ -4329,6 +4529,12 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       }
       // Her eyes are on it.
       if (ball.state === "air") s.pointer = { x: ball.body.x, y: ball.body.y, at: time };
+      // Her throw, come to the visitor's hands in a game with them: caught.
+      const hands = ball.state === "air" && ball.by === "pip" && ball.body.vy > 0 ? visitorHands() : null;
+      if (hands && Math.abs(ball.body.x - hands.x) <= 12 && ball.body.y >= hands.y - 12) {
+        visitorCatch();
+        return;
+      }
     } else if (ball.state === "still" && time - Math.max(ball.rested, ball.touched) > BALL_FORGOTTEN_MS && s.phase !== "fetch" && s.phase !== "carry" && s.phase !== "catch") {
       // Nobody has been in a state to put it away (asleep, a visitor in the way, in a long sulk): it goes by itself, quietly.
       ballGone();
@@ -4445,7 +4651,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       moved = true;
       const hand = pointerAt(e);
       if (!hand) return;
-      const room = ballRoom(live.current.level);
+      const room = ballRoom(live.current.level, live.current.span);
       const now = nowMs();
       ball.body = { ...ball.body, x: Math.max(room.left, Math.min(room.right, hand.x + grip.x)), y: Math.max(room.top, Math.min(room.floor, hand.y + grip.y)) };
       ball.touched = now;
@@ -4482,7 +4688,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
         ball.speed = 0;
         ball.rested = now;
         if (prefersReducedMotion()) {
-          ball.body = ballDown(ball.body.x, ballRoom(live.current.level));
+          ball.body = ballDown(ball.body.x, ballRoom(live.current.level, live.current.span));
           ball.state = "still";
         }
         placeBall();
@@ -4545,8 +4751,13 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
   const carry = () => {
     const s = st.current;
     const { level: lv } = live.current;
-    s.x = Math.max(10, Math.min(lv.w - 10, s.handAt.x + s.grip.x));
+    const span = live.current.span;
+    const wall = span.notch || span.left < 0 ? 16 : 10;
+    s.x = Math.max(span.left + wall, Math.min(span.right - wall, s.handAt.x + s.grip.x));
     s.y = Math.max(28, Math.min(lv.walkY, s.handAt.y + HOLD_DROP + s.grip.y));
+    // Never up under the lift.
+    const clear = outOfNotch({ x: s.x, y: s.y, vx: 0, vy: 0 }, span.notch);
+    if (clear) ({ x: s.x, y: s.y } = clear);
   };
 
   /** Whether a Pip let go of at `x` is over her bed (and so is being put to bed). */
@@ -4605,7 +4816,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     s.whirl = null;
     s.giddy = false;
     if (prefersReducedMotion()) {
-      const bounds = airBounds(lv);
+      const bounds = airBounds(lv, live.current.span);
       s.x = Math.max(bounds.left, Math.min(bounds.right, s.x));
       s.y = lv.walkY;
       s.vx = 0;
@@ -4814,12 +5025,12 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     s.errand = null;
     dropPlan();
     face(dir);
-    s.target = Math.max(18, Math.min(lv.w - 18, s.x + dir * 24));
+    s.target = clampX(s.x + dir * 24);
     s.pace = WALK_SPEED * paceNow();
     s.phase = prefersReducedMotion() ? "rest" : "walk";
     if (s.phase === "rest") {
       // (Not through a visitor: as far as their side, and no further.)
-      s.x = stopForVisitor(worldNow()?.visitor, s.x, s.target) ?? s.target;
+      s.x = stopForVisitor(inTheWay(), s.x, s.target) ?? s.target;
       place();
     }
     show(s.phase === "walk" ? strollMove() : live.current.base, undefined, s.phase === "walk" ? "walk" : "rest");
@@ -4958,7 +5169,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       return;
     }
     if (!freeForFridge() || s.errand?.fridge || inHuff()) return;
-    const at = fridgeStand(fridge.box, live.current.level.w);
+    const at = fridgeStand(fridge.box, live.current.span.right, live.current.span.left);
     // What she will find, where that is known: nothing (she droops, a couple of times a day, and after that only
     // looks), food where there was none (a cheer), or food as usual (and she hopes some of it is for her).
     const larder = larderNow(worldNow());
@@ -4988,7 +5199,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
     if (!fridge || live.current.decorating || s.errand?.kind === "snack") return;
     if (s.phase === "sleep" || s.phase === "tuck") untuck();
     if (!freeForFridge()) return;
-    const at = fridgeStand(fridge.box, live.current.level.w);
+    const at = fridgeStand(fridge.box, live.current.span.right, live.current.span.left);
     const wait = fridgeFetch(Math.random);
     s.touch = null;
     startErrand({ kind: "snack", x: at.x, face: at.face, move: wait.move, loops: wait.loops, line: wait.line, after: 0, hurry: true, fridge: fridge.key }, prefersReducedMotion());
@@ -5036,7 +5247,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
       s.fidgets = 0;
       // Beside it, turned to it; or in front of it, or under it (a thing on a wall, a shelf or the ceiling); or where she is.
       const under = spot.up || visit.stand === "at";
-      const at = visit.stand === "stay" ? null : standAt({ ...spot, up: under }, s.x, lv.w);
+      const at = visit.stand === "stay" ? null : standAt({ ...spot, up: under }, s.x, live.current.span.right, live.current.span.left);
       const way: Step[] = !at || reduced ? [] : under ? [{ kind: "walk", x: at.x }] : [{ kind: "walk", x: at.x }, { kind: "face", dir: at.face }];
       // It answered the tap; with some way to come, it answers again as she gets there (the record is still playing).
       const again: Step[] = at && !reduced && Math.abs(at.x - s.x) > 24 ? [{ kind: "use", id: key, what: "thing", verb: "answer" }] : [];
@@ -5090,6 +5301,7 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
   const frame: RoomFrame = {
     scale,
     w: level.w,
+    span,
     h: level.h,
     walkY: level.walkY,
     floorId: level.id,
@@ -5112,31 +5324,26 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
   const noteText = world?.away?.note ?? "out. back soon.";
   // Said aloud, a line loses the marks that lean on a word ("you stopped *there*?").
   const spoken = shownLine?.replace(/\*/g, "") ?? null;
-  // Where the room fills its stage: where it sits in it, and its edges carried out to the stage's, on either side.
-  const inBox = fill && box ? fillPlace(level.w * scale, level.h * scale, box.width, box.height, ratio) : null;
-  const roomAt = inBox && box ? { left: inBox.left + box.left, top: inBox.top + box.top } : null;
-  const fillStyle: CSSProperties | undefined =
-    roomAt && edges
-      ? {
-          background: `${edgeBands(edges.left, roomAt.top, scale)} left top / 50% 100% no-repeat, ${edgeBands(edges.right, roomAt.top, scale)} right top / 50% 100% no-repeat`
-        }
-      : undefined;
+  // Drawn wide (the room filling the screen), the room's picture runs on past it to the stage's edges, the room in
+  // from its corner: the canvas is placed that far up and to the left of the room, and what fills the room with it
+  // (the shade of drawn curtains) reaches as far (houseStage.css, `--room-pad-*`).
+  const wide = pad.left + pad.right + pad.top + pad.bottom > 0;
+  const wideStyle: CSSProperties | undefined = wide
+    ? { position: "absolute", left: -pad.left * scale, top: -pad.top * scale, width: (level.w + pad.left + pad.right) * scale, height: (level.h + pad.top + pad.bottom) * scale }
+    : undefined;
+  const padVars = wide
+    ? ({ "--room-pad-left": `${pad.left * scale}px`, "--room-pad-right": `${pad.right * scale}px`, "--room-pad-top": `${pad.top * scale}px`, "--room-pad-bottom": `${pad.bottom * scale}px` } as CSSProperties)
+    : null;
 
   return (
-    <div ref={stageRef} className="pip-house-stage" data-fill={fill || undefined} style={fillStyle}>
-      {/* Beside the room, its wallpaper, trim and floor run on to the screen's edges in their own pattern. */}
-      {roomAt && edges?.bands && (
-        <>
-          <EdgeBand pixels={edges.bands.left} height={level.h} scale={scale} left={roomAt.left - BAND_ART * scale} top={roomAt.top} />
-          <EdgeBand pixels={edges.bands.right} height={level.h} scale={scale} left={roomAt.left + level.w * scale} top={roomAt.top} />
-        </>
-      )}
+    <div ref={stageRef} className="pip-house-stage" data-fill={fill || undefined}>
       <div
         ref={roomRef}
         className="pip-house-room"
         data-decorating={decorating || undefined}
         data-night={night || undefined}
-        style={{ width: level.w * scale, height: level.h * scale, ...(roomAt ? { left: roomAt.left, top: roomAt.top } : null) }}
+        data-wide={wide || undefined}
+        style={{ width: level.w * scale, height: level.h * scale, ...(roomAt ? { left: roomAt.left, top: roomAt.top } : null), ...padVars }}
         role="group"
         aria-label={label}
         onPointerMove={(event) => {
@@ -5151,8 +5358,16 @@ export const HouseScene = forwardRef<HouseSceneHandle, HouseSceneProps>(function
           st.current.reader = null;
         }}
       >
-        {openSky && <GardenSky width={level.w} scale={scale} />}
-        <canvas ref={canvasRef} width={level.w} height={level.h} className="pip-sprite pip-house-canvas" data-open-sky={openSky || undefined} aria-hidden="true" />
+        {openSky && <GardenSky width={level.w + pad.left + pad.right} above={pad.top} left={-pad.left} scale={scale} />}
+        <canvas
+          ref={canvasRef}
+          width={level.w + pad.left + pad.right}
+          height={level.h + pad.top + pad.bottom}
+          className="pip-sprite pip-house-canvas"
+          data-open-sky={openSky || undefined}
+          aria-hidden="true"
+          style={wideStyle}
+        />
 
         {furnish.layer}
 

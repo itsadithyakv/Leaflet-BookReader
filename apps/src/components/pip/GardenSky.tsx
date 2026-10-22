@@ -25,7 +25,9 @@ type Forced = { kind: SkyEventKind; at: number; seed: number };
  * string comparison a tick. Without motion it is a still picture of the hour,
  * redrawn once a minute, with nothing flying.
  */
-export const GardenSky = ({ width, scale }: { width: number; scale: number }) => {
+export const GardenSky = ({ width, scale, above = 0, left = 0 }: { width: number; scale: number; above?: number; left?: number }) => {
+  // (Over a room drawn wide, the glass runs on up over it: the sky is that much taller, from that far up.)
+  const height = SKY_H + above;
   const ref = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
@@ -44,10 +46,10 @@ export const GardenSky = ({ width, scale }: { width: number; scale: number }) =>
         if (t >= 1) forced = null;
         else events = [{ kind: forced.kind, t, seed: forced.seed }];
       }
-      const signature = skySignature(width, SKY_H, now, events, still);
+      const signature = skySignature(width, height, now, events, still);
       if (signature === last) return;
       last = signature;
-      context.putImageData(renderSky(width, SKY_H, now, events, still), 0, 0);
+      context.putImageData(renderSky(width, height, now, events, still), 0, 0);
     };
     draw();
     // Development only: `window.__pipSky("dragon")` sends one across now, to look at it
@@ -64,7 +66,16 @@ export const GardenSky = ({ width, scale }: { width: number; scale: number }) =>
       stop();
       if (import.meta.env.DEV) delete dev.__pipSky;
     };
-  }, [width]);
+  }, [width, height]);
 
-  return <canvas ref={ref} width={width} height={SKY_H} className="pip-sprite pip-garden-sky" style={{ width: width * scale, height: SKY_H * scale }} aria-hidden="true" />;
+  return (
+    <canvas
+      ref={ref}
+      width={width}
+      height={height}
+      className="pip-sprite pip-garden-sky"
+      style={{ width: width * scale, height: height * scale, ...(above || left ? { top: -above * scale, left: left * scale } : null) }}
+      aria-hidden="true"
+    />
+  );
 };

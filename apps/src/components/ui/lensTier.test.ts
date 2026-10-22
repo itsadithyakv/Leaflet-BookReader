@@ -61,9 +61,7 @@ describe("the lens and the visual effects", () => {
     const lens = await import("./glassRefraction");
     tier.setEffectsChoice("auto");
     lens.installGlassRefraction();
-    // (Auto starts from the device's tier; here, never judged, Full.)
-    expect(tier.currentTier()).toBe("full");
-    expect(tier.stepDownForSession("test")).toBe(true);
+    // (Auto starts from the device's tier; here, never judged, Smooth.)
     expect(tier.currentTier()).toBe("lite");
     expect(page.classes.has("glass-refracts")).toBe(false);
     expect(tier.stepDownForSession("test")).toBe(true);

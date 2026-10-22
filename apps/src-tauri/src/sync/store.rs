@@ -10,7 +10,7 @@
 
 use crate::db::Database;
 use crate::storage;
-use crate::sync::merge::{merge_camp, BookEntry, CampEntry, DayEntry, SessionEntry, SyncDoc};
+use crate::sync::merge::{BookEntry, CampEntry, DayEntry, SessionEntry, SyncDoc};
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
@@ -96,18 +96,6 @@ fn write_camp(db: &Database, camp: &CampEntry) -> Result<()> {
   db.set_setting(CAMP_SAVED_AT_SETTING, &camp.saved_at)
 }
 
-/// Takes a document's camp if it beats the one kept here. Decided against
-/// what is stored now, not against the snapshot the run started from: a camp
-/// saved while the run was away talking to the network is the newer one, and
-/// must not be rolled back by the answer. Inside `apply`'s transaction.
-fn absorb_camp(db: &Database, theirs: &CampEntry) -> Result<()> {
-  let here = kept_camp(db)?;
-  match merge_camp(&here, &Some(theirs.clone())) {
-    Some(camp) if Some(&camp) != here.as_ref() => write_camp(db, &camp),
-    _ => Ok(())
-  }
-}
-
 /// What `apply` changed, so the caller can report it and fetch missing files.
 #[derive(Debug, Default)]
 pub struct Applied {
@@ -128,9 +116,26 @@ pub struct Applied {
 /// a row a commit held the database (and so every command waiting on it) for
 /// twenty seconds with a year's reading in it; and a run that fails part way
 /// now leaves the library as it was rather than half merged.
+///
+/// Merged, inside that transaction, with what the database holds now, not
+/// written over it. A run takes its snapshot, then goes to the network for
+/// seconds (the account's push, Drive's read, write and read-back), and the
+/// reader goes on meanwhile: the heartbeat keeps a minute's reading, a note
+/// is edited, a highlight or a book is removed. Written as the document had
+/// it, those minutes were gone for good, the note went back, and the
+/// highlight and the book came back to life (sync audit D1). The merge is
+/// commutative and idempotent, so merging the document again with the rows
+/// as they are now loses nothing of either; what was written meanwhile goes
+/// up with the next sync. The document's own time (`updated_at`, the run's
+/// `now`) is the clock it is merged at.
 pub fn apply(db: &Database, doc: &SyncDoc) -> Result<Applied> {
   let mut gone: Vec<(String, String)> = Vec::new();
-  let result = db.in_transaction(|| write(db, doc, &mut gone))?;
+  let result = db.in_transaction(|| {
+    let now = doc.updated_at.as_str();
+    let current = snapshot(db, now)?;
+    let merged = crate::sync::merge::merge(&current, doc, now);
+    write(db, &merged, &mut gone)
+  })?;
   // Only once their rows say so: a file cannot be put back by a rollback.
   for (path, hash) in gone {
     let _ = std::fs::remove_file(&path);
@@ -237,13 +242,16 @@ fn write(db: &Database, doc: &SyncDoc, gone: &mut Vec<(String, String)>) -> Resu
   }
   let carried: Vec<String> = doc.collections.iter().map(|c| c.id.clone()).collect();
   db.retire_collection_tombstones(&carried)?;
-  // Merged into what is stored rather than written over it: the reader may have
-  // learned something here since the snapshot this run started from.
+  // `apply` has already merged these with what is stored now, so they are
+  // kept as they are: a stamp from a clock that was ahead has been put right
+  // (`merge::bounded`), and folding them in again would keep the wrong one.
   if let Some(profile) = &doc.reading_profile {
-    crate::sync::reading::absorb(db, profile)?;
+    crate::sync::reading::keep(db, profile)?;
   }
   if let Some(camp) = &doc.camp {
-    absorb_camp(db, camp)?;
+    if CampEntry::problem(&camp.state).is_none() && kept_camp(db)?.as_ref() != Some(camp) {
+      write_camp(db, camp)?;
+    }
   }
 
   // Tombstones the merge has retired can finally leave the database.
@@ -293,7 +301,7 @@ mod tests {
   use crate::db::BookRecord;
   use crate::sync::merge;
 
-  const NOW: &str = "2026-08-29T12:00:00+00:00";
+  const NOW: &str = "2026-10-29T12:00:00+00:00";
 
   fn record(id: &str, progress: f32) -> BookRecord {
     BookRecord {
@@ -746,14 +754,211 @@ mod tests {
     apply(&to, &doc).expect("apply");
     assert_eq!(to.annotations_for_book("b1").expect("list"), vec![annotation.clone()]);
 
-    // A tombstone the document no longer carries is removed for good.
+    // A tombstone the merge has retired (past the ninety days every device
+    // has had to see it) is removed for good.
     let mut gone = annotation.clone();
+    gone.updated_at = "2026-09-03T00:00:00Z".into();
     gone.deleted_at = Some("2026-09-03T00:00:00Z".into());
     to.put_annotation(&gone).expect("delete");
     let mut empty = doc.clone();
     empty.annotations.clear();
+    // Not yet: a run a day after the removal keeps it, to carry it.
+    empty.updated_at = "2026-09-04T00:00:00Z".into();
+    apply(&to, &empty).expect("apply");
+    assert_eq!(to.find_annotation("h1").expect("find").and_then(|a| a.deleted_at).as_deref(), Some("2026-09-03T00:00:00Z"));
+    empty.updated_at = "2026-12-31T00:00:00Z".into();
     apply(&to, &empty).expect("apply");
     assert!(to.find_annotation("h1").expect("find").is_none());
+  }
+
+  // ---- what is written while a run is at the network (sync audit D1) -----
+
+  /// A library that has been read in: a book, a day with minutes, a note.
+  fn read_in(db: &Database) {
+    db.upsert_book(&record("aaa", 0.3)).expect("book");
+    db.upsert_book(&record("bbb", 0.1)).expect("book");
+    db.credit_minutes("2026-10-29", 10.0, 20).expect("minutes");
+    db.put_annotation(&mark("h1", "first thoughts", "2026-10-29T10:00:00+00:00")).expect("note");
+    db.put_annotation(&mark("h2", "keep this", "2026-10-29T10:00:00+00:00")).expect("note");
+  }
+
+  fn mark(id: &str, note: &str, at: &str) -> crate::db::Annotation {
+    crate::db::Annotation {
+      id: id.into(),
+      book_id: "aaa".into(),
+      kind: "highlight".into(),
+      cfi: format!("epubcfi(/6/2!/4/2,/1:0,/1:{})", id.len()),
+      text: Some("A line worth keeping".into()),
+      note: Some(note.into()),
+      color: Some("yellow".into()),
+      chapter: None,
+      created_at: "2026-10-29T10:00:00+00:00".into(),
+      updated_at: at.into(),
+      deleted_at: None
+    }
+  }
+
+  /// The run: its snapshot, merged with what the account held, the document
+  /// it will apply once the network has answered.
+  fn run_started(db: &Database) -> SyncDoc {
+    let local = snapshot(db, NOW).expect("snapshot");
+    merge::merge(&local, &SyncDoc::empty(NOW), NOW)
+  }
+
+  /// Minutes the heartbeat keeps while the run is away are not put back to
+  /// the snapshot's figure, the total or this device's own.
+  #[test]
+  fn minutes_kept_while_a_run_is_at_the_network_survive_it() {
+    let db = memory_db();
+    read_in(&db);
+    let doc = run_started(&db);
+    // Meanwhile: another minute and a half of reading.
+    db.credit_minutes("2026-10-29", 1.5, 20).expect("heartbeat");
+    let before = db.reading_days().expect("days")["2026-10-29"].minutes;
+    let mine_before = db.reading_day_devices().expect("figures").get("2026-10-29").cloned().unwrap_or_default();
+
+    apply(&db, &doc).expect("apply");
+
+    assert_eq!(db.reading_days().expect("days")["2026-10-29"].minutes, before);
+    assert!((before - 11.5).abs() < 1e-9, "{before}");
+    assert_eq!(db.reading_day_devices().expect("figures").get("2026-10-29").cloned().unwrap_or_default(), mine_before);
+    // And they are in the next run's document.
+    assert_eq!(snapshot(&db, NOW).expect("snapshot").days[0].minutes, before);
+  }
+
+  /// A note edited while the run is away keeps its edit.
+  #[test]
+  fn a_note_edited_while_a_run_is_at_the_network_keeps_its_edit() {
+    let db = memory_db();
+    read_in(&db);
+    let doc = run_started(&db);
+    db.put_annotation(&mark("h1", "second thoughts", "2026-10-29T11:00:00+00:00")).expect("edit");
+
+    apply(&db, &doc).expect("apply");
+
+    let kept = db.find_annotation("h1").expect("find").expect("there");
+    assert_eq!(kept.note.as_deref(), Some("second thoughts"));
+  }
+
+  /// A highlight removed while the run is away stays removed, and its
+  /// tombstone stays to carry the removal: dropped, the next sync brought
+  /// the highlight back from the server.
+  #[test]
+  fn a_highlight_removed_while_a_run_is_at_the_network_stays_removed() {
+    let db = memory_db();
+    read_in(&db);
+    let doc = run_started(&db);
+    let mut gone = mark("h2", "keep this", "2026-10-29T11:00:00+00:00");
+    gone.deleted_at = Some("2026-10-29T11:00:00+00:00".into());
+    db.put_annotation(&gone).expect("remove");
+
+    apply(&db, &doc).expect("apply");
+
+    let kept = db.find_annotation("h2").expect("find").expect("the tombstone is kept");
+    assert_eq!(kept.deleted_at.as_deref(), Some("2026-10-29T11:00:00+00:00"));
+    let next = snapshot(&db, NOW).expect("snapshot");
+    assert!(next.annotations.iter().any(|a| a.id == "h2" && a.deleted_at.is_some()), "it travels");
+    // The server's copy still has it live; the removal wins there too.
+    let on_server = merge::merge(&next, &doc, NOW);
+    assert!(on_server.annotations.iter().any(|a| a.id == "h2" && a.deleted_at.is_some()));
+  }
+
+  /// A book removed while the run is away stays removed: the snapshot's live
+  /// row was written over the new tombstone, and the book was back at once,
+  /// its file already gone.
+  #[test]
+  fn a_book_removed_while_a_run_is_at_the_network_stays_removed() {
+    let db = memory_db();
+    read_in(&db);
+    let doc = run_started(&db);
+    db.delete_book("bbb", "2026-10-29T11:00:00+00:00").expect("remove");
+
+    let applied = apply(&db, &doc).expect("apply");
+
+    let ids: Vec<String> = db.list_books().expect("list").into_iter().map(|book| book.id).collect();
+    assert_eq!(ids, vec!["aaa".to_string()]);
+    let row = db.find_by_id("bbb").expect("find").expect("the tombstone is kept");
+    assert_eq!(row.deleted_at.as_deref(), Some("2026-10-29T11:00:00+00:00"));
+    assert!(applied.removed.is_empty(), "removed here, not by the run");
+    assert!(snapshot(&db, NOW).expect("snapshot").books.iter().any(|b| b.id == "bbb" && b.is_deleted()));
+  }
+
+  /// The run's own news still lands around what was written meanwhile.
+  #[test]
+  fn what_a_run_brings_lands_beside_what_was_written_meanwhile() {
+    let db = memory_db();
+    read_in(&db);
+    let mut doc = run_started(&db);
+    let ahead = doc.books.iter_mut().find(|book| book.id == "aaa").expect("aaa");
+    ahead.progress = 0.8;
+    ahead.progress_updated_at = "2026-10-29T11:30:00+00:00".into();
+    db.put_annotation(&mark("h1", "second thoughts", "2026-10-29T11:00:00+00:00")).expect("edit");
+
+    apply(&db, &doc).expect("apply");
+
+    assert_eq!(db.find_by_id("aaa").expect("find").expect("there").progress, 0.8);
+    assert_eq!(db.find_annotation("h1").expect("find").and_then(|a| a.note).as_deref(), Some("second thoughts"));
+  }
+
+  /// Sync audit D4, as the laptop meets it: the phone removed a book; the
+  /// laptop, opening later, looks the book up (a cover, an author) and tidies
+  /// its title before its first sync. Its stamps are later than the removal,
+  /// and the book still leaves the laptop, rather than coming back everywhere.
+  #[test]
+  fn a_lookup_at_launch_does_not_bring_back_a_book_removed_elsewhere() {
+    let laptop = memory_db();
+    laptop.upsert_book(&record("aaa", 0.3)).expect("book");
+    // An hour ago, on the phone.
+    let removal = (chrono::Utc::now() - chrono::Duration::hours(1)).to_rfc3339();
+    let mut removed = merge::BookEntry::from_record(&record("aaa", 0.3));
+    removed.deleted_at = Some(removal.clone());
+    let phone = SyncDoc { books: vec![removed], ..SyncDoc::empty(NOW) };
+
+    // At launch, before the sync: a lookup that finds an author, and the
+    // title put through today's rules. Both stamp the metadata now.
+    let mut found = laptop.find_by_id("aaa").expect("find").expect("there");
+    found.author = Some("Found Author".into());
+    laptop.update_metadata(&found).expect("lookup");
+    laptop.retitle("aaa", "A Tidier Title", Some("Found Author"), &[]).expect("retitle");
+    let stamped = laptop.find_by_id("aaa").expect("find").expect("there").metadata_updated_at.expect("stamped");
+    assert!(merge::instant(&stamped) > merge::instant(&removal));
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let merged = merge::merge(&snapshot(&laptop, &now).expect("snapshot"), &phone, &now);
+    assert!(merged.books[0].is_deleted(), "the removal holds in what goes up");
+    let applied = apply(&laptop, &merged).expect("apply");
+    assert_eq!(applied.removed, vec!["aaa".to_string()]);
+    assert!(laptop.list_books().expect("list").is_empty());
+
+    // Reading on in it, on the other hand, is the reader wanting it back.
+    let reader = memory_db();
+    reader.upsert_book(&record("aaa", 0.3)).expect("book");
+    reader.update_progress("aaa", 0.35, None, None).expect("read on");
+    let merged = merge::merge(&snapshot(&reader, &now).expect("snapshot"), &phone, &now);
+    assert!(!merged.books[0].is_deleted());
+  }
+
+  /// Sync audit D3, as a device keeps it: a stamp from a clock that ran
+  /// ahead is written back as the run's time, so it cannot go on winning
+  /// (and undo a removal made on another device) once the clock is right.
+  #[test]
+  fn a_stamp_from_a_fast_clock_is_put_right_in_the_rows() {
+    let laptop = memory_db();
+    let mut fast = record("aaa", 0.4);
+    fast.progress_updated_at = Some("2026-10-29T12:20:00+00:00".into());
+    laptop.upsert_book(&fast).expect("book");
+    let doc = run_started(&laptop);
+    apply(&laptop, &doc).expect("apply");
+    assert_eq!(laptop.find_by_id("aaa").expect("find").expect("there").progress_updated_at.as_deref(), Some(NOW));
+
+    // The phone removes the book a minute later; the laptop syncs at 12:30.
+    let mut removed = merge::BookEntry::from_record(&laptop.find_by_id("aaa").expect("find").expect("there"));
+    removed.deleted_at = Some("2026-10-29T12:01:00+00:00".into());
+    let phone = SyncDoc { books: vec![removed], ..SyncDoc::empty(NOW) };
+    let later = "2026-10-29T12:30:00+00:00";
+    let merged = merge::merge(&snapshot(&laptop, later).expect("snapshot"), &phone, later);
+    apply(&laptop, &merged).expect("apply");
+    assert!(laptop.list_books().expect("list").is_empty(), "the removal holds");
   }
 
   #[test]

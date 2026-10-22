@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { edgeBands, edgePattern, fillPlace, rowPeriod, sceneScale } from "./sceneFit";
+import { LIFT_CLEAR, NO_PAD, PAD_STEP, fillPlace, floorSpan, outOfNotch, roomPad, roomSpan, sceneScale } from "./sceneFit";
 
 // A floor of the house: 240 by 120 art pixels.
 const W = 240;
@@ -59,71 +59,55 @@ describe("the room as the whole screen (a phone on its side)", () => {
     expect(Math.abs(place.left * 2 + W * scale - box.width)).toBeLessThanOrEqual(1);
   });
 
-  it("carries the room's edge out as bands of its own colours, the first up to the top and the last down to the foot", () => {
-    const bands = edgeBands(["#a", "#a", "#b", "#c", "#c"], -10, 4);
-    expect(bands).toBe("linear-gradient(to bottom, #a 0px -2px, #b -2px 2px, #c 2px 100%)");
-    expect(edgeBands([], 0, 1)).toBe("none");
-  });
-});
-
-describe("the room carried on past its edges, in its own pattern", () => {
-  // The bedroom's Plain Cream: a dot every 10 pixels (at 5, 15, 25 ...), on cream; the shade under the ceiling.
-  // Packed as a canvas's pixels are read (a Uint32Array over RGBA, little-endian: 0xAABBGGRR).
-  const CREAM = 0xffc6e4f2;
-  const DOT = 0xffaad2e6;
-  const SHADE = 0xffacc6d2;
-  const SHELF = 0xff345a8a;
-  const PALETTE = [0xff3e4a9a, 0xff8c5e3f, 0xff3e84a8, 0xff56743e, 0xff8e5a6a, 0xff40649a, 0xff14263e];
-  const creamRow = (dots: boolean) => Array.from({ length: 240 }, (_, x) => (dots && x % 10 === 5 ? DOT : CREAM));
-  const fromRight = (row: number[]) => [...row].reverse();
-  // Stars on glass, books on a shelf: drawn at random (as pip/house.js's rnd), with no repeat.
-  const noise = (x: number, seed: number) => PALETTE[Math.floor((Math.abs(Math.sin(x * 12.9898 + seed * 78.233)) * 43758.5453) % 1 * 7)];
-
-  it("finds a row's repeat, and none where a thing stands at the edge or the pattern is drawn at random", () => {
-    expect(rowPeriod(creamRow(true))).toBe(10);
-    expect(rowPeriod(creamRow(false))).toBe(1);
-    expect(rowPeriod(Array.from({ length: 240 }, (_, x) => (x < 20 ? SHELF : CREAM)))).toBeNull();
-    expect(rowPeriod(Array.from({ length: 240 }, (_, x) => noise(x, 1)))).toBeNull();
+  it("draws the room's picture on to the stage's edges each side, in steps, never smaller once drawn", () => {
+    // 800 x 369 at 3: a room of 560 x 280 CSS px at (124, 66), 7 device pixels (2.33 CSS) an art pixel.
+    const scale = 7 / 3;
+    const room = { left: 124, top: 66, width: 240 * scale, height: 120 * scale };
+    const pad = roomPad({ width: 800, height: 369 }, room, scale);
+    for (const side of [pad.left, pad.right, pad.top, pad.bottom]) expect(side % PAD_STEP).toBe(0);
+    // It reaches the stage's edges: nothing of the stage is left undrawn.
+    expect(room.left - pad.left * scale).toBeLessThanOrEqual(0);
+    expect(room.left + room.width + pad.right * scale).toBeGreaterThanOrEqual(800);
+    expect(room.top - pad.top * scale).toBeLessThanOrEqual(0);
+    expect(room.top + room.height + pad.bottom * scale).toBeGreaterThanOrEqual(369);
+    // Less than a step over.
+    expect(room.left - pad.left * scale).toBeGreaterThan(-PAD_STEP * scale);
+    // A drawer opened (the room moved left) and shut again: what was drawn still reaches, and is not drawn again smaller.
+    const moved = roomPad({ width: 800, height: 369 }, { ...room, left: 40 }, scale, pad);
+    expect(moved.left).toBe(pad.left);
+    expect(moved.right).toBeGreaterThan(pad.right);
+    expect(roomPad({ width: 800, height: 369 }, room, scale, moved)).toEqual(moved);
+    expect(roomPad({ width: 800, height: 369 }, { ...room, left: 0, top: 0, width: 800, height: 369 }, scale)).toEqual(NO_PAD);
   });
 
-  it("carries the dots and the shade under the ceiling on with no seam, on both sides", () => {
-    const room = [Array(240).fill(SHADE), creamRow(false), ...Array.from({ length: 20 }, (_, r) => creamRow(r % 10 === 5))];
-    const width = 30;
-    const left = edgePattern(room, room.map(() => CREAM), "left", width, room.length);
-    const right = edgePattern(room.map(fromRight), room.map(() => CREAM), "right", width, room.length);
-    // The shade runs on across the band.
-    expect(Array.from(left.slice(0, width)).every((colour) => colour === SHADE)).toBe(true);
-    // A dotted row: the band's columns are x = -30 .. -1 on the left, 240 .. 269 on the right, the dots where the
-    // wallpaper's would be (x % 10 === 5).
-    const row = 7;
-    const leftRow = Array.from(left.slice(row * width, (row + 1) * width));
-    const rightRow = Array.from(right.slice(row * width, (row + 1) * width));
-    leftRow.forEach((colour, column) => expect(colour).toBe((((column - width) % 10) + 10) % 10 === 5 ? DOT : CREAM));
-    rightRow.forEach((colour, column) => expect(colour).toBe((240 + column) % 10 === 5 ? DOT : CREAM));
+  it("gives Pip the floor from the screen's left gutter to short of the rail, in the room's own pixels", () => {
+    const scale = 2;
+    const room = { left: 120, top: 70 };
+    const box = { left: 60, top: 70, right: 704, bottom: 353 };
+    const lift = { left: 8, top: 72, right: 52, bottom: 176 };
+    const span = floorSpan(box, lift, room, scale, 240, { left: 64, right: 56, top: 40, bottom: 8 });
+    expect(span.left).toBe((8 - 120) / 2);
+    expect(span.right).toBe((704 - 120) / 2);
+    expect(span.notch).toEqual({ x: (52 + LIFT_CLEAR - 120) / 2, y: (176 + LIFT_CLEAR - 70) / 2 });
+    expect(span.edge).toBe(240 + 56);
+    // No lift: the box's own left.
+    expect(floorSpan(box, null, room, scale, 240, NO_PAD).left).toBe((60 - 120) / 2);
+    // Alone (framed), wall to wall.
+    expect(roomSpan(240)).toEqual({ left: 0, right: 240, notch: null, edge: 240 });
   });
 
-  it("takes the room's light drifting across its wallpaper for the same wallpaper, and meets the room in its own shade", () => {
-    // The day through the window: the cream a shade lighter every other pixel, the dots likewise.
-    const rgb = (r: number, g: number, b: number) => (0xff000000 | (Math.min(255, b) << 16) | (Math.min(255, g) << 8) | Math.min(255, r)) >>> 0;
-    const lit = (x: number) => {
-      const day = Math.floor(x / 4);
-      return x % 10 === 5 ? rgb(200, 180 + day, 140 + day) : rgb(200, 200 + day, 190 + day);
-    };
-    const row = Array.from({ length: 240 }, (_, x) => lit(x));
-    expect(rowPeriod(row)).toBe(10);
-    const band = edgePattern([row], [CREAM], "left", 10, 1);
-    // x = -1 is the repeat's last pixel nearest the edge (x = 9), as lit there.
-    expect(band[9]).toBe(lit(9));
-    expect(band[5]).toBe(lit(5));
-  });
-
-  it("carries a wall with no pattern on in one colour, not with a stray line of a window's bar or a shelf", () => {
-    const glass = (seed: number) => Array.from({ length: 240 }, (_, x) => noise(x, seed));
-    const bar = Array(240).fill(SHELF);
-    const room = [Array(240).fill(SHADE), glass(1), glass(2), glass(3), bar, glass(4), glass(5), glass(6), bar, glass(7)];
-    const band = edgePattern(room, room.map(() => CREAM), "left", 8, room.length);
-    // The trim under the ceiling is kept; the lone bars go with the glass.
-    expect(band[0]).toBe(SHADE);
-    for (let r = 1; r < room.length; r++) expect(band[r * 8]).toBe(CREAM);
+  it("keeps Pip out of the lift's corner in the air, out the short way, and leaves her be anywhere else", () => {
+    const notch = { x: -20, y: 50 };
+    // On the floor under the lift: clear.
+    expect(outOfNotch({ x: -50, y: 109, vx: -40, vy: 0 }, notch)).toBeNull();
+    // Right of it, high up: clear.
+    expect(outOfNotch({ x: 0, y: 40, vx: -40, vy: 0 }, notch)).toBeNull();
+    // Flying in from the right, high: off its side like a wall.
+    const side = outOfNotch({ x: -6, y: 40, vx: -60, vy: 10 }, notch);
+    expect(side).toEqual({ x: -4, y: 40, vx: 60 * 0.55, vy: 10 });
+    // Thrown up from under it: off its foot like a ceiling.
+    const under = outOfNotch({ x: -50, y: 78, vx: 0, vy: -90 }, notch);
+    expect(under).toEqual({ x: -50, y: 80, vx: 0, vy: 90 * 0.55 });
+    expect(outOfNotch({ x: -50, y: 40, vx: 0, vy: 0 }, null)).toBeNull();
   });
 });

@@ -116,6 +116,12 @@ export const TIPS: readonly Tip[] = [
     when: (state) => state.front.through.includes(role)
   })),
   {
+    // (1.5.11) The meadow's record of the reading.
+    id: "blooms",
+    text: "Every book you finish blooms on the Reading Path in the meadow. Tap a bloom to see which book it was.",
+    when: (state) => opened(state, undefined, "meadow") && state.raised.length > 0
+  },
+  {
     id: "beds",
     text: "More heroes have come than the hut has beds for: the rest are away on the road. Build the hut up, and more of them are about the camp.",
     when: (state) => residents(state).length > bedsOf(state)

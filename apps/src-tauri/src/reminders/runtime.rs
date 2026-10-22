@@ -187,16 +187,20 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) {
     }
   }
   let identifier = identifier(app);
-  let _ = toast::clear_scheduled(&identifier);
-  toast::clear_delivered(&identifier);
-
   let handle = app.clone();
-  let _ = std::thread::Builder::new().name("reminders".into()).spawn(move || loop {
-    // Wake at the top of each minute, so an 19:00 reminder is not up to a
-    // minute late.
-    let second = u64::from(chrono::Timelike::second(&Local::now()));
-    std::thread::sleep(std::time::Duration::from_secs(60 - second.min(59)));
-    tick(&handle);
+  let _ = std::thread::Builder::new().name("reminders".into()).spawn(move || {
+    // Windows' schedule and the notification centre are asked here, not on
+    // the main thread during setup: each is a call into the notification
+    // service, which on a cold start held up the window's first frame.
+    let _ = toast::clear_scheduled(&identifier);
+    toast::clear_delivered(&identifier);
+    loop {
+      // Wake at the top of each minute, so an 19:00 reminder is not up to a
+      // minute late.
+      let second = u64::from(chrono::Timelike::second(&Local::now()));
+      std::thread::sleep(std::time::Duration::from_secs(60 - second.min(59)));
+      tick(&handle);
+    }
   });
 }
 
@@ -295,8 +299,10 @@ fn status<R: Runtime>(app: &AppHandle<R>, settings: ReminderSettings) -> Reminde
   }
 }
 
+/// (Off the main thread: it asks Windows whether Leaflet's notifications are
+/// on, a call into the notification service.)
 #[cfg(not(target_os = "android"))]
-#[tauri::command]
+#[tauri::command(async)]
 pub fn reminders_get(app: AppHandle, state: State<'_, AppState>) -> ReminderStatus {
   let settings = read_settings(&state.db.guard());
   status(&app, settings)

@@ -437,3 +437,122 @@ async fn the_apps_requests_fit_a_real_server() {
     std::fs::write(path, serde_json::to_string_pretty(&seen).expect("JSON")).expect("the dump is written");
   }
 }
+
+/// The account's copy of the reading, through the app's own `cloud::Server`
+/// and `sync_with`, against the real `/v1/state`: two devices, a write that
+/// loses one race to the other device and is merged again, the version the
+/// server counts against the one the app keeps, a sync with nothing new
+/// sending nothing (`?have=`), and a day's minutes that JSON once read back a
+/// step short (2026-10-21) coming back as written.
+#[tokio::test]
+#[ignore = "needs a Leaflet server on this machine: see the top of this file"]
+async fn the_account_sync_fits_a_real_server() {
+  use crate::sync::cloud::{self, Fetched, Pushed, StateStore};
+  use crate::sync::shared_doc::Pending;
+  use std::sync::atomic::{AtomicU32, Ordering};
+  use std::sync::Mutex;
+
+  let (Ok(api), Ok(control)) = (std::env::var("LEAFLET_E2E_API"), std::env::var("LEAFLET_E2E_CONTROL")) else {
+    panic!("set LEAFLET_E2E_API and LEAFLET_E2E_CONTROL (see the top of this file)");
+  };
+  let server = Server { http: reqwest::Client::new(), api: api.clone(), control };
+  let run = format!("{:x}", chrono::Utc::now().timestamp_millis() % 0xff_ffff);
+  let reader = server.sign_up("Sync", &run).await;
+  const TAG: &str = "5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c";
+
+  /// What runs just before a write lands: the other device's sync.
+  type Interloper<'a> = Box<dyn FnOnce() -> Pending<'a, ()> + Send + 'a>;
+
+  /// The real server, counting what goes up, with the other device's sync
+  /// run once just before this one's next write lands (a race lost).
+  struct Counted<'a> {
+    real: cloud::Server<'a>,
+    pushes: AtomicU32,
+    conflicts: AtomicU32,
+    asked: Mutex<Vec<Option<i64>>>,
+    unchanged: AtomicU32,
+    before_push: Mutex<Option<Interloper<'a>>>
+  }
+
+  impl<'a> StateStore for Counted<'a> {
+    fn pull(&self, have: Option<i64>) -> Pending<'_, Fetched> {
+      Box::pin(async move {
+        self.asked.lock().unwrap().push(have);
+        let fetched = self.real.pull(have).await?;
+        if matches!(fetched, Fetched::Unchanged { .. }) {
+          self.unchanged.fetch_add(1, Ordering::SeqCst);
+        }
+        Ok(fetched)
+      })
+    }
+
+    fn push<'b>(&'b self, version: i64, payload: &'b str) -> Pending<'b, Pushed> {
+      Box::pin(async move {
+        let interloper = self.before_push.lock().unwrap().take();
+        if let Some(interloper) = interloper {
+          interloper().await?;
+        }
+        let pushed = self.real.push(version, payload).await?;
+        match pushed {
+          Pushed::Kept => self.pushes.fetch_add(1, Ordering::SeqCst),
+          Pushed::Conflict => self.conflicts.fetch_add(1, Ordering::SeqCst)
+        };
+        Ok(pushed)
+      })
+    }
+  }
+
+  let counted = |db: &'static Mutex<db::Database>| Counted {
+    real: cloud::Server::at(db, &api, &reader.token).expect("a client"),
+    pushes: AtomicU32::new(0),
+    conflicts: AtomicU32::new(0),
+    asked: Mutex::new(Vec::new()),
+    unchanged: AtomicU32::new(0),
+    before_push: Mutex::new(None)
+  };
+  let laptop: &'static Mutex<db::Database> = Box::leak(Box::new(Mutex::new(crate::db::tests::memory_db())));
+  let phone: &'static Mutex<db::Database> = Box::leak(Box::new(Mutex::new(crate::db::tests::memory_db())));
+  let (laptop_store, phone_store) = (counted(laptop), counted(phone));
+  let held_version = || async {
+    let (status, answer) = server.send(Method::GET, "/v1/state", &[], Some(&reader.token), None).await;
+    assert_eq!(status, 200, "{answer}");
+    answer["version"].as_i64().expect("a version")
+  };
+
+  laptop.guard().upsert_book(&book("well", "The Well of Ascension", "Brandon Sanderson", 0.0)).expect("import");
+  laptop.guard().credit_minutes("2026-09-29", 9.748933333333333, 20).expect("read");
+  cloud::sync_with(laptop, &laptop_store, "2026-10-21T11:00:00+00:00", Some(TAG)).await.expect("laptop's first");
+  assert_eq!(held_version().await, 1, "the first write makes version 1");
+  cloud::sync_with(phone, &phone_store, "2026-10-21T11:01:00+00:00", Some(TAG)).await.expect("phone takes it in");
+  assert_eq!(phone.guard().reading_days().expect("days")["2026-09-29"].minutes, 9.748933333333333, "as written");
+  assert_eq!(phone_store.pushes.load(Ordering::SeqCst), 0, "nothing new to send");
+
+  // Nothing new: asked about the version kept, answered "unchanged", nothing sent.
+  cloud::sync_with(laptop, &laptop_store, "2026-10-21T11:02:00+00:00", Some(TAG)).await.expect("laptop again");
+  assert_eq!(laptop_store.pushes.load(Ordering::SeqCst), 1);
+  assert_eq!(laptop_store.asked.lock().unwrap().last().copied().flatten(), Some(1));
+  assert!(laptop_store.unchanged.load(Ordering::SeqCst) >= 1);
+
+  // The phone reads on and syncs just before the laptop's write lands: the
+  // laptop's write is refused (409), merged over the phone's, and kept.
+  phone.guard().update_progress("well", 0.72, Some(db::now_iso()), Some("epubcfi(/6/230!/4/2/1:0)".to_string())).expect("phone reads");
+  phone.guard().credit_minutes("2026-10-21", 25.0, 20).expect("phone reads");
+  laptop.guard().credit_minutes("2026-10-21", 10.0, 20).expect("laptop reads");
+  *laptop_store.before_push.lock().unwrap() = Some(Box::new(move || {
+    Box::pin(async move {
+      let other = Box::leak(Box::new(counted(phone)));
+      cloud::sync_with(phone, other, "2026-10-21T11:03:00+00:00", Some(TAG)).await.map(|_| ())
+    })
+  }));
+  cloud::sync_with(laptop, &laptop_store, "2026-10-21T11:03:30+00:00", Some(TAG)).await.expect("one race lost, then kept");
+  assert_eq!(laptop_store.conflicts.load(Ordering::SeqCst), 1);
+  assert_eq!(held_version().await, 3, "the phone's write, then the laptop's");
+  let well = laptop.guard().find_by_id("well").expect("query").expect("listed");
+  assert_eq!(well.progress, 0.72, "the phone's place came with the merge");
+  assert_eq!(laptop.guard().reading_days().expect("days")["2026-10-21"].minutes, 35.0);
+
+  // And the phone takes the laptop's in, with nothing to send back.
+  cloud::sync_with(phone, &phone_store, "2026-10-21T11:04:00+00:00", Some(TAG)).await.expect("phone");
+  assert_eq!(phone.guard().reading_days().expect("days")["2026-10-21"].minutes, 35.0);
+  assert_eq!(held_version().await, 3);
+}

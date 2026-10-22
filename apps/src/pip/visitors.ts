@@ -408,3 +408,110 @@ export const standAt = (roomWidth: number, door: Door, taken: ReadonlyArray<{ x:
 /** What the door says while a friend knocks, and what a note left on it reads. */
 export const knockLine = (handle: string) => `knock knock. it's @${handle}!`;
 export const noteLine = (handle: string) => `@${handle} came by`;
+
+// ---- together --------------------------------------------------------------------
+//
+// A visit is company, and company plays. Now and then over a visit the two do
+// something together, with nothing to tap: a little dance, the ball passed
+// back and forth, a chase across the floor. When is the visit's own (by its
+// record, like everything here), so a refetch or a return to the tab finds
+// the same plan; most of the time is still a read side by side. The reader
+// can ask for one too, from the visitor's card. The house plays Pip's part
+// (components/pip/HouseScene.tsx, pip/behaviour.ts `togetherPlan`); the
+// visitor's part is a pose by the clock (`togetherPose`), set by the house as
+// Pip joins in (`VisitorAct`). For show, like the visit: nothing here earns
+// seeds or moves mood.
+
+/** What the two can do together. */
+export type TogetherKind = "highfive" | "dance" | "ball" | "chase";
+/** What the visitor can be doing with Pip: one of those, or catching her (thrown their way), or a tumble with her. */
+export type VisitorActKind = TogetherKind | "catch" | "tumble";
+/**
+ * The visitor's part, by the clock (epoch ms, the visit's own clock): what, from when until when. `far`: where a
+ * chase turns (floor pixels). `move` until `moveUntil`: a pose of the moment over it (a catch, a throw in a game of
+ * ball).
+ */
+export type VisitorAct = { kind: VisitorActKind; from: number; until: number; far?: number; move?: string; moveUntil?: number };
+
+/** How long each lasts, ms (a chase: by how far it runs, `chaseMs`). */
+export const TOGETHER_MS: Record<Exclude<TogetherKind, "chase">, number> = { highfive: 2400, dance: 7200, ball: 18_000 };
+/** How fast the visitor runs in a chase (floor pixels a second): a little slower than Pip's run, so she keeps up. */
+export const CHASE_SPEED = 60;
+/** The pause at the far end of a chase, where they turn. */
+export const CHASE_TURN_MS = 1200;
+/** A chase, there and back: ms. */
+export const chaseMs = (spot: number, far: number) => Math.round((2 * Math.abs(far - spot) * 1000) / CHASE_SPEED) + CHASE_TURN_MS;
+/** A catch or a tumble, Pip thrown the visitor's way. */
+export const CATCH_MS = 1600;
+export const TUMBLE_MS = 2200;
+
+/** No beat sooner than this after the visitor sits down (the greeting has a high five of its own), nor nearer its end. */
+export const TOGETHER_AFTER_MS = 25_000;
+export const TOGETHER_BEFORE_END_MS = 12_000;
+/** Between one beat and the next. */
+export const TOGETHER_GAP_MS: readonly [number, number] = [40_000, 75_000];
+/** How long a chase is allowed for in the plan (it is as long as the floor makes it). */
+const CHASE_ALLOWANCE_MS = 10_000;
+
+/**
+ * When, over this visit, the two do something together (`at`: ms from the knock), and what: a seeded choice by the
+ * visit's record, so the same visit has the same plan. About half the turns are only more reading.
+ */
+export const togetherBeats = (record: Pick<VisitRecord, "handle" | "from">, timeline: VisitTimeline): Array<{ at: number; kind: TogetherKind }> => {
+  const readFrom = timeline.knock + timeline.walk + timeline.hello;
+  const readTo = readFrom + timeline.read;
+  const beats: Array<{ at: number; kind: TogetherKind }> = [];
+  let at = readFrom + TOGETHER_AFTER_MS;
+  for (let turn = 0; turn < 12; turn += 1) {
+    const roll = seeded(record.handle, record.from, "together", turn);
+    const kind: TogetherKind | null = roll < 0.5 ? null : roll < 0.67 ? "dance" : roll < 0.84 ? "ball" : "chase";
+    const lasts = kind === null ? 0 : kind === "chase" ? CHASE_ALLOWANCE_MS : TOGETHER_MS[kind];
+    if (at + lasts + TOGETHER_BEFORE_END_MS > readTo) {
+      break;
+    }
+    if (kind !== null) {
+      beats.push({ at, kind });
+    }
+    at += lasts + between(TOGETHER_GAP_MS, seeded(record.handle, record.from, "gap", turn));
+  }
+  return beats;
+};
+
+/**
+ * Where the visitor is and what it does at `now` in an act (null outside it): beside its place for a high five, a
+ * dance, a game of ball (with a catch or a throw over it); off to the far end and back in a chase, at a run, a laugh
+ * where it turns; catching Pip, or in a heap with her. `hostX`: where Pip is, to face.
+ */
+export const togetherPose = (act: VisitorAct | null | undefined, now: number, spot: number, hostX?: number): { x: number; move: string; facing: 1 | -1 } | null => {
+  if (!act || now < act.from || now >= act.until) {
+    return null;
+  }
+  const towards: 1 | -1 = hostX === undefined || hostX >= spot ? 1 : -1;
+  const over = act.move && act.moveUntil !== undefined && now < act.moveUntil ? act.move : null;
+  switch (act.kind) {
+    case "chase": {
+      const far = act.far ?? spot;
+      const run = Math.max(1, (Math.abs(far - spot) * 1000) / CHASE_SPEED);
+      const t = now - act.from;
+      const out: 1 | -1 = far >= spot ? 1 : -1;
+      if (t < run) {
+        return { x: Math.round(spot + (far - spot) * (t / run)), move: "scamper", facing: out };
+      }
+      if (t < run + CHASE_TURN_MS) {
+        return { x: Math.round(far), move: "laugh", facing: out === 1 ? -1 : 1 };
+      }
+      const back = Math.min(1, (t - run - CHASE_TURN_MS) / run);
+      return back >= 1 ? { x: spot, move: "idle", facing: towards } : { x: Math.round(far + (spot - far) * back), move: "scamper", facing: out === 1 ? -1 : 1 };
+    }
+    case "highfive":
+      return { x: spot, move: "welcome", facing: towards };
+    case "dance":
+      return { x: spot, move: "bop", facing: towards };
+    case "ball":
+      return { x: spot, move: over ?? "idle", facing: towards };
+    case "catch":
+      return { x: spot, move: "caught", facing: towards };
+    case "tumble":
+      return { x: spot, move: now - act.from < 900 ? "tumble" : "dizzy", facing: towards };
+  }
+};

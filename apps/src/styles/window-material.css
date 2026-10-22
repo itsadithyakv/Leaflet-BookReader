@@ -2,6 +2,12 @@
    the way a well-made Mac or Windows 11 app draws it. Loaded last (main.tsx),
    so at equal weight a rule here wins over index.css and glass.css.
 
+   Below Full (Smooth, minimal) a desktop is drawn as Leaflet's own: the leather rail, the
+   paper toolbar and the tactile keys and cards of index.css (`html[data-look="leather"]`,
+   platform/perfTier.ts), so the flat keys, fields and cards here are Full's alone; the focus
+   rings, the menus' lit items and the thin scrollbars stay for both. The window is Mica only
+   with Full (src-tauri/src/window_material.rs).
+
    Two scopes:
    - The desktop, held by a mouse (html[data-platform="desktop"][data-input="mouse"],
      platform/device.ts), in any window wide enough for the rail: quiet icon
@@ -78,7 +84,7 @@
      on the toolbar, as a Mac's toolbar draws its items: nearly clear, light caught on the rim,
      a soft shadow. No lens of their own (the toolbar lies on Mica, or is a glass bar already).
      Under the pointer the glass brightens; pressed, it darkens a touch; nothing moves. */
-  :root[data-platform="desktop"][data-input="mouse"] .app-header :is(.key-button, .streak-chip, .profile-button) {
+  :root[data-platform="desktop"][data-input="mouse"]:where(:not([data-look="leather"])) .app-header :is(.key-button, .streak-chip, .profile-button) {
     border-color: transparent;
     background-color: var(--liquid-tint);
     background-image: var(--liquid-sheen);
@@ -87,15 +93,15 @@
     transition: background-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
   }
 
-  :root[data-platform="desktop"][data-input="mouse"] .app-header .key-button {
+  :root[data-platform="desktop"][data-input="mouse"]:where(:not([data-look="leather"])) .app-header .key-button {
     width: 38px;
     height: 38px;
     border-radius: 9999px;
     color: rgb(var(--color-on-surface-variant));
   }
 
-  :root[data-platform="desktop"][data-input="mouse"] .app-header :is(.key-button, .streak-chip, .profile-button):hover,
-  :root[data-platform="desktop"][data-input="mouse"] .app-header .profile-button-open {
+  :root[data-platform="desktop"][data-input="mouse"]:where(:not([data-look="leather"])) .app-header :is(.key-button, .streak-chip, .profile-button):hover,
+  :root[data-platform="desktop"][data-input="mouse"]:where(:not([data-look="leather"])) .app-header .profile-button-open {
     border-color: transparent;
     background-image: linear-gradient(var(--liquid-hover), var(--liquid-hover)), var(--liquid-sheen);
     color: rgb(var(--color-on-surface));
@@ -103,22 +109,22 @@
     transform: none;
   }
 
-  :root[data-platform="desktop"][data-input="mouse"] .app-header :is(.key-button, .streak-chip, .profile-button):active {
+  :root[data-platform="desktop"][data-input="mouse"]:where(:not([data-look="leather"])) .app-header :is(.key-button, .streak-chip, .profile-button):active {
     background-image: linear-gradient(var(--liquid-press), var(--liquid-press)), var(--liquid-sheen);
     box-shadow: var(--liquid-rim);
     transform: none;
   }
 
-  :root[data-platform="desktop"][data-input="mouse"] .app-header :is(.streak-chip, .profile-button) {
+  :root[data-platform="desktop"][data-input="mouse"]:where(:not([data-look="leather"])) .app-header :is(.streak-chip, .profile-button) {
     height: 40px;
   }
 
-  :root[data-platform="desktop"][data-input="mouse"] .app-header .profile-button {
+  :root[data-platform="desktop"][data-input="mouse"]:where(:not([data-look="leather"])) .app-header .profile-button {
     width: 40px;
   }
 
   /* The search field in the toolbar: a capsule of the same glass, a soft ring on focus. */
-  :root[data-platform="desktop"][data-input="mouse"] .app-header .inset-field {
+  :root[data-platform="desktop"][data-input="mouse"]:where(:not([data-look="leather"])) .app-header .inset-field {
     border-color: transparent;
     border-radius: 9999px;
     background-color: var(--liquid-tint);
@@ -126,7 +132,7 @@
     box-shadow: var(--liquid-rim);
   }
 
-  :root[data-platform="desktop"][data-input="mouse"] .app-header .inset-field:focus {
+  :root[data-platform="desktop"][data-input="mouse"]:where(:not([data-look="leather"])) .app-header .inset-field:focus {
     border-color: transparent;
     outline: none;
     box-shadow: var(--liquid-rim), var(--chrome-focus);
@@ -134,7 +140,7 @@
 
   /* Keys on the pages: flat, a hairline and a breath of shadow. The colour
      change under the pointer stays; the lift and the press-in go. */
-  :root[data-platform="desktop"][data-input="mouse"]
+  :root[data-platform="desktop"][data-input="mouse"]:where(:not([data-look="leather"]))
     :is(.tactile-button, .key-button):not(:is(.pip-house-page, .pip-arcade, .pip-drawer, .pip-shop, .pip-album-dialog, .app-header) *) {
     border-color: var(--chrome-hairline);
     border-radius: var(--chrome-radius-control);
@@ -143,14 +149,14 @@
     transition: background-color 140ms ease, color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
   }
 
-  :root[data-platform="desktop"][data-input="mouse"]
+  :root[data-platform="desktop"][data-input="mouse"]:where(:not([data-look="leather"]))
     :is(.tactile-button, .key-button):not(:is(.pip-house-page, .pip-arcade, .pip-drawer, .pip-shop, .pip-album-dialog, .app-header) *):hover {
     border-color: rgb(var(--color-primary) / 0.45);
     box-shadow: var(--chrome-key-shadow), 0 0 0 3px rgb(var(--color-primary) / 0.08);
     transform: none;
   }
 
-  :root[data-platform="desktop"][data-input="mouse"]
+  :root[data-platform="desktop"][data-input="mouse"]:where(:not([data-look="leather"]))
     :is(.tactile-button, .key-button):not(:is(.pip-house-page, .pip-arcade, .pip-drawer, .pip-shop, .pip-album-dialog, .app-header) *):is(:active, [aria-pressed="true"]) {
     background: color-mix(in srgb, rgb(var(--color-surface-high)), rgb(var(--color-on-surface)) 6%);
     box-shadow: none;
@@ -158,7 +164,7 @@
   }
 
   /* The green key: one flat colour with a little light on its top edge. */
-  :root[data-platform="desktop"][data-input="mouse"]
+  :root[data-platform="desktop"][data-input="mouse"]:where(:not([data-look="leather"]))
     .tactile-button.tactile-button-primary:not(:is(.pip-house-page, .pip-arcade, .pip-drawer, .pip-shop, .pip-album-dialog) *) {
     border-color: rgb(var(--color-primary-container) / 0.6);
     background: linear-gradient(180deg, rgb(var(--color-primary-deep)), rgb(var(--color-primary-container)));
@@ -167,7 +173,7 @@
   }
 
   /* Fields: a tinted well with a hairline; focus is a soft ring, as the system draws it. */
-  :root[data-platform="desktop"][data-input="mouse"]
+  :root[data-platform="desktop"][data-input="mouse"]:where(:not([data-look="leather"]))
     .inset-field:not(:is(.pip-house-page, .pip-arcade, .pip-drawer, .pip-shop, .pip-album-dialog, .app-header) *) {
     border-color: var(--chrome-hairline);
     border-radius: var(--chrome-radius-field);
@@ -176,7 +182,7 @@
     transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
   }
 
-  :root[data-platform="desktop"][data-input="mouse"]
+  :root[data-platform="desktop"][data-input="mouse"]:where(:not([data-look="leather"]))
     .inset-field:not(:is(.pip-house-page, .pip-arcade, .pip-drawer, .pip-shop, .pip-album-dialog, .app-header) *):focus {
     border-color: rgb(var(--color-primary) / 0.7);
     outline: none;
@@ -185,7 +191,7 @@
 
   /* Cards on the page: a hairline and a soft shadow below, no light from the
      upper left, no pressed-in edge. */
-  :root[data-platform="desktop"][data-input="mouse"]
+  :root[data-platform="desktop"][data-input="mouse"]:where(:not([data-look="leather"]))
     :is(.paper-surface, .paper-surface-raised):not(:is(.pip-house-page, .pip-arcade, .pip-drawer, .pip-shop, .pip-album-dialog) *, .modal-surface) {
     border-color: var(--chrome-hairline);
     border-radius: var(--chrome-radius-panel);

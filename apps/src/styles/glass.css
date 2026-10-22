@@ -283,10 +283,15 @@ html[data-perf="full"] .pip-dragging .gradual-blur-layer {
 
 /* ---- The app's floating surfaces --------------------------------------------- */
 
+/* (Off the phone, below Full, the app's chrome is Leaflet's own desktop instead: the leather
+   rail, the paper toolbar, cards and sheets of index.css, `html[data-look="leather"]`,
+   platform/perfTier.ts. The rules for the bars, sheets, toasts and tabs here stand aside
+   there, by `:where(:not([data-look="leather"]))`, which weighs nothing.) */
+
 /* The header: over the page on a phone (it floats, and the page scrolls up
    under it); above it on a desktop, where the blur costs nothing as nothing
    moves behind it. */
-:root .app-header.app-header {
+:root:where(:not([data-look="leather"])) .app-header.app-header {
   border-color: rgb(var(--color-outline-variant) / 0.18);
   background-color: var(--glass-tint);
   background-image: var(--glass-sheen);
@@ -295,7 +300,7 @@ html[data-perf="full"] .pip-dragging .gradual-blur-layer {
   box-shadow: inset 0 -1px 0 rgb(var(--color-outline-variant) / 0.18), var(--glass-shadow-bar);
 }
 
-:root .app-header-hidden.app-header-hidden {
+:root:where(:not([data-look="leather"])) .app-header-hidden.app-header-hidden {
   box-shadow: none;
 }
 
@@ -304,7 +309,7 @@ html[data-perf="full"] .pip-dragging .gradual-blur-layer {
    rounded corner (the desktop's paper toolbar, beside the rail) showed the page and the shadow
    pooled under the curve as a darker sliver, and the strip under the clock (below) is square:
    flush, the two read as one surface. */
-:root:where(:is([data-shape="upright"], [data-shape="sideways"])) .app-header.app-header {
+:root:where(:is([data-shape="upright"], [data-shape="sideways"])):where(:not([data-look="leather"])) .app-header.app-header {
   border-radius: 0;
   box-shadow: none;
 }
@@ -317,7 +322,7 @@ html[data-perf="full"] .pip-dragging .gradual-blur-layer {
    the ramp has blurred what is under them already. */
 /* (Solid where no blur is drawn, `.no-glass` (below); while Pip is carried the ramp's blur goes
    and its tint stays.) */
-html:not(.no-glass):where(:is([data-shape="upright"], [data-shape="sideways"])) .app-header.app-header:not(:has(.anchored-panel)) {
+html:not(.no-glass):where(:is([data-shape="upright"], [data-shape="sideways"])):where(:not([data-look="leather"])) .app-header.app-header:not(:has(.anchored-panel)) {
   border-color: transparent;
   background-color: transparent;
   background-image: none;
@@ -329,21 +334,21 @@ html:not(.no-glass):where(:is([data-shape="upright"], [data-shape="sideways"])) 
   display: none;
 }
 
-:where(html:is([data-shape="upright"], [data-shape="sideways"])) .app-header :is(.key-button, .streak-chip, .profile-button) {
+:where(html:is([data-shape="upright"], [data-shape="sideways"]):not([data-look="leather"])) .app-header :is(.key-button, .streak-chip, .profile-button) {
   border-color: transparent;
   background: var(--liquid-tint);
   background-image: var(--liquid-sheen);
   box-shadow: var(--liquid-rim), var(--liquid-shadow-small);
 }
 
-:where(html:is([data-shape="upright"], [data-shape="sideways"])) .app-header .key-button {
+:where(html:is([data-shape="upright"], [data-shape="sideways"]):not([data-look="leather"])) .app-header .key-button {
   border-radius: 9999px;
 }
 
 /* A panel hanging from the header (the profile, the streak) is glass of its
    own: the header gives up its blur while one is open, or it would be the
    panel's backdrop root and the panel would blur nothing below the header. */
-:root .app-header.app-header:has(.anchored-panel) {
+:root:where(:not([data-look="leather"])) .app-header.app-header:has(.anchored-panel) {
   background-color: var(--glass-tint-strong);
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
@@ -399,7 +404,7 @@ html[data-reading] .app-shell > :is(.app-header, .app-body, .now-reading-dock, .
 /* The tab bar: a capsule of liquid glass floating above the foot of the screen, clear of
    the gesture bar and the sides (its room, `--mobile-nav-height`: styles/touch-shell.css).
    The page under it meets the foot in a ramp (`.mobile-nav-edge`, MobileNav.tsx). */
-:root .mobile-nav.mobile-nav {
+:root:where(:not([data-look="leather"])) .mobile-nav.mobile-nav {
   left: max(12px, calc(var(--inset-left, 0px) + 8px));
   right: max(12px, calc(var(--inset-right, 0px) + 8px));
   bottom: calc(var(--inset-bottom, 0px) + 8px);
@@ -414,12 +419,12 @@ html[data-reading] .app-shell > :is(.app-header, .app-body, .now-reading-dock, .
   box-shadow: var(--liquid-rim), var(--liquid-shadow);
 }
 
-:root .mobile-nav.mobile-nav .mobile-nav-item {
+:root:where(:not([data-look="leather"])) .mobile-nav.mobile-nav .mobile-nav-item {
   border-radius: 9999px;
 }
 
 /* The place you are on: a drop of the accent in the glass. */
-:root .mobile-nav.mobile-nav .mobile-nav-item[data-active] {
+:root:where(:not([data-look="leather"])) .mobile-nav.mobile-nav .mobile-nav-item[data-active] {
   background-color: rgb(var(--color-primary) / 0.14);
   box-shadow: inset 0 0 0 1px rgb(var(--color-primary) / 0.12);
 }
@@ -550,7 +555,7 @@ html.no-glass[data-shape="sideways"][data-input="touch"] .leaflet-sidebar.leafle
 
 /* The book being read. Its keys go flat: a raised key on glass is two
    materials at once. */
-:root .now-reading-bar.now-reading-bar {
+:root:where(:not([data-look="leather"])) .now-reading-bar.now-reading-bar {
   border-color: var(--glass-border);
   background: var(--liquid-tint-text);
   background-image: var(--liquid-sheen);
@@ -560,29 +565,29 @@ html.no-glass[data-shape="sideways"][data-input="touch"] .leaflet-sidebar.leafle
 }
 
 /* By a finger it is a small floating bar: the small lens (the panel one is a blur there). */
-:root[data-input="touch"] .now-reading-bar.now-reading-bar {
+:root[data-input="touch"]:where(:not([data-look="leather"])) .now-reading-bar.now-reading-bar {
   -webkit-backdrop-filter: var(--liquid-filter);
   backdrop-filter: var(--liquid-filter);
 }
 
-.now-reading-bar .now-reading-action:not(.now-reading-action-primary) {
+:where(html:not([data-look="leather"])) .now-reading-bar .now-reading-action:not(.now-reading-action-primary) {
   border-color: transparent;
   background: var(--glass-tint-inner);
   box-shadow: none;
 }
 
-.now-reading-bar .now-reading-action-primary {
+:where(html:not([data-look="leather"])) .now-reading-bar .now-reading-action-primary {
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.22);
 }
 
-.now-reading-bar .now-reading-progress {
+:where(html:not([data-look="leather"])) .now-reading-bar .now-reading-progress {
   background: rgb(var(--color-on-surface) / 0.1);
   box-shadow: none;
 }
 
 /* Sheets, dialogs, menus, the update card, "further on", the streak: every
    `.modal-surface` but Pip's. */
-:root .modal-surface:not(.pip-album-dialog, .pip-arcade, .pip-drawer, .pip-shop, .pip-house-page *) {
+:root:where(:not([data-look="leather"])) .modal-surface:not(.pip-album-dialog, .pip-arcade, .pip-drawer, .pip-shop, .pip-house-page *) {
   border-color: var(--glass-border);
   background: var(--glass-tint-strong);
   background-image: var(--liquid-sheen);
@@ -592,7 +597,7 @@ html.no-glass[data-shape="sideways"][data-input="touch"] .leaflet-sidebar.leafle
 }
 
 /* Toasts: a pill of glass. */
-:root .app-toast.app-toast {
+:root:where(:not([data-look="leather"])) .app-toast.app-toast {
   border: 1px solid var(--glass-border);
   border-radius: 22px;
   background: var(--glass-tint-strong);
@@ -604,7 +609,7 @@ html.no-glass[data-shape="sideways"][data-input="touch"] .leaflet-sidebar.leafle
 
 /* A segmented control's track lies on the page, not over it: the glass's
    look (tint, the top light, the hairline) without a blur of nothing. */
-:root .segmented-tabs.segmented-tabs {
+:root:where(:not([data-look="leather"])) .segmented-tabs.segmented-tabs {
   background-color: rgb(var(--color-on-surface) / 0.05);
   background-image: var(--glass-sheen);
   box-shadow: var(--glass-specular), var(--glass-hairline);
@@ -826,11 +831,11 @@ html.no-glass[data-shape="sideways"][data-input="touch"] .leaflet-sidebar.leafle
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   :root .glass,
   :root .glass-pill,
-  :root .app-header.app-header,
-  :root .mobile-nav.mobile-nav,
-  :root .now-reading-bar.now-reading-bar,
-  :root .app-toast.app-toast,
-  :root .modal-surface:not(.pip-album-dialog, .pip-arcade, .pip-drawer, .pip-shop, .pip-house-page *) {
+  :root:where(:not([data-look="leather"])) .app-header.app-header,
+  :root:where(:not([data-look="leather"])) .mobile-nav.mobile-nav,
+  :root:where(:not([data-look="leather"])) .now-reading-bar.now-reading-bar,
+  :root:where(:not([data-look="leather"])) .app-toast.app-toast,
+  :root:where(:not([data-look="leather"])) .modal-surface:not(.pip-album-dialog, .pip-arcade, .pip-drawer, .pip-shop, .pip-house-page *) {
     background-color: var(--glass-tint-solid);
   }
 
@@ -860,9 +865,8 @@ html.no-glass .app-shell::before {
   backdrop-filter: none;
 }
 
-html.no-glass :is(
-    .glass,
-    .glass-pill,
+html.no-glass :is(.glass, .glass-pill),
+html.no-glass:where(:not([data-look="leather"])) :is(
     .app-header.app-header,
     .mobile-nav.mobile-nav,
     .now-reading-bar.now-reading-bar,

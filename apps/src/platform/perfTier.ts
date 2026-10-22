@@ -18,8 +18,13 @@ import { useSyncExternalStore } from "react";
  *     under a blurred bar redraws the blur every frame, and an entry phone's GPU, an
  *     Adreno 619, dropped frames scrolling and throwing Pip). Minimal for 2 GB or less,
  *     or a weak or software GPU with little memory or few cores. Full only by choice.
- *   - Elsewhere (the Windows app): Full, but Smooth on a software renderer (no GPU),
- *     and minimal at 2 GB or less.
+ *   - Elsewhere (the Windows app): Smooth too (the owner's call, 2026-10-21: 1.5.10's glass
+ *     made a laptop with integrated graphics lag; every blur, the lens and the see-through
+ *     window cost frames). Minimal at 2 GB or less. Full only by choice, as on a phone.
+ *
+ * Off the phone, Smooth and minimal are drawn as Leaflet's own desktop: the leather rail and
+ * the paper toolbar and cards (`html[data-look="leather"]`, styles/leather.css); Full keeps
+ * the glass. A phone keeps the glass shapes in every tier (`data-look="glass"`).
  *
  * What the device was judged to be is kept (`leaflet.perf.auto.v1`), so a launch does
  * not open a WebGL context to ask again. Then, on Auto only, two checks can step the
@@ -54,7 +59,7 @@ export const WATCH_WINDOW_MS = 3000;
 const CHOICE_KEY = "leaflet.effects.v1";
 const AUTO_KEY = "leaflet.perf.auto.v1";
 /** Bumped when the rules below change, so a judgement kept under the old ones is made again. */
-export const RULES_VERSION = 2;
+export const RULES_VERSION = 3;
 
 export const TIERS: readonly PerfTier[] = ["full", "lite", "minimal"];
 
@@ -106,9 +111,12 @@ export const autoTier = ({ android, renderer, memory, cores }: DeviceSignals): P
     if ((gpu === "low" || gpu === "software") && little) return "minimal";
     return "lite";
   }
-  if (gpu === "software") return "lite";
-  return "full";
+  return "lite";
 };
+
+/** How the app's chrome is drawn: the glass, or (off the phone, below Full) Leaflet's leather desktop. */
+export type ChromeLook = "glass" | "leather";
+export const chromeLook = (tier: PerfTier, android: boolean): ChromeLook => (!android && tier !== "full" ? "leather" : "glass");
 
 /** The tier drawn: the reader's choice, or on Auto the device's, stepped down by the session's checks. */
 export const resolveTier = (choice: EffectsChoice, auto: PerfTier, session: PerfTier | null = null): PerfTier => {
@@ -228,7 +236,8 @@ const judgeDevice = (): Judged => {
   } catch {
     // Judged again.
   }
-  const renderer = readRenderer();
+  // Off the phone the GPU decides nothing any more: no WebGL context opened at start to ask.
+  const renderer = android ? readRenderer() : null;
   const judged: Judged = { v: RULES_VERSION, tier: autoTier({ android, renderer, memory, cores }), renderer, memory, cores, android };
   try {
     storage()?.setItem(AUTO_KEY, JSON.stringify(judged));
@@ -240,13 +249,16 @@ const judgeDevice = (): Judged => {
 
 type State = { choice: EffectsChoice; auto: PerfTier; session: PerfTier | null; tier: PerfTier; renderer: string | null };
 
-let state: State = { choice: "auto", auto: "full", session: null, tier: "full", renderer: null };
+let state: State = { choice: "auto", auto: "lite", session: null, tier: "lite", renderer: null };
+let onPhone = false;
 const listeners = new Set<() => void>();
 
 const apply = () => {
   if (typeof document === "undefined") return;
   const root = document.documentElement;
   if (root.dataset.perf !== state.tier) root.dataset.perf = state.tier;
+  const look = chromeLook(state.tier, onPhone);
+  if (root.dataset.look !== look) root.dataset.look = look;
   // Everything written for `.no-glass` (solid tints) is the minimal look.
   root.classList.toggle("no-glass", state.tier === "minimal");
 };
@@ -348,6 +360,7 @@ let installed = false;
 export const installPerfTier = () => {
   if (installed || typeof document === "undefined") return;
   installed = true;
+  onPhone = isAndroidUa();
   const judged = judgeDevice();
   update({ choice: readChoice(), auto: judged.tier, renderer: judged.renderer });
   apply();
@@ -357,6 +370,6 @@ export const installPerfTier = () => {
 };
 
 /** The tier drawn, kept as it changes. */
-export const usePerfTier = (): PerfTier => useSyncExternalStore(onTier, currentTier, () => "full");
+export const usePerfTier = (): PerfTier => useSyncExternalStore(onTier, currentTier, () => "lite");
 /** The reader's choice, kept as it changes. */
 export const useEffectsChoice = (): EffectsChoice => useSyncExternalStore(onTier, currentChoice, () => "auto");

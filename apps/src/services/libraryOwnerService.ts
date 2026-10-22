@@ -1,5 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import type { LibraryResolveResult } from "@shared/sync/types";
+import type { LibraryResolveResult, SyncTransport } from "@shared/sync/types";
 
 /**
  * Whose this device's library is (docs/two-devices.md, "One library, one
@@ -58,5 +58,18 @@ export const libraryOwnerService = {
       return;
     }
     await invoke("library_fresh_answer", { useIt });
+  },
+
+  /**
+   * The answer to "your Drive (or sync folder) has a library from before
+   * accounts": bring it into this library (`true`), or keep it apart, so it
+   * carries only this library's book files (`false`). A sync follows, in the
+   * backend.
+   */
+  async storeAnswer(transport: SyncTransport, useIt: boolean): Promise<void> {
+    if (!isTauri()) {
+      return;
+    }
+    await invoke("library_store_answer", { transport, useIt });
   }
 };

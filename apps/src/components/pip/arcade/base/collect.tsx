@@ -232,3 +232,120 @@ export const AcornTrails = forwardRef<AcornTrailsHandle>(function AcornTrails(_,
     document.body
   );
 });
+
+// ---- the reading's pages (1.5.11: arriving after reading, `arrival.ts`) --------------------------------------
+
+/** A page on its way: from, to, when it sets off (performance.now()), how long it flies, and whether it lands as an acorn. */
+type PageFlight = { id: number; from: ClientPoint; to: ClientPoint; start: number; fly: number; lift: number; acorn: boolean };
+export type PageSend = { from: ClientPoint; to: ClientPoint; delay: number; fly: number; acorn?: boolean };
+export type PageTrailsHandle = {
+  /** Sends pages off, each its own way and time. */
+  send: (pages: readonly PageSend[]) => void;
+  /** Done with: every page put away at once (a tap skips the arrival). */
+  skip: () => void;
+};
+/** How long a page that lands on the oak is its acorn, in ms; the flutter's frames a second. */
+const PAGE_ACORN_MS = 150;
+const PAGE_FLAP_FPS = 8;
+
+/**
+ * The reading's pages, coming up the path: laid over the whole page like the acorns, painted by one loop of frames,
+ * each moved by its transform to the whole device pixel and fluttering by a swap of the whole sprite (opacity), so
+ * nothing but transform and opacity changes. A page for the oak is its acorn for a moment when it lands.
+ */
+export const PageTrails = forwardRef<PageTrailsHandle>(function PageTrails(_, ref) {
+  const [flying, setFlying] = useState<PageFlight[]>([]);
+  const nodes = useRef(new Map<number, HTMLSpanElement>());
+  const next = useRef(1);
+  useImperativeHandle(ref, () => ({
+    send(pages) {
+      if (pages.length === 0 || stillOnly()) return;
+      const now = performance.now();
+      setFlying((was) => [
+        ...was,
+        ...pages.map((entry, index) => {
+          const reach = Math.hypot(entry.to.x - entry.from.x, entry.to.y - entry.from.y);
+          return { id: next.current++, from: entry.from, to: entry.to, start: now + entry.delay, fly: entry.fly, lift: Math.max(20, Math.min(80, reach * 0.3)) + (index % 3) * 5, acorn: Boolean(entry.acorn) };
+        })
+      ]);
+    },
+    skip() {
+      setFlying([]);
+    }
+  }));
+  useEffect(() => {
+    if (flying.length === 0) return;
+    let frame = 0;
+    const paint = (time: number) => {
+      const dpr = window.devicePixelRatio || 1;
+      let left = 0;
+      for (const entry of flying) {
+        const node = nodes.current.get(entry.id);
+        const t = (time - entry.start) / entry.fly;
+        const done = t >= 1 + (entry.acorn ? PAGE_ACORN_MS / entry.fly : 0);
+        if (!done) left++;
+        if (!node) continue;
+        const at = trailPoint(entry.from, entry.to, Math.min(1, t), entry.lift, dpr);
+        node.style.transform = `translate3d(${at.x}px, ${at.y}px, 0)`;
+        node.style.opacity = t <= 0 || done ? "0" : "1";
+        // The flutter: one frame or the other, whole; landed on the oak, the acorn.
+        const flap = Math.floor((Math.max(0, time - entry.start) / 1000) * PAGE_FLAP_FPS) % 2;
+        const landed = t >= 1;
+        const [open, folded, acorn] = Array.from(node.children) as HTMLElement[];
+        if (open) open.style.opacity = !landed && flap === 0 ? "1" : "0";
+        if (folded) folded.style.opacity = !landed && flap === 1 ? "1" : "0";
+        if (acorn) acorn.style.opacity = landed && entry.acorn ? "1" : "0";
+      }
+      if (left > 0) frame = requestAnimationFrame(paint);
+      else setFlying([]);
+    };
+    frame = requestAnimationFrame(paint);
+    const longest = Math.max(...flying.map((entry) => entry.start + entry.fly + PAGE_ACORN_MS)) - performance.now();
+    const sure = window.setTimeout(() => setFlying([]), Math.max(0, longest) + 800);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(sure);
+    };
+  }, [flying]);
+  if (flying.length === 0 || typeof document === "undefined") return null;
+  return createPortal(
+    <div className="pip-acorn-trails pip-page-trails" aria-hidden="true">
+      {flying.map((entry) => (
+        <span
+          key={entry.id}
+          className="pip-acorn-trail pip-page-trail"
+          ref={(node) => {
+            if (node) nodes.current.set(entry.id, node);
+            else nodes.current.delete(entry.id);
+          }}
+        >
+          <Sprite name="page" frame={0} box={16} />
+          <Sprite name="page" frame={1} box={16} />
+          <Sprite name="acorn" box={16} />
+        </span>
+      ))}
+    </div>,
+    document.body
+  );
+});
+
+/**
+ * (1.5.11) A point on the screen moved clear of what lies over the picture there (Pip's line, a panel, the top bar):
+ * just below it where the picture goes on below, else just beside it. Unmoved where nothing covers it.
+ */
+export const clearOfCovers = (point: ClientPoint | null, covers: readonly Element[], canvas: Element | null): ClientPoint | null => {
+  if (!point) return null;
+  const room = canvas?.getBoundingClientRect();
+  const MARGIN = 10;
+  let at = point;
+  for (const cover of covers) {
+    const box = cover.getBoundingClientRect();
+    if (box.width === 0 || box.height === 0) continue;
+    const under = at.x >= box.left - MARGIN && at.x <= box.right + MARGIN && at.y >= box.top - MARGIN && at.y <= box.bottom + MARGIN;
+    if (!under) continue;
+    const below = box.bottom + MARGIN + 6;
+    if (!room || below <= room.bottom - MARGIN) at = { x: at.x, y: below };
+    else at = { x: box.right + MARGIN + 6 <= (room?.right ?? Infinity) - MARGIN ? box.right + MARGIN + 6 : box.left - MARGIN - 6, y: at.y };
+  }
+  return at;
+};

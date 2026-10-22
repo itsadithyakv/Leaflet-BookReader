@@ -70,7 +70,7 @@ export const keepLookup = async (result: LookupResult, language: string | null |
       p: Math.min(1, Math.max(0, Number.isFinite(place.progress) ? place.progress : 0))
     });
     // Like a highlight: something to back up.
-    useLibraryStore.getState().requestBackup();
+    useLibraryStore.getState().requestBackup({ whileReading: true });
     return saved;
   } catch {
     return null;

@@ -104,6 +104,19 @@
                         stretched out on 0 and 2, gathered up on 1 and 3), Fizzwick the
                         cross loaf of mossy bread (he waddles: a pixel up on 1 and 3; the
                         tip of his twig is at 7, 2 on frame 0). Our own, nobody else's
+   page        8 x 7    2 frames, a page of the reading flying up the path (1.5.11)
+   bloom       9 x 10   a finished book's bloom on the meadow's Reading Path; opts.variant 0 to
+                        10 in `trophy`'s order: pagewort, wizard's foxglove, star thistle,
+                        lamplily, heartsease, bonecup, old rose, sundial daisy, laurel sprig,
+                        compass bloom, kite flower. Our own flowers
+   bud         9 x 10   your next bloom; opts.variant 0 to 3, a sprout to a bud about to open
+   wildflower  3 x 4    an older book's bloom gone wild; opts.variant is the kind's colour
+   standing   12 x 18   a Reading Stone, a menhir; variant 0 a low chapter stone, 1 a tall
+                        volume stone, 2 mossier, 3 and a gold cap, 4 and a lantern
+   animalhome 16 x 14   an animal's home at one heart; variant 0 to 5 in `animal`'s order:
+                        hen house, cat basket, bell post, owl perch, fox den, sunning stone
+   statue, bookstall, readtree   the volumes' sets: Pip reading in stone (16 x 22), a book
+                        stall (20 x 18), the reading tree (28 x 32)
    signpost   14 x 18   a guardian's own signpost; opts.variant 0 to 6, in `guardian`'s
                         order: the ranger's straw target, the watchman's lantern, the
                         keeper's living stump, the knight's shield and hilt, the dragon's
@@ -3549,10 +3562,214 @@ const signpost = {
   }
 };
 
+// ---------------------------------------------------------------- the meadow (1.5.11: your reading, made visible)
+/** A page of the reading, coming up the path to the oak: open, then folded in the flutter. */
+const PAGE_KEY = { W: "#FFF9EA", w: "#C9B48C", e: "#A8916A" };
+const page = {
+  w: 8, h: 7, frames: 2,
+  draw(g, f) {
+    const k = ((Math.round(f) % 2) + 2) % 2;
+    chart(g, 0, 0, k === 0
+      ? [".eWWWWe.", "eWwwwwWe", "eWWWWWWe", "eWwwwwWe", "eWWWWWWe", "eWwwwWWe", ".eeeeee."]
+      : ["..eWWe..", ".eWwwWe.", ".eWWWWe.", ".eWwwWe.", ".eWWWWe.", ".eWwwWe.", "..eeee.."], PAGE_KEY);
+  }
+};
+
+/** Every bloom's stem and leaves, rows 5 to 9. */
+const STEM = ["....s....", "..l.s....", "..lls.l..", "....sll..", "....s...."];
+const STEM_KEY = { s: "#3F8A52", l: "#5FB34C" };
+/** The eleven blooms, one for each kind of book (`TROPHY_KINDS`): the head, rows 0 to 4, and its colours. Our own flowers. */
+const BLOOMS = [
+  // Pagewort: two cream petals open like a book.
+  { head: ["..WW.WW..", ".WwW.WwW.", ".WWWyWWW.", "..WWWWW..", "...WWW..."], key: { W: "#FFF6DF", w: "#B8A88A", y: "#FFD23F" } },
+  // Wizard's foxglove: a spike of purple bells.
+  { head: ["....P....", "...pPd...", "....Pd...", "...pPPd..", "..pPdPd.."], key: { P: "#9A6AE0", p: "#C9A8FF", d: "#5E3A9A" } },
+  // Star thistle: a blue star on a green cup.
+  { head: ["..b.b.b..", "...bBb...", ".bBBBBBb.", "...bBb...", "...gGg..."], key: { b: "#A8C8FF", B: "#5578E0", g: "#5FA04A", G: "#3F8A52" } },
+  // Lamplily: a yellow bell that glows.
+  { head: [".....sY..", "...YYYY..", "..YyyyYY.", "..YoYoY..", "...o.o..."], key: { s: "#3F8A52", Y: "#FFD23F", y: "#FFF6C2", o: "#E0A800" } },
+  // Heartsease: a pink heart.
+  { head: [".PP...PP.", "PpPP.PpPP", "PPPPPPPPP", ".PPPyPPP.", "...PPP..."], key: { P: "#F08AB4", p: "#FFC4DA", y: "#FFD23F" } },
+  // Bonecup: a pale cup, dark at the heart.
+  { head: [".........", ".W.....W.", ".WW.k.WW.", "..WwWwW..", "...WWW..."], key: { W: "#F0EEE4", w: "#C8C4B4", k: "#3A2A1E" } },
+  // Old rose: deep red, folded.
+  { head: ["...rRr...", "..rRdRr..", ".rRdRdRr.", "..rRRRr..", "...rRr..."], key: { r: "#EE8068", R: "#C8453B", d: "#8E2F28" } },
+  // Sundial daisy: white rays, a gold face with its shadow-stick.
+  { head: ["...W.W...", ".W.WWW.W.", "..WYkYW..", ".W.WWW.W.", "...W.W..."], key: { W: "#FFFFFF", Y: "#FFD23F", k: "#5E3A1F" } },
+  // Laurel sprig: leaves and two gold berries.
+  { head: ["...L.y...", "..LlL....", ".y.LlL...", "..L.l.L..", "...LlL..."], key: { L: "#3F9A4E", l: "#7CCB5E", y: "#FFD23F" } },
+  // Compass bloom: an orange star of four points.
+  { head: ["....o....", "...oOo...", ".oOOyOOo.", "...oOo...", "....o...."], key: { o: "#FFB06A", O: "#F07A2A", y: "#FFF6C2" } },
+  // Kite flower: a bright diamond with a red tail.
+  { head: ["....K....", "...KkK...", "..KkKkK..", "...KkK.t.", "....K.t.."], key: { K: "#3EC1F0", k: "#FFE36B", t: "#F0492F" } }
+];
+const pathBloom = {
+  w: 9, h: 10,
+  draw(g, f, o) {
+    const B = BLOOMS[level(o, BLOOMS.length - 1)];
+    chart(g, 0, 5, STEM, STEM_KEY);
+    chart(g, 0, 0, B.head, B.key);
+  }
+};
+/** Your next bloom: a sprout, a stem, a bud showing its colour, a bud about to open. */
+const BUDS = [
+  [".........", ".........", ".........", ".........", ".........", ".........", ".........", "..l...l..", "...lsl...", "....s...."],
+  [".........", ".........", ".........", ".........", "....g....", "...gGg...", "....s....", "..l.s.l..", "...lsl...", "....s...."],
+  [".........", ".........", "....p....", "...gpg...", "...gGg...", "....s....", "..l.s....", "..lls.l..", "....sll..", "....s...."],
+  ["....y....", "...pPp...", "..gpPpg..", "..gGpGg..", "...gGg...", "....s....", "..l.s....", "..lls.l..", "....sll..", "....s...."]
+];
+const BUD_KEY = { s: "#3F8A52", l: "#5FB34C", g: "#5FA04A", G: "#3F8A52", p: "#FFC4DA", P: "#F08AB4", y: "#FFF6C2" };
+const bud = {
+  w: 9, h: 10,
+  draw(g, f, o) {
+    chart(g, 0, 0, BUDS[level(o, 3)], BUD_KEY);
+  }
+};
+/** A small wild flower, 3 x 4, for the older books: its colour by the kind. */
+const WILD = ["#FFF6DF", "#C9A8FF", "#A8C8FF", "#FFD23F", "#FFC4DA", "#F0EEE4", "#EE8068", "#FFFFFF", "#7CCB5E", "#FFB06A", "#3EC1F0"];
+const wildflower = {
+  w: 3, h: 4,
+  draw(g, f, o) {
+    const c = WILD[level(o, WILD.length - 1)];
+    chart(g, 0, 0, [".c.", "cyc", ".c.", ".s."], { c, y: "#FFD23F", s: "#3F8A52" });
+  }
+};
+
+/** The Reading Stones: a low stone (a chapter's), a tall one (a volume's), the tall one mossed, gold-capped, lit. */
+const STONE_MOSS = ["#7CCB5E", "#3F9A4E"];
+/** The Reading Stones as menhirs: old standing stones, warm grey-brown, leaning a little, moss at the foot and up one side. */
+const MENHIR = ["#D6C9AF", "#B0A188", "#8A7B64", "#665A4A"];
+const INK_MENHIR = "#3A3128";
+/** A rough stone's rows: [left, right] on each row, from its top row down. */
+const MENHIR_TALL = [[4, 6], [3, 7], [3, 8], [2, 8], [2, 9], [2, 9], [2, 9], [1, 9], [1, 10], [1, 10], [2, 10], [1, 10], [1, 9], [1, 10], [1, 10], [1, 10], [0, 11]];
+const MENHIR_LOW = [[4, 7], [3, 8], [2, 8], [2, 9], [2, 9], [1, 9], [2, 9], [1, 10], [1, 10]];
+const rough = (l, rows, top) =>
+  rows.forEach(([a, b], j) => {
+    for (let x = a; x <= b; x++) {
+      const speck = (x * 7 + j * 5) % 13 === 0;
+      l.px(x, top + j, x === a ? MENHIR[0] : x >= b - 1 ? MENHIR[2] : speck ? MENHIR[2] : j === 0 ? MENHIR[0] : MENHIR[1]);
+    }
+  });
+const standing = {
+  w: 12, h: 18,
+  draw(g, f, o) {
+    const n = level(o, 4);
+    if (n === 0) {
+      // A chapter's stone: low and round-shouldered, a tuft of moss at its foot.
+      g.stamp((l) => rough(l, MENHIR_LOW, 9), INK_MENHIR);
+      g.rect(1, 16, 3, 1, STONE_MOSS[1]).px(2, 15, STONE_MOSS[0]).px(9, 16, STONE_MOSS[1]);
+      return;
+    }
+    g.stamp((l) => rough(l, MENHIR_TALL, 1), INK_MENHIR);
+    // Moss: at the foot, and up the shaded side; more of it the second time round.
+    g.rect(0, 17, 4, 1, STONE_MOSS[1]).rect(9, 17, 3, 1, STONE_MOSS[1]).px(1, 16, STONE_MOSS[0]).px(10, 16, STONE_MOSS[1]).px(10, 15, STONE_MOSS[0]);
+    if (n >= 2) g.rect(9, 9, 2, 6, STONE_MOSS[1]).px(9, 8, STONE_MOSS[0]).px(10, 12, STONE_MOSS[0]).rect(1, 13, 1, 3, STONE_MOSS[1]).px(2, 15, STONE_MOSS[0]);
+    // A gold cap the third time round, a lantern on it the fourth.
+    if (n >= 3) g.stamp((l) => l.rect(4, 0, 3, 1, GOLD[1]).px(4, 0, GOLD[0]).rect(3, 1, 5, 1, GOLD[2]), INK_GOLD);
+    if (n >= 4) {
+      g.ell(5.5, -1, 3.5, 2.5, "#FFE36B38");
+      g.px(5, 0, "#FFFFFF");
+    }
+  }
+};
+
+/** Each animal's home in the meadow, at one heart: a hen house, a cat basket, a bell post, a perch, a den, a sunning stone. */
+const HOMES = [
+  (g) => g.stamp((l) => {
+    roof(l, 8, 3, 4, 1, 7, TILE, false);
+    l.rect(3, 7, 10, 6, TIMBER[1]).rect(3, 7, 1, 6, TIMBER[0]).rect(12, 7, 1, 6, TIMBER[2]);
+    door(l, 7, 9, 3, 4, PLANK, null);
+    l.px(4, 12, "#FFF6DF").px(11, 12, "#FFF6DF");
+  }, INK),
+  (g) => g.stamp((l) => {
+    l.ell(8, 11, 6.5, 2.5, (nx) => ((Math.round(nx * 6) + 9) % 2 === 0 ? THATCH[1] : THATCH[2]));
+    l.ell(8, 10.5, 4.5, 1.3, "#C8453B").px(6, 10, "#EE8068");
+    l.rect(2, 8, 1, 3, THATCH[2]).rect(13, 8, 1, 3, THATCH[2]);
+  }, INK),
+  (g) => g.stamp((l) => {
+    l.rect(7, 2, 2, 11, STICK[1]).rect(7, 2, 1, 11, STICK[0]).rect(5, 2, 7, 1, STICK[2]);
+    l.rect(10, 3, 1, 2, "#6B4226");
+    l.rect(9, 5, 3, 3, GOLD[1]).px(9, 5, GOLD[0]).px(11, 7, GOLD[2]).px(10, 8, GOLD[2]);
+  }, INK),
+  (g) => g.stamp((l) => {
+    l.rect(7, 3, 2, 10, STICK[1]).rect(7, 3, 1, 10, STICK[0]);
+    l.rect(3, 3, 10, 1, STICK[0]).rect(3, 4, 10, 1, STICK[2]);
+    l.rect(5, 12, 6, 1, STICK[2]);
+  }, INK),
+  (g) => g.stamp((l) => {
+    l.ell(8, 12, 7, 4.5, (nx, ny) => (ny < -0.3 ? TURF[0] : nx > 0.4 ? TURF[2] : TURF[1]));
+    l.ell(8, 12.5, 3, 2.2, "#2A1A10").px(6, 11, "#3E2A1C");
+  }, INK_LEAF),
+  (g) => g.stamp((l) => l.ell(8, 11.5, 6.5, 2.2, (nx, ny) => (ny < -0.2 ? STONE[0] : nx > 0.5 ? STONE[2] : STONE[1])).px(5, 10, "#FFFFFF"), INK_STONE)
+];
+const animalhome = {
+  w: 16, h: 14,
+  draw(g, f, o) {
+    HOMES[level(o, HOMES.length - 1)](g);
+  }
+};
+
+/**
+ * Pip reading, in stone (the second volume's set): her round body and her leaf sprout, an open book held up in both
+ * hands, all in the menhirs' warm grey-brown, on a low plinth with a little moss.
+ */
+const statue = {
+  w: 16, h: 22,
+  draw(g) {
+    const [LIGHT, BODY, SHADE, DEEP] = MENHIR;
+    g.stamp((l) => {
+      // The plinth: low and wide.
+      l.rect(2, 18, 12, 3, BODY).rect(2, 18, 12, 1, LIGHT).rect(12, 19, 2, 2, SHADE).rect(2, 20, 12, 1, SHADE);
+      // Her body: round, lit from the left.
+      l.ell(8, 12.5, 5.5, 5.5, (nx, ny) => (nx < -0.45 || ny < -0.7 ? LIGHT : nx > 0.5 || ny > 0.75 ? SHADE : BODY));
+      // The leaf on her head: a short stem and one leaf leaning to the right, as she has.
+      l.rect(7, 5, 1, 2, SHADE);
+      l.rect(7, 4, 3, 1, BODY).rect(8, 3, 4, 1, LIGHT).rect(9, 2, 3, 1, LIGHT).px(11, 4, SHADE).px(12, 3, SHADE).px(10, 4, SHADE);
+      // The open book, held up in front of her: two pages and the spine.
+      l.rect(4, 13, 4, 3, LIGHT).rect(9, 13, 4, 3, LIGHT).rect(8, 13, 1, 3, DEEP);
+      l.rect(5, 14, 2, 1, BODY).rect(10, 14, 2, 1, BODY);
+      // Her hands at the book's edges.
+      l.px(3, 14, SHADE).px(13, 14, SHADE);
+    }, INK_MENHIR);
+    // Her eyes, over the top of the book; a little moss on the plinth and at her feet.
+    g.px(6, 10, DEEP).px(10, 10, DEEP);
+    g.rect(2, 20, 3, 1, STONE_MOSS[1]).px(3, 19, STONE_MOSS[0]).rect(11, 20, 2, 1, STONE_MOSS[1]).px(5, 17, STONE_MOSS[0]).px(11, 17, STONE_MOSS[1]);
+  }
+};
+/** A book stall (the fourth volume's): a little cart with books on it, under an awning. */
+const bookstall = {
+  w: 20, h: 18,
+  draw(g) {
+    g.stamp((l) => {
+      for (let i = 0; i < 16; i++) l.rect(2 + i, 2, 1, 3, i % 4 < 2 ? "#F0492F" : "#FFF6DF");
+      l.rect(2, 5, 1, 11, STICK[1]).rect(17, 5, 1, 11, STICK[1]);
+      l.rect(1, 11, 18, 2, TIMBER[1]).rect(1, 11, 18, 1, TIMBER[0]).rect(2, 13, 16, 2, TIMBER[2]);
+      const spines = ["#5578E0", "#C8453B", "#3F9A4E", "#FFD23F", "#9A6AE0", "#F07A2A", "#3EC1F0"];
+      spines.forEach((c, i) => l.rect(4 + i * 2, i % 2 ? 8 : 7, 2, i % 2 ? 3 : 4, c));
+    }, INK);
+    g.stamp((l) => l.ell(4, 16, 2, 2, TIMBER[3]).ell(15, 16, 2, 2, TIMBER[3]), INK);
+  }
+};
+/** The reading tree (the fifth volume's): a broad old tree with books tucked in its branches and a lantern hung. */
+const readtree = {
+  w: 28, h: 32,
+  draw(g) {
+    g.stamp((l) => {
+      l.rect(12, 16, 4, 15, BARK[1]).rect(12, 16, 1, 15, BARK[0]).rect(15, 16, 1, 15, BARK[2]);
+      l.rect(9, 29, 10, 2, BARK[2]);
+    }, INK);
+    g.stamp((l) => dome(l, 14, 19, 13, 17, (u, t, x, y, edge) => (edge ? LEAF[0] : u > 0.55 ? LEAF[2] : rnd(x * 3.7 + y * 9.1) > 0.85 ? LEAF[0] : LEAF[1])), INK_LEAF);
+    const books = [[6, 9, "#C8453B"], [18, 6, "#5578E0"], [11, 4, "#FFD23F"], [21, 12, "#9A6AE0"], [8, 14, "#F07A2A"]];
+    books.forEach(([x, y, c]) => g.rect(x, y, 3, 2, c).px(x, y, "#FFF6DF"));
+    lantern(g, 20, 16);
+  }
+};
+
 export const BASE_SPRITES = {
   title: "The Hollow", bg, burrow, oak, store, fence, tower, hut, scaffold, acorn, magpie, nest,
   workshop, hive, well, stall, trophy, banner: flagpole, king, hedgehog, lantern: lamp, burst, scout, puffcap,
   slinger, mole, perch, hoard, twigwall, nestdown, kingdown, pebble, battleground, decor,
   hero, champion, raider, fencepiece, ring: reach, guardian, animal, heart, land, work, blade,
-  spire, darkwatch, foe, skytop, groundend, gardenbed, signpost
+  spire, darkwatch, foe, skytop, groundend, gardenbed, signpost,
+  page, bloom: pathBloom, bud, wildflower, standing, animalhome, statue, bookstall, readtree
 };

@@ -59,6 +59,16 @@ pub trait DocStore: Sync {
   /// with `None`, makes the first one. With an `owner`, marks it beside the
   /// document too, where the held copy is not marked so already.
   fn write<'a>(&'a self, held: Option<&'a Held>, body: Vec<u8>, owner: Option<&'a str>) -> Pending<'a, Written>;
+  /// How far the store's clock is from this device's, as its last answer
+  /// said (`clock::offset_of`); nothing for a store with no clock (a folder).
+  fn clock_offset(&self) -> Option<i64> {
+    None
+  }
+  /// Takes the owner marked beside the document away: it names an account
+  /// deleted on this device (`owner::remember_released`).
+  fn unmark<'a>(&'a self, _held: &'a Held) -> Pending<'a, ()> {
+    Box::pin(async { Ok(()) })
+  }
 }
 
 /// Who is syncing: the signed-in account's tag (none, signed out), and
@@ -66,16 +76,26 @@ pub trait DocStore: Sync {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Who {
   pub signed_in: Option<String>,
-  pub bridge: bool
+  pub bridge: bool,
+  /// Signed in: ask before claiming a store that holds a library from
+  /// before owners ([`Round::Asks`]), as the account asks a fresh library
+  /// (`cloud::CloudOutcome::AccountHolds`). False once the reader has said
+  /// to bring it in.
+  pub ask_before_claim: bool
 }
 
 impl Who {
   pub fn signed_out() -> Self {
-    Who { signed_in: None, bridge: owner::BRIDGE_STATE_JSON }
+    Who { signed_in: None, bridge: owner::BRIDGE_STATE_JSON, ask_before_claim: false }
   }
 
   pub fn signed_in(tag: &str) -> Self {
-    Who { signed_in: Some(tag.to_string()), bridge: owner::BRIDGE_STATE_JSON }
+    Who { signed_in: Some(tag.to_string()), bridge: owner::BRIDGE_STATE_JSON, ask_before_claim: true }
+  }
+
+  /// The same, with the reader's word on claiming taken (`Some(true)`: bring it in).
+  pub fn answered(&self, answer: Option<bool>) -> Self {
+    Who { ask_before_claim: self.signed_in.is_some() && answer != Some(true), ..self.clone() }
   }
 
   /// What a store is to this device, given the library's owner and the store's.
@@ -139,10 +159,31 @@ pub enum Round {
   Merged { doc: SyncDoc, brought_news: bool },
   /// A later Leaflet wrote it: nothing was written (`merge::read_remote`).
   Newer(Option<SyncDoc>),
+  /// Signed in, the store holds a library from before owners (this many
+  /// books) with something this one lacks: perhaps another reader's, left
+  /// by a device they shared. Nothing was taken or written; the reader is
+  /// asked first (sync audit W1).
+  Asks { books: usize },
   /// The store holds another account's library (or, signed in, one whose
   /// state is not this device's to keep there): nothing was taken from it
   /// and nothing written.
   Refused
+}
+
+/// Whether a store's document is a library at all: books, or reading days.
+/// One with nothing in it is claimed without a question.
+pub fn holds_a_library(doc: &SyncDoc) -> bool {
+  doc.live_books().next().is_some() || !doc.days.is_empty()
+}
+
+/// How many books the reader is asked about before a store is claimed, or
+/// nothing when they are not asked: they have not said to bring it in, the
+/// store is nobody's (`StoreMode::Claim`), it holds a library, and merging it
+/// would change this one.
+pub fn asks_before_claiming(who: &Who, mode: StoreMode, local: &SyncDoc, remote: Option<&SyncDoc>, now: &str) -> Option<usize> {
+  let remote = remote?;
+  (who.ask_before_claim && mode == StoreMode::Claim && holds_a_library(remote) && brings(local, remote, now))
+    .then(|| remote.live_books().count())
 }
 
 /// Whether `ours` is all in `theirs`: merging it in would change nothing.
@@ -162,19 +203,33 @@ pub async fn exchange<S: DocStore + ?Sized>(
   now: &str,
   who: &Who
 ) -> Result<Round> {
+  let started = now;
   let mut round = 0;
+  let mut unmarked_dead = false;
   loop {
     let (remote, held) = doc_store.read().await?;
+    // Google's time, where this device's clock is out (sync audit D3).
+    let reference = crate::sync::clock::reference(started, doc_store.clock_offset());
+    let now = reference.as_str();
     let mark = held.as_ref().and_then(|held| held.owner_mark.clone());
     let doc_owner = match &remote {
       Remote::Ours(doc) | Remote::Newer(Some(doc)) => doc.owner.clone(),
       _ => None
     };
-    let there = remote_owner(doc_owner.as_deref(), mark.as_deref());
-    let (local, local_owner) = {
+    let (local, local_owner, there, dead_mark) = {
       let db = db_mutex.guard();
-      (store::snapshot(&db, now)?, owner::get(&db))
+      // An account deleted here owns nothing, wherever it is still written
+      // (sync audit W3).
+      let dead_mark = owner::clean(mark.as_deref()).is_some_and(|tag| owner::live(&db, Some(tag)).is_none());
+      let there = owner::live(&db, remote_owner(doc_owner.as_deref(), mark.as_deref()));
+      (store::snapshot(&db, now)?, owner::get(&db), there, dead_mark)
     };
+    // Its marker on the store goes, once, and the copy is read again.
+    if let (true, false, Some(held)) = (dead_mark, unmarked_dead, held.as_ref()) {
+      doc_store.unmark(held).await?;
+      unmarked_dead = true;
+      continue;
+    }
     // Whose the store is, from what was read just now: a device that lost a
     // race to claim it finds it taken here, and takes nothing from it.
     let mode = who.mode(local_owner.as_deref(), there.as_deref());
@@ -191,6 +246,9 @@ pub async fn exchange<S: DocStore + ?Sized>(
         })))
       }
     };
+    if let Some(books) = asks_before_claiming(who, mode, &local, remote.as_ref(), now) {
+      return Ok(Round::Asks { books });
+    }
     let stamp = stamp_for(mode, who);
     let merged = merged_for(&local, remote.as_ref(), &there, &stamp, now);
     let brought_news = remote.as_ref().is_some_and(|remote| brings(&local, remote, now));
@@ -203,6 +261,14 @@ pub async fn exchange<S: DocStore + ?Sized>(
     }
 
     let body = serde_json::to_vec_pretty(&merged)?;
+    // What was sent, read as the store will hand it back. The read-back is
+    // held to that rather than to `merged`, so that nothing the trip through
+    // JSON does to a value (a float's last digit, before `float_roundtrip`)
+    // can pass for a write that was lost, round after round.
+    let sent = match merge::read_remote(&body) {
+      Remote::Ours(doc) => doc,
+      _ => merged.clone()
+    };
     if doc_store.write(held.as_ref(), body, merged.owner.as_deref()).await? == Written::Kept {
       // Read back: a store that took the write over a newer copy (ignoring
       // the revision) has lost the other device's work, or a writer that did
@@ -213,7 +279,7 @@ pub async fn exchange<S: DocStore + ?Sized>(
       let kept = match back {
         Remote::Ours(there) => {
           let owner_now = remote_owner(there.owner.as_deref(), back_mark.as_deref());
-          (merged.owner.is_none() || owner_now == merged.owner) && holds(&there, &merged, now)
+          (merged.owner.is_none() || owner_now == merged.owner) && holds(&there, &sent, now)
         }
         // A later version wrote meanwhile: ours is its to keep or not.
         Remote::Newer(_) => true,
@@ -243,7 +309,10 @@ pub struct StateRun {
   pub newer: bool,
   /// The store holds another account's library, or (signed in) one whose
   /// state is not this device's to keep: nothing was taken or written.
-  pub refused: bool
+  pub refused: bool,
+  /// Signed in, the store holds a library from before owners of this many
+  /// books, and the reader is asked before it is claimed ([`Round::Asks`]).
+  pub asks: Option<usize>
 }
 
 /// A round, then its result applied here.
@@ -255,11 +324,12 @@ pub async fn sync<S: DocStore + ?Sized>(
 ) -> Result<StateRun> {
   match exchange(db_mutex, doc_store, now, who).await? {
     Round::Refused => Ok(StateRun { refused: true, ..StateRun::default() }),
+    Round::Asks { books } => Ok(StateRun { asks: Some(books), ..StateRun::default() }),
     Round::Newer(doc) => {
       let db = db_mutex.guard();
       let report = crate::sync::folder::take_from_newer(&db, doc, now)?;
       let brought_news = report.entries_updated > 0 || report.books_removed > 0;
-      Ok(StateRun { report, brought_news, newer: true, refused: false })
+      Ok(StateRun { report, brought_news, newer: true, ..StateRun::default() })
     }
     Round::Merged { doc, brought_news } => {
       let applied = {
@@ -272,7 +342,7 @@ pub async fn sync<S: DocStore + ?Sized>(
         books_pending: applied.missing.len(),
         ..SyncReport::default()
       };
-      Ok(StateRun { report, brought_news, newer: false, refused: false })
+      Ok(StateRun { report, brought_news, ..StateRun::default() })
     }
   }
 }
@@ -304,7 +374,9 @@ pub(crate) mod fake {
     /// honour `If-Match` would.
     ignores_revision: bool,
     writes: u32,
-    conflicts: u32
+    conflicts: u32,
+    /// How far Google's clock is from the device's, as `Date` would say.
+    clock: Option<i64>
   }
 
   impl FakeDrive {
@@ -312,6 +384,12 @@ pub(crate) mod fake {
       let drive = FakeDrive::default();
       drive.inner.lock().unwrap().ignores_revision = true;
       drive
+    }
+
+    /// A Drive whose clock is `offset_ms` from the device's.
+    pub fn with_clock(self, offset_ms: i64) -> Self {
+      self.inner.lock().unwrap().clock = Some(offset_ms);
+      self
     }
 
     pub fn doc(&self) -> Option<SyncDoc> {
@@ -417,6 +495,17 @@ pub(crate) mod fake {
         Ok(Written::Kept)
       })
     }
+
+    fn clock_offset(&self) -> Option<i64> {
+      self.inner.lock().unwrap().clock
+    }
+
+    fn unmark<'a>(&'a self, _held: &'a Held) -> Pending<'a, ()> {
+      Box::pin(async move {
+        self.inner.lock().unwrap().mark = None;
+        Ok(())
+      })
+    }
   }
 }
 #[cfg(test)]
@@ -458,6 +547,55 @@ mod tests {
     fn highlight(&self, id: &str) -> Option<Annotation> {
       self.db.guard().all_annotations().expect("annotations").into_iter().find(|a| a.id == id)
     }
+  }
+
+  /// A day's minutes are a sum of fractions. One JSON had read back a step
+  /// short (9.748933333333333 as 9.748933333333332) never read back as what
+  /// was sent, and every round was taken for a lost write until the fourth
+  /// gave up: "Another device is syncing right now" (the owner's laptop,
+  /// 2026-10-20 on). It is kept in one round, exactly.
+  #[tokio::test]
+  async fn minutes_that_json_does_not_write_round_are_kept_in_one_round() {
+    let drive = FakeDrive::default();
+    let laptop = Device::new();
+    laptop.db.guard().credit_minutes("2026-09-29", 9.748933333333333, 20).expect("read");
+    laptop.sync(&drive, "2026-10-21T11:21:41+00:00").await;
+    assert_eq!((drive.writes(), drive.conflicts()), (1, 0));
+    assert_eq!(drive.doc().expect("doc").days[0].minutes, 9.748933333333333);
+    laptop.sync(&drive, "2026-10-21T11:30:00+00:00").await;
+    assert_eq!(drive.writes(), 1, "and it is not news the next time");
+
+    // A document an older Leaflet wrote with the figure a step short: the
+    // laptop's own, larger, goes up once, and then it is quiet.
+    let mut short = drive.doc().expect("doc");
+    short.days[0].minutes = 9.748933333333332;
+    drive.put_raw(serde_json::to_vec_pretty(&short).expect("json"));
+    let writes = drive.writes();
+    laptop.sync(&drive, "2026-10-21T11:40:00+00:00").await;
+    laptop.sync(&drive, "2026-10-21T11:50:00+00:00").await;
+    assert_eq!(drive.writes(), writes + 1);
+    assert_eq!(drive.doc().expect("doc").days[0].minutes, 9.748933333333333);
+  }
+
+  /// Sync audit D3 over Drive: the phone's clock is an hour slow, and
+  /// Google's `Date` says so. The round goes by Google's time: the document
+  /// is made at it, and the laptop's stamps, on time, are not "from the
+  /// future" to the slow phone.
+  #[tokio::test]
+  async fn a_round_goes_by_googles_clock() {
+    let laptop = Device::new();
+    laptop.db.guard().upsert_book(&book("aaa", "2026-10-21T11:58:00+00:00")).expect("import");
+    let drive = FakeDrive::default();
+    laptop.sync(&drive, "2026-10-21T12:00:00+00:00").await;
+
+    let phone = Device::new();
+    let slow = FakeDrive::default().with_clock(60 * 60 * 1000);
+    slow.put_raw(drive.raw().expect("written"));
+    phone.sync(&slow, "2026-10-21T11:00:00+00:00").await;
+    assert_eq!(phone.books(), vec!["aaa".to_string()]);
+    let row = phone.db.guard().find_by_id("aaa").expect("find").expect("there");
+    // Without Google's word, 11:58 is an hour ahead of the phone and read as 11:00.
+    assert_eq!(row.progress_updated_at.as_deref(), Some("2026-10-21T11:58:00+00:00"));
   }
 
   fn book(id: &str, now: &str) -> BookRecord {
@@ -819,7 +957,8 @@ mod tests {
     };
     drive.sneak_in_marked(serde_json::to_vec(&claimed).expect("json"), A);
 
-    let run = b.run(&drive, "2026-10-01T09:01:30+00:00", &Who::signed_in(B)).await;
+    // (B's reader has said to bring the Drive's library in.)
+    let run = b.run(&drive, "2026-10-01T09:01:30+00:00", &Who::signed_in(B).answered(Some(true))).await;
     assert_eq!(drive.conflicts(), 1, "B's write named the copy it read");
     assert!(run.refused, "and B, reading again, found it taken");
     assert_eq!(b.books(), vec!["bbb".to_string()], "nothing of the store's reached B");
@@ -827,6 +966,99 @@ mod tests {
     let doc = drive.doc().expect("doc");
     assert_eq!(doc.owner.as_deref(), Some(A));
     assert!(doc.books.iter().all(|entry| entry.id != "bbb"), "nothing of B's reached the store");
+  }
+
+  /// Sync audit W1: signed in, a Drive nobody has claimed that holds a
+  /// library (an older Leaflet's, perhaps another reader's on a shared
+  /// Google account) is not merged before the reader says so. One that holds
+  /// nothing, or nothing this library lacks, is claimed without a question.
+  #[tokio::test]
+  async fn a_drive_from_before_owners_is_asked_about_before_it_is_claimed() {
+    let drive = FakeDrive::default();
+    let family = Device::new();
+    family.db.guard().upsert_book(&book("theirs", "2026-10-01T08:00:00+00:00")).expect("import");
+    family.db.guard().credit_minutes("2026-10-01", 30.0, 20).expect("read");
+    family.sync(&drive, "2026-10-01T08:01:00+00:00").await;
+    let before = drive.raw();
+
+    let laptop = Device::new();
+    laptop.db.guard().upsert_book(&book("mine", "2026-10-02T08:00:00+00:00")).expect("import");
+    let run = laptop.run(&drive, "2026-10-02T09:00:00+00:00", &Who::signed_in(A)).await;
+    assert_eq!(run.asks, Some(1));
+    assert!(!run.refused && !run.brought_news);
+    assert_eq!(laptop.books(), vec!["mine".to_string()], "nothing taken");
+    assert_eq!(drive.raw(), before, "nothing written");
+    assert_eq!(drive.mark(), None, "nor claimed");
+
+    // "Use it": merged in, and the Drive is the account's from then on.
+    let run = laptop.run(&drive, "2026-10-02T09:01:00+00:00", &Who::signed_in(A).answered(Some(true))).await;
+    assert_eq!(run.asks, None);
+    assert_eq!(laptop.books(), vec!["mine".to_string(), "theirs".to_string()]);
+    assert_eq!(drive.mark().as_deref(), Some(A));
+    // Claimed, it is not asked about again, whatever is said.
+    assert_eq!(laptop.run(&drive, "2026-10-02T09:02:00+00:00", &Who::signed_in(A)).await.asks, None);
+
+    // An empty Drive is claimed at once.
+    let empty = FakeDrive::default();
+    empty.put_raw(serde_json::to_vec(&SyncDoc::empty("2026-10-01T08:00:00+00:00")).expect("json"));
+    let fresh = Device::new();
+    fresh.db.guard().upsert_book(&book("new", "2026-10-02T08:00:00+00:00")).expect("import");
+    assert_eq!(fresh.run(&empty, "2026-10-02T09:00:00+00:00", &Who::signed_in(A)).await.asks, None);
+    assert_eq!(empty.mark().as_deref(), Some(A));
+
+    // So is one that holds only what this library has already (its own,
+    // from before it was signed in).
+    let own = FakeDrive::default();
+    let reader = Device::new();
+    reader.db.guard().upsert_book(&book("read", "2026-10-01T08:00:00+00:00")).expect("import");
+    reader.sync(&own, "2026-10-01T08:01:00+00:00").await;
+    assert_eq!(reader.run(&own, "2026-10-02T09:00:00+00:00", &Who::signed_in(A)).await.asks, None);
+    assert_eq!(own.mark().as_deref(), Some(A));
+
+    // Signed out, nothing is asked: the Drive is exchanged with as always.
+    let out = Device::new();
+    assert_eq!(out.run(&FakeDrive::default(), "2026-10-02T09:00:00+00:00", &Who::signed_out()).await.asks, None);
+  }
+
+  /// Sync audit W3: the account was deleted on this device. Its tag is still
+  /// written on the Drive (the document and the marker). Signed out, the next
+  /// sync must not take the library back for the dead account; its marker
+  /// goes; and an account signed up after claims the Drive as nobody's.
+  #[tokio::test]
+  async fn a_deleted_accounts_tag_on_the_drive_claims_nothing() {
+    let drive = FakeDrive::default();
+    let laptop = Device::new();
+    laptop.db.guard().upsert_book(&book("aaa", "2026-10-01T08:00:00+00:00")).expect("import");
+    owner::claim_if_unowned(&laptop.db.guard(), A).expect("claimed");
+    laptop.run(&drive, "2026-10-01T09:00:00+00:00", &Who::signed_in(A)).await;
+    assert_eq!(drive.mark().as_deref(), Some(A));
+    assert_eq!(drive.doc().expect("doc").owner.as_deref(), Some(A));
+
+    // The account is deleted here (`cloud::delete_account`).
+    {
+      let db = laptop.db.guard();
+      owner::release_if(&db, A).expect("released");
+      owner::remember_released(&db, A).expect("remembered");
+    }
+    let run = laptop.run(&drive, "2026-10-02T09:00:00+00:00", &Who::signed_out()).await;
+    assert!(!run.refused);
+    assert_eq!(laptop.owner(), None, "not claimed back for the dead account");
+    assert_eq!(drive.mark(), None, "its marker is gone");
+    assert_eq!(drive.doc().expect("doc").owner, None, "and the copy is nobody's");
+    // Nor by a later document that still says so (an older Leaflet's).
+    let mut stale = drive.doc().expect("doc");
+    stale.owner = Some(A.to_string());
+    drive.put_raw(serde_json::to_vec(&stale).expect("json"));
+    laptop.run(&drive, "2026-10-02T09:05:00+00:00", &Who::signed_out()).await;
+    assert_eq!(laptop.owner(), None);
+
+    // A new account signs up here: the Drive is nobody's, so it is claimed,
+    // with no question (it holds nothing this library lacks).
+    let run = laptop.run(&drive, "2026-10-03T09:00:00+00:00", &Who::signed_in(B)).await;
+    assert!(!run.refused && run.asks.is_none());
+    assert_eq!(drive.mark().as_deref(), Some(B));
+    assert!(owner::claim_if_unowned(&laptop.db.guard(), B).expect("claim"));
+    assert!(!owner::claim_if_unowned(&memory_db(), "not a tag").expect("claim"));
   }
 
   /// The bridge: a phone signed out and a laptop signed in, one owner, one
@@ -851,7 +1083,7 @@ mod tests {
     assert_eq!(drive.doc().expect("doc").owner.as_deref(), Some(A));
 
     // Without the bridge, the laptop leaves the state there alone.
-    let off = Who { signed_in: Some(A.to_string()), bridge: false };
+    let off = Who { signed_in: Some(A.to_string()), bridge: false, ask_before_claim: false };
     laptop.db.guard().credit_minutes("2026-10-14", 5.0, 30).expect("more");
     let writes = drive.writes();
     assert!(laptop.run(&drive, "2026-10-14T21:00:00+00:00", &off).await.refused);

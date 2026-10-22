@@ -104,11 +104,12 @@ export const syncService = {
     return invoke<SyncStatus>("set_sync_folder", { path });
   },
 
-  async syncNow(): Promise<SyncReport> {
+  /** `manual`: the reader asked, so Drive is tried even while Google's refusal is being waited out. */
+  async syncNow(manual = false): Promise<SyncReport> {
     if (!isTauri()) {
       return EMPTY_REPORT;
     }
-    return invoke<SyncReport>("sync_now");
+    return invoke<SyncReport>("sync_now", { manual });
   },
 
   /** The library's books over 10 MB on this device, largest first, each with the reader's answer. */

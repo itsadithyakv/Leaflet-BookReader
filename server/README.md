@@ -296,11 +296,14 @@ it by sending the header directly.
 ## Capacity
 
 What the server asks of a small VM and a free Atlas cluster, measured with
-`node scripts/load.mjs` (below) on 2026-10-13. The cluster's own limits are
-not in this repository: the figures used for them here are assumptions to
-check against Atlas (500 connections, 512 MB of data and indexes, about 100
-operations a second before it slows everyone down, 10 GB of transfer each
-way in seven days).
+`node scripts/load.mjs` (below) on 2026-10-13 and 2026-10-17, and modelled
+in [the sync audit](../docs/sync-audit.md) (2026-10-22). The cluster's own
+limits, as MongoDB's page on free clusters gave them on 2026-10-22: 500
+connections, 512 MB of data **and indexes** (counted uncompressed), 100
+operations a second before it is throttled, and **10 GB in and 10 GB out**
+in any seven days (about 1.4 GB a day each way). Both directions count:
+the sync documents an app sends up are transfer *in*, and for a reader who
+highlights a lot they are the larger of the two.
 
 **What one open app sends.** Every five minutes, on any tab: the inbox, its
 own figures, the board of the readers followed, and gifts (four requests).
@@ -330,11 +333,13 @@ come to about **20 operations a second**, a tenth of an operation a second
 an app. At 100 a second the cluster is the limit at about 1,000 apps open at
 once in that mix, or about 550 if every one of them sat on the Board tab.
 
-**Transfer.** What comes back from the database is about 0.48 MB an hour an
+**Transfer out.** What comes back from the database is about 0.48 MB an hour an
 open app (0.56 before the save stopped reading the profile back, measured the
-same way on 2026-10-17): a third of it the public board (which is kept in
-memory only until the next reader's figures change, and with a few hundred
-reading that is all the time), a third the reader's own profile, read once
+same way on 2026-10-17): a third of it the public board (which, until 1.5.11,
+was kept in memory only until the next reader's figures changed, and with a
+few hundred reading that was all the time; it is now kept its whole half
+minute, cleared at once only when a profile's visibility changes or it is
+deleted, so this third falls with the number of readers), a third the reader's own profile, read once
 on every save of their figures to tell whether anything is new (4 KB, nearly
 all of it the camp; a save with something new was 8 KB, the profile read and
 then read back after the write, and is now that one read and a few fields),
@@ -343,9 +348,24 @@ and the save's read ask for only what the answer shows: not the avatar's
 copy, the dates, or the ids behind the kudos counts. A fetch of the sync
 document that names the version the app holds (`?have=`) reads and sends
 only the version when it is still current, instead of the whole document
-(15 KB typically, 2 MB at most). Ten gigabytes in seven days is some 3,000
-app-hours a day: 200 readers with the app open eight hours a day use about
-half of it.
+(about 30 KB for a typical year, 0.5 MB for a heavy reader, 2 MB at most).
+Ten gigabytes in seven days is some 3,000 app-hours a day: 200 readers with
+the app open eight hours a day use about half of it. A full fetch of the
+sync document still happens when another device wrote, and once a day.
+
+**Transfer in.** What the server writes to the database. A save of figures
+with something new is a few hundred bytes since 1.5.11 (only the parts that
+moved are `$set`; the camp, 3 KB, used to go every time). The sync document
+is the large part: every push writes it whole (its gzip, as BSON `Binary`).
+Since 1.5.3 every signed-in reader's state is kept here, not two in five.
+Modelled (sync audit, section 2): a typical reader sends about 8 pushes a
+day of a 30 KB document, 0.24 MB; a heavy one (500 books, 2,000 highlights,
+three devices) about 30 of 520 KB, 15.6 MB. 1.5.11's app holds highlights and
+notes back while a book is open (they go up when it closes, when the app is
+hidden, or after five minutes), which the audit puts at a third to a fifth of
+a heavy reader's pushes. With one reader in ten heavy, transfer *in* is the
+first limit the cluster meets, at some 800 daily readers before that change
+and some 2,500 after it.
 
 Those are the bytes of the documents. The server also asks for zlib on the
 wire (`MONGO_COMPRESSORS`), which makes a profile with a full camp about a
@@ -358,18 +378,21 @@ Network chart, before and after a deploy, is the way to see it. A
 takes both lists together (these first), so neither replaces the other, and
 `MONGO_COMPRESSORS=none` turns off only this one.
 
-**Storage.** A reader with a month or two of use behind them is about 37 KB
-of data and indexes: a profile with a full camp 3.6 KB, follows, inbox
-events, kudos, raids and gifts about 11 KB between them (all but follows
-expire: see below), ten posts 7 KB, the sync document 15 KB for the two in
-five who back their reading up here, and a shared library of 300 books 41 KB
-for the one in five who share one. 200 readers are about 7 MB and 2,000
-about 74 MB, of 512 (twice that if every one of them both backed up and
-shared a library). What grows without end is what readers write (posts,
-threads, replies: under 1 KB each) and the sync document (about 15 KB a year
-of reading, 2 MB at most); everything else is capped a reader or expires
-(sessions after 90 days unused, inbox events 60, raids 30, claimed gifts 30,
-kudos 21, duels 90, daily counts 4, resolved reports 180).
+**Storage.** A reader with a year of use behind them is about 53 KB of data
+and indexes: the sync document about 30 KB (every signed-in reader's, since
+1.5.3), a profile with a full camp 3.6 KB, follows, inbox events, kudos,
+raids and gifts about 11 KB between them (all but follows expire: see
+below), posts, and a shared library of 300 books 41 KB for the one in five
+who share one. A heavy reader is about 610 KB, nearly all of it the sync
+document (half of that the highlights' words). 2,000 typical readers are
+about 110 MB of 512; 840 heavy ones fill it. What grows without end is what
+readers write (posts, threads, replies: under 1 KB each) and the sync
+document (25 to 30 KB a year of modest reading, far more for a heavy
+highlighter; 2 MB at most, and the app warns the reader from 1.6 MB);
+accounts nobody uses stay until deleted (no expiry yet). Everything else is
+capped a reader or expires (sessions after 90 days unused, inbox events 60,
+raids 30, claimed gifts 30, kudos 21, duels 90, daily counts 4, resolved
+reports 180, problem reports 90 and at most 20 MB waiting at once).
 
 **Memory.** With the heap the unit allows (`--max-old-space-size=128`), on a
 development machine: about 100 MB at the pace of those 200 apps, flat over
@@ -380,11 +403,18 @@ password hashes at a time, 32 MiB each). Against the unit's 256 MB that is
 comfortable at 200 apps, and close at several times as many with a burst of
 sign-ins on top. The VM's own figure is in `systemctl status leaflet-api`.
 
-**What gives first** as readers are added, under those assumptions: the
-cluster's weekly transfer (about 380 readers with the app open eight hours
-every day, or 1,500 at two hours; more if compression counts), then its operations a second (about 1,000
-apps open at the same moment). The connections, the storage and the VM's
-processor are all further off than either; its memory is the one to watch.
+**What gives first** as readers are added, under those assumptions (sync
+audit, section 2): with only light readers, the weekly transfer **out**
+(about 1,800 daily readers; the board kept its full half minute since 1.5.11
+moves that on); with even one reader in ten heavy, the weekly transfer
+**in**, nearly all of it whole sync documents (about 800 daily readers
+before 1.5.11's held-back pushes, about 2,500 after). Then storage, which
+only grows (sync documents, dormant accounts), then the operations a second
+(about 1,000 apps open at the same moment). The connections and the VM's
+processor are further off; its memory is the one to watch. These are a
+model from the code's shapes, not readings of the live cluster: the
+cluster's Metrics (Network in and out, Data Size) are the figures that
+count.
 
 ### Measuring it
 

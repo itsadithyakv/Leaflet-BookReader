@@ -66,7 +66,8 @@ const SAMPLE: Slots = {
   run: 7,
   sessions: 2,
   percent: 42,
-  nod: "push the coin, fly the pip."
+  nod: "push the coin, fly the pip.",
+  friend: "@maya"
 };
 
 describe("the diary's dice", () => {

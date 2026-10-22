@@ -222,7 +222,7 @@ fn delete(db: &Database, ids: &[String], now: &str) -> Result<(), String> {
   Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn words_list(state: State<'_, AppState>) -> Result<Vec<Annotation>, String> {
   let db = state.db.guard();
   list(&db)

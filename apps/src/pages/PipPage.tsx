@@ -1006,7 +1006,12 @@ export const PipPage = ({ showToast, openSocial, onNavigate, onOpenProfile }: Pi
                 taken={frame.floor()}
                 busy={decorating || arcadeOpen || place === "hollow"}
                 away={pipOut}
-                onEvent={(event) => sceneRef.current?.visitor(event.type)}
+                onEvent={(event) => {
+                  // A time in the visit's own plan to do something together; or a knock, an arrival, a goodbye.
+                  if (event.type === "together") sceneRef.current?.together(event.kind);
+                  else sceneRef.current?.visitor(event.type);
+                }}
+                onTogether={(kind) => sceneRef.current?.together(kind, true)}
                 onOpenProfile={
                   openSocial
                     ? (handle) => {

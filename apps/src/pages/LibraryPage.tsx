@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -206,7 +206,7 @@ const SessionRing = ({ session, sessionDuration }: { session: ActiveSession | nu
   );
 };
 
-export const LibraryPage = ({ onOpenBook, onNavigate, showToast, onStartFocus }: LibraryPageProps) => {
+const LibraryPageComponent = ({ onOpenBook, onNavigate, showToast, onStartFocus }: LibraryPageProps) => {
   const { books, filters, loading, importing, importBooks, importFiles, refreshMetadata, fetchCover, setFilter } =
     useLibraryStore(
       useShallow((state) => ({
@@ -882,3 +882,10 @@ export const LibraryPage = ({ onOpenBook, onNavigate, showToast, onStartFocus }:
     </div>
   );
 };
+
+/**
+ * Drawn again only when its own props or stores change: the shell (App.tsx) renders again for
+ * the profile panel, a toast, the header and the book being read, and with three hundred books
+ * each of those redrew the whole shelf (about a sixth of a second on a laptop at a quarter speed).
+ */
+export const LibraryPage = memo(LibraryPageComponent);

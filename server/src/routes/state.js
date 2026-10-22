@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { Binary } from "mongodb";
 import { requireAccount } from "../auth.js";
-import { states } from "../db.js";
+import { accounts, states } from "../db.js";
 import { HttpError, asyncHandler, stateJson } from "../http.js";
 import { defaultLimits } from "../rateLimit.js";
 import { limiter } from "../readers.js";
@@ -54,8 +54,9 @@ export function stateRoutes(db, limits = defaultLimits()) {
   //
   // `?have=N` says the app already holds version N, kept from an earlier
   // fetch: when that is still the version stored, the answer is
-  // `{version, unchanged: true}` and no `state`, and the document itself is
-  // not even read from the database, only its version. An app checks for a
+  // `{version, unchanged: true}` and no `state`: the database still loads
+  // the document to answer, but sends back only its version, so neither
+  // Atlas's transfer nor this server carries the document. An app checks for a
   // newer document every time it opens and after every sync, and nearly
   // always there is none, so this was up to 2 MB from the database and to
   // the app for nothing. An app that sends no `have` (every one before
@@ -108,6 +109,12 @@ export function stateRoutes(db, limits = defaultLimits()) {
       if (version === 0) {
         // "I have never seen a document." An insert, so an existing document
         // is a conflict (E11000 on _id) rather than an upsert that blows up.
+        // Not for an account that is gone: a request let in just before its
+        // deletion ended the sessions must not leave a copy behind (sync
+        // audit D5). Once per account, so the read is no cost.
+        if (!(await accounts(db).findOne({ _id: id }, { projection: { _id: 1 } }))) {
+          throw new HttpError(401, "Your session has ended. Sign in again.");
+        }
         try {
           await states(db).insertOne({ _id: id, state: new Binary(bytes), version: 1, updatedAt: now });
           written = true;

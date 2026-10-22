@@ -1153,10 +1153,10 @@ export const bareFound = (seen: BareSeen, today: string, now: number): BareSeen 
 export const foodFound = (seen: BareSeen): BareSeen => ({ ...seen, wasBare: false });
 
 /** Where Pip stands at a fridge whose box is this: at its handle (the left; the door swings out to the right), turned to it. */
-export const fridgeStand = (box: { x: number; w: number }, floorW: number): { x: number; face: 1 | -1 } => {
+export const fridgeStand = (box: { x: number; w: number }, floorW: number, floorLeft = 0): { x: number; face: 1 | -1 } => {
   const left = Math.round(box.x - 10);
-  // No room on that side (a fridge by the left wall): the other, past the open door.
-  return left >= 18 ? { x: left, face: 1 } : { x: Math.min(floorW - 18, Math.round(box.x + box.w + 15)), face: -1 };
+  // No room on that side (a fridge by the left end of the floor): the other, past the open door.
+  return left >= floorLeft + 18 ? { x: left, face: 1 } : { x: Math.min(floorW - 18, Math.round(box.x + box.w + 15)), face: -1 };
 };
 
 // ---- the notes on the fridge ----------------------------------------------------------------

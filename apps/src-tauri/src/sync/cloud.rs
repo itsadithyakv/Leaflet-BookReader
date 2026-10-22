@@ -50,10 +50,49 @@ pub const PROFILE_SENT_SETTING: &str = "cloud_profile_sent";
 /// sync asks the server only whether the copy has moved on (`?have=`), and
 /// the document itself (up to 2 MB, every sync) is not sent for nothing.
 const STATE_COPY_SETTING: &str = "cloud_state_copy";
+/// When this library last took the account's state in (`AccountMerged`): what
+/// says whether its figures are the account's, before they are published.
+pub const ACCOUNT_MERGED_SETTING: &str = "cloud_account_merged";
 
 /// Retries after losing a race for the document. Each one is a fresh merge, so
 /// nothing the other device wrote is lost.
 const MAX_CONFLICT_RETRIES: u32 = 3;
+
+/// The most the server keeps of the account's copy: gzipped bytes, as
+/// `server/src/routes/state.js` (`MAX_STATE_BYTES`) counts them.
+pub const STATE_MAX_BYTES: usize = 2 * 1024 * 1024;
+/// From here the reader is told the account's copy is filling up (sync
+/// audit D2): four fifths of the most there is.
+pub const STATE_WARN_BYTES: usize = STATE_MAX_BYTES / 5 * 4;
+/// How large the account's copy was when this device last sent or fetched it
+/// (gzipped bytes), for the status (`state_usage`).
+pub const STATE_BYTES_SETTING: &str = "cloud_state_bytes";
+
+/// Said when the account's copy would be larger than the server keeps. The
+/// run has still taken in what the account held; nothing here is lost.
+pub fn too_large_message(bytes: usize) -> String {
+  format!(
+    "Your reading is too large for account sync ({} of {}). Everything stays on this device. Removing highlights you no longer need makes room.",
+    megabytes(bytes),
+    megabytes(STATE_MAX_BYTES)
+  )
+}
+
+/// Bytes as megabytes, to one place ("1.7 MB").
+pub fn megabytes(bytes: usize) -> String {
+  format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+}
+
+/// How full the account's copy is, when it is filling up: its bytes, and the
+/// most there is. Nothing below `STATE_WARN_BYTES`, or before it is known.
+pub fn state_usage(db: &Database) -> Option<(usize, usize)> {
+  let bytes = db.get_setting(STATE_BYTES_SETTING).ok().flatten()?.parse::<usize>().ok()?;
+  (bytes >= STATE_WARN_BYTES).then_some((bytes, STATE_MAX_BYTES))
+}
+
+fn note_state_bytes(db: &Database, bytes: usize) {
+  let _ = db.set_setting(STATE_BYTES_SETTING, &bytes.to_string());
+}
 
 #[derive(Debug, Deserialize)]
 struct StateResponse {
@@ -155,11 +194,23 @@ pub fn set_api_base(db: &Database, value: &str) -> Result<()> {
   Ok(())
 }
 
-fn compress(doc: &SyncDoc) -> Result<String> {
+/// The document as the server stores it: gzipped JSON.
+fn gzipped(doc: &SyncDoc) -> Result<Vec<u8>> {
   let json = serde_json::to_vec(doc)?;
   let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
   encoder.write_all(&json)?;
-  Ok(base64::engine::general_purpose::STANDARD.encode(encoder.finish()?))
+  Ok(encoder.finish()?)
+}
+
+/// And as it travels: base64 of that.
+fn compress(doc: &SyncDoc) -> Result<String> {
+  Ok(base64::engine::general_purpose::STANDARD.encode(gzipped(doc)?))
+}
+
+/// The gzipped bytes a base64 copy stands for, without decoding it.
+fn decoded_len(encoded: &str) -> usize {
+  let padding = encoded.bytes().rev().take_while(|byte| *byte == b'=').count();
+  (encoded.len() / 4 * 3).saturating_sub(padding)
 }
 
 /// The document the server holds, or nothing for one that cannot be read.
@@ -196,7 +247,7 @@ async fn describe_failure(response: reqwest::Response) -> anyhow::Error {
   match status.as_u16() {
     401 => anyhow!("Your Leaflet sign-in has ended. Sign in again in Settings."),
     404 => anyhow!("That Leaflet server has no such endpoint — check the address."),
-    413 => anyhow!("Your library is too large for cloud sync."),
+    413 => anyhow!(too_large_message(STATE_MAX_BYTES + 1)),
     400..=499 => anyhow!("{message}"),
     _ => anyhow!("Leaflet server error ({status}): {message}")
   }
@@ -329,6 +380,7 @@ pub fn clear_session(db: &Database) {
   // and fetches afresh.
   forget_profile_sent(db);
   forget_state_copy(db);
+  let _ = db.set_setting(ACCOUNT_MERGED_SETTING, "");
   // The library's owner is kept: it is the library's, not the session's.
 }
 
@@ -356,6 +408,32 @@ pub fn remember_profile_sent(db: &Database, sent: &ProfileSent) {
 /// Forgets what was last sent of the profile, so the next publish sends.
 pub fn forget_profile_sent(db: &Database) {
   let _ = db.set_setting(PROFILE_SENT_SETTING, "");
+}
+
+/// The last time this library merged the account's state in and applied it
+/// (`sync_with`): whose account (its tag), when (Unix seconds, the run's
+/// start), and how many minutes this device itself had read by then
+/// (`Database::own_minutes`). A device's figures are the account's only as of
+/// then, plus what it has read since (`commands::social::figures_current`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AccountMerged {
+  pub tag: String,
+  pub at: i64,
+  pub own: f64
+}
+
+/// When the account's state was last merged here, if it was and can be read.
+pub fn account_merged(db: &Database) -> Option<AccountMerged> {
+  let value = db.get_setting(ACCOUNT_MERGED_SETTING).ok().flatten()?;
+  serde_json::from_str(&value).ok()
+}
+
+/// Notes that `tag`'s state has just been merged in and applied here.
+pub fn remember_account_merged(db: &Database, tag: &str, at: i64) {
+  let merged = AccountMerged { tag: tag.to_string(), at, own: db.own_minutes().unwrap_or(0.0) };
+  if let Ok(value) = serde_json::to_string(&merged) {
+    let _ = db.set_setting(ACCOUNT_MERGED_SETTING, &value);
+  }
 }
 
 /// The rows that say who is signed in on this library, apart from the token
@@ -837,6 +915,9 @@ pub async fn delete_account(db_mutex: &std::sync::Mutex<Database>, password: &st
     // The server deleted the account's copy; the library here is nobody's now.
     if let Some(tag) = signed_in_account_id(&db).map(|id| crate::sync::owner::tag_for(&id)) {
       let _ = crate::sync::owner::release_if(&db, &tag);
+      // And its tag is dead wherever it is still written (a Drive's or a
+      // folder's copy and marker): no sync here takes the library back for it.
+      let _ = crate::sync::owner::remember_released(&db, &tag);
     }
     clear_session(&db);
   }
@@ -879,6 +960,11 @@ pub trait StateStore: Sync {
   fn pull(&self, have: Option<i64>) -> Pending<'_, Fetched>;
   /// Writes `payload` over `version`, only if that is still the server's.
   fn push<'a>(&'a self, version: i64, payload: &'a str) -> Pending<'a, Pushed>;
+  /// How far the store's clock is from this device's, as its last answer
+  /// said (`clock::offset_of`), where it said: what a run goes by.
+  fn clock_offset(&self) -> Option<i64> {
+    None
+  }
 }
 
 /// The server's `/v1/state`, for the account signed in.
@@ -886,14 +972,23 @@ pub struct Server<'a> {
   db_mutex: &'a std::sync::Mutex<Database>,
   base: String,
   token: String,
-  http: reqwest::Client
+  http: reqwest::Client,
+  /// The time the server's last answer gave (`Date`).
+  heard: crate::sync::clock::Heard
 }
 
 impl<'a> Server<'a> {
   /// The signed-in account's copy on the configured server.
   pub fn signed_in(db_mutex: &'a std::sync::Mutex<Database>) -> Result<Self> {
     let (base, token) = session_token(db_mutex)?;
-    Ok(Server { db_mutex, base, token, http: client()? })
+    Ok(Server { db_mutex, base, token, http: client()?, heard: Default::default() })
+  }
+
+  /// A server and a session named outright, for the test against a server
+  /// on this machine (`commands::e2e`): nothing is read from the keychain.
+  #[cfg(test)]
+  pub fn at(db_mutex: &'a std::sync::Mutex<Database>, base: &str, token: &str) -> Result<Self> {
+    Ok(Server { db_mutex, base: base.to_string(), token: token.to_string(), http: client()?, heard: Default::default() })
   }
 }
 
@@ -905,6 +1000,7 @@ impl StateStore for Server<'_> {
         request = request.query(&[("have", have.to_string())]);
       }
       let response = request.send().await.map_err(unreachable)?;
+      self.heard.note(response.headers());
       if !response.status().is_success() {
         forget_if_unauthorised(self.db_mutex, response.status());
         return Err(describe_failure(response).await);
@@ -924,6 +1020,7 @@ impl StateStore for Server<'_> {
         .send()
         .await
         .map_err(unreachable)?;
+      self.heard.note(push.headers());
       if push.status() == reqwest::StatusCode::CONFLICT {
         return Ok(Pushed::Conflict);
       }
@@ -933,6 +1030,10 @@ impl StateStore for Server<'_> {
       }
       Ok(Pushed::Kept)
     })
+  }
+
+  fn clock_offset(&self) -> Option<i64> {
+    self.heard.offset()
   }
 }
 
@@ -968,9 +1069,16 @@ pub async fn sync_with<S: StateStore + ?Sized>(
   stamp: Option<&str>
 ) -> Result<CloudOutcome> {
   let at = unix_seconds(now);
+  let started = now;
   let mut attempt = 0;
+  // Larger than the server keeps: not sent (sync audit D2).
+  let mut too_large: Option<usize> = None;
   let merged = loop {
     let (version, read) = pull_held(db_mutex, store_of, stamp, at).await?;
+    // The server's time, where this device's clock is out (sync audit D3):
+    // what the merge is made at, and what stamps from the future are read as.
+    let reference = crate::sync::clock::reference(started, store_of.clock_offset());
+    let now = reference.as_str();
     // What the server holds, where it holds a document that can be read. A
     // corrupt one must not take the library down: it is merged as an empty
     // one, and republishing this device's own state puts it right.
@@ -980,7 +1088,11 @@ pub async fn sync_with<S: StateStore + ?Sized>(
       // A later Leaflet wrote it: take what this one understands, write nothing.
       Remote::Newer(doc) => {
         let db = db_mutex.guard();
-        return Ok(CloudOutcome::Synced(crate::sync::folder::take_from_newer(&db, doc, now)?));
+        let report = crate::sync::folder::take_from_newer(&db, doc, now)?;
+        if let Some(stamp) = stamp {
+          remember_account_merged(&db, stamp, at);
+        }
+        return Ok(CloudOutcome::Synced(report));
       }
     };
     let fresh = {
@@ -1011,7 +1123,16 @@ pub async fn sync_with<S: StateStore + ?Sized>(
     if !has_news(&merged, held.as_ref()) {
       break merged;
     }
-    let payload = compress(&merged)?;
+    let gzip = gzipped(&merged)?;
+    note_state_bytes(&db_mutex.guard(), gzip.len());
+    // Over what the server keeps, the push would only be refused (413), at
+    // every sync and with megabytes sent each time. It is not sent; what the
+    // account held is still taken in here, and the reader is told.
+    if gzip.len() > STATE_MAX_BYTES {
+      too_large = Some(gzip.len());
+      break merged;
+    }
+    let payload = base64::engine::general_purpose::STANDARD.encode(&gzip);
     match store_of.push(version, &payload).await? {
       Pushed::Kept => {
         // What was sent is now the account's copy, at the version after.
@@ -1036,8 +1157,16 @@ pub async fn sync_with<S: StateStore + ?Sized>(
     let applied = store::apply(&db, &merged)?;
     // The first account sync of a fresh library is behind it.
     crate::sync::owner::set_fresh(&db, false)?;
+    // This library now holds everything the account held at the start of
+    // the run: its figures may be published (`commands::social`).
+    if let Some(stamp) = stamp {
+      remember_account_merged(&db, stamp, at);
+    }
     applied
   };
+  if let Some(bytes) = too_large {
+    return Err(anyhow!(too_large_message(bytes)));
+  }
 
   Ok(CloudOutcome::Synced(SyncReport {
     entries_updated: applied.updated,
@@ -1192,6 +1321,9 @@ async fn pull_held<S: StateStore + ?Sized>(
 fn take_pulled(db_mutex: &std::sync::Mutex<Database>, tag: Option<&str>, pulled: Pulled, now: i64) -> (i64, Remote) {
   let read = pulled.state.as_deref().map(decode_remote).unwrap_or(Remote::Absent);
   let db = db_mutex.guard();
+  if let Some(state) = pulled.state.as_deref() {
+    note_state_bytes(&db, decoded_len(state));
+  }
   if matches!(read, Remote::Absent) {
     forget_state_copy(&db);
   } else {
@@ -1536,7 +1668,9 @@ pub(crate) mod fake {
     /// The `have` of each pull, in order.
     asked: Vec<Option<i64>>,
     /// How much of the document the pulls have carried, in bytes of base64.
-    sent: usize
+    sent: usize,
+    /// How far its clock is from the device's, as a `Date` header would say.
+    clock: Option<i64>
   }
 
   impl FakeCloud {
@@ -1578,6 +1712,12 @@ pub(crate) mod fake {
       self.inner.lock().unwrap().pushes
     }
 
+    /// A server whose clock is `offset_ms` from the device's.
+    pub fn with_clock(self, offset_ms: i64) -> Self {
+      self.inner.lock().unwrap().clock = Some(offset_ms);
+      self
+    }
+
     /// The `have` of each pull since the last call, and the bytes of the
     /// document they carried.
     pub fn pulls(&self) -> (Vec<Option<i64>>, usize) {
@@ -1617,6 +1757,10 @@ pub(crate) mod fake {
         inner.pushes += 1;
         Ok(Pushed::Kept)
       })
+    }
+
+    fn clock_offset(&self) -> Option<i64> {
+      self.inner.lock().unwrap().clock
     }
   }
 }
@@ -1952,6 +2096,213 @@ mod tests {
     let mut ids: Vec<String> = db.guard().list_books().expect("list").into_iter().map(|b| b.id).collect();
     ids.sort();
     ids
+  }
+
+  /// Sync audit D3 over the account: this device's clock is twenty minutes
+  /// fast, and the server's `Date` says so. The run goes by the server's
+  /// time; the stamps the fast clock wrote are read as it, sent so, and put
+  /// right in the rows here.
+  #[tokio::test]
+  async fn a_sync_goes_by_the_servers_clock() {
+    let fast_now = "2026-09-04T12:20:00+00:00";
+    let library = library_with(&["aaa"]);
+    {
+      // Read a minute ago by its own clock.
+      let db = library.guard();
+      let mut row = db.find_by_id("aaa").expect("find").expect("there");
+      row.progress = 0.4;
+      row.progress_updated_at = Some("2026-09-04T12:19:00+00:00".to_string());
+      db.upsert_book(&row).expect("read");
+    }
+    let cloud = FakeCloud::default().with_clock(-20 * 60 * 1000);
+
+    assert!(matches!(sync_with(&library, &cloud, fast_now, Some(A)).await.expect("sync"), CloudOutcome::Synced(_)));
+
+    let held = cloud.doc().expect("held");
+    assert_eq!(held.updated_at, NOW, "made at the server's noon, not the device's twenty past");
+    let book = held.books.iter().find(|book| book.id == "aaa").expect("aaa");
+    assert_eq!(book.progress_updated_at, NOW);
+    let row = library.guard().find_by_id("aaa").expect("find").expect("there");
+    assert_eq!(row.progress_updated_at.as_deref(), Some(NOW));
+    // And the next sync, with nothing read, sends nothing.
+    assert!(matches!(sync_with(&library, &cloud, fast_now, Some(A)).await.expect("sync"), CloudOutcome::Synced(_)));
+    assert_eq!(cloud.pushes(), 1);
+  }
+
+  /// Nothing changed, nothing sent: a library with a bit of everything in it
+  /// (fractional progress and minutes, highlights and a removed one, a
+  /// session, Pip, the camp, the reading pace, a collection) syncs, and the
+  /// syncs after it find nothing to send, through the compression and the
+  /// copy kept here as the server holds it.
+  #[tokio::test]
+  async fn a_library_with_everything_in_it_sends_once_and_then_nothing() {
+    let library = library_with(&["aaa", "bbb"]);
+    {
+      let db = library.guard();
+      db.update_progress("aaa", 0.123_456_7, Some(NOW.to_string()), Some("epubcfi(/6/14!/4/2/1:0)".to_string())).expect("read");
+      db.credit_minutes("2026-09-03", 12.345_678_9, 20).expect("minutes");
+      db.credit_minutes("2026-09-04", 0.1 + 0.2, 20).expect("minutes");
+      for (id, deleted) in [("h1", None), ("h2", Some(NOW.to_string()))] {
+        db.put_annotation(&crate::db::Annotation {
+          id: id.into(),
+          book_id: "aaa".into(),
+          kind: "highlight".into(),
+          cfi: "epubcfi(/6/2!/4/2,/1:0,/1:5)".into(),
+          text: Some("A line".into()),
+          note: Some("a note".into()),
+          color: Some("yellow".into()),
+          chapter: None,
+          created_at: NOW.into(),
+          updated_at: NOW.into(),
+          deleted_at: deleted
+        })
+        .expect("mark");
+      }
+      db.put_collection(&crate::db::Collection {
+        id: "c1".into(),
+        name: "Shelf".into(),
+        book_ids: vec!["aaa".into()],
+        created_at: NOW.into(),
+        updated_at: NOW.into(),
+        deleted_at: None
+      })
+      .expect("shelf");
+      db.put_pip_state(&crate::pip::PipState::fresh(NOW)).expect("pip");
+      crate::sync::store::keep_camp(&db, &merge::CampEntry { state: r#"{"v":2,"camps":3}"#.into(), saved_at: NOW.into() }).expect("camp");
+      crate::sync::reading::absorb(
+        &db,
+        &serde_json::from_str(r#"{"version":2,"core":{"updatedAt":"2026-09-04T11:00:00Z","base":{"wpm":251.75}},"books":{"aaa":{"updatedAt":"2026-09-04T11:00:00Z","wpm":210.3}}}"#).expect("profile")
+      )
+      .expect("pace");
+    }
+    let cloud = FakeCloud::default();
+    for _ in 0..3 {
+      assert!(matches!(sync_with(&library, &cloud, LATER, Some(A)).await.expect("sync"), CloudOutcome::Synced(_)));
+    }
+    assert_eq!(cloud.pushes(), 1, "only the first had anything to send");
+    // A minute read is news again, once.
+    library.guard().credit_minutes("2026-09-04", 1.0, 20).expect("minutes");
+    for _ in 0..2 {
+      sync_with(&library, &cloud, LATER, Some(A)).await.expect("sync");
+    }
+    assert_eq!(cloud.pushes(), 2);
+  }
+
+  /// Highlights made in an open book wait to go up (the app's
+  /// services/pushHold), in the database. An app stopped while they wait
+  /// loses none: the next run, at the next launch, finds them news and sends
+  /// them, with nothing kept anywhere but the library itself.
+  #[tokio::test]
+  async fn highlights_that_waited_go_up_with_the_next_run_after_the_app_was_stopped() {
+    let library = library_with(&["aaa"]);
+    let cloud = FakeCloud::default();
+    sync_with(&library, &cloud, NOW, Some(A)).await.expect("the launch's sync");
+    for id in ["h1", "h2", "h3"] {
+      library
+        .guard()
+        .put_annotation(&crate::db::Annotation {
+          id: id.into(),
+          book_id: "aaa".into(),
+          kind: "highlight".into(),
+          cfi: format!("epubcfi(/6/4!/4/2,/1:0,/1:{})", id.len()),
+          text: Some("Marked while reading".into()),
+          note: None,
+          color: Some("yellow".into()),
+          chapter: None,
+          created_at: NOW.into(),
+          updated_at: NOW.into(),
+          deleted_at: None
+        })
+        .expect("mark");
+    }
+    // The app is stopped here, before any sync. At the next launch:
+    assert!(matches!(sync_with(&library, &cloud, LATER, Some(A)).await.expect("sync"), CloudOutcome::Synced(_)));
+    assert_eq!(cloud.doc().expect("held").annotations.len(), 3);
+    assert_eq!(cloud.pushes(), 2);
+  }
+
+  /// Sync audit D2: a library whose copy would be larger than the server
+  /// keeps is not sent (it would only be refused, at every sync). What the
+  /// account holds still comes in, nothing here is lost, and the reader is
+  /// told why and what to do. Below the most, from four fifths of it, the
+  /// status says it is filling up.
+  #[tokio::test]
+  async fn a_library_too_large_for_the_account_is_not_sent_and_loses_nothing() {
+    let library = library_with(&["aaa"]);
+    {
+      // Highlights of words that do not compress: some 3 MB of them.
+      let db = library.guard();
+      let mut seed: u64 = 0x2545_f491_4f6c_dd1d;
+      let mut words = || {
+        (0..1000)
+          .map(|_| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            char::from(b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"[(seed % 62) as usize])
+          })
+          .collect::<String>()
+      };
+      for index in 0..3000 {
+        db.put_annotation(&crate::db::Annotation {
+          id: format!("h{index}"),
+          book_id: "aaa".into(),
+          kind: "highlight".into(),
+          cfi: format!("epubcfi(/6/{index}!/4/2,/1:0,/1:9)"),
+          text: Some(words()),
+          note: None,
+          color: Some("yellow".into()),
+          chapter: None,
+          created_at: NOW.into(),
+          updated_at: NOW.into(),
+          deleted_at: None
+        })
+        .expect("mark");
+      }
+    }
+    let cloud = FakeCloud::default();
+    cloud.put(&store::snapshot(&library_with(&["phone"]).guard(), NOW).expect("the phone's"));
+
+    let failed = sync_with(&library, &cloud, LATER, Some(A)).await.expect_err("too large");
+    let message = failed.to_string();
+    assert!(message.starts_with("Your reading is too large for account sync ("), "{message}");
+    assert!(message.contains("of 2.0 MB") && message.contains("Removing highlights"), "{message}");
+    assert_eq!(cloud.pushes(), 0, "nothing sent");
+    assert_eq!(ids(&library), vec!["aaa".to_string(), "phone".to_string()], "what the account held came in");
+    assert_eq!(library.guard().all_annotations().expect("marks").len(), 3000, "and nothing here is lost");
+    let (bytes, limit) = state_usage(&library.guard()).expect("the status says so");
+    assert!(bytes > limit && limit == STATE_MAX_BYTES);
+  }
+
+  #[test]
+  fn the_status_says_the_account_is_filling_up_from_four_fifths() {
+    let db = memory_db();
+    assert_eq!(state_usage(&db), None, "not known yet");
+    note_state_bytes(&db, STATE_WARN_BYTES - 1);
+    assert_eq!(state_usage(&db), None);
+    note_state_bytes(&db, STATE_WARN_BYTES);
+    assert_eq!(state_usage(&db), Some((STATE_WARN_BYTES, STATE_MAX_BYTES)));
+    db.set_setting(STATE_BYTES_SETTING, "lots").expect("odd");
+    assert_eq!(state_usage(&db), None);
+    assert_eq!(megabytes(STATE_WARN_BYTES), "1.6 MB");
+    // A copy's size is known from its base64 without decoding it.
+    for size in [0usize, 1, 2, 3, 4, 1000, 1001, 1002] {
+      let encoded = base64::engine::general_purpose::STANDARD.encode(vec![7u8; size]);
+      assert_eq!(decoded_len(&encoded), size);
+    }
+  }
+
+  /// The size is kept from what is sent, and from what is fetched whole.
+  #[tokio::test]
+  async fn the_size_of_the_accounts_copy_is_kept_as_it_is_sent_and_fetched() {
+    let library = library_with(&["aaa"]);
+    let cloud = FakeCloud::default();
+    sync_with(&library, &cloud, NOW, Some(A)).await.expect("sync");
+    let sent: usize = library.guard().get_setting(STATE_BYTES_SETTING).expect("row").expect("kept").parse().expect("a number");
+    assert_eq!(sent, gzipped(&cloud.doc().expect("held")).expect("gzip").len());
+    let phone = library_with(&[]);
+    sync_with(&phone, &cloud, NOW, Some(A)).await.expect("sync");
+    assert_eq!(phone.guard().get_setting(STATE_BYTES_SETTING).expect("row").as_deref(), Some(sent.to_string().as_str()));
   }
 
   /// A fresh library asks about a copy from before owners, and only that:

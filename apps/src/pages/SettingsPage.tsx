@@ -11,6 +11,7 @@ import { StudioVoiceCard } from "../components/StudioVoiceCard";
 import { CharactersSetting } from "../readers/people/CharactersSetting";
 import { WordsSetting } from "../readers/words/WordsSetting";
 import { UiIcon } from "../components/UiIcon";
+import { driveLine, failedLine } from "../components/ProfileButton";
 import { RemindersCard } from "../components/RemindersCard";
 import { ConverterCard } from "../components/ConverterCard";
 import { LeaderboardsCard } from "../components/LeaderboardsCard";
@@ -63,7 +64,7 @@ const EFFECTS_CHOICES: Array<{ choice: EffectsChoice; label: string }> = [
   { choice: "lite", label: "Smooth" }
 ];
 const EFFECTS_TIP =
-  "Full: frosted glass behind bars and sheets. Smooth: the same look without the blur, so scrolling and Pip stay fluid. Auto: Smooth on phones, and on a computer that lags.";
+  "Full: frosted glass behind bars and sheets, and on Windows 11 the see-through window from the next start. Smooth: no blur, so scrolling and Pip stay fluid; on a computer, the leather rail and paper. Auto: Smooth.";
 
 /** Behind the Backup heading's (i), in a release without sync across devices. */
 const MOBILE_APP_SOON =
@@ -176,10 +177,14 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
     syncStatus === "syncing"
       ? syncWords ? "Syncing now…" : "Backing up now…"
       : syncStatus === "error" && !(refusedLine && syncError === refusedLine)
-        ? syncError ?? (syncWords ? "Last sync failed. Try again." : "Last backup failed. Try again.")
-        : sync.lastSyncedAt
-          ? `${syncWords ? "Last synced" : "Last backed up"} ${new Date(sync.lastSyncedAt).toLocaleString()}.`
-          : syncWords ? "Nothing synced yet." : "Nothing backed up yet.";
+        ? `${failedLine(sync)}. ${syncError ?? "Try again."}`
+        : [
+            sync.lastSyncedAt
+              ? `${syncWords ? "Last synced" : "Last backed up"} ${new Date(sync.lastSyncedAt).toLocaleString()}.`
+              : syncWords ? "Nothing synced yet." : "Nothing backed up yet.",
+            // Google refusing Drive while the account synced: said, but no failure.
+            driveLine(sync) && `${driveLine(sync)}.`
+          ].filter(Boolean).join(" ");
 
   const syncing = syncStatus === "syncing";
   const syncConfigured = anywhereToSync(sync);
@@ -274,7 +279,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
   };
 
   const handleSync = () => {
-    syncNow()
+    syncNow({ manual: true })
       .then(() => {
         const beat = pickBeat("backup", Date.now());
         usePipStore.getState().react(beat.move, { loops: 1, line: beat.line });
@@ -919,6 +924,12 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                     {OWNER_COPY.accountRow} · {ownerPaused ? OWNER_COPY.paused : OWNER_COPY.accountSynced}
                     <InfoTip text={ownerPaused ? OWNER_COPY.pausedNote : OWNER_COPY.accountNote} />
                   </p>
+                  {!ownerPaused && sync.accountUsage && (
+                    <p className="mt-2 flex items-center gap-1.5 text-xs text-on-surface-variant">
+                      {OWNER_COPY.roomLine(sync.accountUsage.bytes, sync.accountUsage.limit)}
+                      <InfoTip text={OWNER_COPY.roomNote} />
+                    </p>
+                  )}
                   {ownerPaused && (
                     <div className="mt-3 flex flex-wrap gap-3">
                       <button

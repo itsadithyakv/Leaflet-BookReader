@@ -106,7 +106,25 @@ html:is([data-perf="lite"], [data-perf="minimal"]) {
   --motion-blur: none;
 }
 
+/* (Over the reader's own rules, which weigh more and come later: readers/glass.css.) */
 html:is([data-perf="lite"], [data-perf="minimal"]) .reader-scope.reader-chrome-hidden :is(.reader-toolbar, .reader-toolbar-group, .reader-toolbar-title) {
+  filter: none !important;
+}
+
+/* The reader's bars by a finger, or in a window as narrow as a phone (readers/touch.css): they go
+   out and come back by fading and moving, not through a blur. */
+html:is([data-perf="lite"], [data-perf="minimal"]) .reader-scope[data-shape][data-chrome="hidden"] :is(.reader-toolbar, .reader-chapter-dock > div) {
+  filter: none !important;
+}
+
+/* SpeedRead dims the page behind its words; it also blurred the whole page, one large filter
+   drawn again whenever anything on the page changed. Dimmed and greyed, not blurred. */
+html:is([data-perf="lite"], [data-perf="minimal"]) .reader-speed-active .reader-container {
+  filter: saturate(0.4);
+}
+
+/* The mug's steam is still (below), and sharp. */
+html:is([data-perf="lite"], [data-perf="minimal"]) .leaflet-mug-steam {
   filter: none;
 }
 

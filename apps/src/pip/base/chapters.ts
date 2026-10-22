@@ -279,11 +279,22 @@ export const CHAPTERS: ReadonlyArray<{ name: string; says: string; things: Unloc
   { name: "The Second Plot", says: "A second plot in the yard. Buildings can reach level 5", things: ["yard1"] },
   { name: "The Magpie King", says: "The Magpie King, once a month, and his banners", things: ["king", "banners", "clearing"] }
 ];
-/** What every volume brings: a stone in the clearing with the hours on it, and one more set of things to set down (`VOLUME_SETS`). */
-export const VOLUME = { says: "A volume stone with your hours carved on it, and a new set of things to set down" } as const;
-/** The sets the volumes bring, in turn (the last ones come round again). */
+/**
+ * What every volume brings (1.5.11): a standing stone in the meadow's ring with the hours carved on it, and for the
+ * first six a set Pip puts out by the stones (`VOLUME_SETS`; `stones.ts`). There are no more sets after the sixth.
+ */
+export const VOLUME = { says: "A standing stone with your hours carved on it" } as const;
 export const VOLUME_SETS: readonly string[] = ["Lanterns", "Pip reading, in stone", "Bunting", "A book stall", "The reading tree", "Winter lights"];
-export const volumeSet = (volume: number) => VOLUME_SETS[(Math.max(1, Math.floor(volume)) - 1) % VOLUME_SETS.length];
+/** A volume's set, or null after the sixth. */
+export const volumeSet = (volume: number): string | null => {
+  const at = Math.max(1, Math.floor(volume));
+  return at <= VOLUME_SETS.length ? VOLUME_SETS[at - 1] : null;
+};
+/** What a volume says it brings: the stone, and Pip's set while there are sets. */
+export const volumeSays = (volume: number): string => {
+  const set = volumeSet(volume);
+  return set ? `${VOLUME.says}, and Pip sets out ${set.charAt(0).toLowerCase()}${set.slice(1)} by the stones` : VOLUME.says;
+};
 
 /** The acorns in each chapter's chest (by chapter: 2 to 10), and in every volume's. */
 export const CHAPTER_CHESTS: readonly number[] = [0, 0, 40, 60, 90, 120, 150, 180, 220, 260, 300];
@@ -297,7 +308,7 @@ export const chapterBrings = (chapter: number): ChapterBrings => {
   const ch = Math.max(1, Math.floor(chapter));
   const volume = volumeOf(ch);
   const raises = burrowOfChapter(ch) > burrowOfChapter(ch - 1) ? burrowOfChapter(ch) : null;
-  if (volume !== null) return { chapter: ch, title: `Volume ${volume}`, name: `Volume ${volume}`, says: `${VOLUME.says}: ${volumeSet(volume)}`, things: ["volumes"], level: null, chest: chestOf(ch) };
+  if (volume !== null) return { chapter: ch, title: `Volume ${volume}`, name: `Volume ${volume}`, says: volumeSays(volume), things: ["volumes"], level: null, chest: chestOf(ch) };
   const { name, says, things } = CHAPTERS[ch - 1];
   return { chapter: ch, title: `Chapter ${ch}: ${name}`, name, says, things: [...things], level: ch === 1 ? null : raises, chest: chestOf(ch) };
 };
@@ -429,7 +440,7 @@ export const barLine = (state: BaseState, minutes?: number): { text: string; at:
   const next = progress.brings;
   const what = next.things.length > 0 && next.things[0] !== "volumes" ? UNLOCK_NAMES[next.things[0]].replace(/^The /, "the ") : next.name;
   const which = next.chapter > CHAPTERS_MOST ? `volume ${next.chapter - CHAPTERS_MOST}` : `chapter ${next.chapter}`;
-  const thing = next.chapter > CHAPTERS_MOST ? "a volume stone" : `${what.charAt(0).toLowerCase()}${what.slice(1)}`;
+  const thing = next.chapter > CHAPTERS_MOST ? "a standing stone" : `${what.charAt(0).toLowerCase()}${what.slice(1)}`;
   return { text: `Read ${hoursWords(progress.toGo)}: ${which} brings ${thing}`, at: null, goal: null, progress };
 };
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { fillPlace, sceneScale } from "./sceneFit";
-import { LIFT_FLOATING } from "./layout";
+import { fillPlace, floorSpan, outOfNotch, roomPad, sceneScale } from "./sceneFit";
+import { LIFT_FLOATING, LIFT_TOUCH } from "./layout";
 
 /** A floor of the house: 240 by 120 art pixels, Pip's feet at row 109. */
 const W = 240;
@@ -102,5 +102,57 @@ describe("Pip's house as the whole screen of a phone on its side", () => {
     const rule = await readRules();
     expect(px(rule(`${HOUSE} .pip-lift[data-floating] .pip-lift-arrow`).get("height")) * 2).toBeLessThan(LIFT_FLOATING);
     expect(LIFT_FLOATING).toBeLessThanOrEqual(104);
+  });
+
+  it("gives Pip all the floor that shows, from the screen's left gutter to short of the rail, and the room's picture all the screen", async () => {
+    const rule = await readRules();
+    const house = rule(HOUSE);
+    const hud = px(house.get("--fill-hud"));
+    const rail = px(house.get("--fill-rail"));
+    // Phones on their side (the owner's Nord CE4 Lite among them): width, height, scaling, status bar, gesture bar.
+    const sideways: Array<[number, number, number, number, number]> = [
+      [844, 390, 3, 24, 0],
+      [800, 369, 3, 24, 16],
+      [740, 360, 3, 24, 16],
+      ...PHONES
+    ];
+    for (const [width, height, ratio, top, bottom] of sideways) {
+      const fillTop = top + 8;
+      const fillBottom = Math.max(6, bottom);
+      const box = { left: 8 + 52, top: fillTop + hud + 6, right: width - (rail + 8 + 8), bottom: height - fillBottom };
+      const scale = sceneScale(W, H, box.right - box.left, box.bottom - box.top, ratio) / ratio;
+      const place = fillPlace(W * scale, H * scale, box.right - box.left, box.bottom - box.top, ratio);
+      const room = { left: box.left + place.left, top: box.top + place.top, width: W * scale, height: H * scale };
+      // The lift: a key at the left gutter under the HUD (houseStage.css), a thumb wide.
+      const lift = { left: 8, top: fillTop + hud + 8, right: 8 + LIFT_TOUCH, bottom: fillTop + hud + 8 + LIFT_FLOATING };
+      const pad = roomPad({ width, height }, room, scale);
+      const span = floorSpan(box, lift, room, scale, W, pad);
+      const css = (x: number) => room.left + x * scale;
+      // The picture reaches every edge of the screen.
+      expect(css(-pad.left)).toBeLessThanOrEqual(0);
+      expect(css(W + pad.right)).toBeGreaterThanOrEqual(width);
+      expect(room.top - pad.top * scale).toBeLessThanOrEqual(0);
+      expect(room.top + (H + pad.bottom) * scale).toBeGreaterThanOrEqual(height);
+      // Pip (32 pixels wide, kept 18 from the ends of her floor) walks from the left gutter to the rail's edge, not under it.
+      const leftmost = css(span.left + 18 - 16);
+      const rightmost = css(span.right - 18 + 16);
+      expect(leftmost).toBeGreaterThanOrEqual(8);
+      expect(leftmost).toBeLessThanOrEqual(8 + 2 * scale + 1);
+      expect(rightmost).toBeLessThanOrEqual(width - (rail + 8));
+      expect(rightmost).toBeGreaterThanOrEqual(box.right - 2 * scale - 1);
+      // More floor than the old room's: past its left wall (under the lift's column) and never short of its right.
+      expect(span.left).toBeLessThan(-10);
+      expect(span.right).toBeGreaterThanOrEqual(W);
+      // On the floor she is clear of the lift wherever she stands; in the air she is kept out of its corner.
+      expect((107 - 30) * scale + room.top).toBeGreaterThan(lift.bottom);
+      for (let x = span.left + 16; x < span.right; x += 4) {
+        for (let y = 30; y <= 109; y += 4) {
+          const at = outOfNotch({ x, y, vx: 0, vy: 0 }, span.notch) ?? { x, y };
+          const pipLeft = css(at.x - 16);
+          const pipTop = room.top + (at.y - 30) * scale;
+          expect(pipLeft >= lift.right || pipTop >= lift.bottom, `${width}: (${x}, ${y})`).toBe(true);
+        }
+      }
+    }
   });
 });

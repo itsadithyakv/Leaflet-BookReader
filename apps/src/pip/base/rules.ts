@@ -68,6 +68,7 @@ import {
   type Guardian
 } from "./guards";
 import { CHAMPIONS, HEROES, KING_CHAMPION, heroOpen, heroTraits } from "./heroes";
+import { FOX_LOOT, GOAT_WALL, HEN_EGGS, MEADOW_MARK, OWL_MEND, TORTOISE_LARDER, giftOf, heartLine, heartsOf, meadowMark, readMeadowMark } from "./fondness";
 import {
   CHAPTER_OF,
   GOALS,
@@ -94,7 +95,6 @@ import {
   FRONT_MARK,
   FRONT_WORKS,
   GATE_TOUGHER,
-  GOAT_TOUGHER,
   LINE_DEFAULT,
   TRAIL_Y,
   WORK_CHAPTER,
@@ -328,6 +328,13 @@ export type BaseState = {
    * reads them (and an older build) sees the wall and the constructs where they are.
    */
   front: Front;
+  /**
+   * (1.5.11, the meadow) Minutes read in all when the camp was last arrived at: what has been read since is seen
+   * coming up the path as pages (`arrival.ts`). And when each animal came, by its number (-1 for one not here): its
+   * hearts are the reading since (`fondness.ts`). Both kept in `taught` too (`MEADOW_MARK`).
+   */
+  seenAt: number;
+  animalsFrom: number[];
 };
 
 /** A friend's raid on this camp, for the card that tells of it: who, how it went, the fence it cost, and the day. */
@@ -706,7 +713,9 @@ export const newBase = (minutesRead: number, day: string): BaseState => ({
   goals: [],
   news: [],
   downed: [],
-  front: freshFront(minutesRead)
+  front: freshFront(minutesRead),
+  seenAt: Math.max(0, Math.floor(minutesRead)),
+  animalsFrom: Array.from({ length: ANIMALS.length }, () => -1)
 });
 
 /** The welcome as a new camp has it: nothing given yet (`welcome.ts` `giveWelcome`). */
@@ -906,7 +915,7 @@ export const readBase = (raw: unknown): BaseState | null => {
       return book && mark !== null && since !== null ? { book, mark, from: since } : null;
     })(),
     parcels: wholeOr(from.parcels, 0, PARCELS_MOST, 0),
-    taught: allTaught.filter((entry) => !entry.startsWith(KEPT_MARK) && !entry.startsWith(FRONT_MARK)),
+    taught: allTaught.filter((entry) => !entry.startsWith(KEPT_MARK) && !entry.startsWith(FRONT_MARK) && !entry.startsWith(MEADOW_MARK)),
     prowled: (() => {
       const had = record(from.prowled);
       return { day: text(had.day) ?? "", knocks: wholeOr(had.knocks, 0, 1000, 0), thefts: wholeOr(had.thefts, 0, 1000, 0) };
@@ -982,9 +991,29 @@ export const readBase = (raw: unknown): BaseState | null => {
     stolen: readDecor([from.stolen])[0] ?? null,
     welcome: readWelcome(from.welcome),
     ...readChapters(from, levels.burrow, oakFrom, mark),
-    front: freshFront(0)
+    front: freshFront(0),
+    seenAt: 0,
+    animalsFrom: []
   };
-  return readFront(read, from.front, allTaught, from.works);
+  return readFront(readMeadow(read, from, allTaught), from.front, allTaught, from.works);
+};
+
+/**
+ * The meadow's two fields (1.5.11), as kept: the fields where they are, else the `md:` mark (a camp an older build
+ * saved), else what a camp from before them starts with: arrived at where its reading is, and each animal here
+ * come where its reading is (its hearts count from now).
+ */
+const readMeadow = (read: BaseState, from: Record<string, unknown>, taught: readonly string[]): BaseState => {
+  const mark = readMeadowMark(taught);
+  const seenAt = Math.min(read.minutes, wholeOr(from.seenAt, 0, 1e9, mark?.seenAt ?? read.minutes));
+  const kept = Array.isArray(from.animalsFrom) ? from.animalsFrom : null;
+  const animalsFrom = Array.from({ length: ANIMALS.length }, (_, animal) => {
+    if (!read.animals.includes(animal)) return -1;
+    const field = kept ? whole(kept[animal], 0, 1e9) : null;
+    const marked = mark && mark.animalsFrom[animal] >= 0 ? mark.animalsFrom[animal] : null;
+    return Math.min(read.minutes, field ?? marked ?? read.minutes);
+  });
+  return { ...read, seenAt, animalsFrom };
 };
 
 /**
@@ -1052,7 +1081,17 @@ export const keptForm = (state: BaseState): BaseState & { bank: number } => {
   const acorns = Math.max(0, Math.floor(state.acorns));
   const bank = Math.max(0, acorns - ACORNS_KEPT_MOST);
   const mark = `${KEPT_MARK}${JSON.stringify({ b: bank, l: state.legacy?.burrow ?? 0, s: state.chapterSeen, p: state.chapterPaid, g: goalBits(state.goals) })}`;
-  return { ...state, acorns: acorns - bank, bank, taught: [...state.taught.filter((entry) => !entry.startsWith(KEPT_MARK) && !entry.startsWith(FRONT_MARK)), mark, frontMark(state.front)] };
+  return {
+    ...state,
+    acorns: acorns - bank,
+    bank,
+    taught: [
+      ...state.taught.filter((entry) => !entry.startsWith(KEPT_MARK) && !entry.startsWith(FRONT_MARK) && !entry.startsWith(MEADOW_MARK)),
+      mark,
+      frontMark(state.front),
+      meadowMark(state.seenAt, state.animalsFrom)
+    ]
+  };
 };
 
 /** Things set down, of so many kinds, so many at most, inside a part of the clearing. */
@@ -1134,7 +1173,7 @@ export const holds = (_state: BaseState) => Number.POSITIVE_INFINITY;
 export const hides = (state: BaseState) =>
   isBroken(state, "store")
     ? 0
-    : Math.round(STORE_HIDES[state.levels.store] * GUARD_GIVES.yard[guardOf(state, 5)] * (hasAnimal(state, 5) ? TORTOISE_MORE : 1) * (1 - harmOf(state, "store") * WEAR_A_KNOCK));
+    : Math.round(STORE_HIDES[state.levels.store] * GUARD_GIVES.yard[guardOf(state, 5)] * (hasAnimal(state, 5) ? giftOf(state, 5, TORTOISE_LARDER) : 1) * (1 - harmOf(state, "store") * WEAR_A_KNOCK));
 /** What the larder hides at a level (for its card). */
 export const hidesAt = (level: number) => STORE_HIDES[Math.max(0, Math.min(MAX_LEVEL, Math.floor(level)))];
 /** Acorns in: all of them (since 1.5.10 there is always room). */
@@ -1191,7 +1230,7 @@ export const does = (building: BuildingId, level: number): string => {
     case "fence":
       return level === 0
         ? "A wall across the prowlers' trail"
-        : `${sectionsAt(level).length} sections across the trail${level >= GATE_FROM ? ", with a gate" : ""}${level >= 5 ? ": the whole way across, in stone, with battlements" : level >= 4 ? ": the whole way across, in stone" : level === 1 ? "" : ", sturdier than before"}`;
+        : `${sectionsAt(level).length} sections across the trail${level >= GATE_FROM ? ", with a gatehouse that throws" : ""}${level >= 5 ? ": the whole way across, in stone, with battlements" : level >= 4 ? ": the whole way across, in stone" : level === 1 ? "" : ", sturdier than before"}`;
     case "tower":
       return level === 0 ? "Keeps watch, and throws at prowlers" : `${TOWER_SAYS[level]}; brighter on a day your reading goal is met`;
     case "hut":
@@ -1804,6 +1843,12 @@ export const buyWork = (state: BaseState, kind: number): BaseState => {
   return fronted({ ...paid, front: isTrap(kind) ? { ...paid.front, spots: placed } : { ...paid.front, pads: placed } });
 };
 
+/** (1.5.11) The camp has been arrived at, after so much reading: what came since is shown once, and not again. */
+export const seeArrival = (state: BaseState, minutesRead: number): BaseState => {
+  const at = Math.max(0, Math.floor(minutesRead));
+  return at > (state.seenAt ?? 0) ? { ...state, seenAt: at } : state;
+};
+
 /** Whether a night is owed: prowlers come, and there has been reading since the last night that counted. */
 export const nightDue = (state: BaseState, minutesRead: number) => prowlersCome(state) && Math.floor(minutesRead) > state.front.watchedAt;
 /**
@@ -1947,7 +1992,7 @@ export const campStructures = (state: BaseState, lit: boolean, at?: number): Str
       "wall",
       wall,
       5,
-      (30 + levels.fence * 14) * GUARD_GIVES.fence[rank(1)] * (gate && gate[0] === wall[0] && gate[1] === wall[1] ? GATE_TOUGHER : 1) * (hasAnimal(state, 2) ? GOAT_TOUGHER : 1),
+      (30 + levels.fence * 14) * GUARD_GIVES.fence[rank(1)] * (gate && gate[0] === wall[0] && gate[1] === wall[1] ? GATE_TOUGHER : 1) * (hasAnimal(state, 2) ? giftOf(state, 2, GOAT_WALL) : 1),
       { name: "fencepiece", variant: levels.fence },
       null,
       index === 0 ? posted(1) : {}
@@ -2093,8 +2138,22 @@ export const settle = (state: BaseState, now: Now): BaseState => {
       next = { ...next, animals: [...next.animals, animal.id], events: noted(next, day, `${/^[AEIOU]/.test(animal.name) ? "An" : "A"} ${animal.name.toLowerCase()} has wandered into the meadow, and means to stay.`) };
     }
   }
-  // The hen lays most mornings: the egg comes as a parcel, like everything else that arrives.
-  if (next.animals.includes(0) && next.eggDay !== day && next.parcels < PARCELS_MOST) next = { ...next, eggDay: day, parcels: next.parcels + 1 };
+  // (1.5.11) When each came, for its hearts: one that came now, came at this reading; one with no word of it (a camp
+  // from before), likewise. Each new heart is a line in the journal.
+  const animalsFrom = Array.from({ length: ANIMALS.length }, (_, animal) => (next.animals.includes(animal) ? Math.min(read, (next.animalsFrom ?? [])[animal] ?? -1) : -1)).map((from, animal) =>
+    next.animals.includes(animal) && from < 0 ? read : from
+  );
+  if (animalsFrom.some((from, animal) => from !== (next.animalsFrom ?? [])[animal])) next = { ...next, animalsFrom };
+  for (const animal of ANIMALS) {
+    const was = heartsOf({ ...next, minutes: state.minutes }, animal.id, Math.min(read, state.minutes ?? read));
+    const now = heartsOf(next, animal.id, read);
+    if (now > was) next = { ...next, events: noted(next, day, heartLine(animal.name, now)) };
+  }
+  // The hen lays on a day there is reading (1.5.11; it was most mornings, read or not): the egg comes as a parcel,
+  // like everything else that arrives. Two, once she is fond of the camp.
+  if (next.animals.includes(0) && next.eggDay !== day && (now.today ?? 0) >= 1 && next.parcels < PARCELS_MOST) {
+    next = { ...next, eggDay: day, parcels: Math.min(PARCELS_MOST, next.parcels + giftOf(next, 0, HEN_EGGS)) };
+  }
   // Pip's walk, from a camp kept while walks were still sent (they are not since 2026-10-15): read through, she is
   // back, and what she found is a parcel.
   if (next.trip && read - next.trip.from >= next.trip.needs && next.parcels < PARCELS_MOST) next = { ...next, trip: null, parcels: next.parcels + 1 };
@@ -2283,7 +2342,7 @@ export const SPRING_MENDS = 0.75;
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 export const monthName = (month: string) => MONTH_NAMES[Number(month.slice(5, 7)) - 1] ?? month;
 
-const lootTimes = (state: BaseState) => (state.forks.hut === "b" ? 1.25 : 1) * (state.pack ? 1.5 : 1) * (hasAnimal(state, 4) ? FOX_MORE : 1);
+const lootTimes = (state: BaseState) => (state.forks.hut === "b" ? 1.25 : 1) * (state.pack ? 1.5 : 1) * (hasAnimal(state, 4) ? giftOf(state, 4, FOX_LOOT) : 1);
 const tierOf = (n: number) => Math.min(CAMP_NAMES.length - 1, Math.floor(n / CAMPS_A_NAME));
 
 /** The next stronghold on the ladder: taking it moves the camp on, and makes the road richer. */
@@ -2689,7 +2748,7 @@ export const harmSite = (state: BaseState, site: Placed, day: string): BaseState
 /** The owl keeps watch: mending is a quarter cheaper with her about (her own good thing since 2026-10-15, when the night she watched for was put away). */
 export const OWL_MENDS = 0.75;
 export const fixCost = (state: BaseState, site: Site, day?: string) =>
-  Math.ceil(harmOf(state, site) * (2 + levelOf(state, site)) * (day !== undefined && seasonOf(day) === 3 ? SPRING_MENDS : 1) * (hasAnimal(state, 3) ? OWL_MENDS : 1));
+  Math.ceil(harmOf(state, site) * (2 + levelOf(state, site)) * (day !== undefined && seasonOf(day) === 3 ? SPRING_MENDS : 1) * (hasAnimal(state, 3) ? giftOf(state, 3, OWL_MEND) : 1));
 /** Puts a building right, for acorns; unchanged when there is nothing to fix or not enough to fix it with. */
 export const fixSite = (state: BaseState, site: Placed, day?: string): BaseState => {
   const cost = fixCost(state, site, day);

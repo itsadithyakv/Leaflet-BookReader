@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   autoTier,
+  chromeLook,
   FrameWatch,
   gpuClass,
   lighter,
@@ -71,12 +72,28 @@ describe("the tier a device calls for (Auto)", () => {
     expect(autoTier({ android: true, renderer: "Adreno (TM) 619", memory: 3, cores: 8 })).toBe("lite");
   });
 
-  it("is Full on a computer, but Smooth with no GPU and minimal short of memory", () => {
-    expect(autoTier({ android: false, renderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060)", memory: 8, cores: 16 })).toBe("full");
-    expect(autoTier({ android: false, renderer: null })).toBe("full");
+  it("is Smooth on a computer too, however strong its GPU (Full only by choice), and minimal short of memory", () => {
+    // The owner's laptop: an i5-13420H with Intel UHD graphics, on which 1.5.10's glass lagged.
+    expect(autoTier({ android: false, renderer: "ANGLE (Intel, Intel(R) UHD Graphics (0x0000A7A8) Direct3D11 vs_5_0 ps_5_0, D3D11)", memory: 8, cores: 12 })).toBe("lite");
+    expect(autoTier({ android: false, renderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060)", memory: 8, cores: 16 })).toBe("lite");
+    expect(autoTier({ android: false, renderer: null })).toBe("lite");
     expect(autoTier({ android: false, renderer: "ANGLE (Microsoft, Microsoft Basic Render Driver)", memory: 8 })).toBe("lite");
     expect(autoTier({ android: false, renderer: "Google SwiftShader", memory: 8 })).toBe("lite");
     expect(autoTier({ android: false, renderer: "ANGLE (Intel)", memory: 2 })).toBe("minimal");
+  });
+
+  it("resolves Auto to Smooth on the desktop, and keeps a reader's Full", () => {
+    const desktop = autoTier({ android: false, renderer: "ANGLE (Intel, Intel(R) UHD Graphics)", memory: 8, cores: 12 });
+    expect(resolveTier("auto", desktop)).toBe("lite");
+    expect(resolveTier("full", desktop)).toBe("full");
+    expect(resolveTier("lite", desktop)).toBe("lite");
+  });
+
+  it("draws the desktop below Full as Leaflet's leather, and a phone always as glass", () => {
+    expect(chromeLook("lite", false)).toBe("leather");
+    expect(chromeLook("minimal", false)).toBe("leather");
+    expect(chromeLook("full", false)).toBe("glass");
+    for (const tier of ["full", "lite", "minimal"] as const) expect(chromeLook(tier, true)).toBe("glass");
   });
 });
 

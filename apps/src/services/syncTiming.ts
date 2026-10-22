@@ -11,6 +11,7 @@
  */
 import type { SyncStatus } from "@shared/sync/types";
 import { useLibraryStore } from "../store/libraryStore";
+import { pushHold } from "./pushHold";
 
 /** Going out of sight: not if a sync ran this recently (reading since then is seconds). */
 export const SYNC_ON_LEAVING_AFTER_MS = 30_000;
@@ -31,13 +32,15 @@ const GAP: Record<SyncMoment, number> = {
 
 /**
  * Whether to sync now. `sinceLastMs` is how long ago a sync was last started
- * (null: not since launch); `configured` is whether there is anywhere to sync to.
+ * (null: not since launch); `configured` is whether there is anywhere to sync to;
+ * `waiting`, whether highlights or notes made in an open book are waiting to go
+ * up (services/pushHold): going out of sight never keeps them waiting.
  */
-export const syncDue = (moment: SyncMoment, sinceLastMs: number | null, configured: boolean): boolean => {
+export const syncDue = (moment: SyncMoment, sinceLastMs: number | null, configured: boolean, waiting = false): boolean => {
   if (!configured) {
     return false;
   }
-  if (sinceLastMs === null) {
+  if (sinceLastMs === null || (moment === "hidden" && waiting)) {
     return true;
   }
   return sinceLastMs >= GAP[moment];
@@ -75,9 +78,15 @@ export const syncFor = async (moment: SyncMoment, now = Date.now()): Promise<voi
   watchStarts();
   const { syncStatus, syncNow } = useLibraryStore.getState();
   if (syncStatus === "syncing") {
-    return untilSettled();
+    await untilSettled();
+    // Going out of sight with highlights still waiting (made after the run
+    // under way had read the library): they go now, not at the next launch.
+    if (moment === "hidden" && pushHold.waiting()) {
+      await useLibraryStore.getState().syncNow().catch(() => {});
+    }
+    return;
   }
-  if (!syncDue(moment, lastStartedAt === null ? null : now - lastStartedAt, configured())) {
+  if (!syncDue(moment, lastStartedAt === null ? null : now - lastStartedAt, configured(), pushHold.waiting())) {
     return;
   }
   // Started at once, not after a timer: on the way to the background the

@@ -22,12 +22,20 @@ import {
  */
 
 /**
- * Deletes the account and everything keyed to it: community data (follows
- * and requests to follow, kudos, duels, the library, posts, gifts, places in
- * clubs, inbox events; see `deleteCommunityData`), profile, state blob, the
- * problem reports it sent, sessions, then the account. Sessions go before
- * the account, so a failure part-way leaves an account the reader can still
- * sign in to and delete.
+ * Deletes the account and everything keyed to it: its sessions first, then
+ * community data (follows and requests to follow, kudos, duels, the library,
+ * posts, gifts, places in clubs, inbox events; see `deleteCommunityData`),
+ * profile, state blob, the problem reports it sent, then the account. A
+ * failure part-way still leaves an account the reader can sign in to again
+ * and delete.
+ *
+ * Sessions go first (sync audit D5). They used to go near the end, after the
+ * state: a device of the reader's whose sync was on its way (a push that lost
+ * a race, retried at version 0) could land between the two and insert a new
+ * state document, and the reading history outlived the deletion. With the
+ * sessions gone first no new request is let in; the state is deleted once
+ * more at the very end, for a request that was let in just before; and the
+ * state route will not insert a first copy for an account that is gone.
  *
  * First of all it notes the deletion in `deletions`: the account's id and
  * when, nothing else (no email, no handle), kept 45 days (the TTL index in
@@ -41,6 +49,7 @@ import {
  */
 export async function deleteAccount(db, accountId, at = new Date()) {
   await deletions(db).updateOne({ _id: accountId }, { $set: { at } }, { upsert: true });
+  await endSessionsOf(db, accountId);
   await deleteCommunityData(db, accountId);
   await profiles(db).deleteOne({ _id: accountId });
   forgetBoards();
@@ -53,10 +62,11 @@ export async function deleteAccount(db, accountId, at = new Date()) {
   // What it said went wrong (`routes/problems.js`). One sent signed out has
   // no account on it, and goes after its 90 days.
   await problems(db).deleteMany({ accountId });
-  await endSessionsOf(db, accountId);
   await resets(db).deleteOne({ _id: accountId });
   await confirmations(db).deleteOne({ _id: accountId });
   await accounts(db).deleteOne({ _id: accountId });
+  // A sync let in before the sessions went may have written since.
+  await states(db).deleteOne({ _id: accountId });
 }
 
 /**

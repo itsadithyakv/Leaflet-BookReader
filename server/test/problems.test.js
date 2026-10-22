@@ -5,7 +5,7 @@ import { ObjectId } from "mongodb";
 import { createApp } from "../src/app.js";
 import { close, connect } from "../src/db.js";
 import { accountFootprint } from "../src/deletion.js";
-import { DIAGNOSTICS_MAX, FULL, OPEN_MAX, PROBLEMS_PER_DAY } from "../src/routes/problems.js";
+import { DIAGNOSTICS_MAX, FULL, OPEN_BYTES_MAX, OPEN_MAX, PROBLEMS_PER_DAY } from "../src/routes/problems.js";
 
 /**
  * Problem reports: sent from Settings by anyone, signed in or not, and read
@@ -225,6 +225,31 @@ describe("sending a problem report", () => {
       assert.equal((await send(problem())).status, 201);
     } finally {
       await db.collection("problems").deleteMany({ _id: { $in: ids } });
+    }
+  });
+
+  test("turns new ones away once the waiting ones are as large as a free cluster can spare", async () => {
+    assert.equal(OPEN_BYTES_MAX, 20 * 1024 * 1024);
+    // A server that keeps 200 KB of waiting reports: a few with diagnostics fill it.
+    const small = await listen(createApp(db, { limits: { ...limits, problemBytes: 200 * 1024 } }));
+    const open = await db.collection("problems").find({ status: "open" }, { projection: { _id: 1 } }).toArray();
+    await db.collection("problems").updateMany({ status: "open" }, { $set: { status: "parked" } });
+    try {
+      const heavy = () => problem({ diagnostics: "d".repeat(DIAGNOSTICS_MAX - 10), version: "9.9.9" });
+      for (let index = 0; index < 3; index += 1) {
+        const result = await send(heavy(), { to: small });
+        assert.equal(result.status, 201, JSON.stringify(result.body));
+      }
+      const full = await send(heavy(), { to: small });
+      assert.equal(full.status, 503);
+      assert.equal(full.body.error, FULL);
+      // A short one still fits, and closing one makes room for a long one again.
+      assert.equal((await send(problem({ version: "9.9.9" }), { to: small })).status, 201);
+      await db.collection("problems").updateOne({ version: "9.9.9", status: "open", diagnostics: { $regex: "^ddd" } }, { $set: { status: "closed" } });
+      assert.equal((await send(heavy(), { to: small })).status, 201);
+    } finally {
+      await db.collection("problems").deleteMany({ status: { $in: ["open", "closed"] }, version: "9.9.9" });
+      await db.collection("problems").updateMany({ _id: { $in: open.map((doc) => doc._id) } }, { $set: { status: "open" } });
     }
   });
 

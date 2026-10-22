@@ -25,7 +25,8 @@ type Options = {
 
 /**
  * A book's bookmarks and highlights, kept in the database (and so in the
- * backup). Changes schedule a backup, like closing a book does.
+ * backup). Changes schedule a backup, like closing a book does; while the
+ * book is open they wait for it to close (services/pushHold).
  */
 export const useAnnotations = (bookId: string, { moveOldBookmarks = true, enabled = true }: Options = {}) => {
   const [items, setItems] = useState<Annotation[]>([]);
@@ -76,7 +77,7 @@ export const useAnnotations = (bookId: string, { moveOldBookmarks = true, enable
     async (input: AnnotationInput) => {
       const saved = await annotationService.save(input);
       setItems((current) => [...current.filter((item) => item.id !== saved.id), saved]);
-      requestBackup();
+      requestBackup({ whileReading: true });
       return saved;
     },
     [requestBackup]
@@ -108,7 +109,7 @@ export const useAnnotations = (bookId: string, { moveOldBookmarks = true, enable
           const ids = new Set(saved.map((item) => item.id));
           setItems((current) => [...current.filter((item) => !ids.has(item.id)), ...saved]);
         }
-        requestBackup();
+        requestBackup({ whileReading: true });
       }
       return saved;
     },
@@ -142,7 +143,7 @@ export const useAnnotations = (bookId: string, { moveOldBookmarks = true, enable
     async (id: string) => {
       await annotationService.remove(id);
       setItems((current) => current.filter((item) => item.id !== id));
-      requestBackup();
+      requestBackup({ whileReading: true });
     },
     [requestBackup]
   );

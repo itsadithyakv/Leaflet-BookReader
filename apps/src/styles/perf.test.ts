@@ -108,9 +108,10 @@ describe("Smooth and minimal", () => {
 });
 
 describe("the sheet's place", () => {
-  it("is loaded after every other sheet of the app", async () => {
+  it("is loaded after every other sheet of the app but the desktop's leather (styles/leather.css), which is last", async () => {
     const main = await read("../main.tsx");
     const imports = [...main.matchAll(/import\s+"\.\/([^"]+\.css)"/g)].map((match) => match[1]);
-    expect(imports[imports.length - 1]).toBe("styles/perf.css");
+    expect(imports[imports.length - 1]).toBe("styles/leather.css");
+    expect(imports[imports.length - 2]).toBe("styles/perf.css");
   });
 });

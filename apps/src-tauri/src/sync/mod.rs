@@ -17,6 +17,7 @@
 //! A folder needs no account at all: a directory the reader's own cloud
 //! client already syncs. Drive is for devices with no such client.
 
+pub mod clock;
 pub mod cloud;
 /// Sign-in kept in a private file where there is no keychain (Android).
 #[cfg(any(target_os = "android", test))]

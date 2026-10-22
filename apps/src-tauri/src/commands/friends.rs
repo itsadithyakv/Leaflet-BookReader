@@ -150,10 +150,21 @@ pub(crate) fn reading_now(books: &[BookRecord], now: chrono::DateTime<chrono::Ut
     .filter(|(at, _)| (now - *at).num_days() < READING_NOW_DAYS)
     .max_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.id.cmp(&a.1.id)))
     .map(|(_, book)| {
+      // How far along, as the shared library says it (`shared_library`): of
+      // two copies of one book being read, the one read further. The page
+      // shows both, and said "Reading … 89 %" over a library at 99 % when
+      // the copy opened last was not the one read furthest.
+      let key = book_key(book.title.trim(), book.author.as_deref());
+      let percent = books
+        .iter()
+        .filter(|copy| state_of(copy) == "reading" && book_key(copy.title.trim(), copy.author.as_deref()) == key)
+        .map(percent_of)
+        .max()
+        .unwrap_or_else(|| percent_of(book));
       serde_json::json!({
         "title": book.title.trim().chars().take(120).collect::<String>(),
         "author": book.author.as_deref().map(str::trim).filter(|author| !author.is_empty()).map(|author| author.chars().take(80).collect::<String>()),
-        "percent": percent_of(book)
+        "percent": percent
       })
     })
 }
@@ -163,6 +174,13 @@ pub(crate) fn reading_now(books: &[BookRecord], now: chrono::DateTime<chrono::Ut
 /// the profile's figures in `social::publish_profile`).
 pub(crate) fn fingerprint(body: &[u8]) -> String {
   format!("{:x}", Sha256::digest(body))
+}
+
+/// The fingerprint a body is remembered by once sent (the profile's figures,
+/// the library): salted (`social::SENT_PRINT_SALT`), so that changing the
+/// salt sends every device's once more.
+pub(crate) fn sent_print(body: &[u8]) -> String {
+  fingerprint(&[SENT_PRINT_SALT.as_bytes(), body].concat())
 }
 
 pub(crate) fn shares_library(db: &db::Database) -> bool {
@@ -189,7 +207,7 @@ pub(crate) fn library_due(db: &db::Database) -> Result<Option<(serde_json::Value
     return Ok(None);
   }
   let body = serde_json::json!({ "books": shared_library(&db.list_books().map_err(|e| e.to_string())?) });
-  let print = fingerprint(body.to_string().as_bytes());
+  let print = sent_print(body.to_string().as_bytes());
   let sent = db.get_setting(LIBRARY_SENT_SETTING).ok().flatten().unwrap_or_default();
   Ok((print != sent).then_some((body, print)))
 }
@@ -591,6 +609,29 @@ mod tests {
     // Left for a month, a book is no longer "reading now"; nor is one never opened.
     let stale = [book("old", "Middlemarch", None, 0.2, Some("2026-08-01T10:00:00+00:00")), book("never", "Dune", None, 0.5, None)];
     assert!(reading_now(&stale, now).is_none());
+  }
+
+  /// Two copies of one book (the laptop's file and the phone's): the profile
+  /// says the book being read is as far along as its shared library does,
+  /// whichever copy was opened last. It said 89 % over a library at 99 %.
+  #[test]
+  fn the_book_being_read_is_as_far_along_as_the_library_says() {
+    let now = chrono::DateTime::parse_from_rfc3339("2026-10-22T12:00:00+00:00").expect("now").with_timezone(&chrono::Utc);
+    let books = [
+      book("laptop", "The Well of Ascension", Some("Brandon Sanderson"), 0.89, Some("2026-10-22T09:00:00+00:00")),
+      book("phone", "The Well of Ascension (Mistborn 2)", Some("Sanderson, Brandon"), 0.985, Some("2026-10-21T22:00:00+00:00"))
+    ];
+    let reading = reading_now(&books, now).expect("reading");
+    let library = shared_library(&books);
+    assert_eq!(library.len(), 1);
+    assert_eq!(reading["title"], "The Well of Ascension", "the copy opened last names it");
+    assert_eq!(reading["percent"], library[0].percent);
+    assert_eq!(reading["percent"], 99);
+    // A copy finished is not "being read": the one being read says how far it is.
+    let mut again = books.clone();
+    again[1].finished_at = Some("2026-10-21T22:00:00+00:00".to_string());
+    again[1].progress = 1.0;
+    assert_eq!(reading_now(&again, now).expect("reading")["percent"], 89);
   }
 
   #[test]

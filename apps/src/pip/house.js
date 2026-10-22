@@ -31,7 +31,7 @@
  WALLPAPERS / FLOORS: [{ id, name, price, draw(g, x, y, w, h, f) }]
 
  RENDER
-   renderLevel(levelId, f, { wallpaper?, floor?, placed?, night?, sky? }) -> ImageData
+   renderLevel(levelId, f, { wallpaper?, floor?, placed?, night?, sky?, pad? }) -> ImageData
      placed: [{ slot, itemId }] (snapped) or [{ itemId, x, y }] (free, top-left);
        `off: true` on one draws a light switched off: unlit, casting no glow;
        `data` on one is handed to its draw (a fixture's: the books in the
@@ -39,6 +39,10 @@
      night: dim the room and let lights glow (defaults to level.night).
      sky: false leaves the garden's glass clear (transparent), for the living
      sky (sky.js) to be laid under the floor's picture.
+     pad: { left, right, top, bottom } draws the floor wide: a picture that
+     many pixels bigger each side, the room at (left, top), its own pixels as
+     drawn alone. The wall, skirting and floor run on past it in their own
+     pattern and light, the ceiling (or the glass, the roof) over it.
    renderHouseItem(itemOrId, f, data?) -> ImageData(item.w, item.h)
    renderSwatch("wallpaper"|"floor", id, w = 32, h = 32, f) -> ImageData (shop tiles) */
 import { Painter, skyAt, flame, rnd, blend, ROOM_ITEMS, paintSky, lerpC, withSkyHour } from "./room.js";
@@ -58,7 +62,16 @@ const W = 240, H = 120, FY = 96;
 
 
 // ============================================================ WALLPAPERS
-const tile = (fn) => (g, x0, y0, w, h, f) => { for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) g.px(x, y, fn(x, y, f)); };
+/**
+ * Every repeat the wallpapers and floors are drawn in fits a whole number of times in this many pixels (2^4 3^3 5 7
+ * 29 37: the clouds' 1080, the oak boards' 37 x 29, the leaves' 28, the stripes' 12 ...). Left of the room (a floor
+ * drawn wide, `renderLevel`'s `pad`) a pattern is drawn as it is this far to the right, so it runs on from the room
+ * without a seam: `x % 10` of a negative `x` is not the pattern's phase.
+ */
+export const PATTERN_SPAN = 16223760;
+/** `a` mod `n`, never negative. */
+const md = (a, n) => ((a % n) + n) % n;
+const tile = (fn) => (g, x0, y0, w, h, f) => { for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) g.px(x, y, fn(x < 0 ? x + PATTERN_SPAN : x, y, f)); };
 export const WALLPAPERS = [
   { id: "cream", name: "Plain Cream", price: 0, draw: tile((x, y) => (x % 10 === 5 && y % 10 === 5 ? "#E6D2AA" : "#F2E4C6")) },
   { id: "stripes", name: "Mint Stripes", price: 80, draw: tile((x) => (x % 12 < 6 ? "#CDEBD9" : x % 12 === 6 || x % 12 === 11 ? "#B6DEC6" : "#E6F5EC")) },
@@ -89,6 +102,27 @@ export const FLOORS = [
 ];
 
 // ============================================================ LEVELS
+// Drawn wide (`renderLevel`'s `pad`), a floor's picture runs on past the room: its wall, skirting and floor to
+// either side, its floor on down, and over the room's top the ceiling (the floor of the storey above, in section),
+// or what a floor has instead (`above`: the greenhouse's glass, the attic's roof, the night round the dome).
+
+/** Leaves (x0..x1, y0..y1) clear (see-through): for a sky laid under the picture. */
+const clearPixels = (g, x0, y0, x1, y1) => { for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) g.C.unset(x, y); };
+/** The sky's colours for the hour (no sun, no clouds: they are the room's), over (x0..x1, y0..y1), from `top` to `bottom`. */
+const skyBand = (g, x0, y0, x1, y1, top, bottom) => {
+  const sky = skyAt(g.f);
+  for (let y = y0; y < y1; y++) { const c = lerpC(sky.top, sky.bot, clamp01((y - top) / Math.max(1, bottom - top - 1))); for (let x = x0; x < x1; x++) g.px(x, y, c); }
+};
+/** The greenhouse's glazing bars and glints at one pixel of its glass. */
+const glazing = (g, x, y) => { if (md(x, 30) === 0 || md(y, 20) === 0) g.px(x, y, "#E8F1EC"); else if (md(x + y, 23) === 0) g.px(x, y, "#FFFFFF66"); };
+/** Over a room drawn wide: the ceiling, as the floor of the storey above in section: a cornice, then boards. */
+const slab = (g) => {
+  for (let y = g.y0; y < 0; y++) for (let x = g.x0; x < g.x1; x++) {
+    const k = -y;
+    const board = Math.floor((k - 5) / 7);
+    g.px(x, y, k === 1 ? "#3E2614" : k <= 3 ? "#8A5A34" : k === 4 ? "#B07A4A" : k === 5 ? "#5E3A1F" : md(k - 5, 7) === 0 || md(x + (board % 2) * 17, 34) === 0 ? "#5A3C28" : "#6B4A32");
+  }
+};
 const shelf = (g, x0, x1, y, c = "#8A5A34") => {
   g.rect(x0, y, x1 - x0, 2, c).rect(x0, y, x1 - x0, 1, "#B07A4A").rect(x0, y + 2, x1 - x0, 1, "#00000030");
   g.rect(x0 + 3, y + 2, 2, 3, "#5E3A1F").rect(x1 - 5, y + 2, 2, 3, "#5E3A1F");
@@ -145,12 +179,14 @@ export const HOUSE_LEVELS = [
     ],
     decor(g) {
       // Built-in counter with cupboards, a sink and a tiled splash-back.
-      for (let y = 62; y < 80; y++) for (let x = 162; x < 240; x++) g.px(x, y, (x % 6 === 0 || y % 6 === 2) ? "#C9D6DE" : "#EAF3F8");
+      // (Drawn wide, the counter runs on to the picture's right-hand edge, a cupboard every 26 pixels.)
+      const end = Math.max(W, g.x1);
+      for (let y = 62; y < 80; y++) for (let x = 162; x < end; x++) g.px(x, y, (x % 6 === 0 || y % 6 === 2) ? "#C9D6DE" : "#EAF3F8");
       g.stamp((l) => {
-        l.rect(162, 80, 78, 3, "#E8E0D0").rect(162, 80, 78, 1, "#FFFFFF");
-        l.rect(163, 83, 77, 27, "#6FA8C8").rect(163, 83, 77, 1, "#8FC4E0");
-        for (const x of [165, 191, 217]) l.rect(x, 86, 22, 21, "#5A93B4").rect(x, 86, 22, 1, "#7FB6D2").rect(x + 10, 95, 3, 1, "#E8E0D0");
-        l.rect(163, 108, 77, 2, "#3E6F8C");
+        l.rect(162, 80, end - 162, 3, "#E8E0D0").rect(162, 80, end - 162, 1, "#FFFFFF");
+        l.rect(163, 83, end - 163, 27, "#6FA8C8").rect(163, 83, end - 163, 1, "#8FC4E0");
+        for (let x = 165; x < end; x += 26) l.rect(x, 86, 22, 21, "#5A93B4").rect(x, 86, 22, 1, "#7FB6D2").rect(x + 10, 95, 3, 1, "#E8E0D0");
+        l.rect(163, 108, end - 163, 2, "#3E6F8C");
       });
     }
   },
@@ -168,8 +204,9 @@ export const HOUSE_LEVELS = [
       { id: "rug-1", fits: "rug", x: 120, y: 118, w: 70, h: 18 }
     ],
     decor(g) {
-      for (let y = 70; y < 93; y++) for (let x = 0; x < W; x++) g.px(x, y, y === 70 ? "#A06A40" : x % 30 === 0 || y === 72 || y === 91 ? "#4A2C16" : "#6B4226");
-      g.rect(0, 0, W, 3, "#6B4226").rect(0, 3, W, 1, "#4A2C16");
+      const x0 = Math.min(0, g.x0), x1 = Math.max(W, g.x1);
+      for (let y = 70; y < 93; y++) for (let x = x0; x < x1; x++) g.px(x, y, y === 70 ? "#A06A40" : md(x, 30) === 0 || y === 72 || y === 91 ? "#4A2C16" : "#6B4226");
+      g.rect(x0, 0, x1 - x0, 3, "#6B4226").rect(x0, 3, x1 - x0, 1, "#4A2C16");
       shelf(g, 152, 208, 70, "#6B4226");
     }
   },
@@ -190,10 +227,16 @@ export const HOUSE_LEVELS = [
       // Glass walls and roof on a low brick base. The sky through them is
       // painted here, or left clear for the scene's own living sky (sky.js)
       // to show through: only the glazing bars and the glints are drawn then.
-      if (openSky) { for (let y = 0; y < 60; y++) for (let x = 0; x < W; x++) g.C.d[y * W + x] = null; }
-      else paintSky(g, 0, 0, W, 60, f);
-      for (let y = 0; y < 60; y++) for (let x = 0; x < W; x++) if (x % 30 === 0 || y % 20 === 0) g.px(x, y, "#E8F1EC"); else if ((x + y) % 23 === 0) g.px(x, y, "#FFFFFF66");
-      g.rect(0, 60, W, 2, "#E8F1EC").rect(0, 62, W, 1, "#B8C8BE");
+      // Drawn wide, the glass runs on past the room's sides and up over its top (`glassRoof`).
+      const x0 = Math.min(0, g.x0), x1 = Math.max(W, g.x1);
+      if (openSky) clearPixels(g, x0, 0, x1, 60);
+      else {
+        paintSky(g, 0, 0, W, 60, f);
+        if (x0 < 0) skyBand(g, x0, 0, 0, 60, 0, 60);
+        if (x1 > W) skyBand(g, W, 0, x1, 60, 0, 60);
+      }
+      for (let y = 0; y < 60; y++) for (let x = x0; x < x1; x++) glazing(g, x, y);
+      g.rect(x0, 60, x1 - x0, 2, "#E8F1EC").rect(x0, 62, x1 - x0, 1, "#B8C8BE");
       g.stamp((l) => {
         l.rect(8, 76, 72, 3, "#8A5A34").rect(8, 76, 72, 1, "#B07A4A");
         l.rect(10, 79, 3, 17, "#6B4226").rect(75, 79, 3, 17, "#6B4226").rect(10, 88, 68, 2, "#6B4226");
@@ -215,10 +258,12 @@ export const HOUSE_LEVELS = [
     ],
     decor(g, f) {
       // Sloping roof beams at both sides and a neon strip under the ridge.
+      // (Drawn wide, past the room's sides the roof is down to the eaves: beams all the way.)
+      const x0 = Math.min(0, g.x0), x1 = Math.max(W, g.x1);
       for (let y = 0; y < 56; y++) {
         const e = Math.round(60 - y * 1.07);
-        for (let x = 0; x < e; x++) g.px(x, y, (x + y) % 9 === 0 ? "#3A2616" : "#4A3020");
-        for (let x = W - e; x < W; x++) g.px(x, y, (x - y) % 9 === 0 ? "#3A2616" : "#4A3020");
+        for (let x = x0; x < e; x++) g.px(x, y, (x + y) % 9 === 0 ? "#3A2616" : "#4A3020");
+        for (let x = W - e; x < x1; x++) g.px(x, y, (x - y) % 9 === 0 ? "#3A2616" : "#4A3020");
         g.px(e, y, "#6B4226").px(W - e - 1, y, "#6B4226");
       }
       const hue = ["#FF4DB8", "#7FE0FF", "#FFE36B"][Math.floor(f / 24) % 3];
@@ -241,11 +286,13 @@ export const HOUSE_LEVELS = [
     ],
     decor(g, f) {
       // Stairs up to the house, pipes along the ceiling with a drip.
+      // (Drawn wide, the stairs' treads run on off to the left, and the pipes to the right.)
+      const x0 = Math.min(0, g.x0), x1 = Math.max(W, g.x1);
       g.stamp((l) => {
-        for (let i = 0; i < 8; i++) l.rect(0, 20 + i * 10, 48 - i * 5, 3, "#8A5A34").rect(0, 23 + i * 10, 48 - i * 5, 1, "#5E3A1F");
+        for (let i = 0; i < 8; i++) l.rect(x0, 20 + i * 10, 48 - i * 5 - x0, 3, "#8A5A34").rect(x0, 23 + i * 10, 48 - i * 5 - x0, 1, "#5E3A1F");
         l.line(48, 22, 8, 96, "#6B4226");
       });
-      g.stamp((l) => { l.rect(52, 5, 188, 3, "#8C97A6").rect(52, 5, 188, 1, "#C9D1DB"); l.rect(52, 10, 188, 2, "#B0563A"); for (const x of [90, 150, 210]) l.rect(x, 4, 3, 5, "#5A606E"); }, "#23262E");
+      g.stamp((l) => { l.rect(52, 5, x1 - 52, 3, "#8C97A6").rect(52, 5, x1 - 52, 1, "#C9D1DB"); l.rect(52, 10, x1 - 52, 2, "#B0563A"); for (let x = 90; x < x1; x += 60) l.rect(x, 4, 3, 5, "#5A606E"); }, "#23262E");
       const t = (f % 36) / 36;
       if (t < 0.7) g.px(151, Math.round(12 + t * 80), "#7FC6FF");
       shelf(g, 184, 234, 68, "#6B6E76");
@@ -268,19 +315,38 @@ export const HOUSE_LEVELS = [
     decor(g, f) {
       // A glass dome over the room: the real sky through iron ribs.
       const inDome = (x, y) => { const nx = (x + 0.5 - 120) / 118, ny = (58 - y) / 58; return y < 58 && nx * nx + ny * ny <= 1; };
-      for (let y = 0; y < 58; y++) for (let x = 0; x < W; x++) if (!inDome(x, y)) g.px(x, y, (x + y) % 7 ? "#1B2142" : "#232A52");
+      const x0 = Math.min(0, g.x0), x1 = Math.max(W, g.x1);
+      for (let y = 0; y < 58; y++) for (let x = x0; x < x1; x++) if (!inDome(x, y)) g.px(x, y, (x + y) % 7 ? "#1B2142" : "#232A52");
       paintSky(g, 2, 0, 236, 58, f, inDome);
       for (let y = 0; y < 58; y++) for (let x = 0; x < W; x++) {
         if (!inDome(x, y)) continue;
         const nx = (x + 0.5 - 120) / 118, ny = (58 - y) / 58, r = Math.hypot(nx, ny), a = Math.atan2(ny, nx);
         if (r > 0.96 || Math.abs(r - 0.55) < 0.018 || Math.abs(r - 0.8) < 0.014 || Math.abs(((a / Math.PI) * 8) % 1) < 0.045 * (1.1 - r)) g.px(x, y, r > 0.96 ? "#5A606E" : "#8C97A6");
       }
-      g.rect(0, 57, W, 2, "#5A606E").rect(0, 57, W, 1, "#8C97A6");
+      g.rect(x0, 57, x1 - x0, 2, "#5A606E").rect(x0, 57, x1 - x0, 1, "#8C97A6");
       shelf(g, 64, 90, 76, "#5A606E"); shelf(g, 150, 176, 76, "#5A606E");
     }
   }
 ];
 for (const L of HOUSE_LEVELS) { L.w = W; L.h = H; L.floorY = FY; }
+
+/** Over the room's top, drawn wide, where a floor has something other than a ceiling (`slab`). */
+const ABOVE = {
+  // The glass roof, on up: clear for the living sky, or the sky's colours.
+  greenhouse(g) {
+    if (openSky) clearPixels(g, g.x0, g.y0, g.x1, 0);
+    else skyBand(g, g.x0, g.y0, g.x1, 0, 0, 60);
+    for (let y = g.y0; y < 0; y++) for (let x = g.x0; x < g.x1; x++) glazing(g, x, y);
+  },
+  // Under the roof: its beams.
+  arcade(g) { for (let y = g.y0; y < 0; y++) for (let x = g.x0; x < g.x1; x++) g.px(x, y, (x + y) % 9 === 0 ? "#3A2616" : "#4A3020"); },
+  // The basement's ceiling: cast concrete.
+  workshop(g) {
+    for (let y = g.y0; y < 0; y++) for (let x = g.x0; x < g.x1; x++) g.px(x, y, y === -1 ? "#3C3F46" : md(y, 8) === 0 || md(x + (Math.floor(y / 8) % 2) * 20, 40) === 0 ? "#5E6068" : "#74777E");
+  },
+  // The night round the dome.
+  observatory(g) { for (let y = g.y0; y < 0; y++) for (let x = g.x0; x < g.x1; x++) g.px(x, y, (x + y) % 7 ? "#1B2142" : "#232A52"); }
+};
 
 // ============================================================ ITEMS
 const it = (id, name, kind, fits, level, price, w, h, draw, extra) => Object.assign({ id, name, kind, fits, level, price, w, h, draw }, extra || {});
@@ -1036,6 +1102,12 @@ export function placeAt(item, slot) {
 
 const ORDER = { window: 0, wall: 1, rug: 2, top: 3, stand: 3, ceiling: 4 };
 
+/** How far a picture runs on past the room each side (`renderLevel`'s `pad`): whole pixels, none by default. */
+const wide = (pad) => {
+  const side = (v) => Math.max(0, Math.round(Number(v) || 0));
+  return pad ? { left: side(pad.left), right: side(pad.right), top: side(pad.top), bottom: side(pad.bottom) } : { left: 0, right: 0, top: 0, bottom: 0 };
+};
+
 /** While a level is drawn with `sky: false`: its glass shows nothing, for a sky laid under it. */
 let openSky = false;
 
@@ -1049,12 +1121,17 @@ export function renderLevel(levelId, f = 0, opts = {}) {
     try { return renderLevel(levelId, f, opts); } finally { openSky = false; }
   }
   const L = LEVEL.get(levelId) || HOUSE_LEVELS[0];
-  const g = new Painter(L.w, L.h, f);
-  (WP.get(opts.wallpaper) || WP.get(L.wallpaper)).draw(g, 0, 0, L.w, FY - 3, f);
-  (FL.get(opts.floor) || FL.get(L.floor)).draw(g, 0, FY + 1, L.w, L.h - FY - 1, f);
-  for (let x = 0; x < L.w; x++) g.px(x, 0, "#00000022").px(x, 1, "#00000012");
-  g.rect(0, FY - 3, L.w, 1, "#B07A4A").rect(0, FY - 2, L.w, 2, "#8A5A34").rect(0, FY, L.w, 1, "#5E3A1F");
-  for (let x = 0; x < L.w; x++) g.px(x, FY + 1, "#00000030");
+  // Drawn wide: the room at (left, top) in a picture that runs on past it (wall, floor, what is over it), the
+  // room's own pixels as they are drawn alone.
+  const pad = wide(opts.pad);
+  const g = new Painter(pad.left + L.w + pad.right, pad.top + L.h + pad.bottom, f, undefined, [pad.left, pad.top]);
+  const x0 = g.x0, across = g.x1 - g.x0;
+  (WP.get(opts.wallpaper) || WP.get(L.wallpaper)).draw(g, x0, 0, across, FY - 3, f);
+  (FL.get(opts.floor) || FL.get(L.floor)).draw(g, x0, FY + 1, across, g.y1 - FY - 1, f);
+  if (g.y0 < 0) (ABOVE[L.id] || slab)(g, f);
+  for (let x = x0; x < g.x1; x++) g.px(x, 0, "#00000022").px(x, 1, "#00000012");
+  g.rect(x0, FY - 3, across, 1, "#B07A4A").rect(x0, FY - 2, across, 2, "#8A5A34").rect(x0, FY, across, 1, "#5E3A1F");
+  for (let x = x0; x < g.x1; x++) g.px(x, FY + 1, "#00000030");
   if (L.decor) L.decor(g, f);
 
   const list = [];
@@ -1164,11 +1241,12 @@ const nightColour = (c, L, tr, tg, tb) => {
  * picture is the same to the pixel.
  */
 function nightLight(g, glows) {
-  const d = g.C.d, w = g.w;
+  const d = g.C.d, w = g.w, ox = g.C.ox, oy = g.C.oy;
   for (let i = 0; i < d.length; i++) {
     const c = d[i];
     if (!c) continue;
-    const x = i % w, y = (i / w) | 0;
+    // (In the room's coordinates, where the lights are: a picture drawn wide has the room in from its corner.)
+    const x = (i % w) - ox, y = ((i / w) | 0) - oy;
     let L = 0, tr = 0, tg = 0, tb = 0, lit = false;
     for (const [gx, gy, r, col] of glows) {
       const dist = Math.hypot(x - gx, (y - gy) * 1.1);
@@ -1205,10 +1283,12 @@ export const DAY_BRIGHTEN = 0.08;
  * reaches are worked on, each light over its own box.
  */
 function dayLight(g, glows) {
-  const d = g.C.d, w = g.w, h = g.h;
+  const d = g.C.d, w = g.w, h = g.h, ox = g.C.ox, oy = g.C.oy;
   const most = new Float32Array(w * h), tr = new Float32Array(w * h), tg = new Float32Array(w * h), tb = new Float32Array(w * h);
   const reached = new Uint8Array(w * h);
-  for (const [gx, gy, r, col] of glows) {
+  for (const [lx, ly, r, col] of glows) {
+    // (The lights are in the room's coordinates; the pixels here, the picture's.)
+    const gx = lx + ox, gy = ly + oy;
     const x0 = Math.max(0, Math.floor(gx - r)), x1 = Math.min(w - 1, Math.ceil(gx + r));
     const y0 = Math.max(0, Math.floor(gy - r / 1.1)), y1 = Math.min(h - 1, Math.ceil(gy + r / 1.1));
     for (let y = y0; y <= y1; y++) {

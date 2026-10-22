@@ -3,6 +3,7 @@ import {
   buyWork,
   gotThrough,
   nightOver,
+  seeArrival,
   seatWork,
   slideWall,
   type FrontSlot,
@@ -150,6 +151,8 @@ type BaseStore = {
   slideWall: (x: number) => void;
   /** A night watched to its end: held or not. What it paid (the first after some reading, held), in acorns. */
   nightOver: (held: boolean) => number;
+  /** (1.5.11) The camp has been arrived at, after reading: what came since is not shown again. */
+  seeArrival: () => void;
   /** A kind of prowler got through (Pip has a word about it, once). */
   gotThrough: (role: Parameters<typeof gotThrough>[1]) => void;
   armHero: (hero: number, blade: number) => void;
@@ -468,6 +471,9 @@ export const useBaseStore = create<BaseStore>((set, get) => {
     },
     gotThrough(role) {
       change((base) => gotThrough(base, role));
+    },
+    seeArrival() {
+      change((base, now) => seeArrival(base, now.minutes));
     },
     armHero(hero, blade) {
       change((base) => armHero(base, hero, blade));

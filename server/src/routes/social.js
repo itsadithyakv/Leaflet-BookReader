@@ -431,6 +431,23 @@ function saysNothingNew(held, update) {
   return Object.entries(update).every(([name, value]) => name === "updatedAt" || isDeepStrictEqual(held[name] ?? null, value ?? null));
 }
 
+/** What a save reads of the profile first: what the answer shows, and two parts it does not. */
+const HELD_VIEW = { ...OWN_VIEW, avatar: 1, readDay: 1 };
+
+/**
+ * The parts of a save the profile does not hold already, to `$set`. A save
+ * names every part the app has (the camp alone is a few kilobytes), and most
+ * of them are as they were: only what moved is written (sync audit C8). A
+ * part the profile was not read for is always written.
+ */
+export function changedParts(held, update) {
+  return Object.fromEntries(
+    Object.entries(update).filter(
+      ([name, value]) => name === "updatedAt" || !(name in HELD_VIEW) || !isDeepStrictEqual(held[name] ?? null, value ?? null)
+    )
+  );
+}
+
 export function socialRoutes(db, limits = defaultLimits()) {
   const router = Router();
   const auth = requireAccount(db);
@@ -557,7 +574,7 @@ export function socialRoutes(db, limits = defaultLimits()) {
       const [account, held] = await Promise.all([
         accounts(db).findOne({ _id: request.account.id }, { projection: { avatar: 1, suspendedUntil: 1 } }),
         update.visibility === undefined
-          ? profiles(db).findOne({ _id: request.account.id }, { projection: { ...OWN_VIEW, avatar: 1, readDay: 1 } })
+          ? profiles(db).findOne({ _id: request.account.id }, { projection: HELD_VIEW })
           : null
       ]);
       update.avatar = avatarView(account?.avatar);
@@ -584,11 +601,9 @@ export function socialRoutes(db, limits = defaultLimits()) {
       // An open app sends its figures every few minutes, and every minute
       // while a book or the board is open, whether or not a page was read:
       // most saves say what the last one said. Such a save writes nothing
-      // (it was four writes and two reads), and leaves the board and the
-      // visitors kept in memory alone, which every save used to throw away,
-      // so that with a few hundred apps open they were never kept at all.
-      // Only for a save that leaves visibility alone: one that names it is
-      // the reader's own doing, and is carried out in full every time.
+      // (it was four writes and two reads). Only for a save that leaves
+      // visibility alone: one that names it is the reader's own doing, and
+      // is carried out in full every time.
       if (held && saysNothingNew(held, { ...update, ...(SOCIAL.includes(held.visibility) ? figures : {}) })) {
         response.json(ownView(held));
         return;
@@ -603,8 +618,18 @@ export function socialRoutes(db, limits = defaultLimits()) {
       // just set (the visibility, the kudos counts, the standing, and
       // whatever the app left out): what it set is in `changes`, as it now
       // stands, and sending the camp back as well doubled what a save cost.
+      // And only what moved is set: the rest the profile holds already.
+      //
+      // The board kept in memory is left alone (sync audit C3). Every save
+      // that moved anything used to throw it away, and with a few hundred
+      // apps saving every few minutes it was read from the database for
+      // nearly every request. It now lasts its half minute: a reader's own
+      // row is drawn by the app from the minutes on the device, and the
+      // rest of the board may be that much behind. A choice of who sees
+      // the profile (the long way, below) and a deletion still clear it at
+      // once, so a reader who goes private leaves the board then.
       if (held && SOCIAL.includes(held.visibility)) {
-        const changes = { ...update, ...figures };
+        const changes = changedParts(held, { ...update, ...figures });
         let saved;
         try {
           saved = await profiles(db).findOneAndUpdate(
@@ -619,7 +644,6 @@ export function socialRoutes(db, limits = defaultLimits()) {
           throw error;
         }
         if (saved) {
-          forgetBoards();
           // A duel keeps each side's minutes as the profile has them, so
           // there is something to write there only when they have changed.
           if (figures.weekKey !== undefined && (figures.weekKey !== held.weekKey || figures.weekMinutes !== held.weekMinutes)) {
@@ -655,7 +679,13 @@ export function socialRoutes(db, limits = defaultLimits()) {
           );
           figuresSaved = matchedCount > 0;
         }
-        forgetBoards();
+        // Who sees the profile changed: the board and the visitors kept in
+        // memory may show it where it is no longer shared, and go at once.
+        // Any other save here is of a profile not on the board (one being
+        // made, or a private one).
+        if (update.visibility !== undefined) {
+          forgetBoards();
+        }
       } catch (error) {
         if (error?.code === 11000) {
           throw new HttpError(409, "That handle is taken.");

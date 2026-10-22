@@ -1,6 +1,6 @@
 [package]
 name = "leaflet"
-version = "1.5.10"
+version = "1.5.11"
 edition = "2021"
 build = "build.rs"
 
@@ -56,7 +56,13 @@ quick-xml = "0.31"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart", "stream", "gzip"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# `float_roundtrip`: a number read back is the number written. Without it a
+# day's minutes (a sum of fractions, 9.748933333333333) could come back from
+# JSON a step short, and the sync document never read back as what was sent:
+# Drive's check after a write failed every round ("Another device is
+# syncing right now"), and the account was sent the same document at every
+# sync (2026-10-21).
+serde_json = { version = "1", features = ["float_roundtrip"] }
 sha2 = "0.10"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "sync"] }
 urlencoding = "2.1"

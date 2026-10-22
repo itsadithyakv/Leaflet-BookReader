@@ -214,12 +214,15 @@ describe("the animals", () => {
   it("each bring one small good thing", () => {
     const base = camp({ acorns: 100, camps: 10 }, { burrow: 3, store: 2, fence: 1, hut: 2 });
     const has = (animal: number): BaseState => ({ ...base, animals: [animal] });
-    // The hen lays once a day, and the egg comes as a parcel.
+    // The hen lays once a day on a day there is reading (1.5.11), and the egg comes as a parcel.
     const quiet = camp({ acorns: 100, animals: [0] }, { burrow: 1, store: 2 });
-    const egg = settle(quiet, at(1000));
+    const reading = (minutes: number, day = DAY): Now => ({ ...at(minutes, day), today: 5 });
+    expect(settle(quiet, at(1000)).parcels).toBe(quiet.parcels);
+    expect(settle(quiet, { ...at(1000), today: 0 }).parcels).toBe(quiet.parcels);
+    const egg = settle(quiet, reading(1000));
     expect(egg.parcels).toBe(quiet.parcels + 1);
-    expect(settle(egg, at(1000)).parcels).toBe(egg.parcels);
-    expect(settle(egg, at(1000, "2026-10-13")).parcels).toBe(egg.parcels + 1);
+    expect(settle(egg, reading(1000)).parcels).toBe(egg.parcels);
+    expect(settle(egg, reading(1000, "2026-10-13")).parcels).toBe(egg.parcels + 1);
     expect(nightRaiders(has(1)).capacity).toBe(nightRaiders(base).capacity - 1);
     // The goat leans on the wall (1.5.11: it was two more pieces of fence): a quarter tougher.
     const wall = (state: BaseState) => part(fronted(state), "wall").max;

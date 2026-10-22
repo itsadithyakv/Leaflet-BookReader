@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { VisitorNote, VisitorPip, type VisitorEvent, type VisitorFrame } from "./VisitorPip";
 import { useCommunityStore } from "../community/communityStore";
 import { stubVisit, useVisitorStore, useVisitors } from "../../pip/useVisitors";
-import { defaultDoor, hostOf, standAt, type Door, type VisitorCandidate } from "../../pip/visitors";
+import { defaultDoor, hostOf, standAt, type Door, type TogetherKind, type VisitorCandidate } from "../../pip/visitors";
 
 /** The room as `HouseScene` hands it to an overlay (`RoomFrame`): the visitor's part of it, and how Pip is. */
 export type VisitorsFrame = VisitorFrame & {
@@ -23,6 +23,8 @@ type VisitorsProps = {
   onEvent?: (event: VisitorEvent) => void;
   /** Takes the reader to that profile on the Social page. Left out, the card has no such button. */
   onOpenProfile?: (handle: string) => void;
+  /** The reader asks the two Pips to do something together (the visitor's card): the house has Pip do it. */
+  onTogether?: (kind: TogetherKind) => void;
 };
 
 /** Makes the Social page open on the community, with this reader's card showing. The caller then shows the page. */
@@ -42,7 +44,7 @@ export const prepareVisitorProfile = (handle: string) => {
  * with community off, signed out, a private profile, nothing read today or no
  * friend who has read, it draws nothing and asks nothing of anyone.
  */
-export const Visitors = ({ frame, door, taken, busy = false, away = false, onEvent, onOpenProfile }: VisitorsProps) => {
+export const Visitors = ({ frame, door, taken, busy = false, away = false, onEvent, onOpenProfile, onTogether }: VisitorsProps) => {
   const live = useRef({ frame, busy, away });
   live.current = { frame, busy, away };
   useVisitors(() => {
@@ -54,10 +56,15 @@ export const Visitors = ({ frame, door, taken, busy = false, away = false, onEve
   const note = useVisitorStore((state) => state.note);
   const report = useVisitorStore((state) => state.report);
   const readNote = useVisitorStore((state) => state.readNote);
-  const way = useMemo(() => door ?? defaultDoor(frame.w), [door, frame.w]);
-
+  const act = useVisitorStore((state) => state.act);
   // The place is chosen once, as the visitor knocks: clear of where Pip is then and of the furniture.
   const from = visit?.record.from ?? null;
+  // (Where the room's picture runs on past its walls, the door is past the picture's edge, not the room's: as it
+  // was when the visitor knocked, so a window turned or a drawer opened mid-visit does not move them.)
+  const doorX = frame.span?.edge ?? frame.w;
+  const doorAt = useRef({ from, x: doorX });
+  if (doorAt.current.from !== from) doorAt.current = { from, x: doorX };
+  const way = useMemo(() => door ?? defaultDoor(doorAt.current.x), [door, from]);
   const spot = useMemo(() => {
     if (from === null) {
       return null;
@@ -75,7 +82,7 @@ export const Visitors = ({ frame, door, taken, busy = false, away = false, onEve
       /** Puts a visitor in the house for `stayMs` (or a note on the door). */
       stub: (visitor: Partial<VisitorCandidate> = {}, stayMs = 60_000, kind: "visit" | "note" = "visit") =>
         stubVisit({ handle: "maya", displayName: "Maya", pipSeed: "maya", avatar: "wizard.magic", weekMinutes: 95, streak: 7, ...visitor }, stayMs, kind),
-      clear: () => useVisitorStore.setState({ visit: null, note: null, phase: null, presence: "none", standing: null }),
+      clear: () => useVisitorStore.setState({ visit: null, note: null, phase: null, presence: "none", standing: null, act: null }),
       state: () => {
         const { visit: who, note: left, phase, presence, standing } = useVisitorStore.getState();
         return { visit: who, note: left, phase, presence, standing };
@@ -101,6 +108,8 @@ export const Visitors = ({ frame, door, taken, busy = false, away = false, onEve
           onPhase={report}
           onEvent={onEvent}
           onOpenProfile={onOpenProfile}
+          act={act}
+          onTogether={busy ? undefined : onTogether}
         />
       )}
       {note && !visit && <VisitorNote visitor={note.visitor} frame={frame} door={way} onRead={readNote} onOpenProfile={onOpenProfile} />}

@@ -22,131 +22,76 @@ export const sceneScale = (artWidth: number, artHeight: number, boxWidth: number
 /**
  * Where a room of `roomWidth` by `roomHeight` CSS pixels sits in the box it is fitted to, snapped to device
  * pixels: in the middle of it. (Where Pip's tab is the whole screen the box is what the HUD, the rail and the lift
- * leave clear, so nothing that can be tapped in the room is under one of them; the room's own edges, carried out
- * past it (`edgeBands`), fill the rest of the screen.)
+ * leave clear, so nothing that can be tapped in the room is under one of them; its picture, drawn wide
+ * (`roomPad`), fills the rest of the screen.)
  */
 export const fillPlace = (roomWidth: number, roomHeight: number, boxWidth: number, boxHeight: number, ratio = 1) => {
   const snap = (value: number) => Math.round(value * ratio) / ratio;
   return { left: snap((boxWidth - roomWidth) / 2), top: snap((boxHeight - roomHeight) / 2) };
 };
 
-/**
- * The room's edge carried out to the box's: one colour an art row (the left or right column of the room's
- * picture), as a CSS gradient over the box, each row as tall as it is drawn, from the room's `top` (CSS pixels in
- * the box). The first row runs up to the box's top and the last down to its foot. Rows of one colour are merged.
- */
-export const edgeBands = (rows: readonly string[], top: number, scale: number) => {
-  if (rows.length === 0) return "none";
-  const px = (value: number) => `${Math.round(value * 100) / 100}px`;
-  const stops: string[] = [];
-  let from = 0;
-  for (let row = 0; row < rows.length; row++) {
-    if (row + 1 < rows.length && rows[row + 1] === rows[row]) continue;
-    const start = from === 0 ? "0px" : px(top + from * scale);
-    const end = row === rows.length - 1 ? "100%" : px(top + (row + 1) * scale);
-    stops.push(`${rows[row]} ${start} ${end}`);
-    from = row + 1;
-  }
-  return `linear-gradient(to bottom, ${stops.join(", ")})`;
-};
+/** How far a floor's picture runs on past the room each side, in art pixels (house.js `renderLevel`'s `pad`). */
+export type RoomPad = { left: number; right: number; top: number; bottom: number };
+export const NO_PAD: RoomPad = { left: 0, right: 0, top: 0, bottom: 0 };
+/** A pad is drawn in steps of this many art pixels, so a few pixels' change of the window does not draw the room again. */
+export const PAD_STEP = 8;
 
 /**
- * How far past each side of the room its picture is carried on (art pixels), in the pattern it is drawn in
- * (`edgePattern`): wider than any band beside the room on a phone on its side.
+ * How much wider (and taller) than the room its picture is drawn where the room fills the screen: to the stage's
+ * edges each side, in art pixels, in whole `PAD_STEP`s. `room`: where it is in the stage (CSS pixels); `scale`: CSS
+ * pixels an art pixel. `was`: the pad drawn now, kept where it already reaches (a drawer opened and shut does not
+ * draw the room twice over): a pad only grows, until the scale changes.
  */
-export const BAND_ART = 200;
-/** The longest repeat looked for along a row, and how far in from the edge it must hold. */
-const MAX_PERIOD = 32;
-/** The fewest rows of a wall in a row that make a pattern (`edgePattern`), and the trim under the ceiling. */
-const WALL_RUN = 6;
-const TRIM_ROWS = 4;
-const RUN = 72;
-/** A row with no repeat is carried on in its own commonest colour where it is this much of it (stars on a dark sky). */
-const MOSTLY = 0.85;
-
-/**
- * Two packed colours as near as makes no odds: within `NEAR` on each channel. The room is lit (the day through
- * its window, a lamp), so its wallpaper drifts a shade across the room and a dot ten pixels on is not the same
- * colour to the bit; a dot against its paper is far more than that.
- */
-const NEAR = 10;
-export const nearColour = (a: number, b: number) => {
-  if (a === b) return true;
-  for (let shift = 0; shift < 32; shift += 8) if (Math.abs(((a >>> shift) & 255) - ((b >>> shift) & 255)) > NEAR) return false;
-  return true;
-};
-
-/**
- * The shortest repeat of a row of pixels read in from the room's edge (`pixels[0]` at the edge, as packed
- * colours): the smallest `p` with `pixels[k]` as `pixels[k + p]` (`nearColour`) all along the first `RUN`. Null
- * where there is none (a shelf at the edge, a wallpaper drawn at random): that row is carried on in one colour.
- * Carried on, a repeat is its `p` pixels nearest the edge, so it meets the room in the room's own shade.
- */
-export const rowPeriod = (pixels: ArrayLike<number>, maxPeriod = MAX_PERIOD, run = RUN): number | null => {
-  const span = Math.min(run, pixels.length);
-  for (let period = 1; period <= maxPeriod && period * 2 <= span; period++) {
-    let repeats = true;
-    for (let k = 0; k + period < span; k++) {
-      if (!nearColour(pixels[k], pixels[k + period])) {
-        repeats = false;
-        break;
-      }
-    }
-    if (repeats) return period;
-  }
-  return null;
-};
-
-/**
- * One side of the room carried on past its edge, `width` art pixels, as packed colours (row by row, the column
- * nearest the room last on the left side and first on the right): each row in its own repeat (the dots of a
- * wallpaper, the shade under the ceiling, the tiles of a counter), so the pattern runs on to the screen's edge
- * with no seam; a row with none, in `flat`'s colour for it. `rows[r][k]`: row `r`, `k` pixels in from the edge.
- * Above `wallTo` (the skirting) a pattern is a stretch of rows (`WALL_RUN` or more) that each repeat, or the trim
- * under the ceiling (its first `TRIM_ROWS`): a lone line that repeats among rows that do not (a window's bar
- * among its stars, a shelf among books) is carried on in `flat`'s colour, as they are, not as a stray line.
- */
-export const edgePattern = (rows: readonly (ArrayLike<number>)[], flat: readonly number[], side: "left" | "right", width = BAND_ART, wallTo = 0): Uint32Array => {
-  const out = new Uint32Array(width * rows.length);
-  const periods = rows.map((row) => rowPeriod(row));
-  const wallRows = Math.min(wallTo, rows.length);
-  // Each wall row that repeats: how many in a row with it do.
-  const kept = periods.map((period) => period !== null);
-  for (let r = 0; r < wallRows; ) {
-    if (periods[r] === null) {
-      r++;
-      continue;
-    }
-    let end = r;
-    while (end < wallRows && periods[end] !== null) end++;
-    if (end - r < WALL_RUN) for (let at = r; at < end; at++) if (at >= TRIM_ROWS) kept[at] = false;
-    r = end;
-  }
-  // A row with no repeat: its own colour where it is mostly one (the dark between a sky's stars), else `flat`'s.
-  const mostly = (row: ArrayLike<number>, r: number) => {
-    const span = Math.min(RUN, row.length);
-    // Counted by shade (a sixteenth of each channel), as lit; the one nearest the edge of the commonest is the colour.
-    const counts = new Map<number, { count: number; first: number }>();
-    let best: { count: number; first: number } | null = null;
-    for (let k = 0; k < span; k++) {
-      const shade = (row[k] >>> 4) & 0x0f0f0f0f;
-      const entry = counts.get(shade) ?? { count: 0, first: row[k] };
-      entry.count += 1;
-      counts.set(shade, entry);
-      if (!best || entry.count > best.count) best = entry;
-    }
-    return best && best.count >= span * MOSTLY ? best.first : flat[r];
+export const roomPad = (stage: { width: number; height: number }, room: { left: number; top: number; width: number; height: number }, scale: number, was: RoomPad | null = null): RoomPad => {
+  const art = (css: number) => Math.max(0, Math.ceil(Math.ceil(Math.max(0, css) / scale - 1e-6) / PAD_STEP) * PAD_STEP);
+  const want = {
+    left: art(room.left),
+    right: art(stage.width - room.left - room.width),
+    top: art(room.top),
+    bottom: art(stage.height - room.top - room.height)
   };
-  rows.forEach((row, r) => {
-    const period = kept[r] ? periods[r] : null;
-    // (A lone line that repeats, among rows that do not, is `flat`'s colour: its own would draw it on.)
-    const one = period !== null ? 0 : periods[r] !== null ? flat[r] : mostly(row, r);
-    for (let d = 1; d <= width; d++) {
-      // d pixels out from the edge: the repeat carried on (k = -d, brought into it), or the row's one colour.
-      const colour = period === null ? one : row[(((-d) % period) + period) % period];
-      const column = side === "left" ? width - d : d - 1;
-      out[r * width + column] = colour;
-    }
-  });
-  return out;
+  if (!was) return want;
+  return { left: Math.max(want.left, was.left), right: Math.max(want.right, was.right), top: Math.max(want.top, was.top), bottom: Math.max(want.bottom, was.bottom) };
+};
+
+/** A rectangle in the stage, in CSS pixels. */
+export type Edges = { left: number; top: number; right: number; bottom: number };
+
+/**
+ * Pip's floor where the room fills the screen, in the room's art pixels (0 is the room's left wall, and it can be
+ * less): from the left of the screen (inside its gutter) to short of the rail (or a drawer), so she walks, is
+ * thrown and plays along all the floor that shows and never under the rail. The lift is a key at the top-left,
+ * over the wall, not the floor: `notch` is the corner it takes, which she is kept out of in the air.
+ * `box`: what the HUD, the rail and the lift leave clear (the stage's content box); `lift`: the lift's box, or null
+ * with none. `edge`: the picture's right-hand edge (where she comes in from outside).
+ */
+export type FloorSpan = { left: number; right: number; notch: { x: number; y: number } | null; edge: number };
+/** Kept between Pip (or a visitor) and the lift, CSS pixels. */
+export const LIFT_CLEAR = 4;
+
+export const floorSpan = (box: Edges, lift: Edges | null, room: { left: number; top: number }, scale: number, roomWidth: number, pad: RoomPad): FloorSpan => {
+  const x = (css: number) => (css - room.left) / scale;
+  const left = lift ? Math.min(box.left, lift.left) : box.left;
+  return {
+    left: x(left),
+    right: x(box.right),
+    notch: lift ? { x: x(lift.right + LIFT_CLEAR), y: (lift.bottom + LIFT_CLEAR - room.top) / scale } : null,
+    edge: roomWidth + pad.right
+  };
+};
+
+/** The floor of a room drawn alone (not filling the screen): wall to wall. */
+export const roomSpan = (roomWidth: number): FloorSpan => ({ left: 0, right: roomWidth, notch: null, edge: roomWidth });
+
+/**
+ * A body `half` art pixels either side of `x` and `tall` above its feet at `y`, kept out of the span's notch (the
+ * lift's corner): pushed out the short way, its speed that way turned back (and lost a little, as off a wall). Null
+ * when it is clear.
+ */
+export const outOfNotch = (body: { x: number; y: number; vx: number; vy: number }, notch: FloorSpan["notch"], half = 16, tall = 30, bounce = 0.55) => {
+  if (!notch) return null;
+  const right = notch.x - (body.x - half);
+  const down = notch.y - (body.y - tall);
+  if (right <= 0 || down <= 0) return null;
+  return right <= down ? { ...body, x: body.x + right, vx: Math.abs(body.vx) * bounce } : { ...body, y: body.y + down, vy: Math.abs(body.vy) * bounce };
 };

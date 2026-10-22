@@ -294,7 +294,7 @@ pub async fn discuss(route: String, args: Option<serde_json::Value>, state: Stat
 /// The key of each book in the library, by its id here: what tells the app
 /// how far the reader is in the book a community or a post is about, so it
 /// can keep spoilers past that place covered.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn library_keys(state: State<'_, AppState>) -> Result<std::collections::BTreeMap<String, String>, String> {
   let db = state.db.guard();
   Ok(

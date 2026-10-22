@@ -409,19 +409,20 @@ const CORNER = 20;
 
 /**
  * The tantrum she throws about `cause`, from where she stands (`x`, on a
- * floor `floorW` wide). The performance, then off to the nearer wall, her
+ * floor from `floorLeft`, 0 when left out, to `floorW`). The performance, then off to the nearer wall, her
  * back to the room; or, woken with a bed to go back to (`bed`: its name among
  * the spots), back into it without a word. With motion reduced it is a line
  * and a pose, not a performance.
  */
-export const tantrumPlan = (cause: Annoyance, state: { x: number; floorW: number; bed?: string | null; reduced?: boolean }, rand: Rand): Activity => {
+export const tantrumPlan = (cause: Annoyance, state: { x: number; floorW: number; floorLeft?: number; bed?: string | null; reduced?: boolean }, rand: Rand): Activity => {
   const label = "having a tantrum";
   const turned: Step = { kind: "do", move: SULK_MOVE, seconds: 6, line: "hmph." };
   if (state.reduced) return { id: "tantrum", label, steps: [{ kind: "do", move: SULK_MOVE, seconds: 5, line: pick(rand, TANTRUMS[cause][0].lines) }] };
   const acts: Step[] = TANTRUMS[cause].map((act) => ({ kind: "do", move: act.move, seconds: act.seconds, line: pick(rand, act.lines) }));
   if (cause === "woken" && state.bed) return { id: "tantrum", label, steps: [...acts, { kind: "do", move: SULK_MOVE, seconds: 3, line: "hmph." }, { kind: "use", id: state.bed, what: "bed" }] };
-  const left = state.x < state.floorW / 2;
-  const wall = left ? CORNER : state.floorW - CORNER;
+  const from = state.floorLeft ?? 0;
+  const left = state.x < (from + state.floorW) / 2;
+  const wall = left ? from + CORNER : state.floorW - CORNER;
   return { id: "tantrum", label, steps: [...acts, { kind: "walk", x: wall }, { kind: "face", dir: left ? -1 : 1 }, turned] };
 };
 

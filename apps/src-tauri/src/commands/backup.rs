@@ -1,7 +1,7 @@
 //! Backup: its status, Google Drive sign-in, the sync folder, and running a backup.
 
 use super::*;
-use crate::sync::folder::SyncReport;
+use crate::sync::folder::{StoreHolds as SyncStoreHolds, SyncReport};
 use crate::sync::owner::{self, Standing, StoreMode, Transport};
 use crate::sync::shared_doc::{Pending, StateRun, Who};
 
@@ -55,7 +55,21 @@ pub struct SyncStatus {
   /// library's book files only.
   pub drive_files_only: bool,
   /// The same for the sync folder.
-  pub folder_files_only: bool
+  pub folder_files_only: bool,
+  /// Drive is connected and the last try found Google refusing Leaflet's
+  /// client (`client_disabled`) or the reader's grant (`reconnect`).
+  pub drive_unavailable: Option<drive::DriveUnavailable>,
+  /// Account sync is on and its copy is filling up (sync audit D2): how
+  /// large it is and the most the server keeps, in bytes. Nothing below
+  /// four fifths of that.
+  pub account_usage: Option<AccountUsage>
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountUsage {
+  pub bytes: usize,
+  pub limit: usize
 }
 
 pub const FOLDER_SETTING: &str = "sync_folder_path";
@@ -110,7 +124,13 @@ pub(crate) fn read_sync_status(db: &db::Database) -> Result<SyncStatus, String> 
       refused: if signed_in { None } else { owner::refused(db) }
     },
     drive_files_only: signed_in && owner::files_only(db, Transport::Drive),
-    folder_files_only: signed_in && owner::files_only(db, Transport::Folder)
+    folder_files_only: signed_in && owner::files_only(db, Transport::Folder),
+    drive_unavailable: if refresh.is_some() { drive::unavailable_noted(db) } else { None },
+    account_usage: if account_sync_on(standing) {
+      crate::sync::cloud::state_usage(db).map(|(bytes, limit)| AccountUsage { bytes, limit })
+    } else {
+      None
+    }
   })
 }
 
@@ -182,6 +202,8 @@ pub async fn drive_auth_wait(state: State<'_, AppState>) -> Result<(), String> {
     .map_err(|e| e.to_string())?;
   // Goes to the OS keychain when one is available, not a plaintext column.
   drive::store_refresh_token(&db, &tokens.refresh_token).map_err(|e| e.to_string())?;
+  // A new grant: whatever Google refused before is asked afresh.
+  drive::clear_unavailable(&db).map_err(|e| e.to_string())?;
   Ok(())
 }
 
@@ -228,6 +250,7 @@ pub fn drive_disconnect(state: State<'_, AppState>) -> Result<SyncStatus, String
 /// disconnected or changed, and the next one is asked afresh.
 fn forget_store(db: &db::Database, transport: Transport) -> Result<(), String> {
   owner::clear_refusal(db, transport).map_err(|e| e.to_string())?;
+  owner::set_claim_answer(db, transport, None).map_err(|e| e.to_string())?;
   owner::set_files_only(db, transport, false).map_err(|e| e.to_string())
 }
 
@@ -282,7 +305,7 @@ pub(crate) fn large_books_in(db: &db::Database) -> Result<Vec<LargeBook>, String
 /// The library's large books on this device, largest first, each with the
 /// reader's answer. The app asks about the ones with none after a backup
 /// reports files held back, and a book's menu reads its own.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn large_books(state: State<'_, AppState>) -> Result<Vec<LargeBook>, String> {
   let db = state.db.guard();
   large_books_in(&db)
@@ -302,10 +325,11 @@ pub fn set_large_book_backup(book_ids: Vec<String>, back_up: bool, state: State<
 }
 
 /// Runs whichever transports are configured, as the library's owner allows
-/// (`run_sync`).
+/// (`run_sync`). `manual`: the reader asked (Sync now), so Drive is tried
+/// even while a disabled client is being left alone (`drive::paused`).
 #[tauri::command]
-pub async fn sync_now(app: AppHandle, state: State<'_, AppState>) -> Result<SyncReport, String> {
-  let result = run_sync(&state).await;
+pub async fn sync_now(app: AppHandle, manual: Option<bool>, state: State<'_, AppState>) -> Result<SyncReport, String> {
+  let result = run_sync(&state, manual.unwrap_or(false)).await;
   // A goal met on the laptop silences the phone's reminders now, not at the
   // next re-plan: the phone's alarms are planned again from what arrived.
   #[cfg(target_os = "android")]
@@ -464,11 +488,12 @@ pub(crate) async fn execute(
       let mut refused: Option<String> = None;
       for carrier in carriers {
         let transport = carrier.transport();
-        let local = {
+        let (local, there) = {
           let db = db_mutex.guard();
-          owner::get(&db)
+          // An account deleted here owns nothing (sync audit W3).
+          (owner::get(&db), owner::live(&db, carrier.store_owner()))
         };
-        let mut step = step_for(who.mode(local.as_deref(), carrier.store_owner().as_deref()));
+        let mut step = step_for(who.mode(local.as_deref(), there.as_deref()));
         let mut newer = false;
         if step.state {
           let run = carrier.sync_state(db_mutex, now, &who).await.map_err(fail)?;
@@ -521,14 +546,26 @@ pub(crate) async fn execute(
       let mut files: Vec<(usize, bool)> = Vec::new();
       for (index, carrier) in carriers.iter().enumerate() {
         let transport = carrier.transport();
-        let local = {
+        let (local, there, answer) = {
           let db = db_mutex.guard();
-          owner::get(&db)
+          (owner::get(&db), owner::live(&db, carrier.store_owner()), owner::claim_answer(&db, transport))
         };
-        let mut step = step_for(who.mode(local.as_deref(), carrier.store_owner().as_deref()));
+        let mut mode = who.mode(local.as_deref(), there.as_deref());
+        // A library from before owners the reader chose to keep apart: this
+        // library's files go there, its reading is left as it is.
+        if mode == StoreMode::Claim && answer == Some(false) {
+          mode = StoreMode::FilesOnly;
+        }
+        let mut step = step_for(mode);
         let mut newer = false;
         if step.state {
-          let run = carrier.sync_state(db_mutex, now, &who).await.map_err(fail)?;
+          let run = carrier.sync_state(db_mutex, now, &who.answered(answer)).await.map_err(fail)?;
+          // A library from before owners: nothing is taken from it, nothing
+          // of this one's goes there, until the reader says (sync audit W1).
+          if let Some(books) = run.asks {
+            report.store_holds.get_or_insert(SyncStoreHolds { transport, books });
+            continue;
+          }
           if run.refused {
             step = step_for(StoreMode::FilesOnly);
           } else {
@@ -573,6 +610,56 @@ pub(crate) async fn execute(
   }
 }
 
+/// How a run ends once Drive could not be opened (`drive_error`).
+///
+/// Signed in, the account carries the reading: when it synced and Google
+/// refuses only Leaflet's client or the reader's grant, the run succeeded,
+/// and says so with `drive_unavailable`. Anything else of Drive's, and every
+/// Drive failure signed out (where Drive is a carrier of the reading), stays
+/// an error.
+pub(crate) fn settle(plan: Plan, result: Result<SyncReport, String>, drive_error: Option<anyhow::Error>) -> Result<SyncReport, String> {
+  let mut report = result?;
+  let Some(error) = drive_error else {
+    return Ok(report);
+  };
+  match (plan, drive::unavailable(&error)) {
+    (Plan::SignedIn { .. }, Some(kind)) => {
+      report.drive_unavailable = Some(kind);
+      Ok(report)
+    }
+    _ => Err(error.to_string())
+  }
+}
+
+/// Opens Drive for a run, or says why not. An automatic run (not `manual`)
+/// leaves a disabled client alone for a while (`drive::paused`) rather than
+/// asking Google again at every book closed; what Google refused is noted
+/// for the status, and cleared once Drive answers.
+async fn open_drive(db_mutex: &std::sync::Mutex<db::Database>, manual: bool) -> Result<drive::DriveCtx, anyhow::Error> {
+  let now = chrono::Utc::now();
+  if let Some(error) = drive_left_alone(&db_mutex.guard(), manual, now) {
+    return Err(error);
+  }
+  let opened = drive::open(db_mutex).await;
+  let db = db_mutex.guard();
+  match &opened {
+    Ok(_) => drive::clear_unavailable(&db)?,
+    Err(error) => {
+      if let Some(kind) = drive::unavailable(error) {
+        drive::note_unavailable(&db, kind, now)?;
+      }
+    }
+  }
+  opened
+}
+
+/// Drive is not asked this run: it is automatic, and Google disabled the
+/// client less than `drive::CLIENT_DISABLED_PAUSE_HOURS` ago. The error is
+/// the one Google gave then.
+fn drive_left_alone(db: &db::Database, manual: bool, now: chrono::DateTime<chrono::Utc>) -> Option<anyhow::Error> {
+  (!manual && drive::paused(db, now)).then(|| drive::DriveAuthError(drive::DriveUnavailable::ClientDisabled).into())
+}
+
 /// What a run starts from.
 struct Facts {
   folder_path: Option<String>,
@@ -597,7 +684,7 @@ impl Facts {
 /// One run: the account (signed in), the folder, then Drive, each as whose
 /// library this is allows (`execute`); then the board, for a library that is
 /// the account's own.
-pub(crate) async fn run_sync(state: &State<'_, AppState>) -> Result<SyncReport, String> {
+pub(crate) async fn run_sync(state: &State<'_, AppState>, manual: bool) -> Result<SyncReport, String> {
   // One run at a time. Connecting Drive fires a sync from the auth flow and
   // another from the status change; run together, both found no `state.json`
   // and both created one, leaving devices to drift across two copies. A caller
@@ -623,13 +710,13 @@ pub(crate) async fn run_sync(state: &State<'_, AppState>) -> Result<SyncReport, 
 
   let folder = folder_path.as_deref().map(FolderCarrier::at);
   // Drive that cannot be reached does not keep the rest from syncing; its
-  // failure is reported once the others have run.
+  // failure is reported once the others have run (`settle`).
   let mut drive_error = None;
   let drive_ctx = if drive_connected {
-    match drive::open(&state.db).await {
+    match open_drive(&state.db, manual).await {
       Ok(ctx) => Some(ctx),
       Err(error) => {
-        drive_error = Some(error.to_string());
+        drive_error = Some(error);
         None
       }
     }
@@ -661,10 +748,7 @@ pub(crate) async fn run_sync(state: &State<'_, AppState>) -> Result<SyncReport, 
     // library that is the account's own (`publish_profile`).
     let _ = publish_profile_after_sync(state).await;
   }
-  let report = report?;
-  if let Some(error) = drive_error {
-    return Err(error);
-  }
+  let report = settle(plan, report, drive_error)?;
   {
     let db = state.db.guard();
     db.set_setting(LAST_SYNCED_SETTING, &now).map_err(|e| e.to_string())?;
@@ -693,7 +777,23 @@ pub async fn library_fresh_answer(use_it: bool, app: AppHandle, state: State<'_,
     let db = state.db.guard();
     owner::set_fresh(&db, false).map_err(|e| e.to_string())?;
   }
-  sync_now(app, state).await
+  sync_now(app, None, state).await
+}
+
+/// The reader's answer for a Drive or sync folder that holds a library from
+/// before owners (`SyncReport::store_holds`): bring it into this library
+/// (`use_it`), which claims it for the account; or keep it apart, which
+/// leaves its reading as it is and uses it for this library's book files
+/// only. Kept until the Drive is disconnected or the folder changed. Then a
+/// sync.
+#[tauri::command]
+pub async fn library_store_answer(transport: Transport, use_it: bool, app: AppHandle, state: State<'_, AppState>) -> Result<SyncReport, String> {
+  {
+    let _running = state.sync_lock.lock().await;
+    let db = state.db.guard();
+    owner::set_claim_answer(&db, transport, Some(use_it)).map_err(|e| e.to_string())?;
+  }
+  sync_now(app, None, state).await
 }
 
 #[cfg(test)]
@@ -890,8 +990,18 @@ mod tests {
 
     let (laptop, cloud) = (Device::new(), FakeCloud::default());
     laptop.add("aaa");
+    // It holds a library from before owners: asked first (sync audit W1).
+    // The account syncs; nothing of the Drive's is taken, nor its files touched.
+    let asked = laptop.run("2026-10-14T19:59:00+00:00", Some(A), Some(&cloud), &[&drive]).await.expect("sync");
+    assert_eq!(asked.store_holds, Some(SyncStoreHolds { transport: Transport::Drive, books: 1 }));
+    assert_eq!(laptop.books(), vec!["aaa".to_string()]);
+    assert_eq!(drive.drive.mark(), None);
+    assert_eq!(drive.deletes(), Vec::<bool>::new());
+    assert_eq!(cloud.pushes(), 1);
+    // "Use it".
+    owner::set_claim_answer(&laptop.db.guard(), Transport::Drive, Some(true)).expect("answered");
     laptop.run("2026-10-14T20:00:00+00:00", Some(A), Some(&cloud), &[&drive]).await.expect("sync");
-    assert_eq!(cloud.pushes(), 2, "the account, then what Drive brought");
+    assert_eq!(cloud.pushes(), 2, "then what Drive brought");
     let held = cloud.doc().expect("held");
     let mut ids: Vec<&str> = held.books.iter().map(|b| b.id.as_str()).collect();
     ids.sort();
@@ -970,6 +1080,167 @@ mod tests {
     assert_eq!(drive.deletes(), vec![true]);
   }
 
+  /// The owner's Drive client, 2026-10-22: Google disabled it ("Error 401:
+  /// disabled_client"), and every run read "Couldn't sync since ...",
+  /// though the account had synced the reading each time. Signed in, a run
+  /// whose account synced is a success that says Drive is unavailable.
+  #[tokio::test]
+  async fn signed_in_a_disabled_drive_client_leaves_the_run_synced_and_says_so() {
+    use crate::sync::drive::{DriveAuthError, DriveUnavailable};
+    let (laptop, cloud) = (Device::owned_by(A), FakeCloud::default());
+    laptop.read(DAY, 10.0);
+    let plan = Plan::SignedIn { adopting: false };
+    // `run_sync` with Drive connected and `drive::open` refused: no Drive carrier.
+    let run = laptop.run("2026-10-22T09:00:00+00:00", Some(A), Some(&cloud), &[]).await;
+    let report = settle(plan, run, Some(DriveAuthError(DriveUnavailable::ClientDisabled).into())).expect("synced");
+    assert_eq!(report.drive_unavailable, Some(DriveUnavailable::ClientDisabled));
+    assert_eq!(cloud.doc().expect("the account holds the reading").days.len(), 1);
+
+    let run = laptop.run("2026-10-22T09:01:00+00:00", Some(A), Some(&cloud), &[]).await;
+    let report = settle(plan, run, Some(DriveAuthError(DriveUnavailable::Reconnect).into())).expect("synced");
+    assert_eq!(report.drive_unavailable, Some(DriveUnavailable::Reconnect));
+
+    // Drive failing otherwise (offline) is still a failure.
+    let run = laptop.run("2026-10-22T09:02:00+00:00", Some(A), Some(&cloud), &[]).await;
+    let error = settle(plan, run, Some(anyhow::anyhow!("Could not reach Drive: timed out"))).expect_err("offline");
+    assert!(error.contains("Could not reach Drive"), "{error}");
+
+    // And the account failing is the run failing, whatever Drive did.
+    let failing = FakeCloud::failing();
+    let run = laptop.run("2026-10-22T09:03:00+00:00", Some(A), Some(&failing), &[]).await;
+    assert!(settle(plan, run, Some(DriveAuthError(DriveUnavailable::ClientDisabled).into())).is_err());
+
+    // With Drive fine, nothing is flagged.
+    let run = laptop.run("2026-10-22T09:04:00+00:00", Some(A), Some(&cloud), &[]).await;
+    assert_eq!(settle(plan, run, None).expect("synced").drive_unavailable, None);
+  }
+
+  /// Signed out, Drive carries the reading itself: a disabled client is a
+  /// failed sync, in words that say what happened.
+  #[tokio::test]
+  async fn signed_out_a_disabled_drive_client_is_an_error() {
+    use crate::sync::drive::{DriveAuthError, DriveUnavailable};
+    // A sync folder beside Drive syncs; Drive's refusal still fails the run.
+    let root = std::env::temp_dir().join("leaflet-backup-test-drive-disabled");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("dir");
+    let folder = FolderCarrier::at(root.to_str().expect("path"));
+    let phone = Device::new();
+    phone.read(DAY, 10.0);
+    let run = phone.run("2026-10-22T09:00:00+00:00", None, None, &[&folder]).await;
+    assert!(run.is_ok(), "the folder synced: {run:?}");
+    let error = settle(Plan::SignedOut, run, Some(DriveAuthError(DriveUnavailable::ClientDisabled).into())).expect_err("signed out");
+    assert_eq!(error, "Google Drive is unavailable right now.");
+    let error = settle(Plan::SignedOut, Ok(SyncReport::default()), Some(DriveAuthError(DriveUnavailable::Reconnect).into())).expect_err("signed out");
+    assert!(error.contains("Reconnect Google Drive"), "{error}");
+    let _ = std::fs::remove_dir_all(&root);
+  }
+
+  /// An automatic run leaves a disabled client alone for six hours; one the
+  /// reader asks for (Sync now) tries Google again (`open_drive`).
+  #[test]
+  fn automatic_runs_leave_a_disabled_drive_client_alone() {
+    use crate::sync::drive::{self, DriveUnavailable};
+    let db = memory_db();
+    let at = chrono::DateTime::parse_from_rfc3339("2026-10-22T09:00:00+00:00").unwrap().with_timezone(&chrono::Utc);
+    assert!(drive_left_alone(&db, false, at).is_none(), "nothing refused yet");
+    drive::note_unavailable(&db, DriveUnavailable::ClientDisabled, at).expect("noted");
+    let error = drive_left_alone(&db, false, at + chrono::Duration::hours(1)).expect("left alone");
+    assert_eq!(drive::unavailable(&error), Some(DriveUnavailable::ClientDisabled));
+    assert!(drive_left_alone(&db, true, at + chrono::Duration::hours(1)).is_none(), "Sync now still tries");
+    assert!(drive_left_alone(&db, false, at + chrono::Duration::hours(6)).is_none(), "and after six hours, any run");
+    // A reconnect is not waited out: it is the reader's to fix.
+    drive::note_unavailable(&db, DriveUnavailable::Reconnect, at).expect("noted");
+    assert!(drive_left_alone(&db, false, at).is_none());
+  }
+
+  /// The owner's laptop, from 2026-10-20: every run ended "Another device is
+  /// syncing right now", with no other device syncing. A day's minutes are a
+  /// sum of fractions (9.748933333333333 on 29 September); JSON read back
+  /// from Drive's `state.json` gave 9.748933333333332, a step short, so the
+  /// check after the write never found what was sent, and the round ran four
+  /// times and gave up. (The account had synced first; it was only sent the
+  /// same document again at every sync, for the same reason.)
+  #[tokio::test]
+  async fn minutes_that_json_does_not_write_round_still_sync_with_drive_once() {
+    let (laptop, cloud, drive) = (Device::owned_by(A), FakeCloud::default(), FakeDriveCarrier::default());
+    laptop.read("2026-09-29", 9.748933333333333);
+    laptop.run("2026-10-21T11:21:41+00:00", Some(A), Some(&cloud), &[&drive]).await.expect("a run with Drive bridged");
+    assert_eq!((drive.drive.writes(), drive.drive.conflicts()), (1, 0));
+    assert_eq!(cloud.pushes(), 1);
+    assert_eq!(drive.drive.doc().expect("bridged").days[0].minutes, 9.748933333333333);
+
+    // Nothing read since: neither is sent anything.
+    laptop.run("2026-10-21T11:30:00+00:00", Some(A), Some(&cloud), &[&drive]).await.expect("again");
+    assert_eq!(drive.drive.writes(), 1, "nothing new for Drive");
+    assert_eq!(cloud.pushes(), 1, "nor for the account");
+  }
+
+  /// A run whose write to the account loses one race (the phone wrote
+  /// between this device's read and its write) merges over the phone's and
+  /// succeeds: both devices' reading is on the account and here.
+  #[tokio::test]
+  async fn an_account_sync_that_loses_one_race_merges_again_and_succeeds() {
+    let (laptop, phone, cloud) = (Device::owned_by(A), Device::owned_by(A), FakeCloud::default());
+    laptop.read(DAY, 10.0);
+    laptop.run("2026-10-14T09:00:00+00:00", Some(A), Some(&cloud), &[]).await.expect("first");
+    phone.read(DAY, 25.0);
+    let theirs = {
+      let local = crate::sync::store::snapshot(&phone.db.guard(), "2026-10-14T09:05:00+00:00").expect("snapshot");
+      crate::sync::merge::merge(&local, &cloud.doc().expect("held"), "2026-10-14T09:05:00+00:00")
+    };
+    cloud.sneak_in(&theirs);
+    laptop.read(DAY, 5.0);
+    laptop.run("2026-10-14T09:06:00+00:00", Some(A), Some(&cloud), &[]).await.expect("one lost race, then kept");
+    assert_eq!(laptop.minutes(DAY), 40.0, "the laptop's 15 and the phone's 25");
+    assert_eq!(cloud.doc().expect("held").days[0].minutes, 40.0);
+  }
+
+  /// The owner's book on 2026-10-21. The phone had read on past 70 % (72
+  /// here) and the account carried it to the laptop; the laptop opened the
+  /// book at its own older 54 % and saved that as the newest place, and the
+  /// account was sent back to it. Opening at this device's own place is
+  /// right (the phone's is offered, not taken), but standing there is not a
+  /// move: only reading on from it is.
+  #[tokio::test]
+  async fn a_device_opening_at_its_own_older_place_never_drags_the_other_back() {
+    let (laptop, phone, cloud) = (Device::owned_by(A), Device::owned_by(A), FakeCloud::default());
+    let (at54, at55, at72) = ("epubcfi(/6/178!/4/2/2/4/1:287)", "epubcfi(/6/178!/4/2/2/30/1:0)", "epubcfi(/6/230!/4/2/1:0)");
+    let place = |device: &Device, progress: f32, cfi: Option<&str>| {
+      device.db.guard().update_progress("well", progress, Some(db::now_iso()), cfi.map(str::to_string)).expect("a save");
+    };
+    let agreed = |device: &Device| {
+      let book = device.db.guard().find_by_id("well").expect("query").expect("listed");
+      (book.progress, book.position)
+    };
+    laptop.add("well");
+    place(&laptop, 0.54, Some(at54));
+    laptop.run("2026-10-19T09:41:29+00:00", Some(A), Some(&cloud), &[]).await.expect("laptop");
+    phone.run("2026-10-19T10:00:00+00:00", Some(A), Some(&cloud), &[]).await.expect("phone takes the book in");
+    place(&phone, 0.72, Some(at72));
+    phone.run("2026-10-21T10:00:00+00:00", Some(A), Some(&cloud), &[]).await.expect("phone");
+    laptop.run("2026-10-21T11:17:00+00:00", Some(A), Some(&cloud), &[]).await.expect("laptop takes the phone's place in");
+    assert_eq!(agreed(&laptop), (0.72, Some(at72.to_string())));
+
+    // The laptop opens at its own place: the open (no position), then the
+    // reader's first saves of where it stands, then closing unread.
+    place(&laptop, 0.54, None);
+    place(&laptop, 0.54, Some(at54));
+    place(&laptop, 0.54, None);
+    assert_eq!(agreed(&laptop), (0.72, Some(at72.to_string())), "the agreed place is not moved by standing still");
+    assert_eq!(laptop.db.guard().place_here("well").expect("place"), Some((0.54, Some(at54.to_string()))));
+    laptop.run("2026-10-21T11:21:41+00:00", Some(A), Some(&cloud), &[]).await.expect("laptop");
+    phone.run("2026-10-21T11:30:00+00:00", Some(A), Some(&cloud), &[]).await.expect("phone");
+    let on_account = cloud.doc().expect("held").books.into_iter().find(|book| book.id == "well").expect("the book");
+    assert_eq!(on_account.progress, 0.72);
+    assert_eq!(agreed(&phone), (0.72, Some(at72.to_string())), "the phone keeps its place");
+
+    // Reading on from the laptop's own place is the reader's choice, and is a move.
+    place(&laptop, 0.55, Some(at55));
+    laptop.run("2026-10-21T12:00:00+00:00", Some(A), Some(&cloud), &[]).await.expect("laptop read on");
+    assert_eq!(agreed(&laptop), (0.55, Some(at55.to_string())));
+  }
+
   /// Two devices, two accounts, one Drive nobody had claimed, at the same
   /// moment. B's write is refused (A's landed first); B reads again, finds
   /// it taken, and goes on with files only. B's account took nothing of A's,
@@ -993,6 +1264,8 @@ mod tests {
       doc
     };
     drive.drive.sneak_in_marked(serde_json::to_vec(&claimed).expect("json"), A);
+    // (Y's reader has said to bring the Drive's library in.)
+    owner::set_claim_answer(&y.db.guard(), Transport::Drive, Some(true)).expect("answered");
     y.run("2026-10-14T09:00:01+00:00", Some(B), Some(&cloud_b), &[&drive]).await.expect("sync");
 
     assert_eq!(drive.drive.conflicts(), 1);
@@ -1010,6 +1283,32 @@ mod tests {
     assert_eq!(x.owner().as_deref(), Some(A));
     let a_held = cloud_a.doc().expect("A's account");
     assert!(a_held.books.iter().all(|b| b.id != "bbb"));
+  }
+
+  /// "Keep it apart": a Drive from before owners the reader chose not to
+  /// bring in carries this library's book files, and its reading is left
+  /// as it is, never asked about again until the Drive is disconnected.
+  #[tokio::test]
+  async fn a_drive_kept_apart_carries_files_only_and_is_not_asked_again() {
+    let drive = FakeDriveCarrier::default();
+    let family = Device::new();
+    family.add("theirs");
+    crate::sync::shared_doc::sync(&family.db, &drive.drive, "2026-10-13T09:00:00+00:00", &Who::signed_out()).await.expect("seed");
+    let before = drive.drive.raw();
+
+    let (laptop, cloud) = (Device::new(), FakeCloud::default());
+    laptop.add("mine");
+    owner::set_claim_answer(&laptop.db.guard(), Transport::Drive, Some(false)).expect("kept apart");
+    for at in ["2026-10-14T20:00:00+00:00", "2026-10-14T21:00:00+00:00"] {
+      let report = laptop.run(at, Some(A), Some(&cloud), &[&drive]).await.expect("sync");
+      assert_eq!(report.store_holds, None);
+    }
+    assert_eq!(drive.drive.raw(), before, "its reading untouched");
+    assert_eq!(laptop.books(), vec!["mine".to_string()]);
+    assert_eq!(drive.deletes(), vec![false, false], "files, and never a removal");
+    assert!(owner::files_only(&laptop.db.guard(), Transport::Drive));
+    forget_store(&laptop.db.guard(), Transport::Drive).expect("disconnected");
+    assert_eq!(owner::claim_answer(&laptop.db.guard(), Transport::Drive), None);
   }
 
   /// A fresh library's first account sync asks before taking in a copy from

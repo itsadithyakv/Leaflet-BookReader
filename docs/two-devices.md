@@ -203,8 +203,29 @@ by `update_progress` and never by a sync. On opening, after the pull:
   "Your other device is further on: Chapter 14 · 62%. Go there / Stay here"
   (`services/placeElsewhere.ts`, `components/sync/FurtherOnOffer.tsx`).
 
-Opening at this device's place writes it as the newest place (as reading on
-does); "Go there" moves the reader, which then saves the other.
+Opening at this device's place does not make it the newest place: standing
+at one's own old place is not reading (`db::update_progress` counts a move
+only from both the row and `places_here`), so the other device's place stays
+the agreed one, and stays offered, until the reader reads on here or goes
+there. (Until 2026-10-21 it did, and a laptop opening at its old 54 % sent the
+account back from the phone's 70 % and more.) "Go there" moves the reader,
+which then saves the other.
+
+## What a device publishes
+
+Every device of an account writes the one public profile (reading now, this
+week's minutes, streak, books finished, the shared library), and the server
+keeps whichever came last. So a device publishes only figures that are the
+account's (`commands::social::figures_current`, 1.5.11): within five minutes
+of an account sync that merged the account's state in (`cloud_account_merged`,
+written by `cloud::sync_with`), or, up to six hours after one, once it has
+read since (its own minutes on the ledger have risen), which is news the
+account does not have yet. A publish held back goes with the publish after
+the next sync. Until 1.5.11 a laptop launched after a day away published its
+old figures before its first sync ("Reading … 89 %" over the phone's 99 %),
+and the phone, remembering its own as sent, did not send them again for six
+hours. The fingerprints of what was sent are salted (`SENT_PRINT_SALT`), so
+every device sends its figures and its library once more after the update.
 
 ## The test
 

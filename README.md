@@ -35,10 +35,11 @@ Website, privacy policy and terms: https://itsadithyakv.github.io/Leaflet-BookRe
   leaderboards, follows, kudos, reading duels, friend raids and keeping your
   place across devices. Nothing else needs an account, and the account can be
   deleted from the app.
-- **Looks.** A Liquid Glass look on desktop (soft blur at scroll edges, glass
-  that bends what is behind it). Phones default to Smooth, the same look
-  without live blur; Settings > Appearance > Visual effects switches between
-  Full, Smooth and a plain minimal mode.
+- **Looks.** Smooth by default everywhere: no live blur. On a computer that is
+  the leather sidebar rail and paper toolbar; on a phone, the glass shapes
+  without blur. Full (Liquid Glass: soft blur at scroll edges, glass that bends
+  what is behind it, Mica on Windows 11) is a choice in Settings > Appearance >
+  Visual effects, beside Smooth and Auto.
 
 ### Coming in 1.5.11
 

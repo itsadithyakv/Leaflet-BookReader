@@ -14,7 +14,7 @@ pub fn log_client_error(message: String) {
 /// A plain-text report for Settings → "Copy diagnostics": versions, where the
 /// data lives, what is switched on, and the end of the log. No tokens, emails
 /// or book contents; file paths and error messages may name book files.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn diagnostics(state: State<'_, AppState>) -> Result<String, String> {
   let db = state.db.guard();
   let books = db.list_books().map(|books| books.len()).unwrap_or(0);
@@ -206,7 +206,7 @@ pub(crate) fn problem_body(
 
 /// The diagnostics exactly as a problem report would send them, for the sheet
 /// to show before it is sent.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn problem_diagnostics(state: State<'_, AppState>) -> Result<String, String> {
   let home = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")).unwrap_or_default();
   diagnostics(state).map(|report| fit_diagnostics(&without_home(&report, &home)))

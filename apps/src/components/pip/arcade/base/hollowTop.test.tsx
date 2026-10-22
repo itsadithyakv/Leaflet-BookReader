@@ -83,9 +83,10 @@ describe("the dock", () => {
 });
 
 describe("the guide behind the (i)", () => {
-  it("is seven pages of three lines at most, and does not speak of prowlers before their chapter as if they were here", () => {
+  it("is eight pages of three lines at most, and does not speak of prowlers (or the meadow) before their chapter as if they were here", () => {
     const pages = pagesOf(newBase(0, "2026-10-21"), 0);
-    expect(pages.map((page) => page.id)).toEqual(["acorns", "chapters", "buildings", "prowlers", "raids", "heroes", "friends"]);
+    expect(pages.map((page) => page.id)).toEqual(["acorns", "chapters", "buildings", "prowlers", "raids", "heroes", "meadow", "friends"]);
+    expect(pages.find((page) => page.id === "meadow")?.locked).toBe("Chapter 7");
     expect(pages.every((page) => page.lines.length <= 3)).toBe(true);
     expect(pages.find((page) => page.id === "prowlers")?.locked).toBe("Chapter 3");
     expect(pagesOf(newBase(4 * 60, "2026-10-21"), 4 * 60).find((page) => page.id === "prowlers")?.locked).toBeUndefined();

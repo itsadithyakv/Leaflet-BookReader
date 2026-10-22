@@ -114,7 +114,8 @@ const BLANK: Slots = {
   run: 0,
   sessions: 0,
   percent: 0,
-  nod: ""
+  nod: "",
+  friend: ""
 };
 
 const leadKind = (facts: DayFacts, today: boolean): LeadKind => {
@@ -177,9 +178,25 @@ export const entryFor = (
   const parts: EntryPart[] = [write(kind, LEADS[kind], base)];
   const aside = (asideKind: AsideKind, slots: Partial<Slots> = {}) => write(asideKind, ASIDES[asideKind], { ...base, ...slots });
 
+  // A friend's Pip came round, and the two did something together: a line of its own, last (whatever else the day was).
+  const company = (): EntryPart | null => {
+    const played = facts.company ?? [];
+    if (played.length === 0) {
+      return null;
+    }
+    // The liveliest thing done, with the first friend who did it.
+    const rank = ["ball", "chase", "dance", "highfive"] as const;
+    const best = [...played].sort((a, b) => rank.indexOf(a.kind) - rank.indexOf(b.kind))[0];
+    return aside(best.kind, { friend: `@${best.handle}` });
+  };
+
   if (!facts.read) {
     if (facts.covered && !today) {
       parts.push(aside(facts.covered));
+    }
+    const friend = company();
+    if (friend) {
+      parts.push(friend);
     }
     return { dateKey: facts.dateKey, kind, rest: true, parts, text: parts.map((part) => part.text).join(" ") };
   }
@@ -238,6 +255,10 @@ export const entryFor = (
     if (about.length > 0) {
       parts.push(pickOf(about, "about")());
     }
+  }
+  const friend = company();
+  if (friend) {
+    parts.push(friend);
   }
 
   return { dateKey: facts.dateKey, kind, rest: false, parts, text: parts.map((part) => part.text).join(" ") };

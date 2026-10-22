@@ -1905,3 +1905,78 @@
   color: #fff2c8;
   box-shadow: 0 0 0 2px var(--whim-butter);
 }
+
+/* ==== 1.5.11: your reading, made visible (the meadow work) ==== */
+
+/* Arriving after reading: the reading's pages up the path (collect.tsx PageTrails). The page and its flutter frame
+   are stacked in one cell, and only their opacity changes; the trail itself moves by transform alone. */
+.pip-page-trail > .pip-sprite {
+  grid-area: 1 / 1;
+  opacity: 0;
+}
+
+/* The chapter card's "Since you were last here": icon rows, numbers only behind the card's tap. */
+.pip-chapter-since {
+  display: grid;
+  gap: 2px;
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  background: var(--whim-butter-soft, rgba(255, 226, 140, 0.25));
+  font-size: 0.75rem;
+  line-height: 1.35;
+  box-shadow: 0 0 0 2px var(--hud-line);
+}
+
+.pip-chapter-since-title {
+  margin: 0 0 2px;
+  font-size: 0.625rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pip-chapter-since-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
+/* The animals card's hearts: three small ones, the earned ones red. */
+.pip-animal-hearts {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.pip-animal-heart {
+  width: 9px;
+  height: 8px;
+  background: #e8303c;
+  clip-path: polygon(50% 100%, 0 40%, 0 15%, 25% 0, 50% 18%, 75% 0, 100% 15%, 100% 40%);
+}
+
+.pip-animal-heart.is-empty {
+  background: var(--hud-line);
+  opacity: 0.45;
+}
+
+/* The Blooms list (the meadow's dock): a row a finished book. */
+.pip-blooms-list {
+  display: grid;
+  gap: 4px;
+  max-height: 60vh;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.pip-blooms-list > li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 0.75rem;
+}

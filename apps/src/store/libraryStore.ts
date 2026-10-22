@@ -1,12 +1,13 @@
 import { create } from "zustand";
 import type { Book, BookFilter } from "@shared/models/book";
-import { EMPTY_SYNC_STATUS, SYNC_UPDATE_NEEDED, type DriveSyncStatus, type SyncReport, type SyncStatus } from "@shared/sync/types";
+import { EMPTY_SYNC_STATUS, SYNC_UPDATE_NEEDED, type DriveSyncStatus, type StoreHolds, type SyncReport, type SyncStatus } from "@shared/sync/types";
 import { bookService, type FinishedGone, type ImportOutcome } from "../services/bookService";
 import { syncService } from "../services/syncService";
 import { socialService } from "../services/socialService";
 import { finishedOn, hasFinished, isFinished } from "../constants/books";
 import { isStandInCover } from "../readers/pageCover";
 import { storyMoved } from "../pip/base/storyFeed";
+import { pushHold } from "../services/pushHold";
 
 const defaultFilters: BookFilter = {
   query: "",
@@ -45,6 +46,13 @@ type LibraryState = {
   accountHolds: number | null;
   /** The reader answered, or put the question away. */
   dismissAccountHolds: () => void;
+  /**
+   * Signed in, Drive or the sync folder holds a library from before accounts:
+   * which, and how many books, while the reader is asked whether to bring it
+   * in (components/sync/StoreHoldsSheet.tsx). Null when nothing is asked.
+   */
+  storeHolds: StoreHolds | null;
+  dismissStoreHolds: () => void;
   metadataTotal: number;
   metadataDone: number;
   syncStatus: DriveSyncStatus;
@@ -74,10 +82,15 @@ type LibraryState = {
   clearDriveCredentials: () => Promise<void>;
   setSyncFolder: (path: string | null) => Promise<void>;
   setCloudApi: (url: string) => Promise<void>;
-  /** What the run did; rejects with the reason it failed. */
-  syncNow: () => Promise<SyncReport>;
-  /** Backs up soon, coalescing with any other change that lands meanwhile. */
-  requestBackup: () => void;
+  /** What the run did; rejects with the reason it failed. `manual`: the reader pressed Sync now. */
+  syncNow: (options?: { manual?: boolean }) => Promise<SyncReport>;
+  /**
+   * Backs up soon, coalescing with any other change that lands meanwhile.
+   * `whileReading`: a highlight, a note or the like, which waits while a book
+   * is open (services/pushHold) and goes when it closes, the app is hidden, or
+   * five minutes on.
+   */
+  requestBackup: (options?: { whileReading?: boolean }) => void;
   ensureBookFile: (book: Book) => Promise<Book>;
   deleteBook: (id: string) => Promise<void>;
   refreshMissingMetadata: (books?: Book[]) => Promise<void>;
@@ -129,6 +142,10 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   accountHolds: null,
   dismissAccountHolds() {
     set({ accountHolds: null });
+  },
+  storeHolds: null,
+  dismissStoreHolds() {
+    set({ storeHolds: null });
   },
   metadataTotal: 0,
   metadataDone: 0,
@@ -326,13 +343,18 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       await get().syncNow();
     }
   },
-  requestBackup() {
+  requestBackup(options) {
+    if (options?.whileReading && pushHold.hold(() => get().requestBackup())) {
+      return;
+    }
     scheduleSync(set, get);
   },
-  async syncNow() {
+  async syncNow(options) {
+    // This run carries whatever waited (services/pushHold).
+    pushHold.carried();
     set({ syncStatus: "syncing", syncError: null });
     try {
-      const report = await syncService.syncNow();
+      const report = await syncService.syncNow(options?.manual ?? false);
       // Sync can add, remove and re-position books, so the library is re-read
       // rather than patched: guessing which rows changed is how the two views
       // drift apart.
@@ -344,6 +366,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       // A fresh library, and the account held a library from before: nothing
       // was merged, and the reader is asked (AccountHoldsSheet).
       if (typeof report.accountHolds === "number") set({ syncStatus: "idle", accountHolds: report.accountHolds });
+      // Drive or the folder holds a library from before accounts: nothing of
+      // it was taken, and the reader is asked (StoreHoldsSheet). The rest synced.
+      if (report.storeHolds) set({ storeHolds: report.storeHolds });
       // A newer Leaflet wrote the library: what it holds has arrived, and
       // nothing of this device's went up. Said where a failed sync is said.
       if (report.updateNeeded) set({ syncStatus: "error", syncError: SYNC_UPDATE_NEEDED });
@@ -353,7 +378,13 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       return report;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      set({ syncStatus: "error", syncError: message });
+      // A run can fail part-way after it has already brought another
+      // device's reading in (the account goes first, Drive after), so the
+      // library is re-read all the same. Without it this device went on
+      // showing, and opening books at, places the database had moved on from
+      // (the owner's laptop, 2026-10-21: 54 % shown, the phone past 70 %).
+      const reread = await Promise.all([bookService.list(), syncService.status()]).catch(() => null);
+      set({ ...(reread ? { books: reread[0], sync: reread[1] } : {}), syncStatus: "error", syncError: message });
       throw error;
     }
   },
@@ -450,6 +481,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       lookupTried: {},
       largeHeld: 0,
       accountHolds: null,
+      storeHolds: null,
       metadataTotal: 0,
       metadataDone: 0,
       syncStatus: "idle",

@@ -786,12 +786,12 @@ pub(crate) fn save_base(db: &db::Database, base: &str, now: &str) -> Result<(), 
 }
 
 /// The kept camp as it was saved, or nothing before the first.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pip_base_load(state: State<'_, AppState>) -> Result<Option<String>, String> {
   state.db.guard().get_setting(BASE_SETTING).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pip_base_save(base: String, state: State<'_, AppState>) -> Result<(), String> {
   save_base(&state.db.guard(), &base, &db::now_iso())
 }

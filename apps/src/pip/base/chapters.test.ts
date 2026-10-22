@@ -258,7 +258,7 @@ describe("a camp begun on chapters", () => {
     const done = { ...read(newBase(0, DAY), chapterStartsAt(3) + 40), goals: GOALS.map((goal) => goal.id) };
     expect(barLine(done).text).toBe("Read 2 h 20 m: chapter 4 brings the fence");
     const far = { ...read(newBase(0, DAY), chapterStartsAt(10)), goals: GOALS.map((goal) => goal.id) };
-    expect(barLine(far).text).toBe("Read 15 h: volume 1 brings a volume stone");
+    expect(barLine(far).text).toBe("Read 15 h: volume 1 brings a standing stone");
   });
 
   it("counts a prowler seen off, for its goal", () => {

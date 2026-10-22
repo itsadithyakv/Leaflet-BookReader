@@ -34,11 +34,13 @@ import { clothStyle } from "./components/shelf/spine";
 import { LibraryPage } from "./pages/LibraryPage";
 import { useLibraryStore } from "./store/libraryStore";
 import { watchSyncMoments } from "./services/syncTiming";
+import { pushHold } from "./services/pushHold";
 import { placeChecked, withPlaceHere } from "./services/placeElsewhere";
 import { useAccountStore } from "./store/accountStore";
 import { connectLibraryOwner, useLibraryOwnerStore } from "./store/libraryOwnerStore";
 import { LibraryOwnerSheet } from "./components/sync/LibraryOwnerSheet";
 import { AccountHoldsSheet } from "./components/sync/AccountHoldsSheet";
+import { StoreHoldsSheet } from "./components/sync/StoreHoldsSheet";
 import { OWNER_COPY } from "./components/sync/ownerCopy";
 import { FEATURES } from "./constants/features";
 import { ALIVE_EVERY_MS, AWAY_FREE_MS, flowerGrowing, useHabitStore } from "./store/habitStore";
@@ -367,6 +369,8 @@ const App = () => {
     noteBookClosed();
     setSelected(null);
     setOpenAt(null);
+    // Highlights and notes made while it was open waited for this (services/pushHold).
+    pushHold.setReading(false);
     requestBackup();
     // Highlights made or removed while reading show in the library's counts.
     void useHighlightsStore.getState().loadCounts();
@@ -472,6 +476,7 @@ const App = () => {
       showBookNod(book);
     }
     noteBookOpened();
+    pushHold.setReading(true);
     setSelected(book);
     setOpenAt(at);
     // A session started on no book is of the one now opened.
@@ -796,7 +801,10 @@ const App = () => {
       // The account panel is anchored to the header, so sliding the header away
       // would take the panel with it.
       // Set only when it changes: this runs on every scroll event, and App is the whole shell.
-      const hide = !accountPanelOpen && top > previous && top > 72;
+      // Only where the header floats over the page (a phone's shapes): beside the rail it never
+      // moves, and the shell drawn again at each turn of the wheel was work for nothing.
+      const floats = document.documentElement.dataset.shape !== "wide";
+      const hide = floats && !accountPanelOpen && top > previous && top > 72;
       if (hide !== headerHiddenRef.current) {
         headerHiddenRef.current = hide;
         setHeaderHidden(hide);
@@ -935,7 +943,7 @@ const App = () => {
       showToast("Connect Google Drive in Settings to back up your library.");
       return;
     }
-    syncNow()
+    syncNow({ manual: true })
       .then((report) => {
         if (report.ownerPaused) {
           showToast(OWNER_COPY.pausedToast);
@@ -999,6 +1007,10 @@ const App = () => {
       startSession({ startedAt: new Date().toISOString(), durationMinutes: minutes });
     }
   };
+  // The same, with one identity for the Library (memoised: it is not drawn again with the shell).
+  const startFocusRef = useRef(startFocus);
+  startFocusRef.current = startFocus;
+  const startFocusFromLibrary = useCallback((minutes?: number) => startFocusRef.current(minutes), []);
 
   // A clicked reading reminder: pick up the last book, once the library has
   // loaded (a click can be what launched the app). Never over an open book.
@@ -1318,7 +1330,7 @@ const App = () => {
               onOpenBook={openBookFromLibrary}
               onNavigate={setActiveTab}
               showToast={showToast}
-              onStartFocus={startFocus}
+              onStartFocus={startFocusFromLibrary}
             />
           )}
           <Suspense fallback={null}>
@@ -1636,6 +1648,7 @@ const App = () => {
       <AccountDialog showToast={showToast} />
       <LibraryOwnerSheet />
       <AccountHoldsSheet />
+      <StoreHoldsSheet />
       {/* A held finger reads any tooltip (docs/android.md, rule 3). */}
       {touch && <TouchTips />}
       {/* The lenses every liquid-glass surface bends what is behind it through. */}

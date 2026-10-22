@@ -1,4 +1,4 @@
-import type { MutableRefObject, ReactNode, Ref } from "react";
+import { useEffect, useRef, type MutableRefObject, type ReactNode, type Ref } from "react";
 import { ChevronRight, Info, Package } from "lucide-react";
 import { Sprite } from "./Sprite";
 import { AcornCount, AcornTrails, type AcornCue, type AcornTrailsHandle } from "./collect";
@@ -51,6 +51,11 @@ type HollowTopProps = {
   night?: ReactNode;
   /** Under the bar: a chip's card, and what Pip has to say. */
   children?: ReactNode;
+  /**
+   * (1.5.11) Arriving after reading: the bar's fill as the arrival has it, in whole CSS pixels at `t` ms from `start`
+   * (`arrival.ts` `barFillAt`), until `until`; after that, and without it, the fill is where the reading has it.
+   */
+  fillFrom?: { at: (t: number) => number; start: number; until: number } | null;
 };
 
 /**
@@ -81,13 +86,14 @@ export const HollowTop = ({
   onHouse,
   nav,
   night,
-  children
+  children,
+  fillFrom = null
 }: HollowTopProps) => (
   <div className="pip-base-head">
     <div className="pip-base-head-left">
       <p className="pip-base-stats pip-hollow-top">
         <HollowMenu sound={sound} onSound={onSound} onPostcard={onPostcard} onArcade={onArcade} onHouse={onHouse} nav={nav} />
-        {chapter && !chapterHidden && <ChapterBar chapter={chapter} open={chapterOpen} onOpen={onChapter} />}
+        {chapter && !chapterHidden && <ChapterBar chapter={chapter} open={chapterOpen} onOpen={onChapter} fillFrom={fillFrom} />}
         {/* The Hollow's one money: plain, a count and no pill (the berry pill is for what waits). */}
         <button
           type="button"
@@ -145,8 +151,32 @@ export const HollowTop = ({
 const BAR_W = 44;
 
 /** "Ch 4 [▰▰▰▱▱] 6 h 20 m / 10 h · Next: Lay 3 pieces of fence ›": one chip, and a tap on it is the chapter's card. */
-const ChapterBar = ({ chapter, open, onOpen }: { chapter: ChapterChip; open: boolean; onOpen: () => void }) => {
+const ChapterBar = ({ chapter, open, onOpen, fillFrom }: { chapter: ChapterChip; open: boolean; onOpen: () => void; fillFrom: HollowTopProps["fillFrom"] }) => {
   const fill = fillOf(chapter.part, BAR_W);
+  const fillRef = useRef<HTMLSpanElement | null>(null);
+  // Arriving: the fill steps up (in whole pixels) as the arrival says, by its own loop of frames, not by renders.
+  useEffect(() => {
+    const node = fillRef.current;
+    if (!node || !fillFrom) return;
+    let frame = 0;
+    const step = (time: number) => {
+      if (time >= fillFrom.until) {
+        node.style.width = `${fill}px`;
+        return;
+      }
+      node.style.width = `${fillFrom.at(time - fillFrom.start)}px`;
+      frame = requestAnimationFrame(step);
+    };
+    node.style.width = `${fillFrom.at(performance.now() - fillFrom.start)}px`;
+    frame = requestAnimationFrame(step);
+    // Where frames are not painted (a hidden page), the fill is the right one soon after.
+    const sure = window.setTimeout(() => (node.style.width = `${fill}px`), Math.max(0, fillFrom.until - performance.now()) + 200);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(sure);
+      node.style.width = `${fill}px`;
+    };
+  }, [fillFrom, fill]);
   const where = chapter.volume ? `Volume ${chapter.volume}` : `Chapter ${chapter.n}`;
   const after = chapter.volume ? `volume ${chapter.volume + 1}` : `chapter ${chapter.n + 1}`;
   return (
@@ -163,7 +193,7 @@ const ChapterBar = ({ chapter, open, onOpen }: { chapter: ChapterChip; open: boo
         {chapter.volume ? `Vol ${chapter.volume}` : `Ch ${chapter.n}`}
       </span>
       <span className="pip-chapter-meter" aria-hidden="true" style={{ width: BAR_W }}>
-        <span className="pip-chapter-meter-fill" style={{ width: fill }} />
+        <span ref={fillRef} className="pip-chapter-meter-fill" style={{ width: fill }} />
       </span>
       <span className="pip-chapter-bar-hours" aria-hidden="true">
         {hoursText(chapter.read)}

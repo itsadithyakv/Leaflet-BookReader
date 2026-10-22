@@ -136,7 +136,8 @@ describe("the app's glass", () => {
       for (const match of body.matchAll(/--glass-border:\s*([^;]+);/g)) expect(match[1].trim()).toBe("transparent");
     }
     // The header over a phone's page is flush: no rounded corner, no shadow pooled under one.
-    expect(css).toMatch(/:root:where\(:is\(\[data-shape="upright"\], \[data-shape="sideways"\]\)\) \.app-header\.app-header \{\s*border-radius: 0;\s*box-shadow: none;/);
+    // (Standing aside, at no weight, for the desktop's leather: `html[data-look="leather"]`.)
+    expect(css).toMatch(/:root:where\(:is\(\[data-shape="upright"\], \[data-shape="sideways"\]\)\)(:where\(:not\(\[data-look="leather"\]\)\))? \.app-header\.app-header \{\s*border-radius: 0;\s*box-shadow: none;/);
   });
 
   it("paints no strip under Pip on a phone (she steps off words instead: pip/footing.ts)", async () => {

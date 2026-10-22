@@ -176,10 +176,14 @@ pub fn run() {
   dotenvy::dotenv().ok();
   let startup_paths = supported_book_paths(std::env::args().skip(1));
 
-  // The window's material (Mica on Windows 11), chosen before the window is
-  // made: only then can its webview be made see-through (`window_material.rs`).
-  let material = window_material::detect();
+  // The window's material (Mica on Windows 11, with the full visual effects
+  // only), chosen before the window is made: only then can its webview be made
+  // see-through (`window_material.rs`). The reader's choice is a file beside the
+  // library, where Tauri's app data folder is (the identifier under the
+  // platform's data folder); the resolver itself is not there yet.
   let mut context = tauri::generate_context!();
+  let data_dir = dirs::data_dir().map(|dir| dir.join(&context.config().identifier));
+  let material = window_material::detect(window_material::full_effects_chosen(data_dir.as_deref()));
   if material == window_material::Material::Mica {
     for window in context.config_mut().app.windows.iter_mut() {
       window.transparent = true;
@@ -329,6 +333,7 @@ pub fn run() {
     })
     .invoke_handler(tauri::generate_handler![
       window_material::window_material_theme,
+      window_material::window_material_effects,
       reminders::runtime::reminders_get,
       reminders::runtime::reminders_set,
       reminders::runtime::reminders_context,
@@ -370,6 +375,7 @@ pub fn run() {
       commands::sync_status,
       commands::sync_now,
       commands::library_fresh_answer,
+      commands::library_store_answer,
       commands::library_resolve,
       commands::library_open_mine,
       commands::library_start_fresh,

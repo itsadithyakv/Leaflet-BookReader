@@ -67,6 +67,7 @@ import {
   footOf,
   isBroken,
   TROPHY_MINUTES,
+  trophyBudget,
   trophyWaits,
   GATE_FROM,
   gateOf,
@@ -181,7 +182,9 @@ import { FoeFace, NightCard, NightChip } from "./NightCard";
 import { nightHeld } from "./wave";
 import { ANIMALS, BLADES, GUARDIANS, GUARD_MOST, SCENERY, WORKS, bladeSays, type Guardian } from "../../../../pip/base/guards";
 import { HEROES, heroWants } from "../../../../pip/base/heroes";
-import { TROPHY_KINDS, toRaise, trophyKind, trophyRow } from "../../../../pip/base/trophies";
+import { BLOOM_NAMES, TROPHY_KINDS, bloomsOf, budStage, toRaise, trophyKind, trophyRow } from "../../../../pip/base/trophies";
+import { FINERY_NAMES, FOND_DOES, HEARTS_MOST, HOME_NAMES, heartsOf, nextHeartIn } from "../../../../pip/base/fondness";
+import { stoneSays } from "../../../../pip/base/stones";
 import { tipNow } from "../../../../pip/base/tips";
 import { finishedOn, hasFinished } from "../../../../constants/books";
 import { FEATURES } from "../../../../constants/features";
@@ -212,7 +215,10 @@ import { MAP_COACH, coachDue, coachSteps } from "./mapCoach";
 import { siteBox } from "../../onboarding/geometry";
 import "./hollow.css";
 import { PipFace, Sprite } from "./Sprite";
-import { acornsSound, bumpCount, shakeFull, type AcornCue, type AcornTrailsHandle, type ClientPoint } from "./collect";
+import { PageTrails, acornsSound, clearOfCovers, bumpCount, shakeFull, type AcornCue, type AcornTrailsHandle, type ClientPoint, type PageSend, type PageTrailsHandle } from "./collect";
+import { ARRIVAL_MS, arrivalOf, barFillAt, firstLands, pageStarts, type Arrival } from "./arrival";
+import { hoursText } from "./chapterWords";
+import { currentTier } from "../../../../platform/perfTier";
 import { useBurrowDoor } from "../../onboarding/useBurrowDoor";
 import { busyFpsFor, runScene, sceneGate, untilNextArtFrame } from "../frameGate";
 import { ReplayTour } from "../../onboarding/ReplayTour";
@@ -231,6 +237,7 @@ import { STEP } from "../../onboarding/steps";
 import { useCoachStore } from "../../onboarding/coachStore";
 import { tutorialRunning } from "../../../../pip/base/ladder";
 import { levelBrings } from "../../../../pip/base/ladder";
+import { meadowTapAt } from "./scene";
 import { ART_FPS, AWAKE_SECONDS, GENRE_FOE, PROWLER_NAMES, NIGHT_FROM, nightAt, nightKinds, nightPlanOf, nightStart, walksAt, basketAtPoint, parcelAtPoint, trophyAtPoint, BANNERS_SHOWN, RESIDENTS_SHOWN, TROPHIES_SHOWN, animalAt, decorAt, duskAt, gardenAt, gardenSpot, guardAtPoint, postAtPoint, landAt, oakAcornAt, paintCamp, paintGround, paintSky, siteAt, workAt, type CampExtras, type CampLook } from "./scene";
 
 const prefersReducedMotion = () => {
@@ -305,7 +312,7 @@ const stars = (count: number, size = 14) => (
 
 type Tab = "camp" | "raids" | "journal";
 /** What the card under the picture is about: the chosen plot, who lives here, things to set down, a guardian, or the garden. */
-type Panel = "site" | "people" | "decor" | "guard" | "garden";
+type Panel = "site" | "people" | "decor" | "guard" | "garden" | "blooms";
 
 /**
  * The picture is the page. Where Pip's tab is at least this wide and tall,
@@ -406,6 +413,21 @@ const STIRRED_MS = 400;
 
 /** How far the camera's home leans to the left of the middle once the Dark Wood has a trail (1.5.11), in art pixels. */
 const TRAIL_LEAN = 16;
+/** (1.5.11) What came of the reading since the last arrival, in a sentence (the chapter card has it as rows). */
+const arrivalWords = (arrival: Arrival): string =>
+  [
+    `Since you were last here: ${hoursText(arrival.since.minutes)} read`,
+    arrival.since.oakFull ? "the oak is full" : arrival.since.oak > 0 ? `the oak has ${arrival.since.oak} more acorns waiting` : null,
+    arrival.since.raids > 0 ? `the scouts are rested for ${arrival.since.raids} more ${arrival.since.raids === 1 ? "raid" : "raids"}` : null,
+    `${hoursText(arrival.since.toChapter)} to the next chapter`,
+    arrival.since.toBloom > 0 ? `${hoursText(arrival.since.toBloom)} to your next bloom` : "your next bloom is ready"
+  ]
+    .filter(Boolean)
+    .join("; ") + ".";
+/** (1.5.11) Where the camera is centred, across the meadow, on a phone on its side. */
+const MEADOW_HOME_X = 132;
+/** A wave setting out takes the camera to the trail only if the screen has not been touched for so long. */
+const EASE_UNTOUCHED_MS = 2000;
 
 /**
  * The Hollow, Pip's camp: the arcade's building game (`pip/base/rules.ts`).
@@ -516,7 +538,14 @@ export const BaseScreen = ({
   const [area, setArea] = useState<Place>("camp");
   /** What the list just paid, for a moment, over the acorns. */
   const [gained, setGained] = useState<{ acorns: number; at: number } | null>(null);
-  const petted = useRef<{ x: number; y: number; at: number } | null>(null);
+  const petted = useRef<{ x: number; y: number; at: number; hearts?: number } | null>(null);
+  /** (1.5.11) What a tap in the meadow says on Pip's line: a bloom (its book), the bud, a stone; null for nothing. */
+  const [meadowSay, setMeadowSay] = useState<{ kind: "bloom"; index: number } | { kind: "bud" } | { kind: "stone"; text: string } | null>(null);
+  /** The trophies raised as the meadow was last seen, this visit: one raised since opens the bud, in a burst. */
+  const bloomsSeen = useRef<number | null>(null);
+  const bloomBurstAt = useRef<number | null>(null);
+  /** The Blooms list, thirty at a time. */
+  const [bloomsShown, setBloomsShown] = useState(30);
   const [sound, setSound] = useSoundOn();
   const [chosenDecor, setChosenDecor] = useState(-1);
   /** What the next tap on the picture does: sets a new thing down, or moves the chosen one. */
@@ -570,7 +599,8 @@ export const BaseScreen = ({
   /** Where the camera sits at home: the camp in the middle (its grass is about 80 art pixels down). */
   // (1.5.11) Once there is a trail, home leans to the left, so the trail's mouth and the whole wall are in view.
   const trailLean = base && campOpened(base, now.minutes, "prowlers") ? TRAIL_LEAN : 0;
-  const camHome: Point = view && camBounds ? centredOn({ x: GAME_W / 2 - trailLean, y: lay.sky + 80 }, view, camBounds) : { x: 0, y: 0 };
+  // (1.5.11) The meadow's home is a little to the right, so the Reading Path's newest blooms and the stones are in view.
+  const camHome: Point = view && camBounds ? centredOn({ x: area === "meadow" ? MEADOW_HOME_X : GAME_W / 2 - trailLean, y: lay.sky + 80 }, view, camBounds) : { x: 0, y: 0 };
   const cam = useRef<Point>({ x: 0, y: 0 });
   /** Let go with some speed: the glide it is on. Sent somewhere (to show a chosen thing): where to. */
   const glide = useRef<Glide | null>(null);
@@ -702,6 +732,8 @@ export const BaseScreen = ({
   const finished = useMemo(() => books.filter(hasFinished), [books]);
   const waiting = useMemo(() => (base ? toRaise(finished, base) : []), [finished, base]);
   const standing = useMemo(() => (base ? trophyRow(finished, base, TROPHIES_SHOWN) : []), [finished, base]);
+  /** (1.5.11) Every trophy raised as a bloom on the meadow's Reading Path, in the order raised. */
+  const blooms = useMemo(() => (base ? bloomsOf(base.raised, finished) : []), [base?.raised, finished]);
 
   const night = useMemo(() => {
     const hour = new Date().getHours();
@@ -760,6 +792,11 @@ export const BaseScreen = ({
         guards: base.guards,
         area,
         animals: base.animals,
+        // (1.5.11) The meadow's record of the reading: the animals' hearts, the blooms, the bud, the stones.
+        hearts: ANIMALS.map((animal) => heartsOf(base, animal.id, now.minutes)),
+        blooms: blooms.map((entry) => entry.kind),
+        bud: meadowOpen(base) ? budStage(trophyBudget(base, now.minutes)) : null,
+        read: now.minutes,
         meadow: base.meadow,
         land: base.land,
         meadowLand: base.meadowLand,
@@ -775,7 +812,7 @@ export const BaseScreen = ({
         ...(prowlersCome(base) ? { wave: { seed: visitSeed(base), chapter: frontChapter(base) } } : {})
       },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [base, season, night, now, standing, area, garden === undefined, minute, readingKind]
+    [base, season, night, now, standing, area, garden === undefined, minute, readingKind, blooms]
   );
   // The burrow is the way in: a tap on its door, Pip walking in ahead (onboarding/useBurrowDoor.ts).
   const door = useBurrowDoor({ look, onInside, canvasRef, sky: lay.sky });
@@ -963,10 +1000,28 @@ export const BaseScreen = ({
   const oakShook = useRef<{ kind: "gather" | "full"; at: number } | null>(null);
   /** Acorns flying to the count at the top (collect.tsx), and when those on their way land on it. */
   const trailsRef = useRef<AcornTrailsHandle | null>(null);
+  /**
+   * (1.5.11) Arriving after reading (`arrival.ts`): the pages on their way up the path, the oak's acorn kept back
+   * until the first lands, the arrival while it plays (the bar's fill, the chapter card waiting), what the card says
+   * came since, and the line a screen reader hears.
+   */
+  const pagesRef = useRef<PageTrailsHandle | null>(null);
+  const pagesComing = useRef(false);
+  const arrivalTimers = useRef<number[]>([]);
+  const [arriving, setArriving] = useState<{ arrival: Arrival; start: number } | null>(null);
+  const [since, setSince] = useState<Arrival["since"] | null>(null);
+  const [arrivalSaid, setArrivalSaid] = useState("");
+  const [pageShown, setPageShown] = useState(() => typeof document === "undefined" || document.visibilityState !== "hidden");
   const acornCue = useRef<AcornCue>(null);
   const bounced = useRef<{ site: Placed; at: number } | null>(null);
   /** When the pointer last did anything on the picture: it is painted at every frame for a moment after (frameGate.ts). */
   const stirred = useRef(-Infinity);
+  /** When a finger (or the mouse) last went down anywhere in the Hollow: the camera is not taken from a reader using it. */
+  const touchedAt = useRef(-Infinity);
+  /** The nights the camera has gone over to the trail for, as each set out; and whether a panel is open (for the timer). */
+  const nightsEased = useRef(new Set<number>());
+  const panelShown = useRef(false);
+  panelShown.current = panelOpen;
   /** Brings the camp's frame loop back from a rest between art frames at once (set by the loop below). */
   const wakeScene = useRef<() => void>(() => undefined);
   /** When each building was last knocked by a prowler, and which the pointer is resting on: their health is shown on a bar for a moment, and while pointed at. */
@@ -1221,7 +1276,9 @@ export const BaseScreen = ({
         through: placing || arrange ? null : (hovered.current ?? (panelOpen && panel === "site" && chosenDecor < 0 ? spotted : null)),
         peek: placing || arrange || press.current?.dragging ? null : resting.current,
         floats: floats.current.filter((entry) => time - entry.at < 1300).map((entry) => ({ x: entry.x, y: entry.y, age: (time - entry.at) / 1000, text: entry.text, bad: entry.bad })),
-        petted: petted.current && time - petted.current.at < 900 ? { x: petted.current.x, y: petted.current.y, age: (time - petted.current.at) / 1000 } : null,
+        petted: petted.current && time - petted.current.at < 900 ? { x: petted.current.x, y: petted.current.y, age: (time - petted.current.at) / 1000, hearts: petted.current.hearts } : null,
+        bloomBurst: bloomBurstAt.current !== null && time - bloomBurstAt.current < 1000 ? (time - bloomBurstAt.current) / 1000 : null,
+        pagesComing: pagesComing.current,
         burst: burst && burstFrame < BURST_FRAMES ? { site: burst.site, frame: burstFrame } : null,
         magpies: null,
         // The burrow's door: glowing to be found, open for Pip going in or coming out.
@@ -1259,6 +1316,7 @@ export const BaseScreen = ({
       (oakShook.current !== null && time - oakShook.current.at < OAK_SHOOK_MS) ||
       floats.current.some((entry) => time - entry.at < 1300) ||
       (petted.current !== null && time - petted.current.at < 900) ||
+      (bloomBurstAt.current !== null && time - bloomBurstAt.current < 1000) ||
       (burst !== null && time - burst.at < (BURST_FRAMES / ART_FPS) * 1000) ||
       prowling.current;
     let ticked = 0;
@@ -1464,6 +1522,18 @@ export const BaseScreen = ({
         if (paid > 0) setGained({ acorns: paid, at: performance.now() });
         playSound(held ? "chime" : "crumble", { volume: 0.6 });
       }
+      // A night setting out: the camera eases over to the trail to see it come, unless the reader touched the screen
+      // in the last two seconds (or has a panel open, or a finger down).
+      const setting = nightAt(clock);
+      if (setting >= 0 && !nightsEased.current.has(setting) && clock >= nightStart(setting) && clock < nightStart(setting) + 4) {
+        nightsEased.current.add(setting);
+        const { bounds, view, home } = camState.current;
+        const plan = nightPlanOf(seen, rings, setting, clock);
+        if (plan && plan.walks.length > 0 && bounds && view && !panelShown.current && !press.current && performance.now() - touchedAt.current > EASE_UNTOUCHED_MS) {
+          const to = centredOn({ x: (seen.line ?? 64) / 2 + 12, y: home.y + view.h / 2 }, view, bounds);
+          if (Math.abs(to.x - cam.current.x) > 0.5) sendCamera(to);
+        }
+      }
       // Tonight's chip: from a little before dusk until the night is over, who is coming, and how many are still to come.
       let showing: typeof nightShown = null;
       for (const n of [night, night + 1]) {
@@ -1485,6 +1555,108 @@ export const BaseScreen = ({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded, tab, area, arrange, placing, raid, watching]);
+
+  // Any touch in the Hollow (the picture, a key, a panel): the camera is the reader's for a moment after.
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return undefined;
+    const touched = () => {
+      touchedAt.current = performance.now();
+    };
+    root.addEventListener("pointerdown", touched, { capture: true, passive: true });
+    return () => root.removeEventListener("pointerdown", touched, { capture: true });
+  }, [loaded]);
+
+  // (1.5.11) A trophy raised since the meadow was last seen, this visit: the bud opens there, in a burst.
+  useEffect(() => {
+    if (!base) return;
+    if (bloomsSeen.current === null) {
+      bloomsSeen.current = base.raised.length;
+      return;
+    }
+    if (area !== "meadow" || base.raised.length <= bloomsSeen.current) return;
+    bloomsSeen.current = base.raised.length;
+    if (prefersReducedMotion()) return;
+    bloomBurstAt.current = performance.now();
+    playSound("pop", { volume: 0.5 });
+    wakeScene.current();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [area, base?.raised.length]);
+  // A meadow line goes with the meadow.
+  useEffect(() => {
+    if (area !== "meadow") setMeadowSay(null);
+  }, [area]);
+
+  // (1.5.11) Arriving after reading: once the camp is shown (and nothing else is: no tour, no sheet, no battle, the
+  // page itself in view), what was read since the last arrival comes up the path. Marked as arrived at as it begins,
+  // so it never plays twice; any touch skips to the end, and the touch still does what it was for.
+  useEffect(() => {
+    const seen = () => setPageShown(document.visibilityState !== "hidden");
+    document.addEventListener("visibilitychange", seen);
+    return () => document.removeEventListener("visibilitychange", seen);
+  }, []);
+  const endArrival = () => {
+    arrivalTimers.current.forEach((timer) => window.clearTimeout(timer));
+    arrivalTimers.current = [];
+    pagesRef.current?.skip();
+    pagesComing.current = false;
+    setArriving(null);
+    wakeScene.current();
+  };
+  useEffect(() => {
+    if (!loaded || !base || !pageShown || tab !== "camp" || area !== "camp" || panelOpen || chapterOpen || raid || watching || arriving || tutorialRunning(base)) return;
+    const tier = currentTier();
+    const arrival = arrivalOf(base, now.minutes, tier, prefersReducedMotion(), meadowOpen(base));
+    if (!arrival) return;
+    useBaseStore.getState().seeArrival();
+    setSince(arrival.since);
+    setArrivalSaid(arrivalWords(arrival));
+    if (arrival.pages === 0) return;
+    const path = sceneToClient(base.spots.burrow[0], 56);
+    const oakAt = oakAcornAt(base.spots);
+    const root = rootRef.current;
+    // Never under Pip's line (on a phone the oak can be behind it): just clear of it, below or beside.
+    const oak = clearOfCovers(sceneToClient(oakAt.x, oakAt.y), Array.from(root?.querySelectorAll(".pip-camp-say, .pip-base-stats") ?? []), canvasRef.current);
+    if (!path || !oak) return;
+    const raidKey = centreOf(Array.from(root?.querySelectorAll(".pip-base-under button") ?? []).find((key) => /Raid/.test(key.textContent ?? "")));
+    const meadowKey = centreOf(root?.querySelector(".pip-base-edge"));
+    const bar = centreOf(root?.querySelector('[data-hud="chapter"] .pip-chapter-meter'));
+    const sends: PageSend[] = pageStarts(arrival.pages).map((delay) => ({ from: path, to: oak, delay, fly: ARRIVAL_MS.fly, acorn: true }));
+    if (arrival.toRaid && raidKey) sends.push({ from: path, to: raidKey, delay: ARRIVAL_MS.peel, fly: ARRIVAL_MS.fly });
+    if (arrival.toMeadow && meadowKey) sends.push({ from: path, to: meadowKey, delay: ARRIVAL_MS.peel + ARRIVAL_MS.gap, fly: ARRIVAL_MS.fly });
+    if (bar) sends.push({ from: oak, to: bar, delay: ARRIVAL_MS.bar, fly: ARRIVAL_MS.fly });
+    // On the lighter tier, five things moving at the most.
+    pagesRef.current?.send(tier === "lite" ? sends.slice(0, 5) : sends);
+    pagesComing.current = true;
+    wakeScene.current();
+    playSound("swish", { volume: 0.35 });
+    const start = performance.now();
+    setArriving({ arrival, start });
+    arrivalTimers.current = [
+      window.setTimeout(() => {
+        pagesComing.current = false;
+        wakeScene.current();
+        acornsSound(Math.max(1, arrival.since.oak));
+      }, firstLands(arrival.pages)),
+      window.setTimeout(() => {
+        arrivalTimers.current = [];
+        pagesComing.current = false;
+        setArriving(null);
+      }, arrival.ends)
+    ];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, pageShown, tab, area, panelOpen, chapterOpen, raid, watching, arriving, base?.seenAt, now.minutes]);
+  // A touch anywhere while it plays: straight to the end.
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!arriving || !root) return undefined;
+    const skip = () => endArrival();
+    root.addEventListener("pointerdown", skip, { capture: true, passive: true });
+    return () => root.removeEventListener("pointerdown", skip, { capture: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [arriving]);
+  useEffect(() => () => arrivalTimers.current.forEach((timer) => window.clearTimeout(timer)), []);
+  const barFrom = useMemo(() => (arriving ? { at: (t: number) => barFillAt(arriving.arrival, t), start: arriving.start, until: arriving.start + arriving.arrival.ends } : null), [arriving]);
 
   // Android's Back steps out of the camp's own states one at a time, as a hand would: what is being set down, the
   // moving about, the panel, a trophy's line, the raids or the journal, the meadow. With none of them, it is not the
@@ -2069,11 +2241,23 @@ export const BaseScreen = ({
         pointer.current = null;
         return;
       }
-      // An animal under the finger is petted: it does nothing but please them both.
-      const animal = animalAt(prefersReducedMotion() ? null : performance.now() / 1000, base.animals, at.x, at.y);
-      if (animal) {
-        petted.current = { x: animal.x, y: animal.y, at: performance.now() };
-        playSound(animal.animal === 1 ? "purr" : animal.animal === 0 ? "squeak" : "pop", { pitch: 0.8 + animal.animal * 0.08 });
+      // An animal under the finger is petted: it does nothing but please them both (and shows its hearts). Then (1.5.11)
+      // the record of the reading: a stone, a bloom, the bud say what they are; the wild ones open the list.
+      const tapped = meadowTapAt(look ?? { animals: base.animals }, prefersReducedMotion() ? null : performance.now() / 1000, at.x, at.y);
+      if (tapped?.kind === "animal") {
+        petted.current = { x: tapped.x, y: tapped.y, at: performance.now(), hearts: heartsOf(base, tapped.animal, now.minutes) };
+        playSound(tapped.animal === 1 ? "purr" : tapped.animal === 0 ? "squeak" : "pop", { pitch: 0.8 + tapped.animal * 0.08 });
+        return;
+      }
+      if (tapped?.kind === "wild") {
+        setBloomsShown(30);
+        setPanel("blooms");
+        playSound("click");
+        return;
+      }
+      if (tapped) {
+        setMeadowSay(tapped.kind === "stone" ? { kind: "stone", text: stoneSays(tapped.stone) } : tapped.kind === "bloom" ? { kind: "bloom", index: tapped.index } : { kind: "bud" });
+        playSound("click");
         return;
       }
       const set = decorAt(base.meadow, at.x, at.y);
@@ -3154,6 +3338,36 @@ export const BaseScreen = ({
   );
 
   // ---- the meadow's own card: who lives there, and who might ------------------------------------------------
+  /** (1.5.11) The Blooms list: every finished book's bloom, the newest first, thirty at a time. */
+  const bloomsCard = () => {
+    const newest = [...blooms].reverse();
+    return (
+      <section className="pip-base-card mt-3" aria-live="polite">
+        <h3 className="pip-base-title">
+          Blooms
+          <span className="pip-base-chip ml-2 align-middle">{blooms.length}</span>
+        </h3>
+        <ul className="pip-blooms-list">
+          {newest.slice(0, bloomsShown).map((entry, index) => (
+            <li key={`${entry.key}-${index}`}>
+              <Sprite name="bloom" variant={entry.kind} box={20} />
+              <span className="min-w-0 flex-1 truncate">
+                <strong>{entry.title ?? "A book you finished"}</strong>
+                {entry.author ? ` · ${entry.author}` : ""}
+              </span>
+              <span className="shrink-0 text-on-surface-variant">{BLOOM_NAMES[entry.kind]}</span>
+            </li>
+          ))}
+        </ul>
+        {newest.length > bloomsShown && (
+          <button type="button" className="tactile-button mt-2 px-3 py-1 text-xs" onClick={() => setBloomsShown((shown) => shown + 30)}>
+            {Math.min(30, newest.length - bloomsShown)} more
+          </button>
+        )}
+      </section>
+    );
+  };
+
   const animalsCard = () => (
     <section className="pip-base-card mt-3" aria-live="polite">
       <h3 className="pip-base-title" title="Animals come to a camp that has been made charming, by what is set about it and by the books you have finished. Once here, they stay.">
@@ -3165,19 +3379,33 @@ export const BaseScreen = ({
       <ul className="pip-base-people">
         {ANIMALS.map((animal) => {
           const here = base.animals.includes(animal.id);
+          const hearts = heartsOf(base, animal.id, now.minutes);
+          const toNext = nextHeartIn(base, animal.id, now.minutes);
           return (
             <li key={animal.id}>
               <Sprite name="animal" variant={animal.id} box={36} className={here ? "" : "is-locked"} />
               <div className="min-w-0 flex-1">
                 <p className="pip-base-person">
                   {animal.name}
+                  {here && (
+                    <span
+                      className="pip-animal-hearts"
+                      role="img"
+                      aria-label={`${hearts} of ${HEARTS_MOST} hearts${toNext !== null ? `, ${hoursText(toNext)} more reading to the next` : ""}`}
+                      title={`${hearts} of ${HEARTS_MOST}${toNext !== null ? ` · ${hoursText(toNext)} more reading` : ` · ${HOME_NAMES[animal.id]}, and ${FINERY_NAMES[animal.id]}`}`}
+                    >
+                      {Array.from({ length: HEARTS_MOST }, (_, at) => (
+                        <span key={at} className={`pip-animal-heart ${at < hearts ? "" : "is-empty"}`} />
+                      ))}
+                    </span>
+                  )}
                   {!here && (
                     <span className="pip-base-chip ml-2" title={`Comes when the camp's charm is ${animal.charm}`}>
                       <Sparkles size={11} aria-hidden /> {animal.charm}
                     </span>
                   )}
                 </p>
-                <p className="text-xs text-on-surface-variant">{animal.does}</p>
+                <p className="text-xs text-on-surface-variant">{here && hearts >= HEARTS_MOST ? FOND_DOES[animal.id] : animal.does}</p>
               </div>
             </li>
           );
@@ -3436,6 +3664,7 @@ export const BaseScreen = ({
         acornCue={acornCue}
         acornChipRef={acornChipRef}
         trailsRef={trailsRef}
+        fillFrom={barFrom}
         gained={gained}
         onAcorns={() => openGuide("acorns")}
         parcels={base.parcels}
@@ -3506,7 +3735,39 @@ export const BaseScreen = ({
                   </button>
                 </p>
               )}
-              {shownTrophy
+              {meadowSay && area === "meadow"
+                ? (() => {
+                    const bloom = meadowSay.kind === "bloom" ? blooms[meadowSay.index] : null;
+                    const waits = trophyWaits(base, now.minutes);
+                    const text =
+                      meadowSay.kind === "stone"
+                        ? meadowSay.text
+                        : meadowSay.kind === "bud"
+                          ? waits > 0
+                            ? `Your next bloom · ${hoursText(waits)} more reading`
+                            : "Your next bloom: finish a book and it opens"
+                          : null;
+                    return (
+                      <p className="pip-camp-say-line">
+                        {bloom ? <Sprite name="bloom" variant={bloom.kind} box={20} /> : meadowSay.kind === "bud" ? <Sprite name="bud" variant={look?.bud ?? 0} box={20} /> : <Sprite name="standing" variant={1} box={20} />}
+                        <span className="min-w-0 flex-1 truncate">
+                          {bloom ? (
+                            <>
+                              <strong>{bloom.title ?? "A book you finished"}</strong>
+                              {bloom.author ? ` · ${bloom.author}` : ""}
+                              {bloom.on ? ` · ${new Date(bloom.on).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}` : ""}
+                            </>
+                          ) : (
+                            text
+                          )}
+                        </span>
+                        <button type="button" className="tactile-button px-2 py-0.5 text-xs" aria-label="Close" onClick={() => setMeadowSay(null)}>
+                          <X size={12} aria-hidden />
+                        </button>
+                      </p>
+                    );
+                  })()
+                : shownTrophy
                 ? (() => {
                     const book = books.find((entry) => entry.id === shownTrophy);
                     if (!book) return null;
@@ -3617,7 +3878,8 @@ export const BaseScreen = ({
 
       {(() => {
         const news = tab === "camp" && !tourOn ? chapterNewsOf(base, now.minutes) : null;
-        const shown = news && news.chapter > celebrated ? news : null;
+        // (1.5.11) A chapter crossed while the reading's pages come up the path: its card waits for them (or a tap).
+        const shown = news && news.chapter > celebrated && !arriving?.arrival.crossed ? news : null;
         if (!shown && !chapterOpen) {
           const raids = newsOf(base);
           if (tab !== "camp" || tourOn || newsClosed || raids.length === 0 || raid) return null;
@@ -3651,6 +3913,7 @@ export const BaseScreen = ({
           <ChapterCard
             view={chapterCardOf(base, now.minutes)}
             news={shown}
+            since={since}
             onGo={(at) => {
               if (shown) {
                 setCelebrated(shown.chapter);
@@ -3676,11 +3939,18 @@ export const BaseScreen = ({
         );
       })()}
 
+      {/* (1.5.11) The reading's pages coming up the path, and what came of it, said for a screen reader. */}
+      <PageTrails ref={pagesRef} />
+      <p className="sr-only" aria-live="polite">
+        {arrivalSaid}
+      </p>
+
       {postcard && look && (
         <Suspense fallback={null}>
           <HollowPostcard
             art={art}
-            look={{ ...look, area: "camp" }}
+            // (1.5.11) Of the clearing being looked at: the meadow, with its blooms and stones, makes a postcard too.
+            look={{ ...look, area }}
             stats={{
               name: useCommunityStore.getState().me?.displayName || useCommunityStore.getState().me?.handle || null,
               level: base.levels.burrow,
@@ -3795,6 +4065,16 @@ export const BaseScreen = ({
                         onOpen: () => {
                           setPanel("decor");
                           setChosenDecor(-1);
+                          playSound("click");
+                        }
+                      },
+                      blooms: {
+                        count: blooms.length,
+                        last: blooms[blooms.length - 1]?.kind ?? 0,
+                        chosen: panelOpen && panel === "blooms",
+                        onOpen: () => {
+                          setBloomsShown(30);
+                          setPanel("blooms");
                           playSound("click");
                         }
                       }
@@ -3924,6 +4204,8 @@ export const BaseScreen = ({
             gardenCard()
           ) : panel === "guard" && area === "camp" ? (
             guardCard()
+          ) : area === "meadow" && panel === "blooms" ? (
+            bloomsCard()
           ) : area === "meadow" ? (
             animalsCard()
           ) : panel === "people" ? (

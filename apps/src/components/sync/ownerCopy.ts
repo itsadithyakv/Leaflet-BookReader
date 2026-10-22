@@ -22,15 +22,25 @@ export const OWNER_COPY = {
   startEmptyConfirmTitle: "Start empty?",
   startEmptyConfirmBody: "What your account holds is replaced by this empty library. This can't be undone.",
 
+  storeHoldsTitle: (where: "drive" | "folder", books: number) =>
+    `${where === "drive" ? "Your Google Drive" : "Your sync folder"} has a library · ${books} ${books === 1 ? "book" : "books"}`,
+  storeHoldsNote: "Saved there by Leaflet before accounts. It may be someone else's, if you share the account.",
+  keepApart: "Keep it apart",
+  keepApartNote: "Leave its reading as it is. Only your book files go there.",
+
+  roomLine: (bytes: number, limit: number) => `Account sync nearly full · ${(bytes / 1048576).toFixed(1)} of ${(limit / 1048576).toFixed(1)} MB`,
+  roomNote:
+    "Highlights take the most room. Removing ones you no longer need makes room. Everything stays on this device either way.",
+
   accountRow: "Leaflet account",
   accountSynced: "Reading synced",
   accountNote:
     "Your places, reading days, highlights, notes, collections and Pip are kept with your account. Book files stay on your devices and in your Drive or sync folder.",
   filesOnly: "Files only",
   driveFilesOnlyNote:
-    "This Drive's library belongs to another Leaflet account. Your book files are kept here; your reading is kept with your account.",
+    "This Drive's library isn't this account's. Your book files are kept here; your reading is kept with your account.",
   folderFilesOnlyNote:
-    "This sync folder's library belongs to another Leaflet account. Your book files are kept here; your reading is kept with your account.",
+    "This sync folder's library isn't this account's. Your book files are kept here; your reading is kept with your account.",
   paused: "Paused",
   pausedNote: "This device's library belongs to another Leaflet account, so its reading isn't synced to yours.",
   driveRefused: "This Drive holds another Leaflet account's library.",

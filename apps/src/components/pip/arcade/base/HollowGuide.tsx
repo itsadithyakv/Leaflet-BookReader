@@ -7,7 +7,7 @@ import { FrontPicture } from "./NightCard";
 import { campOpened } from "./hollowRules";
 
 /** The guide's pages, in the order a reader meets the things they are about. */
-export type GuidePage = "acorns" | "chapters" | "buildings" | "prowlers" | "raids" | "heroes" | "friends" | "happened";
+export type GuidePage = "acorns" | "chapters" | "buildings" | "prowlers" | "raids" | "heroes" | "meadow" | "friends" | "happened";
 
 type Page = { id: GuidePage; name: string; picture: ReactNode; lines: string[]; locked?: string };
 
@@ -20,6 +20,7 @@ export const pagesOf = (base: BaseState, minutes: number): Page[] => {
   const drops = Math.max(1, Math.round(oakDrops(base)));
   const prowlers = campOpened(base, minutes, "prowlers");
   const raids = campOpened(base, minutes, "raids");
+  const meadow = campOpened(base, minutes, "meadow");
   return [
     {
       id: "acorns",
@@ -81,6 +82,18 @@ export const pagesOf = (base: BaseState, minutes: number): Page[] => {
         `Finish a book with ${Math.round(TROPHY_MINUTES / 6) / 10} h of reading behind it, and its trophy stands in the camp.`,
         "A trophy of the right kind brings a hero to live here. One leads each raid.",
         "Blades won from the magpie lords are carried by heroes."
+      ]
+    },
+    {
+      // (1.5.11) Your reading, made visible.
+      id: "meadow",
+      name: "The meadow",
+      picture: <Sprite name="bloom" variant={4} box={64} className={meadow ? "" : "is-locked"} />,
+      locked: meadow ? undefined : `Chapter ${CHAPTER_OF.meadow}`,
+      lines: [
+        "Every book you finish blooms on the Reading Path, a flower for its kind. The bud is your next one.",
+        "From chapter 7 a standing stone is carved for each chapter, then each volume, with your hours.",
+        "The animals grow fond of you as you read: at three hearts their gift doubles."
       ]
     },
     {

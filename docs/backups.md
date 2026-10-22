@@ -1,10 +1,18 @@
 # Database backups — the run sheet
 
-Atlas's free M0 cluster keeps no backups of its own. Since 1.5.3 the database
-holds signed-in readers' highlights, notes, places and history, so the VM
-backs it up every night, encrypted, to the Google Drive of the leafletmail
-Gmail account. Each step says **where** it happens and how to check it
-worked.
+Since 1.5.3 the database holds signed-in readers' highlights, notes, places
+and history, so the VM backs it up every night, encrypted, to the Google
+Drive of the leafletmail Gmail account. Each step says **where** it happens
+and how to check it worked.
+
+Atlas's own: MongoDB's page on free clusters (read 2026-10-22, see
+[the sync audit](sync-audit.md)) says a free cluster can have backups turned
+on, a daily snapshot with up to four kept. This repository said for a long
+time that the free tier keeps none; check the cluster's **Backup** tab. If it
+is offered, turn it on as a second line: it is a few days deep, kept by
+MongoDB, unencrypted to you and restored only through Atlas. The nightly
+encrypted backup below stays the one this run sheet relies on (fourteen days
+deep, in a Drive you hold, and what `restore.js --deletions-from` works with).
 
 How it works:
 
@@ -251,12 +259,12 @@ Anything readers did after the backup was taken is not in it.
 
 | | |
 | --- | --- |
-| Database | M0 holds at most 512 MB. Much of it (`states`) is gzipped already, so a backup is somewhat smaller than the database, not many times smaller. |
+| Database | M0 holds at most 512 MB, data and indexes. Much of it (`states`, the sync documents: about 30 KB a typical reader, 0.5 MB a heavy one) is gzipped already, so a backup is somewhat smaller than the database, not many times smaller. |
 | Parts | 8 MB each (`BACKUP_PART_MB`, 1 to 8), at most 500 a backup (4 GB). An 8 MB part is an 11 MB request (base64 in JSON). |
 | Apps Script | Each part is one call, which must finish within Apps Script's 6 minutes; the receiver takes at most 12 MB a part and 6 new backups in any 24 hours. Google does not document the largest request a web app accepts (50 MB is the figure usually given); if large parts ever fail, set `BACKUP_PART_MB=4` in `/etc/leaflet-backup.env`. |
 | The alert | One email a day at most, out of MailApp's 100 a day for the account (shared with the reset mailer if that script is in the same account). |
 | Drive | 15 GB, shared with leafletmail's Gmail and Photos. Kept: 14 days of backups (`KEEP_DAYS`), the 3 newest always, nothing past 30 days. Backups moved to the bin still count against the 15 GB for the 30 days the bin keeps them (only if step 1.9 was skipped), so plan for about 44 backups' worth: 44 × 20 MB is under 1 GB. |
-| Atlas transfer | Each backup reads the whole database once: the M0's weekly 10 GB out is shared with the API. A 50 MB database is 350 MB a week. |
+| Atlas transfer | Each backup reads the whole database once: the M0's weekly 10 GB **out** is shared with the API (the 10 GB **in** is the API's alone: mostly the sync documents apps send up). A 50 MB database is 350 MB a week; at 200 MB, 1.4 GB, a seventh of the week's allowance. |
 | The VM | The service is capped at 256 MB (`MemoryMax`), runs at `Nice=10` and a fifth of the CPU weight, and writes nothing to disk. |
 | Consistency | Collections are read one after another while the API runs, so a backup is not one instant across the database: a reader's activity during the minute it takes can be in one collection and not yet in another. |
 

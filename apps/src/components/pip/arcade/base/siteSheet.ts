@@ -188,9 +188,9 @@ export const levelSays = (base: BaseState, site: Site, to: number): string => {
     case "fence": {
       if (from === 0) return "A wall across the trail, a few stakes to begin with";
       const more = fencePieces(up) - fencePieces(base);
-      const gate = from < 2 && to >= 2 ? ", with a gate" : "";
+      const gate = from < 2 && to >= 2 ? ", with a gatehouse that throws" : "";
       const stone = from < 4 && to >= 4 ? ", in stone" : "";
-      return more > 0 ? `${more} more ${more === 1 ? "section" : "sections"}${gate}${stone}, tougher` : `Tougher${stone}${level5(to)}`;
+      return more > 0 ? `${more} more ${more === 1 ? "section" : "sections"}${gate}${stone}, tougher` : `Tougher${stone}${level5(to)}${to > 2 ? ", and its gatehouse throws quicker" : ""}`;
     }
     default:
       return doesAt(base, site, to);

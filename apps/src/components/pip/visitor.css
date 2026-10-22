@@ -184,6 +184,36 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Something for the two Pips to do together: the Play keys' words, small, in a row. */
+.pip-visitor-card-together {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.pip-visitor-card-key {
+  display: flex;
+  min-height: 40px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 3px 0;
+  border: 0;
+  border-radius: 2px;
+  background: var(--hud-well, #f3ecda);
+  color: var(--hud-ink, #1c261f);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.1;
+  cursor: pointer;
+}
+
+.pip-visitor-card-key:active {
+  transform: translateY(1px);
+}
+
 .pip-visitor-card-open {
   display: block;
   width: 100%;
@@ -224,5 +254,9 @@
 
   .pip-visitor-card-name {
     padding-right: 36px;
+  }
+
+  .pip-visitor-card-key {
+    min-height: 44px;
   }
 }

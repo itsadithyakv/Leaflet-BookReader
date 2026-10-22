@@ -82,10 +82,18 @@ pub struct BookEntry {
 }
 
 impl BookEntry {
-  /// The most recent moment this book was touched in any way. Used to decide
-  /// whether an edit is newer than a deletion.
-  fn touched_at(&self) -> i64 {
-    instant(&self.metadata_updated_at).max(instant(&self.progress_updated_at))
+  /// The last moment the reader did something with this book that says they
+  /// want it: read on in it, marked it finished or not started, or added it
+  /// again (an import stamps its progress). Used to decide whether a book
+  /// removed on another device comes back.
+  ///
+  /// Not the metadata stamp. That one moves without the reader: a lookup at
+  /// launch for a missing cover (`db::update_metadata`), the title tidied by
+  /// today's rules (`db::retitle`). It used to count, and so a laptop that
+  /// opened after the phone had removed a book looked the book up and
+  /// brought it back on every device, its file already gone (sync audit D4).
+  fn revived_at(&self) -> i64 {
+    instant(&self.progress_updated_at)
   }
 
   pub fn is_deleted(&self) -> bool {
@@ -327,6 +335,82 @@ fn instant_opt(value: &Option<String>) -> Option<i64> {
   value.as_deref().map(instant)
 }
 
+/// How far past `now` a stamp may be and still be taken at its word: clocks
+/// a little apart, and the seconds a run takes. Anything later is a clock
+/// that is wrong (sync audit D3).
+pub const FUTURE_TOLERANCE_SECS: i64 = 5 * 60;
+
+/// A document with every stamp a merge compares held to `now`: a stamp more
+/// than `FUTURE_TOLERANCE_SECS` ahead of it is read as `now`.
+///
+/// Every last-writer-wins rule goes by these stamps, and nothing bounded a
+/// device's clock. A laptop twenty minutes fast won every merge for twenty
+/// minutes (the phone's later reading lost, its notes reverted), and its
+/// "later" read of a book undid a removal made on the phone. `now` is the
+/// caller's best idea of the time: the server's, from its `Date` header,
+/// where there is a server (`sync::clock`), so this device's own clock is
+/// held to it as well.
+///
+/// Both sides are bounded the same way before they meet, so the merge stays
+/// commutative and idempotent; and the stamp written back is `now`, so a
+/// wrong one is put right for good rather than winning at every sync.
+pub fn bounded(doc: &SyncDoc, now: &str) -> SyncDoc {
+  let mut doc = doc.clone();
+  let Ok(at) = DateTime::parse_from_rfc3339(now) else {
+    return doc;
+  };
+  let limit = at.with_timezone(&Utc).timestamp_millis() + FUTURE_TOLERANCE_SECS * 1000;
+  let held = |stamp: &mut String| {
+    if instant(stamp) > limit {
+      *stamp = now.to_string();
+    }
+  };
+  let held_opt = |stamp: &mut Option<String>| {
+    if let Some(stamp) = stamp {
+      if instant(stamp) > limit {
+        *stamp = now.to_string();
+      }
+    }
+  };
+  for book in &mut doc.books {
+    held(&mut book.metadata_updated_at);
+    held(&mut book.progress_updated_at);
+    held(&mut book.created_at);
+    held_opt(&mut book.finished_at);
+    held_opt(&mut book.last_opened);
+    held_opt(&mut book.deleted_at);
+  }
+  for session in &mut doc.sessions {
+    held_opt(&mut session.burned_at);
+  }
+  if let Some(pip) = &mut doc.pip {
+    held(&mut pip.updated_at);
+    held(&mut pip.mood_updated_at);
+  }
+  for annotation in &mut doc.annotations {
+    held(&mut annotation.updated_at);
+    held_opt(&mut annotation.deleted_at);
+  }
+  for collection in &mut doc.collections {
+    held(&mut collection.updated_at);
+    held_opt(&mut collection.deleted_at);
+  }
+  if let Some(profile) = &mut doc.reading_profile {
+    held(&mut profile.core.updated_at);
+    if let Some(limits) = &mut profile.limits {
+      held(&mut limits.updated_at);
+    }
+    for entry in profile.books.values_mut() {
+      held(&mut entry.updated_at);
+    }
+    held_opt(&mut profile.reset_at);
+  }
+  if let Some(camp) = &mut doc.camp {
+    held(&mut camp.saved_at);
+  }
+  doc
+}
+
 /// The later of two optional timestamps, preferring whichever is set.
 fn later(a: &Option<String>, b: &Option<String>) -> Option<String> {
   match (a, b) {
@@ -416,20 +500,21 @@ fn merge_book(a: &BookEntry, b: &BookEntry) -> BookEntry {
     }
   };
 
-  // A deletion holds unless the other device edited the book after it — which
-  // is how re-importing a removed book brings it back rather than being undone
-  // on the next sync.
+  // A deletion holds unless the other device's reader wanted the book after
+  // it (`revived_at`): which is how re-importing a removed book, or reading on
+  // in it, brings it back rather than being undone on the next sync. Nothing
+  // automatic does: a deletion wins over a lookup.
   let deleted_at = match (&a.deleted_at, &b.deleted_at) {
     (Some(x), Some(y)) => later(&Some(x.clone()), &Some(y.clone())),
     (Some(x), None) => {
-      if b.touched_at() > instant(x) {
+      if b.revived_at() > instant(x) {
         None
       } else {
         Some(x.clone())
       }
     }
     (None, Some(y)) => {
-      if a.touched_at() > instant(y) {
+      if a.revived_at() > instant(y) {
         None
       } else {
         Some(y.clone())
@@ -679,8 +764,10 @@ fn union_by_id<T: Clone + Ord>(a: &[T], b: &[T], id: impl Fn(&T) -> &str) -> Vec
 
 /// Combines two documents into the one both devices should end up holding.
 ///
-/// `now` drives tombstone collection only; nothing else here reads a clock.
+/// `now` drives tombstone collection, and bounds the stamps of both sides
+/// (`bounded`); nothing else here reads a clock.
 pub fn merge(local: &SyncDoc, remote: &SyncDoc, now: &str) -> SyncDoc {
+  let (local, remote) = (&bounded(local, now), &bounded(remote, now));
   // BTreeMap rather than HashMap: the output order must be identical on every
   // device, or two machines produce byte-different documents from the same
   // inputs and re-upload each other's work forever.
@@ -1424,13 +1511,103 @@ mod tests {
     let mut deleted = entry("aaa");
     deleted.deleted_at = Some("2026-06-01T00:00:00+00:00".to_string());
 
-    // A fresh import stamps the metadata group, which is how the merge learns
-    // the book was wanted again.
+    // A fresh import stamps progress (and the metadata group), which is how
+    // the merge learns the book was wanted again.
     let mut reimported = entry("aaa");
     reimported.metadata_updated_at = "2026-06-02T00:00:00+00:00".to_string();
+    reimported.progress_updated_at = "2026-06-02T00:00:00+00:00".to_string();
 
-    let merged = merge(&doc(vec![deleted]), &doc(vec![reimported]), NOW);
+    let merged = merge(&doc(vec![deleted.clone()]), &doc(vec![reimported.clone()]), NOW);
     assert!(!find(&merged, "aaa").is_deleted());
+    assert!(!find(&merge(&doc(vec![reimported]), &doc(vec![deleted.clone()]), NOW), "aaa").is_deleted());
+
+    // Reading on in it after the removal is wanting it too.
+    let mut read_on = entry("aaa");
+    read_on.progress = 0.4;
+    read_on.progress_updated_at = "2026-06-03T00:00:00+00:00".to_string();
+    assert!(!find(&merge(&doc(vec![deleted]), &doc(vec![read_on]), NOW), "aaa").is_deleted());
+  }
+
+  /// Sync audit D4: the phone removes a book; the laptop opens, looks the
+  /// book up for its missing cover (or tidies its title, or reads a series
+  /// from the file) and stamps the metadata later than the removal. That is
+  /// not the reader wanting the book back: the removal holds, both ways round.
+  #[test]
+  fn an_automatic_metadata_stamp_never_undoes_a_deletion() {
+    let mut deleted = entry("aaa");
+    deleted.deleted_at = Some("2026-06-01T00:00:00+00:00".to_string());
+    let mut looked_up = entry("aaa");
+    looked_up.metadata_updated_at = "2026-06-02T00:00:00+00:00".to_string();
+    looked_up.author = Some("Found by a lookup".to_string());
+    looked_up.series = Some("A series".to_string());
+
+    for merged in [
+      merge(&doc(vec![deleted.clone()]), &doc(vec![looked_up.clone()]), NOW),
+      merge(&doc(vec![looked_up.clone()]), &doc(vec![deleted.clone()]), NOW)
+    ] {
+      let book = find(&merged, "aaa");
+      assert_eq!(book.deleted_at.as_deref(), Some("2026-06-01T00:00:00+00:00"));
+      assert_eq!(merged.live_books().count(), 0);
+    }
+    // And again, as a third device or a retry would: still removed.
+    let once = merge(&doc(vec![deleted]), &doc(vec![looked_up.clone()]), NOW);
+    assert!(find(&merge(&once, &doc(vec![looked_up]), NOW), "aaa").is_deleted());
+  }
+
+  /// Sync audit D3: a stamp from a clock that is ahead is read as the
+  /// merge's now (the server's, where there is one) and written back so; one
+  /// within the tolerance is taken at its word. Either way round, and again.
+  #[test]
+  fn a_stamp_from_the_future_is_read_as_now() {
+    // NOW is noon. The laptop's clock says twenty past.
+    let mut fast = entry("aaa");
+    fast.progress = 0.5;
+    fast.progress_updated_at = "2026-08-29T12:20:00+00:00".to_string();
+    fast.last_opened = Some("2026-08-29T12:20:00+00:00".to_string());
+    let mut laptop = doc(vec![fast]);
+    laptop.annotations = vec![note("n1", "2026-08-29T12:19:00+00:00", "edited on the laptop", None)];
+    laptop.pip = Some(pip_at("2026-08-29T12:18:00+00:00", "fox"));
+    // Within five minutes: a clock a little apart, taken as it is.
+    let mut close = entry("bbb");
+    close.progress_updated_at = "2026-08-29T12:04:00+00:00".to_string();
+    laptop.books.push(close);
+    let server = doc(vec![]);
+
+    let merged = merge(&laptop, &server, NOW);
+    assert_eq!(find(&merged, "aaa").progress_updated_at, NOW);
+    assert_eq!(find(&merged, "aaa").last_opened.as_deref(), Some(NOW));
+    assert_eq!(merged.annotations[0].updated_at, NOW);
+    assert_eq!(merged.pip.as_ref().map(|pip| pip.updated_at.as_str()), Some(NOW));
+    assert_eq!(find(&merged, "bbb").progress_updated_at, "2026-08-29T12:04:00+00:00");
+    assert_eq!(merge(&server, &laptop, NOW), merged, "either way round");
+    assert_eq!(merge(&laptop, &merged, NOW), merged, "and again");
+    // A stamp that will not read is left alone (it reads as the beginning of time).
+    let mut odd = entry("ccc");
+    odd.progress_updated_at = "yesterday".to_string();
+    assert_eq!(find(&merge(&doc(vec![odd]), &server, NOW), "ccc").progress_updated_at, "yesterday");
+  }
+
+  /// The case D3 names, as two devices meet over the account. Noon by the
+  /// server: the laptop, twenty minutes fast, syncs; its stamp is put right.
+  /// The phone removes the book a minute later. The laptop's next sync, half
+  /// an hour on, keeps the removal; under its own clock's word (12:20) the
+  /// book came back.
+  #[test]
+  fn a_fast_clock_does_not_undo_a_removal_made_after_it_synced() {
+    let mut fast = entry("aaa");
+    fast.progress = 0.4;
+    fast.progress_updated_at = "2026-08-29T12:20:00+00:00".to_string();
+    let laptop = merge(&doc(vec![fast.clone()]), &doc(vec![]), NOW);
+    assert_eq!(find(&laptop, "aaa").progress_updated_at, NOW);
+
+    let mut removed = find(&laptop, "aaa").clone();
+    removed.deleted_at = Some("2026-08-29T12:01:00+00:00".to_string());
+    let phone = doc(vec![removed]);
+    let later = "2026-08-29T12:30:00+00:00";
+    assert!(find(&merge(&laptop, &phone, later), "aaa").is_deleted());
+    assert!(find(&merge(&phone, &laptop, later), "aaa").is_deleted());
+    // What the bound prevents: the laptop's own word for when it read.
+    assert!(!find(&merge(&doc(vec![fast]), &phone, later), "aaa").is_deleted());
   }
 
   #[test]
@@ -1999,6 +2176,9 @@ mod tests {
     assert_eq!(merge(&none, &older, NOW).pip, older.pip, "a device that never opened the Pip tab loses nothing");
   }
 
+  /// After every camp below was saved: a stamp from the future is read as now.
+  const CAMP_NOW: &str = "2027-06-01T00:00:00+00:00";
+
   fn camp_at(saved_at: &str, state: &str) -> SyncDoc {
     SyncDoc { camp: Some(CampEntry { state: state.to_string(), saved_at: saved_at.to_string() }), ..doc(vec![]) }
   }
@@ -2011,30 +2191,30 @@ mod tests {
   fn the_camp_saved_later_wins_whichever_side_holds_it() {
     let older = camp_at("2026-10-01T10:00:00+00:00", r#"{"v":2,"camps":3}"#);
     let newer = camp_at("2026-10-02T10:00:00+00:00", r#"{"v":2,"camps":4}"#);
-    assert_eq!(merge(&older, &newer, NOW).camp, newer.camp);
-    assert_eq!(merge(&newer, &older, NOW).camp, newer.camp);
-    assert_eq!(merge(&older, &merge(&older, &newer, NOW), NOW).camp, newer.camp, "syncing again changes nothing");
+    assert_eq!(merge(&older, &newer, CAMP_NOW).camp, newer.camp);
+    assert_eq!(merge(&newer, &older, CAMP_NOW).camp, newer.camp);
+    assert_eq!(merge(&older, &merge(&older, &newer, CAMP_NOW), CAMP_NOW).camp, newer.camp, "syncing again changes nothing");
 
     // As instants: half past nine in the evening in India is before five in
     // the afternoon in Greenwich, though it sorts after it as text.
     let east = camp_at("2026-10-03T21:30:00+05:30", r#"{"v":2,"camps":5}"#);
     let west = camp_at("2026-10-03T17:00:00+00:00", r#"{"v":2,"camps":6}"#);
-    assert_eq!(camp_state(&merge(&east, &west, NOW)), Some(r#"{"v":2,"camps":6}"#));
-    assert_eq!(camp_state(&merge(&west, &east, NOW)), Some(r#"{"v":2,"camps":6}"#));
+    assert_eq!(camp_state(&merge(&east, &west, CAMP_NOW)), Some(r#"{"v":2,"camps":6}"#));
+    assert_eq!(camp_state(&merge(&west, &east, CAMP_NOW)), Some(r#"{"v":2,"camps":6}"#));
 
     // An exact tie is settled the same way on both devices.
     let tie_a = camp_at("2026-10-01T10:00:00+00:00", r#"{"v":2,"camps":1}"#);
     let tie_b = camp_at("2026-10-01T10:00:00+00:00", r#"{"v":2,"camps":2}"#);
-    assert_eq!(merge(&tie_a, &tie_b, NOW).camp, merge(&tie_b, &tie_a, NOW).camp);
+    assert_eq!(merge(&tie_a, &tie_b, CAMP_NOW).camp, merge(&tie_b, &tie_a, CAMP_NOW).camp);
   }
 
   #[test]
   fn a_document_without_a_camp_does_not_erase_one() {
     let mine = camp_at("2026-10-01T10:00:00+00:00", r#"{"v":2,"camps":3}"#);
     let none = doc(vec![]);
-    assert_eq!(merge(&mine, &none, NOW).camp, mine.camp);
-    assert_eq!(merge(&none, &mine, NOW).camp, mine.camp);
-    assert_eq!(merge(&none, &none, NOW).camp, None);
+    assert_eq!(merge(&mine, &none, CAMP_NOW).camp, mine.camp);
+    assert_eq!(merge(&none, &mine, CAMP_NOW).camp, mine.camp);
+    assert_eq!(merge(&none, &none, CAMP_NOW).camp, None);
   }
 
   #[test]
@@ -2042,12 +2222,12 @@ mod tests {
     // Kept by a build from before saves were stamped.
     let unstamped = camp_at("", r#"{"v":1,"acorns":999}"#);
     let stamped = camp_at("2026-01-01T00:00:00+00:00", r#"{"v":2,"camps":0}"#);
-    assert_eq!(merge(&unstamped, &stamped, NOW).camp, stamped.camp);
-    assert_eq!(merge(&stamped, &unstamped, NOW).camp, stamped.camp);
+    assert_eq!(merge(&unstamped, &stamped, CAMP_NOW).camp, stamped.camp);
+    assert_eq!(merge(&stamped, &unstamped, CAMP_NOW).camp, stamped.camp);
     // Alone it is still the camp, and two of them settle the same both ways.
-    assert_eq!(merge(&unstamped, &doc(vec![]), NOW).camp, unstamped.camp);
+    assert_eq!(merge(&unstamped, &doc(vec![]), CAMP_NOW).camp, unstamped.camp);
     let other = camp_at("", r#"{"v":1,"acorns":5}"#);
-    assert_eq!(merge(&unstamped, &other, NOW).camp, merge(&other, &unstamped, NOW).camp);
+    assert_eq!(merge(&unstamped, &other, CAMP_NOW).camp, merge(&other, &unstamped, CAMP_NOW).camp);
   }
 
   #[test]
@@ -2056,9 +2236,9 @@ mod tests {
     let too_large = format!(r#"{{"pad":"{}"}}"#, "x".repeat(CAMP_MAX_BYTES));
     for broken in ["", "not json", "[1,2,3]", "null", too_large.as_str()] {
       let damaged = camp_at("2027-01-01T00:00:00+00:00", broken);
-      assert_eq!(merge(&mine, &damaged, NOW).camp, mine.camp, "{:.20}", broken);
-      assert_eq!(merge(&damaged, &mine, NOW).camp, mine.camp, "{:.20}", broken);
-      assert_eq!(merge(&damaged, &doc(vec![]), NOW).camp, None, "{:.20}", broken);
+      assert_eq!(merge(&mine, &damaged, CAMP_NOW).camp, mine.camp, "{:.20}", broken);
+      assert_eq!(merge(&damaged, &mine, CAMP_NOW).camp, mine.camp, "{:.20}", broken);
+      assert_eq!(merge(&damaged, &doc(vec![]), CAMP_NOW).camp, None, "{:.20}", broken);
     }
   }
 

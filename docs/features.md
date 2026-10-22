@@ -5014,10 +5014,10 @@ style.
 - **Refraction** (`components/ui/GlassSurface.tsx`, `glassRefraction.ts`,
   `LiquidGlassDefs.tsx`): the lens bends what is behind it at the rim. Where
   the bend cannot be drawn, it is frosted glass with a sheen and a rim.
-- **Windows 11's Mica** behind a see-through window (`src-tauri/src/window_material.rs`,
-  `styles/window-material.css`). Chosen before the window exists, since a web
-  view is made see-through only when it is created; Windows 10 keeps its
-  opaque window.
+- **Windows 11's Mica** behind a see-through window, with Full only
+  (`src-tauri/src/window_material.rs`, `styles/window-material.css`). Chosen
+  before the window exists, since a web view is made see-through only when it
+  is created; Windows 10 and Smooth keep an opaque window.
 
 **Visual effects tiers** (`platform/perfTier.ts`, `styles/perf.css`, the one
 place the lighter looks are written). Settings → General → Appearance →
@@ -5033,8 +5033,19 @@ On Auto, **Android is Smooth on every phone** (the owner's call: a phone
 scrolling under a blurred bar redraws the blur every frame, and an Adreno 619
 dropped frames scrolling and throwing Pip). Minimal at 2 GB of memory or
 less, or a weak or software GPU with little memory or few cores. Full on a
-phone only by choice. Windows is Full, Smooth on a software renderer, minimal
-at 2 GB or less. What the device was judged to be is kept
+phone only by choice. **Windows is Smooth too** (1.5.11, the owner's call:
+1.5.10's glass lagged on a laptop with integrated graphics), minimal at 2 GB or
+less, Full only by choice; no WebGL context is opened at start to judge it.
+Below Full a computer is drawn as Leaflet's own desktop again, the 1.5.7
+look: the leather rail, the paper toolbar, tactile keys and paper cards
+(`html[data-look="leather"]`, `styles/leather.css`; the glass rules for those
+surfaces stand aside by a weightless `:where(:not([data-look="leather"]))`).
+The window is Mica only with Full: Rust reads the choice at launch from
+`visual-effects-full` in the app's data folder, which the page keeps
+(`window_material_effects`), so a change reaches the window at the next start.
+The page's scroller is an opaque layer of the page's colour there: a
+see-through scroller is not given a layer of its own at normal screen
+density, and every scrolled frame was painted and rastered again. What the device was judged to be is kept
 (`leaflet.perf.auto.v1`). Then, on Auto only, a short probe of frame times
 after start and a watchdog over scrolling and dragging (15% of frames over
 25 ms across 3 s of movement) can step the tier down for the session. The

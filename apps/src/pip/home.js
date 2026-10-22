@@ -446,8 +446,9 @@ export const levelFixtures = (level, decor, open = false, data = {}) => {
  * real time; `frame` then only animates lamps, fish, clouds and stars.
  * The floor's fixtures are drawn as `decor.fixtures` says, or shut and where
  * `decor.placed` leaves room when it does not say. `openSky` leaves the garden's glass wall transparent (see pip/sky.js).
+ * `pad` draws it wide (house.js `renderLevel`): the room in from the corner, its walls and floor running on past it.
  */
-export const renderHouseLevel = (level, frame, decor, night, hour, openSky = false) => {
+export const renderHouseLevel = (level, frame, decor, night, hour, openSky = false, pad = undefined) => {
   if (!level.fallback && typeof art.renderLevel === "function") {
     return art.renderLevel(level.id, frame, {
       wallpaper: decor.wallpaper ?? undefined,
@@ -458,7 +459,9 @@ export const renderHouseLevel = (level, frame, decor, night, hour, openSky = fal
       night: level.night || Boolean(night),
       hour,
       // The garden's glass left clear, for the scene's living sky underneath.
-      ...(openSky ? { sky: false } : {})
+      ...(openSky ? { sky: false } : {}),
+      // Drawn wide: the room's walls, floor and ceiling run on past it (house.js).
+      ...(pad ? { pad } : {})
     });
   }
   if (level.garden) return null;

@@ -56,6 +56,39 @@ export const ProfileFace = ({ size }: { size: number }) => {
   );
 };
 
+/** When the last whole sync was, said shortly: a time today, a day before then. */
+const since = (iso: string, now: Date) => {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return null;
+  return at.toDateString() === now.toDateString()
+    ? at.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+    : at.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+};
+
+/**
+ * A failed sync, said honestly: since when nothing has got through
+ * ("Couldn't sync since 19 Oct"), not only that the last try failed. Sync
+ * can fail at every try for days, and "Sync failed" read the same on the
+ * first day as on the fifth (2026-10-21).
+ */
+export const failedLine = (sync: Pick<SyncStatus, "lastSyncedAt">, now = new Date()) => {
+  const words = FEATURES.multiDeviceSync ? "Couldn't sync" : "Couldn't back up";
+  const when = sync.lastSyncedAt ? since(sync.lastSyncedAt, now) : null;
+  return when ? `${words} since ${when}` : words;
+};
+
+/**
+ * Google refusing Drive, in a few words, or null: Leaflet's client disabled
+ * (nothing for the reader to do), or the reader's grant gone (connect again).
+ * Not a failed sync: the account carries the reading meanwhile.
+ */
+export const driveLine = (sync: Pick<SyncStatus, "driveConnected" | "driveUnavailable">) => {
+  if (!sync.driveConnected) return null;
+  if (sync.driveUnavailable === "client_disabled") return "Google Drive is unavailable right now";
+  if (sync.driveUnavailable === "reconnect") return "Reconnect Google Drive";
+  return null;
+};
+
 /**
  * One line on the state of backup, for the button's tooltip and the menu.
  * Quiet when all is well: "Backed up 5m ago", not a badge that says so forever.
@@ -66,21 +99,26 @@ export const backupLine = (mode: SyncMode, status: DriveSyncStatus, sync: SyncSt
   // Sync where several devices are kept in step, a backup where they are not (constants/features.ts).
   if (FEATURES.multiDeviceSync) {
     if (status === "syncing") return "Syncing…";
-    if (status === "error") return "Sync failed";
+    if (status === "error") return failedLine(sync);
     if (mode === "off") return "Not synced";
     return sync.lastSyncedAt ? `Synced ${relativeTime(sync.lastSyncedAt)}` : "Sync on, nothing sent yet";
   }
   if (status === "syncing") return "Backing up…";
-  if (status === "error") return "Backup failed";
+  if (status === "error") return failedLine(sync);
   if (mode === "off") return "Not backed up";
   return sync.lastSyncedAt ? `Backed up ${relativeTime(sync.lastSyncedAt)}` : "Backup on, nothing sent yet";
 };
 
+/** The account's copy filling up, in a few words, or null (sync audit D2). */
+export const roomLine = (sync: Pick<SyncStatus, "accountUsage">) =>
+  sync.accountUsage ? OWNER_COPY.roomLine(sync.accountUsage.bytes, sync.accountUsage.limit) : null;
+
 /** The tooltip's words on backup: the line, and "Files only" where Drive or the folder carries only book files. */
 export const backupTitle = (mode: SyncMode, status: DriveSyncStatus, sync: SyncStatus) => {
   const line = backupLine(mode, status, sync);
+  if (line === OWNER_COPY.paused) return line;
   const filesOnly = (sync.driveConnected && sync.driveFilesOnly) || (Boolean(sync.folderPath) && sync.folderFilesOnly);
-  return filesOnly && line !== OWNER_COPY.paused ? `${line} · ${OWNER_COPY.filesOnly}` : line;
+  return [line, filesOnly ? OWNER_COPY.filesOnly : null, driveLine(sync), roomLine(sync)].filter(Boolean).join(" · ");
 };
 
 /**
@@ -164,6 +202,7 @@ export const ProfileButton = ({
   const who = account ? account.displayName || account.email : accountsOn ? "Not signed in" : "Your Pip";
   const failed = status === "error";
   const syncing = status === "syncing";
+  const driveRefused = driveLine(sync);
   const tooltip = `${account ? `${who}. ` : ""}${lineTitle}${sync.booksPending > 0 ? `. ${sync.booksPending} to download` : ""}`;
   const what = touch ? "Your profile, backup and settings" : "Your profile and backup";
   // Not on the phone: a sync folder there would do nothing.
@@ -254,6 +293,11 @@ export const ProfileButton = ({
             {error && failed && (
               <p className="mt-2 rounded-lg bg-error-container/40 px-3 py-2 text-[11px] leading-relaxed text-on-surface">{error}</p>
             )}
+            {roomLine(sync) && (
+              <p className="mt-2 text-[11px] text-on-surface-variant" title={OWNER_COPY.roomNote}>
+                {roomLine(sync)}
+              </p>
+            )}
             {sync.booksPending > 0 && (
               <p className="mt-2 text-[11px] text-on-surface-variant">
                 {sync.booksPending} {sync.booksPending === 1 ? "book" : "books"} will download when opened.
@@ -266,14 +310,23 @@ export const ProfileButton = ({
                 </p>
               )
             ) : sync.driveConnected ? (
-              <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-on-surface-variant">
-                <span className="min-w-0 truncate" title={sync.accountEmail ?? undefined}>
-                  Google Drive{sync.accountEmail ? ` · ${sync.accountEmail}` : ""}
-                </span>
-                <button type="button" className="shrink-0 underline hover:text-on-surface" onClick={onDisconnectDrive}>
-                  Disconnect
-                </button>
-              </div>
+              <>
+                <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-on-surface-variant">
+                  <span className="min-w-0 truncate" title={sync.accountEmail ?? undefined}>
+                    {sync.driveUnavailable === "client_disabled"
+                      ? driveRefused
+                      : `Google Drive${sync.accountEmail ? ` · ${sync.accountEmail}` : ""}`}
+                  </span>
+                  <button type="button" className="shrink-0 underline hover:text-on-surface" onClick={onDisconnectDrive}>
+                    Disconnect
+                  </button>
+                </div>
+                {sync.driveUnavailable === "reconnect" && (
+                  <button type="button" className={`${small} tactile-button-primary mt-2 w-full`} onClick={onConnectDrive}>
+                    {driveRefused}
+                  </button>
+                )}
+              </>
             ) : (
               <>
                 <p className="mt-2 text-[11px] leading-relaxed text-on-surface-variant">

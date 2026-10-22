@@ -37,6 +37,8 @@ type LibraryOwnerState = {
   switchAndReload: (target: LibraryTarget) => Promise<boolean>;
   /** "Your account already has a library": use it (true), or start empty (false). */
   answerHolds: (useIt: boolean) => Promise<void>;
+  /** "Your Drive has a library from before accounts": use it (true), or keep it apart (false). */
+  answerStoreHolds: (useIt: boolean) => Promise<void>;
 };
 
 type Hooks = {
@@ -163,6 +165,21 @@ export const useLibraryOwnerStore = create<LibraryOwnerState>((set, get) => ({
       await Promise.all([library.loadBooks(), library.loadSyncStatus()]);
     } catch (cause) {
       toast(errorMessage(cause, "Couldn't reach your account. Try again."));
+    } finally {
+      set({ busy: false });
+    }
+  },
+  async answerStoreHolds(useIt) {
+    const library = useLibraryStore.getState();
+    const holds = library.storeHolds;
+    if (!holds) return;
+    set({ busy: true });
+    try {
+      await libraryOwnerService.storeAnswer(holds.transport, useIt);
+      library.dismissStoreHolds();
+      await Promise.all([library.loadBooks(), library.loadSyncStatus()]);
+    } catch (cause) {
+      toast(errorMessage(cause, "Couldn't sync. Try again."));
     } finally {
       set({ busy: false });
     }

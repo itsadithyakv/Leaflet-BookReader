@@ -490,7 +490,7 @@ const BookMenuPanel = ({ book, actions = [], onRemoved, triggerRef, onDismiss }:
                   close();
                   void syncService
                     .setLargeBookBackup([book.id], true)
-                    .then(requestBackup)
+                    .then(() => requestBackup())
                     .catch((cause) => failed("This file could not be backed up", cause));
                 }}
               >

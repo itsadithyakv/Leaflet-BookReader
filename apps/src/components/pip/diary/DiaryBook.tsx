@@ -14,6 +14,7 @@ import { WeekCard } from "./WeekCard";
 import "./diary.css";
 import { useBackLayer } from "../../../platform/back";
 import { backdropClose } from "../../ui/backdrop";
+import { readPlaydates } from "../../../pip/playdates";
 
 export type DiaryAt = {
   /** The day to open at ("2026-10-04"); today when left out. */
@@ -109,7 +110,9 @@ export const DiaryPages = ({ onClose, initialDay = null, initialView = "days" }:
           sessions: snapshot.sessions,
           freeReads: snapshot.freeReads,
           books: rows?.books ?? library.map((book) => ({ id: book.id, title: book.title, author: book.author, progress: book.progress })),
-          marks: rows?.marks ?? []
+          marks: rows?.marks ?? [],
+          // What she did with visiting friends' Pips: this device's own record.
+          playdates: readPlaydates()
         },
         today
       ),

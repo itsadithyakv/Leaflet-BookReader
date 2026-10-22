@@ -86,7 +86,7 @@ export type Animal = {
 
 export const ANIMALS: readonly Animal[] = [
   { id: 0, name: "Hen", charm: 8, does: "An egg most mornings: a parcel a day" },
-  { id: 1, name: "Cat", charm: 20, does: "One prowler in ten thinks better of it and stays in the wood" },
+  { id: 1, name: "Cat", charm: 20, does: "One creeper in ten thinks better of it and stays in the wood" },
   { id: 2, name: "Goat", charm: 35, does: "Leans on the wall: it stands a quarter longer" },
   { id: 3, name: "Owl", charm: 55, does: "Keeps watch: mending what prowlers did costs a quarter less" },
   { id: 4, name: "Fox", charm: 80, does: "A tenth more from every raid" },

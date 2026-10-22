@@ -103,7 +103,7 @@ pub(super) fn sources(db: &Database) -> Result<DiarySources, String> {
 }
 
 /// What the diary is written from, beyond the habit snapshot.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn diary_sources(state: State<'_, AppState>) -> Result<DiarySources, String> {
   let db = state.db.guard();
   sources(&db)

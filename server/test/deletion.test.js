@@ -10,6 +10,7 @@ import { after, before, describe, test } from "node:test";
 import { ObjectId } from "mongodb";
 import { createApp } from "../src/app.js";
 import { close, connect } from "../src/db.js";
+import { deleteAccount } from "../src/deletion.js";
 
 /**
  * Deleting an account: by the reader (DELETE /v1/account) and by the owner on
@@ -112,6 +113,53 @@ describe("deleting an account", () => {
       assert.equal(await db.collection(name).countDocuments(filter), 0, name);
     }
     assert.deepEqual(Object.keys(await db.collection("deletions").findOne({ _id: me.id })).sort(), ["_id", "at"]);
+  });
+
+  /**
+   * Sync audit D5: a device's sync on its way while the account is deleted
+   * on another (its push lost a race and retries at version 0) used to land
+   * between the state going and the sessions ending, and put a new state
+   * back: the reading outlived the deletion. Sessions end first now, and the
+   * state goes again at the very end.
+   */
+  test("ends the sessions before anything is deleted, and deletes the state last", async () => {
+    const me = await reader();
+    const seen = [];
+    const watch = (collection) =>
+      new Proxy(collection, {
+        get(target, name) {
+          if (name === "deleteOne") {
+            return async (...args) => {
+              seen.push(await db.collection("sessions").countDocuments({ userId: me.id }));
+              return target.deleteOne(...args);
+            };
+          }
+          const value = target[name];
+          return typeof value === "function" ? value.bind(target) : value;
+        }
+      });
+    const watched = new Proxy(db, {
+      get(target, name) {
+        if (name === "collection") return (which) => (which === "states" ? watch(target.collection(which)) : target.collection(which));
+        const value = target[name];
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+    });
+    await deleteAccount(watched, me.id);
+    assert.deepEqual(seen, [0, 0], "no session was left when the state went, either time");
+    assert.equal(await db.collection("states").countDocuments({ _id: me.id }), 0);
+    assert.equal((await call("PUT", "/v1/state", { token: me.token, body: { version: 0, state: Buffer.from("y").toString("base64") } })).status, 401);
+    assert.equal(await db.collection("states").countDocuments({ _id: me.id }), 0);
+  });
+
+  test("a first copy is not kept for an account that is gone, even on a session still open", async () => {
+    const me = await reader();
+    await db.collection("states").deleteOne({ _id: me.id });
+    // The account goes while a request already let in is on its way.
+    await db.collection("accounts").deleteOne({ _id: me.id });
+    const late = await call("PUT", "/v1/state", { token: me.token, body: { version: 0, state: Buffer.from("z").toString("base64") } });
+    assert.equal(late.status, 401);
+    assert.equal(await db.collection("states").countDocuments({ _id: me.id }), 0);
   });
 
   test("an address with no account is said so, and fails", async () => {

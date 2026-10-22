@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { BSON } from "mongodb";
 import { optionalAccount, requireAccount } from "../auth.js";
 import { problems, profiles } from "../db.js";
 import { HttpError, asyncHandler, plainLines, problemJson, smallJson } from "../http.js";
@@ -35,6 +36,13 @@ export const DIAGNOSTICS_MAX = 64 * 1024;
 export const PROBLEMS_PER_DAY = 5;
 /** How many may wait for the owner at once before new ones are turned away. */
 export const OPEN_MAX = 1000;
+/**
+ * And how large they may be together, in bytes as stored: a thousand
+ * reports each with its 64 KB of diagnostics would be some 66 MB, an eighth
+ * of a free cluster (sync audit C7). 20 MB is a few hundred with
+ * diagnostics, thousands without.
+ */
+export const OPEN_BYTES_MAX = 20 * 1024 * 1024;
 /** How many the admin's list shows at a time. */
 const PAGE = 50;
 /** How much of a message the list shows. */
@@ -140,6 +148,7 @@ export function problemRoutes(db, limits = defaultLimits()) {
   // Every attempt from one address counts, before its body is read, so a
   // stranger cannot have the server parse 64 KB after 64 KB.
   const fromAddress = limiter(limits.problems ?? defaultLimits().problems);
+  const openBytesMax = limits.problemBytes ?? OPEN_BYTES_MAX;
   const limitAddress = (request, _response, next) => {
     fromAddress(`ip:${request.ip ?? "unknown"}`);
     next();
@@ -174,6 +183,15 @@ export function problemRoutes(db, limits = defaultLimits()) {
       const now = new Date();
       const { version, platform } = body;
       const doc = { at: now, message, diagnostics, version, platform, status: "open" };
+      // What the waiting reports take together, this one with them. Read on
+      // the database (the reports are never sent here for it); a report is
+      // rare enough for the read to cost nothing worth counting.
+      const [held] = await problems(db)
+        .aggregate([{ $match: { status: "open" } }, { $group: { _id: null, bytes: { $sum: { $bsonSize: "$$ROOT" } } } }])
+        .toArray();
+      if ((held?.bytes ?? 0) + BSON.calculateObjectSize(doc) > openBytesMax) {
+        throw new HttpError(503, FULL);
+      }
       if (accountId) {
         const enough = `You can send ${PROBLEMS_PER_DAY} problem reports a day.`;
         await spend(db, accountId, "problem", PROBLEMS_PER_DAY, enough, now);

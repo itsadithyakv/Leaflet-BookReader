@@ -330,10 +330,17 @@ impl Database {
 
   /// Writes what an enrichment pass found. Not the series: the reader may have
   /// set it while the lookup was out, and a lookup never finds one.
+  ///
+  /// Stamped only when something that travels changed (the title, the
+  /// author, the genres): a lookup that found a cover, or nothing new, is no
+  /// news for the other devices, and stamping it anyway sent the whole sync
+  /// document up again after every launch's lookups.
   pub fn update_metadata(&self, book: &BookRecord) -> Result<()> {
     let genres_json = serde_json::to_string(&book.genres).ok();
     self.conn.execute(
-      "UPDATE books SET title = ?1, author = ?2, genres = ?3, cover_url = ?4, metadata_checked_at = ?5, metadata_updated_at = ?6 WHERE id = ?7",
+      "UPDATE books SET title = ?1, author = ?2, genres = ?3, cover_url = ?4, metadata_checked_at = ?5,
+         metadata_updated_at = CASE WHEN title IS ?1 AND author IS ?2 AND genres IS ?3 THEN metadata_updated_at ELSE ?6 END
+       WHERE id = ?7",
       params![
         book.title,
         book.author,
@@ -464,6 +471,16 @@ impl Database {
   /// CFI at the same percentage is a move (a percentage is coarse; several
   /// pages can share it). A move reported without a position clears the stored
   /// one rather than leaving a CFI that no longer matches the percentage.
+  ///
+  /// Moved means moved from where this device itself last stood
+  /// (`places_here`) as well as from the books row. When a sync has carried
+  /// another device's place into the row, the book opens here at this
+  /// device's own place, with the other offered (`services/placeElsewhere`);
+  /// saving that own place again is standing still, not reading, and it is
+  /// not made the newest place: on 2026-10-21 that is how a laptop opening
+  /// at its old 54 % sent the account back from the phone's 70 % and more.
+  /// The row keeps the other device's place until this device reads on from
+  /// its own (or goes there).
   pub fn update_progress(
     &self,
     book_id: &str,
@@ -479,16 +496,25 @@ impl Database {
         |row| Ok((row.get(0)?, row.get(1)?))
       )
       .optional()?;
+    let here = self.place_here(book_id)?;
+    let moved_from_row = previous
+      .as_ref()
+      .map(|(value, previous_position)| {
+        (value - progress).abs() > f32::EPSILON || (position.is_some() && position != *previous_position)
+      })
+      .unwrap_or(true);
+    // From this device's own place: a CFI where it kept none is the same place.
+    let moved_from_here = here
+      .as_ref()
+      .map(|(value, here_position)| {
+        (value - progress).abs() > f32::EPSILON || (position.is_some() && here_position.is_some() && position != *here_position)
+      })
+      .unwrap_or(true);
+    let moved = moved_from_row && moved_from_here;
     // Reaching the end from short of it is finishing the book: the date is
     // kept from then on (`BookRecord::finished_at`). A book that is new here,
     // or was already at its end, is not finished again by being opened.
-    let finishes = progress >= FINISHED_AT && previous.as_ref().is_some_and(|(value, _)| *value < FINISHED_AT);
-    let moved = previous
-      .map(|(value, previous_position)| {
-        (value - progress).abs() > f32::EPSILON
-          || (position.is_some() && position != previous_position)
-      })
-      .unwrap_or(true);
+    let finishes = moved && progress >= FINISHED_AT && previous.as_ref().is_some_and(|(value, _)| *value < FINISHED_AT);
     if moved {
       self.conn.execute(
         "UPDATE books SET progress = ?1, position = ?2, last_opened = ?3, progress_updated_at = ?4 WHERE id = ?5",
@@ -508,7 +534,12 @@ impl Database {
     }
     // Where this device itself last stood in the book, apart from where a
     // sync may later move the row above: what the reader offers to go from
-    // ("Your other device is further on", `place_here`).
+    // ("Your other device is further on", `place_here`). Standing at its own
+    // old place again changes nothing there, not even when: the other
+    // device's place stays offered until the reader answers it.
+    if moved_from_row && !moved_from_here {
+      return Ok(());
+    }
     self.conn.execute(
       "INSERT INTO places_here (book_id, progress, position, at)
        SELECT id, progress, position, ?2 FROM books WHERE id = ?1
@@ -649,6 +680,17 @@ impl Database {
     let id = hex::encode(bytes);
     self.set_setting(KEY, &id)?;
     Ok(id)
+  }
+
+  /// Every minute this device itself has on its ledger (its own figure, all
+  /// days kept). It only rises while this device reads: a sync never raises
+  /// it beyond what this device credited (`merge`, figure by figure).
+  pub fn own_minutes(&self) -> Result<f64> {
+    Ok(self.conn.query_row(
+      "SELECT COALESCE(SUM(minutes), 0) FROM reading_day_devices WHERE device_id = ?1",
+      params![self.device_id()?],
+      |row| row.get::<_, f64>(0)
+    )?)
   }
 
   /// What each device read on each day, by day.
@@ -1723,6 +1765,35 @@ pub(crate) mod tests {
       .expect("seed");
   }
 
+  /// A lookup that changes nothing that travels (it found a cover, or what
+  /// the book already said) leaves the stamp alone: no news for the other
+  /// devices, and no push of the whole document after each launch's lookups.
+  #[test]
+  fn a_lookup_stamps_the_metadata_only_when_it_changed_what_travels() {
+    let db = memory_db();
+    seeded_book(&db);
+    db.conn
+      .execute("UPDATE books SET author = 'Someone', genres = '[\"fiction\"]', metadata_updated_at = '2026-01-01T00:00:00Z' WHERE id = 'b1'", [])
+      .expect("seed");
+    let mut book = db.find_by_id("b1").expect("query").expect("present");
+    book.cover_url = Some("/covers/b1.jpg".to_string());
+    book.metadata_checked_at = Some("2026-10-22T10:00:00Z".to_string());
+    db.update_metadata(&book).expect("a cover found");
+    let after = db.find_by_id("b1").expect("query").expect("present");
+    assert_eq!(after.cover_url.as_deref(), Some("/covers/b1.jpg"));
+    assert_eq!(after.metadata_checked_at.as_deref(), Some("2026-10-22T10:00:00Z"));
+    assert_eq!(after.metadata_updated_at.as_deref(), Some("2026-01-01T00:00:00Z"), "nothing that travels changed");
+
+    book.author = Some("Someone Else".to_string());
+    db.update_metadata(&book).expect("an author found");
+    let after = db.find_by_id("b1").expect("query").expect("present");
+    assert_ne!(after.metadata_updated_at.as_deref(), Some("2026-01-01T00:00:00Z"), "a new author is news");
+    let stamp = after.metadata_updated_at.clone();
+    book.genres = vec!["fiction".to_string(), "history".to_string()];
+    db.update_metadata(&book).expect("a genre found");
+    assert!(db.find_by_id("b1").expect("query").expect("present").metadata_updated_at >= stamp);
+  }
+
   #[test]
   fn a_series_from_the_file_never_overrides_the_readers_word() {
     let db = memory_db();
@@ -2093,6 +2164,73 @@ pub(crate) mod tests {
 
     db.update_progress("aaa", 0.6, Some(now_iso()), Some("epubcfi(/6/30)".to_string())).expect("went there");
     assert_eq!(db.place_here("aaa").expect("place"), Some((0.6, Some("epubcfi(/6/30)".to_string()))));
+  }
+
+  /// Saving the place a book is already at, with or without its CFI, is not
+  /// a move: the stamp the merge goes by stays where it was.
+  #[test]
+  fn saving_the_same_place_again_is_not_newer() {
+    let db = memory_db();
+    seeded_book(&db);
+    let cfi = Some("epubcfi(/6/8!/4/2/1:0)".to_string());
+    db.update_progress("b1", 0.4, Some(now_iso()), cfi.clone()).expect("read");
+    db.conn.execute("UPDATE books SET progress_updated_at = '2026-01-02T00:00:00Z'", []).expect("backdate");
+    db.update_progress("b1", 0.4, Some(now_iso()), None).expect("opened");
+    db.update_progress("b1", 0.4, Some(now_iso()), cfi.clone()).expect("the reader's first save");
+    db.update_progress("b1", 0.4, Some(now_iso()), cfi.clone()).expect("ten seconds on");
+    let book = db.find_by_id("b1").expect("query").expect("present");
+    assert_eq!(book.progress_updated_at.as_deref(), Some("2026-01-02T00:00:00Z"));
+    assert_eq!((book.progress, book.position), (0.4, cfi));
+  }
+
+  /// Another device's place in the row (a sync), this device's own older one
+  /// in `places_here`: opening there and saving it again moves nothing and
+  /// stamps nothing, and the other place stays offered. Reading on from it,
+  /// or going to the other place, is a move as ever.
+  #[test]
+  fn standing_at_this_devices_own_older_place_does_not_outdate_another_devices() {
+    let db = memory_db();
+    seeded_book(&db);
+    let mine = Some("epubcfi(/6/178!/4/2/2/4/1:287)".to_string());
+    let theirs = Some("epubcfi(/6/230!/4/2/1:0)".to_string());
+    db.update_progress("b1", 0.54, Some(now_iso()), mine.clone()).expect("read here");
+    let (_, _, stood) = db.place_here_at("b1").expect("place").expect("here");
+    // The phone's place arrives by sync.
+    db.conn
+      .execute(
+        "UPDATE books SET progress = 0.72, position = ?1, progress_updated_at = '2099-10-21T10:00:00Z' WHERE id = 'b1'",
+        params![theirs]
+      )
+      .expect("sync");
+
+    db.update_progress("b1", 0.54, Some(now_iso()), None).expect("opened at its own place");
+    db.update_progress("b1", 0.54, Some(now_iso()), mine.clone()).expect("saved where it stands");
+    let book = db.find_by_id("b1").expect("query").expect("present");
+    assert_eq!((book.progress, book.position.clone()), (0.72, theirs.clone()));
+    assert_eq!(book.progress_updated_at.as_deref(), Some("2099-10-21T10:00:00Z"));
+    assert!(book.last_opened.is_some());
+    let (progress, position, at) = db.place_here_at("b1").expect("place").expect("here");
+    assert_eq!((progress, position, at), (0.54, mine.clone(), stood), "still offered: nothing answered it");
+
+    // Reading on from its own place: the reader's choice, and the newest place.
+    let on = Some("epubcfi(/6/178!/4/2/2/30/1:0)".to_string());
+    db.update_progress("b1", 0.55, Some(now_iso()), on.clone()).expect("read on");
+    let book = db.find_by_id("b1").expect("query").expect("present");
+    assert_eq!((book.progress, book.position), (0.55, on.clone()));
+    assert_ne!(book.progress_updated_at.as_deref(), Some("2099-10-21T10:00:00Z"));
+    assert_eq!(db.place_here("b1").expect("place"), Some((0.55, on)));
+
+    // Going to the other device's place instead moves this device's own there.
+    db.conn
+      .execute(
+        "UPDATE books SET progress = 0.72, position = ?1, progress_updated_at = '2099-10-21T10:00:00Z' WHERE id = 'b1'",
+        params![theirs]
+      )
+      .expect("sync");
+    db.update_progress("b1", 0.72, Some(now_iso()), theirs.clone()).expect("went there");
+    let book = db.find_by_id("b1").expect("query").expect("present");
+    assert_eq!(book.progress_updated_at.as_deref(), Some("2099-10-21T10:00:00Z"), "already the agreed place");
+    assert_eq!(db.place_here("b1").expect("place"), Some((0.72, theirs)));
   }
 
   /// A book removed takes this device's place in it with it; marked not

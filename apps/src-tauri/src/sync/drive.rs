@@ -91,6 +91,144 @@ pub enum CredentialSource {
   None
 }
 
+/// Why Google will not let Leaflet reach Drive, when no retry can help.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DriveUnavailable {
+  /// Google has disabled (or no longer knows) Leaflet's OAuth client:
+  /// `disabled_client`, `invalid_client`, `unauthorized_client`. Nothing the
+  /// reader does fixes it; it lasts until the client is restored.
+  ClientDisabled,
+  /// The reader's grant is revoked or expired (`invalid_grant`): connecting
+  /// Drive again fixes it.
+  Reconnect
+}
+
+impl DriveUnavailable {
+  pub fn message(self) -> &'static str {
+    match self {
+      DriveUnavailable::ClientDisabled => "Google Drive is unavailable right now.",
+      DriveUnavailable::Reconnect => "Drive access was revoked. Reconnect Google Drive to keep syncing."
+    }
+  }
+
+  fn key(self) -> &'static str {
+    match self {
+      DriveUnavailable::ClientDisabled => "client_disabled",
+      DriveUnavailable::Reconnect => "reconnect"
+    }
+  }
+
+  fn from_key(key: &str) -> Option<Self> {
+    match key {
+      "client_disabled" => Some(DriveUnavailable::ClientDisabled),
+      "reconnect" => Some(DriveUnavailable::Reconnect),
+      _ => None
+    }
+  }
+}
+
+/// A Drive failure that is Google refusing the client or the grant
+/// (`unavailable` finds it in an `anyhow::Error`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DriveAuthError(pub DriveUnavailable);
+
+impl std::fmt::Display for DriveAuthError {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.write_str(self.0.message())
+  }
+}
+
+impl std::error::Error for DriveAuthError {}
+
+/// What a failure from Drive says about the client or the grant, if anything.
+pub fn unavailable(error: &anyhow::Error) -> Option<DriveUnavailable> {
+  error.downcast_ref::<DriveAuthError>().map(|error| error.0)
+}
+
+/// The OAuth error codes that mean the client or the grant is unusable.
+fn refusal_of(code: &str) -> Option<DriveUnavailable> {
+  match code {
+    "disabled_client" | "invalid_client" | "unauthorized_client" => Some(DriveUnavailable::ClientDisabled),
+    "invalid_grant" => Some(DriveUnavailable::Reconnect),
+    _ => None
+  }
+}
+
+/// Google's OAuth error that means the client or the grant is unusable, from
+/// a token endpoint's answer (`{"error":"disabled_client",...}`) or the
+/// `error` parameter of a refused consent.
+pub(crate) fn oauth_refusal(body: &str) -> Option<DriveUnavailable> {
+  let code = serde_json::from_str::<serde_json::Value>(body)
+    .ok()
+    .and_then(|json| json.get("error").and_then(|value| value.as_str()).map(str::to_string))
+    .unwrap_or_else(|| body.trim().to_string());
+  refusal_of(&code).or_else(|| {
+    // Not Google's JSON (a proxy's page, a changed format): the code by name.
+    ["disabled_client", "invalid_client", "unauthorized_client", "invalid_grant"]
+      .into_iter()
+      .find(|code| body.contains(code))
+      .and_then(refusal_of)
+  })
+}
+
+/// Drive was found unavailable (`note_unavailable`), and why.
+pub const UNAVAILABLE_SETTING: &str = "drive_unavailable";
+/// Until when automatic syncs leave Drive alone after Google disabled the client.
+pub const PAUSED_UNTIL_SETTING: &str = "drive_paused_until";
+/// How long automatic syncs leave a disabled client alone. A sync the reader
+/// asks for still tries.
+pub const CLIENT_DISABLED_PAUSE_HOURS: i64 = 6;
+
+/// Records why Drive is unavailable; a disabled client is left alone by
+/// automatic syncs for `CLIENT_DISABLED_PAUSE_HOURS`.
+pub fn note_unavailable(db: &Database, kind: DriveUnavailable, now: DateTime<Utc>) -> Result<()> {
+  db.set_setting(UNAVAILABLE_SETTING, kind.key())?;
+  let until = match kind {
+    DriveUnavailable::ClientDisabled => (now + chrono::Duration::hours(CLIENT_DISABLED_PAUSE_HOURS)).to_rfc3339(),
+    DriveUnavailable::Reconnect => String::new()
+  };
+  db.set_setting(PAUSED_UNTIL_SETTING, &until)?;
+  Ok(())
+}
+
+/// Drive answered again, or was connected, disconnected or changed.
+pub fn clear_unavailable(db: &Database) -> Result<()> {
+  db.set_setting(UNAVAILABLE_SETTING, "")?;
+  db.set_setting(PAUSED_UNTIL_SETTING, "")?;
+  Ok(())
+}
+
+/// Why Drive was last found unavailable, if it was.
+pub fn unavailable_noted(db: &Database) -> Option<DriveUnavailable> {
+  db.get_setting(UNAVAILABLE_SETTING).ok().flatten().as_deref().and_then(DriveUnavailable::from_key)
+}
+
+/// An automatic sync leaves Drive alone: Google disabled the client less than
+/// `CLIENT_DISABLED_PAUSE_HOURS` ago.
+pub fn paused(db: &Database, now: DateTime<Utc>) -> bool {
+  unavailable_noted(db) == Some(DriveUnavailable::ClientDisabled)
+    && db
+      .get_setting(PAUSED_UNTIL_SETTING)
+      .ok()
+      .flatten()
+      .and_then(|until| DateTime::parse_from_rfc3339(&until).ok())
+      .is_some_and(|until| until.with_timezone(&Utc) > now)
+}
+
+/// A Drive call answered 401: the access token is no longer honoured. `open`
+/// refreshes once on it, which is where Google says why.
+#[derive(Debug)]
+struct SessionExpired;
+
+impl std::fmt::Display for SessionExpired {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.write_str("Drive session expired. Reconnect Drive.")
+  }
+}
+
+impl std::error::Error for SessionExpired {}
+
 fn from_build_or_env(build: Option<&str>, key: &str) -> Option<String> {
   build
     .filter(|value| !value.is_empty())
@@ -386,6 +524,8 @@ fn serve_callback(listener: TcpListener, expected_state: String, tx: oneshot::Se
             respond(&mut stream, FAILURE_PAGE);
             outcome = Err(if reason == "access_denied" {
               anyhow!("Drive connection was cancelled.")
+            } else if oauth_refusal(&reason) == Some(DriveUnavailable::ClientDisabled) {
+              DriveAuthError(DriveUnavailable::ClientDisabled).into()
             } else {
               anyhow!("Google refused the connection: {reason}")
             });
@@ -484,6 +624,11 @@ async fn exchange_code(
   let status = response.status();
   let body = response.text().await.unwrap_or_default();
   if !status.is_success() {
+    // A disabled client is said as such; a code that expired or was used
+    // already (`invalid_grant`, here) is the sign-in's own, said below.
+    if oauth_refusal(&body) == Some(DriveUnavailable::ClientDisabled) {
+      return Err(DriveAuthError(DriveUnavailable::ClientDisabled).into());
+    }
     return Err(anyhow!("Google rejected the sign-in: {}", google_error(&body).unwrap_or_else(|| status.to_string())));
   }
   tokens_from(&body)
@@ -627,6 +772,7 @@ pub fn clear_tokens(db: &Database) -> Result<()> {
   db.set_setting(REFRESH_SETTING, "")?;
   db.set_setting(ACCESS_SETTING, "")?;
   db.set_setting(EXPIRES_SETTING, "")?;
+  clear_unavailable(db)?;
   Ok(())
 }
 
@@ -654,10 +800,10 @@ async fn refresh_access_token(
   let status = response.status();
   let body = response.text().await.unwrap_or_default();
   if !status.is_success() {
-    // A revoked or expired grant is the one case worth naming: the user has to
-    // reconnect, and no amount of retrying will help.
-    if body.contains("invalid_grant") {
-      return Err(anyhow!("Drive access was revoked. Reconnect Drive to continue syncing."));
+    // A disabled client and a revoked or expired grant are the cases worth
+    // naming: no amount of retrying helps either (`DriveUnavailable`).
+    if let Some(kind) = oauth_refusal(&body) {
+      return Err(DriveAuthError(kind).into());
     }
     return Err(anyhow!("Could not refresh Drive access ({status})."));
   }
@@ -734,7 +880,7 @@ async fn describe_failure(response: reqwest::Response) -> anyhow::Error {
     .unwrap_or_else(|| body.chars().take(200).collect());
 
   match status.as_u16() {
-    401 => anyhow!("Drive session expired. Reconnect Drive."),
+    401 => SessionExpired.into(),
     403 if message.contains("storageQuota") || message.contains("quotaExceeded") => {
       anyhow!("Your Google Drive is full. Free some space and sync again.")
     }
@@ -1022,17 +1168,6 @@ async fn upload_book(
   Ok(())
 }
 
-async fn download(client: &reqwest::Client, token: &str, file_id: &str) -> Result<Vec<u8>> {
-  let response = send(
-    client
-      .get(format!("{DRIVE_API}/files/{file_id}"))
-      .bearer_auth(token)
-      .query(&[("alt", "media")])
-  )
-  .await?;
-  Ok(response.bytes().await?.to_vec())
-}
-
 /// A file's bytes straight to `path`, a piece at a time.
 async fn download_to(client: &reqwest::Client, token: &str, file_id: &str, path: &Path) -> Result<()> {
   let mut response = send(
@@ -1075,7 +1210,9 @@ pub async fn fetch_account_email(client: &reqwest::Client, token: &str) -> Resul
 struct DriveDoc<'a> {
   client: &'a reqwest::Client,
   token: &'a str,
-  root: &'a str
+  root: &'a str,
+  /// The time Google's last answer gave (`Date`).
+  heard: crate::sync::clock::Heard
 }
 
 impl shared_doc::DocStore for DriveDoc<'_> {
@@ -1084,7 +1221,16 @@ impl shared_doc::DocStore for DriveDoc<'_> {
       let Some(file) = find_file(self.client, self.token, STATE_FILE, self.root).await? else {
         return Ok((Remote::Absent, None));
       };
-      let bytes = download(self.client, self.token, &file.id).await?;
+      let response = send(
+        self
+          .client
+          .get(format!("{DRIVE_API}/files/{}", file.id))
+          .bearer_auth(self.token)
+          .query(&[("alt", "media")])
+      )
+      .await?;
+      self.heard.note(response.headers());
+      let bytes = response.bytes().await?.to_vec();
       // A corrupt document reads as absent, and this device republishes its
       // own state, which is recoverable. One a later version wrote is told
       // apart by its version first, and is not written over.
@@ -1142,6 +1288,26 @@ impl shared_doc::DocStore for DriveDoc<'_> {
       Ok(shared_doc::Written::Kept)
     })
   }
+
+  fn clock_offset(&self) -> Option<i64> {
+    self.heard.offset()
+  }
+
+  fn unmark<'a>(&'a self, held: &'a shared_doc::Held) -> shared_doc::Pending<'a, ()> {
+    Box::pin(async move {
+      // A property set to null is taken away (Drive v3 `appProperties`).
+      send(
+        self
+          .client
+          .patch(format!("{DRIVE_API}/files/{}", held.id))
+          .bearer_auth(self.token)
+          .query(&[("fields", "id")])
+          .json(&serde_json::json!({ "appProperties": { OWNER_PROPERTY: serde_json::Value::Null } }))
+      )
+      .await?;
+      Ok(())
+    })
+  }
 }
 
 /// A connection to the reader's Drive for one run: the folders found or
@@ -1156,7 +1322,32 @@ pub struct DriveCtx {
 
 /// Connects for a run: a token, the Leaflet folders, the Google account's
 /// address for Settings, and the marker on `state.json`.
+///
+/// A 401 on a token not yet expired (Google stops honouring tokens when it
+/// disables a client or a grant is revoked) drops the token and tries once
+/// more: the refresh is where Google says which (`DriveAuthError`). A second
+/// 401, on a fresh token, means connecting again.
 pub async fn open(db_mutex: &std::sync::Mutex<Database>) -> Result<DriveCtx> {
+  match connect(db_mutex).await {
+    Err(error) if error.is::<SessionExpired>() => {
+      {
+        let db = db_mutex.guard();
+        db.set_setting(ACCESS_SETTING, "")?;
+        db.set_setting(EXPIRES_SETTING, "")?;
+      }
+      connect(db_mutex).await.map_err(|error| {
+        if error.is::<SessionExpired>() {
+          DriveAuthError(DriveUnavailable::Reconnect).into()
+        } else {
+          error
+        }
+      })
+    }
+    other => other
+  }
+}
+
+async fn connect(db_mutex: &std::sync::Mutex<Database>) -> Result<DriveCtx> {
   let token = ensure_access_token(db_mutex).await?;
   let client = reqwest::Client::builder()
     .timeout(Duration::from_secs(120))
@@ -1183,7 +1374,7 @@ pub async fn sync_state(
   now: &str,
   who: &shared_doc::Who
 ) -> Result<shared_doc::StateRun> {
-  let doc_store = DriveDoc { client: &ctx.client, token: &ctx.token, root: &ctx.root };
+  let doc_store = DriveDoc { client: &ctx.client, token: &ctx.token, root: &ctx.root, heard: Default::default() };
   shared_doc::sync(db_mutex, &doc_store, now, who).await
 }
 
@@ -1454,6 +1645,58 @@ mod tests {
     assert!(google_error(used).expect("words").contains("Connect Drive again"));
     assert_eq!(google_error(r#"{"error":"invalid_client"}"#).as_deref(), Some("invalid_client"));
     assert_eq!(google_error("<html>bad gateway</html>"), None);
+  }
+
+  /// The owner's Drive client, 2026-10-22: "Error 401: disabled_client".
+  /// Google's refusals of the client, and of the grant, are told apart from
+  /// everything else, and carried as a typed error.
+  #[test]
+  fn googles_refusals_of_the_client_and_the_grant_are_recognised() {
+    use DriveUnavailable::*;
+    let disabled = r#"{"error":"disabled_client","error_description":"The OAuth client was disabled."}"#;
+    assert_eq!(oauth_refusal(disabled), Some(ClientDisabled));
+    assert_eq!(oauth_refusal(r#"{"error":"invalid_client","error_description":"The OAuth client was not found."}"#), Some(ClientDisabled));
+    assert_eq!(oauth_refusal(r#"{"error":"unauthorized_client","error_description":"Unauthorized"}"#), Some(ClientDisabled));
+    assert_eq!(oauth_refusal(r#"{"error":"invalid_grant","error_description":"Token has been expired or revoked."}"#), Some(Reconnect));
+    // A consent page's `error` parameter, and an answer that is not JSON.
+    assert_eq!(oauth_refusal("disabled_client"), Some(ClientDisabled));
+    assert_eq!(oauth_refusal("<html>Error 401: disabled_client</html>"), Some(ClientDisabled));
+    // Everything else is no verdict on the client.
+    assert_eq!(oauth_refusal(r#"{"error":"invalid_request","error_description":"Missing code verifier."}"#), None);
+    assert_eq!(oauth_refusal(r#"{"error":"access_denied"}"#), None);
+    assert_eq!(oauth_refusal("<html>bad gateway</html>"), None);
+    assert_eq!(oauth_refusal(""), None);
+
+    let error: anyhow::Error = DriveAuthError(ClientDisabled).into();
+    assert_eq!(unavailable(&error), Some(ClientDisabled));
+    assert_eq!(error.to_string(), "Google Drive is unavailable right now.");
+    assert_eq!(unavailable(&anyhow!("Could not reach Drive: timed out")), None);
+    assert_eq!(serde_json::to_string(&ClientDisabled).unwrap(), "\"client_disabled\"");
+    assert_eq!(serde_json::to_string(&Reconnect).unwrap(), "\"reconnect\"");
+  }
+
+  /// After a disabled client, automatic syncs leave Drive alone for six
+  /// hours; a grant to reconnect is never waited out.
+  #[test]
+  fn a_disabled_client_is_left_alone_for_six_hours() {
+    let db = crate::db::tests::memory_db();
+    let at = DateTime::parse_from_rfc3339("2026-10-22T09:00:00+00:00").unwrap().with_timezone(&Utc);
+    assert!(!paused(&db, at));
+    note_unavailable(&db, DriveUnavailable::ClientDisabled, at).unwrap();
+    assert_eq!(unavailable_noted(&db), Some(DriveUnavailable::ClientDisabled));
+    assert!(paused(&db, at + chrono::Duration::hours(5) + chrono::Duration::minutes(59)));
+    assert!(!paused(&db, at + chrono::Duration::hours(6)));
+
+    note_unavailable(&db, DriveUnavailable::Reconnect, at).unwrap();
+    assert_eq!(unavailable_noted(&db), Some(DriveUnavailable::Reconnect));
+    assert!(!paused(&db, at));
+
+    note_unavailable(&db, DriveUnavailable::ClientDisabled, at).unwrap();
+    // (What `clear_tokens` does on a disconnect; not called here, as it
+    // would clear this computer's real keychain entry.)
+    clear_unavailable(&db).unwrap();
+    assert_eq!(unavailable_noted(&db), None);
+    assert!(!paused(&db, at));
   }
 
   #[test]

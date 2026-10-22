@@ -43,6 +43,8 @@ type MeadowDock = {
   onCamp: () => void;
   animals: { count: number; of: number; last: number; chosen: boolean; onOpen: () => void };
   decor: { chosen: boolean; onOpen: () => void };
+  /** (1.5.11) The Blooms list: every finished book's bloom on the Reading Path. */
+  blooms?: { count: number; last: number; chosen: boolean; onOpen: () => void };
 };
 
 /**
@@ -139,6 +141,19 @@ export const HollowDock = ({ dock, after }: { dock: CampDock | EditDock | Meadow
         >
           <Sprite name="decor" variant={10} box={28} />
         </button>
+        {dock.blooms && (
+          <button
+            type="button"
+            className={`pip-base-tile ${dock.blooms.chosen ? "is-chosen" : ""}`}
+            aria-pressed={dock.blooms.chosen}
+            aria-label={`Blooms: ${dock.blooms.count}, one for every book you finished`}
+            title="Blooms: one for every book you finished"
+            onClick={dock.blooms.onOpen}
+          >
+            <Sprite name="bloom" variant={dock.blooms.last} box={28} className={dock.blooms.count === 0 ? "is-locked" : ""} />
+            <span className="pip-base-tile-level">{dock.blooms.count}</span>
+          </button>
+        )}
       </div>
     ) : (
       <div className="pip-base-dock pip-hollow-dock" role="group" aria-label="The camp">

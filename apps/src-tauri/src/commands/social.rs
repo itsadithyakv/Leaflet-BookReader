@@ -132,6 +132,60 @@ pub(crate) fn read_day(days: &[habit::DayRecord], today_key: &str) -> Option<Str
 /// memory (a server put back from a backup has older ones).
 const PROFILE_RESEND_SECS: i64 = 6 * 60 * 60;
 
+/// Put before every body fingerprinted as sent (the profile's figures here,
+/// the library in `friends::library_due`). Changed when what was sent before
+/// cannot be trusted to be on the server: every device then sends its figures
+/// and its library once more, whether or not they moved. Changed for 1.5.11:
+/// until then a device with an old copy of the library (a laptop that had
+/// not synced) could overwrite what another had just published, and the one
+/// with the right figures, remembering them as sent, never sent them again.
+pub(crate) const SENT_PRINT_SALT: &str = "account-figures-1\n";
+
+/// How long after this device last took the account's state in
+/// (`cloud::AccountMerged`) its figures count as the account's, with nothing
+/// read here since: the app's own interval between publishes.
+pub(crate) const FIGURES_FRESH_SECS: i64 = 5 * 60;
+
+/// How long after that a device that has read since may still publish: what
+/// it read is newer than anything the account holds, and the rest is the
+/// account's from a few hours before at most (a book opened, the window
+/// come back to and every book closed take the account's in again).
+pub(crate) const FIGURES_READ_SINCE_SECS: i64 = 6 * 60 * 60;
+
+/// Whether this device's figures are the account's, and so may be published.
+///
+/// Every device of an account publishes onto the one profile, and the server
+/// keeps whichever came last. A laptop that had been shut for a day published
+/// its figures at launch, before its first sync had brought the phone's
+/// reading in (and again every ten minutes while it sat open, unsynced, in
+/// front): "Reading … 89 %" over the phone's 99 %, last week's minutes, and a
+/// count from before. So the figures go up only from a library that took the
+/// account's state in (`merged`, for the account signed in, `tag`) moments
+/// ago; or that has read since then itself (`own_now`, its own minutes, above
+/// what it had then), which is news the account does not have yet.
+pub(crate) fn figures_current(merged: Option<&cloud::AccountMerged>, tag: Option<&str>, own_now: f64, now: i64) -> bool {
+  let (Some(merged), Some(tag)) = (merged, tag) else {
+    return false;
+  };
+  let age = now - merged.at;
+  merged.tag == tag && ((0..FIGURES_FRESH_SECS).contains(&age) || ((0..FIGURES_READ_SINCE_SECS).contains(&age) && own_now > merged.own + 0.01))
+}
+
+/// `figures_current` for this library, now, for the account signed in.
+fn figures_current_here(db: &db::Database, now: i64) -> bool {
+  figures_current_for(db, crate::sync::owner::signed_in_tag(db).as_deref(), now)
+}
+
+/// `figures_current` for this library and the account tagged `tag`.
+pub(crate) fn figures_current_for(db: &db::Database, tag: Option<&str>, now: i64) -> bool {
+  figures_current(cloud::account_merged(db).as_ref(), tag, db.own_minutes().unwrap_or(0.0), now)
+}
+
+/// Set when a publish was held back because this device's figures were not
+/// the account's (`figures_current`): the publish that follows the next sync
+/// goes then, whenever the last one was.
+static FIGURES_WAITING: AtomicBool = AtomicBool::new(false);
+
 /// Whether the figures fingerprinted `print` are to be sent to `account`:
 /// when asked to (`force`), or unless they are exactly what that account was
 /// last sent, and recently.
@@ -161,7 +215,7 @@ where
   Fut: std::future::Future<Output = anyhow::Result<serde_json::Value>>
 {
   // The body exactly as `put_profile` sends it.
-  let print = fingerprint(&serde_json::to_vec(update).map_err(|e| e.to_string())?);
+  let print = sent_print(&serde_json::to_vec(update).map_err(|e| e.to_string())?);
   let (account, sent) = {
     let db = db_mutex.guard();
     (cloud::signed_in_account_id(&db), cloud::profile_sent(&db))
@@ -222,8 +276,14 @@ pub(crate) async fn publish_profile(state: &State<'_, AppState>, force: bool) ->
   if !shared_now(known, asked)? {
     return Ok(false);
   }
+  // Never figures older than the account's (`figures_current`): held back
+  // until a sync has brought the account's state in, and sent after it.
   let update = {
     let db = state.db.guard();
+    if !figures_current_here(&db, chrono::Utc::now().timestamp()) {
+      FIGURES_WAITING.store(true, Ordering::Relaxed);
+      return Ok(false);
+    }
     build_profile_update(&db, &local_today())?
   };
   // A library that has changed goes up behind the figures, and only behind
@@ -251,6 +311,7 @@ pub(crate) async fn publish_profile(state: &State<'_, AppState>, force: bool) ->
     crate::diag::warn(&format!("the shared library was not sent: {error}"));
   }
   *LAST_PUBLISHED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Instant::now());
+  FIGURES_WAITING.store(false, Ordering::Relaxed);
   Ok(true)
 }
 
@@ -299,14 +360,17 @@ pub(crate) fn publish_due(last: Option<Instant>, now: Instant) -> bool {
 /// from another device goes up with the next publish, minutes later at most.
 ///
 /// A reader this run has not yet asked the server about is always let
-/// through: that first publish is also what learns whether they share.
+/// through: that first publish is also what learns whether they share. So
+/// is a publish held back for want of the account's state (`FIGURES_WAITING`):
+/// the sync has just brought it.
 pub(crate) async fn publish_profile_after_sync(state: &State<'_, AppState>) -> Result<bool, String> {
   let known = {
     let db = state.db.guard();
     cloud::known_visibility(&db)
   };
   let last = *LAST_PUBLISHED.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-  if known.is_some() && VISIBILITY_CONFIRMED.load(Ordering::Relaxed) && !publish_due(last, Instant::now()) {
+  let waiting = FIGURES_WAITING.load(Ordering::Relaxed);
+  if known.is_some() && VISIBILITY_CONFIRMED.load(Ordering::Relaxed) && !waiting && !publish_due(last, Instant::now()) {
     return Ok(false);
   }
   publish_profile(state, false).await
@@ -326,6 +390,7 @@ static VISIBILITY_CONFIRMED: AtomicBool = AtomicBool::new(false);
 pub(crate) fn forget_run_state() {
   *LAST_PUBLISHED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
   VISIBILITY_CONFIRMED.store(false, Ordering::Relaxed);
+  FIGURES_WAITING.store(false, Ordering::Relaxed);
 }
 
 /// Whether to publish: the server's word when it was asked and answered, else
@@ -425,21 +490,26 @@ pub async fn save_social_profile(
     ..cloud::ProfileUpdate::default()
   };
 
-  // The figures go only from the account's own library.
+  // The figures go only from the account's own library, and only when they
+  // are the account's (`figures_current`); otherwise after the next sync.
   if going_public && library_may_publish(&state).await {
     let db = state.db.guard();
-    let stats = build_profile_update(&db, &local_today())?;
-    update.week_key = stats.week_key;
-    update.week_minutes = stats.week_minutes;
-    update.streak = stats.streak;
-    update.books_finished = stats.books_finished;
-    update.shelf = stats.shelf;
-    update.read_day = stats.read_day;
-    update.reading = stats.reading;
-    update.level = stats.level;
-    update.badges = stats.badges;
-    update.arcade = stats.arcade;
-    update.camp = stats.camp;
+    if !figures_current_here(&db, chrono::Utc::now().timestamp()) {
+      FIGURES_WAITING.store(true, Ordering::Relaxed);
+    } else {
+      let stats = build_profile_update(&db, &local_today())?;
+      update.week_key = stats.week_key;
+      update.week_minutes = stats.week_minutes;
+      update.streak = stats.streak;
+      update.books_finished = stats.books_finished;
+      update.shelf = stats.shelf;
+      update.read_day = stats.read_day;
+      update.reading = stats.reading;
+      update.level = stats.level;
+      update.badges = stats.badges;
+      update.arcade = stats.arcade;
+      update.camp = stats.camp;
+    }
   }
 
   cloud::put_profile(&state.db, &update).await.map_err(|e| e.to_string())?;
@@ -863,6 +933,82 @@ mod tests {
     cloud::forget_profile_sent(&db.guard());
     publish(&db, &figures(33.0), false, T + 30_300, &calls, ok()).await.expect("sent");
     assert_eq!(calls.load(Ordering::Relaxed), 10);
+  }
+
+  /// The owner's laptop, shut since the phone finished a book: its figures are
+  /// not the account's until a sync has brought the account's state in, and
+  /// they are held back until then; just after one they go, and a device that
+  /// reads on after it publishes what it read.
+  #[test]
+  fn figures_go_up_only_from_a_library_that_holds_the_accounts_state() {
+    const T: i64 = 1_792_000_000;
+    let merged = |at: i64, own: f64| cloud::AccountMerged { tag: "adi".to_string(), at, own };
+    // Never merged here, or nobody signed in: nothing to vouch for them.
+    assert!(!figures_current(None, Some("adi"), 0.0, T));
+    assert!(!figures_current(Some(&merged(T, 0.0)), None, 0.0, T));
+    // Merged for another account (another library on this computer): not this one's.
+    assert!(!figures_current(Some(&merged(T, 0.0)), Some("someone-else"), 0.0, T));
+    // Just merged: the account's.
+    assert!(figures_current(Some(&merged(T, 40.0)), Some("adi"), 40.0, T + 1));
+    assert!(figures_current(Some(&merged(T, 40.0)), Some("adi"), 40.0, T + FIGURES_FRESH_SECS - 1));
+    // Left open and unsynced, nothing read here: the account may have moved on.
+    assert!(!figures_current(Some(&merged(T, 40.0)), Some("adi"), 40.0, T + FIGURES_FRESH_SECS));
+    // Launched a day later, before the first sync: the merge is last session's.
+    assert!(!figures_current(Some(&merged(T - 86_400, 40.0)), Some("adi"), 40.0, T));
+    // Read here since: news the account has not had yet, so it goes...
+    assert!(figures_current(Some(&merged(T, 40.0)), Some("adi"), 52.0, T + 3_600));
+    // ...but not on a merge from days ago.
+    assert!(!figures_current(Some(&merged(T, 40.0)), Some("adi"), 52.0, T + FIGURES_READ_SINCE_SECS));
+    // A clock set back is not "just merged".
+    assert!(!figures_current(Some(&merged(T, 40.0)), Some("adi"), 40.0, T - 10));
+  }
+
+  /// The marker an account sync leaves is what lets the figures go, for that
+  /// account; a sync that failed leaves none.
+  #[tokio::test]
+  async fn an_account_sync_vouches_for_the_figures_and_a_failed_one_does_not() {
+    let db = std::sync::Mutex::new(crate::db::tests::memory_db());
+    let tag = "account-tag";
+    let now = chrono::Utc::now();
+    let stamp = now.to_rfc3339();
+    let today = now.format("%Y-%m-%d").to_string();
+    // Read on this device before any sync: not the account's figures.
+    db.guard().credit_minutes(&today, 25.0, 20).expect("read");
+    assert!(!figures_current_for(&db.guard(), Some(tag), now.timestamp()));
+    // The account could not be reached: still not.
+    let down = crate::sync::cloud::fake::FakeCloud::failing();
+    assert!(crate::sync::cloud::sync_with(&db, &down, &stamp, Some(tag)).await.is_err());
+    assert!(!figures_current_for(&db.guard(), Some(tag), now.timestamp()));
+    // Synced: the account's, as of now, and for that account only.
+    let cloud = crate::sync::cloud::fake::FakeCloud::default();
+    crate::sync::cloud::sync_with(&db, &cloud, &stamp, Some(tag)).await.expect("synced");
+    assert!(figures_current_for(&db.guard(), Some(tag), now.timestamp()));
+    assert!(!figures_current_for(&db.guard(), Some("another-account"), now.timestamp()));
+    let merged = cloud::account_merged(&db.guard()).expect("merged");
+    assert_eq!((merged.tag.as_str(), merged.own), (tag, 25.0));
+    // Ten minutes on, nothing read here: held back. A page more read here: it goes.
+    assert!(!figures_current_for(&db.guard(), Some(tag), now.timestamp() + 600));
+    db.guard().credit_minutes(&today, 1.0, 20).expect("read on");
+    assert!(figures_current_for(&db.guard(), Some(tag), now.timestamp() + 600));
+  }
+
+  /// What every device remembers as sent is salted, so that a change of the
+  /// salt sends the figures (and the library, by the same print) once more.
+  #[tokio::test]
+  async fn figures_remembered_from_before_the_salt_are_sent_again() {
+    use std::sync::atomic::AtomicUsize;
+    let db = signed_in_as("a1");
+    const T: i64 = 1_790_000_000;
+    let body = serde_json::to_vec(&figures(30.0)).expect("json");
+    assert_ne!(sent_print(&body), fingerprint(&body));
+    // As 1.5.10 remembered it: the bare body's print.
+    cloud::remember_profile_sent(&db.guard(), &cloud::ProfileSent { account: "a1".to_string(), print: fingerprint(&body), at: T });
+    let calls = AtomicUsize::new(0);
+    let ok = || Ok(serde_json::json!({ "visibility": "public" }));
+    publish(&db, &figures(30.0), false, T + 60, &calls, ok()).await.expect("sent");
+    assert_eq!(calls.load(Ordering::Relaxed), 1, "sent once more after the update");
+    publish(&db, &figures(30.0), false, T + 120, &calls, ok()).await.expect("skipped");
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
   }
 
   /// A clock set back makes the last send look like the future: not trusted.

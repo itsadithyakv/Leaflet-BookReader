@@ -259,7 +259,7 @@ const BookView = ({
 
   // Like a change made in the reader: it goes into the next backup, and the library's counts follow.
   const changed = () => {
-    requestBackup();
+    requestBackup({ whileReading: true });
     void loadCounts();
   };
 

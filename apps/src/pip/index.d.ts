@@ -145,6 +145,8 @@ export type PipFinish = { id: string; name: string; price: number };
 export declare const HOUSE_LEVELS: PipHouseLevel[];
 export declare const WALLPAPERS: PipFinish[];
 export declare const FLOORS: PipFinish[];
+/** Every repeat the wallpapers and floors are drawn in fits this many pixels whole: left of a room drawn wide, a pattern is drawn as it is this far right. */
+export declare const PATTERN_SPAN: number;
 export declare const HOUSE_ITEMS: PipRoomItem[];
 export declare const NOD_ITEMS: PipRoomItem[];
 export declare const ALL_ITEMS: PipRoomItem[];
@@ -166,7 +168,14 @@ export declare function lightAt(glows: ReadonlyArray<readonly [number, number, n
 export declare function renderLevel(
   levelId: string,
   frame: number,
-  opts?: { wallpaper?: string; floor?: string; placed?: Array<{ slot: string; itemId: string }>; night?: boolean }
+  opts?: {
+    wallpaper?: string;
+    floor?: string;
+    placed?: Array<{ slot: string; itemId: string }>;
+    night?: boolean;
+    /** Drawn wide: that many pixels more each side, the room at (left, top), its own pixels as drawn alone. */
+    pad?: { left: number; right: number; top: number; bottom: number };
+  }
 ): ImageData;
 export declare function renderHouseItem(item: PipRoomItem | string, frame?: number, data?: unknown): ImageData;
 export declare function renderSwatch(type: "wallpaper" | "floor", id: string, w?: number, h?: number, frame?: number): ImageData;

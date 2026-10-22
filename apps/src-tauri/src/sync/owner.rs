@@ -35,6 +35,13 @@ pub const FOLDER_FILES_ONLY_SETTING: &str = "folder_files_only";
 /// "1" for a library started fresh for an account: its first account sync
 /// asks before taking in what the account already holds.
 pub const FRESH_SETTING: &str = "library_fresh";
+/// Tags of accounts deleted from this device, comma separated: no owner any
+/// more, wherever they are still written (`live`).
+pub const RELEASED_SETTING: &str = "library_owners_released";
+/// The reader's answer about a Drive (or folder) holding a library from
+/// before owners, signed in (`claim_answer`): "use" or "apart".
+pub const DRIVE_CLAIM_SETTING: &str = "drive_claim_answer";
+pub const FOLDER_CLAIM_SETTING: &str = "folder_claim_answer";
 
 /// Whether, signed in, a Drive or folder holding this owner's library still
 /// gets a copy of the state, for the owner's devices that are signed out.
@@ -67,10 +74,11 @@ pub fn get(db: &Database) -> Option<String> {
   clean(db.get_setting(OWNER_SETTING).ok().flatten().as_deref())
 }
 
-/// Claims the library for `tag` if nobody has. Never changes an owner.
+/// Claims the library for `tag` if nobody has. Never changes an owner, and
+/// never claims for an account deleted here (`remember_released`).
 /// Whether the library is now `tag`'s.
 pub fn claim_if_unowned(db: &Database, tag: &str) -> Result<bool> {
-  if !is_tag(tag) {
+  if !is_tag(tag) || is_released(db, tag) {
     return Ok(false);
   }
   match get(db) {
@@ -89,6 +97,64 @@ pub fn release_if(db: &Database, tag: &str) -> Result<bool> {
   }
   db.set_setting(OWNER_SETTING, "")?;
   Ok(true)
+}
+
+/// The tags of accounts deleted from this device.
+pub fn released(db: &Database) -> Vec<String> {
+  db.get_setting(RELEASED_SETTING)
+    .ok()
+    .flatten()
+    .unwrap_or_default()
+    .split(',')
+    .filter_map(|part| clean(Some(part)))
+    .collect()
+}
+
+fn is_released(db: &Database, tag: &str) -> bool {
+  released(db).iter().any(|dead| dead == tag)
+}
+
+/// Notes that `tag`'s account is gone (deleted from this device). Its tag
+/// stays written where this device cannot reach to wipe it (a Drive's or a
+/// folder's copy, another device's), and wherever this device reads it,
+/// it is no owner (`live`): sync audit W3, where a sync signed out took the
+/// library back for the dead account and a new account then found it
+/// "another account's".
+pub fn remember_released(db: &Database, tag: &str) -> Result<()> {
+  if !is_tag(tag) || is_released(db, tag) {
+    return Ok(());
+  }
+  let mut all = released(db);
+  all.push(tag.to_string());
+  db.set_setting(RELEASED_SETTING, &all.join(","))
+}
+
+/// An owner read from a store, a document or a marker, unless it is an
+/// account deleted here: that is nobody's.
+pub fn live(db: &Database, owner: Option<String>) -> Option<String> {
+  owner.filter(|tag| !is_released(db, tag))
+}
+
+/// The reader's answer about a store that holds a library from before
+/// owners (`Some(true)`: bring it in; `Some(false)`: keep it apart, files
+/// only), or nothing yet.
+pub fn claim_answer(db: &Database, transport: Transport) -> Option<bool> {
+  match db.get_setting(transport.claim_setting()).ok().flatten().as_deref() {
+    Some("use") => Some(true),
+    Some("apart") => Some(false),
+    _ => None
+  }
+}
+
+/// Keeps the reader's answer (`None` forgets it: the store was disconnected
+/// or changed, or it is this account's now).
+pub fn set_claim_answer(db: &Database, transport: Transport, answer: Option<bool>) -> Result<()> {
+  let value = match answer {
+    Some(true) => "use",
+    Some(false) => "apart",
+    None => ""
+  };
+  db.set_setting(transport.claim_setting(), value)
 }
 
 /// The signed-in account's tag, when someone is signed in and this device
@@ -235,7 +301,7 @@ pub fn store_mode(signed_in: Option<&str>, local: Option<&str>, remote: Option<&
 }
 
 /// A transport that carries the state document.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Transport {
   Drive,
@@ -255,6 +321,13 @@ impl Transport {
     match self {
       Transport::Drive => DRIVE_REFUSED,
       Transport::Folder => FOLDER_REFUSED
+    }
+  }
+
+  fn claim_setting(self) -> &'static str {
+    match self {
+      Transport::Drive => DRIVE_CLAIM_SETTING,
+      Transport::Folder => FOLDER_CLAIM_SETTING
     }
   }
 

@@ -19,7 +19,7 @@ const PER_BOOK_PREFIXES = ["leaflet.reader.", "leaflet.bookmarks.", "leaflet.pdf
  * `leaflet.people.preview` is the browser preview's character sheets (the app
  * keeps them in the database, which the delete clears).
  */
-const LISTS = ["leaflet.pip.nodsSeen", "leaflet.shelf.lastSeen", "leaflet.people.preview", "leaflet.words.preview", "leaflet.pip.lastStop", "leaflet.pip.spines", "leaflet.pip.visits", "leaflet.pip.findSeen"];
+const LISTS = ["leaflet.pip.nodsSeen", "leaflet.shelf.lastSeen", "leaflet.people.preview", "leaflet.words.preview", "leaflet.pip.lastStop", "leaflet.pip.spines", "leaflet.pip.visits", "leaflet.pip.playdates", "leaflet.pip.findSeen"];
 /**
  * How the reader likes every book laid out, and what the reader has already
  * been shown once: settings. Most are kept under the per-book prefix; the

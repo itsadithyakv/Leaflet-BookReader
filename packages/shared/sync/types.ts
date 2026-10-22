@@ -45,7 +45,34 @@ export type SyncStatus = {
   driveFilesOnly?: boolean;
   /** The sync folder holds another account's library: only book files go there. */
   folderFilesOnly?: boolean;
+  /** Drive is connected, and Google last refused Leaflet's client or the reader's grant. */
+  driveUnavailable?: DriveUnavailable | null;
+  /**
+   * Account sync is on and its copy is filling up: its size and the most the
+   * server keeps, in bytes. Null below four fifths of that.
+   */
+  accountUsage?: AccountUsage | null;
 };
+
+/** How large the account's copy of the reading is, against the most the server keeps. */
+export type AccountUsage = { bytes: number; limit: number };
+
+/** Drive or the sync folder, as the backend names them. */
+export type SyncTransport = "drive" | "folder";
+
+/**
+ * Signed in, Drive or the sync folder holds a library from before accounts
+ * (perhaps another reader's): nothing was taken from it, and the reader is
+ * asked whether to bring it in. How many books it holds.
+ */
+export type StoreHolds = { transport: SyncTransport; books: number };
+
+/**
+ * Why Google will not let Leaflet reach Drive: it has disabled Leaflet's
+ * client (`client_disabled`), or the reader's grant is revoked or expired
+ * (`reconnect`).
+ */
+export type DriveUnavailable = "client_disabled" | "reconnect";
 
 /**
  * This library's standing with the Leaflet account signed in.
@@ -93,6 +120,10 @@ export type SyncReport = {
    * the reader is asked about it. The number of books that copy holds.
    */
   accountHolds?: number | null;
+  /** Signed in, the account synced and only Drive could not, for this reason. */
+  driveUnavailable?: DriveUnavailable | null;
+  /** Drive or the sync folder holds a library from before accounts: the reader is asked. */
+  storeHolds?: StoreHolds | null;
 };
 
 /** What the reader is told then, in place of a sync error. */
@@ -125,7 +156,9 @@ export const EMPTY_SYNC_STATUS: SyncStatus = {
   accountBackup: false,
   library: { standing: "unowned", stayOut: false, elsewhere: false, refused: null },
   driveFilesOnly: false,
-  folderFilesOnly: false
+  folderFilesOnly: false,
+  driveUnavailable: null,
+  accountUsage: null
 };
 
 /** One book on a shared shelf. The spine's look derives from the seed. */

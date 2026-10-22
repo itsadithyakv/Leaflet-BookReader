@@ -57,7 +57,23 @@ pub struct SyncReport {
   /// Nothing was synced: this library was started fresh, and the account
   /// already holds a library of this many books from before. The reader is
   /// asked (`library_fresh_answer`).
-  pub account_holds: Option<usize>
+  pub account_holds: Option<usize>,
+  /// Signed in, the account synced and Drive alone could not: Google
+  /// refuses Leaflet's client, or the reader's grant (`drive::DriveUnavailable`).
+  /// The reading is synced all the same; only the book files wait.
+  pub drive_unavailable: Option<crate::sync::drive::DriveUnavailable>,
+  /// Signed in, Drive or the sync folder holds a library from before owners
+  /// with something this one lacks: nothing was taken from it, and the
+  /// reader is asked whether to bring it in (`library_store_answer`).
+  pub store_holds: Option<StoreHolds>
+}
+
+/// A store holding a library from before owners, and how many books it has.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoreHolds {
+  pub transport: owner::Transport,
+  pub books: usize
 }
 
 impl SyncReport {
@@ -75,6 +91,8 @@ impl SyncReport {
     self.update_needed |= other.update_needed;
     self.owner_paused |= other.owner_paused;
     self.account_holds = self.account_holds.or(other.account_holds);
+    self.drive_unavailable = self.drive_unavailable.or(other.drive_unavailable);
+    self.store_holds = self.store_holds.or(other.store_holds);
   }
 }
 
@@ -184,12 +202,18 @@ pub fn sync_state(db: &Database, root: &Path, now: &str, who: &Who) -> Result<St
   let _lock = FolderLock::acquire(root)?;
 
   let remote = read_state(root)?;
-  let mark = read_mark(root);
+  let mut mark = read_mark(root);
+  // A marker naming an account deleted here goes (sync audit W3): it owns
+  // nothing, wherever it is still written.
+  if mark.is_some() && owner::live(db, mark.clone()).is_none() {
+    fs::remove_file(root.join(OWNER_FILE))?;
+    mark = None;
+  }
   let doc_owner = match &remote {
     Remote::Ours(doc) | Remote::Newer(Some(doc)) => doc.owner.clone(),
     _ => None
   };
-  let there = shared_doc::remote_owner(doc_owner.as_deref(), mark.as_deref());
+  let there = owner::live(db, shared_doc::remote_owner(doc_owner.as_deref(), mark.as_deref()));
   let mode = who.mode(owner::get(db).as_deref(), there.as_deref());
   if matches!(mode, StoreMode::FilesOnly | StoreMode::Refuse) {
     return Ok(StateRun { refused: true, ..StateRun::default() });
@@ -205,10 +229,13 @@ pub fn sync_state(db: &Database, root: &Path, now: &str, who: &Who) -> Result<St
       });
       let report = take_from_newer(db, doc, now)?;
       let brought_news = report.entries_updated > 0 || report.books_removed > 0;
-      return Ok(StateRun { report, brought_news, newer: true, refused: false });
+      return Ok(StateRun { report, brought_news, newer: true, ..StateRun::default() });
     }
   };
   let local = store::snapshot(db, now)?;
+  if let Some(books) = shared_doc::asks_before_claiming(who, mode, &local, remote.as_ref(), now) {
+    return Ok(StateRun { asks: Some(books), ..StateRun::default() });
+  }
   let stamp = shared_doc::stamp_for(mode, who);
   let merged = shared_doc::merged_for(&local, remote.as_ref(), &there, &stamp, now);
   let brought_news = remote.as_ref().is_some_and(|remote| shared_doc::brings(&local, remote, now));
@@ -229,7 +256,7 @@ pub fn sync_state(db: &Database, root: &Path, now: &str, who: &Who) -> Result<St
     books_pending: applied.missing.len(),
     ..SyncReport::default()
   };
-  Ok(StateRun { report, brought_news, newer: false, refused: false })
+  Ok(StateRun { report, brought_news, ..StateRun::default() })
 }
 
 /// The files half, over this library as it is here: publishes the books the
@@ -374,6 +401,43 @@ mod tests {
     let mut ids: Vec<String> = db.list_books().expect("list").into_iter().map(|b| b.id).collect();
     ids.sort();
     ids
+  }
+
+  /// Sync audits W1 and W3 through a folder: signed in, a folder from
+  /// before owners that holds a library is asked about first; and a marker
+  /// naming an account deleted here is taken away, not claimed back for it.
+  #[test]
+  fn a_folder_from_before_owners_asks_and_a_dead_accounts_marker_goes() {
+    let scratch = Scratch::new("owners-w1-w3");
+    let family = memory_db();
+    family.upsert_book(&book("theirs", 0.2, "2026-10-01T08:00:00+00:00")).expect("import");
+    sync(&family, &scratch.path, "2026-10-01T08:01:00+00:00").expect("an old device's folder");
+
+    let laptop = memory_db();
+    laptop.upsert_book(&book("mine", 0.1, "2026-10-02T08:00:00+00:00")).expect("import");
+    let run = sync_state(&laptop, &scratch.path, "2026-10-02T09:00:00+00:00", &Who::signed_in(A)).expect("run");
+    assert_eq!(run.asks, Some(1));
+    assert_eq!(titles(&laptop), vec!["mine".to_string()]);
+    assert!(!scratch.path.join(OWNER_FILE).exists());
+
+    let run = sync_state(&laptop, &scratch.path, "2026-10-02T09:01:00+00:00", &Who::signed_in(A).answered(Some(true))).expect("run");
+    assert_eq!(run.asks, None);
+    assert_eq!(titles(&laptop), vec!["mine".to_string(), "theirs".to_string()]);
+    assert_eq!(read_mark(&scratch.path).as_deref(), Some(A));
+
+    // The account is deleted here.
+    owner::claim_if_unowned(&laptop, A).expect("claimed");
+    owner::release_if(&laptop, A).expect("released");
+    owner::remember_released(&laptop, A).expect("remembered");
+    assert_eq!(store_owner(&scratch.path).as_deref(), Some(A), "still written there");
+    sync(&laptop, &scratch.path, "2026-10-03T09:00:00+00:00").expect("signed out");
+    assert_eq!(owner::get(&laptop), None, "not claimed back");
+    assert!(!scratch.path.join(OWNER_FILE).exists(), "the marker is gone");
+    assert_eq!(store_owner(&scratch.path), None);
+    // A new account claims it as nobody's.
+    let run = sync_state(&laptop, &scratch.path, "2026-10-03T10:00:00+00:00", &Who::signed_in(B)).expect("run");
+    assert!(!run.refused && run.asks.is_none());
+    assert_eq!(read_mark(&scratch.path).as_deref(), Some(B));
   }
 
   /// The whole point of sync, end to end: a book imported on one device appears

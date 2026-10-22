@@ -3,10 +3,13 @@
  *
  * It is the one query that is the same for every reader, and every open
  * Social page asks for it, so it is served from memory instead of sorting
- * profiles on each request. Any change to a profile clears it, so a reader
- * never sees a stale version of their own row; the time limit only bounds how
- * long an idle entry lingers. At most a few weeks of 100 rows each: a few
- * hundred kilobytes at worst.
+ * profiles on each request. It is kept for its time limit, whatever the
+ * saves: the app draws the reader's own row from the minutes on the device,
+ * and the rest of the board may be half a minute behind. Only a change of who
+ * sees a profile (made private, or deleted) clears it at once
+ * (`forgetBoards`). It used to be cleared by every save that moved anything,
+ * and with a few hundred apps open it was hardly ever kept (sync audit C3).
+ * At most a few weeks of 100 rows each: a few hundred kilobytes at worst.
  */
 
 const TTL_MS = 30_000;
@@ -54,7 +57,7 @@ export function rememberBoard(weekKey, rows, sharedReaders, stamp = changes) {
   boards.set(weekKey, { at: Date.now(), rows, sharedReaders });
 }
 
-/** A profile changed (minutes, name, avatar, visibility, or it was deleted). */
+/** Who sees a profile changed (its visibility, or it was deleted). */
 export function forgetBoards() {
   changes += 1;
   boards.clear();

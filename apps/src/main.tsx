@@ -25,6 +25,8 @@ import "./styles/glass.css";
 import "./styles/window-material.css";
 // The lighter visual effects (Smooth, minimal: `html[data-perf]`, platform/perfTier.ts), over all of the above.
 import "./styles/perf.css";
+// Off the phone, below Full: Leaflet's leather desktop, and the page's scroller as an opaque layer (last of all).
+import "./styles/leather.css";
 import { installSurfaceMotion } from "./components/ui/motion";
 import { installGlassRefraction } from "./components/ui/glassRefraction";
 

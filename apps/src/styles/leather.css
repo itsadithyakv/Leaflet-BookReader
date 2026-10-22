@@ -1,0 +1,48 @@
+/* Leaflet's own desktop, the default off the phone (`html[data-look="leather"]`: Smooth and
+   minimal on the Windows app, platform/perfTier.ts): the leather rail, the paper toolbar, the
+   tactile keys, cards and sheets of index.css, as 1.5.7 drew them. The glass rules for the same
+   surfaces (styles/glass.css, styles/window-material.css) stand aside there; this sheet holds
+   what the desktop needs on top, and is loaded after every other sheet of the app (main.tsx).
+
+   Cheap by rule: no blur, no filter in motion, no endless animation, textures as small images
+   that never move under a transition. */
+
+/* ---- The page's scroller: an opaque layer ------------------------------------------------
+   A scroller with nothing behind its words is not given a layer of its own on a screen of
+   normal density (Chromium keeps ClearType instead), so every scrolled frame painted the page
+   again and the GPU drew it afresh: a library scrolled on Intel UHD graphics kept the GPU busy
+   all the time. With the page's own colour under it, it scrolls on the compositor and keeps
+   its sharp text. (The paper grain stays under the toolbar and the rail; in the page it would
+   be painted again with every row that scrolls in.) On Mica the page is see-through by design:
+   there it is given its layer anyway, with greyscale text, as a see-through window has. */
+:root[data-platform="desktop"]:not([data-window-material="mica"]) .app-main-scroll {
+  background-color: rgb(var(--color-background));
+}
+
+:root[data-platform="desktop"][data-window-material="mica"] .app-main-scroll {
+  will-change: scroll-position;
+}
+
+/* ---- The rail -------------------------------------------------------------------------------
+   It widens over the page under the pointer. The leather keeps its place as it does (anchored at
+   the left rather than centred, so the hide does not slide under the stitching on every frame of
+   the widening). */
+:root[data-look="leather"] .leaflet-sidebar.leather-surface {
+  background-position: left center;
+}
+
+:root[data-look="leather"][data-theme="dark"] .leaflet-sidebar.leather-surface {
+  background-position: left center, left center, top left;
+}
+
+/* ---- Paper with nothing showing through -----------------------------------------------------
+   The book being read, sheets, dialogs and menus were 2 to 6 % see-through: the words of the
+   cards under them read faintly through their own (a title under the bar, "Import Books" under
+   the profile). Opaque, the same paper. */
+:root[data-look="leather"] .now-reading-bar {
+  background: linear-gradient(105deg, rgb(var(--color-surface-high)), rgb(var(--color-surface)));
+}
+
+:root[data-look="leather"] .modal-surface:not(.pip-album-dialog, .pip-arcade, .pip-drawer, .pip-shop, .pip-house-page *) {
+  background: linear-gradient(145deg, rgb(var(--color-surface-high)), rgb(var(--color-surface)));
+}

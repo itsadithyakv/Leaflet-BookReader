@@ -60,7 +60,7 @@ pub fn annotations_highlight_counts(state: State<'_, AppState>) -> Result<Vec<Hi
 /// clippings, whose ids come from the book, the place and the words) leaves
 /// these out, so a highlight removed here does not come back with the same
 /// file. Saving one again on purpose (Undo) still brings it back: see `save`.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn annotations_removed(book_id: String, state: State<'_, AppState>) -> Result<Vec<String>, String> {
   let db = state.db.guard();
   db.removed_annotation_ids(&book_id).map_err(|e| e.to_string())
@@ -115,6 +115,11 @@ fn delete(db: &db::Database, id: &str, now: &str) -> Result<(), String> {
     }
     annotation.updated_at = now.to_string();
     annotation.deleted_at = Some(now.to_string());
+    // The tombstone travels for ninety days so the removal reaches every
+    // device; the words do not need to. Without them, removing highlights
+    // makes room in the account's copy at once (sync audit D2).
+    annotation.text = None;
+    annotation.note = None;
     db.put_annotation(&annotation).map_err(|e| e.to_string())?;
   }
   Ok(())
@@ -188,6 +193,10 @@ mod tests {
     delete(&db, "nothing", LATER).expect("an id nothing has is already gone");
     assert!(db.annotations_for_book("b1").expect("list").is_empty());
     assert_eq!(db.find_annotation("h1").expect("find").and_then(|row| row.deleted_at).as_deref(), Some(LATER));
+    // The tombstone carries the removal, not the words (they made the
+    // account's copy no smaller for ninety days).
+    let gone = db.find_annotation("h1").expect("find").expect("the tombstone");
+    assert_eq!((gone.text, gone.note), (None, None));
     // Saved again, it is back.
     save(&db, input("h1", "highlight"), LATER).expect("save");
     assert_eq!(db.annotations_for_book("b1").expect("list").len(), 1);

@@ -231,6 +231,8 @@ describe("visitors", () => {
 
     // The friend's day turns over and they read again: today's visit is over.
     await call("PUT", "/v1/profile/me", { token: friend.token, body: { weekKey: WEEK, weekMinutes: 31, readDay: TOMORROW } });
+    // Half a minute on: a save leaves what is kept to its time (sync audit C3).
+    forgetBoards();
     assert.deepEqual(handles(await visitors(me, TODAY)), []);
     assert.deepEqual(handles(await visitors(me, TOMORROW)), [friend.handle]);
     // A publish without a day (nothing read yet on the new day) leaves the last one standing.
@@ -238,6 +240,7 @@ describe("visitors", () => {
     assert.equal((await stored(friend.id)).readDay, TOMORROW);
     // And null clears it.
     await call("PUT", "/v1/profile/me", { token: friend.token, body: { readDay: null } });
+    forgetBoards();
     assert.deepEqual(handles(await visitors(me, TOMORROW)), []);
   });
 
@@ -301,7 +304,7 @@ describe("visitors", () => {
     assert.equal(pickVisitors(rows.slice(0, 2), "2026-10-04", me).length, 2);
   });
 
-  test("an answer is kept for a moment, and any profile change clears it", async () => {
+  test("an answer is kept for its moment; a change of who sees a profile clears it", async () => {
     const me = await reader();
     const friend = await reader();
     await befriend(me, friend);
@@ -309,8 +312,12 @@ describe("visitors", () => {
     // Changed behind the API's back: the kept answer still stands, for the day it was asked about.
     await db.collection("profiles").updateOne({ _id: friend.id }, { $set: { readDay: YESTERDAY } });
     assert.deepEqual(handles(await visitors(me)), [friend.handle]);
-    // A change made through the API (anyone's) clears it.
+    // So it does after a save of figures through the API (anyone's): saves no
+    // longer throw what is kept away (sync audit C3).
     await call("PUT", "/v1/profile/me", { token: me.token, body: { weekKey: WEEK, weekMinutes: 33, readDay: TODAY } });
+    assert.deepEqual(handles(await visitors(me)), [friend.handle]);
+    // A choice of who sees a profile (anyone's) clears it.
+    await call("PUT", "/v1/profile/me", { token: me.token, body: { visibility: "followers" } });
     assert.deepEqual(handles(await visitors(me)), []);
     assert.deepEqual(handles(await visitors(me, YESTERDAY)), [friend.handle]);
   });

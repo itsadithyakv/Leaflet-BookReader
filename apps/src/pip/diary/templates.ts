@@ -40,6 +40,8 @@ export type Slots = {
   percent: number;
   /** One of Pip's own lines about the book. */
   nod: string;
+  /** A visiting friend, as "@maya". */
+  friend?: string;
 };
 
 export type Line = (s: Slots) => string;
@@ -60,7 +62,11 @@ export type AsideKind =
   | "percent"
   | "nod"
   | "freeze"
-  | "grace";
+  | "grace"
+  | "ball"
+  | "dance"
+  | "chase"
+  | "highfive";
 
 export const LEADS: Record<LeadKind, Line[]> = {
   // The first day anything was read.
@@ -237,5 +243,26 @@ export const ASIDES: Record<AsideKind, Line[]> = {
     () => "the streak got its one free pass.",
     () => "a day of grace. the streak says thanks.",
     () => "grace covered it. no harm done."
+  ],
+  // A visiting friend's Pip, and what the two of them did (pip/playdates.ts: this device's own record).
+  ball: [
+    (s) => `played ball with ${s.friend}'s pip. i dropped it once. twice.`,
+    (s) => `${s.friend}'s pip came over. we passed the ball till it got silly.`,
+    (s) => `ball with ${s.friend}'s pip. they throw high. noted.`
+  ],
+  dance: [
+    (s) => `danced with ${s.friend}'s pip. nobody was watching. good.`,
+    (s) => `${s.friend}'s pip has moves. i have enthusiasm.`,
+    (s) => `a little dance with ${s.friend}'s pip, right there by the bookshelf.`
+  ],
+  chase: [
+    (s) => `chased ${s.friend}'s pip round the room. then they chased me.`,
+    (s) => `${s.friend}'s pip is fast. i let them win. obviously.`,
+    (s) => `ran the length of the floor with ${s.friend}'s pip. twice.`
+  ],
+  highfive: [
+    (s) => `${s.friend}'s pip came to read. high five at the door.`,
+    (s) => `read side by side with ${s.friend}'s pip. very grown up.`,
+    (s) => `company: ${s.friend}'s pip. we high-fived. it was a good one.`
   ]
 };

@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
+import { Footprints } from "lucide-react";
+import { UiIcon } from "../UiIcon";
 import { PipSprite } from "../PipSprite";
 import { PipSay } from "../PipSay";
 import { avatarLook } from "../community/PipAvatar";
@@ -9,11 +11,15 @@ import { playSound } from "../../pip/sound";
 import {
   knockLine,
   noteLine,
+  togetherBeats,
+  togetherPose,
   visitPose,
   visitTimeline,
   type Door,
+  type TogetherKind,
   type VisitPhase,
   type VisitRecord,
+  type VisitorAct,
   type VisitorCandidate
 } from "../../pip/visitors";
 import { cardBounds, placeCard } from "./cardPlace";
@@ -35,10 +41,29 @@ export type VisitorFrame = {
   h?: number;
   /** Where feet stand. */
   walkY: number;
+  /**
+   * The floor that shows, when the room says (where it fills a phone's screen it runs on past the room's walls):
+   * its ends, and (`edge`) where the picture ends, which a visitor comes in from past.
+   */
+  span?: { left: number; right: number; edge: number };
 };
 
-/** What the house may want to answer: a knock, the visitor reaching its place, the visitor gone. */
-export type VisitorEvent = { type: "knocked" | "arrived" | "left"; visitor: VisitorCandidate };
+/**
+ * What the house may want to answer: a knock, the visitor reaching its place, the visitor gone; and, by the
+ * visit's own plan (`togetherBeats`), a time to do something together.
+ */
+export type VisitorEvent = { type: "knocked" | "arrived" | "left"; visitor: VisitorCandidate } | { type: "together"; kind: TogetherKind; visitor: VisitorCandidate };
+
+/** What the reader can ask the two to do together, from the visitor's card: the Play keys' words. */
+const TOGETHER_KEYS: ReadonlyArray<{ kind: TogetherKind; label: string; title: string }> = [
+  { kind: "highfive", label: "High 5", title: "A high five, Pip and your friend's Pip" },
+  { kind: "ball", label: "Ball", title: "Pass the ball between them" },
+  { kind: "dance", label: "Dance", title: "A dance together" },
+  { kind: "chase", label: "Chase", title: "A chase across the floor" }
+];
+
+const TogetherIcon = ({ kind }: { kind: TogetherKind }) =>
+  kind === "chase" ? <Footprints size={18} aria-hidden /> : <UiIcon name={kind === "highfive" ? "hand" : kind === "ball" ? "goal" : "move"} size={18} />;
 
 type CardProps = {
   visitor: VisitorCandidate;
@@ -48,6 +73,8 @@ type CardProps = {
   anchor: () => Rect | null;
   onClose: () => void;
   onOpenProfile?: (handle: string) => void;
+  /** Something for the two Pips to do together (the visitor is sitting with Pip): the keys for it, under who it is. */
+  onTogether?: (kind: TogetherKind) => void;
 };
 
 /**
@@ -58,7 +85,7 @@ type CardProps = {
  * last button was cut off wherever the room is under 150 px tall. Escape or
  * the cross closes it.
  */
-const VisitorCard = ({ visitor, why, anchor, onClose, onOpenProfile }: CardProps) => {
+const VisitorCard = ({ visitor, why, anchor, onClose, onOpenProfile, onTogether }: CardProps) => {
   // Android's Back closes it, as Escape does.
   useBackLayer(true, onClose);
   const card = useRef<HTMLDivElement | null>(null);
@@ -118,6 +145,16 @@ const VisitorCard = ({ visitor, why, anchor, onClose, onOpenProfile }: CardProps
           <b>{minutesText(visitor.weekMinutes)}</b>this week
         </li>
       </ul>
+      {onTogether && (
+        <div className="pip-visitor-card-together" role="group" aria-label="Play together">
+          {TOGETHER_KEYS.map((key) => (
+            <button key={key.kind} type="button" className="pip-visitor-card-key" title={key.title} onClick={() => onTogether(key.kind)}>
+              <TogetherIcon kind={key.kind} />
+              <span>{key.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
       {onOpenProfile && (
         <button type="button" className="pip-visitor-card-open" onClick={() => onOpenProfile(visitor.handle)}>
           Open profile
@@ -145,6 +182,10 @@ export type VisitorPipProps = {
   onEvent?: (event: VisitorEvent) => void;
   /** Shows the reader's card on the Social page. Left out, the card has no such button. */
   onOpenProfile?: (handle: string) => void;
+  /** What the visitor is doing with Pip just now (the house sets it as she joins in): it plays its part. */
+  act?: VisitorAct | null;
+  /** The reader asks the two to do something together (from the card): the house has Pip do it, if she can. */
+  onTogether?: (kind: TogetherKind) => void;
   /** The clock, for the preview's tests. */
   now?: () => number;
 };
@@ -164,32 +205,49 @@ type View = { phase: VisitPhase; move: string; facing: 1 | -1; shown: boolean };
  *
  * Mounted inside the room box (`position: relative`), beside Pip.
  */
-export const VisitorPip = ({ visitor, record, frame, spot, door, hostX, onPhase, onEvent, onOpenProfile, now = Date.now }: VisitorPipProps) => {
+export const VisitorPip = ({ visitor, record, frame, spot, door, hostX, onPhase, onEvent, onOpenProfile, act = null, onTogether, now = Date.now }: VisitorPipProps) => {
   const node = useRef<HTMLDivElement | null>(null);
   const button = useRef<HTMLButtonElement | null>(null);
   const [view, setView] = useState<View>({ phase: "knock", move: "idle", facing: 1, shown: false });
   const [open, setOpen] = useState(false);
-  const live = useRef({ hostX, onPhase, onEvent, now, visitor });
-  live.current = { hostX, onPhase, onEvent, now, visitor };
+  const live = useRef({ hostX, onPhase, onEvent, now, visitor, act });
+  live.current = { hostX, onPhase, onEvent, now, visitor, act };
+  // Looks again at once (a new part to play): set by the running visit below.
+  const kick = useRef<() => void>(() => undefined);
   const reduced = prefersReducedMotion();
   const { scale, walkY } = frame;
 
   useEffect(() => {
     const timeline = visitTimeline(record.until - record.from, door.x - spot, reduced);
+    // When, over this visit, the two do something together: only those still to come (a visit come back to after
+    // a while does not catch up on what it missed). Without motion, none: nothing travels or dances then.
+    const beats = reduced ? [] : togetherBeats(record, timeline);
+    let nextBeat = beats.findIndex((beat) => beat.at > now() - record.from);
+    if (nextBeat < 0) nextBeat = beats.length;
     let frameId = 0;
     let timer = 0;
     let stopped = false;
     let last: View | null = null;
+    // Whole device pixels, so a sprite walking or standing never shimmers between two.
+    const ratio = window.devicePixelRatio || 1;
+    const snap = (css: number) => Math.round(css * ratio) / ratio;
 
     const step = () => {
       if (stopped) return;
-      const { hostX: host, onPhase: phased, onEvent: raise, now: clock, visitor: who } = live.current;
-      const pose = visitPose(clock() - record.from, timeline, door.x, spot, host?.() ?? undefined);
+      cancelAnimationFrame(frameId);
+      window.clearTimeout(timer);
+      const { hostX: host, onPhase: phased, onEvent: raise, now: clock, visitor: who, act: part } = live.current;
+      const time = clock();
+      const towards = host?.() ?? undefined;
+      const visit = visitPose(time - record.from, timeline, door.x, spot, towards);
+      // Sitting with Pip, its part in what the two are doing together, if anything (`togetherPose`).
+      const playing = visit.phase === "hello" || visit.phase === "read" ? togetherPose(part, time, spot, towards) : null;
+      const pose = playing ? { ...visit, ...playing } : visit;
       if (node.current) {
         // A 32-pixel sprite standing at x: its box starts 16 to the left and 30 above the feet.
-        node.current.style.transform = `translate(${((pose.x - 16) * scale).toFixed(2)}px, ${((walkY - 30) * scale).toFixed(2)}px)`;
+        node.current.style.transform = `translate(${snap(Math.round(pose.x - 16) * scale)}px, ${snap((walkY - 30) * scale)}px)`;
       }
-      if (!last || last.phase !== pose.phase || last.facing !== pose.facing) {
+      if (!last || last.phase !== pose.phase || last.facing !== pose.facing || last.move !== pose.move) {
         const before = last?.phase ?? null;
         last = { phase: pose.phase, move: pose.move, facing: pose.facing, shown: pose.shown };
         setView(last);
@@ -207,24 +265,40 @@ export const VisitorPip = ({ visitor, record, frame, spot, door, hostX, onPhase,
           }
         }
       }
+      // A time in the visit's plan to do something together: the house hears of it (once), and has Pip join in if she can.
+      while (nextBeat < beats.length && time - record.from >= beats[nextBeat].at) {
+        const beat = beats[nextBeat];
+        nextBeat += 1;
+        if (visit.phase === "read" && !playing) raise?.({ type: "together", kind: beat.kind, visitor: who });
+      }
       if (pose.phase === "gone") {
         return;
       }
-      // Walking is drawn every frame; anything else only needs to notice its own end (and which way Pip is).
-      if (pose.move === "walk") {
+      // Walking and running are drawn every frame; anything else only needs to notice its own end (and which way Pip is).
+      const moving = pose.move === "walk" || pose.move === "scamper";
+      if (moving) {
         frameId = requestAnimationFrame(step);
       } else {
-        timer = window.setTimeout(step, Math.max(16, Math.min(pose.left, 500)));
+        const beatIn = nextBeat < beats.length ? beats[nextBeat].at - (time - record.from) : Infinity;
+        const partIn = part ? (time < part.from ? part.from - time : time < part.until ? part.until - time : Infinity) : Infinity;
+        timer = window.setTimeout(step, Math.max(16, Math.min(pose.left, 500, beatIn, partIn)));
       }
     };
+    kick.current = step;
     step();
     return () => {
       stopped = true;
+      kick.current = () => undefined;
       cancelAnimationFrame(frameId);
       window.clearTimeout(timer);
       live.current.onPhase?.(null);
     };
   }, [record.from, record.until, door.x, spot, scale, walkY, reduced]);
+
+  // A new part to play (or the end of one): looked at at once, not at the next look.
+  useEffect(() => {
+    kick.current();
+  }, [act]);
 
   // Gone: whatever was open about them closes with them.
   useEffect(() => {
@@ -233,7 +307,7 @@ export const VisitorPip = ({ visitor, record, frame, spot, door, hostX, onPhase,
 
   const look = avatarLook(visitor.pipSeed, visitor.avatar);
   const size = 32 * scale;
-  const reading = view.phase === "read";
+  const reading = view.phase === "read" && view.move === "read";
   // The tag is the room's to clip. Under the visitor's feet it needs 20 px of floor below them, which a room
   // drawn under two pixels a pixel does not have (at one, half of it was cut off): it goes over their head there.
   // And it is no wider than the room either side of where they stand.
@@ -278,6 +352,14 @@ export const VisitorPip = ({ visitor, record, frame, spot, door, hostX, onPhase,
           anchor={() => button.current?.getBoundingClientRect() ?? null}
           onClose={closeCard}
           onOpenProfile={onOpenProfile}
+          onTogether={
+            onTogether && (view.phase === "read" || view.phase === "hello")
+              ? (kind) => {
+                  setOpen(false);
+                  onTogether(kind);
+                }
+              : undefined
+          }
         />
       )}
     </>

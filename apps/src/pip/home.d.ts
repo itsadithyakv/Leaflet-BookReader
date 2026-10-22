@@ -109,7 +109,13 @@ export declare const COLOUR_SHOWS: number;
 export declare const WHITE_SHOWS: number;
 export declare const LIT_BY_DAY: string;
 export declare function litMatrix(light: readonly number[]): string;
-export declare function renderHouseLevel(level: HouseLevel, frame: number, decor: LevelDecor, night?: boolean, hour?: number, openSky?: boolean): ImageData | null;
+/** How far a floor's picture runs on past the room each side, in its pixels (`renderHouseLevel`). */
+export type RoomPad = { left: number; right: number; top: number; bottom: number };
+/**
+ * A floor with its decor. With `pad`, drawn wide: a picture that much bigger each side, the room at (left, top) with
+ * its own pixels as drawn alone, its wall, floor and ceiling running on past it. (Not for a floor another module draws.)
+ */
+export declare function renderHouseLevel(level: HouseLevel, frame: number, decor: LevelDecor, night?: boolean, hour?: number, openSky?: boolean, pad?: RoomPad): ImageData | null;
 /** Where an item is drawn in a slot: its box in the floor's pixels, as the art places it. */
 export declare function itemBox(item: PipRoomItem | string, slot: HouseSlot): { x: number; y: number; w: number; h: number } | null;
 export declare function renderItem(item: PipRoomItem | string, frame?: number, data?: unknown): ImageData;

@@ -14,6 +14,7 @@
  * house scene (components/pip/HouseScene.tsx) walks the plan.
  */
 import type { GenreMood } from "./genre";
+import type { TogetherKind } from "./visitors";
 import type { PipCold } from "../services/habitService";
 
 /** A random source: numbers in [0, 1). */
@@ -171,6 +172,8 @@ export type ActivityId =
   | "potter"
   /** A visitor is here: reading beside them. */
   | "company"
+  /** A visitor is here, and the two do something together: a high five, a dance, the ball, a chase (`togetherPlan`). */
+  | "together"
   /** She has a cold: tissues, tea under a blanket, a sneeze. */
   | "nurse"
   /** Her temper has run out (pip/temper.ts plans it): never chosen, only thrown. */
@@ -191,7 +194,7 @@ export type Step =
    * stroll (bent over a trail, marching with a sword), at a `slow` pace if so
    * said. Without motion she is simply there.
    */
-  | { kind: "walk"; x: number; pace?: "tiptoe" | "slow"; as?: string }
+  | { kind: "walk"; x: number; pace?: "tiptoe" | "slow" | "run"; as?: string }
   /** Turn to face left (-1) or right (1). */
   | { kind: "face"; dir: 1 | -1 }
   /** Play a move for about this long (the scene rounds it to whole loops), saying `line` as it starts. */
@@ -233,7 +236,11 @@ export type BehaviourState = {
   mood: number;
   /** The reader's local hour, 0..23. */
   hour: number;
-  floor: { w: number; garden: boolean; arcade: boolean };
+  /**
+   * The floor she has, in floor pixels: from `left` (0 when left out: the room's left wall) to `w`. Where the room
+   * fills a phone's screen it is all the floor that shows, and runs on past the room's walls (components/pip/sceneFit.ts).
+   */
+  floor: { w: number; left?: number; garden: boolean; arcade: boolean };
   /** Where she stands, in floor pixels. */
   x: number;
   spots: readonly Spot[];
@@ -260,7 +267,10 @@ const MARGIN = 18;
 
 const between = (rand: Rand, low: number, high: number) => low + rand() * (high - low);
 const pick = <T,>(rand: Rand, items: readonly T[]): T => items[Math.min(items.length - 1, Math.floor(rand() * items.length))];
-const clampX = (x: number, w: number) => Math.max(MARGIN, Math.min(w - MARGIN, Math.round(x)));
+const clampX = (x: number, w: number, left = 0) => Math.max(left + MARGIN, Math.min(w - MARGIN, Math.round(x)));
+/** The floor's left end (`floor.left`), and a point `t` of the way across it. */
+const leftOf = (state: BehaviourState) => state.floor.left ?? 0;
+const across01 = (state: BehaviourState, t: number) => leftOf(state) + (state.floor.w - leftOf(state)) * t;
 
 const nearest = (state: BehaviourState, kind: SpotKind): Spot | null => {
   const found = state.spots.filter((spot) => spot.kind === kind);
@@ -273,27 +283,27 @@ const nearest = (state: BehaviourState, kind: SpotKind): Spot | null => {
  * the wall (facing as she came), or beside a thing on the floor, on the side
  * she is already on, turned towards it.
  */
-export const standAt = (spot: Spot, fromX: number, floorW: number): { x: number; face: 1 | -1 } => {
-  if (spot.up) return { x: clampX(spot.x, floorW), face: spot.x >= fromX ? 1 : -1 };
+export const standAt = (spot: Spot, fromX: number, floorW: number, floorLeft = 0): { x: number; face: 1 | -1 } => {
+  if (spot.up) return { x: clampX(spot.x, floorW, floorLeft), face: spot.x >= fromX ? 1 : -1 };
   const reach = spot.w / 2 + 11;
   const left = spot.x - reach;
   const right = spot.x + reach;
   let fromLeft = Math.abs(left - fromX) <= Math.abs(right - fromX);
   // Not into a wall: stand on the side there is room for.
-  if (left < MARGIN) fromLeft = false;
+  if (left < floorLeft + MARGIN) fromLeft = false;
   else if (right > floorW - MARGIN) fromLeft = true;
-  return fromLeft ? { x: clampX(left, floorW), face: 1 } : { x: clampX(right, floorW), face: -1 };
+  return fromLeft ? { x: clampX(left, floorW, floorLeft), face: 1 } : { x: clampX(right, floorW, floorLeft), face: -1 };
 };
 
 /** Where she stands at the fridge: at its handle, on the left (its door swings out to the right), turned to it; the other side by a wall. */
-const atFridge = (spot: Spot, floorW: number): { x: number; face: 1 | -1 } => {
+const atFridge = (spot: Spot, floorW: number, floorLeft = 0): { x: number; face: 1 | -1 } => {
   const left = Math.round(spot.x - spot.w / 2 - 10);
-  return left >= MARGIN ? { x: left, face: 1 } : { x: clampX(spot.x + spot.w / 2 + 15, floorW), face: -1 };
+  return left >= floorLeft + MARGIN ? { x: left, face: 1 } : { x: clampX(spot.x + spot.w / 2 + 15, floorW, floorLeft), face: -1 };
 };
 
 const go = (state: BehaviourState, spot: Spot | null): Step[] => {
   if (!spot || state.reduced) return [];
-  const at = standAt(spot, state.x, state.floor.w);
+  const at = standAt(spot, state.x, state.floor.w, leftOf(state));
   // Under a thing on the wall she keeps facing the way she came; beside a thing, she turns to it.
   return spot.up ? [{ kind: "walk", x: at.x }] : [{ kind: "walk", x: at.x }, { kind: "face", dir: at.face }];
 };
@@ -361,6 +371,8 @@ export const weights = (state: BehaviourState): Record<ActivityId, number> => {
     potter: Math.min(3, offers(state).reduce((sum, spot) => sum + (spot.offer?.weight ?? 1), 0)),
     // Company: with a visitor in the room she mostly reads beside them.
     company: state.world?.visitor ? 4 : 0,
+    // Never chosen as she pleases: the visit's own plan, or the reader, asks for it (`togetherPlan`).
+    together: 0,
     // A cold is looked after, the more the worse it is.
     nurse: stage === "bad" ? 5 : stage === "mending" ? 3.5 : stage === "nearly" ? 1.5 : 0,
     // Thrown, never chosen.
@@ -469,7 +481,7 @@ const build = (id: ActivityId, state: BehaviourState, rand: Rand): Activity => {
       const seat = nearest(state, "seat");
       const fetchBook: Step[] = books ? [...go(state, books), { kind: "do", move: books.up ? "pointup" : "point", seconds: 1.3 }] : [];
       const settle: Step[] = seat ? go(state, seat) : [];
-      const back: Step[] = books && !state.reduced ? [...go({ ...state, x: seat ? standAt(seat, state.x, floor.w).x : state.x }, books), { kind: "do", move: books.up ? "pointup" : "point", seconds: 1.3 }] : [];
+      const back: Step[] = books && !state.reduced ? [...go({ ...state, x: seat ? standAt(seat, state.x, floor.w, leftOf(state)).x : state.x }, books), { kind: "do", move: books.up ? "pointup" : "point", seconds: 1.3 }] : [];
       // Now and then the phone comes out a few pages in. She catches herself, and the book wins.
       const drift = rand() < DRIFT_CHANCE;
       const reading: Step[] = drift
@@ -537,7 +549,7 @@ const build = (id: ActivityId, state: BehaviourState, rand: Rand): Activity => {
     }
     case "toy": {
       const toy = pick(rand, state.toys);
-      const middle = clampX(floor.w * between(rand, 0.35, 0.65), floor.w);
+      const middle = clampX(across01(state, between(rand, 0.35, 0.65)), floor.w, leftOf(state));
       return {
         id,
         label: "playing",
@@ -578,7 +590,7 @@ const build = (id: ActivityId, state: BehaviourState, rand: Rand): Activity => {
       // To bed with the phone when there is one; else where she is, on her feet, until she nods off.
       const bed = nearest(state, "bed");
       const beats = scrollSession(state.hour, rand, state.reduced);
-      if (bed) return { id, label: "in bed with her phone", steps: [...reach(state, standAt(bed, state.x, floor.w)), { kind: "use", id: bed.id ?? "bed", what: "scroll", beats }] };
+      if (bed) return { id, label: "in bed with her phone", steps: [...reach(state, standAt(bed, state.x, floor.w, leftOf(state))), { kind: "use", id: bed.id ?? "bed", what: "scroll", beats }] };
       return {
         id,
         label: "on her phone",
@@ -637,20 +649,23 @@ const build = (id: ActivityId, state: BehaviourState, rand: Rand): Activity => {
     }
     case "company":
       return company(state, rand);
+    case "together":
+      return togetherPlan("highfive", state, rand);
     case "nurse":
       return nurse(state, rand);
     case "sunbathe":
       return {
         id,
         label: "sunbathing",
-        steps: [{ kind: "walk", x: clampX(floor.w * between(rand, 0.3, 0.7), floor.w) }, { kind: "do", move: "sunbathe", seconds: between(rand, 12, 18) }, { kind: "do", move: "stretch", seconds: 3.3 }]
+        steps: [{ kind: "walk", x: clampX(across01(state, between(rand, 0.3, 0.7)), floor.w, leftOf(state)) }, { kind: "do", move: "sunbathe", seconds: between(rand, 12, 18) }, { kind: "do", move: "stretch", seconds: 3.3 }]
       };
     case "stroll":
     default: {
       // Somewhere else: the far side of the room rather than a step away.
-      let x = MARGIN + rand() * (floor.w - MARGIN * 2);
-      if (Math.abs(x - state.x) < 30) x = state.x < floor.w / 2 ? state.x + 50 : state.x - 50;
-      return { id: "stroll", label: "having a wander", steps: [{ kind: "walk", x: clampX(x, floor.w) }, { kind: "do", move: "look", seconds: 5 }] };
+      const from = leftOf(state);
+      let x = from + MARGIN + rand() * (floor.w - from - MARGIN * 2);
+      if (Math.abs(x - state.x) < 30) x = state.x < across01(state, 0.5) ? state.x + 50 : state.x - 50;
+      return { id: "stroll", label: "having a wander", steps: [{ kind: "walk", x: clampX(x, floor.w, from) }, { kind: "do", move: "look", seconds: 5 }] };
     }
   }
 };
@@ -748,7 +763,7 @@ export const fridgeVisit = (state: BehaviourState, rand: Rand, fromBed: boolean)
   const label = dim ? "having a midnight snack" : "looking in the fridge";
   if (!fridge) return { id: "fridge", label, steps: [{ kind: "do", move: "look", seconds: 5 }] };
   const id = fridge.id ?? "fridge";
-  const at = atFridge(fridge, state.floor.w);
+  const at = atFridge(fridge, state.floor.w, leftOf(state));
   const pace = dim ? ("tiptoe" as const) : undefined;
   const stare = dim ? between(rand, 8, 14) : between(rand, 4, 7);
   const open: Step[] = [...reach(state, at, pace), { kind: "use", id, what: "open" }];
@@ -788,7 +803,7 @@ export const fridgeVisit = (state: BehaviourState, rand: Rand, fromBed: boolean)
   const steps: Step[] = [...open, { kind: "do", move: "fridge-stare", seconds: stare, line: rand() < 0.7 ? pick(rand, dim ? STARE_LINES : PECKISH_LINES) : undefined }];
   // Shut, off, and back for another look: only where there is walking to do.
   if (!state.reduced && rand() < 0.25) {
-    const away = clampX(at.x + (at.x > state.floor.w / 2 ? -1 : 1) * between(rand, 34, 52), state.floor.w);
+    const away = clampX(at.x + (at.x > across01(state, 0.5) ? -1 : 1) * between(rand, 34, 52), state.floor.w, leftOf(state));
     steps.push(
       { kind: "use", id, what: "shut" },
       { kind: "walk", x: away, pace },
@@ -1004,7 +1019,7 @@ const spooked = (state: BehaviourState, rand: Rand): Activity => {
     label: "hiding under the quilt",
     steps: [
       start,
-      ...reach(state, standAt(bed, state.x, state.floor.w), "tiptoe"),
+      ...reach(state, standAt(bed, state.x, state.floor.w, leftOf(state)), "tiptoe"),
       { kind: "use", id: bed.id ?? "bed", what: "hide", seconds: between(rand, 8, 13) },
       // Out of bed she stands at its foot, on the right: the look beneath it is to the left.
       { kind: "face", dir: -1 },
@@ -1019,13 +1034,14 @@ export const quiltLine = (rand: Rand) => pick(rand, QUILT_LINES);
 /** Somewhere across the room from where she stands: on the side with more floor, a good walk away, never into a wall. */
 const across = (state: BehaviourState, rand: Rand) => {
   const w = state.floor.w;
-  return clampX(state.x < w / 2 ? between(rand, state.x + 50, w - MARGIN) : between(rand, MARGIN, state.x - 50), w);
+  const from = leftOf(state);
+  return clampX(state.x < across01(state, 0.5) ? between(rand, state.x + 50, w - MARGIN) : between(rand, from + MARGIN, state.x - 50), w, from);
 };
 
 /** A mystery: the glass up to her eye, something followed along the floor one way and part of the way back, and the case solved. */
 const sleuth = (state: BehaviourState, rand: Rand): Activity => {
   const first = across(state, rand);
-  const second = clampX((first + state.x) / 2 + between(rand, -12, 12), state.floor.w);
+  const second = clampX((first + state.x) / 2 + between(rand, -12, 12), state.floor.w, leftOf(state));
   return {
     id: "sleuth",
     label: "following a clue",
@@ -1118,11 +1134,11 @@ export const crossesVisitor = (activity: Activity, state: BehaviourState) => {
 };
 
 /** Where she stands beside the visitor: on the side she is on, a little off their box, turned to them. */
-export const besideVisitor = (visitor: { x: number; w: number }, fromX: number, floorW: number): { x: number; face: 1 | -1 } => {
+export const besideVisitor = (visitor: { x: number; w: number }, fromX: number, floorW: number, floorLeft = 0): { x: number; face: 1 | -1 } => {
   const left = visitor.x - 12;
   const right = visitor.x + visitor.w + 12;
   let onLeft = fromX <= visitor.x + visitor.w / 2;
-  if (left < MARGIN) onLeft = false;
+  if (left < floorLeft + MARGIN) onLeft = false;
   else if (right > floorW - MARGIN) onLeft = true;
   return onLeft ? { x: Math.round(left), face: 1 } : { x: Math.round(right), face: -1 };
 };
@@ -1152,12 +1168,143 @@ const company = (state: BehaviourState, rand: Rand, greet = false): Activity => 
   return {
     id: "company",
     label: greet ? "saying hello to her visitor" : "reading beside her visitor",
-    steps: [...reach(state, besideVisitor(visitor, state.x, state.floor.w)), ...hello, ...read]
+    steps: [...reach(state, besideVisitor(visitor, state.x, state.floor.w, leftOf(state))), ...hello, ...read]
   };
 };
 
-/** The visitor has just come in: over to them, a wave and their name, and a read together. */
-export const greetVisitor = (state: BehaviourState, rand: Rand): Activity => stilled(company(state, rand, true), state);
+/**
+ * The visitor has just come in: over to them, a high five and their name (the visitor's hand meets hers:
+ * `TOGETHER_VERB`), and a read together.
+ */
+export const greetVisitor = (state: BehaviourState, rand: Rand): Activity => {
+  const visitor = state.world?.visitor;
+  if (!visitor) return stilled(company(state, rand, true), state);
+  const read: Step[] = [{ kind: "do", move: "read", seconds: between(rand, 20, 36) }, { kind: "do", move: "bookmark", seconds: 3.3 }];
+  return stilled(
+    {
+      id: "company",
+      label: "saying hello to her visitor",
+      steps: [
+        ...reach(state, besideVisitor(visitor, state.x, state.floor.w, leftOf(state))),
+        togetherStep("highfive"),
+        { kind: "do", move: "welcome", seconds: 2.4, line: helloLine(rand, visitor.handle) },
+        ...read
+      ]
+    },
+    state
+  );
+};
+
+// ---- together ------------------------------------------------------------------------
+//
+// Now and then over a visit the two do something together (pip/visitors.ts
+// decides when, by the visit's record, and the reader can ask from the
+// visitor's card): a high five, a dance, a game of ball, a chase. Here is
+// Pip's part. A step `use` of the visitor with a `together:` verb is where
+// the visitor's own part starts (the scene sets it going: visitors.ts,
+// `VisitorAct`), so the two are in step whatever the walk over took. Every
+// plan ends with her beside the visitor, clear of them (`visitorZone`). For
+// show: none of it is play that counts (the scene keeps it from the mood).
+
+export type { TogetherKind };
+/** The verb of the step that starts the visitor's part. */
+export const TOGETHER_VERB = "together:";
+/** The step on which the visitor's part of `kind` starts. */
+export const togetherStep = (kind: TogetherKind): Step => ({ kind: "use", id: "visitor", what: "thing", verb: `${TOGETHER_VERB}${kind}` });
+
+const HIGH5_LINES = ["high five!", "up top!", "yes! good one."];
+const DANCE_LINES = ["dance break!", "follow me. no, left.", "music in my head. go."];
+const BALL_LINES = ["catch!", "ball? ball.", "think fast!"];
+const CHASE_LINES = ["you're it!", "can't catch me!", "race you!"];
+const CHASED_LINES = ["now you chase me!", "eek! run!", "your turn!"];
+
+/** How far apart they dance (centre to centre): a step more than beside. */
+const DANCE_APART = 36;
+/** How far apart they stand to pass the ball. */
+const BALL_APART = 56;
+
+/** Where a chase turns: the end of the floor further from the visitor (floor pixels), in from the wall. */
+export const chaseTurn = (visitor: { x: number; w: number }, state: Pick<BehaviourState, "floor">): number => {
+  const middle = visitor.x + visitor.w / 2;
+  const left = (state.floor.left ?? 0) + MARGIN + 6;
+  const right = state.floor.w - MARGIN - 6;
+  return middle - left >= right - middle ? left : right;
+};
+
+/**
+ * Something with the visitor: over to them (on her side, a step off for a dance, across the floor for the ball),
+ * turned to them, the visitor's part started, and hers. A chase: the visitor runs for the far end of the floor and
+ * she runs after; they turn; she runs back ahead of them, and stops beside the visitor's place. Without motion
+ * (nothing walks or runs): a high five or a dance where she stands; the ball and the chase are a high five.
+ */
+export const togetherPlan = (kind: TogetherKind, state: BehaviourState, rand: Rand): Activity => {
+  const visitor = state.world?.visitor;
+  if (!visitor) return company(state, rand);
+  const from = leftOf(state);
+  const middle = visitor.x + visitor.w / 2;
+  const beside = besideVisitor(visitor, state.x, state.floor.w, from);
+  const done: Step[] = [{ kind: "do", move: "laugh", seconds: 1.5 }];
+  const asked = state.reduced && (kind === "ball" || kind === "chase") ? "highfive" : kind;
+  if (asked === "highfive") {
+    return stilled(
+      { id: "together", label: "high-fiving her visitor", steps: [...reach(state, beside), togetherStep("highfive"), { kind: "do", move: "welcome", seconds: 2.4, line: pick(rand, HIGH5_LINES) }, ...done] },
+      state
+    );
+  }
+  if (asked === "dance") {
+    const side = beside.face === 1 ? -1 : 1;
+    const at = { x: clampX(middle + side * DANCE_APART, state.floor.w, from), face: beside.face };
+    const move = state.dances.length > 0 ? pick(rand, state.dances) : "bop";
+    return stilled(
+      {
+        id: "together",
+        label: "dancing with her visitor",
+        steps: [...reach(state, at), togetherStep("dance"), { kind: "do", move, seconds: 7, line: pick(rand, DANCE_LINES) }, { kind: "do", move: "cheer", seconds: 2 }]
+      },
+      state
+    );
+  }
+  if (asked === "ball") {
+    // On her own side, a throw's length off; the other side only where hers has no room for it.
+    const mine: 1 | -1 = state.x <= middle ? -1 : 1;
+    const fits = (side: 1 | -1) => (side < 0 ? middle - BALL_APART >= from + MARGIN : middle + BALL_APART <= state.floor.w - MARGIN);
+    const side = fits(mine) ? mine : (-mine as 1 | -1);
+    const x = clampX(middle + side * BALL_APART, state.floor.w, from);
+    const face: 1 | -1 = x < middle ? 1 : -1;
+    return { id: "together", label: "playing ball with her visitor", steps: [...reach(state, { x, face }), { kind: "do", move: "beg", seconds: 1, line: pick(rand, BALL_LINES) }, togetherStep("ball")] };
+  }
+  // A chase.
+  const far = chaseTurn(visitor, state);
+  const inward: 1 | -1 = middle >= far ? 1 : -1;
+  const turnAt = clampX(far + inward * 28, state.floor.w, from);
+  const end = clampX(middle - inward * 28, state.floor.w, from);
+  return {
+    id: "together",
+    label: "chasing her visitor",
+    steps: [
+      togetherStep("chase"),
+      { kind: "do", move: "laugh", seconds: 0.6, line: pick(rand, CHASE_LINES) },
+      { kind: "walk", x: turnAt, pace: "run" },
+      { kind: "face", dir: inward },
+      { kind: "walk", x: end, pace: "run" },
+      { kind: "face", dir: inward },
+      { kind: "do", move: "cheer", seconds: 2, line: pick(rand, CHASED_LINES) }
+    ]
+  };
+};
+
+/** How far either side of the visitor's box she counts as landing on them, thrown. */
+export const ONTO_VISITOR = 10;
+
+/**
+ * Pip thrown (or dropped) and down at `x`: on or by the visitor, they catch her (a soft landing) or the two of them
+ * go over in a heap (a hard one); and then she steps out to beside them. Null when she came down clear of them.
+ */
+export const landedBy = (visitor: { x: number; w: number } | null | undefined, x: number, hard: boolean, floorW: number, floorLeft = 0) => {
+  if (!visitor) return null;
+  if (x < visitor.x - ONTO_VISITOR || x > visitor.x + visitor.w + ONTO_VISITOR) return null;
+  return { react: hard ? ("tumble" as const) : ("catch" as const), stand: besideVisitor(visitor, x, floorW, floorLeft) };
+};
 
 // ---- a cold --------------------------------------------------------------------------
 //

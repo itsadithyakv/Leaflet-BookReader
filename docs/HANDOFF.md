@@ -26,8 +26,11 @@ the details in [features.md](features.md)):
   under a bar, `components/ui/GradualBlur.tsx`; the lens,
   `GlassSurface.tsx`; Mica on Windows 11). Visual effects tiers Full, Smooth
   and minimal (`platform/perfTier.ts`, `styles/perf.css`), chosen in
-  Settings → General → Appearance → Visual effects. **Android defaults to
-  Smooth: no live blur.** The page-wide `:has()` rules are gone, replaced by
+  Settings → General → Appearance → Visual effects. **Auto is Smooth on
+  Android and Windows alike: no live blur; Full only by choice.** Below Full
+  a computer is drawn as the 1.5.7 leather desktop (`styles/leather.css`,
+  `html[data-look]`) in an opaque window; Mica comes with Full, from the next
+  launch. The page-wide `:has()` rules are gone, replaced by
   attributes on `<html>` (`platform/rootMarks.ts`), and a test keeps them
   out (`styles/hasSelectors.test.ts`). features.md, "Liquid Glass".
 - **Speed**: cover thumbnails made in Rust at 240 and 480 px

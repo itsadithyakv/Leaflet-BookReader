@@ -53,7 +53,7 @@ export const usePeople = (bookId: string, enabled: boolean) => {
         const saved = await peopleService.save(change.save);
         await peopleService.remove(change.remove);
         setEntries((current) => applied(current, saved, change.remove));
-        requestBackup();
+        requestBackup({ whileReading: true });
         return true;
       } catch {
         return false;

@@ -63,7 +63,7 @@ export const sectionsAt = (level: number): number[] => [...(SECTIONS[Math.max(0,
  */
 export const SEALED_FROM = 1;
 /** How tough a section is, by the fence's level: so many seconds of one prowler battering at it. The gate is half as tough again. */
-export const SECTION_TOUGH = [0, 6, 12, 20, 30, 44];
+export const SECTION_TOUGH = [0, 4, 12, 22, 32, 42];
 export const GATE_TOUGHER = 1.5;
 /** The goat leans on the wall: a quarter tougher. */
 export const GOAT_TOUGHER = 1.25;
@@ -252,9 +252,9 @@ export const ROLE_NAMES: Readonly<Record<Role, { one: string; many: string }>> =
 /** What each does, in a few words (for the night's card and the guide). */
 export const ROLE_DOES: Readonly<Record<Role, string>> = {
   creeper: "Walks the trail and batters the wall",
-  runner: "Quick, frail, over the wall in a bound",
+  runner: "Quick, and over the wall in a bound",
   flier: "Flies over the wall, after the larder",
-  brute: "Sturdy, and batters the gate twice as hard",
+  brute: "Sturdy, and batters the gate four times as hard",
   digger: "Tunnels under the wall and comes up inside",
   bomber: "Blows a section of the wall open"
 };
@@ -296,10 +296,16 @@ export const waveKinds = (chapter: number, seed: number, night: number, winter =
   const others = rolesAt(chapter).filter((role) => role !== "creeper");
   const special: Role[] = [];
   const most = Math.floor(size / 2);
-  for (const role of others) {
+  // Which of them ask first, shuffled: the few places a night has go round all of them, not to the oldest.
+  const asking = [...others];
+  for (let at = asking.length - 1; at > 0; at--) {
+    const other = Math.floor(roll() * (at + 1));
+    [asking[at], asking[other]] = [asking[other], asking[at]];
+  }
+  for (const role of asking) {
     const cap = chapter === ROLE_FROM[role] ? 1 : 2;
     // Each other kind comes on most nights, but not all: some nights are quiet of it.
-    let count = roll() < 0.62 ? (roll() < 0.4 ? 2 : 1) : 0;
+    let count = roll() < 0.5 ? (roll() < 0.35 ? 2 : 1) : 0;
     count = Math.min(cap, count);
     for (let n = 0; n < count && special.length < most; n++) special.push(role);
   }

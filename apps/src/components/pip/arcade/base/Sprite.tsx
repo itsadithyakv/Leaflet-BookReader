@@ -19,11 +19,13 @@ type Props = {
   /** The box to fit in, in CSS pixels. */
   box: number;
   className?: string;
+  /** Which of its frames (1.5.11: a page's flutter); the first when not said. */
+  frame?: number;
 };
 
-export const Sprite = ({ name, variant, box, className = "" }: Props) => {
+export const Sprite = ({ name, variant, box, className = "", frame = 0 }: Props) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const sprite = art().sprite(name, 0, variant === undefined ? {} : { variant });
+  const sprite = art().sprite(name, frame, variant === undefined ? {} : { variant });
   useEffect(() => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");

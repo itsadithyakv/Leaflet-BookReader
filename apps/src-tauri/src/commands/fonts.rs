@@ -3,7 +3,7 @@
 
 use crate::fonts::{self, Font};
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fonts_list() -> Vec<Font> {
   fonts::list()
 }

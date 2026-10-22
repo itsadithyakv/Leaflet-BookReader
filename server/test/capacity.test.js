@@ -6,6 +6,7 @@ import { createApp } from "../src/app.js";
 import { boardStamp } from "../src/boardCache.js";
 import { asString, clientOptions, close, connect } from "../src/db.js";
 import { errorHandler } from "../src/http.js";
+import { changedParts } from "../src/routes/social.js";
 import { hashPassword, verifyPassword } from "../src/passwords.js";
 import { isoWeekKey } from "../src/week.js";
 
@@ -303,17 +304,33 @@ describe("saving a profile", () => {
     assert.deepEqual(await db.collection("profiles").findOne({ _id: me.id }), stored);
     assert.equal(boardStamp(), stamp, "nothing kept in memory was thrown away");
 
-    // A minute read is something new: written, and the board is read afresh.
+    // A minute read is something new: written. The board kept in memory is
+    // kept all the same, for its half minute (sync audit C3).
     const read = await call("PUT", "/v1/profile/me", { token: me.token, body: figures(31) });
     assert.equal(read.body.weekMinutes, 31);
     assert.equal((await db.collection("profiles").findOne({ _id: me.id })).weekMinutes, 31);
-    assert.notEqual(boardStamp(), stamp);
+    assert.equal(boardStamp(), stamp, "a save no longer throws the board away");
     // So is any one part of it: a guardian's signpost carried somewhere else.
-    const before = boardStamp();
     const moved = figures(31);
     moved.camp.posts[2] = [31, 80];
     assert.deepEqual((await call("PUT", "/v1/profile/me", { token: me.token, body: moved })).body.camp.posts[2], [31, 80]);
-    assert.notEqual(boardStamp(), before);
+    assert.deepEqual((await db.collection("profiles").findOne({ _id: me.id })).camp.posts[2], [31, 80]);
+    assert.equal(boardStamp(), stamp);
+    // Going private takes the reader off the board at once.
+    assert.equal((await call("PUT", "/v1/profile/me", { token: me.token, body: { visibility: "private" } })).status, 200);
+    assert.notEqual(boardStamp(), stamp);
+  });
+
+  /** Sync audit C8: of what a save names, only what moved is set. */
+  test("a save sets only the parts that moved", () => {
+    const camp = { v: 2, posts: [[1, 2]] };
+    const held = { weekKey: "2026-W43", weekMinutes: 30, camp, handle: "ada", displayName: null };
+    const update = { updatedAt: new Date(), weekKey: "2026-W43", weekMinutes: 31, camp: { v: 2, posts: [[1, 2]] }, handle: "ada", displayName: null, notHeld: 1 };
+    assert.deepEqual(Object.keys(changedParts(held, update)).sort(), ["notHeld", "updatedAt", "weekMinutes"]);
+    // A camp moved is set; a part held as nothing and sent as null is not.
+    const moved = changedParts(held, { ...update, camp: { v: 2, posts: [[1, 3]] }, level: null });
+    assert.ok("camp" in moved);
+    assert.equal("level" in moved, false);
   });
 
   test("is answered with the profile exactly as it is then held, whichever way the save is made", async () => {

@@ -38,9 +38,11 @@ import {
   type VisitLog,
   type VisitPhase,
   type VisitRecord,
+  type VisitorAct,
   type VisitorCandidate,
   type VisitorPresence
 } from "./visitors";
+import { forgetPlaydates } from "./playdates";
 
 /** Today's visits (handle, from, until), on this device only. Removed by Delete All Data and at sign-out. */
 export const VISITS_KEY = "leaflet.pip.visits";
@@ -61,6 +63,9 @@ type VisitorState = {
   presence: VisitorPresence;
   /** Where the visitor stands while in the room (floor pixels), for Pip to keep clear of and turn to. */
   standing: { x: number; w: number } | null;
+  /** What the visitor is doing with Pip just now (the house sets it as she joins in: visitors.ts, `VisitorAct`). */
+  act: VisitorAct | null;
+  setAct: (act: VisitorAct | null) => void;
   /** `VisitorPip` says where the visit has got to. */
   report: (phase: VisitPhase | null, x?: number) => void;
   /** The note has been read: it comes off the door. */
@@ -105,6 +110,8 @@ const forgetLog = () => {
   } catch {
     // Nothing kept, nothing to remove.
   }
+  // And what Pip did with them, for her diary: it was that reader's too.
+  forgetPlaydates();
 };
 
 const sameVisit = (a: Visit | null, b: Visit | null) =>
@@ -116,6 +123,12 @@ export const useVisitorStore = create<VisitorState>((set, get) => ({
   phase: null,
   presence: "none",
   standing: null,
+  act: null,
+
+  setAct(act) {
+    // Only with someone here to do it.
+    set({ act: act && get().visit ? act : null });
+  },
 
   report(phase, x) {
     const presence = presenceOf(phase);
@@ -140,8 +153,8 @@ export const useVisitorStore = create<VisitorState>((set, get) => ({
 
 const nobody = () => {
   const state = useVisitorStore.getState();
-  if (state.visit || state.note || state.phase) {
-    useVisitorStore.setState({ visit: null, note: null, phase: null, presence: "none", standing: null });
+  if (state.visit || state.note || state.phase || state.act) {
+    useVisitorStore.setState({ visit: null, note: null, phase: null, presence: "none", standing: null, act: null });
   }
 };
 
@@ -202,7 +215,7 @@ const look = (openedAt: number, todayMinutes: number, host: Host) => {
 
   const before = useVisitorStore.getState();
   if (!sameVisit(before.visit, visit) || !sameVisit(before.note, note)) {
-    useVisitorStore.setState(visit ? { visit, note } : { visit, note, phase: null, presence: "none", standing: null });
+    useVisitorStore.setState(visit ? { visit, note, ...(before.visit && sameVisit(before.visit, visit) ? {} : { act: null }) } : { visit, note, phase: null, presence: "none", standing: null, act: null });
   }
 };
 
@@ -287,6 +300,6 @@ export const stubVisit = (visitor: VisitorCandidate, stayMs: number, kind: Visit
   }
   const record: VisitRecord = { handle: visitor.handle, from, until: kind === "note" ? from : from + stayMs, kind };
   useVisitorStore.setState(
-    kind === "note" ? { note: { record, visitor } } : { visit: { record, visitor }, phase: null, presence: "none", standing: null }
+    kind === "note" ? { note: { record, visitor } } : { visit: { record, visitor }, phase: null, presence: "none", standing: null, act: null }
   );
 };

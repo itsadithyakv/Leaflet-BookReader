@@ -269,10 +269,12 @@ and from anywhere (browser is fine):
 A `MongoServerSelectionError` in the log almost always means the Atlas
 Network Access entry (step 3.3) or the password in the string.
 
-**Backups.** Atlas's free tier keeps none of its own. The nightly encrypted
-backup to Google Drive is set up once, by its own run sheet:
-[backups.md](backups.md). Until then `deploy.ps1` ends with
-`Backups: off`.
+**Backups.** The nightly encrypted backup to Google Drive is set up once, by
+its own run sheet: [backups.md](backups.md). Until then `deploy.ps1` ends
+with `Backups: off`. MongoDB's page now says a free cluster can turn on
+Atlas's own daily snapshot (up to four kept): check the cluster's Backup tab
+and turn it on if offered, as a second line beside the nightly one (see
+[backups.md](backups.md)).
 
 ## 6. Google sign-in (Drive backup) — *console.cloud.google.com*
 
