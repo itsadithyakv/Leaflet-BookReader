@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { isTouchInput } from "../../platform/device";
 import { wordAround } from "../wordTap";
+import { pictureAt, type PagePicture } from "../pictures";
 import {
   TAP_RUN_MAX, countTap, endTapRun, finishTapRun, glidingAt, isPageTap, markNotTap
 } from "../tapRun";
@@ -67,6 +68,25 @@ export const wordRangeAt = (doc: Document, x: number, y: number): Range | null =
 };
 
 /**
+ * A finger's tap on a picture of the page (readers/pictures.ts, `pictureAt`):
+ * a picture is not text, so it opens large at once, and no run of taps (the
+ * menu, a word) counts it. A run under way before it is over, and does what
+ * it does. A picture that is a link, or a click something already took, is
+ * not one. Answers whether the tap was the picture's.
+ */
+export const takePictureTap = (key: object, event: MouseEvent, open: (picture: PagePicture) => void) => {
+  const onto = event.target as Node | null;
+  const picture = !event.defaultPrevented && onto?.nodeType === 1 ? pictureAt(onto as Element) : null;
+  if (!picture) {
+    return false;
+  }
+  finishTapRun(key);
+  event.preventDefault();
+  open(picture);
+  return true;
+};
+
+/**
  * A finger's taps on the page (readers/tapRun.ts). Each click is first told
  * from a scroll: a finger that moved or was held, a page that scrolled while
  * it was down, or one still gliding when it came down (that touch only
@@ -75,7 +95,8 @@ export const wordRangeAt = (doc: Document, x: number, y: number): Range | null =
  * lands with, and the third on a word selects that word, as a press and hold
  * does: the selection's bar comes up, and nothing is highlighted until the
  * bar is used. Three on a highlight, a name or a link are theirs: the first
- * tap opened it. A mouse's clicks are the browser's own, as before.
+ * tap opened it. A tap on a picture opens it at once and is no part of a run
+ * (`takePictureTap`). A mouse's clicks are the browser's own, as before.
  */
 export const useTapRuns = (reader: WithCover) => {
   const { book, layout, loading, renditionRef, viewerRef } = reader;
@@ -129,6 +150,12 @@ export const useTapRuns = (reader: WithCover) => {
       if (!doc || !tapped) {
         markNotTap(event);
         finishTapRun(rendition);
+        return;
+      }
+      if (
+        latestRef.current.readingModeRef.current !== "speed" &&
+        takePictureTap(rendition, event, (picture) => latestRef.current.openPictureRef.current(picture))
+      ) {
         return;
       }
       // In the window's coordinates: the taps of a run may fall in two chapters' frames.

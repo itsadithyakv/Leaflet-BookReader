@@ -69,6 +69,15 @@ pub trait DocStore: Sync {
   fn unmark<'a>(&'a self, _held: &'a Held) -> Pending<'a, ()> {
     Box::pin(async { Ok(()) })
   }
+  /// The copies another device wrote between `read` (the copy this device
+  /// read) and `now` (the copy there is after this device's write, which
+  /// it has just read back), as far as the store keeps its history: what a
+  /// store that took the write over a copy it did not name (one that does
+  /// not honour `If-Match`) went over. Nothing for a store that keeps no
+  /// history, or that has let the copy read go from it.
+  fn written_between<'a>(&'a self, _read: &'a Held, _now: &'a Held) -> Pending<'a, Vec<Remote>> {
+    Box::pin(async { Ok(Vec::new()) })
+  }
 }
 
 /// Who is syncing: the signed-in account's tag (none, signed out), and
@@ -206,6 +215,10 @@ pub async fn exchange<S: DocStore + ?Sized>(
   let started = now;
   let mut round = 0;
   let mut unmarked_dead = false;
+  // Copies another device wrote that this device's write went over, found
+  // in the store's history (`DocStore::written_between`): merged into the
+  // next round, so their work is not lost from the store (sync audit W7).
+  let mut rescued: Vec<SyncDoc> = Vec::new();
   loop {
     let (remote, held) = doc_store.read().await?;
     // Google's time, where this device's clock is out (sync audit D3).
@@ -250,8 +263,11 @@ pub async fn exchange<S: DocStore + ?Sized>(
       return Ok(Round::Asks { books });
     }
     let stamp = stamp_for(mode, who);
-    let merged = merged_for(&local, remote.as_ref(), &there, &stamp, now);
-    let brought_news = remote.as_ref().is_some_and(|remote| brings(&local, remote, now));
+    // What a write of this device's went over is merged in as if the store
+    // still held it; whether to write is still judged against what it holds.
+    let with_lost = remote.as_ref().map(|doc| rescued.iter().fold(doc.clone(), |doc, lost| merge::merge(&doc, lost, now)));
+    let merged = merged_for(&local, with_lost.as_ref(), &there, &stamp, now);
+    let brought_news = with_lost.as_ref().is_some_and(|remote| brings(&local, remote, now));
     // Nothing the store lacks: it is left as it is (no new revision for the
     // other device to race against). A copy without its marker is written
     // all the same, so the marker lands.
@@ -275,7 +291,7 @@ pub async fn exchange<S: DocStore + ?Sized>(
       // the same has lost ours. Either way what was sent is not all there.
       // Nor is it when the store has become another account's meanwhile.
       let (back, back_held) = doc_store.read().await?;
-      let back_mark = back_held.and_then(|held| held.owner_mark);
+      let back_mark = back_held.as_ref().and_then(|held| held.owner_mark.clone());
       let kept = match back {
         Remote::Ours(there) => {
           let owner_now = remote_owner(there.owner.as_deref(), back_mark.as_deref());
@@ -285,9 +301,29 @@ pub async fn exchange<S: DocStore + ?Sized>(
         Remote::Newer(_) => true,
         Remote::Absent => false
       };
-      if kept {
+      // And what the read-back cannot see (sync audit W7): another
+      // device's write that landed between this device's read and its
+      // write, and that the write went over. Drive's `If-Match` should have
+      // refused it; if Drive takes the write anyway, the other device's
+      // read-back has passed already (it saw its own work), and the work was
+      // gone from Drive until that device synced again. The store's history
+      // still has it: it is merged in, and written again.
+      let lost = match (held.as_ref(), back_held.as_ref()) {
+        (Some(read), Some(after)) if kept => doc_store.written_between(read, after).await?,
+        _ => Vec::new()
+      };
+      let lost: Vec<SyncDoc> = lost
+        .into_iter()
+        .filter_map(|copy| match copy {
+          Remote::Ours(doc) => Some(doc),
+          _ => None
+        })
+        .filter(|doc| !holds(&merged, doc, now))
+        .collect();
+      if kept && lost.is_empty() {
         return Ok(Round::Merged { doc: merged, brought_news });
       }
+      rescued.extend(lost);
     }
 
     round += 1;
@@ -376,13 +412,33 @@ pub(crate) mod fake {
     writes: u32,
     conflicts: u32,
     /// How far Google's clock is from the device's, as `Date` would say.
-    clock: Option<i64>
+    clock: Option<i64>,
+    /// Every copy there has been, by revision, as Drive keeps revisions.
+    history: Vec<(u64, Vec<u8>)>,
+    /// Keeps no history (`written_between` finds nothing).
+    forgets: bool
+  }
+
+  impl Inner {
+    /// Puts `body` in place as the next revision, and keeps it in the history.
+    fn land(&mut self, body: Vec<u8>) {
+      self.revision += 1;
+      self.history.push((self.revision, body.clone()));
+      self.body = Some(body);
+    }
   }
 
   impl FakeDrive {
     pub fn ignoring_revisions() -> Self {
       let drive = FakeDrive::default();
       drive.inner.lock().unwrap().ignores_revision = true;
+      drive
+    }
+
+    /// The same, keeping no history of what it went over.
+    pub fn ignoring_revisions_forgetting() -> Self {
+      let drive = FakeDrive::ignoring_revisions();
+      drive.inner.lock().unwrap().forgets = true;
       drive
     }
 
@@ -402,9 +458,7 @@ pub(crate) mod fake {
     }
 
     pub fn put_raw(&self, body: Vec<u8>) {
-      let mut inner = self.inner.lock().unwrap();
-      inner.body = Some(body);
-      inner.revision += 1;
+      self.inner.lock().unwrap().land(body);
     }
 
     /// The owner marked beside the document.
@@ -470,8 +524,7 @@ pub(crate) mod fake {
       Box::pin(async move {
         let mut inner = self.inner.lock().unwrap();
         if let Some((theirs, mark)) = inner.interloper.take() {
-          inner.body = Some(theirs);
-          inner.revision += 1;
+          inner.land(theirs);
           if mark.is_some() {
             inner.mark = mark;
           }
@@ -482,17 +535,29 @@ pub(crate) mod fake {
           inner.conflicts += 1;
           return Ok(Written::Conflict);
         }
-        inner.body = Some(body);
-        inner.revision += 1;
+        inner.land(body);
         inner.writes += 1;
         if let Some(owner) = owner {
           inner.mark = Some(owner.to_string());
         }
         if let Some(theirs) = inner.clobber.take() {
-          inner.body = Some(theirs);
-          inner.revision += 1;
+          inner.land(theirs);
         }
         Ok(Written::Kept)
+      })
+    }
+
+    fn written_between<'a>(&'a self, read: &'a Held, now: &'a Held) -> Pending<'a, Vec<Remote>> {
+      Box::pin(async move {
+        let inner = self.inner.lock().unwrap();
+        if inner.forgets {
+          return Ok(Vec::new());
+        }
+        let revision = |held: &Held| held.revision.as_deref().and_then(|value| value.parse::<u64>().ok());
+        let (Some(from), Some(to)) = (revision(read), revision(now)) else {
+          return Ok(Vec::new());
+        };
+        Ok(inner.history.iter().filter(|(at, _)| *at > from && *at < to).map(|(_, body)| merge::read_remote(body)).collect())
       })
     }
 
@@ -825,6 +890,48 @@ mod tests {
     assert_eq!(drive.writes(), 3, "the laptop's first, the phone's lost one, the phone's again");
     laptop.sync(&drive, "2026-10-14T09:01:00+00:00").await;
     assert_eq!(laptop.minutes("2026-10-14"), 40.0);
+  }
+
+  /// Sync audit W7: the case the read-back cannot see. The laptop writes
+  /// between the phone's read and the phone's write, and reads back its own
+  /// work: it passes. A Drive that does not honour `If-Match` then takes the
+  /// phone's write over it, and the phone reads back its own work: it passes
+  /// too. The laptop's reading was gone from Drive until the laptop synced
+  /// again. Drive's history still has the laptop's copy: the phone merges it
+  /// in and writes again.
+  #[tokio::test]
+  async fn a_write_that_went_over_another_unseen_is_put_right_from_the_history() {
+    for forgets in [false, true] {
+      let drive = if forgets { FakeDrive::ignoring_revisions_forgetting() } else { FakeDrive::ignoring_revisions() };
+      let (laptop, phone) = (Device::new(), Device::new());
+      laptop.db.guard().credit_minutes("2026-10-14", 10.0, 30).expect("laptop reads");
+      laptop.sync(&drive, "2026-10-14T08:00:00+00:00").await;
+
+      // The laptop's next write, made over the copy there is now, lands
+      // after the phone has read and before the phone writes.
+      laptop.db.guard().credit_minutes("2026-10-14", 5.0, 30).expect("laptop reads on");
+      let laptops = {
+        let local = store::snapshot(&laptop.db.guard(), "2026-10-14T09:00:00+00:00").expect("snapshot");
+        merge::merge(&local, &drive.doc().expect("doc"), "2026-10-14T09:00:00+00:00")
+      };
+      drive.sneak_in(serde_json::to_vec(&laptops).expect("json"));
+
+      phone.db.guard().credit_minutes("2026-10-14", 25.0, 30).expect("phone reads");
+      phone.sync(&drive, "2026-10-14T09:00:01+00:00").await;
+
+      let day = drive.doc().expect("doc").days.into_iter().find(|d| d.date_key == "2026-10-14").expect("day");
+      if forgets {
+        // A store with no history: the gap of one sync the audit found,
+        // closed by the laptop's next sync (each device keeps its own).
+        assert_eq!(day.minutes, 35.0, "the laptop's five more are not on Drive yet");
+        laptop.sync(&drive, "2026-10-14T09:01:00+00:00").await;
+        let day = drive.doc().expect("doc").days.into_iter().find(|d| d.date_key == "2026-10-14").expect("day");
+        assert_eq!(day.minutes, 40.0);
+      } else {
+        assert_eq!(day.minutes, 40.0, "the phone's twenty-five and the laptop's fifteen, at once");
+        assert_eq!(drive.writes(), 3, "the laptop's first, the phone's over the laptop's, the phone's again");
+      }
+    }
   }
 
   /// Every device names itself once, and the name sticks.

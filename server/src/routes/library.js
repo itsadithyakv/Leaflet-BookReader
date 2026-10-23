@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Router } from "express";
 import { requireAccount } from "../auth.js";
 import { PERSON_FIELDS, followedIds, personView, socialProfilesById } from "../community.js";
@@ -88,8 +89,21 @@ export function libraryRoutes(db, limits = defaultLimits()) {
         byKey.set(book.key, book);
       }
       const books = [...byKey.values()];
-      const me = await socialSelf(db, request.account.id);
-      await libraries(db).replaceOne({ _id: me._id }, { books, updatedAt: new Date() }, { upsert: true });
+      // Whether they share a profile, and nothing more of it (it holds a camp of a few KB).
+      const me = await socialSelf(db, request.account.id, { _id: 1, visibility: 1, handle: 1 });
+      // The same list as the one kept is not written again. Since 1.5.12 the
+      // app sends its library once more every six hours, changed or not (a
+      // server restored from a backup has an older one, and nothing else
+      // would say so: sync audit W5), and a library is up to a few hundred
+      // kilobytes. So each is kept with a hash of its books, and a resend
+      // costs one small read instead of the whole list into the database.
+      const hash = createHash("sha256").update(JSON.stringify(books)).digest("base64url");
+      const kept = await libraries(db).findOne({ _id: me._id }, { projection: { _id: 0, hash: 1 } });
+      if (kept?.hash === hash) {
+        response.json({ count: books.length, unchanged: true });
+        return;
+      }
+      await libraries(db).replaceOne({ _id: me._id }, { books, hash, updatedAt: new Date() }, { upsert: true });
       response.json({ count: books.length });
     })
   );

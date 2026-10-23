@@ -92,7 +92,7 @@ import { useBackFallback } from "../platform/back";
 import { android, holdBarLook, holdNightMode, onAndroid } from "../platform/android";
 import { isTouchInput, useTouchInput } from "../platform/device";
 import { isPhoneShape, readerShape, sidewaysPageView, systemBarsHidden, useReaderDevice, useReaderShape, useRotationLock, type SidewaysView } from "../readers/touchLayout";
-import { usePageGestures } from "../readers/pageGestures";
+import { pinchTransform, usePageGestures } from "../readers/pageGestures";
 import { useStageLightSwipes } from "../readers/useStageLightSwipes";
 import { ReadingLight, ReadingLightRows } from "../readers/ReaderLight";
 import { useReaderAwake } from "../readers/readerAwake";
@@ -344,6 +344,8 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
   });
   const sidewaysViewRef = useRef<SidewaysView<PageFit, PageLayout> | null>(initialPreferences?.sideways ?? null);
   const scrollPagesRef = useRef<ScrollPagesHandle>(null);
+  /** A pinch under way: what is stretched, and where its top left corner was (readers/pageGestures.ts, `previewZoom`). */
+  const pinchShownRef = useRef<{ element: HTMLElement; origin: { x: number; y: number } } | null>(null);
   // Where the scroll was last, as stored; and where the scroll opens, set when the book (or the layout) does.
   const placeRef = useRef<StoredPlace | null>(initialPreferences?.place ?? null);
   const [openPlace, setOpenPlace] = useState<OpenPlace | null>(null);
@@ -819,10 +821,12 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
    * Changes how the page is sized without losing the place: the point of the
    * page under `about` (the pointer, or the middle of the window) stays under
    * it. The page drawn is stretched to its new size at once and drawn sharp a
-   * moment later, so zooming answers the wheel rather than the render.
+   * moment later, so zooming answers the wheel rather than the render. With
+   * `to`, the point under `about` goes there instead (a pinch whose fingers
+   * moved).
    */
   const setView = useCallback(
-    (nextFit: PageFit, nextZoom: number, about?: { x: number; y: number }) => {
+    (nextFit: PageFit, nextZoom: number, about?: { x: number; y: number }, to?: { x: number; y: number }) => {
       const stage = scrollRef.current;
       const canvas = canvasRef.current;
       const natural = naturalRef.current;
@@ -831,7 +835,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
       }
       if (scrolling) {
         // The column keeps the place itself: the point under the pointer, or the reader's line.
-        scrollPagesRef.current?.holdAt(about);
+        scrollPagesRef.current?.holdAt(about, to);
         if (natural && source) {
           // Known at once, so a second notch of the wheel in the same moment goes on from the first.
           scaleRef.current = scaleFor(natural, { fit: nextFit, zoom: nextZoom, ...measureRoom() }, source.actualScale);
@@ -843,6 +847,11 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
       if (stage && canvas && natural && source) {
         const anchor = anchorAt(about);
         if (anchor) {
+          if (to) {
+            const stageBox = stage.getBoundingClientRect();
+            anchor.px = to.x - stageBox.left;
+            anchor.py = to.y - stageBox.top;
+          }
           anchorRef.current = anchor;
           const scale = scaleFor(natural, { fit: nextFit, zoom: nextZoom, ...measureRoom() }, source.actualScale);
           canvas.style.width = `${Math.floor(natural.width * scale)}px`;
@@ -1912,8 +1921,36 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
     toggleChrome,
     hideChrome,
     immersive: phone,
-    zoomTo: (nextFit, nextScale, about) =>
-      setView(nextFit, nextFit === "free" ? clampZoom(nextScale, actualScale) : zoom, about)
+    zoomTo: (nextFit, nextScale, about, from) =>
+      setView(nextFit, nextFit === "free" ? clampZoom(nextScale, actualScale) : zoom, from ?? about, from ? about : undefined),
+    previewZoom: (preview) => {
+      // What the stage shows (the page, or the column of pages), stretched by its transform alone.
+      const shown = pinchShownRef.current;
+      if (!preview) {
+        if (shown) {
+          shown.element.style.transform = "";
+          shown.element.style.transformOrigin = "";
+          shown.element.style.willChange = "";
+        }
+        pinchShownRef.current = null;
+        return 1;
+      }
+      const content = scrollRef.current?.firstElementChild as HTMLElement | null | undefined;
+      const base = scaleRef.current;
+      if (!content || !(base > 0)) {
+        return preview.factor;
+      }
+      if (!shown || shown.element !== content) {
+        const box = content.getBoundingClientRect();
+        pinchShownRef.current = { element: content, origin: { x: box.left, y: box.top } };
+        content.style.transformOrigin = "0 0";
+        content.style.willChange = "transform";
+      }
+      const factor = clampZoom(base * preview.factor, actualScale) / base;
+      const move = pinchTransform(pinchShownRef.current!.origin, preview.from, preview.to, factor);
+      content.style.transform = `translate(${move.x}px, ${move.y}px) scale(${move.scale})`;
+      return factor;
+    }
   });
   // Brightness and warmth by a swipe up or down the stage's edges (readers/readingLight.ts).
   useStageLightSwipes(scrollRef, Boolean(source) && !loading && !error && shape !== "desktop");

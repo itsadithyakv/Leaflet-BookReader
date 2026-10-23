@@ -5,6 +5,11 @@ and history, so the VM backs it up every night, encrypted, to the Google
 Drive of the leafletmail Gmail account. Each step says **where** it happens
 and how to check it worked.
 
+**2026-10-23:** found never set up on the VM (no timer, no log). The
+leafletmail account is locked behind Google's security delay, so the
+receiver goes in the owner's personal Google account instead: read
+"leafletmail" below as that account.
+
 Atlas's own: MongoDB's page on free clusters (read 2026-10-22, see
 [the sync audit](sync-audit.md)) says a free cluster can have backups turned
 on, a daily snapshot with up to four kept. This repository said for a long
@@ -102,7 +107,7 @@ Deploy. The URL stays the same; a new *deployment* would give a new URL.
 ## 2. The key, one time — *PowerShell on your PC*
 
 ```powershell
-cd D:\Leaflet\server
+cd D:\Leaflet\.claude\worktrees\android\server
 node src/backup/keygen.js C:\Users\Adi\.leaflet\backup-private.pem
 ```
 
@@ -146,15 +151,15 @@ BACKUP_PUBLIC_KEY=/etc/leaflet-backup.pub
 `MONGO_URI` and `MONGO_DB` come from `/etc/leaflet-api.env`, which the
 backup reads too.
 
-Then ship the server as usual, from your PC ([deploy.md](deploy.md), step 5):
+Then switch the timer on. Every deploy since 1.5.3 installs the backup units
+already (and says `Backups: off` until this file exists), so on the VM:
 
-```powershell
-cd D:\Leaflet\server\deploy
-.\deploy.ps1 -Host 129.154.40.208 -KeyPath "C:\Users\Adi\Documents\UnifloeMarketingKeys\unifloeMarketingPrivate.key"
+```bash
+sudo systemctl enable --now leaflet-backup.timer
 ```
 
-It installs both units, and with `/etc/leaflet-backup.env` in place says
-`Backups: on, next run …`. (Without it, `Backups: off`, and nothing runs.)
+(The next deploy finds `/etc/leaflet-backup.env` and keeps it on, saying
+`Backups: on, next run …`.)
 
 **Check it**, on the VM: run one now, rather than wait for the night.
 
@@ -186,7 +191,7 @@ A backup nobody has restored is a hope. Once a month:
    Downloads.
 2. Check it opens and is whole (writes nothing):
    ```powershell
-   cd D:\Leaflet\server
+   cd D:\Leaflet\.claude\worktrees\android\server
    node src/backup/restore.js --in "$env:USERPROFILE\Downloads\leaflet-2026-10-17T0330Z" --key C:\Users\Adi\.leaflet\backup-private.pem --list
    ```
    (`--in` takes the extracted folder or the one above it, or one file of

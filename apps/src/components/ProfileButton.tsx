@@ -10,6 +10,8 @@ import { relativeTime } from "./community/format";
 import { PipSprite } from "./PipSprite";
 import { UiIcon } from "./UiIcon";
 import { useAccountDialog } from "./account/AccountDialog";
+import { useAdminPage } from "./admin/AdminHost";
+import { useCommunityStore } from "./community/communityStore";
 import { SheetHandle } from "./ui/SheetHandle";
 import { useBackClose } from "../hooks/useBackClose";
 import { usePhoneMenus, useSheetLayout } from "../hooks/useMediaQuery";
@@ -148,9 +150,15 @@ export const ProfileButton = ({
   const loadAccount = useAccountStore((state) => state.load);
   const signOut = useAccountStore((state) => state.signOut);
   const showAccountDialog = useAccountDialog((state) => state.show);
+  const showAdmin = useAdminPage((state) => state.show);
   const accountsOn = FEATURES.accounts && Boolean(sync.apiBase);
   const signedIn = accountsOn && accountStatus.signedIn;
   const account = signedIn ? accountStatus.account : null;
+  // The owner's own page, for the account the server calls the admin (its
+  // own profile says so, private or not); nobody else is offered it.
+  const isAdmin = useCommunityStore((state) => Boolean(state.me?.isAdmin));
+  const meLoaded = useCommunityStore((state) => state.me !== null);
+  const loadMe = useCommunityStore((state) => state.loadMe);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   // On a phone the panel is a sheet from the bottom (at the side, held sideways), drawn
@@ -169,6 +177,13 @@ export const ProfileButton = ({
       void loadAccount(false);
     }
   }, [accountsOn, loadAccount]);
+
+  // Who is signed in is asked for when the menu first opens, if nothing has asked yet.
+  useEffect(() => {
+    if (open && signedIn && FEATURES.community && !meLoaded) {
+      void loadMe();
+    }
+  }, [open, signedIn, meLoaded, loadMe]);
 
   // Closes on a click elsewhere and on Escape.
   useEffect(() => {
@@ -271,6 +286,20 @@ export const ProfileButton = ({
           {account && FEATURES.community && (
             <button type="button" className={`${small} mt-3 w-full`} onClick={onOpenProfile}>
               Your profile
+            </button>
+          )}
+          {account && isAdmin && (
+            <button
+              type="button"
+              className="profile-settings-row tactile-button mt-2 w-full"
+              onClick={() => {
+                onClose();
+                showAdmin();
+              }}
+            >
+              <UiIcon name="analytics" size={18} />
+              <span className="flex-1 text-left">Admin</span>
+              <ChevronRight size={16} className="text-on-surface-variant" aria-hidden />
             </button>
           )}
 

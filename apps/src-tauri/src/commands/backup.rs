@@ -202,6 +202,7 @@ pub async fn drive_auth_wait(state: State<'_, AppState>) -> Result<(), String> {
     .map_err(|e| e.to_string())?;
   // Goes to the OS keychain when one is available, not a plaintext column.
   drive::store_refresh_token(&db, &tokens.refresh_token).map_err(|e| e.to_string())?;
+  drive::note_grant_client(&db, &credentials.client_id).map_err(|e| e.to_string())?;
   // A new grant: whatever Google refused before is asked afresh.
   drive::clear_unavailable(&db).map_err(|e| e.to_string())?;
   Ok(())
@@ -486,6 +487,9 @@ pub(crate) async fn execute(
     Plan::SignedOut => {
       let who = Who::signed_out();
       let mut refused: Option<String> = None;
+      // A store that fails is noted and the next one still runs (sync audit
+      // W6): a folder that is not there must not keep Drive from syncing.
+      let mut store_error: Option<String> = None;
       for carrier in carriers {
         let transport = carrier.transport();
         let (local, there) = {
@@ -496,7 +500,14 @@ pub(crate) async fn execute(
         let mut step = step_for(who.mode(local.as_deref(), there.as_deref()));
         let mut newer = false;
         if step.state {
-          let run = carrier.sync_state(db_mutex, now, &who).await.map_err(fail)?;
+          let run = match carrier.sync_state(db_mutex, now, &who).await {
+            Ok(run) => run,
+            // Its files wait for a run whose state half went through.
+            Err(error) => {
+              store_error.get_or_insert_with(|| fail(error));
+              continue;
+            }
+          };
           if run.refused {
             step = step_for(StoreMode::Refuse);
           } else {
@@ -515,12 +526,17 @@ pub(crate) async fn execute(
         }
         db_note(false)?;
         if step.files && !newer {
-          report.merge_in(carrier.sync_files(db_mutex, step.may_delete).await.map_err(fail)?);
+          match carrier.sync_files(db_mutex, step.may_delete).await {
+            Ok(files) => report.merge_in(files),
+            Err(error) => {
+              store_error.get_or_insert_with(|| fail(error));
+            }
+          }
         }
       }
-      match refused {
-        Some(message) => Err(message),
-        None => Ok(report)
+      match (refused, store_error) {
+        (Some(message), _) | (None, Some(message)) => Err(message),
+        (None, None) => Ok(report)
       }
     }
     Plan::SignedIn { adopting } => {
@@ -541,7 +557,12 @@ pub(crate) async fn execute(
           Err(error) => cloud_error = Some(error.to_string())
         }
       }
-      // (b) Each store's state, as what it holds allows.
+      // (b) Each store's state, as what it holds allows. A store that fails
+      // is noted and the run goes on (sync audit W6): what the others
+      // brought still reaches the account in (c), the claim in (d) is still
+      // made, and the other stores' files still move in (e). The failure is
+      // the run's answer at the end, after the account's own.
+      let mut store_error: Option<String> = None;
       let mut brought_news = false;
       let mut files: Vec<(usize, bool)> = Vec::new();
       for (index, carrier) in carriers.iter().enumerate() {
@@ -559,7 +580,14 @@ pub(crate) async fn execute(
         let mut step = step_for(mode);
         let mut newer = false;
         if step.state {
-          let run = carrier.sync_state(db_mutex, now, &who.answered(answer)).await.map_err(fail)?;
+          let run = match carrier.sync_state(db_mutex, now, &who.answered(answer)).await {
+            Ok(run) => run,
+            // Its files wait for a run whose state half went through.
+            Err(error) => {
+              store_error.get_or_insert_with(|| fail(error));
+              continue;
+            }
+          };
           // A library from before owners: nothing is taken from it, nothing
           // of this one's goes there, until the reader says (sync audit W1).
           if let Some(books) = run.asks {
@@ -599,10 +627,16 @@ pub(crate) async fn execute(
       }
       // (e) The files, over this library as it is now.
       for (index, may_delete) in files {
-        report.merge_in(carriers[index].sync_files(db_mutex, may_delete).await.map_err(fail)?);
+        match carriers[index].sync_files(db_mutex, may_delete).await {
+          Ok(moved) => report.merge_in(moved),
+          Err(error) => {
+            store_error.get_or_insert_with(|| fail(error));
+          }
+        }
       }
-      // (g) The account's failure, now that the stores have had their turn.
-      match cloud_error {
+      // (g) The account's failure, now that the stores have had their turn;
+      // else the first store's.
+      match cloud_error.or(store_error) {
         Some(error) => Err(error),
         None => Ok(report)
       }
@@ -1080,6 +1114,68 @@ mod tests {
     assert_eq!(drive.deletes(), vec![true]);
   }
 
+  /// A store that cannot be reached: a sync folder on a drive that is not
+  /// plugged in, say. Its state half fails, or (`files_fail`) only its files.
+  struct FailingFolder {
+    files_fail: bool
+  }
+
+  const FOLDER_GONE: &str = "The sync folder could not be read.";
+
+  impl Carrier for FailingFolder {
+    fn transport(&self) -> Transport {
+      Transport::Folder
+    }
+
+    fn store_owner(&self) -> Option<String> {
+      None
+    }
+
+    fn sync_state<'a>(&'a self, _db_mutex: &'a Mutex<db::Database>, _now: &'a str, _who: &'a Who) -> Pending<'a, StateRun> {
+      Box::pin(async move {
+        if self.files_fail {
+          Ok(StateRun::default())
+        } else {
+          Err(anyhow::anyhow!(FOLDER_GONE))
+        }
+      })
+    }
+
+    fn sync_files<'a>(&'a self, _db_mutex: &'a Mutex<db::Database>, _may_delete: bool) -> Pending<'a, SyncReport> {
+      Box::pin(async move { Err(anyhow::anyhow!(FOLDER_GONE)) })
+    }
+  }
+
+  /// Sync audit W6: a folder whose state failed used to end the run there
+  /// (`?`), so Drive never ran, what it would have brought never reached the
+  /// account, and its files never moved.
+  #[tokio::test]
+  async fn a_store_that_fails_lets_the_others_run_and_their_news_reach_the_account() {
+    let drive = FakeDriveCarrier::default();
+    // The phone, signed out, keeps the account's Drive in step (the bridge).
+    let phone = Device::owned_by(A);
+    phone.add("ppp");
+    phone.run("2026-10-14T08:00:00+00:00", None, None, &[&drive]).await.expect("the phone's Drive");
+
+    for files_fail in [false, true] {
+      let (laptop, cloud) = (Device::owned_by(A), FakeCloud::default());
+      let folder = FailingFolder { files_fail };
+      let error = laptop.run("2026-10-14T09:00:00+00:00", Some(A), Some(&cloud), &[&folder, &drive]).await.expect_err("the folder failed");
+      assert_eq!(error, FOLDER_GONE);
+      assert_eq!(laptop.books(), vec!["ppp".to_string()], "Drive still ran");
+      assert!(cloud.doc().expect("pushed").books.iter().any(|book| book.id == "ppp"), "and what it brought reached the account");
+      assert_eq!(drive.deletes().last(), Some(&true), "and its files moved");
+    }
+
+    // Signed out, the same.
+    let tablet = Device::owned_by(A);
+    let before = drive.deletes().len();
+    let error = tablet.run("2026-10-14T10:00:00+00:00", None, None, &[&FailingFolder { files_fail: false }, &drive]).await.expect_err("failed");
+    assert_eq!(error, FOLDER_GONE);
+    assert_eq!(tablet.books(), vec!["ppp".to_string()]);
+    assert_eq!(drive.deletes().len(), before + 1);
+  }
+
   /// The owner's Drive client, 2026-10-22: Google disabled it ("Error 401:
   /// disabled_client"), and every run read "Couldn't sync since ...",
   /// though the account had synced the reading each time. Signed in, a run
@@ -1337,7 +1433,12 @@ mod tests {
     owner::set_fresh(&fresh.db.guard(), false).expect("answered");
     fresh.run("2026-10-14T09:02:00+00:00", Some(A), Some(&cloud), &[]).await.expect("sync");
     let held = cloud.doc().expect("held");
-    assert_eq!(held.books.iter().map(|b| b.id.as_str()).collect::<Vec<_>>(), vec!["new"]);
+    assert_eq!(held.live_books().map(|b| b.id.as_str()).collect::<Vec<_>>(), vec!["new"]);
+    // With the old library's books as removals, so a device that still has
+    // them does not bring them back (sync audit W2).
+    let mut removed: Vec<&str> = held.books.iter().filter(|b| b.is_deleted()).map(|b| b.id.as_str()).collect();
+    removed.sort();
+    assert_eq!(removed, vec!["old1", "old2"]);
     assert_eq!(held.owner.as_deref(), Some(A));
   }
 

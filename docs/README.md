@@ -15,6 +15,7 @@ why it is built that way. Written for someone picking the codebase up cold.
 | [building.md](building.md) | Desktop and Android builds, the traps |
 | [mobile.md](mobile.md) | The plan for the phone app: two devices as one, reading upright and sideways, Dotty by touch, signing in |
 | [release-msix.md](release-msix.md) | Packaging for the Microsoft Store and submitting |
+| [owner-handbook.md](owner-handbook.md) | **Start here for running Leaflet**: where everything lives, secrets, builds, deploys, backups, Google sign-in, the log, open items |
 | [deploy.md](deploy.md) | The 1.0 run sheet: GitHub Pages, Atlas, the VM, the API, the Store build |
 | [backups.md](backups.md) | The server database's nightly encrypted backup: setup, checking it, the restore drill |
 | [release-notes-1.0.md](release-notes-1.0.md) | What 1.0 does, and its known issues |

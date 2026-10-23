@@ -11,7 +11,10 @@ and we never see your books.
 
 ## The short version
 
-- Leaflet has no ads, no analytics and no tracking.
+- Leaflet has no ads, no analytics and no tracking. When something goes
+  wrong in the app, it tells our server which error it was, with the app's
+  version and platform and nothing about you; you can switch that off in
+  Settings (see "Error reports" below).
 - Your books never leave your device unless you turn on backup to **your own**
   Google Drive (or, on a computer, a sync folder of your own). We cannot see
   what is in your Drive.
@@ -110,7 +113,10 @@ one, we store the following on our server:
 - **Account:** your email address, a display name if you give one, and your
   password as a salted scrypt hash. We never store or see your password itself.
 - **Sign-in sessions:** a hashed token for each device you are signed in on,
-  with when it was created and last used, so that you stay signed in.
+  with when it was created and last used, so that you stay signed in. We
+  also keep the day your account was last used, and which Leaflet version
+  and kind of device (Windows, Android, macOS or Linux) it was used from, so
+  that we can count how many readers use each version.
 - **Password reset:** if you ask for a reset code, a hash of the code, when it
   expires (15 minutes later) and how many wrong tries it has had. It is deleted
   once used, after five wrong tries, or when it expires. We also keep the dates
@@ -313,6 +319,40 @@ after it is sent, or sooner if we delete it, and at once if you delete your
 account. If you would rather email, "Email it instead" puts the same text on
 your clipboard and opens your email app.
 
+## Error reports (on unless you switch them off)
+
+When something goes wrong inside the app (a screen fails to draw, an
+operation fails without being caught, or the app crashes), Leaflet notes
+**which kind of error it was**, and once a session, a little while after you
+open the app, sends the kinds it noted to our server in one small message.
+Each kind is the error's name, its message and the few places in Leaflet's
+own code it came from, with anything that could be yours taken out first, on
+your device and again on our server: file paths and file names, web
+addresses, email addresses, numbers, long codes and anything in quotation
+marks (where a book's title would be) are replaced by placeholders. With it
+go the app's version and platform (Windows, Android, macOS or Linux) and how
+many times it happened that day.
+
+It is sent whether or not you are signed in, and **never** with your
+sign-in: it does not carry your account, email address, device name, book
+titles, file names, notes, highlights or anything you typed. We do not store
+your IP address with it. We count the same kind of error from everyone
+together, by version, platform and day, and delete the counts after 90 days.
+Only we (Leaflet's administrator) can see them.
+
+Switch **Send error reports** off in Settings (General) and nothing is sent;
+anything noted and not yet sent is forgotten.
+
+## Messages from us in the app
+
+We may show a short message inside the app (for example, that Google Drive
+backup needs to be reconnected). The app fetches these with the update
+notice it already asks for, without your sign-in, and decides on your device
+whether a message is for you (by platform, by version, or whether Google
+Drive was ever connected on this device). Your device remembers which
+messages you have closed and whether Drive was connected on it; neither is
+sent to us.
+
 ## Other services Leaflet talks to
 
 - **Open Library and Wikipedia.** To fill in missing titles, authors and
@@ -392,7 +432,8 @@ present is kept until it is unwrapped and for 30 days after; a request to
 follow until it is answered or withdrawn; a post, a thread or a reply until
 you remove it (or we do); a like, a block and your community memberships
 until you take them back; a report until it has been dealt with and for 180
-days after; a problem report you send for 90 days; a book
+days after; a problem report you send for 90 days; the error-report counts
+for 90 days; a book
 club until its last member leaves. Making
 your profile private hides you from boards, inboxes, duels, feeds and clubs
 straight away, removes the reading figures, shelf, badges and scores stored
@@ -431,6 +472,11 @@ contact us and we will delete it.
 If this policy changes, we will update the date above and, for significant
 changes, say so in the app.
 
+- **23 October 2026:** error reports, sent by the app by itself unless you
+  switch them off (which kind of error, the app's version and platform, and
+  nothing about you), kept 90 days; the day your account was last used, and
+  the Leaflet version and kind of device it was used from; messages from us
+  shown in the app.
 - **18 October 2026:** problem reports sent from the app (what you type, and
   diagnostics unless you leave them out), kept 90 days.
 - **17 October 2026:** encrypted nightly backups of our server's database,

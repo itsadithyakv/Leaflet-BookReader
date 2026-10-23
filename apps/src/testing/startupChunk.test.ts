@@ -94,6 +94,17 @@ describe("what the app loads at start", () => {
     "pip/house.js",
     // The books Pip nods to (fetched when she is first out).
     "pip/books/index.js",
+    // The shop's catalogue, the house and the treats (the wardrobe and the profile picture need only pip/moves.js;
+    // a focus flower only pip/painter.js).
+    "pip/shop.js",
+    "pip/home.js",
+    "pip/room.js",
+    "pip/treats.js",
+    // Pip out in the app: she comes once the library is on screen (platform/afterStartup.ts).
+    "components/PipWorld.tsx",
+    "pip/tour.ts",
+    // The Hollow's dot on the Pip tab is worked out after the start too.
+    "components/pip/arcade/base/pipTabWaits.ts",
     // Pages and the card after a session.
     "pages/PipPage.tsx",
     "pages/SocialPage.tsx",

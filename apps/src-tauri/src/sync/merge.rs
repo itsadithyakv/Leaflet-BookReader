@@ -312,13 +312,21 @@ pub fn read_remote(bytes: &[u8]) -> Remote {
 /// Always sent: the first there is (the server holds none), one in place of
 /// a copy that could not be read (so a damaged one is put right), and one
 /// that differs from the server's in anything at all, however small.
+///
+/// Not news: detail the held copy keeps that the merge has let go
+/// (`compact`, as of the merge's own time). Trimming alone is no reason to
+/// send a whole document; the trimmed one goes up with the next real change.
+/// And a device that has not trimmed yet, writing it back, cannot start the
+/// two sending it to and fro. (Stamps from the future that the merge held to
+/// `now` are not passed over: putting those right is news, sync audit D3.)
 pub fn has_news(merged: &SyncDoc, held: Option<&SyncDoc>) -> bool {
   let Some(held) = held else {
     return true;
   };
+  let held = compact(held.clone(), &merged.updated_at);
   let mut undated = merged.clone();
   undated.updated_at.clone_from(&held.updated_at);
-  undated != *held
+  undated != held
 }
 
 /// An RFC 3339 timestamp as milliseconds since the epoch, or 0 if unparseable.
@@ -695,7 +703,6 @@ pub(crate) fn merge_camp(a: &Option<CampEntry>, b: &Option<CampEntry>) -> Option
 trait Edited: Clone + Ord {
   fn id(&self) -> &str;
   fn updated_at(&self) -> &str;
-  fn deleted_at(&self) -> &Option<String>;
 }
 
 impl Edited for crate::db::Annotation {
@@ -704,9 +711,6 @@ impl Edited for crate::db::Annotation {
   }
   fn updated_at(&self) -> &str {
     &self.updated_at
-  }
-  fn deleted_at(&self) -> &Option<String> {
-    &self.deleted_at
   }
 }
 
@@ -717,14 +721,12 @@ impl Edited for crate::db::Collection {
   fn updated_at(&self) -> &str {
     &self.updated_at
   }
-  fn deleted_at(&self) -> &Option<String> {
-    &self.deleted_at
-  }
 }
 
 /// Two copies of one record: the newer edit wins. An exact tie is decided by
-/// the records themselves, so every device picks the same one.
-fn merge_edited<T: Edited>(a: &[T], b: &[T], cutoff: i64) -> Vec<T> {
+/// the records themselves, so every device picks the same one. Old
+/// tombstones leave in `compact`.
+fn merge_edited<T: Edited>(a: &[T], b: &[T]) -> Vec<T> {
   let mut out: BTreeMap<String, T> = BTreeMap::new();
   for item in a.iter().chain(b.iter()) {
     let replace = match out.get(item.id()) {
@@ -739,11 +741,7 @@ fn merge_edited<T: Edited>(a: &[T], b: &[T], cutoff: i64) -> Vec<T> {
       out.insert(item.id().to_string(), item.clone());
     }
   }
-  out
-    .into_values()
-    // Old tombstones leave, as books' do.
-    .filter(|item| instant_opt(item.deleted_at()).map(|at| at >= cutoff).unwrap_or(true))
-    .collect()
+  out.into_values().collect()
 }
 
 /// Records that never change once made (plantings, harvests): a union by id.
@@ -783,24 +781,7 @@ pub fn merge(local: &SyncDoc, remote: &SyncDoc, now: &str) -> SyncDoc {
     books.insert(book.id.as_str(), merged);
   }
 
-  let cutoff = instant(now) - Duration::days(TOMBSTONE_RETENTION_DAYS).num_milliseconds();
-  let books = books
-    .into_values()
-    .filter(|book| match instant_opt(&book.deleted_at) {
-      // Drop tombstones old enough that every device has certainly seen them.
-      // Not one of a book that was finished: that entry is also the record
-      // that it was, and what the count of books finished goes by once the
-      // book is out of the library. It is a few hundred bytes, kept for good.
-      Some(deleted) => deleted >= cutoff || book.finished_at.as_deref().is_some_and(|at| !at.is_empty()),
-      None => true
-    })
-    .collect();
-
-  // The first day that still carries its per-device minutes. Day keys are
-  // local dates and `now` is an instant; a day either way is nothing here.
-  let figures_since = DateTime::parse_from_rfc3339(now)
-    .map(|at| (at - Duration::days(BY_DEVICE_RETENTION_DAYS)).format("%Y-%m-%d").to_string())
-    .unwrap_or_default();
+  let books = books.into_values().collect();
 
   let mut days: BTreeMap<&str, DayEntry> = BTreeMap::new();
   for day in &local.days {
@@ -839,31 +820,73 @@ pub fn merge(local: &SyncDoc, remote: &SyncDoc, now: &str) -> SyncDoc {
     }
   }
 
-  SyncDoc {
-    version: DOC_VERSION,
-    updated_at: now.to_string(),
-    annotations: merge_edited(&local.annotations, &remote.annotations, cutoff),
-    collections: merge_edited(&local.collections, &remote.collections, cutoff),
-    plantings: union_by_id(&local.plantings, &remote.plantings, |p| p.id.as_str()),
-    harvests: union_by_id(&local.harvests, &remote.harvests, |h| h.id.as_str()),
-    books,
-    days: days
-      .into_values()
-      .map(|mut day| {
-        // Old days travel as a total alone, as they did before the figures.
-        if day.date_key.as_str() < figures_since.as_str() {
-          day.by_device.clear();
-        }
-        day
-      })
-      .collect(),
-    sessions: sessions.into_values().collect(),
-    purchases: purchases.into_values().collect(),
-    pip: merge_pip(&local.pip, &remote.pip),
-    reading_profile: crate::sync::reading::merge(&local.reading_profile, &remote.reading_profile),
-    camp: merge_camp(&local.camp, &remote.camp),
-    owner: crate::sync::owner::merge_owner(&local.owner, &remote.owner)
+  compact(
+    SyncDoc {
+      version: DOC_VERSION,
+      updated_at: now.to_string(),
+      annotations: merge_edited(&local.annotations, &remote.annotations),
+      collections: merge_edited(&local.collections, &remote.collections),
+      plantings: union_by_id(&local.plantings, &remote.plantings, |p| p.id.as_str()),
+      harvests: union_by_id(&local.harvests, &remote.harvests, |h| h.id.as_str()),
+      books,
+      days: days.into_values().collect(),
+      sessions: sessions.into_values().collect(),
+      purchases: purchases.into_values().collect(),
+      pip: merge_pip(&local.pip, &remote.pip),
+      reading_profile: crate::sync::reading::merge(&local.reading_profile, &remote.reading_profile),
+      camp: merge_camp(&local.camp, &remote.camp),
+      owner: crate::sync::owner::merge_owner(&local.owner, &remote.owner)
+    },
+    now
+  )
+}
+
+/// Every rule by which the document lets old detail go, in one place (sync
+/// audit C4): what no device still needs, folded or dropped as of `now`.
+/// Every merge ends with it, and `has_news` holds the copy a store has to
+/// it, so a copy written by a device that has not let the detail go yet (an
+/// older Leaflet, or a clock a day behind) is not news, and is never sent
+/// back and forth over it.
+///
+/// * A removed book's entry leaves after `TOMBSTONE_RETENTION_DAYS`, when
+///   every device in use has seen the removal. One that was finished stays
+///   for good, as the record that it was (the count of books finished goes
+///   by it), but without its exact place in the book (`position`, an EPUB
+///   CFI): nothing reads the place in a book that left the library months ago.
+/// * A removed bookmark, highlight or collection leaves after the same.
+/// * A day keeps what each device read on it (`by_device`) for
+///   `BY_DEVICE_RETENTION_DAYS`; after that it travels as its total alone,
+///   which is what every device already shows: no device still holds
+///   unsynced reading that old, so the split has nothing left to add.
+///
+/// What is kept whole, and why: every reading day (the streak, the
+/// calendar, the stats and the goal bonuses are worked out from the days);
+/// every focus session, purchase, planting and harvest (Pip's seeds, garden,
+/// badges, earned skins, the shelf and the diaries are replayed from them on
+/// every device, session by session: `habit::seeds`, `pip::earned`); every
+/// live bookmark, highlight and note (the reader's own words).
+///
+/// Each rule looks at one entry and `now` alone, so it commutes with the
+/// merge: two devices, one that has trimmed and one that has not, merge to
+/// the same document, and trimming twice changes nothing.
+pub fn compact(mut doc: SyncDoc, now: &str) -> SyncDoc {
+  let cutoff = instant(now) - Duration::days(TOMBSTONE_RETENTION_DAYS).num_milliseconds();
+  let recent = |deleted_at: &Option<String>| instant_opt(deleted_at).is_none_or(|at| at >= cutoff);
+  doc.books.retain(|book| recent(&book.deleted_at) || book.finished_at.as_deref().is_some_and(|at| !at.is_empty()));
+  for book in doc.books.iter_mut().filter(|book| !recent(&book.deleted_at)) {
+    book.position = None;
   }
+  doc.annotations.retain(|mark| recent(&mark.deleted_at));
+  doc.collections.retain(|shelf| recent(&shelf.deleted_at));
+  // The first day that still carries its per-device minutes. Day keys are
+  // local dates and `now` is an instant; a day either way is nothing here.
+  let figures_since = DateTime::parse_from_rfc3339(now)
+    .map(|at| (at - Duration::days(BY_DEVICE_RETENTION_DAYS)).format("%Y-%m-%d").to_string())
+    .unwrap_or_default();
+  for day in doc.days.iter_mut().filter(|day| day.date_key.as_str() < figures_since.as_str()) {
+    day.by_device.clear();
+  }
+  doc
 }
 
 // ---- conversions to and from local storage --------------------------------
@@ -2040,6 +2063,164 @@ mod tests {
     assert!(find("2026-01-01").by_device.is_empty());
     assert_eq!(find("2026-01-01").minutes, 20.0, "its minutes stay");
     assert_eq!(merge(&merged, &here, NOW), merged, "and merging again changes nothing");
+  }
+
+  /// A document with something of every kind `compact` lets go, and the
+  /// same kinds recent enough to stay. `NOW` is 2026-08-29.
+  fn with_old_detail() -> SyncDoc {
+    let removed = |id: &str, at: &str, finished: Option<&str>| BookEntry {
+      deleted_at: Some(at.to_string()),
+      finished_at: finished.map(str::to_string),
+      progress: if finished.is_some() { 1.0 } else { 0.4 },
+      position: Some("epubcfi(/6/14!/4/2/1:0)".to_string()),
+      ..entry(id)
+    };
+    let shelf = |id: &str, deleted_at: &str| crate::db::Collection {
+      id: id.into(),
+      name: "Shelf".into(),
+      book_ids: vec!["live".into()],
+      created_at: "2026-01-01T00:00:00Z".into(),
+      updated_at: deleted_at.into(),
+      deleted_at: Some(deleted_at.into())
+    };
+    let mut held = SyncDoc {
+      books: vec![
+        entry("live"),
+        removed("gone-long-ago", "2026-03-01T00:00:00+00:00", None),
+        removed("finished-long-ago", "2026-03-01T00:00:00+00:00", Some("2026-02-20T00:00:00+00:00")),
+        removed("gone-lately", "2026-08-20T00:00:00+00:00", None)
+      ],
+      annotations: vec![
+        note("kept", "2026-08-01T00:00:00Z", "words", None),
+        note("removed-long-ago", "2026-03-01T00:00:00Z", "words", Some("2026-03-01T00:00:00Z")),
+        note("removed-lately", "2026-08-20T00:00:00Z", "words", Some("2026-08-20T00:00:00Z"))
+      ],
+      collections: vec![shelf("old-shelf", "2026-03-01T00:00:00Z"), shelf("new-shelf", "2026-08-20T00:00:00Z")],
+      days: vec![
+        DayEntry { date_key: "2026-03-02".to_string(), ..read_on("laptop", 25.0) },
+        DayEntry { date_key: "2026-08-27".to_string(), ..read_on("laptop", 15.0) }
+      ],
+      ..doc(vec![])
+    };
+    // In the order a merge writes them, as a store holds them.
+    held.books.sort_by(|a, b| a.id.cmp(&b.id));
+    held.annotations.sort_by(|a, b| a.id.cmp(&b.id));
+    held.collections.sort_by(|a, b| a.id.cmp(&b.id));
+    held
+  }
+
+  /// Prints what `compact` saves on a heavy reader's document, gzipped as
+  /// the account's copy is: 500 books over three years (300 of them read
+  /// and removed), 2,000 highlights, 800 sessions, three devices.
+  /// `cargo test --lib sync::merge::tests::what_compacting -- --ignored --nocapture`
+  #[test]
+  #[ignore = "a measurement"]
+  fn what_compacting_saves_on_a_heavy_document() {
+    use std::io::Write;
+    let gz = |doc: &SyncDoc| {
+      let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+      encoder.write_all(&serde_json::to_vec(doc).expect("json")).expect("gzip");
+      encoder.finish().expect("gzip").len()
+    };
+    let stamp = |day: i64| (DateTime::parse_from_rfc3339(NOW).expect("now") - Duration::days(day)).to_rfc3339();
+    let mut heavy = doc(vec![]);
+    for index in 0..500i64 {
+      let mut book = entry(&format!("{:064x}", index * 7919 + 1));
+      book.title = format!("A Title of Some Length, Volume {index}");
+      book.position = Some(format!("epubcfi(/6/{}!/4/2/{}/1:{})", index % 40 + 2, index % 9 + 1, index * 13 % 400));
+      book.progress_updated_at = stamp(1000 - index * 2);
+      if index < 300 {
+        book.finished_at = Some(stamp(1000 - index * 3));
+        book.deleted_at = Some(stamp(990 - index * 3));
+        book.progress = 1.0;
+      }
+      heavy.books.push(book);
+    }
+    for index in 0..2000i64 {
+      heavy.annotations.push(note(&format!("{:032x}", index * 104_729 + 3), &stamp(1000 - index / 2), "A passage of about the length a reader marks, give or take a line or two of it.", None));
+    }
+    for index in 0..1095i64 {
+      let mut day = DayEntry { date_key: (DateTime::parse_from_rfc3339(NOW).expect("now") - Duration::days(index)).format("%Y-%m-%d").to_string(), ..day("x", 30.0 + (index % 17) as f64 / 3.0) };
+      day.by_device = BTreeMap::from([("laptop".to_string(), 20.0), ("phone".to_string(), 10.0 + (index % 17) as f64 / 3.0)]);
+      heavy.days.push(day);
+    }
+    let before_rules: usize = gz(&heavy);
+    let trimmed = compact(heavy.clone(), NOW);
+    let mut without_positions = trimmed.clone();
+    for book in &mut without_positions.books {
+      if book.is_deleted() {
+        book.position = heavy.books.iter().find(|b| b.id == book.id).and_then(|b| b.position.clone());
+      }
+    }
+    println!("heavy document, gzipped: {before_rules} bytes with nothing let go");
+    println!("  as 1.5.11 kept it (old figures folded): {} bytes", gz(&without_positions));
+    println!("  as 1.5.12 keeps it (and old finished books' places): {} bytes", gz(&trimmed));
+  }
+
+  /// Sync audit C4: what `compact` lets go, and what it keeps.
+  #[test]
+  fn compact_lets_old_detail_go_and_keeps_what_the_app_reads() {
+    let trimmed = compact(with_old_detail(), NOW);
+    let ids: Vec<&str> = trimmed.books.iter().map(|book| book.id.as_str()).collect();
+    assert_eq!(ids, vec!["finished-long-ago", "gone-lately", "live"]);
+    let finished = find(&trimmed, "finished-long-ago");
+    assert_eq!(finished.finished_at.as_deref(), Some("2026-02-20T00:00:00+00:00"), "still counted as finished");
+    assert_eq!((finished.title.as_str(), finished.position.as_deref()), ("Book finished-long-ago", None), "named, without its place");
+    assert!(find(&trimmed, "gone-lately").position.is_some(), "a recent removal is left whole");
+    let marks: Vec<&str> = trimmed.annotations.iter().map(|mark| mark.id.as_str()).collect();
+    assert_eq!(marks, vec!["kept", "removed-lately"]);
+    let shelves: Vec<&str> = trimmed.collections.iter().map(|shelf| shelf.id.as_str()).collect();
+    assert_eq!(shelves, vec!["new-shelf"]);
+    assert!(trimmed.days[0].by_device.is_empty() && trimmed.days[0].minutes == 25.0, "an old day: its total alone");
+    assert_eq!(trimmed.days[1].by_device.get("laptop"), Some(&15.0), "a recent one keeps who read what");
+    assert_eq!(compact(trimmed.clone(), NOW), trimmed, "trimming twice changes nothing");
+    // Every merge ends trimmed.
+    assert_eq!(merge(&with_old_detail(), &doc(vec![]), NOW), merge(&trimmed, &doc(vec![]), NOW));
+  }
+
+  /// The merge stays the merge when one device has trimmed and the other has
+  /// not: in either order, and with each side's own news on top.
+  #[test]
+  fn a_device_that_has_trimmed_and_one_that_has_not_merge_to_the_same() {
+    let untrimmed = with_old_detail();
+    let trimmed = compact(untrimmed.clone(), NOW);
+    let both_whole = merge(&untrimmed, &untrimmed, NOW);
+    for (a, b) in [(&trimmed, &untrimmed), (&untrimmed, &trimmed), (&trimmed, &trimmed)] {
+      assert_eq!(merge(a, b, NOW), both_whole);
+    }
+    // News on each side survives, whichever trimmed.
+    let mut laptop = untrimmed.clone();
+    laptop.days[0].minutes = 40.0; // an old day an old version raised, total only
+    laptop.days[1] = reads_more(&laptop.days[1], "laptop", 5.0);
+    let mut phone = trimmed.clone();
+    phone.days[1] = reads_more(&phone.days[1], "phone", 10.0);
+    phone.annotations.push(note("new", "2026-08-28T00:00:00Z", "fresh", None));
+    let merged = merge(&laptop, &phone, NOW);
+    assert_eq!(merged, merge(&phone, &laptop, NOW), "commutative");
+    assert_eq!(merge(&merged, &laptop, NOW), merged, "idempotent");
+    assert_eq!(merged.days[0].minutes, 40.0, "an old day takes the larger total");
+    assert_eq!(merged.days[1].minutes, 30.0, "a recent one adds up each device's own");
+    assert!(merged.annotations.iter().any(|mark| mark.id == "new"));
+    assert!(!merged.annotations.iter().any(|mark| mark.id == "removed-long-ago"), "an old tombstone does not come back");
+  }
+
+  /// A copy that differs from the merge only by what the merge let go is no
+  /// news: it is not sent for that alone, and a device that has not trimmed
+  /// cannot set two devices sending it to and fro.
+  #[test]
+  fn a_copy_that_differs_only_by_old_detail_is_no_news() {
+    let held = with_old_detail();
+    let merged = merge(&held, &held, NOW);
+    assert_ne!(merged.books.len(), held.books.len(), "the merge did let something go");
+    assert!(!has_news(&merged, Some(&held)));
+    // Real news still is.
+    let mut more = held.clone();
+    more.books.push(entry("another"));
+    assert!(has_news(&merge(&more, &held, NOW), Some(&held)));
+    // So is a stamp from the future the merge put right (sync audit D3).
+    let mut ahead = held.clone();
+    ahead.books[0].progress_updated_at = "2026-08-29T13:00:00+00:00".to_string();
+    assert!(has_news(&merge(&ahead, &ahead, NOW), Some(&ahead)));
   }
 
   #[test]

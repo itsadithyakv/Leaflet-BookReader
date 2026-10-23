@@ -395,6 +395,62 @@ describe("saving a profile", () => {
     assert.equal(JSON.parse(renamed).displayName, "Ada King");
   });
 
+  /** 1.5.12: an app sends only the figures that moved; the server reads, sets and answers with those alone. */
+  test("a save that names some figures reads and answers with those, and keeps the rest as they were", async () => {
+    const me = await reader();
+    await call("PUT", "/v1/profile/me", { token: me.token, body: { handle: me.handle, visibility: "public", ...figures(30) } });
+    const before = await db.collection("profiles").findOne({ _id: me.id });
+
+    const minutes = await call("PUT", "/v1/profile/me", { token: me.token, body: { weekKey: isoWeekKey(), weekMinutes: 32 } });
+    assert.equal(minutes.status, 200, JSON.stringify(minutes.body));
+    assert.equal(minutes.body.weekMinutes, 32);
+    assert.equal(minutes.body.visibility, "public", "who sees it is always in the answer");
+    for (const left of ["camp", "shelf", "badges", "arcade", "reading", "streak"]) {
+      assert.equal(left in minutes.body, false, `${left} was not named, so it is neither read nor answered with`);
+    }
+    const after = await db.collection("profiles").findOne({ _id: me.id });
+    assert.equal(after.weekMinutes, 32);
+    for (const kept of ["camp", "shelf", "badges", "arcade", "reading", "streak", "booksFinished", "level"]) {
+      assert.deepEqual(after[kept], before[kept], `${kept} kept`);
+    }
+
+    // The same few figures again: nothing written.
+    assert.equal((await call("PUT", "/v1/profile/me", { token: me.token, body: { weekKey: isoWeekKey(), weekMinutes: 32 } })).status, 200);
+    assert.deepEqual(await db.collection("profiles").findOne({ _id: me.id }), after);
+
+    // A camp moved, alone: set, and answered with.
+    const moved = figures(32).camp;
+    moved.posts[2] = [31, 80];
+    const camp = await call("PUT", "/v1/profile/me", { token: me.token, body: { camp: moved } });
+    assert.deepEqual(camp.body.camp.posts[2], [31, 80]);
+    assert.equal("weekMinutes" in camp.body, false);
+    assert.equal((await db.collection("profiles").findOne({ _id: me.id })).weekMinutes, 32);
+
+    // What an app before 1.5.12 sends, every figure: answered in full, as it always was.
+    const whole = await call("PUT", "/v1/profile/me", { token: me.token, body: figures(33) });
+    for (const name of ["camp", "shelf", "badges", "arcade", "reading", "streak", "weekMinutes"]) {
+      assert.ok(name in whole.body, name);
+    }
+  });
+
+  /** Sync audit W5: the app sends its library again every six hours; the same list is not written again. */
+  test("a shared library sent again unchanged is not written again", async () => {
+    const me = await reader();
+    await call("PUT", "/v1/profile/me", { token: me.token, body: { handle: me.handle, visibility: "public", shareLibrary: true } });
+    const books = [{ key: "isbn:1", title: "Dune", author: "Frank Herbert", state: "reading", percent: 40 }];
+    assert.deepEqual((await call("PUT", "/v1/library/me", { token: me.token, body: { books } })).body, { count: 1 });
+    const first = await db.collection("libraries").findOne({ _id: me.id });
+    assert.equal(typeof first.hash, "string");
+    const again = await call("PUT", "/v1/library/me", { token: me.token, body: { books } });
+    assert.deepEqual(again.body, { count: 1, unchanged: true });
+    assert.deepEqual(await db.collection("libraries").findOne({ _id: me.id }), first, "not a byte written");
+    const changed = await call("PUT", "/v1/library/me", { token: me.token, body: { books: [{ ...books[0], percent: 41 }] } });
+    assert.deepEqual(changed.body, { count: 1 });
+    const stored = await db.collection("libraries").findOne({ _id: me.id });
+    assert.equal(stored.books[0].percent, 41);
+    assert.notEqual(stored.hash, first.hash);
+  });
+
   test("the same figures are still kept off a private profile, and go in the moment it is shared", async () => {
     const me = await reader();
     await call("PUT", "/v1/profile/me", { token: me.token, body: { handle: me.handle, visibility: "private" } });

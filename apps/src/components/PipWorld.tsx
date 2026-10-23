@@ -18,6 +18,7 @@ import { layoutCache, setStyle } from "../pip/layoutCache";
 import { PipSprite, pipCssSize } from "./PipSprite";
 import { PipSay, type PipSayTail } from "./PipSay";
 import { bubbleArea, type Area } from "./pipBubbleArea";
+import { firstOutDelay } from "../pip/firstOut";
 import "./pip/touch.css";
 
 /**
@@ -400,7 +401,8 @@ const wordsUnderfoot = (b: Bounds, tall = HEIGHT): Span[] => {
       }
       const el = node as HTMLElement;
       // (Not `aria-hidden`: a blank cover's lettering is hidden from a screen reader, not from her.)
-      if (el.hasAttribute("data-pip-scroll-layer")) return NodeFilter.FILTER_REJECT;
+      // (Nor a page kept out of sight behind another tab: hooks/pageShown.ts.)
+      if (el.hasAttribute("data-pip-scroll-layer") || el.hasAttribute("data-page-hidden")) return NodeFilter.FILTER_REJECT;
       const r = el.getBoundingClientRect();
       // (A box with no size may still hold what it lays out: `display: contents`.)
       if (r.width === 0 && r.height === 0) return NodeFilter.FILTER_SKIP;
@@ -511,9 +513,16 @@ const perchFor = (stop: TourStop, b: Bounds, size: number): Perch | null => {
 type PipWorldProps = {
   /** Shortcuts the app offers from Pip's right-click menu. */
   actions: PipAction[];
+  /**
+   * When the app started (`performance.now()`). Pip is put in once the library is on screen
+   * (App.tsx), a moment after the app; her first coming out keeps its time from the app's start.
+   */
+  startedAt?: number;
 };
 
-export const PipWorld = ({ actions }: PipWorldProps) => {
+export const PipWorld = ({ actions, startedAt }: PipWorldProps) => {
+  // Only her first coming out counts from the app's start (taken on the effect's first run, whatever it does).
+  const startedAtRef = useRef(startedAt);
   const {
     mode,
     suspended,
@@ -1940,13 +1949,15 @@ export const PipWorld = ({ actions }: PipWorldProps) => {
 
   // Out on launch if Pip lives out; home and away as the logo is used.
   useEffect(() => {
+    const since = startedAtRef.current;
+    startedAtRef.current = undefined;
     if (mode === "off" || usePipStore.getState().tour !== null) {
       return;
     }
     const s = st.current;
     // Held back while the welcome screen is up: out once it closes.
     if (!home && s.phase === "home" && !waiting) {
-      const timer = window.setTimeout(() => emerge(false), s.greeted ? 0 : 1400);
+      const timer = window.setTimeout(() => emerge(false), s.greeted ? 0 : firstOutDelay(since, performance.now()));
       return () => window.clearTimeout(timer);
     }
     if (home && s.phase !== "home") {

@@ -1,7 +1,9 @@
 import express from "express";
 import { BUSY, errorHandler, notFound } from "./http.js";
+import { RequestStats, countRequests } from "./metrics.js";
 import { defaultLimits } from "./rateLimit.js";
 import { accountRoutes } from "./routes/account.js";
+import { adminRoutes } from "./routes/admin.js";
 import { clubRoutes } from "./routes/clubs.js";
 import { communityRoomRoutes } from "./routes/communities.js";
 import { communityRoutes } from "./routes/community.js";
@@ -23,7 +25,10 @@ const REQUESTS_AT_ONCE = 40;
  * Kept apart from `index.js` so tests can run the real app against a throwaway
  * database, with their own (tiny) rate limits, without reading the environment.
  */
-export function createApp(db, { limits = defaultLimits(), corsOrigin = "", mailer = null, suspensionSalt = "", atOnce = REQUESTS_AT_ONCE } = {}) {
+export function createApp(
+  db,
+  { limits = defaultLimits(), corsOrigin = "", mailer = null, suspensionSalt = "", atOnce = REQUESTS_AT_ONCE, stats = new RequestStats() } = {}
+) {
   const app = express();
   app.disable("x-powered-by");
   // Nothing sends If-None-Match (the app calls from Rust), so an ETag is a
@@ -60,7 +65,7 @@ export function createApp(db, { limits = defaultLimits(), corsOrigin = "", maile
   if (corsOrigin) {
     app.use((request, response, next) => {
       response.set("Access-Control-Allow-Origin", corsOrigin);
-      response.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
+      response.set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Leaflet-Client");
       response.set("Access-Control-Allow-Methods", "GET, PUT, POST, PATCH, DELETE, OPTIONS");
       if (request.method === "OPTIONS") {
         response.sendStatus(204);
@@ -69,6 +74,10 @@ export function createApp(db, { limits = defaultLimits(), corsOrigin = "", maile
       next();
     });
   }
+
+  // Every request counted for the owner's overview (`metrics.js`): in memory,
+  // before the door below, so the ones turned away are counted too.
+  app.use(countRequests(stats));
 
   app.get("/health", (_request, response) => response.json({ ok: true }));
 
@@ -130,6 +139,8 @@ export function createApp(db, { limits = defaultLimits(), corsOrigin = "", maile
   app.use("/v1", moderationRoutes(db, limits, suspensionSalt));
   // What readers say went wrong with Leaflet itself, and the owner's list of it.
   app.use("/v1", problemRoutes(db, limits));
+  // The owner's overview, and the error kinds the apps send by themselves.
+  app.use("/v1", adminRoutes(db, limits, stats));
 
   app.use(notFound);
   app.use(errorHandler);

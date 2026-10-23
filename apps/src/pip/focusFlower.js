@@ -5,7 +5,7 @@
 
  Drawn with the room art's Painter, like the garden, and just as pure: the
  flower, its growth (0..1), its state and the frame. */
-import { Painter } from "./room.js";
+import { Painter } from "./painter.js";
 
 export const FLOWER_W = 24;
 export const FLOWER_H = 36;

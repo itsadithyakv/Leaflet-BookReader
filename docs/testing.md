@@ -92,6 +92,59 @@ contents in both forms, a chapter's markup, its stylesheet).
 covered and the folder transport is verified end to end, but no test touches the
 real API — that needs an OAuth client tied to a Google account.
 
+## Performance budgets
+
+`npm run perf` (in `apps`) is the check that the app stays fast. It builds
+the app for production, serves the build on a local port, and drives a
+headless Chrome (GPU on, a fresh profile each time) through the flows that
+have to feel fast:
+
+| Flow | What is measured |
+| --- | --- |
+| `start` | Start to the library usable (first cards drawn) and to the first screen of covers; long tasks and the JavaScript loaded before it; long tasks in the first 5 s. Each the median of three starts with the caches emptied (one start alone varies by half again) |
+| `scroll` | A fast fling down the library and back: frames over 20 ms, the 95th percentile frame |
+| `tabs` | Library to Collections, Social and back, warm: the interaction (input to next paint) back to the Library and away from it; the JS heap and DOM nodes on another tab |
+| `sheets` | Settings, the profile sheet and a book's menu opening (median of three) |
+| `pip` | Pip picked up and thrown over the library: frames over 20 ms while she flies |
+| `hollow` | The Hollow left alone for 6 s: main-thread time per second, frames over 20 ms |
+| `reader` | Opening a book to its first text; Smart Read and auto-scroll for 6 s each: frames over 20 ms |
+
+Each flow runs in four configurations: a 1280×800 desktop and a 393×852 phone
+(touch, a phone's pixel ratio, a generic Android user agent), each with the
+CPU at full speed and slowed four times (`Emulation.setCPUThrottlingRate`),
+the nearest the laptop gets to the performance floor (a OnePlus Nord CE4
+Lite). Tauri's IPC is stood in for by `scripts/perf/mock.js`: a made-up
+library of 300 books with generated covers and one generated EPUB
+(`scripts/perf/fixtures.mjs`, written once to `node_modules/.perf/`). No
+real library, account or file is used, and nothing leaves the machine. It
+needs Chrome or Chromium installed (or its path in `CHROME_PATH`).
+
+The numbers are compared with `scripts/perf/budgets.json` and printed as a
+table; any over budget fails the run (exit code 1). Headless numbers vary from
+run to run, by 10 to 20 % and more for the short ones, so the budgets are the
+numbers measured when they were set (the median of three runs) plus a margin
+(30 % and 25 ms for times, more for the percentages). A run over budget is run
+again before it is believed.
+
+```bash
+cd apps
+npm run perf                                   # build, measure everything, check (about seven minutes)
+npm run perf -- --no-build --configs desktop-4x,phone-4x --flows start,tabs
+npm run perf -- --runs 3 --json after.json     # the median of three
+npm run perf -- --compare before.json after.json   # a before-and-after table
+npm run perf -- --runs 3 --update              # today's numbers plus the margin become the budgets
+npm run perf -- --budgets-from after.json      # the same, from numbers already measured
+npm run perf -- --shots shots                  # a screenshot at each step, for a flow that loses its way
+```
+
+It is slow, so it is not part of `npm test`. CI has it as a separate job run
+by hand ("Run workflow"), which never fails the run: a shared runner has no
+GPU and its own speed, so only a run on the machine the budgets were set on
+is a real check. Set new budgets (`--update`) only after a change that is
+meant to make something slower, and say why in the commit. The emulated phone
+is not the phone: the real one is checked by hand over USB debugging
+(docs/android.md).
+
 ## Verifying UI
 
 With no component tests, UI changes are checked in a browser against the dev

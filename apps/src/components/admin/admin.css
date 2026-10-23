@@ -1,0 +1,101 @@
+/* The owner's admin page (AdminPage.tsx). Loaded with the page, so a reader
+   who never opens it never loads this either. Opaque throughout: no glass,
+   no blur, at any effects level. */
+
+.admin-page {
+  padding-top: var(--inset-top, 0px);
+  padding-bottom: var(--inset-bottom, 0px);
+  padding-left: var(--inset-left, 0px);
+  padding-right: var(--inset-right, 0px);
+  animation: admin-page-in 160ms ease-out both;
+}
+
+@keyframes admin-page-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.admin-page-bar {
+  background: rgb(var(--color-background));
+}
+
+.admin-tile {
+  min-width: 0;
+}
+
+.admin-tile.is-warning {
+  box-shadow: inset 0 0 0 1px rgb(var(--color-error) / 0.45);
+  background-color: rgb(var(--color-error) / 0.06);
+}
+
+.admin-tile-link {
+  cursor: pointer;
+  transition: transform 120ms ease-out;
+}
+
+.admin-tile-link:hover,
+.admin-tile-link:focus-visible {
+  transform: translateY(-1px);
+}
+
+.admin-bar {
+  display: block;
+  height: 8px;
+  min-width: 2rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgb(var(--color-on-surface) / 0.08);
+}
+
+.admin-bar > span {
+  display: block;
+  height: 100%;
+  min-width: 3px;
+  border-radius: inherit;
+  background: rgb(var(--color-primary) / 0.75);
+}
+
+/* A row of columns, oldest on the left: a day's hours, or a week's days. */
+.admin-columns {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 72px;
+}
+
+.admin-column {
+  display: flex;
+  flex: 1 1 0;
+  align-items: flex-end;
+  height: 100%;
+  min-width: 0;
+  border-radius: 3px;
+  background: rgb(var(--color-on-surface) / 0.05);
+}
+
+.admin-column > span {
+  display: block;
+  width: 100%;
+  border-radius: 3px;
+  background: rgb(var(--color-primary) / 0.7);
+}
+
+.admin-column > span.has-failures {
+  background: rgb(var(--color-error) / 0.75);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-page {
+    animation: none;
+  }
+
+  .admin-tile-link {
+    transition: none;
+  }
+
+  .admin-tile-link:hover,
+  .admin-tile-link:focus-visible {
+    transform: none;
+  }
+}

@@ -4,6 +4,7 @@ import { MongoClient } from "mongodb";
 import { clientOptions } from "../db.js";
 import { runBackup } from "./backup.js";
 import { BackupError, loadPublicKey } from "./format.js";
+import { noteBackup } from "./note.js";
 import { appsScriptTarget, folderTarget, shortUrl } from "./targets.js";
 
 /**
@@ -103,6 +104,11 @@ async function main() {
     say(
       `${result.name}: ${Object.keys(result.counts).length} collections, ${result.documents} documents, ` +
         `${result.parts} part${result.parts === 1 ? "" : "s"}, ${(result.size / 1024 / 1024).toFixed(2)} MB, ${where} in ${seconds} s`
+    );
+    // For the owner's overview: when the last backup went through. One write
+    // a night; a backup that went through is not failed for want of it.
+    await noteBackup(client.db(dbName), result, { where: values.out ? "folder" : "drive" }).catch((error) =>
+      say(`could not note the backup for the overview: ${error?.message ?? error}`)
     );
   } finally {
     await client.close().catch(() => {});

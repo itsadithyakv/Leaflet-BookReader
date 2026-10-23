@@ -52,6 +52,34 @@ jobs:
         working-directory: apps/src-tauri
         run: cargo test --locked
 
+  # The performance budgets (apps/scripts/perf, docs/testing.md): by hand only
+  # ("Run workflow"), and never failing the run. A shared runner has no GPU and
+  # its speed varies, so its numbers are a rough check against budgets set on a
+  # laptop; the real check is `npm run perf` on the machine the budgets came from.
+  perf:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: apps
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/package-lock.json
+      - run: npm ci
+      - name: Performance budgets
+        run: npm run perf -- --json perf-results.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf-results
+          path: apps/perf-results.json
+          if-no-files-found: ignore
+
   server:
     runs-on: ubuntu-latest
     services:

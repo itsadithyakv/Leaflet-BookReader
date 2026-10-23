@@ -1,4 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { keptPageStyle, usePageShown } from "../hooks/pageShown";
+import { KeptScroll } from "../components/KeptScroll";
+import { useStartupSettled } from "../platform/afterStartup";
 import { useShallow } from "zustand/react/shallow";
 import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -118,6 +121,8 @@ const inertWhen = (hidden: boolean) => (hidden ? { inert: "" } : {});
  * are not drawn again each second. It also ends a session that has run out.
  */
 const SessionRing = ({ session, sessionDuration }: { session: ActiveSession | null; sessionDuration: number }) => {
+  // While another tab is up the page is kept, hidden (App.tsx): the ring rests as it did when it was not there.
+  const shown = usePageShown();
   const stopSession = useHabitStore((state) => state.stopSession);
   const [sessionTick, setSessionTick] = useState(0);
   const [sessionRemaining, setSessionRemaining] = useState<number | null>(null);
@@ -125,7 +130,7 @@ const SessionRing = ({ session, sessionDuration }: { session: ActiveSession | nu
   const focusPercent = Math.min(100, Math.round(focusProgress * 100));
 
   useEffect(() => {
-    if (!session) {
+    if (!session || !shown) {
       setSessionRemaining(null);
       return;
     }
@@ -133,10 +138,10 @@ const SessionRing = ({ session, sessionDuration }: { session: ActiveSession | nu
       setSessionTick((value) => value + 1);
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [session]);
+  }, [session, shown]);
 
   useEffect(() => {
-    if (!session) {
+    if (!session || !shown) {
       setSessionRemaining(null);
       return;
     }
@@ -148,7 +153,7 @@ const SessionRing = ({ session, sessionDuration }: { session: ActiveSession | nu
     if (remaining <= 0) {
       void stopSession({ reason: "completed", cleanSession: true });
     }
-  }, [session, sessionTick]);
+  }, [session, sessionTick, shown]);
 
   return (
     <div className="paper-surface-raised flex flex-col items-center gap-4 border-primary/40 bg-primary/10 px-6 py-6 text-center">
@@ -207,6 +212,11 @@ const SessionRing = ({ session, sessionDuration }: { session: ActiveSession | nu
 };
 
 const LibraryPageComponent = ({ onOpenBook, onNavigate, showToast, onStartFocus }: LibraryPageProps) => {
+  // Kept while another tab is shown, out of the layout (App.tsx, hooks/pageShown.ts): what follows that
+  // reaches outside the page (the drop target, the + in the header, lookups for covers) waits until shown.
+  const shown = usePageShown();
+  const shownRef = useRef(shown);
+  shownRef.current = shown;
   const { books, filters, loading, importing, importBooks, importFiles, refreshMetadata, fetchCover, setFilter } =
     useLibraryStore(
       useShallow((state) => ({
@@ -250,6 +260,11 @@ const LibraryPageComponent = ({ onOpenBook, onNavigate, showToast, onStartFocus 
       ? Math.min(100, Math.round((todayMinutes / snapshot.goalMinutes) * 100))
       : 0;
   const [dropActive, setDropActive] = useState(false);
+  useEffect(() => {
+    if (!shown) {
+      setDropActive(false);
+    }
+  }, [shown]);
   const importDropRef = useRef<HTMLButtonElement>(null);
   const debouncedQuery = useDebouncedValue(filters.query, 250);
 
@@ -286,8 +301,11 @@ const LibraryPageComponent = ({ onOpenBook, onNavigate, showToast, onStartFocus 
   const highlightCounts = useHighlightsStore((state) => state.counts);
   const loadHighlightCounts = useHighlightsStore((state) => state.loadCounts);
   useEffect(() => {
-    void loadHighlightCounts();
-  }, [books, loadHighlightCounts]);
+    // And each time the page is shown again, as when it was built again for each visit.
+    if (shown) {
+      void loadHighlightCounts();
+    }
+  }, [books, loadHighlightCounts, shown]);
   const highlightTotal = useMemo(
     () => books.reduce((sum, book) => sum + (highlightCounts[book.id] ?? 0), 0),
     [books, highlightCounts]
@@ -328,7 +346,7 @@ const LibraryPageComponent = ({ onOpenBook, onNavigate, showToast, onStartFocus 
 
   // The header's + (a phone held sideways) asks for the same.
   useAddBooksRequest(() => {
-    if (!importing) {
+    if (!importing && shownRef.current) {
       handleImport();
     }
   });
@@ -397,7 +415,8 @@ const LibraryPageComponent = ({ onOpenBook, onNavigate, showToast, onStartFocus 
 
     getCurrentWebview()
       .onDragDropEvent((event) => {
-        if (disposed) {
+        // Hidden, the page is not where anything is dropped.
+        if (disposed || !shownRef.current) {
           return;
         }
         const payload = event.payload;
@@ -469,7 +488,17 @@ const LibraryPageComponent = ({ onOpenBook, onNavigate, showToast, onStartFocus 
 
   const requestedCovers = useRef(new Set<string>());
 
+  // Not while the app is starting: their answers draw the shelf again (platform/afterStartup.ts).
+  const settled = useStartupSettled();
   useEffect(() => {
+    // Looked for while the page is shown; the next showing tries again, as a new visit did.
+    if (!shown) {
+      requestedCovers.current.clear();
+      return;
+    }
+    if (!settled) {
+      return;
+    }
     const now = Date.now();
     const missing = books.filter(
       (book) =>
@@ -481,7 +510,7 @@ const LibraryPageComponent = ({ onOpenBook, onNavigate, showToast, onStartFocus 
         // offline or unavailable; will retry on next launch
       });
     });
-  }, [books, fetchCover]);
+  }, [books, fetchCover, shown, settled]);
 
   // On a phone: one key in the search row at rest, a slim card while a session runs (PhoneLibrary).
   const focusStrip = (
@@ -499,7 +528,13 @@ const LibraryPageComponent = ({ onOpenBook, onNavigate, showToast, onStartFocus 
   );
 
   return (
-    <div className={`library-page dock-clear mx-auto flex min-h-full w-full max-w-[2240px] flex-col ${phone ? "gap-5" : "gap-10"}`}>
+    <div
+      className={`library-page dock-clear mx-auto flex min-h-full w-full max-w-[2240px] flex-col ${phone ? "gap-5" : "gap-10"}`}
+      style={keptPageStyle(shown)}
+      data-page-hidden={shown ? undefined : ""}
+    >
+      {/* First: puts the page's place back before the list below reads it. */}
+      <KeptScroll />
       {/* From md the header carries search: a phone on its side keeps only the Focus key here. */}
       <div className={phone ? `phone-search-row${sideways ? " md:hidden" : ""}` : "md:hidden"}>
         <div className="relative min-w-0 flex-1 md:hidden">

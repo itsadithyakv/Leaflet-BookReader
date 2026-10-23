@@ -2,6 +2,8 @@ import { createHash, randomBytes } from "node:crypto";
 import { accounts, sessions } from "./db.js";
 import { HttpError, asyncHandler } from "./http.js";
 import { avatarView } from "./avatars.js";
+import { noteSeen } from "./dormant.js";
+import { clientOf } from "./metrics.js";
 
 /**
  * Sessions: an opaque random token for the client, only its hash for us.
@@ -34,6 +36,8 @@ export async function createSession(db, userId) {
     lastUsedAt: now,
     expiresAt: new Date(now.getTime() + SESSION_MS)
   });
+  // A sign-in is a use of the account (`dormant.js`; nothing while that is off).
+  await noteSeen(db, userId, now).catch(() => {});
   return token;
 }
 
@@ -125,6 +129,10 @@ export function requireAccount(db) {
       session.lastUsedAt = now;
       session.expiresAt = expiresAt;
       await sessions(db).updateOne({ _id: sessionId }, { $set: { lastUsedAt: now, expiresAt } });
+      // And of the account, at most once a day (`dormant.js`; nothing while
+      // that is off). Never a reason to refuse the request.
+      // With the version and platform the app says it is (`X-Leaflet-Client`).
+      await noteSeen(db, session.userId, now, clientOf(request.get("x-leaflet-client"))).catch(() => {});
     }
     request.account = { id: session.userId, sessionId };
     next();

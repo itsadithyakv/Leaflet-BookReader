@@ -186,17 +186,64 @@ pub(crate) fn figures_current_for(db: &db::Database, tag: Option<&str>, now: i64
 /// goes then, whenever the last one was.
 static FIGURES_WAITING: AtomicBool = AtomicBool::new(false);
 
-/// Whether the figures fingerprinted `print` are to be sent to `account`:
-/// when asked to (`force`), or unless they are exactly what that account was
-/// last sent, and recently.
-pub(crate) fn profile_needs_sending(sent: Option<&cloud::ProfileSent>, account: &str, print: &str, now: i64, force: bool) -> bool {
-  force
-    || !sent.is_some_and(|sent| sent.account == account && sent.print == print && (0..PROFILE_RESEND_SECS).contains(&(now - sent.at)))
+/// The part of a profile body a field goes with: the week's minutes are sent
+/// with the week they were summed over (the server takes neither alone), and
+/// every other field is a part of its own.
+fn profile_part(field: &str) -> &str {
+  match field {
+    "weekKey" | "weekMinutes" => "week",
+    other => other
+  }
 }
 
-/// Sends the profile's figures with `send` (`cloud::put_profile`), unless
-/// they are byte for byte what this account last sent (`profile_needs_sending`).
-/// The server's answer, or `None` when nothing needed sending.
+/// A profile body to send: its fields, the print of every field of the
+/// whole body as it now is, and whether it is the whole body.
+pub(crate) type ToSend = (serde_json::Map<String, serde_json::Value>, std::collections::BTreeMap<String, String>, bool);
+
+/// What of a profile body (`fields`, as `put_profile` sends it) goes to
+/// `account`, given what was last sent (`sent`): the fields to send, the
+/// print of each field as it now is, and whether this is a whole send.
+/// Nothing when no part has moved.
+///
+/// The whole body goes when asked to (`force`), to an account it was not
+/// last sent to, when nothing is remembered per part (before 1.5.12), and
+/// six hours after the last whole send (`PROFILE_RESEND_SECS`), moved or
+/// not: the server is the record, and what this device remembers sending is
+/// only a memory (a server put back from a backup, a profile another device
+/// of the account wrote meanwhile). Otherwise only the parts that moved
+/// since they were last sent go: most publishes move the week's minutes and
+/// nothing else, and the camp alone (most of a body) is a few kilobytes.
+/// The server keeps what a save leaves out (`PUT /v1/profile/me` has taken
+/// any part alone since before 1.5.10).
+pub(crate) fn profile_to_send(
+  sent: Option<&cloud::ProfileSent>,
+  account: &str,
+  fields: &serde_json::Map<String, serde_json::Value>,
+  now: i64,
+  force: bool
+) -> Option<ToSend> {
+  let prints: std::collections::BTreeMap<String, String> =
+    fields.iter().map(|(field, value)| (field.clone(), sent_print(format!("{field}={value}").as_bytes()))).collect();
+  let remembered = sent.filter(|sent| sent.account == account && !sent.parts.is_empty() && (0..PROFILE_RESEND_SECS).contains(&(now - sent.at)));
+  let Some(remembered) = remembered.filter(|_| !force) else {
+    return Some((fields.clone(), prints, true));
+  };
+  let moved: std::collections::BTreeSet<&str> = prints
+    .iter()
+    .filter(|(field, print)| remembered.parts.get(*field) != Some(*print))
+    .map(|(field, _)| profile_part(field))
+    .collect();
+  if moved.is_empty() {
+    return None;
+  }
+  let partial = fields.iter().filter(|(field, _)| moved.contains(profile_part(field))).map(|(field, value)| (field.clone(), value.clone())).collect();
+  Some((partial, prints, false))
+}
+
+/// Sends the profile's figures with `send` (`cloud::put_profile`, handed the
+/// body to send), unless none of them has moved since this account was last
+/// sent them; and then only the parts that moved (`profile_to_send`). The
+/// server's answer, or `None` when nothing needed sending.
 ///
 /// The figures went up every few minutes of reading and every ten minutes
 /// of the pulse, a few kilobytes each (the camp is most of it), though most
@@ -211,28 +258,46 @@ pub(crate) async fn send_profile<F, Fut>(
   send: F
 ) -> Result<Option<serde_json::Value>, String>
 where
-  F: FnOnce() -> Fut,
+  F: FnOnce(serde_json::Value) -> Fut,
   Fut: std::future::Future<Output = anyhow::Result<serde_json::Value>>
 {
-  // The body exactly as `put_profile` sends it.
-  let print = sent_print(&serde_json::to_vec(update).map_err(|e| e.to_string())?);
+  // The body exactly as `put_profile` would send it whole.
+  let whole = serde_json::to_value(update).map_err(|e| e.to_string())?;
+  let print = sent_print(whole.to_string().as_bytes());
+  let fields = whole.as_object().cloned().unwrap_or_default();
   let (account, sent) = {
     let db = db_mutex.guard();
     (cloud::signed_in_account_id(&db), cloud::profile_sent(&db))
   };
-  if let Some(account) = account.as_deref() {
-    if !profile_needs_sending(sent.as_ref(), account, &print, now, force) {
-      return Ok(None);
-    }
-  }
-  let saved = send().await.map_err(|e| e.to_string())?;
+  // Not knowing the account, the whole body goes and nothing is remembered.
+  let Some(account) = account else {
+    return send(whole).await.map(Some).map_err(|e| e.to_string());
+  };
+  let Some((body, prints, all)) = profile_to_send(sent.as_ref(), &account, &fields, now, force) else {
+    return Ok(None);
+  };
+  let sent_fields: Vec<String> = body.keys().cloned().collect();
+  let saved = send(serde_json::Value::Object(body)).await.map_err(|e| e.to_string())?;
   let db = db_mutex.guard();
-  match account {
-    // Still the account it went to (not signed out, or into another, meanwhile).
-    Some(account) if !server_says_private(&saved) && cloud::signed_in_account_id(&db).as_deref() == Some(account.as_str()) => {
-      cloud::remember_profile_sent(&db, &cloud::ProfileSent { account, print, at: now });
-    }
-    _ => cloud::forget_profile_sent(&db)
+  // Still the account it went to (not signed out, or into another, meanwhile).
+  if !server_says_private(&saved) && cloud::signed_in_account_id(&db).as_deref() == Some(account.as_str()) {
+    let remembered = match (all, sent) {
+      (true, _) | (false, None) => cloud::ProfileSent { account, print, at: now, parts: prints },
+      // A part sent alone: its print is now the one sent; the rest stand as
+      // they were last sent, and so does the time of the last whole send.
+      (false, Some(mut before)) => {
+        for field in sent_fields {
+          if let Some(print) = prints.get(&field) {
+            before.parts.insert(field, print.clone());
+          }
+        }
+        before.print = print;
+        before
+      }
+    };
+    cloud::remember_profile_sent(&db, &remembered);
+  } else {
+    cloud::forget_profile_sent(&db);
   }
   Ok(Some(saved))
 }
@@ -294,7 +359,7 @@ pub(crate) async fn publish_profile(state: &State<'_, AppState>, force: bool) ->
     library_due(&db).ok().flatten().is_some()
   };
   let now = chrono::Utc::now().timestamp();
-  let sent = send_profile(&state.db, &update, force || library_waits, now, || cloud::put_profile(&state.db, &update)).await?;
+  let sent = send_profile(&state.db, &update, force || library_waits, now, |body| async move { cloud::put_profile(&state.db, &body).await }).await?;
   // The answer is the profile as the server now has it. If it says private,
   // the profile was un-shared somewhere else since this run last asked (on
   // another computer, say), and until the app was restarted every publish
@@ -870,7 +935,7 @@ mod tests {
     calls: &std::sync::atomic::AtomicUsize,
     answer: anyhow::Result<serde_json::Value>
   ) -> Result<Option<serde_json::Value>, String> {
-    send_profile(db, update, force, now, || async {
+    send_profile(db, update, force, now, |_body| async {
       calls.fetch_add(1, Ordering::Relaxed);
       answer
     })
@@ -933,6 +998,77 @@ mod tests {
     cloud::forget_profile_sent(&db.guard());
     publish(&db, &figures(33.0), false, T + 30_300, &calls, ok()).await.expect("sent");
     assert_eq!(calls.load(Ordering::Relaxed), 10);
+  }
+
+  /// Sends `update` as `publish_profile` would, and keeps each body that
+  /// reaches the stand-in for the server.
+  async fn publish_kept(
+    db: &std::sync::Mutex<db::Database>,
+    update: &cloud::ProfileUpdate,
+    force: bool,
+    now: i64,
+    bodies: &std::sync::Mutex<Vec<serde_json::Value>>
+  ) -> Option<serde_json::Value> {
+    send_profile(db, update, force, now, |body| async move {
+      bodies.lock().unwrap().push(body);
+      Ok(serde_json::json!({ "visibility": "public" }))
+    })
+    .await
+    .expect("published")
+  }
+
+  /// 1.5.12: of the figures, only the parts that moved go (the week's
+  /// minutes with their week); all of them go again six hours after the
+  /// last whole send, when forced, and to another account.
+  #[tokio::test]
+  async fn only_the_parts_that_moved_are_sent() {
+    let db = signed_in_as("a1");
+    const T: i64 = 1_790_000_000;
+    let bodies = std::sync::Mutex::new(Vec::new());
+    let last = || bodies.lock().unwrap().last().cloned().expect("a body");
+    let count = || bodies.lock().unwrap().len();
+    let camp = |level: i64| serde_json::json!({ "levels": { "burrow": level }, "camps": 1 });
+    let full = |minutes: f64, streak: i64, level: i64, reading: serde_json::Value| cloud::ProfileUpdate {
+      streak: Some(streak),
+      camp: Some(camp(level)),
+      reading: Some(reading),
+      ..figures(minutes)
+    };
+    let dune = serde_json::json!({ "title": "Dune", "author": null, "percent": 40 });
+
+    publish_kept(&db, &full(30.0, 3, 1, dune.clone()), false, T, &bodies).await.expect("whole");
+    let whole = last();
+    for field in ["weekKey", "weekMinutes", "streak", "camp", "reading"] {
+      assert!(whole.get(field).is_some(), "the first send is whole: {field}");
+    }
+
+    // A minute read: the minutes, with their week, and nothing else.
+    publish_kept(&db, &full(31.0, 3, 1, dune.clone()), false, T + 300, &bodies).await.expect("sent");
+    assert_eq!(last(), serde_json::json!({ "weekKey": "2026-W42", "weekMinutes": 31.0 }));
+    // Nothing moved: nothing sent.
+    assert!(publish_kept(&db, &full(31.0, 3, 1, dune.clone()), false, T + 600, &bodies).await.is_none());
+    assert_eq!(count(), 2);
+    // The camp alone.
+    publish_kept(&db, &full(31.0, 3, 2, dune.clone()), false, T + 900, &bodies).await.expect("sent");
+    assert_eq!(last(), serde_json::json!({ "camp": camp(2) }));
+    // A book put down: "reading" goes as null, so the server stops showing it.
+    publish_kept(&db, &full(31.0, 3, 2, serde_json::Value::Null), false, T + 1_200, &bodies).await.expect("sent");
+    assert_eq!(last(), serde_json::json!({ "reading": null }));
+    // Two parts at once.
+    publish_kept(&db, &full(40.0, 4, 2, serde_json::Value::Null), false, T + 1_500, &bodies).await.expect("sent");
+    assert_eq!(last(), serde_json::json!({ "weekKey": "2026-W42", "weekMinutes": 40.0, "streak": 4 }));
+
+    // Six hours after the first whole send: whole again, moved or not.
+    publish_kept(&db, &full(40.0, 4, 2, serde_json::Value::Null), false, T + PROFILE_RESEND_SECS - 1, &bodies).await.ok_or(()).expect_err("not yet");
+    publish_kept(&db, &full(40.0, 4, 2, serde_json::Value::Null), false, T + PROFILE_RESEND_SECS, &bodies).await.expect("whole");
+    assert!(last().get("camp").is_some() && last().get("streak").is_some());
+    // Forced (a session ended, the board opened): whole.
+    publish_kept(&db, &full(40.0, 4, 2, serde_json::Value::Null), true, T + PROFILE_RESEND_SECS + 60, &bodies).await.expect("whole");
+    assert!(last().get("camp").is_some());
+    // Another account on this library: whole.
+    db.guard().set_setting(cloud::ACCOUNT_CACHE_SETTING, r#"{"id":"b2","email":"b2@example.com"}"#).expect("set");
+    publish_kept(&db, &full(40.0, 4, 2, serde_json::Value::Null), false, T + PROFILE_RESEND_SECS + 120, &bodies).await.expect("whole");
+    assert!(last().get("camp").is_some());
   }
 
   /// The owner's laptop, shut since the phone finished a book: its figures are
@@ -1002,7 +1138,7 @@ mod tests {
     let body = serde_json::to_vec(&figures(30.0)).expect("json");
     assert_ne!(sent_print(&body), fingerprint(&body));
     // As 1.5.10 remembered it: the bare body's print.
-    cloud::remember_profile_sent(&db.guard(), &cloud::ProfileSent { account: "a1".to_string(), print: fingerprint(&body), at: T });
+    cloud::remember_profile_sent(&db.guard(), &cloud::ProfileSent { account: "a1".to_string(), print: fingerprint(&body), at: T, parts: Default::default() });
     let calls = AtomicUsize::new(0);
     let ok = || Ok(serde_json::json!({ "visibility": "public" }));
     publish(&db, &figures(30.0), false, T + 60, &calls, ok()).await.expect("sent");
@@ -1014,10 +1150,12 @@ mod tests {
   /// A clock set back makes the last send look like the future: not trusted.
   #[test]
   fn a_send_from_the_future_is_not_trusted() {
-    let sent = cloud::ProfileSent { account: "a1".to_string(), print: "p".to_string(), at: 1_000 };
-    assert!(!profile_needs_sending(Some(&sent), "a1", "p", 1_000, false));
-    assert!(profile_needs_sending(Some(&sent), "a1", "p", 999, false));
-    assert!(profile_needs_sending(Some(&sent), "a1", "q", 1_000, false));
-    assert!(profile_needs_sending(None, "a1", "p", 1_000, false));
+    let fields = serde_json::json!({ "streak": 3 }).as_object().cloned().expect("object");
+    let (_, parts, _) = profile_to_send(None, "a1", &fields, 1_000, false).expect("whole");
+    let sent = cloud::ProfileSent { account: "a1".to_string(), print: "p".to_string(), at: 1_000, parts };
+    assert!(profile_to_send(Some(&sent), "a1", &fields, 1_000, false).is_none());
+    assert!(profile_to_send(Some(&sent), "a1", &fields, 999, false).expect("sent").2, "from the future: whole");
+    assert!(profile_to_send(Some(&sent), "b2", &fields, 1_000, false).expect("sent").2, "another account: whole");
+    assert!(profile_to_send(None, "a1", &fields, 1_000, false).expect("sent").2);
   }
 }

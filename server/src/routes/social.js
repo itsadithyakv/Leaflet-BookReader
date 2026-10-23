@@ -134,14 +134,6 @@ const OWN_VIEW = {
   kudosTo: { $size: { $ifNull: ["$kudosTo", []] } }
 };
 
-/**
- * The same, but for the fields named: a save's `$set` says what they now
- * are, so the profile read back after it need not carry them as well.
- */
-function ownViewWithout(names) {
-  return Object.fromEntries(Object.entries(OWN_VIEW).filter(([name]) => !names.includes(name)));
-}
-
 /** A list of readers' ids as `OWN_VIEW` reads it (its length), or as it is stored. */
 const howMany = (ids) => (typeof ids === "number" ? ids : ids?.length ?? 0);
 
@@ -431,19 +423,73 @@ function saysNothingNew(held, update) {
   return Object.entries(update).every(([name, value]) => name === "updatedAt" || isDeepStrictEqual(held[name] ?? null, value ?? null));
 }
 
-/** What a save reads of the profile first: what the answer shows, and two parts it does not. */
+/** What a save can read of the profile first: what the answer shows, and two parts it does not. */
 const HELD_VIEW = { ...OWN_VIEW, avatar: 1, readDay: 1 };
+
+/**
+ * What every save reads of the profile held, whatever it names: who sees
+ * it, the standing and the kudos counts the answer shows, the handle and
+ * name, and the avatar's copy. A few hundred bytes.
+ */
+const HELD_ALWAYS = Object.fromEntries(Object.entries(HELD_VIEW).filter(([name]) => !FIGURES.includes(name)));
+
+/**
+ * What a save reads of the profile held: `HELD_ALWAYS`, and each of the
+ * figures it names, to tell whether they moved. A figure it leaves out is
+ * neither read nor answered with.
+ *
+ * Since 1.5.12 the app names only the figures that moved since it last
+ * sent them (and all of them every six hours), so most saves are a few
+ * numbers: reading the whole profile for each (the camp alone is about
+ * 3 KB) was most of what a save took out of the database. An app before
+ * 1.5.12 names every figure, is read for every one, and is answered in full
+ * as before; so is a save that names none (a new name, a switch), which is
+ * the reader's own doing and rare, and which an older app may show from.
+ */
+export function heldViewFor(names) {
+  const named = FIGURES.filter((name) => names.includes(name));
+  if (named.length === 0) {
+    return HELD_VIEW;
+  }
+  return { ...HELD_ALWAYS, ...Object.fromEntries(named.map((name) => [name, 1])) };
+}
+
+/**
+ * The profile as the answer to a save shows it: `ownView`, without the
+ * figures the save neither named nor had read (`read`, the projection it
+ * was read with). Those are as they were, and an app that left them out
+ * knows what they are; leaving them out, rather than sending them as
+ * nothing, keeps the answer true.
+ */
+function answerOf(profile, read) {
+  const view = ownView(profile);
+  for (const name of FIGURES) {
+    if (!(name in read) && name in view) {
+      delete view[name];
+    }
+  }
+  return view;
+}
+
+/**
+ * What a save asks back of the profile it has just written: only what
+ * another request may have changed since it was read (who sees it, the
+ * standing, the kudos counts). The rest the save has just read or set, so
+ * nothing as large as the camp or the shelf comes back from the database.
+ */
+const FRESH_AFTER_SAVE = Object.fromEntries(Object.entries(HELD_ALWAYS).filter(([name]) => name !== "avatar"));
 
 /**
  * The parts of a save the profile does not hold already, to `$set`. A save
  * names every part the app has (the camp alone is a few kilobytes), and most
  * of them are as they were: only what moved is written (sync audit C8). A
- * part the profile was not read for is always written.
+ * part the profile was not read for (`read`, the projection) is always
+ * written.
  */
-export function changedParts(held, update) {
+export function changedParts(held, update, read = HELD_VIEW) {
   return Object.fromEntries(
     Object.entries(update).filter(
-      ([name, value]) => name === "updatedAt" || !(name in HELD_VIEW) || !isDeepStrictEqual(held[name] ?? null, value ?? null)
+      ([name, value]) => name === "updatedAt" || !(name in read) || !isDeepStrictEqual(held[name] ?? null, value ?? null)
     )
   );
 }
@@ -571,10 +617,12 @@ export function socialRoutes(db, limits = defaultLimits()) {
       // profile as it is held: see "says nothing new" below. As much of it
       // as the answer shows, and the two parts a save can say that it does
       // not (the avatar's copy, the day last read), to tell whether it does.
+      // Of the figures, only those the save names (`heldViewFor`).
+      const read = heldViewFor(Object.keys(update));
       const [account, held] = await Promise.all([
         accounts(db).findOne({ _id: request.account.id }, { projection: { avatar: 1, suspendedUntil: 1 } }),
         update.visibility === undefined
-          ? profiles(db).findOne({ _id: request.account.id }, { projection: HELD_VIEW })
+          ? profiles(db).findOne({ _id: request.account.id }, { projection: read })
           : null
       ]);
       update.avatar = avatarView(account?.avatar);
@@ -605,7 +653,7 @@ export function socialRoutes(db, limits = defaultLimits()) {
       // visibility alone: one that names it is the reader's own doing, and
       // is carried out in full every time.
       if (held && saysNothingNew(held, { ...update, ...(SOCIAL.includes(held.visibility) ? figures : {}) })) {
-        response.json(ownView(held));
+        response.json(answerOf(held, read));
         return;
       }
       // The save an app makes of its own accord, to a profile that is shared:
@@ -614,10 +662,11 @@ export function socialRoutes(db, limits = defaultLimits()) {
       // profile, then the figures if it was still shared, then a read of the
       // result.) Still only if the profile is shared at that moment; one
       // made private in between is no match, and is saved the long way below,
-      // without its figures. What comes back is only what the save did not
-      // just set (the visibility, the kudos counts, the standing, and
-      // whatever the app left out): what it set is in `changes`, as it now
-      // stands, and sending the camp back as well doubled what a save cost.
+      // without its figures. What comes back from the database is only what
+      // another request could have changed since the read (the visibility,
+      // the kudos counts, the standing: `FRESH_AFTER_SAVE`): what the save
+      // set is in `changes`, and the rest is what was just read. Sending
+      // the camp back as well doubled what a save cost.
       // And only what moved is set: the rest the profile holds already.
       //
       // The board kept in memory is left alone (sync audit C3). Every save
@@ -629,13 +678,13 @@ export function socialRoutes(db, limits = defaultLimits()) {
       // the profile (the long way, below) and a deletion still clear it at
       // once, so a reader who goes private leaves the board then.
       if (held && SOCIAL.includes(held.visibility)) {
-        const changes = changedParts(held, { ...update, ...figures });
+        const changes = changedParts(held, { ...update, ...figures }, read);
         let saved;
         try {
           saved = await profiles(db).findOneAndUpdate(
             { _id: request.account.id, visibility: { $in: SOCIAL } },
             { $set: changes },
-            { returnDocument: "after", projection: ownViewWithout(Object.keys(changes)) }
+            { returnDocument: "after", projection: FRESH_AFTER_SAVE }
           );
         } catch (error) {
           if (error?.code === 11000) {
@@ -649,7 +698,7 @@ export function socialRoutes(db, limits = defaultLimits()) {
           if (figures.weekKey !== undefined && (figures.weekKey !== held.weekKey || figures.weekMinutes !== held.weekMinutes)) {
             await recordDuelMinutes(db, request.account.id, figures.weekKey, figures.weekMinutes);
           }
-          response.json(ownView({ ...changes, ...saved }));
+          response.json(answerOf({ ...held, ...saved, ...changes }, read));
           return;
         }
       }

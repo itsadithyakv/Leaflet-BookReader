@@ -1,7 +1,8 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { getDateKey } from "./habitService";
 import type { ShopKind } from "../pip/shop";
-import { DEFAULT_SIGNATURE, DEFAULT_VARIANT, GOALS, SETS, STARTER_CHEST, catalogue, roomItems } from "../pip/shop";
+// The catalogue (and the house and treats with it) is needed only by the browser preview's stand-in below,
+// so it is fetched then, not with the app (`pipWardrobeStore` brings this module into the start-up).
 
 /** Where a reader's seeds came from (see `habit/seeds.rs`). */
 export type SeedEarnings = {
@@ -262,7 +263,8 @@ const previewFindsFridgeBare = () => {
  * Outside Tauri (the browser dev server) there is no ledger to earn from, so
  * the Pip tab shows the starting state: the welcome gift and the free things.
  */
-const browserOverview = (): PipOverview => {
+const browserOverview = async (): Promise<PipOverview> => {
+  const { DEFAULT_SIGNATURE, DEFAULT_VARIANT, GOALS, SETS, STARTER_CHEST, catalogue, roomItems } = await import("../pip/shop");
   const now = new Date().toISOString();
   const items = catalogue();
   // Free things, and the starter pieces of the floors everyone has.

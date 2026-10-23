@@ -279,6 +279,30 @@ pub(crate) fn ask_for(route: &str, args: &serde_json::Value) -> Result<Ask, Stri
       Ask::send(Method::DELETE, format!("/v1/admin/problems/{}", hex(args, "id", "report")?), None)
     }
 
+    // An error kind marked fixed in a version, or (no version) open again.
+    "admin_error_mark" => {
+      let sig = need(args, "sig")?.to_ascii_lowercase();
+      if sig.len() != 32 || !sig.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("No such error.".to_string());
+      }
+      Ask::send(Method::POST, format!("/v1/admin/errors/{sig}"), Some(serde_json::json!({ "fixedIn": text(args, "fixedIn") })))
+    }
+
+    // The owner's announcements: the list, one published (the server checks
+    // every field, so what the page wrote goes as it is), one withdrawn.
+    "admin_announcements" => Ask::get("/v1/admin/announcements"),
+    "admin_announce" => {
+      let draft = args.get("draft").filter(|draft| draft.is_object()).cloned().ok_or_else(|| "Nothing to publish.".to_string())?;
+      Ask::send(Method::POST, "/v1/admin/announcements", Some(draft))
+    }
+    "admin_withdraw" => {
+      let id = need(args, "id")?.to_ascii_lowercase();
+      if id.len() != 12 || !id.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("No such announcement.".to_string());
+      }
+      Ask::send(Method::DELETE, format!("/v1/admin/announcements/{id}"), None)
+    }
+
     _ => return Err("No such request.".to_string())
   })
 }
@@ -289,6 +313,26 @@ pub(crate) fn ask_for(route: &str, args: &serde_json::Value) -> Result<Ask, Stri
 pub async fn discuss(route: String, args: Option<serde_json::Value>, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
   let ask = ask_for(&route, &args.unwrap_or(serde_json::Value::Null))?;
   community(&state, ask.method, ask.path, ask.query, ask.body, CommunityAuth::Required).await
+}
+
+/// The owner's overview (`GET /v1/admin/overview`), or `None` from a server
+/// deployed before it, which the admin page says in a line rather than as a
+/// failure. (A reader who is not the admin is told the same 404, but is
+/// never shown the page that asks.)
+#[tauri::command]
+pub async fn admin_overview(state: State<'_, AppState>) -> Result<Option<serde_json::Value>, String> {
+  cloud::community_call_if_there(&state.db, Method::GET, "/v1/admin/overview", &[], CommunityAuth::Required)
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// The error kinds the apps sent, open, fixed or all; `None` from a server deployed before them.
+#[tauri::command]
+pub async fn admin_errors(status: Option<String>, state: State<'_, AppState>) -> Result<Option<serde_json::Value>, String> {
+  let status = status.as_deref().filter(|status| matches!(*status, "fixed" | "all")).unwrap_or("open");
+  cloud::community_call_if_there(&state.db, Method::GET, "/v1/admin/errors", &[("status", status)], CommunityAuth::Required)
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// The key of each book in the library, by its id here: what tells the app
@@ -452,6 +496,29 @@ mod tests {
 
     let gone = ask("admin_problem_delete", json!({ "id": ID }));
     assert_eq!((gone.method, gone.body), (Method::DELETE, None));
+  }
+
+  /// Error kinds and announcements: a signature and an id go into a path
+  /// only if they are one, and a draft is sent as the page wrote it.
+  #[test]
+  fn the_owners_errors_and_announcements_ask_for_what_the_server_has() {
+    let sig = "0123456789abcdef0123456789ABCDEF";
+    let fixed = ask("admin_error_mark", json!({ "sig": sig, "fixedIn": " 1.5.12 " }));
+    assert_eq!((fixed.method, fixed.path.as_str()), (Method::POST, "/v1/admin/errors/0123456789abcdef0123456789abcdef"));
+    assert_eq!(fixed.body, Some(json!({ "fixedIn": "1.5.12" })));
+    assert_eq!(ask("admin_error_mark", json!({ "sig": sig })).body, Some(json!({ "fixedIn": null })));
+    for bad in ["../admin", "123", "0123456789abcdef0123456789abcdeg"] {
+      assert!(ask_for("admin_error_mark", &json!({ "sig": bad })).is_err(), "{bad}");
+    }
+
+    assert_eq!(ask("admin_announcements", json!({})).path, "/v1/admin/announcements");
+    let draft = json!({ "title": "Sorry", "body": "Drive needs you.", "link": { "label": "Reconnect", "action": "reconnect_drive" }, "audience": { "kind": "drive" } });
+    let made = ask("admin_announce", json!({ "draft": draft.clone() }));
+    assert_eq!((made.method, made.body), (Method::POST, Some(draft)));
+    assert!(ask_for("admin_announce", &json!({ "draft": "Sorry" })).is_err());
+    let gone = ask("admin_withdraw", json!({ "id": "0123456789AB" }));
+    assert_eq!((gone.method, gone.path.as_str()), (Method::DELETE, "/v1/admin/announcements/0123456789ab"));
+    assert!(ask_for("admin_withdraw", &json!({ "id": "../../notice" })).is_err());
   }
 
   /// The server changes whatever is in the body, so nothing goes that was not given.

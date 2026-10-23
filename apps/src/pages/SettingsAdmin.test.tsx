@@ -20,9 +20,10 @@ const SIGNED_IN = {
 };
 
 /**
- * The owner's tools are in Settings, under a tab of their own that only the
- * admin is shown, whatever their profile shares: the profile is asked for
- * here, not only on the Social page, and a private one still says `isAdmin`.
+ * The owner's tools used to be a tab of Settings. Since 1.5.12 they are the
+ * admin page, from the profile menu (components/admin), so Settings has no
+ * such tab for anyone; it still asks for the profile, and it carries the
+ * switch for error reports, on unless turned off.
  */
 describe("Settings, for the admin", () => {
   let React: typeof import("react");
@@ -85,24 +86,28 @@ describe("Settings, for the admin", () => {
     await settle();
   };
 
-  it("asks for the profile, and shows a private admin the Admin tab", async () => {
+  it("asks for the profile, and shows even the admin no Admin tab (it is the profile menu's now)", async () => {
     await mount(true);
     const commands = () => invoke.mock.calls.map(([command]) => command);
     expect(commands()).toContain("social_profile");
-    const admin = tab("Admin");
-    expect(admin, "an Admin tab").toBeTruthy();
+    expect(tab("General")).toBeTruthy();
+    expect(tab("Admin")).toBeUndefined();
+    const routes = invoke.mock.calls.filter(([command]) => command === "discuss").map(([, args]) => args.route);
+    expect(routes).not.toContain("admin_problems");
+  });
+
+  it("has the switch for error reports, on until it is turned off", async () => {
+    localStorage.removeItem("leaflet.errorReports");
+    await mount(false);
+    const toggle = () =>
+      page().findAll((element) => element.getAttribute("role") === "switch" && element.textContent === "Send error reports")[0];
+    expect(toggle()?.getAttribute("aria-checked")).toBe("true");
     await React.act(async () => {
-      admin.dispatchEvent(makeEvent("click", admin));
+      toggle()!.dispatchEvent(makeEvent("click", toggle()!));
     });
-    await settle();
-    expect(page().textContent).toContain("Problems");
-    expect(page().textContent).toContain("Reports");
-    expect(page().textContent).toContain("Update notice");
-    const routes = invoke.mock.calls
-      .filter(([command]) => command === "discuss")
-      .map(([, args]) => args.route);
-    expect(routes).toContain("admin_problems");
-    expect(routes).toContain("admin_reports");
+    expect(toggle()?.getAttribute("aria-checked")).toBe("false");
+    expect(localStorage.getItem("leaflet.errorReports")).toBe("off");
+    localStorage.removeItem("leaflet.errorReports");
   });
 
   it("shows anyone else no such tab", async () => {

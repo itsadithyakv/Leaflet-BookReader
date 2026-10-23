@@ -12,7 +12,8 @@
  */
 
 import { ACCESSORIES, LIB, SKINS } from "./core";
-import { DEFAULT_VARIANT, isEarnedOnly, visibleOutfit } from "./shop";
+// Not the shop itself: the header's profile picture needs these at start-up, and the shop brings the house.
+import { DEFAULT_VARIANT, isEarnedOnly, visibleOutfit } from "./moves";
 
 export type Avatar = {
   /** `skin.move`, as stored on the account. */

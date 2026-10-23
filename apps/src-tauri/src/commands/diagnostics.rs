@@ -241,6 +241,31 @@ pub async fn send_problem(
   cloud::send_problem(&state.db, body).await.map_err(|e| e.to_string())
 }
 
+/// Sends the session's error kinds (`errorReports.ts`, which has scrubbed
+/// them): this app's version and platform go with them, and never the
+/// sign-in. True when the server took them, false when it has no such route
+/// yet (the page then drops them); fails only when it could not be asked.
+#[tauri::command]
+pub async fn send_error_kinds(kinds: serde_json::Value, state: State<'_, AppState>) -> Result<bool, String> {
+  cloud::send_error_kinds(&state.db, error_batch(kinds)).await.map_err(|e| e.to_string())
+}
+
+/// The batch as sent: the kinds as the page gave them (at most twenty), and this app's version and platform.
+pub(crate) fn error_batch(kinds: serde_json::Value) -> serde_json::Value {
+  let kinds: Vec<serde_json::Value> = kinds.as_array().map(|list| list.iter().take(20).cloned().collect()).unwrap_or_default();
+  serde_json::json!({ "version": env!("CARGO_PKG_VERSION"), "platform": problem_platform(), "kinds": kinds })
+}
+
+/// The panics noted since the last start (`diag::take_pending_panics`), as
+/// `{message, place}`, each once: the page scrubs them and reports their kinds.
+#[tauri::command]
+pub fn take_panic_reports() -> Vec<serde_json::Value> {
+  crate::diag::take_pending_panics()
+    .into_iter()
+    .map(|(message, place)| serde_json::json!({ "message": message, "place": place }))
+    .collect()
+}
+
 pub(crate) fn on_off(value: bool) -> &'static str {
   if value {
     "on"
@@ -252,6 +277,22 @@ pub(crate) fn on_off(value: bool) -> &'static str {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// An error batch carries the app's version and platform, the kinds as
+  /// given (twenty at most), and nothing else: no account, no device.
+  #[test]
+  fn an_error_batch_says_only_which_app_it_is_from() {
+    let kinds: Vec<serde_json::Value> = (0..25).map(|n| serde_json::json!({ "name": "TypeError", "message": format!("kind {n}") })).collect();
+    let batch = error_batch(serde_json::json!(kinds));
+    let fields: Vec<&String> = batch.as_object().expect("an object").keys().collect();
+    assert_eq!(fields, ["kinds", "platform", "version"]);
+    assert_eq!(batch["kinds"].as_array().map(Vec::len), Some(20));
+    assert_eq!(batch["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(error_batch(serde_json::json!("nonsense"))["kinds"], serde_json::json!([]));
+    // The same two values every call to the server carries in its header.
+    assert_eq!(cloud::client_tag(), format!("{}; {}", env!("CARGO_PKG_VERSION"), problem_platform()));
+    assert!(reqwest::header::HeaderValue::from_str(&cloud::client_tag()).is_ok());
+  }
 
   #[test]
   fn a_report_sent_to_us_does_not_name_the_reader_by_their_home_folder() {

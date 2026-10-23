@@ -514,7 +514,10 @@ describe("Pip's camp on a profile", () => {
   test("null clears it, and a save that does not name it leaves it alone", async () => {
     const me = await reader({ extra: { camp: CAMP } });
     const other = await call("PUT", "/v1/profile/me", { token: me.token, body: { level: 3, arcade: { dash: 5 } } });
-    assert.deepEqual(other.body.camp, CAMP);
+    assert.equal(other.status, 200);
+    // Since 1.5.12 a save is answered with the figures it named (`heldViewFor`): the camp is not read for it.
+    assert.equal("camp" in other.body, false);
+    assert.deepEqual((await call("GET", "/v1/profile/me", { token: me.token })).body.camp, CAMP);
 
     const cleared = await call("PUT", "/v1/profile/me", { token: me.token, body: { camp: null } });
     assert.equal(cleared.status, 200, JSON.stringify(cleared.body));
@@ -522,7 +525,7 @@ describe("Pip's camp on a profile", () => {
     assert.equal((await call("GET", `/v1/profile/${me.handle}`)).body.camp, null);
     assert.equal((await db.collection("profiles").findOne({ _id: me.id })).camp, null);
     // The rest of the profile is as it was.
-    assert.equal(cleared.body.level, 3);
+    assert.equal((await call("GET", "/v1/profile/me", { token: me.token })).body.level, 3);
   });
 
   test("a wrong shape is refused, and changes nothing", async () => {

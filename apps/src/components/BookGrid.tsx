@@ -4,7 +4,7 @@ import { BookCard } from "./BookCard";
 import type { BookMenuAction } from "./BookMenu";
 import { VirtualRows } from "./VirtualRows";
 import { getPlatform } from "../platform";
-import { coverWidth, gridColumns } from "../library/gridColumns";
+import { coverWidth, gridColumns, gridShape } from "../library/gridColumns";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 
 /** Libraries up to this size render in full; larger ones draw only what is on screen. */
@@ -40,8 +40,13 @@ const useColumns = (gap: number) => {
       return;
     }
     const update = () => {
-      setColumns(gridColumns(element.clientWidth, gap));
-      setCover(Math.ceil(coverWidth(element.clientWidth, gap) / 10) * 10);
+      // No width is no layout (a kept page while hidden, pages/LibraryPage.tsx): the columns stay as they were,
+      // so the rows are not drawn again for a width of nothing, and again when it comes back.
+      const shape = gridShape(element.clientWidth, gap);
+      if (shape) {
+        setColumns(shape.columns);
+        setCover(shape.cover);
+      }
     };
     update();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);

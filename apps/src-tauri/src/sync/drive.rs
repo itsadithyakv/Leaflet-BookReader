@@ -205,9 +205,12 @@ pub fn unavailable_noted(db: &Database) -> Option<DriveUnavailable> {
 }
 
 /// An automatic sync leaves Drive alone: Google disabled the client less than
-/// `CLIENT_DISABLED_PAUSE_HOURS` ago.
+/// `CLIENT_DISABLED_PAUSE_HOURS` ago. Not when the grant is another client's:
+/// a pause noted before the update to a new client would only hold back the
+/// reconnect it needs.
 pub fn paused(db: &Database, now: DateTime<Utc>) -> bool {
   unavailable_noted(db) == Some(DriveUnavailable::ClientDisabled)
+    && !grant_from_another_client(db)
     && db
       .get_setting(PAUSED_UNTIL_SETTING)
       .ok()
@@ -680,6 +683,38 @@ pub const REFRESH_SETTING: &str = "drive_refresh_token";
 pub const ACCESS_SETTING: &str = "drive_access_token";
 pub const EXPIRES_SETTING: &str = "drive_expires_at";
 pub const ACCOUNT_SETTING: &str = "drive_account_email";
+/// Which OAuth client this library's grant was made with (kept since 1.5.12).
+pub const GRANT_CLIENT_SETTING: &str = "drive_grant_client";
+
+/// Notes the client a new grant was made with (`drive_auth_wait`).
+pub fn note_grant_client(db: &Database, client_id: &str) -> Result<()> {
+  db.set_setting(GRANT_CLIENT_SETTING, client_id)
+}
+
+/// Whether this library's grant was made with a client other than the one
+/// presented now.
+///
+/// Every grant before 1.5.12 was made with the Drive client Google disabled
+/// on 2026-10-22, and 1.5.12 ships another. Google answers a grant from
+/// another client `unauthorized_client`, which reads as the client being
+/// disabled, but connecting again fixes it. A grant with no note is from
+/// before the note was kept, and so counts as another client's until the
+/// client presented now is seen to honour it.
+fn grant_from_another_client(db: &Database) -> bool {
+  match load_credentials(db) {
+    Some(credentials) => stored(db, GRANT_CLIENT_SETTING).as_deref() != Some(credentials.client_id.as_str()),
+    None => false
+  }
+}
+
+/// What Google refusing this library's grant means for the reader: a client
+/// "disabled" for a grant another client made is a grant to make again.
+fn refusal_for_grant(kind: DriveUnavailable, another_client: bool) -> DriveUnavailable {
+  match kind {
+    DriveUnavailable::ClientDisabled if another_client => DriveUnavailable::Reconnect,
+    kind => kind
+  }
+}
 
 /// A refresh token is a long-lived credential to the user's Drive, so it goes to
 /// the OS keychain rather than a plaintext column in the library database.
@@ -772,6 +807,7 @@ pub fn clear_tokens(db: &Database) -> Result<()> {
   db.set_setting(REFRESH_SETTING, "")?;
   db.set_setting(ACCESS_SETTING, "")?;
   db.set_setting(EXPIRES_SETTING, "")?;
+  db.set_setting(GRANT_CLIENT_SETTING, "")?;
   clear_unavailable(db)?;
   Ok(())
 }
@@ -846,11 +882,24 @@ pub(crate) async fn ensure_access_token(db_mutex: &std::sync::Mutex<Database>) -
     }
   }
 
-  let bundle = refresh_access_token(&refresh_token, &credentials).await?;
+  let bundle = match refresh_access_token(&refresh_token, &credentials).await {
+    Ok(bundle) => bundle,
+    Err(error) => {
+      let another_client = grant_from_another_client(&db_mutex.guard());
+      return Err(match unavailable(&error) {
+        Some(kind) => DriveAuthError(refusal_for_grant(kind, another_client)).into(),
+        None => error
+      });
+    }
+  };
   {
     let db = db_mutex.guard();
     db.set_setting(ACCESS_SETTING, &bundle.access_token)?;
     db.set_setting(EXPIRES_SETTING, &bundle.expires_at)?;
+    // A grant from before the note was kept, honoured by this client.
+    if grant_from_another_client(&db) {
+      note_grant_client(&db, &credentials.client_id)?;
+    }
   }
   Ok(bundle.access_token)
 }
@@ -1013,20 +1062,7 @@ async fn upload_simple(
   owner: Option<&str>
 ) -> Result<DriveFile> {
   let response = match existing {
-    Some(file) => {
-      let mut request = client
-        .patch(format!("{DRIVE_UPLOAD}/files/{}", file.id))
-        .bearer_auth(token)
-        .query(&[("uploadType", "media"), ("fields", "id,name,headRevisionId")])
-        .header(reqwest::header::CONTENT_TYPE, "application/json")
-        .body(body);
-      // Optimistic concurrency: if the other device wrote since we read, this
-      // fails with 412 rather than silently discarding their work.
-      if let Some(revision) = file.head_revision_id.as_deref() {
-        request = request.header(reqwest::header::IF_MATCH, revision);
-      }
-      request.send().await?
-    }
+    Some(file) => write_over(client, token, file, body).send().await?,
     None => {
       // A create needs the name and parent, which `uploadType=media` cannot
       // carry, so the metadata goes in first and the bytes follow.
@@ -1059,6 +1095,28 @@ async fn upload_simple(
     return Err(describe_failure(response).await);
   }
   Ok(response.json().await?)
+}
+
+/// The write of `body` over an existing small file, naming the revision read
+/// (`If-Match`).
+///
+/// Optimistic concurrency: if another device wrote since it was read, this
+/// should fail with 412 rather than discard their work. Whether Drive v3
+/// honours `If-Match` on a media upload is not documented, and could not be
+/// tried without a real Drive (sync audit W7). If it does not, the write
+/// goes over the other device's, and `DocStore::written_between` finds what
+/// it went over in the file's revisions and merges it back.
+fn write_over(client: &reqwest::Client, token: &str, file: &DriveFile, body: Vec<u8>) -> reqwest::RequestBuilder {
+  let request = client
+    .patch(format!("{DRIVE_UPLOAD}/files/{}", file.id))
+    .bearer_auth(token)
+    .query(&[("uploadType", "media"), ("fields", "id,name,headRevisionId")])
+    .header(reqwest::header::CONTENT_TYPE, "application/json")
+    .body(body);
+  match file.head_revision_id.as_deref() {
+    Some(revision) => request.header(reqwest::header::IF_MATCH, revision),
+    None => request
+  }
 }
 
 /// What a new small file is made with: its name and folder, and, for
@@ -1308,6 +1366,93 @@ impl shared_doc::DocStore for DriveDoc<'_> {
       Ok(())
     })
   }
+
+  /// Drive keeps a file's earlier contents as revisions. The copies written
+  /// between the one read and the one there is now are listed, and fetched:
+  /// what a write that Drive took over a copy it did not name went over
+  /// (sync audit W7). Never a reason to fail the run: the write itself went
+  /// through, and a history that cannot be read is no history.
+  fn written_between<'a>(&'a self, read: &'a shared_doc::Held, now: &'a shared_doc::Held) -> shared_doc::Pending<'a, Vec<Remote>> {
+    Box::pin(async move {
+      let (Some(from), Some(to)) = (read.revision.as_deref(), now.revision.as_deref()) else {
+        return Ok(Vec::new());
+      };
+      if from == to || read.id != now.id {
+        return Ok(Vec::new());
+      }
+      match copies_between(self.client, self.token, &now.id, from, to).await {
+        Ok(copies) => Ok(copies),
+        Err(error) => {
+          crate::diag::warn(&format!("Drive's history of state.json could not be read: {error}"));
+          Ok(Vec::new())
+        }
+      }
+    })
+  }
+}
+
+/// The most copies another device can have written between one read and one
+/// write: a few seconds apart, so one or two at most. Anything past this is
+/// left for the devices that wrote it, which put it back at their next sync.
+const MOST_COPIES_BETWEEN: usize = 4;
+
+#[derive(Deserialize)]
+struct RevisionList {
+  #[serde(default)]
+  revisions: Vec<RevisionId>,
+  #[serde(rename = "nextPageToken", default)]
+  next_page_token: Option<String>
+}
+
+#[derive(Deserialize)]
+struct RevisionId {
+  id: String
+}
+
+/// The revisions strictly between `from` and `to` in `ids` (oldest first,
+/// as Drive lists them); none when either is not there (Drive has let it go,
+/// or another device's write came later still).
+pub(crate) fn revisions_between(ids: &[String], from: &str, to: &str) -> Vec<String> {
+  let (Some(start), Some(end)) = (ids.iter().position(|id| id == from), ids.iter().position(|id| id == to)) else {
+    return Vec::new();
+  };
+  if end <= start + 1 {
+    return Vec::new();
+  }
+  ids[start + 1..end].to_vec()
+}
+
+/// The contents of `file_id`'s revisions between `from` and `to`.
+async fn copies_between(client: &reqwest::Client, token: &str, file_id: &str, from: &str, to: &str) -> Result<Vec<Remote>> {
+  let mut ids: Vec<String> = Vec::new();
+  let mut page: Option<String> = None;
+  loop {
+    let mut request = client
+      .get(format!("{DRIVE_API}/files/{file_id}/revisions"))
+      .bearer_auth(token)
+      .query(&[("fields", "revisions(id),nextPageToken"), ("pageSize", "1000")]);
+    if let Some(page) = &page {
+      request = request.query(&[("pageToken", page.as_str())]);
+    }
+    let listed: RevisionList = send(request).await?.json().await?;
+    ids.extend(listed.revisions.into_iter().map(|revision| revision.id));
+    page = listed.next_page_token;
+    if page.is_none() || ids.iter().any(|id| id == to) {
+      break;
+    }
+  }
+  let mut copies = Vec::new();
+  for revision in revisions_between(&ids, from, to).into_iter().take(MOST_COPIES_BETWEEN) {
+    let response = send(
+      client
+        .get(format!("{DRIVE_API}/files/{file_id}/revisions/{revision}"))
+        .bearer_auth(token)
+        .query(&[("alt", "media")])
+    )
+    .await?;
+    copies.push(merge::read_remote(&response.bytes().await?));
+  }
+  Ok(copies)
 }
 
 /// A connection to the reader's Drive for one run: the folders found or
@@ -1463,7 +1608,9 @@ pub async fn fetch_book(db_mutex: &std::sync::Mutex<Database>, book_id: &str) ->
   let books_folder = ensure_folder(&client, &token, BOOKS_FOLDER, &root).await?;
   let file = find_file(&client, &token, &entry.remote_name(), &books_folder)
     .await?
-    .ok_or_else(|| anyhow!("That book has not been uploaded from your other device yet."))?;
+    // Not only "not uploaded yet": since 1.5.12's new Drive client, a book
+    // whose file was only in the old backup is in no device's reach at all.
+    .ok_or_else(|| anyhow!("That book isn't in your backup yet. Open it on a device that has it, or add the file again."))?;
 
   let destination = store::local_path_for(&entry)?;
   if let Some(parent) = destination.parent() {
@@ -1491,6 +1638,40 @@ pub fn credentials_present(db: &Database) -> bool {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// Sync audit W7, as far as it goes without a real Drive: the write of
+  /// `state.json` names the revision read (`If-Match`), as a media upload,
+  /// and a file read with no revision is written without one.
+  #[test]
+  fn the_state_is_written_only_over_the_revision_read() {
+    let client = reqwest::Client::new();
+    let file = |revision: Option<&str>| DriveFile {
+      id: "f1".to_string(),
+      name: STATE_FILE.to_string(),
+      head_revision_id: revision.map(str::to_string),
+      app_properties: None
+    };
+    let request = write_over(&client, "token", &file(Some("0B7r")), b"{}".to_vec()).build().expect("a request");
+    assert_eq!(request.method(), reqwest::Method::PATCH);
+    assert!(request.url().as_str().starts_with(&format!("{DRIVE_UPLOAD}/files/f1?")));
+    assert!(request.url().query().unwrap_or_default().contains("uploadType=media"));
+    assert_eq!(request.headers().get(reqwest::header::IF_MATCH).and_then(|value| value.to_str().ok()), Some("0B7r"));
+    let unnamed = write_over(&client, "token", &file(None), b"{}".to_vec()).build().expect("a request");
+    assert!(unnamed.headers().get(reqwest::header::IF_MATCH).is_none());
+  }
+
+  /// What a write went over is found between the revision read and the one
+  /// there after it, as Drive lists them (oldest first); nothing when Drive
+  /// has let the revision read go, or the two are next to each other.
+  #[test]
+  fn the_copies_a_write_went_over_are_the_revisions_between() {
+    let ids: Vec<String> = ["r1", "r2", "r3", "r4", "r5"].iter().map(|id| id.to_string()).collect();
+    assert_eq!(revisions_between(&ids, "r2", "r5"), vec!["r3".to_string(), "r4".to_string()]);
+    assert!(revisions_between(&ids, "r4", "r5").is_empty(), "nobody wrote in between");
+    assert!(revisions_between(&ids, "r0", "r5").is_empty(), "the revision read is gone from the history");
+    assert!(revisions_between(&ids, "r2", "r9").is_empty());
+    assert!(revisions_between(&ids, "r5", "r2").is_empty());
+  }
 
   #[test]
   fn parses_a_well_formed_callback() {
@@ -1681,6 +1862,9 @@ mod tests {
   fn a_disabled_client_is_left_alone_for_six_hours() {
     let db = crate::db::tests::memory_db();
     let at = DateTime::parse_from_rfc3339("2026-10-22T09:00:00+00:00").unwrap().with_timezone(&Utc);
+    // A grant this client made, whatever the build ships.
+    db.set_setting(CLIENT_ID_SETTING, "leaflet.apps.googleusercontent.com").unwrap();
+    note_grant_client(&db, "leaflet.apps.googleusercontent.com").unwrap();
     assert!(!paused(&db, at));
     note_unavailable(&db, DriveUnavailable::ClientDisabled, at).unwrap();
     assert_eq!(unavailable_noted(&db), Some(DriveUnavailable::ClientDisabled));
@@ -1697,6 +1881,33 @@ mod tests {
     clear_unavailable(&db).unwrap();
     assert_eq!(unavailable_noted(&db), None);
     assert!(!paused(&db, at));
+  }
+
+  /// 1.5.12 ships a new Drive client (the old one was disabled 2026-10-22).
+  /// Google refuses a grant the old client made `unauthorized_client`; that
+  /// is the reader's to fix by reconnecting, and is said so, at once.
+  #[test]
+  fn a_grant_from_the_old_client_asks_to_reconnect() {
+    use DriveUnavailable::{ClientDisabled, Reconnect};
+    let db = crate::db::tests::memory_db();
+    let at = DateTime::parse_from_rfc3339("2026-10-24T09:00:00+00:00").unwrap().with_timezone(&Utc);
+    db.set_setting(CLIENT_ID_SETTING, "new.apps.googleusercontent.com").unwrap();
+
+    // A grant from before the note was kept, and one noted as the old client's.
+    assert!(grant_from_another_client(&db));
+    note_grant_client(&db, "old.apps.googleusercontent.com").unwrap();
+    assert!(grant_from_another_client(&db));
+    assert_eq!(refusal_for_grant(ClientDisabled, true), Reconnect);
+    // The pause 1.5.11 noted for the disabled client does not hold it back.
+    note_unavailable(&db, ClientDisabled, at).unwrap();
+    assert!(!paused(&db, at));
+
+    // Reconnected: the grant is this client's, and a disabled client is that again.
+    note_grant_client(&db, "new.apps.googleusercontent.com").unwrap();
+    assert!(!grant_from_another_client(&db));
+    assert_eq!(refusal_for_grant(ClientDisabled, false), ClientDisabled);
+    assert_eq!(refusal_for_grant(Reconnect, false), Reconnect);
+    assert!(paused(&db, at));
   }
 
   #[test]

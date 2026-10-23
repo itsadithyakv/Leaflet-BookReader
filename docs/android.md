@@ -139,6 +139,15 @@ gets (CSS px):
   the gesture bar. Dragging it shows where you would land.
 - **Panels are sheets**: contents, Aa, notes, search, characters rise from
   the bottom. Search keeps its field above the keyboard.
+- **Pictures** (1.5.12): one tap on a picture opens it large at once (a
+  picture is not text: no run of taps counts it, `takePictureTap` in
+  readers/text/useTapRuns.ts). A pinch that starts on a picture opens the
+  viewer with the picture where the page had it and goes on zooming about
+  the same point (readers/pictureHandover.ts). A picture shown much smaller
+  than it is (a map wider than the column) carries a small magnifier at its
+  corner. A pinch on the text does nothing (the WebView does not zoom the
+  page). In the viewer: pinch about the fingers, drag, double tap in and out,
+  a tap beside the picture, Back or a swipe down at the fit closes.
 
 ### Sideways
 
@@ -188,7 +197,10 @@ gets (CSS px):
 - **Tap the sides or swipe** to turn, as in books; a tap in the middle for
   the chrome.
 - **Pinch to zoom** and pan with one finger when zoomed; **double tap**
-  goes between fit-the-page and fit-the-width at the tapped spot.
+  goes between fit-the-page and fit-the-width at the tapped spot. While the
+  fingers pinch the page is only stretched (a transform); its new size is
+  set and drawn once they lift (1.5.12; it was laid out and re-rendered on
+  every move).
 - Sideways defaults to fit-width and scrolling.
 - Go-to-page rides above the keyboard.
 

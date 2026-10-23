@@ -107,6 +107,10 @@ export function defaultLimits() {
     // Problem reports per address, signed in or not (per account it is
     // five a UTC day, in `tallies`). Ten, so two readers behind one router
     // can each send their five.
-    problems: { limit: 10, windowMs: 24 * 60 * MINUTE }
+    problems: { limit: 10, windowMs: 24 * 60 * MINUTE },
+    // Error reports per address: an app sends one small batch a session at
+    // most, so six an hour is a household of readers opening Leaflet a few
+    // times each, and a script gets no further than that.
+    errors: { limit: 6, windowMs: 60 * MINUTE }
   };
 }

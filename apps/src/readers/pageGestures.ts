@@ -9,6 +9,11 @@ import type { PageFit } from "./pageZoom";
  * across turns; two fingers pinch the page larger or smaller about the point
  * between them, and one finger then moves about it (the stage's own scroll);
  * a double tap goes between the whole page and its width, at the tapped spot.
+ *
+ * While the fingers pinch, the page is only stretched (`previewZoom`, a
+ * transform: nothing is laid out or drawn again, which a slow phone could not
+ * keep up with), and the new size is set once, when they lift, with the
+ * point that was between them where they moved it.
  */
 
 /** A second tap within this long, and this near, is a double tap. */
@@ -29,6 +34,17 @@ export const midpoint = (a: Point, b: Point): Point => ({ x: (a.x + b.x) / 2, y:
 /** The scale a pinch asks for: the scale it began at, by how far the fingers have moved apart. */
 export const pinchScale = (startScale: number, startSpread: number, spreadNow: number) =>
   startSpread > 0 && spreadNow > 0 ? startScale * (spreadNow / startSpread) : startScale;
+
+/**
+ * The transform that shows a pinch under way on content whose top left corner
+ * is at `origin` (window points; transform-origin at that corner): what was
+ * under `from` is under `to`, `factor` times larger.
+ */
+export const pinchTransform = (origin: Point, from: Point, to: Point, factor: number) => ({
+  x: to.x - origin.x - (from.x - origin.x) * factor,
+  y: to.y - origin.y - (from.y - origin.y) * factor,
+  scale: factor
+});
 
 /** A double tap goes between the whole page and its width (and from any other size to the width). */
 export const doubleTapFit = (fit: PageFit): PageFit => (fit === "width" ? "page" : "width");
@@ -57,8 +73,19 @@ type GestureOptions = {
   hideChrome: () => void;
   /** A phone: scrolling, only a tap in the middle brings the chrome (readers/touchLayout.ts, `tapAction`). */
   immersive?: boolean;
-  /** A new size about a point of the window: a pinch ("free"), a double tap (a fit). */
-  zoomTo: (fit: PageFit, scale: number, about: Point) => void;
+  /**
+   * A new size about a point of the window: a pinch ("free"), a double tap
+   * (a fit). With `from`, the point of the page that was under `from` goes
+   * to `about` (a pinch's fingers moved while they pinched).
+   */
+  zoomTo: (fit: PageFit, scale: number, about: Point, from?: Point) => void;
+  /**
+   * A pinch under way, shown by stretching what is drawn: what was under
+   * `from` is under `to`, `factor` times larger; null when it is over.
+   * Answers the factor shown (the reader's limits may hold it back). Without
+   * it, every move of the fingers sets a new size.
+   */
+  previewZoom?: (preview: { factor: number; from: Point; to: Point } | null) => number;
 };
 
 /** What a press began on that is its own (a link, a control, a highlight, words being selected). */
@@ -81,7 +108,25 @@ export const usePageGestures = (options: GestureOptions) => {
     }
     const fingers = new Map<number, Point>();
     let press: { x: number; y: number; at: number; fingers: number; own: boolean } | null = null;
-    let pinch: { spread: number; scale: number } | null = null;
+    let pinch: { spread: number; scale: number; from: Point; factor: number; to: Point } | null = null;
+    let frame = 0;
+    /** The fingers lifted (or one did): the pinch's size is set, once. */
+    const endPinch = () => {
+      const done = pinch;
+      pinch = null;
+      window.cancelAnimationFrame(frame);
+      frame = 0;
+      const preview = latest.current.previewZoom;
+      if (!done || !preview) {
+        return;
+      }
+      // Held to the reader's limits as it was shown, so the page comes to rest as the fingers left it.
+      const factor = preview({ factor: done.factor, from: done.from, to: done.to });
+      preview(null);
+      if (Math.abs(factor - 1) > 0.005) {
+        latest.current.zoomTo("free", done.scale * factor, done.to, done.from);
+      }
+    };
     let lastTap: { at: number; x: number; y: number } | null = null;
     let tapTimer = 0;
 
@@ -111,7 +156,8 @@ export const usePageGestures = (options: GestureOptions) => {
       }
       if (fingers.size === 2) {
         const [a, b] = [...fingers.values()];
-        pinch = { spread: spreadOf(a, b), scale: latest.current.scale() };
+        const mid = midpoint(a, b);
+        pinch = { spread: spreadOf(a, b), scale: latest.current.scale(), from: mid, to: mid, factor: 1 };
         window.clearTimeout(tapTimer);
         lastTap = null;
       }
@@ -122,6 +168,23 @@ export const usePageGestures = (options: GestureOptions) => {
         return;
       }
       fingers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (pinch && fingers.size >= 2 && latest.current.previewZoom) {
+        const [a, b] = [...fingers.values()];
+        pinch.to = midpoint(a, b);
+        pinch.factor = pinchScale(1, pinch.spread, spreadOf(a, b));
+        if (!frame) {
+          // One stretch a frame, however many moves the fingers send.
+          frame = window.requestAnimationFrame(() => {
+            frame = 0;
+            const now = pinch;
+            const preview = latest.current.previewZoom;
+            if (now && preview) {
+              now.factor = preview({ factor: now.factor, from: now.from, to: now.to });
+            }
+          });
+        }
+        return;
+      }
       if (pinch && fingers.size >= 2) {
         const [a, b] = [...fingers.values()];
         const scale = pinchScale(pinch.scale, pinch.spread, spreadOf(a, b));
@@ -136,10 +199,12 @@ export const usePageGestures = (options: GestureOptions) => {
         return;
       }
       fingers.delete(event.pointerId);
+      if (fingers.size < 2) {
+        endPinch();
+      }
       if (fingers.size > 0) {
         return;
       }
-      pinch = null;
       const begun = press;
       press = null;
       if (!begun || event.type !== "pointerup" || begun.fingers > 1 || begun.own) {
@@ -206,6 +271,10 @@ export const usePageGestures = (options: GestureOptions) => {
     stage.addEventListener("pointercancel", up, { passive: true });
     return () => {
       window.clearTimeout(tapTimer);
+      window.cancelAnimationFrame(frame);
+      if (pinch) {
+        latest.current.previewZoom?.(null);
+      }
       stage.removeEventListener("pointerdown", down);
       stage.removeEventListener("pointermove", move);
       stage.removeEventListener("pointerup", up);

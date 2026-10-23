@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { annotationService, type Annotation } from "../../services/annotationService";
 import { useLibraryStore } from "../../store/libraryStore";
 import { isKindlePlace } from "../../library/kindleClippings";
@@ -6,6 +6,7 @@ import { EYEBROW } from "../ui/SectionHeader";
 import { UiIcon } from "../UiIcon";
 import { dayKey, dismiss, dismissedOn, pickBook, pickHighlight } from "./highlightOfTheDay";
 import { openInBook, useHighlightsStore } from "./highlightsStore";
+import { usePageShown } from "../../hooks/pageShown";
 
 /**
  * One of the reader's own highlights, on the library page, once a day
@@ -15,9 +16,25 @@ import { openInBook, useHighlightsStore } from "./highlightsStore";
 export const DailyHighlight = () => {
   const counts = useHighlightsStore((state) => state.counts);
   const books = useLibraryStore((state) => state.books);
-  const [day] = useState(() => dayKey(new Date()));
+  const [day, setDay] = useState(() => dayKey(new Date()));
   const [away, setAway] = useState(() => dismissedOn(day));
   const [found, setFound] = useState<Annotation | null>(null);
+  // The Library is kept while another tab is up (App.tsx). Each time it is shown again is a new visit, as
+  // when the page was built again: the day is read again, and the passage looked up again.
+  const shown = usePageShown();
+  const [visit, setVisit] = useState(0);
+  const wasShown = useRef(shown);
+  useEffect(() => {
+    if (shown && !wasShown.current) {
+      const today = dayKey(new Date());
+      if (today !== day) {
+        setDay(today);
+        setAway(dismissedOn(today));
+      }
+      setVisit((value) => value + 1);
+    }
+    wasShown.current = shown;
+  }, [shown, day]);
 
   // Among the books still in the library: a count can outlive its book.
   const bookId = useMemo(() => {
@@ -42,7 +59,7 @@ export const DailyHighlight = () => {
     return () => {
       live = false;
     };
-  }, [away, bookId, day]);
+  }, [away, bookId, day, visit]);
 
   const book = found ? books.find((item) => item.id === found.bookId) : null;
   if (away || !found || !book) {

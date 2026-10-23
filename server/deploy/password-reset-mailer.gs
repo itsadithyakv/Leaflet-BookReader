@@ -1,7 +1,7 @@
 /**
  * Leaflet password-reset mailer — a Google Apps Script web app.
  *
- * The Leaflet API posts here and this script sends one of three fixed emails
+ * The Leaflet API posts here and this script sends one of four fixed emails
  * from the Gmail account that owns it (MailApp: free, about 100 recipients a
  * day on a personal account):
  *
@@ -12,6 +12,11 @@
  *                                                (not called `code`: an older copy of
  *                                                this script then refuses the message
  *                                                instead of sending it as a reset)
+ *   {secret, kind: "dormant", to, removeOn}      the account has not been used for a
+ *                                                year; its synced reading and shared
+ *                                                library go on removeOn unless the reader
+ *                                                signs in (server/src/dormant.js; only
+ *                                                when the owner turns that on)
  *   {secret, kind: "ping"}                       checks the secret, sends nothing
  *                                                (the API does this when it starts)
  *
@@ -51,7 +56,13 @@ function doPost(e) {
     return reply({ ok: false, error: "bad request" });
   }
   var message =
-    body.kind === "limit" ? limitMessage(body) : body.kind === "confirm" ? confirmMessage(body) : codeMessage(body);
+    body.kind === "limit"
+      ? limitMessage(body)
+      : body.kind === "confirm"
+        ? confirmMessage(body)
+        : body.kind === "dormant"
+          ? dormantMessage(body)
+          : codeMessage(body);
   if (!message) {
     return reply({ ok: false, error: "bad request" });
   }
@@ -144,6 +155,40 @@ function limitMessage(body) {
       '<a href="mailto:' + SUPPORT_EMAIL + '">' + SUPPORT_EMAIL + "</a> from this address.</p>" +
       '<p style="color:#5b6b5e;font-size:13px">If you didn\'t ask for this, ignore this email; ' +
       "nothing has changed.</p>"
+  };
+}
+
+/**
+ * The account has not been used for a year: what will be removed, and when.
+ * (An older copy of this script refuses this message: it has no `code`.)
+ */
+function dormantMessage(body) {
+  var removeOn = String(body.removeOn || "");
+  if (!DATE.test(removeOn)) {
+    return null;
+  }
+  return {
+    subject: "Your Leaflet account hasn't been used for a year",
+    text:
+      "Nobody has signed in to the Leaflet account for this email address for a year.\n\n" +
+      "On " + removeOn + " we will remove the copy of its reading (places, reading days, highlights, notes " +
+      "and Pip) that our server keeps to sync your devices, and its shared library list, unless you sign in " +
+      "before then. Your account, profile and posts stay.\n\n" +
+      "Your devices keep their own copy: if you sign in on one later, it sends its reading to the account again. " +
+      "Only reading that no device of yours still has would be lost.\n\n" +
+      "To keep everything as it is, open Leaflet and sign in (Settings -> Account) before " + removeOn + ".\n\n" +
+      "Questions: " + SUPPORT_EMAIL + "\n\n" +
+      "- Leaflet",
+    html:
+      "<p>Nobody has signed in to the Leaflet account for this email address for a year.</p>" +
+      "<p>On <strong>" + removeOn + "</strong> we will remove the copy of its reading (places, reading days, " +
+      "highlights, notes and Pip) that our server keeps to sync your devices, and its shared library list, " +
+      "unless you sign in before then. Your account, profile and posts stay.</p>" +
+      "<p>Your devices keep their own copy: if you sign in on one later, it sends its reading to the account " +
+      "again. Only reading that no device of yours still has would be lost.</p>" +
+      "<p>To keep everything as it is, open Leaflet and sign in (Settings &rarr; Account) before " + removeOn + ".</p>" +
+      '<p style="color:#5b6b5e;font-size:13px">Questions: <a href="mailto:' + SUPPORT_EMAIL + '">' +
+      SUPPORT_EMAIL + "</a></p>"
   };
 }
 

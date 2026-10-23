@@ -667,8 +667,10 @@ export const useBookOpening = (reader: WithCover) => {
                 filter: invert(1) hue-rotate(180deg) brightness(0.92);
                 mix-blend-mode: screen;
               }
-              /* A picture that opens in the viewer (readers/pictures.ts). */
-              [data-leaflet-zoom] { cursor: zoom-in; }
+              /* A picture that opens in the viewer (readers/pictures.ts). Two
+                 fingers on it are the viewer's pinch, never the browser's zoom
+                 (readers/pictureHandover.ts); one still scrolls the page. */
+              [data-leaflet-zoom] { cursor: zoom-in; touch-action: pan-x pan-y; }
               ${OPENINGS_CSS}
               ${BLOCKS_CSS}
               ${NARROW_CSS}
@@ -1481,7 +1483,12 @@ export const useBookOpening = (reader: WithCover) => {
                 }
                 if (!anchor) {
                   // A picture opens large (readers/ImageViewer.tsx). A long
-                  // press is holding the page still, not asking to look.
+                  // press is holding the page still, not asking to look. A
+                  // finger's tap on a phone is told from a scroll first, and
+                  // opens it there (useTapRuns.ts).
+                  if (pressRef.current?.pointerType === "touch" && isTouchInput()) {
+                    return;
+                  }
                   const found = Date.now() - pressedAt < 700 ? pictureAt(event.target as Element | null) : null;
                   if (found) {
                     event.preventDefault();
@@ -1556,7 +1563,7 @@ export const useBookOpening = (reader: WithCover) => {
             }
             (rendition.getContents?.() ?? []).forEach((contents: any) => {
               if (contents?.document) {
-                markViewable(contents.document);
+                markViewable(contents.document, reader.pinchablePicture);
               }
             });
           });

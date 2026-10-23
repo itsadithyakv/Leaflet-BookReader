@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DOUBLE_TAP_MS, doubleTapFit, isDoubleTap, isTap, midpoint, pinchScale, spreadOf } from "./pageGestures";
+import { DOUBLE_TAP_MS, doubleTapFit, isDoubleTap, isTap, midpoint, pinchScale, pinchTransform, spreadOf } from "./pageGestures";
 
 describe("a PDF's pages by finger", () => {
   it("pinches about the point between the fingers, by how far they moved apart", () => {
@@ -29,5 +29,20 @@ describe("a PDF's pages by finger", () => {
     expect(isTap(4, 120)).toBe(true);
     expect(isTap(30, 120)).toBe(false);
     expect(isTap(2, 900)).toBe(false);
+  });
+
+  it("stretches the page under a pinch so the point between the fingers follows them", () => {
+    const origin = { x: 40, y: 120 };
+    const from = { x: 200, y: 400 };
+    const to = { x: 230, y: 380 };
+    const move = pinchTransform(origin, from, to, 1.5);
+    // Where a point of the page lands, stretched from its top left corner and moved.
+    const shown = (point: { x: number; y: number }) => ({
+      x: origin.x + move.x + (point.x - origin.x) * move.scale,
+      y: origin.y + move.y + (point.y - origin.y) * move.scale
+    });
+    expect(shown(from).x).toBeCloseTo(to.x);
+    expect(shown(from).y).toBeCloseTo(to.y);
+    expect(pinchTransform(origin, from, from, 1)).toEqual({ x: 0, y: 0, scale: 1 });
   });
 });

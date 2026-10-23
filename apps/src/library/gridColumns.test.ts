@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { coverWidth, gridColumns } from "./gridColumns";
+import { coverWidth, gridColumns, gridShape } from "./gridColumns";
 
 const GAP = 32;
 
@@ -43,5 +43,16 @@ describe("how many covers go in a row", () => {
       expect(columns, `at ${width}`).toBeGreaterThanOrEqual(last);
       last = columns;
     }
+  });
+});
+
+describe("gridShape", () => {
+  it("is the columns and the cover's width, rounded up to 10 px", () => {
+    expect(gridShape(1200, GAP)).toEqual({ columns: 5, cover: Math.ceil(coverWidth(1200, GAP) / 10) * 10 });
+    expect(gridShape(393, 14)?.columns).toBe(2);
+  });
+
+  it("is nothing for a grid with no width (a page kept hidden), so its columns are left as they were", () => {
+    expect(gridShape(0, GAP)).toBeNull();
   });
 });

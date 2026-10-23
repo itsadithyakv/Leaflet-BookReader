@@ -18,9 +18,18 @@ use sha2::{Digest, Sha256};
 /// follow them. The server holds the same switch (`sharesLibrary`); this copy
 /// is what lets a publish know, without asking, whether to send the list.
 pub(crate) const SHARE_LIBRARY_SETTING: &str = "social_share_library";
-/// A fingerprint of the library as it was last sent, so that the list (which
-/// can run to thousands of books) goes up only when it has changed.
+/// What of the library was last sent (`cloud::ProfileSent`, as JSON): the
+/// account it went to, its fingerprint and when, so that the list (which can
+/// run to thousands of books) goes up only when it has changed, or six hours
+/// on. Before 1.5.12 it was the fingerprint alone, for whichever account.
 pub(crate) const LIBRARY_SENT_SETTING: &str = "social_library_sent";
+/// How long a library that has not changed may go unsent: six hours, as the
+/// profile's figures. What this device remembers sending is only a memory: a
+/// server put back from a backup holds an older list, and a library signed
+/// in to another account has sent that account nothing (sync audit W5). The
+/// server keeps a hash of each list and writes nothing for the same one, so
+/// a resend costs it one small read.
+pub(crate) const LIBRARY_RESEND_SECS: i64 = 6 * 60 * 60;
 /// The most books a shared library holds: the server's limit.
 pub(crate) const LIBRARY_MAX: usize = 3000;
 /// The most of this library's books asked about at once: the server's limit.
@@ -200,16 +209,42 @@ pub(crate) fn remember_share_library(db: &db::Database, on: bool) {
 }
 
 /// The library as it would be sent, and its fingerprint, when it is shared
-/// and has changed since it was last sent; nothing otherwise.
+/// and is not what was last sent to this account in the last six hours;
+/// nothing otherwise.
 pub(crate) fn library_due(db: &db::Database) -> Result<Option<(serde_json::Value, String)>, String> {
+  library_due_at(db, chrono::Utc::now().timestamp())
+}
+
+/// `library_due` at `now` (Unix seconds).
+pub(crate) fn library_due_at(db: &db::Database, now: i64) -> Result<Option<(serde_json::Value, String)>, String> {
   // Never another account's library under this one's name.
   if !shares_library(db) || !crate::sync::owner::may_publish(crate::sync::owner::standing(db)) {
     return Ok(None);
   }
   let body = serde_json::json!({ "books": shared_library(&db.list_books().map_err(|e| e.to_string())?) });
   let print = sent_print(body.to_string().as_bytes());
-  let sent = db.get_setting(LIBRARY_SENT_SETTING).ok().flatten().unwrap_or_default();
-  Ok((print != sent).then_some((body, print)))
+  let account = cloud::signed_in_account_id(db).unwrap_or_default();
+  let sent = library_sent(db);
+  Ok((!library_current(sent.as_ref(), &account, &print, now)).then_some((body, print)))
+}
+
+/// What of the library was last sent, if it can be read (one remembered
+/// before 1.5.12, a bare fingerprint, cannot: it is sent again once).
+fn library_sent(db: &db::Database) -> Option<cloud::ProfileSent> {
+  db.get_setting(LIBRARY_SENT_SETTING).ok().flatten().and_then(|value| serde_json::from_str(&value).ok())
+}
+
+/// Whether the library fingerprinted `print` is what `account` was last sent,
+/// less than six hours ago (`LIBRARY_RESEND_SECS`).
+pub(crate) fn library_current(sent: Option<&cloud::ProfileSent>, account: &str, print: &str, now: i64) -> bool {
+  sent.is_some_and(|sent| sent.account == account && sent.print == print && (0..LIBRARY_RESEND_SECS).contains(&(now - sent.at)))
+}
+
+/// Remembers the library fingerprinted `print` as sent to the account signed
+/// in, at `now`.
+pub(crate) fn remember_library_sent(db: &db::Database, print: String, now: i64) -> Result<(), String> {
+  let sent = cloud::ProfileSent { account: cloud::signed_in_account_id(db).unwrap_or_default(), print, at: now, ..Default::default() };
+  db.set_setting(LIBRARY_SENT_SETTING, &serde_json::to_string(&sent).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
 }
 
 /// Sends the library to the server if it is shared and has changed since it
@@ -225,7 +260,7 @@ pub(crate) async fn publish_library(state: &State<'_, AppState>) -> Result<(), S
   };
   community(state, Method::PUT, "/v1/library/me".into(), vec![], Some(body), CommunityAuth::Required).await?;
   let db = state.db.guard();
-  db.set_setting(LIBRARY_SENT_SETTING, &print).map_err(|e| e.to_string())
+  remember_library_sent(&db, print, chrono::Utc::now().timestamp())
 }
 
 /// Takes the library off the server (the reader stopped sharing it).
@@ -688,5 +723,27 @@ mod tests {
     remember_share_library(&db, false);
     assert!(!shares_library(&db));
     assert_eq!(db.get_setting(LIBRARY_SENT_SETTING).expect("setting").as_deref(), Some(""));
+  }
+
+  /// Sync audit W5: the library sent is remembered for the account it went
+  /// to, and for six hours; after that, or for another account, it goes again.
+  #[test]
+  fn the_library_sent_is_remembered_per_account_for_six_hours() {
+    let db = crate::db::tests::memory_db();
+    db.set_setting(cloud::ACCOUNT_CACHE_SETTING, r#"{"id":"a1","email":"a1@example.com"}"#).expect("set");
+    const T: i64 = 1_790_000_000;
+    // As 1.5.11 remembered it: a bare fingerprint, which cannot be read, so it goes once more.
+    db.set_setting(LIBRARY_SENT_SETTING, "0f3a").expect("set");
+    assert!(library_sent(&db).is_none());
+    remember_library_sent(&db, "p1".to_string(), T).expect("remembered");
+    let sent = library_sent(&db).expect("read back");
+    assert_eq!((sent.account.as_str(), sent.print.as_str(), sent.at), ("a1", "p1", T));
+    assert!(library_current(Some(&sent), "a1", "p1", T + 60));
+    assert!(library_current(Some(&sent), "a1", "p1", T + LIBRARY_RESEND_SECS - 1));
+    assert!(!library_current(Some(&sent), "a1", "p1", T + LIBRARY_RESEND_SECS), "six hours on: again");
+    assert!(!library_current(Some(&sent), "a1", "p2", T + 60), "changed");
+    assert!(!library_current(Some(&sent), "b2", "p1", T + 60), "another account");
+    assert!(!library_current(Some(&sent), "a1", "p1", T - 60), "a clock set back");
+    assert!(!library_current(None, "a1", "p1", T));
   }
 }

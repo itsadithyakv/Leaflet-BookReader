@@ -1,7 +1,7 @@
 {
   "name": "leaflet-desktop",
   "private": true,
-  "version": "1.5.11",
+  "version": "1.5.12",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,6 +9,7 @@
     "build": "tsc --noEmit -p . && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "perf": "node scripts/perf/perf.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

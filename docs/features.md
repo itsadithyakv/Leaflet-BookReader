@@ -825,10 +825,15 @@ book's HTML is never put in the app. Long notes are cut at 700 characters;
 jumps. The popup shares the selection bar's dock, and counts as an
 interruption to hands-free reading.
 
-**Pictures.** A click on a picture opens it large (`readers/ImageViewer.tsx`,
-geometry in `imageZoom.ts`): fitted, zoomed with the wheel about the pointer,
-a pinch or + and -, dragged or moved with the arrows, closed with Escape or a
-click beside it, always as drawn. Ornaments under 48 px and pictures that are
+**Pictures.** A click or a tap on a picture opens it large (`readers/ImageViewer.tsx`,
+geometry in `imageZoom.ts`): fitted, zoomed with the wheel about the pointer
+(Ctrl and the wheel, a touchpad's pinch, finer), a pinch about the fingers, a
+double tap or + and -, dragged (within reach) or moved with the arrows, closed
+with Escape, Back, a click beside it or a swipe down at the fit, always as
+drawn. A pinch begun on a picture of the page carries on in the viewer
+(`pictureHandover.ts`); a picture the page shows much smaller than it is has a
+magnifier chip at its corner (`pictures.ts`). Zoom goes to three screen pixels
+to one of the picture's, or four times the fit for a small map. Ornaments under 48 px and pictures that are
 links do not open. The viewer holds "Show as drawn" / "Blend with page" for
 ink pictures (it used to be the click itself), applied to every copy of that
 picture on the page.

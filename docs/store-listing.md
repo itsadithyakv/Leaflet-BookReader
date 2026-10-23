@@ -54,6 +54,33 @@ name must match the reserved name exactly ("Leaflet Book Reader", as in
 
 ## What's new in this version
 
+For 1.5.12 (written on 2026-10-23). It says what 1.5.11 and 1.5.12 bring,
+because the Store may still be on 1.5.10 (about 1,150 characters):
+
+> Pinch to zoom: maps and pictures in your books now open full screen, and
+> you can pinch and drag to read the small print.
+>
+> Google Drive backup has moved to a new sign-in. Tap Reconnect Google Drive
+> once on each device, and your books back up again on their own. Your
+> reading progress is safe.
+>
+> The Hollow holds a front: prowlers come down one trail through the Dark
+> Wood, and you see who is coming each night. Raise a wall across it, and
+> pick the trap or tower that beats each kind. Your reading shows in the
+> meadow too: pages fly up to the oak after you read, a flower blooms for
+> each book you finish, standing stones mark your long reading, and the
+> animals grow fond of you as you read.
+>
+> Faster and calmer: the library comes back instantly and keeps your place,
+> the app starts lighter, and the look is clean and quick by default (glass
+> effects are still in Settings).
+>
+> Sync is steadier between devices, and it sends less.
+>
+> New: when something goes wrong, Leaflet sends an anonymous error report so
+> it can be fixed (switch it off in Settings), and it can show you an
+> occasional note from us.
+
 For 1.5.10 (written on 2026-10-21). The Windows Store is on 1.5.6: put this
 first and the 1.5.9 text below it, within 1,500 characters:
 

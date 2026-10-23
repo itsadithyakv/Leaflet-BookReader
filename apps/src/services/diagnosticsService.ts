@@ -1,5 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { SUPPORT_EMAIL } from "../constants/links";
+import { errorReports, type QueuedKind } from "./errorReports";
+import { kindOf } from "./errorScrub";
 
 /**
  * The app's side of diagnostics: errors from the interface go to the same log
@@ -35,7 +37,12 @@ export type ProblemReport = {
 export const diagnosticsService = {
   /** Writes an error to the log. Repeats and floods are dropped. */
   logError(context: string, error: unknown) {
-    if (!isTauri() || sent >= MAX_PER_SESSION) {
+    if (!isTauri()) {
+      return;
+    }
+    // Its kind, for the error report sent once a session (`errorReports.ts`).
+    errorReports.note(kindOf(context, error));
+    if (sent >= MAX_PER_SESSION) {
       return;
     }
     const message = `${context}: ${describe(error)}`.slice(0, 3000);
@@ -115,5 +122,45 @@ export const diagnosticsService = {
     window.addEventListener("unhandledrejection", (event) => {
       diagnosticsService.logError("unhandled rejection", event.reason);
     });
+    if (!isTauri()) {
+      return;
+    }
+    // The panics noted before the app last ended, a little after it starts;
+    // then, once it has settled, the session's one error report. Later errors
+    // wait for the next session. Hidden first (a phone put away), it goes then.
+    window.setTimeout(() => void diagnosticsService.collectPanics(), PANICS_AFTER_MS);
+    const report = () => void diagnosticsService.sendErrorReport();
+    window.setTimeout(report, REPORT_AFTER_MS);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") report();
+    });
+  },
+
+  /** Reads the panics the Rust side noted (`take_panic_reports`) into the error report. */
+  async collectPanics() {
+    try {
+      const { getVersion } = await import("@tauri-apps/api/app");
+      errorReports.setVersion(await getVersion());
+    } catch {
+      // Sent with the app's version by the Rust side instead.
+    }
+    try {
+      errorReports.notePanics(await invoke<{ message: string; place: string }[]>("take_panic_reports"));
+    } catch {
+      // An older Rust side, or nothing to read.
+    }
+  },
+
+  /**
+   * Sends the error kinds waiting (`send_error_kinds`), once a session and
+   * only with the switch on. A server without the route drops them; one that
+   * cannot be reached leaves them for next time. Never logged either way.
+   */
+  sendErrorReport(): Promise<void> {
+    return errorReports.sendOnce((kinds: QueuedKind[]) => invoke<boolean>("send_error_kinds", { kinds }));
   }
 };
+
+/** When panics from the last run are read, and when the session's error report goes. */
+const PANICS_AFTER_MS = 10_000;
+const REPORT_AFTER_MS = 90_000;

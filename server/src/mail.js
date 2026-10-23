@@ -4,7 +4,7 @@
  * Through a Google Apps Script web app (deploy/password-reset-mailer.gs) that
  * sends from the owner's Gmail with MailApp: free, about 100 emails a day,
  * and no mail server to run. The server holds only a shared secret for that
- * script, not a Gmail password; the script sends three fixed messages and
+ * script, not a Gmail password; the script sends four fixed messages and
  * nothing else, so a leaked secret can at worst send Leaflet's own emails.
  *
  * A mailer is `async (message) => void`, throwing on failure, where message is
@@ -12,7 +12,11 @@
  * `{ kind: "limit", to, availableOn }` (this year's resets are used up) or
  * `{ kind: "confirm", to, confirmation, minutes }` (the code that confirms an
  * address; under another name than `code` so that a script deployed before
- * this message existed refuses it instead of sending it as a reset).
+ * this message existed refuses it instead of sending it as a reset), or
+ * `{ kind: "dormant", to, removeOn }` (an account unused for a year, and the
+ * day its synced reading goes: `dormant.js`, only when the owner turns that
+ * on; a script from before it refuses it, having no `code`, and then nothing
+ * is removed).
  * Tests pass their own. The Apps Script mailer also has `check()`, run when
  * the server starts (see index.js).
  */

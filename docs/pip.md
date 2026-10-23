@@ -351,15 +351,13 @@ friends' raids shown as news, with Put them back; and being raidable by
 friends off until the reader says yes. That last needs the server change in
 `server/src/routes/raids.js` and `social.js` deployed by the owner.
 
-### In progress for 1.5.11: The Front
+### The Front (shipped in 1.5.11)
 
-**Not shipped, and not finished.** The code is in the working tree
-(`src/pip/base/front.ts`, `components/pip/arcade/base/wave.ts`,
-`NightCard.tsx`, and changes to `scene.ts`, `BaseScreen.tsx`, `siteSheet.ts`,
-`ChapterCard.tsx`; the chapter texts for 3, 4 and 8 already speak of the
-trail), with tests, but the balance has not met its targets. The plan is a
-scratchpad note of the session that wrote it; its summary is at
-<https://claude.ai/artifact/69yxsveTaBKm4VpMjSRtoN>.
+The code: `src/pip/base/front.ts`, `components/pip/arcade/base/wave.ts`,
+`NightCard.tsx`, and its parts of `scene.ts`, `BaseScreen.tsx`,
+`siteSheet.ts` and `ChapterCard.tsx`. The plan is
+[design/hollow/front-plan.md](design/hollow/front-plan.md), and the last
+balance run is [design/hollow/front-balance-results.md](design/hollow/front-balance-results.md).
 
 The owner's ask: walls that make sense because enemies come one way, enemies
 that can break walls, real choices, and a map that looks different.
@@ -402,17 +400,34 @@ that can break walls, real choices, and a map that looks different.
   every build keeps, so a camp saved by a 1.5.10 device and read again by
   1.5.11 still has its constructs where they were and its nights held.
 
-What is left: the balance (a first simulation of 200 nights a chapter found
-some counters raise the held rate by far less than the 20 points aimed for,
-and the flier's, brute's and digger's counters by none), the raid half,
-screenshots on a phone held sideways and on a desktop, and measuring a night's
-planning on the real phone (a few ms on a desktop; 8 ms is the bound).
+**Where it stands (2026-10-23).**
+- **The balance meets its main targets** in the last run (500 nights a
+  chapter): every counter raises the held rate on its role's nights by 21 to
+  31 points (aimed for: at least 20).
+- **Raids the other way round** are built: strongholds with a trail, the drop
+  strip, and Puffcaps that blow a wall open.
 
-### After the Front: your reading, made visible (1.5.11, planned)
+**Still open:**
+- **No real-phone playtest** of the Front or the meadow. Nobody has played a
+  night on the Nord CE4 Lite yet, held upright or sideways.
+- **A night's planning time on that phone** is not measured. It takes 0.4 to
+  1.9 ms on the desktop simulation, and the bound is 8 ms.
+- **The wall's levels count for less than aimed** on brute nights. Levels 2,
+  3 and 4 add 24, 7 and 9 points against 10 aimed for, and level 5 adds 7.
+  Small tuning in `SECTION_TOUGH`.
+- **No screenshots** on a phone held sideways or on a desktop.
 
-Agreed as a design, not started. Four parts, built in this order, with no
-server or Rust change; nothing new is stored but two small fields, which ride
-in a taught mark so older builds keep them:
+### Your reading, made visible (shipped in 1.5.11)
+
+All four parts are built:
+- pages up the path: `components/pip/arcade/base/arrival.ts`;
+- book blooms: `pip/base/trophies.ts`;
+- Reading Stones: `pip/base/stones.ts`;
+- animal fondness: `pip/base/fondness.ts`.
+
+The plan is [design/hollow/meadow-plan.md](design/hollow/meadow-plan.md).
+The design as agreed, with no server or Rust change, and nothing new stored
+but two small fields, which ride in a taught mark so older builds keep them:
 
 1. **Pages up the path.** Opening the camp after reading, pages (one, plus
    one for each 15 minutes read since, six at most; three on Smooth, none on

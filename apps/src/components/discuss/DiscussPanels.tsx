@@ -6,7 +6,6 @@ import { SectionHeader } from "../ui/SectionHeader";
 import { useCommunityStore } from "../community/communityStore";
 import { COPY, PROFILE_PLACE } from "../community/copy";
 import { at } from "../community/format";
-import { AdminPanel } from "./AdminPanel";
 import { CommunitiesPanel } from "./Communities";
 import { DiscoverFeed } from "./DiscoverPanel";
 import { SignInPrompt } from "../account/SignInPrompt";
@@ -57,16 +56,15 @@ const Gate = ({ name, onNavigate, children }: { name: string; onNavigate: (tab: 
   return <>{children}</>;
 };
 
-/** The Discover tab: what readers anywhere posted for everyone; and, for the owner, what was reported. */
-export const DiscoverPanel = ({ showToast, onNavigate }: { showToast: Toast; onNavigate: (tab: "settings") => void }) => {
-  const isAdmin = useCommunityStore((state) => Boolean(state.me?.isAdmin));
-  return (
-    <Gate name="Discover" onNavigate={onNavigate}>
-      {isAdmin && <AdminPanel showToast={showToast} />}
-      <DiscoverFeed showToast={showToast} />
-    </Gate>
-  );
-};
+/**
+ * The Discover tab: what readers anywhere posted for everyone. (What was
+ * reported is on the owner's admin page, from the profile menu.)
+ */
+export const DiscoverPanel = ({ showToast, onNavigate }: { showToast: Toast; onNavigate: (tab: "settings") => void }) => (
+  <Gate name="Discover" onNavigate={onNavigate}>
+    <DiscoverFeed showToast={showToast} />
+  </Gate>
+);
 
 /** The Communities tab: one community a book or a series, each with its threads. */
 export const CommunitiesTab = ({ showToast, onNavigate }: { showToast: Toast; onNavigate: (tab: "settings") => void }) => (

@@ -303,6 +303,49 @@ mod tests {
 
   const NOW: &str = "2026-10-29T12:00:00+00:00";
 
+  /// History trimming (`merge::compact`, 1.5.12) on a real reader's library,
+  /// not a made-up one: given a **copy** of a `library.db` (with its `-wal`),
+  /// it keeps every session, day, purchase, planting, harvest, live book and
+  /// live highlight; trimming twice is trimming once; and a trimmed and an
+  /// untrimmed device merge to the same document in either order.
+  /// `$env:LEAFLET_REAL_DB="<copy>\library.db"; cargo test --lib sync::store::tests::compacting_a_real -- --ignored --nocapture`
+  #[test]
+  #[ignore = "needs a copy of a real library.db in LEAFLET_REAL_DB"]
+  fn compacting_a_real_library_loses_nothing_that_counts() {
+    let path = std::env::var("LEAFLET_REAL_DB").expect("LEAFLET_REAL_DB: a copy of library.db");
+    let db = crate::db::Database::open_at(std::path::Path::new(&path)).expect("open the copy");
+    let now = chrono::Utc::now().to_rfc3339();
+    let full = snapshot(&db, &now).expect("snapshot");
+    let trimmed = merge::compact(full.clone(), &now);
+    let live = |values: &[serde_json::Value]| values.iter().filter(|value| value.get("deletedAt").is_none_or(|at| at.is_null())).count();
+    let json = |items: &[crate::db::Annotation]| items.iter().map(|item| serde_json::to_value(item).expect("json")).collect::<Vec<_>>();
+
+    assert_eq!(trimmed.sessions.len(), full.sessions.len(), "sessions");
+    assert_eq!(trimmed.days.len(), full.days.len(), "days");
+    assert_eq!(trimmed.purchases.len(), full.purchases.len(), "purchases");
+    assert_eq!(trimmed.plantings.len(), full.plantings.len(), "plantings");
+    assert_eq!(trimmed.harvests.len(), full.harvests.len(), "harvests");
+    let live_books = |doc: &SyncDoc| doc.books.iter().filter(|book| book.deleted_at.is_none()).count();
+    assert_eq!(live_books(&trimmed), live_books(&full), "live books");
+    assert_eq!(live(&json(&trimmed.annotations)), live(&json(&full.annotations)), "live highlights");
+    assert_eq!(merge::compact(trimmed.clone(), &now), trimmed, "trimming twice is trimming once");
+    let one_way = merge::compact(merge::merge(&full, &trimmed, &now), &now);
+    let other_way = merge::compact(merge::merge(&trimmed, &full, &now), &now);
+    assert_eq!(one_way, other_way, "the same in either order");
+
+    let size = |doc: &SyncDoc| serde_json::to_vec(doc).expect("json").len();
+    println!(
+      "books {} ({} live), days {}, sessions {}, highlights {}: {} bytes, trimmed {} bytes",
+      full.books.len(),
+      live_books(&full),
+      full.days.len(),
+      full.sessions.len(),
+      full.annotations.len(),
+      size(&full),
+      size(&trimmed)
+    );
+  }
+
   fn record(id: &str, progress: f32) -> BookRecord {
     BookRecord {
       finished_at: None,

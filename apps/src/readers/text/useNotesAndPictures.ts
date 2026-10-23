@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
 import { resolveBookLink } from "../bookLinks";
 import { classifyNoteLink, elementById, linkFacts, noteBlockOf, noteText, targetFacts, type NoteRun } from "../footnotes";
-import { setInkOff } from "../pictures";
+import { pictureAt, setInkOff } from "../pictures";
+import { bindPicturePinch } from "../pictureHandover";
 import { type ViewedPicture } from "../ImageViewer";
 import type { WithMarks } from "./scope";
 
@@ -116,6 +117,20 @@ export const useNotesAndPictures = (reader: WithMarks) => {
     closeNoteRef.current();
     setPicture(found);
   };
+  /**
+   * A picture of the page that opens the viewer: a pinch on it opens it too,
+   * and goes on in it (readers/pictureHandover.ts). Bound from
+   * `markViewable` (useBookOpening.ts), once a picture.
+   */
+  const pinchablePicture = (element: HTMLImageElement) =>
+    bindPicturePinch(element, (handover) => {
+      const found = pictureRef.current ? null : pictureAt(element);
+      if (!found) {
+        return false;
+      }
+      openPictureRef.current({ ...found, handover });
+      return true;
+    });
   /** "Show as drawn" / "Blend with page", from the viewer: every copy of the picture on the page. */
   const togglePictureInk = () => {
     const open = pictureRef.current;
@@ -131,6 +146,6 @@ export const useNotesAndPictures = (reader: WithMarks) => {
 
   return {
     followBookLinkRef, note, setNote, noteRef, noteRequestRef, closeNoteRef, picture, setPicture, pictureRef,
-    openPictureRef, goToNote, togglePictureInk
+    openPictureRef, pinchablePicture, goToNote, togglePictureInk
   };
 };

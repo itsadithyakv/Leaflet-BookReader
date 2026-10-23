@@ -18,6 +18,7 @@ import { UiIcon } from "./UiIcon";
 import { SheetHandle } from "./ui/SheetHandle";
 import { useBackClose } from "../hooks/useBackClose";
 import { usePhoneMenus } from "../hooks/useMediaQuery";
+import { useCloseWhenHidden } from "../hooks/pageShown";
 
 export type BookMenuAction = { label: string; onSelect: () => void; danger?: boolean };
 
@@ -91,6 +92,8 @@ type PanelProps = Omit<Props, "className"> & {
  * time as it scrolls into view.
  */
 const BookMenuPanel = ({ book, actions = [], onRemoved, triggerRef, onDismiss }: PanelProps) => {
+  // The Library hidden behind another tab (App.tsx) takes its menus with it.
+  useCloseWhenHidden(onDismiss);
   // Drawn only while open; `setOpen(false)` is its closing.
   const open = true;
   const setOpen = (value: boolean) => {

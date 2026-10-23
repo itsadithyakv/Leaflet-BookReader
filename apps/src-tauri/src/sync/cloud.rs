@@ -265,8 +265,17 @@ async fn describe_failure(response: reqwest::Response) -> anyhow::Error {
 ///
 /// In tests each call still builds its own: a test has its own runtime, and
 /// a connection kept from one that has ended is of no use to the next.
+///
+/// Every call says which app it is from (`client_tag`), so the server can
+/// count the versions and platforms in use without a request of its own.
 fn client() -> Result<reqwest::Client> {
-  let build = || reqwest::Client::builder().timeout(Duration::from_secs(45)).build();
+  let build = || {
+    let mut headers = reqwest::header::HeaderMap::new();
+    if let Ok(tag) = reqwest::header::HeaderValue::from_str(&client_tag()) {
+      headers.insert("x-leaflet-client", tag);
+    }
+    reqwest::Client::builder().timeout(Duration::from_secs(45)).default_headers(headers).build()
+  };
   if cfg!(test) {
     return Ok(build()?);
   }
@@ -276,6 +285,21 @@ fn client() -> Result<reqwest::Client> {
   }
   let built = build()?;
   Ok(SHARED.get_or_init(|| built).clone())
+}
+
+/// What this app is, as the server is told on every call
+/// (`X-Leaflet-Client`): its version and its platform, as problem reports
+/// name them ("1.5.12; android"). Nothing else: the server keeps these two on
+/// the account it was used with that day, for the owner's count of versions
+/// in use, and only from the Leaflet server's own client, never the webview.
+pub(crate) fn client_tag() -> String {
+  let platform = match std::env::consts::OS {
+    "windows" => "windows",
+    "android" => "android",
+    "macos" => "macos",
+    _ => "linux"
+  };
+  format!("{}; {platform}", env!("CARGO_PKG_VERSION"))
 }
 
 /// A 401 on an authenticated call means the session is gone server-side
@@ -385,12 +409,17 @@ pub fn clear_session(db: &Database) {
 }
 
 /// What was last sent of the profile (`PROFILE_SENT_SETTING`): the account it
-/// went to, a fingerprint of the body, and when (Unix seconds).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// went to, a fingerprint of the body, when it last went whole (Unix
+/// seconds), and a fingerprint of each field as it was last sent, whole or
+/// alone (`commands::social::profile_to_send`; empty before 1.5.12, which
+/// sent the whole body every time).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ProfileSent {
   pub account: String,
   pub print: String,
-  pub at: i64
+  pub at: i64,
+  #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+  pub parts: std::collections::BTreeMap<String, String>
 }
 
 /// What was last sent of the profile, if it can be read.
@@ -1188,6 +1217,91 @@ pub async fn replace_with_empty(db_mutex: &std::sync::Mutex<Database>, now: &str
   replace_with_empty_on(db_mutex, &Server::signed_in(db_mutex)?, now, &stamp).await
 }
 
+/// What "Start empty" writes over the account's copy (`held`): no library,
+/// stamped as the account's (`stamp`), but a removal, made `now`, of every
+/// book, bookmark, highlight and collection the copy holds that this library
+/// (`local`) does not have itself (sync audit W2).
+///
+/// It used to write an empty document. The merge is a union, so the next
+/// sync of any other device that still held the old library (another of the
+/// account's, or an old Leaflet behind the Drive bridge) merged all of it
+/// back, though the reader had been told it could not be undone. A removal
+/// later than anything those devices did to the old library wins every
+/// merge, there and here, as a removal made on a device does.
+///
+/// The removals carry nothing of what they remove (no title, no words of a
+/// highlight, no collection's name), and a book removed this way does not
+/// count as finished: the old library's books are not this one's. They are
+/// kept the usual ninety days (`TOMBSTONE_RETENTION_DAYS`), long enough to
+/// reach every device in use.
+///
+/// What has no removal in the document cannot be taken back this way: the
+/// reading days, focus sessions and Pip's purchases, plantings and harvests
+/// merge as unions or larger-of, and Pip's look, camp and reading pace go to
+/// the newest. Another device still holding those brings them in again.
+pub(crate) fn emptied(held: &SyncDoc, local: &SyncDoc, now: &str, stamp: &str) -> SyncDoc {
+  use std::collections::HashSet;
+  let books_here: HashSet<&str> = local.live_books().map(|book| book.id.as_str()).collect();
+  let marks_here: HashSet<&str> = local.annotations.iter().filter(|mark| mark.deleted_at.is_none()).map(|mark| mark.id.as_str()).collect();
+  let shelves_here: HashSet<&str> =
+    local.collections.iter().filter(|shelf| shelf.deleted_at.is_none()).map(|shelf| shelf.id.as_str()).collect();
+  let gone = Some(now.to_string());
+  SyncDoc {
+    owner: Some(stamp.to_string()),
+    books: held
+      .books
+      .iter()
+      .filter(|book| !books_here.contains(book.id.as_str()))
+      .map(|book| merge::BookEntry {
+        id: book.id.clone(),
+        ext: book.ext.clone(),
+        title: String::new(),
+        author: None,
+        genres: Vec::new(),
+        metadata_updated_at: now.to_string(),
+        progress: 0.0,
+        position: None,
+        series: None,
+        series_index: None,
+        // Said now: later than any device's progress in the old library, so
+        // the removal holds, and "not started" beats any date it was finished.
+        progress_updated_at: now.to_string(),
+        finished_at: Some(String::new()),
+        last_opened: None,
+        created_at: book.created_at.clone(),
+        deleted_at: gone.clone()
+      })
+      .collect(),
+    annotations: held
+      .annotations
+      .iter()
+      .filter(|mark| !marks_here.contains(mark.id.as_str()))
+      .map(|mark| crate::db::Annotation {
+        text: None,
+        note: None,
+        color: None,
+        chapter: None,
+        updated_at: now.to_string(),
+        deleted_at: gone.clone(),
+        ..mark.clone()
+      })
+      .collect(),
+    collections: held
+      .collections
+      .iter()
+      .filter(|shelf| !shelves_here.contains(shelf.id.as_str()))
+      .map(|shelf| crate::db::Collection {
+        name: String::new(),
+        book_ids: Vec::new(),
+        updated_at: now.to_string(),
+        deleted_at: gone.clone(),
+        ..shelf.clone()
+      })
+      .collect(),
+    ..SyncDoc::empty(now)
+  }
+}
+
 /// `replace_with_empty` against any store. The copy kept of what the account
 /// held goes first, whatever comes of the write: it is about to be wrong.
 pub async fn replace_with_empty_on<S: StateStore + ?Sized>(
@@ -1197,13 +1311,24 @@ pub async fn replace_with_empty_on<S: StateStore + ?Sized>(
   stamp: &str
 ) -> Result<()> {
   forget_state_copy(&db_mutex.guard());
-  let empty = SyncDoc { owner: Some(stamp.to_string()), ..SyncDoc::empty(now) };
-  let payload = compress(&empty)?;
   for _ in 0..=MAX_CONFLICT_RETRIES {
-    let version = match store_of.pull(None).await? {
-      Fetched::Full(pulled) => pulled.version,
+    let pulled = match store_of.pull(None).await? {
+      Fetched::Full(pulled) => pulled,
       Fetched::Unchanged { .. } => return Err(anyhow!(ODD_ANSWER))
     };
+    let version = pulled.version;
+    // What it holds is what is removed; a copy that cannot be read has
+    // nothing to remove, and an empty document goes over it as before.
+    let held = match pulled.state.as_deref().map(decode_remote) {
+      Some(Remote::Ours(doc) | Remote::Newer(Some(doc))) => Some(doc),
+      _ => None
+    };
+    let local = store::snapshot(&db_mutex.guard(), now)?;
+    let replacement = match held {
+      Some(held) => emptied(&held, &local, now, stamp),
+      None => SyncDoc { owner: Some(stamp.to_string()), ..SyncDoc::empty(now) }
+    };
+    let payload = compress(&replacement)?;
     if store_of.push(version, &payload).await? == Pushed::Kept {
       keep_state_copy(&db_mutex.guard(), Some(stamp), version + 1, Some(&payload), unix_seconds(now));
       return Ok(());
@@ -1488,9 +1613,11 @@ pub async fn get_profile(db_mutex: &std::sync::Mutex<Database>) -> Result<Profil
   Ok(response.json().await?)
 }
 
-pub async fn put_profile(
+/// Saves the profile: a `ProfileUpdate`, or (`commands::social::send_profile`)
+/// only the parts of one that moved.
+pub async fn put_profile<T: Serialize + ?Sized>(
   db_mutex: &std::sync::Mutex<Database>,
-  update: &ProfileUpdate
+  update: &T
 ) -> Result<serde_json::Value> {
   let (base, token) = session_token(db_mutex)?;
   let response = client()?
@@ -1602,6 +1729,24 @@ pub async fn send_problem(
     Some(message) if plain => anyhow!(message),
     _ => anyhow!("The Leaflet server had a problem ({status}). Try again later.")
   })
+}
+
+/// Sends a session's batch of error kinds (`POST /v1/errors`): never with
+/// the sign-in, signed in or not, so the server cannot tell whose they are.
+/// `Ok(false)` from a server that has no such route yet (one deployed before
+/// this app), which the page takes as "drop them": it is not a failure worth
+/// a retry, nor an error for the log (which would be reported in turn).
+pub async fn send_error_kinds(db_mutex: &std::sync::Mutex<Database>, body: serde_json::Value) -> Result<bool> {
+  let base = configured_base(db_mutex)?;
+  let response = client()?.post(format!("{base}/v1/errors")).json(&body).send().await.map_err(unreachable)?;
+  let status = response.status();
+  if status.is_success() {
+    return Ok(true);
+  }
+  if status == reqwest::StatusCode::NOT_FOUND {
+    return Ok(false);
+  }
+  Err(anyhow!("The Leaflet server did not take the error reports ({status})."))
 }
 
 async fn community_send(
@@ -2353,8 +2498,91 @@ mod tests {
     cloud.sneak_in(&store::snapshot(&library_with(&["old", "older"]).guard(), NOW).expect("snapshot"));
     replace_with_empty_on(&library_with(&[]), &cloud, LATER, A).await.expect("replaced");
     let held = cloud.doc().expect("held");
-    assert!(held.books.is_empty() && held.days.is_empty());
+    // Nothing left in it but the removals of what it held (sync audit W2).
+    assert!(held.live_books().next().is_none() && held.days.is_empty());
+    let mut removed: Vec<&str> = held.books.iter().map(|book| book.id.as_str()).collect();
+    removed.sort();
+    assert_eq!(removed, vec!["old", "older"], "the copy that won the race is the one emptied");
     assert_eq!(held.owner.as_deref(), Some(A));
+  }
+
+  /// Sync audit W2: "Start empty" wrote an empty document, and the merge is a
+  /// union, so the next sync of a device that still held the old library
+  /// merged every book, highlight and collection of it back.
+  #[tokio::test]
+  async fn starting_empty_sticks_though_another_device_still_holds_the_old_library() {
+    const AFTER: &str = "2026-09-04T18:40:00+00:00";
+    const LAST: &str = "2026-09-04T18:50:00+00:00";
+    // The old library: three books (one finished), a highlight and a collection.
+    let old = library_with(&["old", "done", "both"]);
+    {
+      let db = old.guard();
+      let mut done = db.find_by_id("done").expect("query").expect("done");
+      done.progress = 1.0;
+      done.finished_at = Some(NOW.to_string());
+      db.upsert_book(&done).expect("finished");
+      db.put_annotation(&crate::db::Annotation {
+        id: "mark".to_string(),
+        book_id: "old".to_string(),
+        kind: "highlight".to_string(),
+        cfi: "epubcfi(/6/2!/4/2,/1:0,/1:9)".to_string(),
+        text: Some("their words".to_string()),
+        note: Some("their note".to_string()),
+        color: Some("yellow".to_string()),
+        chapter: Some("One".to_string()),
+        created_at: NOW.to_string(),
+        updated_at: NOW.to_string(),
+        deleted_at: None
+      })
+      .expect("mark");
+      db.put_collection(&crate::db::Collection {
+        id: "shelf".to_string(),
+        name: "Their shelf".to_string(),
+        book_ids: vec!["old".to_string()],
+        created_at: NOW.to_string(),
+        updated_at: NOW.to_string(),
+        deleted_at: None
+      })
+      .expect("shelf");
+    }
+    let cloud = FakeCloud::default();
+    cloud.put(&store::snapshot(&old.guard(), NOW).expect("snapshot"));
+
+    // The fresh library, which has one of those books itself, starts empty.
+    let fresh = library_with(&["both", "new"]);
+    replace_with_empty_on(&fresh, &cloud, LATER, A).await.expect("replaced");
+    let held = cloud.doc().expect("held");
+    assert_eq!(held.live_books().count(), 0);
+    let removed: Vec<&str> = held.books.iter().map(|book| book.id.as_str()).collect();
+    assert_eq!(removed, vec!["old", "done"], "a removal for each of its books but the one this library has");
+    assert!(held.books.iter().all(|book| book.title.is_empty() && book.finished_at.as_deref() == Some("")), "nothing of them kept");
+    assert!(held.annotations.iter().all(|mark| mark.deleted_at.is_some() && mark.text.is_none() && mark.note.is_none()));
+    assert!(held.collections.iter().all(|shelf| shelf.deleted_at.is_some() && shelf.name.is_empty()));
+    assert_eq!(held.owner.as_deref(), Some(A));
+
+    sync_with(&fresh, &cloud, AFTER, Some(A)).await.expect("fresh syncs");
+    assert_eq!(ids(&fresh), vec!["both".to_string(), "new".to_string()]);
+
+    // The device with the old library syncs with the account: the old
+    // library leaves it, rather than coming back.
+    sync_with(&old, &cloud, LAST, Some(A)).await.expect("old syncs");
+    assert_eq!(ids(&old), vec!["both".to_string(), "new".to_string()]);
+    let held = cloud.doc().expect("held");
+    let mut live: Vec<&str> = held.live_books().map(|book| book.id.as_str()).collect();
+    live.sort();
+    assert_eq!(live, vec!["both", "new"]);
+    assert!(held.annotations.iter().all(|mark| mark.deleted_at.is_some()), "the highlight stays removed");
+    assert!(held.collections.iter().all(|shelf| shelf.deleted_at.is_some()));
+    assert!(
+      held.books.iter().filter(|book| book.is_deleted()).all(|book| book.finished_at.as_deref().unwrap_or("").is_empty()),
+      "the old library's finished book is not counted as this one's"
+    );
+    assert!(old.guard().all_annotations().expect("marks").iter().all(|mark| mark.deleted_at.is_some()));
+
+    // And the fresh library, syncing again, has nothing of it either.
+    sync_with(&fresh, &cloud, "2026-09-04T19:00:00+00:00", Some(A)).await.expect("again");
+    assert_eq!(ids(&fresh), vec!["both".to_string(), "new".to_string()]);
+    assert!(fresh.guard().all_annotations().expect("marks").iter().all(|mark| mark.deleted_at.is_some()));
   }
 
   /// A write that loses a race is merged again over the winner's.

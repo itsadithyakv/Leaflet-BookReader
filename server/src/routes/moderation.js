@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { LIVE_MAX, announcementView, cleanAnnouncement, isLive } from "../announcements.js";
 import { requireAccount } from "../auth.js";
 import { forgetVisitors } from "../boardCache.js";
 import { PERSON_FIELDS, personView, socialProfilesById } from "../community.js";
@@ -436,11 +437,22 @@ export function moderationRoutes(db, limits = defaultLimits(), suspensionSalt = 
   // itself, but not all, and not soon. Asked for without an account (most
   // readers have none), so the answer is kept a minute in memory: hundreds of
   // apps asking cost one read a minute at most.
+  //
+  // The owner's announcements (`announcements.js`) come in the same answer and
+  // the same read, so they cost no more: the notice's document and theirs are
+  // fetched together, and one that has run out is left out when it is sent.
   let noticeKept = null;
   const readNotice = async () => {
     if (noticeKept && Date.now() - noticeKept.at < NOTICE_KEPT_MS) return noticeKept.value;
-    const doc = await settings(db).findOne({ _id: "notice" }, { projection: { version: 1, note: 1, updatedAt: 1 } });
-    const value = { version: doc?.version ?? null, note: doc?.note ?? null, at: doc?.updatedAt ? doc.updatedAt.toISOString() : null };
+    const docs = await settings(db)
+      .find({ _id: { $in: ["notice", "announcements"] } }, { projection: { version: 1, note: 1, updatedAt: 1, items: 1 } })
+      .toArray();
+    const doc = docs.find((found) => found._id === "notice");
+    const items = docs.find((found) => found._id === "announcements")?.items ?? [];
+    const value = {
+      notice: { version: doc?.version ?? null, note: doc?.note ?? null, at: doc?.updatedAt ? doc.updatedAt.toISOString() : null },
+      items
+    };
     noticeKept = { at: Date.now(), value };
     return value;
   };
@@ -448,7 +460,13 @@ export function moderationRoutes(db, limits = defaultLimits(), suspensionSalt = 
   router.get(
     "/notice",
     asyncHandler(async (_request, response) => {
-      response.json(await readNotice());
+      const { notice, items } = await readNotice();
+      const live = items.filter((item) => isLive(item)).map(announcementView);
+      // Nothing personal is in it, and every app gets the same: a cache on the
+      // way may keep it as long as this server does.
+      response.set("Cache-Control", `public, max-age=${NOTICE_KEPT_MS / 1000}`);
+      // Only when there are any, so the answer is as it always was otherwise.
+      response.json(live.length > 0 ? { ...notice, announcements: live } : notice);
     })
   );
 
@@ -475,6 +493,67 @@ export function moderationRoutes(db, limits = defaultLimits(), suspensionSalt = 
       await settings(db).updateOne({ _id: "notice" }, { $set: { version, note: version === null ? null : note, updatedAt } }, { upsert: true });
       noticeKept = null;
       response.json({ version, note: version === null ? null : note, at: updatedAt.toISOString() });
+    })
+  );
+
+  // ---- announcements ----------------------------------------------------------
+
+  const keptAnnouncements = async () =>
+    (await settings(db).findOne({ _id: "announcements" }, { projection: { items: 1 } }))?.items ?? [];
+
+  /** Every announcement kept, live or run out, newest first, with whether it is still shown. */
+  router.get(
+    "/admin/announcements",
+    auth,
+    admin,
+    asyncHandler(async (_request, response) => {
+      const now = new Date();
+      const items = await keptAnnouncements();
+      response.json({
+        announcements: [...items].reverse().map((item) => ({ ...announcementView(item), live: isLive(item, now) })),
+        liveMax: LIVE_MAX
+      });
+    })
+  );
+
+  /**
+   * Publishes one: `{title, body, link?, audience?, expiresAt?}` (see
+   * `cleanAnnouncement`). Ones that have run out are cleared away on the way;
+   * with `LIVE_MAX` still live, it is refused until one is withdrawn.
+   */
+  router.post(
+    "/admin/announcements",
+    auth,
+    admin,
+    smallJson,
+    asyncHandler(async (request, response) => {
+      const now = new Date();
+      const made = cleanAnnouncement(request.body, now);
+      const live = (await keptAnnouncements()).filter((item) => isLive(item, now));
+      if (live.length >= LIVE_MAX) {
+        throw new HttpError(409, `Up to ${LIVE_MAX} announcements can be up at once. Withdraw one first.`);
+      }
+      await settings(db).updateOne({ _id: "announcements" }, { $set: { items: [...live, made], updatedAt: now } }, { upsert: true });
+      noticeKept = null;
+      response.status(201).json({ ...announcementView(made), live: true });
+    })
+  );
+
+  /** Withdraws one: apps stop showing it at their next look at the notice. */
+  router.delete(
+    "/admin/announcements/:id",
+    auth,
+    admin,
+    asyncHandler(async (request, response) => {
+      const id = String(request.params.id);
+      const { modifiedCount } = /^[0-9a-f]{12}$/.test(id)
+        ? await settings(db).updateOne({ _id: "announcements", "items.id": id }, { $pull: { items: { id } }, $set: { updatedAt: new Date() } })
+        : { modifiedCount: 0 };
+      if (!modifiedCount) {
+        throw new HttpError(404, "That announcement is no longer up.");
+      }
+      noticeKept = null;
+      response.json({ withdrawn: true });
     })
   );
 

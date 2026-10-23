@@ -24,3 +24,11 @@ export const coverWidth = (width: number, gap: number) => {
   const columns = gridColumns(width, gap);
   return (width - gap * (columns - 1)) / columns;
 };
+
+/**
+ * The grid's columns and a cover's width (rounded up to 10 px, so a window dragged wider does not
+ * redraw every card each pixel) for this width; none for a width of nothing, which is a grid with no
+ * layout (the Library kept hidden behind another tab), whose columns stay as they were.
+ */
+export const gridShape = (width: number, gap: number) =>
+  width > 0 ? { columns: gridColumns(width, gap), cover: Math.ceil(coverWidth(width, gap) / 10) * 10 } : null;

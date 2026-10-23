@@ -56,9 +56,10 @@ export type ScrollPagesHandle = {
   sync(): void;
   /**
    * Before the pages change size: the point of the document under `about`
-   * (the pointer; the reader's line when absent) is to stay where it is.
+   * (the pointer; the reader's line when absent) is to stay where it is, or
+   * to come to `to` (where a pinch's fingers moved it).
    */
-  holdAt(about?: { x: number; y: number }): void;
+  holdAt(about?: { x: number; y: number }, to?: { x: number; y: number }): void;
   /** The reader's line: the page (from 1) across a third of the way down the window, and how far down it. */
   line(): { page: number; fraction: number } | null;
 };
@@ -907,7 +908,7 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
         ownScrollRef.current = null;
         read(true);
       },
-      holdAt(about) {
+      holdAt(about, to = about) {
         const stage = stageRef.current;
         if (!stage || topsRef.current.length < 2) {
           return;
@@ -915,7 +916,7 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
         const box = stage.getBoundingClientRect();
         const offset = about ? about.y - box.top : stage.clientHeight / 3;
         const place = placeAt(topsRef.current, viewTop() + offset);
-        anchorRef.current = { place, offset };
+        anchorRef.current = { place, offset: to ? to.y - box.top : offset };
         acrossRef.current = null;
         // Across the page too: under the pointer, or else the middle of the
         // window. (With no pointer nothing was held across, and a page going
@@ -928,7 +929,7 @@ export const PdfScrollPages = forwardRef<ScrollPagesHandle, PdfScrollPagesProps>
           acrossRef.current = {
             page: place.page,
             fraction: Math.min(1, Math.max(0, (x - pageBoxNow.left) / pageBoxNow.width)),
-            x
+            x: to ? to.x : x
           };
         }
       },

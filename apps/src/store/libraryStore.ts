@@ -8,6 +8,7 @@ import { finishedOn, hasFinished, isFinished } from "../constants/books";
 import { isStandInCover } from "../readers/pageCover";
 import { storyMoved } from "../pip/base/storyFeed";
 import { pushHold } from "../services/pushHold";
+import { afterStartup } from "../platform/afterStartup";
 
 const defaultFilters: BookFilter = {
   query: "",
@@ -160,22 +161,26 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // A list read while a book was being opened (a sync finishing late) does
     // not take its opening back: the later of the two stands, as sync merges it.
     set({ books: keepLaterOpened(books, get().books), finishedGone, loading: false });
-    void get().refreshMissingMetadata(books);
-    if (!seriesScanned) {
-      // Books imported before series were read have theirs read once, here.
-      seriesScanned = true;
-      bookService
-        .scanSeries()
-        .then(async (found) => {
-          if (found > 0) {
-            set({ books: await bookService.list() });
-          }
-        })
-        .catch(() => {
-          // Tried again next launch.
-          seriesScanned = false;
-        });
-    }
+    // The lookups and the scan wait until the library is on screen at launch (platform/afterStartup.ts):
+    // their answers draw it again, and on a slow phone they made the first screen late.
+    afterStartup(() => {
+      void get().refreshMissingMetadata(books);
+      if (!seriesScanned) {
+        // Books imported before series were read have theirs read once, here.
+        seriesScanned = true;
+        bookService
+          .scanSeries()
+          .then(async (found) => {
+            if (found > 0) {
+              set({ books: await bookService.list() });
+            }
+          })
+          .catch(() => {
+            // Tried again next launch.
+            seriesScanned = false;
+          });
+      }
+    });
   },
   async setSeries(id, series, seriesIndex) {
     const updated = await bookService.setSeries(id, series, seriesIndex);

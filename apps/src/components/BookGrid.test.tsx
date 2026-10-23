@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { Book } from "@shared/models/book";
 import { BookGrid, VIRTUALIZE_FROM } from "./BookGrid";
 import { bookService } from "../services/bookService";
+import { PageShownContext } from "../hooks/pageShown";
 
 const books: Book[] = Array.from({ length: 300 }, (_, at) => ({
   id: `b-${at}`,
@@ -57,6 +58,19 @@ describe("a long library's grid", () => {
     expect(shown).not.toContain(0);
     expect(shown).not.toContain(60);
     expect(Math.min(...shown)).toBeGreaterThanOrEqual(10);
+  });
+
+  it("draws the same rows while its page is kept hidden: hiding the Library builds nothing again", () => {
+    atPlace(3920);
+    const shown = drawn(renderToStaticMarkup(<BookGrid books={books} onRefresh={nothing} onOpen={nothing} />));
+    const hidden = drawn(
+      renderToStaticMarkup(
+        <PageShownContext.Provider value={false}>
+          <BookGrid books={books} onRefresh={nothing} onOpen={nothing} />
+        </PageShownContext.Provider>
+      )
+    );
+    expect(hidden).toEqual(shown);
   });
 
   it("asks for each cover at the card's size, both widths, lazily", () => {

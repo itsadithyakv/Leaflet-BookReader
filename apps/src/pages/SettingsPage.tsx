@@ -48,8 +48,11 @@ import { setEffectsChoice, useEffectsChoice, type EffectsChoice } from "../platf
 import { OWNER_COPY } from "../components/sync/ownerCopy";
 import { ReportProblemSheet } from "../components/ReportProblemSheet";
 import { useCommunityStore } from "../components/community/communityStore";
-import { AdminPanel } from "../components/discuss/AdminPanel";
-import { ProblemsPanel } from "../components/discuss/ProblemsPanel";
+import { errorReports } from "../services/errorReports";
+
+/** Behind the (i) beside "Send error reports". */
+const ERROR_REPORTS_TIP =
+  "When something goes wrong, Leaflet tells us which error it was, the version and the platform, once a session. Never your books, files, notes or account.";
 
 const PIP_MODES: Array<{ mode: PipMode; label: string; detail: string; preview: string }> = [
   { mode: "chatty", label: "Chatty", detail: "Pip lives out in the app: it wanders, naps, celebrates, and can be picked up and thrown. Select the logo to call it home.", preview: "look" },
@@ -130,6 +133,13 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
   const pipMode = usePipStore((state) => state.mode);
   const setPipMode = usePipStore((state) => state.setMode);
   const [pipSounds, setPipSounds] = useSoundOn();
+  // Anonymous error reports (`errorReports.ts`): on unless turned off.
+  const [errorReportsOn, setErrorReportsOn] = useState(() => errorReports.on());
+  const toggleErrorReports = () => {
+    const next = !errorReportsOn;
+    errorReports.setOn(next);
+    setErrorReportsOn(next);
+  };
   const [volumeKeys, setVolumeKeys] = useVolumeKeysTurnPages();
   const togglePipSounds = () => {
     setPipSounds(!pipSounds);
@@ -189,10 +199,8 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
   const syncing = syncStatus === "syncing";
   const syncConfigured = anywhereToSync(sync);
   const accountSignedIn = useAccountStore((state) => state.status.signedIn);
-  // The owner's own tools are a section of their own here, whatever their
-  // profile shares: the server says who the admin is (`isAdmin` on their own
-  // profile, read whether it is private or not), and answers no one else.
-  const isAdmin = useCommunityStore((state) => Boolean(state.me?.isAdmin));
+  // The reader's own profile, read once. (The owner's tools are no longer a
+  // section here: they are the admin page, from the profile menu.)
   const meLoaded = useCommunityStore((state) => state.me !== null);
   const loadMe = useCommunityStore((state) => state.loadMe);
   useEffect(() => {
@@ -356,8 +364,7 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
     { id: "general", label: "General" },
     { id: "reading", label: "Reading" },
     { id: "library", label: "Library" },
-    ...(showAccount ? [{ id: "account" as const, label: "Account" }] : []),
-    ...(isAdmin && accountSignedIn ? [{ id: "admin" as const, label: "Admin" }] : [])
+    ...(showAccount ? [{ id: "account" as const, label: "Account" }] : [])
   ];
   const offered = sections.map((item) => item.id);
   const [chosen, setChosen] = useState<SettingsSection>(() => readSettingsSection(offered));
@@ -566,6 +573,19 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                 >
                   Report a problem
                 </button>
+              </div>
+              <div className="mt-3 flex items-center gap-2">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={errorReportsOn}
+                  className="inset-field flex min-w-0 flex-1 items-center justify-between gap-3 px-4 py-3 text-xs text-on-surface-variant transition hover:text-primary"
+                  onClick={toggleErrorReports}
+                >
+                  <span>Send error reports</span>
+                  {renderToggle(errorReportsOn)}
+                </button>
+                <InfoTip text={ERROR_REPORTS_TIP} />
               </div>
               <details className="mt-3 text-xs text-on-surface-variant">
                 <summary className="cursor-pointer select-none hover:text-primary">Open-source notices</summary>
@@ -977,17 +997,6 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
           {FEATURES.accounts && sync.apiBase && <AccountCard key={sync.apiBase} showToast={showToast} />}
 
           {FEATURES.community && <LeaderboardsCard showToast={showToast} />}
-        </div>
-      )}
-
-      {section === "admin" && (
-        <div {...panel("admin")}>
-          <div className={column}>
-            <ProblemsPanel showToast={showToast} />
-          </div>
-          <div className={column}>
-            <AdminPanel showToast={showToast} />
-          </div>
         </div>
       )}
 

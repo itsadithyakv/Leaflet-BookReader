@@ -73,11 +73,26 @@ import { MongoClient } from "mongodb";
  *             database to delete again what was deleted after the backup
  *             (`deletion.js`, `backup/restore.js --deletions-from`). Backups
  *             are kept 30 days at most, so 45 covers every one of them.
+ * `errorKinds` one per kind of error the apps reported by themselves, per
+ *             version, platform and UTC day: its scrubbed name, message and
+ *             places in the code, and how many times (`errorKinds.js`).
+ *             Nothing about who sent it. Expires after 90 days.
+ * `errorFixes` one per kind of error the owner marked fixed, and in which
+ *             version; forgotten 180 days after it was marked.
+ * `meta`      small facts about the server kept by its other processes: the
+ *             last nightly backup that went through (`_id: "lastBackup"`,
+ *             `backup/note.js`), so the owner's overview can say when it was.
+ *
+ *             (`accounts.lastSeenAt` is the day an account was last used, and
+ *             `accounts.client` the version and platform of the app it was
+ *             used from that day: `dormant.js`, written once a day at most.)
  */
 
 const DAY_SECONDS = 24 * 60 * 60;
 /** How long a problem report is kept (`routes/problems.js`). */
 export const PROBLEM_DAYS = 90;
+/** How long an error kind is kept (`errorKinds.js`). */
+export const ERROR_DAYS = 90;
 
 let client = null;
 let database = null;
@@ -191,6 +206,10 @@ async function dropIfPresent(collection, name, isCurrent) {
 
 export async function ensureIndexes(db) {
   await accounts(db).createIndex({ email: 1 }, { name: "email", unique: true });
+  // The owner's count of active readers (`routes/admin.js`), and the
+  // dormant sweep's "not used since": both ask for a range of days. Sparse,
+  // since an account that has never been noted as used has no day at all.
+  await accounts(db).createIndex({ lastSeenAt: 1 }, { name: "seen", sparse: true });
 
   // Expired sessions delete themselves. TTL runs about once a minute, so
   // lookups also check `expiresAt` rather than rely on it.
@@ -230,6 +249,12 @@ export async function ensureIndexes(db) {
     { at: 1 },
     { name: "expiry", expireAfterSeconds: PROBLEM_DAYS * DAY_SECONDS }
   );
+
+  // Error kinds: the owner's list (by signature) and the overview's last
+  // week (by day, from this index), and gone after 90 days.
+  await errorKinds(db).createIndex({ at: 1 }, { name: "expiry", expireAfterSeconds: ERROR_DAYS * DAY_SECONDS });
+  await errorKinds(db).createIndex({ sig: 1 }, { name: "sig" });
+  await errorFixes(db).createIndex({ at: 1 }, { name: "expiry", expireAfterSeconds: 180 * DAY_SECONDS });
 
   await ensureCommunityIndexes(db);
 }
@@ -410,6 +435,9 @@ export const resets = (db) => db.collection("resets");
 export const confirmations = (db) => db.collection("confirmations");
 export const deletions = (db) => db.collection("deletions");
 export const problems = (db) => db.collection("problems");
+export const errorKinds = (db) => db.collection("errorKinds");
+export const errorFixes = (db) => db.collection("errorFixes");
+export const meta = (db) => db.collection("meta");
 
 export async function close() {
   if (client) {

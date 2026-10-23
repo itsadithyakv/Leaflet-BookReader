@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { createApp } from "./app.js";
 import { backfillKudosCircles } from "./community.js";
 import { close, connect } from "./db.js";
+import { dormantPolicyFromEnv, sweepDormant, useDormantPolicy } from "./dormant.js";
 import { mailerFromEnv } from "./mail.js";
 
 /**
@@ -94,6 +95,21 @@ const app = createApp(db, {
   // constant in the source is used instead: see `standing.js`.
   suspensionSalt: process.env.RESET_MAIL_SECRET || ""
 });
+
+// Accounts nobody has used for a year (`dormant.js`): off unless
+// DORMANT_ACCOUNTS=on. Once a day, the first ten minutes after a start, and
+// only ever counts in the log.
+const dormant = dormantPolicyFromEnv();
+useDormantPolicy(dormant);
+if (dormant.enabled) {
+  const sweep = () =>
+    sweepDormant(db, { mailer })
+      .then((counts) => console.log(`[leaflet] dormant accounts: ${JSON.stringify(counts)}`))
+      .catch((error) => console.warn("[leaflet] dormant accounts: the sweep failed:", error?.message ?? error));
+  setTimeout(sweep, 10 * 60_000).unref();
+  setInterval(sweep, 24 * 60 * 60_000).unref();
+  console.log(`[leaflet] dormant accounts: on (${dormant.months} months, then ${dormant.graceDays} days after the email).`);
+}
 
 const server = app.listen(port, host, () => {
   console.log(`Leaflet API on http://${host}:${port}`);

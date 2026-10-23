@@ -17,7 +17,9 @@ import { useCommunityPulse } from "./hooks/useCommunityPulse";
 import { usePipTabDot } from "./hooks/usePipTabDot";
 import { PipHome } from "./components/PipHome";
 import { PipReaderPeek } from "./components/PipReaderPeek";
-import { PipWorld, type PipAction } from "./components/PipWorld";
+// Pip out in the app comes once the library is up (below); her stylesheet stays here, in its place among the app's.
+import type { PipAction } from "./components/PipWorld";
+import "./components/pip/touch.css";
 import { FocusDouble } from "./components/focus/FocusDouble";
 import { usualFocusMinutes } from "./components/focus/focusDeal";
 import { usePipStore } from "./store/pipStore";
@@ -32,6 +34,8 @@ import { MobileNav } from "./components/MobileNav";
 import { UiIcon } from "./components/UiIcon";
 import { clothStyle } from "./components/shelf/spine";
 import { LibraryPage } from "./pages/LibraryPage";
+import { PageShownContext } from "./hooks/pageShown";
+import { settleStartup, settleStartupWhenIdle, useStartupSettled } from "./platform/afterStartup";
 import { useLibraryStore } from "./store/libraryStore";
 import { watchSyncMoments } from "./services/syncTiming";
 import { pushHold } from "./services/pushHold";
@@ -53,6 +57,8 @@ import { useHighlightsStore } from "./components/highlights/highlightsStore";
 import { useLibrarySearchStore } from "./components/search/librarySearchStore";
 import { RatePrompt, noteBookClosed, noteBookOpened, openStoreReview } from "./components/RatePrompt";
 import { UpdateBanner } from "./components/UpdateBanner";
+import { AdminHost } from "./components/admin/AdminHost";
+import { AnnouncementHost } from "./components/announcements/AnnouncementHost";
 import { ReminderOptIn } from "./components/ReminderOptIn";
 import { useLargeBookPrompt } from "./hooks/useLargeBookPrompt";
 import { usePageCovers } from "./hooks/usePageCovers";
@@ -123,6 +129,8 @@ const HighlightsDialog = lazy(() =>
 const LibrarySearchDialog = lazy(() =>
   import("./components/search/LibrarySearchDialog").then((module) => ({ default: module.LibrarySearchDialog }))
 );
+// Pip out in the app: she comes out once the library is on screen (platform/afterStartup.ts), not with it.
+const PipWorld = lazy(() => import("./components/PipWorld").then((module) => ({ default: module.PipWorld })));
 // The card after a focus session: it draws the camp and her finds, so it brings
 // most of the Hollow's art with it. Fetched when a session ends, not at start.
 const SessionWrapUp = lazy(() =>
@@ -207,12 +215,42 @@ const App = () => {
   const [openingBook, setOpeningBook] = useState<Book | null>(null);
   const openingRef = useRef(openingBook);
   openingRef.current = openingBook;
-  // The reader's code is fetched once the app has settled, so the first book opens without waiting for it.
+  // The reader's code is fetched once the app has settled, so the first book opens without waiting for it:
+  // after 2.5 s, in a moment when nothing else is running (it is a long task on a slow phone).
   useEffect(() => {
     const warm = () => void import("./pages/ReaderView").catch(() => undefined);
-    // Not every WebView has idle callbacks; a timer does as well.
-    const handle = window.setTimeout(warm, 2500);
-    return () => window.clearTimeout(handle);
+    let idle: number | null = null;
+    const handle = window.setTimeout(() => {
+      // Not every WebView has idle callbacks; then it goes at once, as it used to.
+      if (typeof window.requestIdleCallback === "function") {
+        idle = window.requestIdleCallback(warm, { timeout: 1500 });
+      } else {
+        warm();
+      }
+    }, 2500);
+    return () => {
+      window.clearTimeout(handle);
+      if (idle !== null) window.cancelIdleCallback(idle);
+    };
+  }, []);
+  // When the app started, for Pip's first coming out (she comes later than the app now, at the same time as before).
+  const [startedAt] = useState(() => performance.now());
+  // The start is over once the library has been read and drawn, and the page is idle (platform/afterStartup.ts):
+  // then Pip comes out into the app, the Hollow's dot is worked out, the backup on launch and the lookups run.
+  const startupSettled = useStartupSettled();
+  const listedRef = useRef(false);
+  const libraryListing = useLibraryStore((state) => state.loading);
+  useEffect(() => {
+    if (libraryListing) {
+      listedRef.current = true;
+    } else if (listedRef.current) {
+      settleStartupWhenIdle();
+    }
+  }, [libraryListing]);
+  // Whatever happens to the library, nothing waits longer than this.
+  useEffect(() => {
+    const timer = window.setTimeout(settleStartup, 5000);
+    return () => window.clearTimeout(timer);
   }, []);
   const openingVeil = (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90" role="status" aria-live="polite">
@@ -333,13 +371,14 @@ const App = () => {
   // in (`accountBackup`), the reading goes to the account whatever else is set
   // up; never for another account's library, whose sync is paused.
   const ownerPaused = sync.library?.standing === "other";
+  // Once the library is on screen (`startupSettled`): the run's answer draws the library again.
   useEffect(() => {
-    if ((sync.driveConnected || sync.accountBackup) && !ownerPaused) {
+    if ((sync.driveConnected || sync.accountBackup) && !ownerPaused && startupSettled) {
       syncNow().catch(() => {
         // startup backup failure is fine; it is recorded and retried later
       });
     }
-  }, [sync.driveConnected, sync.accountBackup, ownerPaused, syncNow]);
+  }, [sync.driveConnected, sync.accountBackup, ownerPaused, syncNow, startupSettled]);
 
   // Signed in at launch: whose this library is decides what follows (a
   // switch to the account's own, or the question). Signing in asks by itself
@@ -1325,14 +1364,16 @@ const App = () => {
           {/* Pip stands in here while it is on a card, so it scrolls with the
               card natively instead of chasing it a frame behind. */}
           <div className="pip-scroll-layer" data-pip-scroll-layer />
-          {activeTab === "library" && (
+          {/* Kept while another tab is up, out of the layout and at rest (hooks/pageShown.ts): coming back
+              to it used to build the whole shelf again. */}
+          <PageShownContext.Provider value={activeTab === "library"}>
             <LibraryPage
               onOpenBook={openBookFromLibrary}
               onNavigate={setActiveTab}
               showToast={showToast}
               onStartFocus={startFocusFromLibrary}
             />
-          )}
+          </PageShownContext.Provider>
           <Suspense fallback={null}>
             {activeTab === "collections" && (
               <CollectionsPage onNavigate={setActiveTab} onOpenBook={openBookFromLibrary} showToast={showToast} />
@@ -1590,7 +1631,11 @@ const App = () => {
 
       {/* Pip lives over the app; while a book is open it waits (hidden) and
           celebrations come through the reader peek instead. */}
-      <PipWorld actions={pipActions} />
+      {startupSettled && (
+        <Suspense fallback={null}>
+          <PipWorld actions={pipActions} startedAt={startedAt} />
+        </Suspense>
+      )}
       {selected && <PipReaderPeek />}
 
       {/* The streak's moments (a goal met, a day saved, a milestone, a streak lost), once each, never over a book. */}
@@ -1628,6 +1673,22 @@ const App = () => {
       )}
       <RatePrompt />
       <UpdateBanner />
+      {/* The owner's one-time messages: in the Library only, never over a book or the welcome. */}
+      <AnnouncementHost
+        ready={activeTab === "library" && selected === null && openingBook === null && !welcomeShowing}
+        driveConnected={sync.driveConnected}
+        showToast={showToast}
+        onAction={(action) => {
+          if (action === "reconnect_drive") {
+            handleDriveConnect();
+          } else {
+            requestSettingsSection("library");
+            setActiveTab("settings");
+          }
+        }}
+      />
+      {/* The owner's admin page, from the profile menu: loaded the first time it opens. */}
+      <AdminHost showToast={showToast} />
       <ReminderOptIn />
 
       <MobileNav activeItem={tabLabels[activeTab]} onNavigate={handleSidebarNavigate} badge={navBadge} />

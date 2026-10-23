@@ -91,7 +91,7 @@ Authenticated routes take `Authorization: Bearer <token>`. Errors are
 | `PUT /v1/state` | ✓ | `{version, state}`. `version` is the one last read (0 = none). `409` with the current document if another device wrote first. Up to 2 MB. |
 | `DELETE /v1/state` | ✓ | Removes the stored state. |
 | `GET /v1/profile/me` | ✓ | The reader's own profile: `{handle, displayName, visibility, weekKey, weekMinutes, streak, booksFinished, shelf, reading, level, badges, arcade, camp, kudosFrom, kudosTo, sharesLibrary, raidable, rulesAccepted, isAdmin, suspendedUntil}`. `kudosFrom` is how many different readers have sent this one kudos, and `kudosTo` how many different readers this one has sent kudos to, each counted up to 10 and `0` before any (the badges `kudos-from-10` and `kudos-to-10` are earned at 10; see the full profile below). `badges` here is as the app saved it, without those two. `raidable` says friends may raid the camp (`POST /v1/raids`), and is `false` until the reader turns it on (since app 1.5.10; a reader who never touched it has no `raidable` stored). `reading`, `level`, `arcade` and `camp` are `null` and `badges` is `[]` until sent; with no profile yet, `visibility` is `private` and the rest empty. `rulesAccepted` says the guidelines were accepted (`POST /v1/rules/accept`); `isAdmin` is `role: "admin"` on the profile, which no route can set; `suspendedUntil` is an ISO time while an admin's suspension lasts, else `null`. |
-| `PUT /v1/profile/me` | ✓ | `handle`, `displayName`, `visibility` (`public`, `followers` or `private`; anything else is taken as `private`), `shareLibrary` (boolean), `raidable` (boolean: whether friends may raid the camp; off until turned on), `weekKey` + `weekMinutes`, `streak`, `booksFinished`, `shelf`, `readDay` (the reader's local date on which they last read, like `2026-09-27`; a date no clock could be in is a `400`, `null` clears it), `reading` (`null`, or `{title (1–120), author (≤80) or null, percent (whole, 0–100)}`), `level` (whole, 0–999), `badges` (at most 80 ids matching `^[a-z0-9][a-z0-9-]{0,39}$`; repeats are dropped, order kept, and any id starting `kudos-` is dropped: only the server gives those), `arcade` (`{dash, catch, flap}`, each whole, 0–10000000, a missing one is 0), `camp` (`null` clears it; otherwise `{levels, yard, camps, banners, trophies}`, Pip's camp in the arcade's building game as the reader shows it: `levels` is `{burrow, oak, store, fence, tower, hut}`, each whole, 0–5; `yard` is at most 2 of `{kind, level}`, `kind` one of `workshop`, `hive`, `well`, `stall` or `null` and `level` whole, 0–3; `camps`, `banners` and `trophies` are whole, 0–100000. Every one of those parts has to be there. Seven more may come with them, and say where things stand in the 240 by 120 scene: `spots` (`{burrow, oak, store, tower, hut, yard0, yard1}`, each `[x, y]`), `walls` (at most 32 of `[x, y]`, the pieces of fence), `decor` (at most 24 of `{kind, x, y}`, `kind` whole, 0–17), `land` (at most 30 of `{kind, x, y}`, the landscape, `kind` whole, 0–9) and `works` (at most 12 of `{kind, x, y}`, the defences, `kind` whole, 0–11), with `x` whole, 0–240 and `y` whole, 0–120; `guards` (a list of 7 whole numbers, 0–3, the rank of the guardian at each post, 0 for none); and `posts` (a list of exactly 7, each `[x, y]` or `null`, where each guardian's signpost was carried to, `null` for one not moved). These seven are never a `400`: one that is not the right shape is left out, an entry that cannot be read is dropped, a place outside the scene is brought to its edge, and a list that is too long is cut. `guards` is kept as 7 ranks or not at all: a shorter list is filled out with 0, a longer one is cut to its first 7, a rank that cannot be read is 0, one above 3 is 3, and a list with no rank above 0 is left out. `posts` is kept as 7 entries or not at all: a list that is not 7 long is left out, an entry that cannot be read is `null`, the fifth (the dragon, who has no post) and one whose guardian's rank is 0 are always `null`, and a list of nothing but `null` is left out. Anything sent beside all these is dropped, not stored). Each is optional and only what is sent changes; a malformed value is a `400` and nothing is saved. The reading figures (everything from `weekKey` on, `shareLibrary` and `raidable` apart) are kept only for a shared profile (`public` or `followers`): sent for a private one they are checked, answered `200` and not stored, and `visibility: "private"` removes the ones held, along with the uploaded library and the requests to follow that were waiting. `visibility: "public"` turns the requests waiting on a followers-only profile into follows. The answer is the profile as `GET` gives it, so a client can see from `visibility` that its figures were not kept. Names, titles and authors are stored as one line of visible text (no control characters, right-to-left overrides or zero-width spaces), cut to their length; `displayName: ""` clears the name. `409` if the handle is taken. |
+| `PUT /v1/profile/me` | ✓ | `handle`, `displayName`, `visibility` (`public`, `followers` or `private`; anything else is taken as `private`), `shareLibrary` (boolean), `raidable` (boolean: whether friends may raid the camp; off until turned on), `weekKey` + `weekMinutes`, `streak`, `booksFinished`, `shelf`, `readDay` (the reader's local date on which they last read, like `2026-09-27`; a date no clock could be in is a `400`, `null` clears it), `reading` (`null`, or `{title (1–120), author (≤80) or null, percent (whole, 0–100)}`), `level` (whole, 0–999), `badges` (at most 80 ids matching `^[a-z0-9][a-z0-9-]{0,39}$`; repeats are dropped, order kept, and any id starting `kudos-` is dropped: only the server gives those), `arcade` (`{dash, catch, flap}`, each whole, 0–10000000, a missing one is 0), `camp` (`null` clears it; otherwise `{levels, yard, camps, banners, trophies}`, Pip's camp in the arcade's building game as the reader shows it: `levels` is `{burrow, oak, store, fence, tower, hut}`, each whole, 0–5; `yard` is at most 2 of `{kind, level}`, `kind` one of `workshop`, `hive`, `well`, `stall` or `null` and `level` whole, 0–3; `camps`, `banners` and `trophies` are whole, 0–100000. Every one of those parts has to be there. Seven more may come with them, and say where things stand in the 240 by 120 scene: `spots` (`{burrow, oak, store, tower, hut, yard0, yard1}`, each `[x, y]`), `walls` (at most 32 of `[x, y]`, the pieces of fence), `decor` (at most 24 of `{kind, x, y}`, `kind` whole, 0–17), `land` (at most 30 of `{kind, x, y}`, the landscape, `kind` whole, 0–9) and `works` (at most 12 of `{kind, x, y}`, the defences, `kind` whole, 0–11), with `x` whole, 0–240 and `y` whole, 0–120; `guards` (a list of 7 whole numbers, 0–3, the rank of the guardian at each post, 0 for none); and `posts` (a list of exactly 7, each `[x, y]` or `null`, where each guardian's signpost was carried to, `null` for one not moved). These seven are never a `400`: one that is not the right shape is left out, an entry that cannot be read is dropped, a place outside the scene is brought to its edge, and a list that is too long is cut. `guards` is kept as 7 ranks or not at all: a shorter list is filled out with 0, a longer one is cut to its first 7, a rank that cannot be read is 0, one above 3 is 3, and a list with no rank above 0 is left out. `posts` is kept as 7 entries or not at all: a list that is not 7 long is left out, an entry that cannot be read is `null`, the fifth (the dragon, who has no post) and one whose guardian's rank is 0 are always `null`, and a list of nothing but `null` is left out. Anything sent beside all these is dropped, not stored). Each is optional and only what is sent changes (1.5.12's app sends only the figures that moved); a malformed value is a `400` and nothing is saved. The reading figures (everything from `weekKey` on, `shareLibrary` and `raidable` apart) are kept only for a shared profile (`public` or `followers`): sent for a private one they are checked, answered `200` and not stored, and `visibility: "private"` removes the ones held, along with the uploaded library and the requests to follow that were waiting. `visibility: "public"` turns the requests waiting on a followers-only profile into follows. The answer is the profile as `GET` gives it, so a client can see from `visibility` that its figures were not kept; but a save that names some of the figures and not all (a shared profile, visibility not named) is answered without the figures it left out, which were neither read nor changed (`heldViewFor`). Names, titles and authors are stored as one line of visible text (no control characters, right-to-left overrides or zero-width spaces), cut to their length; `displayName: ""` clears the name. `409` if the handle is taken. |
 | `DELETE /v1/profile/me` | ✓ | `{deleted: true}`. Removes the profile and all community data (see Deletion). |
 | `GET /v1/leaderboard?week=2026-W39&scope=everyone` | optional | Top 100 public profiles for that ISO week (default: the server's). Rows: `{rank, handle, displayName, pipSeed, avatar, weekMinutes, streak, booksFinished, reading, level, isYou}` (`reading` and `level` as on the profile, or `null`). With a token, `you` is the reader's own row and rank even outside the top 100 (public profiles only: a private or followers-only reader gets `null`, and the app draws their own row from the minutes on their device). `sharedReaders` counts the public profiles there are, read this week or not, so an empty board can say why it is empty; followers-only profiles are not on this board and not counted. |
 | `GET /v1/leaderboard?week=…&scope=following` | ✓ | The reader plus the readers they follow who share a profile (public, or followers-only: a follow of those exists only once accepted), zeros included. Same rows. |
@@ -109,7 +109,7 @@ Authenticated routes take `Authorization: Bearer <token>`. Errors are
 | `GET /v1/duels` | ✓ | `{duels: […]}`: this week's pending/accepted duels and results settled in the last 8 days, each `{id, weekKey, status, youChallenged, weekOver, you, them, stake, result}` (`stake` is 0 on a duel from before stakes). Settles finished weeks first. |
 | `GET /v1/inbox?since=ISO` | ✓ | `{events, now}`: the newest 50 events after `since`. Types: `follow`, `follow_request`, `follow_accept`, `kudos`, `gift`, `duel_invite`, `duel_accepted`, `duel_result`, each `{id, type, createdAt, actor}`; a `duel_*` event also carries `duel`, and a `follow_request` carries `pending` (whether it is still waiting: the event is written once per pair and stays as history after it is answered or taken back). A `kudos` event for a post also carries `about: {kind, title}` (`kind` is `finished`, `review` or `quote`; `title` the book's, as the post had it when the kudos was sent), and is the actor only otherwise. A `gift` event is the actor only; the gift itself is in `GET /v1/gifts`. Events from readers who no longer share a profile are omitted. So are events from a reader on either side of a block with the caller. |
 | `GET /v1/search?q=ma` | optional | Up to 10 shared profiles whose handle starts with `q`: `{results: [{handle, displayName, pipSeed, avatar, visibility, locked, weekMinutes, streak}]}`. A followers-only reader is `locked: true` with `weekMinutes: 0, streak: 0`, except to themself and, with a token, to readers whose follow they accepted. A reader who has blocked the caller is not among the results. |
-| `PUT /v1/library/me` | ✓ | `{books: [{key, title, author, state, percent}]}` → `{count}`. Replaces the reader's uploaded library. At most 3000 books; `key` 1–160 characters (trimmed and lower-cased; sent twice, the later one is kept); `title` 1–160; `author` ≤80 or `null`; `state` one of `reading`, `finished`, `unread`; `percent` whole, 0–100. `400` for anything else, `403` unless the reader shares a profile, `413` over 2 MB, `429` past the library limit. |
+| `PUT /v1/library/me` | ✓ | `{books: [{key, title, author, state, percent}]}` → `{count}` (`{count, unchanged: true}` when it is the list already kept, which is then not written). Replaces the reader's uploaded library. At most 3000 books; `key` 1–160 characters (trimmed and lower-cased; sent twice, the later one is kept); `title` 1–160; `author` ≤80 or `null`; `state` one of `reading`, `finished`, `unread`; `percent` whole, 0–100. `400` for anything else, `403` unless the reader shares a profile, `413` over 2 MB, `429` past the library limit. |
 | `DELETE /v1/library/me` | ✓ | `{deleted: true}`. |
 | `GET /v1/profile/:handle/library` | ✓ | `{books, updatedAt}` (`{books: [], updatedAt: null}` when nothing was uploaded), to the owner and to readers who follow them, and only if the owner's `shareLibrary` is on. `404` if the reader is private or absent, is followers-only and has not accepted the caller, or does not share a library (the owner included); `403` for a public reader who does share one, to a caller who does not follow them. |
 | `POST /v1/library/among` | ✓ | `{keys: [up to 500 keys]}` → `{books: [{key, finished, readers: [{handle, displayName, pipSeed, avatar, state: "reading", percent}]}]}`. Over the readers the caller follows who share a profile and a library: how many finished each book, and up to 5 who are reading it, furthest along first. Only keys somebody has finished or is reading, in the order asked. `400` for more than 500 keys or a malformed one; `413` over 256 KB. |
@@ -157,6 +157,13 @@ Authenticated routes take `Authorization: Bearer <token>`. Errors are
 | `POST /v1/admin/suspend` | admin | `{handle, days (whole, 0–3650)}` → `{handle, suspendedUntil}`. `0` lifts it. Remembered against the reader's email address, as a keyed hash, until it ends (see Moderation). |
 | `POST /v1/admin/community` | admin | `{id, title? (1–120), author? (≤80 or null), keeper? (handle of a current member), unban? (handle), relist? (boolean)}` → `{community}` (the same view as everywhere). Only what is sent changes. `relist: true` clears what reports or the admin unlisted (it does not list a community that never had its 3 established members); `relist: false` unlists it. `404` unknown community or handle; `409` if `keeper` is not a member; `400` for a malformed value. |
 | `GET /v1/notice` | — | `{version, note, at}`: the newest Leaflet as the owner has said (all `null` when nothing is said). No account needed: most readers have none. Kept in memory for a minute, so hundreds of apps asking cost at most one read a minute. Apps from 1.4.2 ask 20 s after opening and every 6 hours, and show a reader who is behind a card with Update (the Store's page). |
+| `GET /v1/admin/announcements` | admin | `{announcements: [{id, title, body, link, audience, at, expiresAt, live}], liveMax}`, newest first, run-out ones included until the next publish clears them. |
+| `POST /v1/admin/announcements` | admin | `{title (≤80), body (≤600, line breaks kept), link? ({label (≤30), url (https)} or {label, action: reconnect_drive / open_library_settings / report_problem}), audience? ({kind: everyone / android / windows / drive} or {kind: below, version}), expiresAt? (within a year)}` → `201` with the announcement. `409` with 3 live. Rides on `GET /v1/notice` as `announcements` (only when there are any); the audience is decided on the device. |
+| `DELETE /v1/admin/announcements/:id` | admin | Withdraws one. `404` if it is not there. |
+| `GET /v1/admin/overview` | admin | Readers (accounts, new this week, active today / 7 / 30 days from `lastSeenAt`, versions and platforms from `client`), open problem reports and reported things, error kinds this week, `dbStats` against 512 MB (null if refused), the largest collections (`$collStats`, kept 15 minutes; null if refused), the last backup (`meta`), and this process's own requests: uptime, the last 24 hours by hour (requests, 5xx, p50/p95) and the busiest and slowest routes, from memory. The database part is kept a minute. |
+| `GET /v1/admin/errors?status=open\|fixed\|all` | admin | `{errors: [{sig, name, message, frames, count, recent, versions, platforms, firstAt, lastAt, fixedIn, status, reopened}]}`, one row a kind, the most recently seen first. A kind fixed in a version and since seen in that version or a later one is `open` again (`reopened`). |
+| `POST /v1/admin/errors/:sig` | admin | `{fixedIn: "1.5.12"}` or `{fixedIn: null}` (open again). `404` for a kind there is no record of. |
+| `POST /v1/errors` | — | An app's batch of error kinds, once a session: `{version, platform, kinds: [{name, message, frames, count, version?}] (≤20)}`, body ≤24 KB, 6 an hour per address. Never signed in (a token sent is ignored). Scrubbed again, then one upsert per kind (`$inc`); at most 100 new kinds a day. `202 {counted}`. |
 | `PUT /v1/admin/notice` | admin | `{version (two to four whole numbers with dots, or null), note? (≤160, spaces folded)}` → `{version, note, at}`. `version: null` takes the notice down. `400` for a malformed version or a note that is not text. Seen by every app at once (the kept copy is dropped). Stored as the `notice` document in `settings`. |
 | `GET /v1/admin/settings` · `PUT /v1/admin/settings` | admin | `{publicPosting: boolean}` → `{publicPosting}`. |
 | `POST /v1/problems` | optional | A problem report from Settings → Report a problem: `{message (1–2000 characters), diagnostics? (text, ≤64 KB), version (two to four whole numbers with dots), platform ("windows" \| "android" \| "macos" \| "linux"), contact? (an email address)}` → `201 {id}`. Signed in, the account and its handle are kept with it and `contact` is ignored; signed out, `contact` is kept if given (normalised; `400` if it is not an address). Longer text is refused (`400`), not cut; control characters are stripped (the diagnostics keep their line breaks and tabs). `429` past 10 a day from one address (every attempt counts, before the body is read) or 5 a UTC day from one account (`tallies`); `503` with a plain message while 1,000 are open; `413` for a body over 160 KB. Never logged. Apps from 1.5.7 send it, and offer to email instead when it fails (an older server answers `404`). See `problems` under stored data. |
@@ -353,9 +360,20 @@ Ten gigabytes in seven days is some 3,000 app-hours a day: 200 readers with
 the app open eight hours a day use about half of it. A full fetch of the
 sync document still happens when another device wrote, and once a day.
 
+Since 1.5.12 the app sends only the figures that moved (a minute read is
+the week's minutes alone; all of them every six hours), and the server
+reads and asks back only those, so the camp is not read on every save:
+a minute's save brings back 617 bytes, where it was 4,362. Measured again
+with `node scripts/load.mjs --app 1.5.10|1.5.11|1.5.12` on 2026-10-23: about
+**0.47, 0.41 and 0.34 MB an hour an open app** (1.5.11 already sent nothing
+when nothing had moved). The script prices each kind of request once, so
+the board's half-minute cache is not in these figures: they are the high side.
+
 **Transfer in.** What the server writes to the database. A save of figures
 with something new is a few hundred bytes since 1.5.11 (only the parts that
-moved are `$set`; the camp, 3 KB, used to go every time). The sync document
+moved are `$set`; the camp, 3 KB, used to go every time). A shared library
+sent again unchanged (1.5.12's app resends it every six hours) is not
+written: each is kept with a hash of its books. The sync document
 is the large part: every push writes it whole (its gzip, as BSON `Binary`).
 Since 1.5.3 every signed-in reader's state is kept here, not two in five.
 Modelled (sync audit, section 2): a typical reader sends about 8 pushes a
@@ -363,9 +381,10 @@ day of a 30 KB document, 0.24 MB; a heavy one (500 books, 2,000 highlights,
 three devices) about 30 of 520 KB, 15.6 MB. 1.5.11's app holds highlights and
 notes back while a book is open (they go up when it closes, when the app is
 hidden, or after five minutes), which the audit puts at a third to a fifth of
-a heavy reader's pushes. With one reader in ten heavy, transfer *in* is the
-first limit the cluster meets, at some 800 daily readers before that change
-and some 2,500 after it.
+a heavy reader's pushes. With one reader in ten heavy, transfer *in* was the
+first limit the cluster met, at some 800 daily readers before that change;
+worked out again with 1.5.11 and 1.5.12 together (sync audit, section 4) it
+is some 2,200, and transfer *out* (about 1,500) now comes first.
 
 Those are the bytes of the documents. The server also asks for zlib on the
 wire (`MONGO_COMPRESSORS`), which makes a profile with a full camp about a
@@ -389,7 +408,10 @@ about 110 MB of 512; 840 heavy ones fill it. What grows without end is what
 readers write (posts, threads, replies: under 1 KB each) and the sync
 document (25 to 30 KB a year of modest reading, far more for a heavy
 highlighter; 2 MB at most, and the app warns the reader from 1.6 MB);
-accounts nobody uses stay until deleted (no expiry yet). Everything else is
+accounts nobody uses stay until deleted, unless the owner switches on
+dormant accounts (`DORMANT_ACCOUNTS=on`, `src/dormant.js`, off by default:
+after 12 months unused one email, and 60 days later the sync document and
+shared library go; see docs/deploy-1.5.12.md). Everything else is
 capped a reader or expires (sessions after 90 days unused, inbox events 60,
 raids 30, claimed gifts 30, kudos 21, duels 90, daily counts 4, resolved
 reports 180, problem reports 90 and at most 20 MB waiting at once).
@@ -404,13 +426,15 @@ comfortable at 200 apps, and close at several times as many with a burst of
 sign-ins on top. The VM's own figure is in `systemctl status leaflet-api`.
 
 **What gives first** as readers are added, under those assumptions (sync
-audit, section 2): with only light readers, the weekly transfer **out**
-(about 1,800 daily readers; the board kept its full half minute since 1.5.11
-moves that on); with even one reader in ten heavy, the weekly transfer
-**in**, nearly all of it whole sync documents (about 800 daily readers
-before 1.5.11's held-back pushes, about 2,500 after). Then storage, which
-only grows (sync documents, dormant accounts), then the operations a second
-(about 1,000 apps open at the same moment). The connections and the VM's
+audit, section 4, worked out again for 1.5.12): with only light readers,
+the weekly transfer **out**, at about 2,400 daily readers (was 1,800); with
+one reader in ten heavy, transfer **out** too, at about 1,500 (it was
+transfer **in**, at about 800, before 1.5.11's held-back pushes), and
+transfer in at about 2,200; with only heavy readers, both directions at
+about 350, nearly all of it whole sync documents. Then storage, which only
+grows (sync documents; dormant accounts unless switched on), then the
+operations a second (about 1,250 apps open at the same moment: 0.08 an app
+in the 1.5.12 load run). The connections and the VM's
 processor are further off; its memory is the one to watch. These are a
 model from the code's shapes, not readings of the live cluster: the
 cluster's Metrics (Network in and out, Data Size) are the figures that
@@ -422,6 +446,7 @@ count.
 node scripts/load.mjs                 # 200 readers; an hour of open apps in two minutes
 node scripts/load.mjs --latency 40    # every trip to the database 40 ms longer
 node scripts/load.mjs --plans         # the plan of every query each request makes
+node scripts/load.mjs --app 1.5.12    # the publishes as that app makes them (1.5.10, the default, 1.5.11 or 1.5.12)
 node scripts/load.mjs --latency 40 --span 10 --seconds 600   # ten minutes, at the apps' own pace
 ```
 
@@ -449,8 +474,11 @@ ObjectId, a short-lived password-reset record, nine small community
 collections that reference it (`libraries` is keyed by it too), and the
 public layer's nine (`quoteTallies`, `tallies`, `reactions`, `communities`,
 `threads`, `replies`, `reports`, `blocks`, `suspensions`), one settings
-document, `deletions` (the ids of accounts deleted in the last 45 days), and
-`problems` (the problem reports readers send from Settings, signed in or not).
+document, `deletions` (the ids of accounts deleted in the last 45 days),
+`problems` (the problem reports readers send from Settings, signed in or not),
+and three that hold nothing about any reader: `errorKinds` and `errorFixes`
+(the kinds of error the apps report by themselves, anonymously) and `meta`
+(when the last backup went through).
 
 **`accounts`** — one per account
 - `_id` — ObjectId
@@ -461,6 +489,10 @@ document, `deletions` (the ids of accounts deleted in the last 45 days), and
 - `createdAt`, `passwordChangedAt` — dates
 - `passwordResets` — when the password was reset with an emailed code, the last 365 days only (for the 3-a-year limit)
 - `suspendedUntil` — only if an admin suspended the reader, or the account was made with (or changed to) an address whose suspension had not ended: a copy of the profile's, so that deleting the profile and making another does not end it early; `null` once lifted
+- `lastSeenAt` — the day the account was last used (a sign-in, or a request of its app), written at most once a UTC day (`src/dormant.js` `noteSeen`); only while dormant accounts or the count of active readers is on (`ACTIVE_READERS`, on unless `off`)
+- `client` — `{version, platform}`: the Leaflet version (`1.5.12`) and kind of device (`windows`, `android`, `macos`, `linux`) the account was used from that day, from the app's `X-Leaflet-Client` header, on the same write as `lastSeenAt` (absent for an app older than 1.5.12). For the owner's count of versions in use (`GET /v1/admin/overview`)
+- Index: `{lastSeenAt}` sparse (the overview's active readers; the dormant sweep)
+- `dormantWarnedAt`, `dormantRemoveAfter`, `dormantClearedAt` — only with dormant accounts on (`DORMANT_ACCOUNTS=on`, off by default): when the one email about an unused account went, the day its sync document and library go unless it is used before, and when they went (or that there was nothing to remove). All three are taken away the next time the account is used
 
 **`sessions`** — one per signed-in device
 - `_id` — SHA-256 (hex) of the session token
@@ -515,7 +547,8 @@ document, `deletions` (the ids of accounts deleted in the last 45 days), and
 **`libraries`** — only if the reader uploaded one (`PUT /v1/library/me`), which only a reader who shares a profile can. Replaced whole by each upload; kept until the reader deletes it, goes private, or deletes the profile or account
 - `_id` — the account's ObjectId
 - `books` — up to 3000 of `{key (≤160, lower-case), title (≤160), author (≤80) | null, state (reading, finished or unread), percent (0–100)}`. No files, covers, highlights or dates
-- `updatedAt` — date
+- `updatedAt` — date (of the last upload that changed the list)
+- `hash` — a SHA-256 of `books` as stored, so that the same list uploaded again is not written (since 1.5.12)
 - Indexes: none beyond `_id`
 
 **`posts`** — one per finished book, review or quote a reader posted; kept until the reader deletes it, an admin removes it, or the profile or account is deleted (hidden, not deleted, while its reader is private or suspended, and while reports have hidden it)
@@ -594,6 +627,20 @@ document, `deletions` (the ids of accounts deleted in the last 45 days), and
 **`deletions`** — one per deleted account, **for 45 days** (deleted automatically), so that restoring a backup deletes again what was deleted after it was taken (see [docs/backups.md](../docs/backups.md))
 - `_id` — the deleted account's ObjectId; `at` — date. Nothing else: no email, no handle
 - Index: `{at}` with a TTL
+
+**`errorKinds`** — not per reader: one per kind of error the apps report by themselves (`POST /v1/errors`, `src/errorKinds.js`), per version, platform and UTC day. **Deleted automatically 90 days after that day.** Sent anonymously (never signed in), from readers signed in or not, unless "Send error reports" is off in the app's Settings; nothing about the sender is stored, not even an IP address (the per-address limit is counted in memory only)
+- `_id` — `<sig>:<version>:<platform>:<day>`; `sig` — the first 32 hex digits of the SHA-256 of the scrubbed name, message and frames
+- `name` (≤60), `message` (≤200) — scrubbed on the device and again here: paths, file names, URLs, emails, long ids, numbers and anything quoted are replaced by `<path>`, `<file>`, `<url>`, `<email>`, `<id>`, `#`, `<q>`
+- `frames` — up to 5 places in the code, `function@file` with the build's hash, line and column taken off (`openBook@assets/LibraryPage.js`, `panic@sync/cloud.rs`)
+- `version`, `platform`, `day`, `at` (the day's start, for the TTL); `count` — how many times; `firstAt`, `lastAt`
+- At most 100 new kinds a day are taken; past that, only kinds already there are counted
+- Indexes: `{at}` with a 90-day TTL; `{sig}`
+
+**`errorFixes`** — one per error kind the admin marked fixed: `_id` (the kind's `sig`), `fixedIn` (a version), `at`. Index: `{at}` with a 180-day TTL
+
+**`meta`** — small facts kept by the server's other processes. Today one document: `_id: "lastBackup"`, written by the nightly backup (`src/backup/run.js`, `src/backup/note.js`) after a run that went through: `at`, `sizeMB`, `parts`, `collections`, `documents`, `where` (`drive` or `folder`). Nothing about any reader
+
+**`settings`** also holds `_id: "announcements"`: the admin's one-time messages to readers (`items`, at most 3 live: `id`, `title`, `body`, `link` (a label and an https URL, or a label and one of the app's action keys), `audience`, `at`, `expiresAt`), sent with `GET /v1/notice`. Nothing about any reader
 
 **`clubs`** — one per book club; kept until its last member leaves or is deleted
 - `name` (≤60); `code` — the 8-character join code (unique)

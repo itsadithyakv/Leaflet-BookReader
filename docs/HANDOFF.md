@@ -1,5 +1,9 @@
 # Handoff — 2026-10-21
 
+> **Read [owner-handbook.md](owner-handbook.md) first** (2026-10-23). It has
+> where everything lives, the server, backups and Google sign-in, the log, and
+> the open items. This page covers the state of features as of 1.5.10.
+
 A snapshot for the next session, not permanent documentation. Delete it once
 acted on. The durable reference is [docs/README.md](README.md); how to release
 is in [deploy.md](deploy.md) (the checklist) and

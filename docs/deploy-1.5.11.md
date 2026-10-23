@@ -1,5 +1,8 @@
 # Deploying 1.5.11's server — the run sheet
 
+> **Superseded by [deploy-1.5.12.md](deploy-1.5.12.md)**, which carries these
+> changes and 1.5.12's in one deploy. Kept for the record.
+
 Four small changes from [the sync audit](sync-audit.md), one deploy. None of
 them needs a new secret, an environment value, an npm package, an index or
 a migration, and none changes what the app sends or reads: 1.5.10's app and

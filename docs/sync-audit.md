@@ -10,6 +10,11 @@ touched.
 another agent during the audit, so their line numbers move. Each citation
 names the function as well as the line.
 
+**Since then:** the top items were fixed in 1.5.11 and the deferred ones in
+1.5.12 (2026-10-23). What each finding came to, and the capacity worked out
+again with both, are in [section 4](#4-after-1511-and-1512) at the end; the
+sections before it are the audit as it was written.
+
 ## The four earlier fixes, checked
 
 | Fix | Holds? | Where |
@@ -208,6 +213,128 @@ for a mix.
    - cap problem-report bytes (C7).
 
    Then the client's size warning (D2).
+
+## 4. After 1.5.11 and 1.5.12
+
+### What each finding came to
+
+| # | Status | Where |
+|---|---|---|
+| D1 | Fixed in 1.5.11: `apply` merges with the rows as they are now, inside its transaction. | `sync/store.rs` `apply` |
+| D2 | Warned in 1.5.11 (from 1.6 MB, not sent past 2 MB). The document still grows (C4 below). | `cloud::sync_with` |
+| D3 | Fixed in 1.5.11: stamps bounded to the server's (or Google's) clock. | `sync/clock.rs`, `merge::bounded` |
+| D4 | Fixed in 1.5.11: only the reader's acts undo a removal. | `BookEntry::revived_at` |
+| D5 | Fixed in 1.5.11 (server). | `deletion.js`, `routes/state.js` |
+| W1, W3 | Fixed in 1.5.11. | `owner.rs`, `shared_doc.rs` |
+| **W2** | **1.5.12**: "Start empty" writes a removal, stamped now, of every book, bookmark, highlight and collection the account held that this library does not have (`cloud::emptied`); removals carry no titles or words, and a book removed so is not counted as finished. A device that still holds the old library loses it at its next sync instead of merging it back. Not covered: reading days, focus sessions, Pip's purchases, plantings and harvests (union or larger-of merges, with no removal in the document), and Pip's look, camp and pace (newest wins); and a device offline longer than the removals are kept (90 days). | `sync/cloud.rs` `emptied`, `replace_with_empty_on` |
+| W4 | The other agent's (1.5.11). | |
+| **W5** | **1.5.12**: the library sent is remembered per account and sent again six hours on, as the figures are; the server keeps a hash and does not write the same list again. | `commands/friends.rs` `library_due_at`, `library_current`; `server/src/routes/library.js` |
+| **W6** | **1.5.12**: a store whose state or files fail is noted and the run goes on: the next store runs, what it brought reaches the account, the claim is made, the others' files move; the run then reports the account's error, else the first store's. | `commands/backup.rs` `execute` |
+| **W7** | **1.5.12**, as far as it goes without a real Drive: a test that the write names the revision read (`If-Match`) as a media upload; and a guard in case Drive ignores it: after a write, the revisions between the one read and the one there now are fetched from the file's history, and merged in and written again if they hold anything the write lacked (`DocStore::written_between`). Whether Drive honours `If-Match`, and whether its revision list shows every write a few seconds apart, are still untried on real Drive; a history that cannot be read is passed over, leaving the gap of one sync the audit found. | `sync/drive.rs` `write_over`, `written_between`, `revisions_between`; `sync/shared_doc.rs` `exchange` |
+| C1 (1) | Done in 1.5.11: highlights and notes wait while a book is open. (2), sectioned documents: not done. | `services/pushHold.ts` |
+| C2, C5, C9 | Not done. | |
+| C3, C7, C8 | Done in 1.5.11 (server). | |
+| **C4** | **1.5.12**, in part (below). | `merge::compact` |
+| **C6** | **1.5.12**: built, off by default. | `server/src/dormant.js`, [deploy-1.5.12.md](deploy-1.5.12.md) |
+| **Profile saves** | **1.5.12**: the app sends only the figures that moved since it last sent them to this account (the week's minutes with their week), and all of them six hours after the last whole send, when forced, or for another account. The server reads only the figures a save names, and asks back only what another request may have changed. A minute's save: 4,362 bytes from the database before, 617 after (`node scripts/load.mjs`). Server and app agree: every server since before 1.5.10 takes any figure alone; a 1.5.12 server answers a save naming all figures, or none, in full, as older apps expect. | `commands/social.rs` `profile_to_send`; `server/src/routes/social.js` `heldViewFor` |
+
+### C4: what could be trimmed, and what could not
+
+All the trimming rules are now one function, `merge::compact`, which every
+merge ends with, and `has_news` holds the store's copy to it. So a copy that
+differs only by detail the merge let go is no news: trimming alone never
+sends a whole document, and an older app that has not trimmed cannot set two
+devices sending it back and forth. Each rule looks at one entry and the day,
+so a device that has trimmed and one that has not merge to the same document
+(tested both ways, with news on each side).
+
+| Detail | Rule | Since |
+|---|---|---|
+| Per-device minutes of a day (`by_device`) | folded into the day's total after 90 days | 1.5.7 (moved into `compact`) |
+| A removed book (not finished), bookmark, highlight, collection | gone after 90 days | before 1.5 (moved) |
+| A removed highlight's words | not kept in the removal | 1.5.11 (at deletion) |
+| A removed, finished book | kept for good (the finished count goes by it), now without its place in the book after 90 days | 1.5.12 |
+
+That is all that could go without dropping meaning. Measured on a simulated
+heavy document (`what_compacting_saves_on_a_heavy_document`, ignored test):
+the places of 300 old finished books are about 1.7 KB of gzip. The rest of
+what grows is what the app reads:
+
+- **Reading days**: the streak, the calendar, the stats and the goal bonuses
+  are worked out from them. A day is about 15 bytes of gzip; kept.
+- **Focus sessions, purchases, plantings, harvests**: Pip's seeds, garden and
+  rewards are replayed from every one of them on every device
+  (`habit::seeds::count_minutes` orders sessions by their end, takes their
+  minutes from each day's pool, and pours water at their end time), and the
+  badges and earned skins (`pip::earned`, sittings per book), the shelf and
+  the diaries read them session by session. Folded into daily totals, a new
+  device would grow a different garden and a different seed balance from the
+  same reading. Folding them needs a checkpoint in the economy itself (the
+  seeds, water and rewards a device has replayed up to a day, kept in the
+  document and agreed between devices), which is Pip's code, outside this
+  work. Proposal for later: a `ledgerCheckpoint {before: date, seeds, water,
+  sessionsDone, longestFocus, sittingsByBook}` written once a session is more
+  than a year old, with `ledger_from` starting from it; sessions before it
+  then fold into daily totals, purchases into owned items and a balance.
+- **Live highlights and notes**: the reader's own words.
+
+So the document still grows at about 25 to 30 KB a year for a modest reader,
+and mostly with highlights for a heavy one. Dormant accounts (C6, when the
+owner switches it on) are what take storage back.
+
+### Capacity, worked out again
+
+What changed in the model, and from where:
+
+| | Typical | Heavy | Source |
+|---|---|---|---|
+| Pushes a day | 8 → **7** | 30 → **~8** | 1.5.11 holds highlights and notes while a book is open (the audit's ÷3 to ÷5; ÷4 taken). Not measured on a real library. |
+| Full pulls a day | 3 | 8 → **~5** | fewer pushes by the other devices |
+| Document | 30 KB | 520 KB (−2 KB) | `compact`: next to nothing |
+| Out, besides the state, an open app-hour | 0.48 → **0.34 MB** | same | `scripts/load.mjs`, 200 apps, this machine: 0.47 (1.5.10's app), 0.41 (1.5.11's), 0.34 (1.5.12's). The board's half-minute cache is not counted in it (the script prices each kind of request once), so this is the high side. |
+| In, besides the state | 0.04 MB | 0.10 MB | the camp no longer in every save (1.5.11); a library resent unchanged is not written (1.5.12) |
+
+Per reader per day:
+
+| | Typical | Heavy |
+|---|---|---|
+| State in | 7 × 30 KB ≈ 0.21 MB | 8 × 515 KB ≈ 4.1 MB |
+| State out | 3 × 30 KB ≈ 0.09 MB | 5 × 515 KB ≈ 2.6 MB |
+| Other out | 1.5 h × 0.34 ≈ 0.51 MB | 4 h × 0.34 ≈ 1.4 MB |
+| Other in | ≈ 0.03 MB | ≈ 0.1 MB |
+| **Total in / out** | **≈ 0.24 / 0.60 MB** (was 0.28 / 0.81) | **≈ 4.2 / 4.0 MB** (was 15.7 / 6.1) |
+
+How many daily readers fit:
+
+| Limit | All typical | All heavy | 90 % typical + 10 % heavy |
+|---|---|---|---|
+| **Transfer in** (1.43 GB/day) | ~6,000 (was 5,100) | ~340 (was 90) | ~2,200 (was **790**) |
+| **Transfer out** (1.43 GB/day) | **~2,400** (was 1,800) | ~360 (was 235) | **~1,500** (was 1,075) |
+| **Operations** (100/s) | ~6,600 (was 5,300) | ~2,500 (was 2,000) | ~6,000 (was 4,800) |
+| **Storage** (512 MB) | ~9,600 accounts | ~840 accounts | ~4,700 accounts |
+| Storage, dormant accounts on | ~9,600 used in the last 14 months, plus ~5 KB for each one cleared | ~840 likewise | ~4,700 likewise |
+
+Operations: the load script's 1.5.12 run made 16 a second for 200 open apps
+(0.08 an app, against the README's 0.1), with no request at all for a
+publish with nothing new.
+
+**What gives first now:**
+
+- With one reader in ten heavy, the weekly **transfer out**, at about 1,500
+  daily readers (was transfer in, at about 800): the pulse, the inbox and
+  the board, and the heavy tenth's full pulls. Then transfer in at about
+  2,200.
+- With only light readers, still transfer out, at about 2,400.
+- With only heavy readers, transfer in and out together, at about 350: the
+  whole-document pushes and pulls. Sectioned documents (C1 (2)) are what
+  moves that.
+- Then storage, which still only grows unless dormant accounts are switched
+  on; then operations.
+
+Not counted, and each would move the out figures further: the board's
+half-minute cache (one board read per half minute for the whole server
+instead of per request), C2 (a 409 still fetches the document twice), C5
+(every device still fetches the whole document once a day).
 
 ## What could not be verified
 

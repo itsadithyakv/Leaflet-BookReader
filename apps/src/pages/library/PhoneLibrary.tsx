@@ -5,6 +5,7 @@ import { UiIcon } from "../../components/UiIcon";
 import { PhoneSheet, SheetChoice } from "../../components/ui/PhoneSheet";
 import { getSessionProgress, sessionElapsedMs, type ActiveSession } from "../../store/habitStore";
 import { useLongPress } from "../../hooks/useLongPress";
+import { CloseWhenHidden } from "../../hooks/pageShown";
 import { FocusDouble } from "../../components/focus/FocusDouble";
 import { FOCUS_LENGTHS, focusLengthsWith } from "../../components/focus/focusDeal";
 
@@ -101,6 +102,7 @@ export const PhoneFocusStrip = ({
       </button>
       {open && (
         <PhoneSheet title="Focus session" onClose={() => setOpen(false)}>
+          <CloseWhenHidden onClose={() => setOpen(false)} />
           <div className="sheet-choices" role="group" aria-label="Session length">
             {focusLengthsWith(duration).map((minutes) => (
               <SheetChoice key={minutes} chosen={duration === minutes} onClick={() => setDuration(minutes)}>
@@ -187,6 +189,7 @@ export const PhoneShelfTools = ({
       </button>
       {open && (
         <PhoneSheet title="Sort and filter" onClose={() => setOpen(false)}>
+          <CloseWhenHidden onClose={() => setOpen(false)} />
           <div className="sheet-choices" role="group" aria-label="Show as">
             <SheetChoice chosen={filters.view === "grid"} onClick={() => setFilter({ view: "grid" })}>
               <UiIcon name="grid" size={17} /> Covers

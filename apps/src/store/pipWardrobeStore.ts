@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { pipService, shopError, type PipLook, type PipOverview } from "../services/pipService";
-import { DEFAULT_SIGNATURE, DEFAULT_VARIANT, PREMIUM_MOVES } from "../pip/shop";
+import { DEFAULT_SIGNATURE, DEFAULT_VARIANT, PREMIUM_MOVES } from "../pip/moves";
 import type { ShopKind } from "../pip/shop";
 
 type WardrobeState = {

@@ -7,6 +7,13 @@
 //   node scripts/load.mjs --latency 40         every trip to the database 40 ms longer
 //   node scripts/load.mjs --pool 5             the server's MONGO_MAX_POOL
 //   node scripts/load.mjs --span 20 --seconds 300   the hour's first 20 minutes, at four times the pace
+//   node scripts/load.mjs --app 1.5.12         what that version of the app sends (below)
+//
+// `--app`: which app's publishes are replayed. 1.5.10 (the default, as every
+// figure here was measured before 1.5.12) sends the whole profile every
+// time, a minute read or not; 1.5.11 sends nothing when nothing moved, and
+// the whole profile when anything did; 1.5.12 sends only the figures that
+// moved (a minute read: the minutes and their week).
 //
 // What it prints: each request's database operations and the plan each took
 // (any collection scan is marked), p50/p95 latency by request, the most
@@ -59,6 +66,14 @@ const SECONDS = option("seconds", 120);
 const BACKGROUND = option("background", 2000);
 const LATENCY = option("latency", 0);
 const POOL = option("pool", 0);
+const APP = (() => {
+  const at = process.argv.indexOf("--app");
+  return at > 0 ? String(process.argv[at + 1]) : "1.5.10";
+})();
+if (!["1.5.10", "1.5.11", "1.5.12"].includes(APP)) {
+  console.error("load: --app is 1.5.10, 1.5.11 or 1.5.12.");
+  process.exit(1);
+}
 /** How much of an hour of open apps is replayed, in seconds: all of it unless `--span` (minutes) says less. */
 const HOUR = Math.min(60, Math.max(1, option("span", 60))) * 60;
 /** Seconds of what is replayed to a second of the clock. */
@@ -335,6 +350,11 @@ const requests = {
     reader.minutes += 1;
     return call(reader, "PUT /v1/profile/me (a minute read)", "PUT", "/v1/profile/me", figures(reader.n, reader.minutes));
   },
+  // What 1.5.12 sends for a minute read: the minutes, with their week.
+  publishMinutes: (reader) => {
+    reader.minutes += 1;
+    return call(reader, "PUT /v1/profile/me (a minute, 1.5.12)", "PUT", "/v1/profile/me", { weekKey: week, weekMinutes: reader.minutes });
+  },
   following: (reader) => call(reader, "GET /v1/leaderboard?scope=following", "GET", `/v1/leaderboard?scope=following&week=${week}`),
   everyone: (reader) => call(reader, "GET /v1/leaderboard", "GET", `/v1/leaderboard?week=${week}`),
   gifts: (reader) => call(reader, "GET /v1/gifts", "GET", "/v1/gifts"),
@@ -434,8 +454,9 @@ for (const reader of active) {
   const what = doing(reader);
   tally[what] += 1;
   const shared = reader.visibility !== "private";
-  const publishSame = shared ? requests.publishSame : async () => undefined;
-  const publishNew = shared ? requests.publishNew : async () => undefined;
+  // 1.5.11 and 1.5.12 send nothing when nothing moved; 1.5.12 sends a minute alone.
+  const publishSame = shared && APP === "1.5.10" ? requests.publishSame : async () => undefined;
+  const publishNew = shared ? (APP === "1.5.12" ? requests.publishMinutes : requests.publishNew) : async () => undefined;
   const phase = (reader.n * 7919) % 300;
   const steps = [];
   // The pulse, on every tab: the inbox, a publish, the board of the readers followed, gifts.
@@ -504,7 +525,8 @@ for (const reader of active) {
 }
 plan.sort((a, b) => a.at - b.at);
 
-console.log(`\nload: ${USERS} apps open (${tally.idle} idle, ${tally.reading} reading, ${tally.board} on the board, ${tally.camp} in the camp): ${HOUR / 60} minutes of them in ${SECONDS} s, which is ${SQUEEZE.toFixed(0)} times as fast as they really go`);
+console.log(`\nload: the app's publishes as ${APP} makes them`);
+console.log(`load: ${USERS} apps open (${tally.idle} idle, ${tally.reading} reading, ${tally.board} on the board, ${tally.camp} in the camp): ${HOUR / 60} minutes of them in ${SECONDS} s, which is ${SQUEEZE.toFixed(0)} times as fast as they really go`);
 let peakConnections = 0;
 let peakRss = 0;
 let peakHeap = 0;

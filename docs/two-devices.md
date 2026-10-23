@@ -302,7 +302,12 @@ files only, having sent its own account nothing of the other's.
 **A fresh library meets an old account copy.** An account used before 1.5.3
 may hold reading from a shared laptop. A library started fresh does not merge
 it blind: its first sync reports `accountHolds` (the copy's book count) and
-asks "Use it" or "Start empty"; starting empty replaces the copy.
+asks "Use it" or "Start empty"; starting empty replaces the copy with
+removals of its books, bookmarks, highlights and collections (all but the
+ones this library has itself), so a device that still holds the old library
+loses it at its next sync rather than merging it back (1.5.12). Its reading
+days, focus sessions and Pip's records have no removal and can come back
+from such a device; and the removals last 90 days, as every removal does.
 
 **The bridge.** While `BRIDGE_STATE_JSON` is on (1.5.3), a signed-in device
 keeps its own account's `state.json` up to date, so a phone that is signed

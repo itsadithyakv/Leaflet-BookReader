@@ -162,7 +162,6 @@ export const AdminPanel = ({ showToast }: { showToast: (message: string) => void
           </ul>
         )}
       </section>
-      <UpdateNoticeCard showToast={showToast} />
     </>
   );
 };
@@ -174,7 +173,7 @@ export const AdminPanel = ({ showToast }: { showToast: (message: string) => void
  * Store's page; Take down stops it. Only apps from 1.4.2 on ask, so readers
  * on older ones are not reached by it.
  */
-const UpdateNoticeCard = ({ showToast }: { showToast: (message: string) => void }) => {
+export const UpdateNoticeCard = ({ showToast }: { showToast: (message: string) => void }) => {
   const [current, setCurrent] = useState<UpdateNotice | null>(null);
   const [version, setVersion] = useState("");
   const [note, setNote] = useState("");
@@ -206,7 +205,7 @@ const UpdateNoticeCard = ({ showToast }: { showToast: (message: string) => void 
   };
 
   return (
-    <section className="paper-surface mt-6 rounded-xl p-4 sm:p-6" aria-labelledby="notice-title">
+    <section className="paper-surface rounded-xl p-4 sm:p-6" aria-labelledby="notice-title">
       <SectionHeader eyebrow="Only you see this" title="Update notice" id="notice-title" />
       <p className="mt-2 text-xs text-on-surface-variant">
         {current?.version ? `Up now: ${current.version}${current.at ? `, since ${relativeTime(current.at)}` : ""}.` : "Nothing is up."}
