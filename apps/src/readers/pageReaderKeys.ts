@@ -32,6 +32,7 @@ export type PageAction =
   | "fitWidth"
   | "fitPage"
   | "escape"
+  | "readAloud"
   | "screenDown"
   | "screenUp"
   | "lineDown"
@@ -128,6 +129,15 @@ export const PAGE_BINDINGS: Binding[] = [
     keys: ["↑"],
     matches: (press) => plain(press) && press.key === "ArrowUp",
     label: (context) => (scrolling(context) ? "Scroll up a little" : "Scroll up a little; at the top, the page before"),
+    group: "Reading"
+  },
+  {
+    action: "readAloud",
+    keys: ["R"],
+    matches: (press) => plain(press) && letter(press, "r"),
+    // A comic is pictures: there are no words in it to read aloud.
+    when: (context) => context.kind === "pdf",
+    label: () => "Read aloud from here, or pause it",
     group: "Reading"
   },
   {

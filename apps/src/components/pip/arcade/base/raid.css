@@ -1,0 +1,623 @@
+/* ==== A raid: scout, plan, fight, end (the Magpie Lands, 2026-10-24; RaidFlow.tsx) =================================
+   The raid is the page, as the camp and the map are: it fills the picture's whole room under the camp's bar along the
+   top, the field as large as a whole number of device pixels lets it be (raidLayout.ts), the woods round it. Its two
+   canvases are a pixel to each of the field's, hard-edged. Paper chips and boards in the camp's chrome; nothing
+   blurred, nothing that shakes. */
+
+.pip-raid {
+  position: relative;
+  overflow: hidden;
+  color: var(--hud-ink);
+  background:
+    radial-gradient(rgba(20, 40, 20, 0.22) 1px, transparent 1.5px) 0 0 / 12px 12px,
+    #4a7a3c;
+}
+
+.pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-raid {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+}
+
+.pip-arcade .pip-base.is-stage[data-mode="stack"] > .pip-raid,
+.pip-arcade .pip-base.is-stage[data-mode="side"] > .pip-raid {
+  order: 5;
+  grid-column: 1 / -1;
+  grid-row: 5;
+  min-width: 0;
+  height: max(460px, calc(100dvh - 170px));
+  scroll-margin-top: 84px;
+  box-shadow:
+    0 0 0 2px var(--hud-line),
+    0 6px 0 2px var(--hud-drop);
+}
+
+.pip-raid-field {
+  position: absolute;
+  inset: 0;
+}
+
+.pip-raid-canvas {
+  position: absolute;
+  pointer-events: none;
+}
+
+.pip-raid-field-hit {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: default;
+}
+
+/* An approach's tag over its path, and a group's colour swatch wherever a group is named. */
+.pip-raid-swatch {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  flex: none;
+  background: var(--group, #ffd23f);
+  box-shadow: 0 0 0 1.5px var(--hud-line);
+}
+
+.pip-raid-tag {
+  position: absolute;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px 2px;
+  border: 0;
+  background: var(--hud-face);
+  box-shadow: 0 0 0 2px var(--hud-line);
+  color: var(--hud-ink);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  white-space: nowrap;
+  transform: translate(-50%, -50%);
+}
+
+.pip-raid-tag.is-target {
+  cursor: pointer;
+}
+
+.pip-raid-tag.is-target:hover,
+.pip-raid-tag.is-target:focus-visible {
+  outline: 2px dashed var(--group);
+  outline-offset: 2px;
+}
+
+.pip-raid-tag-count {
+  min-width: 14px;
+  padding: 0 3px;
+  background: var(--group);
+  box-shadow: 0 0 0 1.5px var(--hud-line);
+  text-align: center;
+}
+
+/* The scout's card and the planner: down the right of a wide field, across the foot of a tall one. */
+.pip-raid-side {
+  position: absolute;
+  top: calc(var(--raid-top, 0px) + 8px);
+  right: 12px;
+  z-index: 5;
+  width: min(330px, 42%);
+  max-height: calc(100% - var(--raid-top, 0px) - 16px);
+  overflow-y: auto;
+}
+
+.pip-raid[data-orient="tall"] .pip-raid-side {
+  top: auto;
+  right: 6px;
+  bottom: 6px;
+  left: 6px;
+  width: auto;
+  max-height: 50%;
+}
+
+.pip-raid-panel {
+  padding: 12px 14px 14px;
+  background:
+    radial-gradient(var(--hud-track) 1px, transparent 1.5px) 0 0 / 14px 14px,
+    var(--hud-face);
+  box-shadow:
+    0 0 0 2px var(--hud-line),
+    0 6px 0 2px var(--hud-drop);
+  color: var(--hud-ink);
+}
+
+.pip-raid[data-orient="tall"] .pip-raid-panel {
+  padding: 8px 10px 10px;
+}
+
+.pip-raid-panel-close {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  float: right;
+  margin-left: 8px;
+}
+
+.pip-raid-quirk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.pip-raid-quirk-chip {
+  gap: 6px;
+  font-weight: 800;
+}
+
+.pip-raid-info {
+  width: 26px;
+  height: 26px;
+}
+
+.pip-raid-quirk-told {
+  flex: 1 1 100%;
+  padding: 6px 8px;
+  background: var(--whim-butter, #ffe9a8);
+  box-shadow: 0 0 0 2px var(--hud-line);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.pip-raid-goals {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 4px;
+  font-size: 0.8125rem;
+}
+
+.pip-raid-goals > li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pip-raid-goals > li.is-feat {
+  font-weight: 800;
+}
+
+/* ---- the planner ---- */
+
+.pip-raid-plan-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 40px 8px 0;
+}
+
+.pip-raid-room {
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pip-raid-room.is-bad {
+  background: #ffd0c4;
+}
+
+.pip-raid-mark {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  background: #e0393e;
+  box-shadow: 0 0 0 1.5px var(--hud-line);
+  color: #fff;
+  font-size: 0.625rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.pip-raid-groups {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.pip-raid-group {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 0;
+  background: var(--hud-face);
+  box-shadow:
+    0 0 0 2px var(--hud-line),
+    0 3px 0 2px var(--hud-drop);
+  color: var(--hud-ink);
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  touch-action: none;
+  cursor: pointer;
+}
+
+.pip-raid-group.is-chosen {
+  background: var(--group);
+  box-shadow:
+    0 0 0 2px var(--hud-line),
+    0 0 0 4px var(--hud-face),
+    0 0 0 6px var(--hud-line);
+}
+
+.pip-raid-group.is-held {
+  outline: 2px dashed var(--hud-line);
+  outline-offset: -5px;
+}
+
+.pip-raid-group:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Refused: a moment dimmed, and back. Nothing moves. */
+.is-nudged {
+  animation: pip-raid-nudge 360ms ease-out;
+}
+
+@keyframes pip-raid-nudge {
+  30% {
+    filter: saturate(0.2) brightness(0.85);
+    opacity: 0.6;
+  }
+}
+
+.pip-raid-group-edit {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.35);
+  box-shadow: 0 0 0 2px var(--hud-line);
+}
+
+.pip-raid-ways {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.pip-raid-way {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border: 0;
+  background: var(--hud-face);
+  box-shadow: 0 0 0 2px var(--hud-line);
+  color: var(--hud-ink);
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.pip-raid-way.is-chosen {
+  background: var(--group);
+}
+
+.pip-raid-kinds {
+  display: grid;
+  gap: 4px;
+}
+
+.pip-raid-kinds > li {
+  display: grid;
+  align-items: center;
+  gap: 6px;
+  grid-template-columns: 26px 26px 26px 26px auto;
+}
+
+.pip-raid-step {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: var(--hud-face);
+  box-shadow: 0 0 0 2px var(--hud-line);
+  color: var(--hud-ink);
+}
+
+.pip-raid-step:disabled {
+  opacity: 0.4;
+}
+
+.pip-raid-count {
+  font-size: 0.9375rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.pip-raid-room-each {
+  color: var(--hud-ink-soft);
+  font-size: 0.6875rem;
+}
+
+.pip-raid-group-keys {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.pip-raid-toggle {
+  gap: 4px;
+  cursor: pointer;
+}
+
+.pip-raid-toggle.is-on {
+  background: var(--whim-butter, #ffe9a8);
+  font-weight: 800;
+}
+
+.pip-raid-go {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.pip-raid-likely {
+  display: flex;
+  min-height: 22px;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8125rem;
+  font-weight: 800;
+}
+
+.pip-raid-likely.is-waiting {
+  opacity: 0.55;
+}
+
+.pip-raid-band {
+  color: var(--hud-ink-soft);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.pip-raid-ghost {
+  position: fixed;
+  z-index: 50;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: var(--group);
+  box-shadow: 0 0 0 2px var(--hud-line);
+  color: var(--hud-ink);
+  font-size: 0.75rem;
+  font-weight: 800;
+  pointer-events: none;
+  transform: translate(-50%, -130%);
+}
+
+/* ---- the fight: the bar along the top, the orders at the foot ---- */
+
+.pip-raid-hud {
+  position: absolute;
+  top: calc(var(--raid-top, 0px) + 8px);
+  left: 50%;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transform: translateX(-50%);
+}
+
+.pip-raid-hud > .pip-base-chip {
+  gap: 4px;
+  background: var(--hud-face);
+  box-shadow:
+    0 0 0 2px var(--hud-line),
+    0 4px 0 2px var(--hud-drop);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pip-raid-hud > .pip-raid-bell.is-rung {
+  background: var(--whim-butter, #ffe9a8);
+}
+
+.pip-raid-hud > .pip-raid-bell.is-bad {
+  background: #ffd0c4;
+}
+
+.pip-raid-hud > .pip-raid-orders-left.is-spent {
+  color: var(--hud-ink-soft);
+}
+
+.pip-raid-dock {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  left: 12px;
+  z-index: 4;
+  display: flex;
+  width: fit-content;
+  max-width: calc(100% - 24px);
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 0 auto;
+  padding: 8px 10px 9px;
+  background: var(--hud-face);
+  box-shadow:
+    0 0 0 2px var(--hud-line),
+    0 6px 0 2px var(--hud-drop);
+}
+
+.pip-raid-dock .tactile-button.is-chosen {
+  background: var(--whim-butter, #ffe9a8);
+}
+
+/* What a tap may pick, while a group or the hero's aim waits for it. */
+.pip-raid-target {
+  position: absolute;
+  z-index: 3;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: crosshair;
+}
+
+.pip-raid-target:hover,
+.pip-raid-target:focus-visible {
+  outline: 2px dashed #fff6c2;
+  outline-offset: 0;
+}
+
+/* ---- the end card, over the field ---- */
+
+.pip-raid-end-wrap {
+  position: absolute;
+  inset: calc(var(--raid-top, 0px) + 8px) 8px 8px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow-y: auto;
+  pointer-events: none;
+}
+
+.pip-raid-end-wrap > * {
+  pointer-events: auto;
+}
+
+.pip-raid-end-card {
+  margin: auto;
+}
+
+.pip-raid-lines {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  margin: 2px 0;
+  font-size: 0.8125rem;
+  text-align: left;
+}
+
+.pip-raid-lines > li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pip-raid-lines > li.is-won {
+  font-weight: 800;
+}
+
+.pip-raid-lines > li.is-missed {
+  color: var(--hud-ink-soft);
+}
+
+.pip-raid-lines-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  margin: 0 2px;
+  background: var(--hud-track);
+  box-shadow: 0 0 0 1.5px var(--hud-line);
+}
+
+.pip-raid-end-keys {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .is-nudged {
+    animation: none;
+  }
+}
+
+/* An upright phone: the card across the foot is kept short, so the field above it can be large. The scout's card
+   says the third star's feat (the first two are always the nest and most of it); the planner's kinds go two a row. */
+.pip-raid[data-short] .pip-raid-side {
+  width: min(280px, 44%);
+}
+
+.pip-raid[data-short] .pip-raid-panel {
+  padding: 8px 10px 10px;
+}
+
+.pip-raid[data-short] .pip-raid-goals > li:not(.is-feat),
+.pip-raid[data-orient="tall"] .pip-raid-goals > li:not(.is-feat) {
+  display: none;
+}
+
+.pip-raid[data-short] .pip-lands-card-pic,
+.pip-raid[data-orient="tall"] .pip-lands-card-pic {
+  width: 34px;
+  height: 34px;
+}
+
+.pip-raid[data-orient="tall"] .pip-raid-scout .pip-lands-card-head {
+  margin-bottom: 2px;
+}
+
+.pip-raid[data-orient="tall"] .pip-raid-scout .pip-lands-keys {
+  margin-top: 4px;
+}
+
+.pip-raid[data-short] .pip-raid-kinds,
+.pip-raid[data-orient="tall"] .pip-raid-kinds {
+  grid-template-columns: 1fr 1fr;
+}
+
+.pip-raid[data-short] .pip-raid-kinds > li,
+.pip-raid[data-orient="tall"] .pip-raid-kinds > li {
+  grid-template-columns: 22px 24px 18px 24px auto;
+  gap: 3px;
+}
+
+.pip-raid[data-short] .pip-raid-step,
+.pip-raid[data-orient="tall"] .pip-raid-step {
+  width: 24px;
+  height: 24px;
+}
+
+.pip-raid[data-short] .pip-raid-group-edit,
+.pip-raid[data-orient="tall"] .pip-raid-group-edit {
+  gap: 6px;
+  padding: 6px;
+}
+
+.pip-raid[data-short] .pip-raid-go,
+.pip-raid[data-orient="tall"] .pip-raid-go {
+  margin-top: 6px;
+}
+
+/* A short room (a phone on its side): the bar and the orders stand in the field's far corner, past the camp, so the
+   field can take the room's whole height. */
+.pip-raid[data-short] .pip-raid-hud {
+  right: 8px;
+  left: auto;
+  flex-direction: column;
+  align-items: flex-end;
+  transform: none;
+}
+
+.pip-raid[data-short] .pip-raid-dock {
+  right: 8px;
+  left: auto;
+  max-width: 44%;
+  margin: 0;
+  padding: 6px;
+  gap: 6px;
+}

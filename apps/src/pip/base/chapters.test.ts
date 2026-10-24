@@ -49,6 +49,7 @@ import {
   prowlersCome,
   purseLeft,
   putBack,
+  raidBlocked,
   raidBoard,
   raidForecast,
   raidSummary,
@@ -371,18 +372,19 @@ describe("acorns past 1400", () => {
 describe("raids, 1.5.10", () => {
   const ready = { ...settle(newBase(0, DAY), at(3 * H)), acorns: 0, levels: { ...newBase(0, DAY).levels, burrow: 2, hut: 2 }, raidFrom: 0 };
 
-  it("offer a rematch of the last stronghold taken: a sure win, for a little, that moves nothing on", () => {
+  it("offer a replay of any stronghold taken (the Magpie Lands: it was a sure rematch of the last), that moves nothing on", () => {
     expect(rematchOf(ready)).toBeNull();
     const four = { ...ready, camps: 4 };
-    const rematch = rematchOf(four)!;
-    expect(rematch).toMatchObject({ kind: "rematch", n: 3, cost: 0 });
-    expect(raidForecast(four, rematch)).toMatchObject({ stars: 3, canSend: true, sure: true });
-    const sent = sendRaid(four, "rematch", at(3 * H))!;
-    expect(sent.end).toMatchObject({ won: true, stars: 3 });
+    // The last taken when none is said; any one taken by its number; never one not taken.
+    expect(rematchOf(four)).toMatchObject({ kind: "rematch", n: 3, cost: 0 });
+    expect(rematchOf(four, 0)).toMatchObject({ kind: "rematch", n: 0 });
+    expect(rematchOf(four, 4)).toBeNull();
+    // Fought for stars like any raid: nothing sure about it.
+    expect(raidForecast(four, rematchOf(four, 0)!).sure).toBe(false);
+    const sent = sendRaid(four, "rematch", at(3 * H), 0)!;
+    expect(sent.end.won).toBe(true);
     expect(sent.state.camps).toBe(4);
-    expect(sent.end.loot).toBeLessThan(rematchOf({ ...four, camps: 5 })!.loot * 3);
-    // Even the hardest stronghold, once taken, is a sure thing.
-    expect(raidForecast({ ...ready, camps: 30 }, rematchOf({ ...ready, camps: 30 })!).stars).toBe(3);
+    expect(raidBlocked(four, "rematch", at(3 * H), 4)).toBe("none");
   });
 
   it("show a board: the rematch, the next stronghold, and the King from chapter 10, none of them for acorns", () => {

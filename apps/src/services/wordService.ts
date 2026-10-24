@@ -69,15 +69,36 @@ export const wordService = {
     await invoke("words_review", { reviews });
   },
 
+  /** Removes words: each is left as a tombstone (so the removal reaches the other copies), and can be put back. */
   async remove(ids: string[]): Promise<void> {
     if (ids.length === 0) {
       return;
     }
     if (!isTauri()) {
       const gone = new Set(ids);
-      previewWrite(previewAll().filter((row) => !gone.has(row.id)));
+      const now = new Date().toISOString();
+      previewWrite(previewAll().map((row) => (gone.has(row.id) && !row.deletedAt ? { ...row, updatedAt: now, deletedAt: now } : row)));
       return;
     }
     await invoke("words_delete", { ids });
+  },
+
+  /**
+   * The undo of `remove`: the words come back as they were, the quiz's box
+   * included, dated after their removal so the other copies take them back
+   * too (`commands/words.rs`). Resolves with the words put back.
+   */
+  async restore(ids: string[]): Promise<SavedWord[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+    if (!isTauri()) {
+      const back = new Set(ids);
+      const now = new Date().toISOString();
+      const all = previewAll().map((row) => (back.has(row.id) && row.deletedAt ? { ...row, updatedAt: now, deletedAt: null } : row));
+      previewWrite(all);
+      return wordsOf(all.filter((row) => back.has(row.id)));
+    }
+    return wordsOf(await invoke<WordRow[]>("words_restore", { ids }));
   }
 };

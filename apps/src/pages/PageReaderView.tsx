@@ -98,6 +98,10 @@ import { ReadingLight, ReadingLightRows } from "../readers/ReaderLight";
 import { useReaderAwake } from "../readers/readerAwake";
 import { RotationChoice, SheetRow } from "../readers/text/ReaderTouchRows";
 import { AudioLines } from "lucide-react";
+import { usePdfReadAloud } from "../readers/readAloud/usePdfReadAloud";
+import { ReadAloudPill } from "../readers/readAloud/ReadAloudPill";
+import { ReadAloudMenuRow } from "../readers/readAloud/ReadAloudMenuRow";
+import type { ReadAloudControls } from "../readers/readAloud/useReadAloudCore";
 import { openAmbiencePopover, useAmbienceState } from "../ambience";
 import "../readers/pdfTextLayer.css";
 import "./PageReaderView.css";
@@ -291,6 +295,8 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
   const pendingProgressRef = useRef<number | null>(null);
   const lastKeyTurnRef = useRef(0);
   const clickedControlRef = useRef<Element | null>(null);
+  // Read aloud (readers/readAloud/usePdfReadAloud.ts), for the keys, which are bound before it is made.
+  const readAloudRef = useRef<ReadAloudControls | null>(null);
   // Back to where you were (readers/jumpHistory.ts): the lines left by jumps, for this visit.
   const [jumps, setJumps] = useState<JumpHistory>(NO_JUMPS);
   const jumpsRef = useRef<JumpHistory>(NO_JUMPS);
@@ -1716,6 +1722,9 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
           setBookmarkPanelOpen(false);
           setMorePanelOpen(false);
           closeAmbiencePopover();
+        } else if (readAloudRef.current?.active) {
+          // Reading aloud: Escape stops it, as in the text reader.
+          readAloudRef.current.stop();
         } else {
           exitGuard.escape(event);
         }
@@ -1741,6 +1750,9 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
           toggleCurrentBookmark();
         } else if (pressed === "shortcuts") {
           setShortcutsOpen(true);
+        } else if (pressed === "readAloud") {
+          // From the first sentence on screen; then pauses and carries on.
+          if (!event.repeat) readAloudRef.current?.toggle();
         } else if (pressed === "back") {
           goBack();
         } else if (pressed === "forward") {
@@ -1907,6 +1919,25 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
     };
   });
 
+  // Read aloud, lit and followed on the page (readers/readAloud/usePdfReadAloud.ts). A comic has no words to read.
+  const { readAloud } = usePdfReadAloud({
+    bookId: book.id,
+    title: book.title,
+    author: book.author ?? null,
+    pdf: kind === "pdf" ? pdf : null,
+    pageCount,
+    stageRef: scrollRef,
+    scrolling,
+    pageNumber,
+    drawnPage,
+    goToLine,
+    chapterOf,
+    toast: showToast,
+    scanned: chapters === "scan",
+    closeMenus: () => setMorePanelOpen(false)
+  });
+  readAloudRef.current = readAloud;
+
   // ---- By finger (docs/android.md, "PDFs and comics") ----
 
   // Taps, swipes, a pinch and a double tap on the stage (readers/pageGestures.ts).
@@ -2015,6 +2046,8 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
       closeAmbiencePopover();
     } else if (sidebarOpen) {
       setSidebarOpen(false);
+    } else if (readAloud.active) {
+      readAloud.stop();
     } else {
       exitGuard.back();
     }
@@ -2464,6 +2497,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
                     <span className="reader-toggle" data-on={twoPages} />
                   </button>
                 )}
+                <ReadAloudMenuRow kind={kind} readAloud={readAloud} onChoose={() => setMorePanelOpen(false)} touch={touch} />
                 <button
                   type="button"
                   className="mt-3 flex w-full items-center justify-between rounded-lg border px-3 py-2 text-xs uppercase tracking-widest transition reader-border reader-pill reader-icon"
@@ -2864,6 +2898,8 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
       </div>
 
       {notes.dock}
+
+      {kind === "pdf" && <ReadAloudPill reader={{ readAloud }} />}
 
       {/* Another device read further (components/sync): its page, gone to only on a tap. */}
       <FurtherOnOffer

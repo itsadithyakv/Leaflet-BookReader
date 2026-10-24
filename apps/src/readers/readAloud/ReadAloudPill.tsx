@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AudioLines, Info, LocateFixed, Pause, Play, SkipBack, SkipForward, Sparkles, X } from "lucide-react";
-import type { ReaderScope } from "../text/scope";
+import type { ReadAloudControls } from "./useReadAloudCore";
 import { RATES, rateLabel } from "./prefs";
 import { openSpeechSettings } from "./androidEngine";
 import "./readAloud.css";
@@ -75,8 +75,9 @@ const Preparing = ({ seconds, android, onPhoneVoice }: { seconds: number; androi
  * Reading aloud's own controls, there while it reads: a sentence back,
  * play or pause, a sentence on, the speed, the voice, stop. "Follow" comes
  * up beside them once the reader has moved the page away from the voice.
+ * The same in both readers (each hands in its own `readAloud`).
  */
-export const ReadAloudPill = ({ reader }: { reader: ReaderScope }) => {
+export const ReadAloudPill = ({ reader }: { reader: { readAloud: ReadAloudControls } }) => {
   const { readAloud } = reader;
   const [infoOpen, setInfoOpen] = useState(false);
   const android = readAloud.engineKind === "android";
@@ -112,6 +113,24 @@ export const ReadAloudPill = ({ reader }: { reader: ReaderScope }) => {
               )}
             </div>
           )}
+        </div>
+      )}
+      {(readAloud.notice === "noText" || readAloud.notice === "noTextBook") && (
+        <div className="read-aloud-notice reader-panel reader-border" role="status">
+          <span>{readAloud.notice === "noTextBook" ? "This PDF has no text to read" : "No text to read on this page"}</span>
+          <button
+            type="button"
+            className="read-aloud-icon reader-icon reader-hover-accent"
+            aria-label="Why"
+            aria-expanded={infoOpen}
+            onClick={() => setInfoOpen((open) => !open)}
+          >
+            <Info size={16} aria-hidden="true" />
+          </button>
+          <button type="button" className="read-aloud-icon reader-icon reader-hover-accent" aria-label="Close" onClick={readAloud.dismissNotice}>
+            <X size={16} aria-hidden="true" />
+          </button>
+          {infoOpen && <div className="read-aloud-info reader-muted">Scanned pages are pictures: there are no words in them to read aloud.</div>}
         </div>
       )}
       {readAloud.active && readAloud.sheetOpen && (

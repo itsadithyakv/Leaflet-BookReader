@@ -7618,9 +7618,8 @@ button.pip-shop-tile:hover,
   color: rgb(var(--color-on-surface));
 }
 
-/* The clearing while something is being set down, and the field of a raid. */
-.pip-arcade-canvas.is-placing,
-.pip-base-field {
+/* The clearing while something is being set down. */
+.pip-arcade-canvas.is-placing {
   cursor: crosshair;
 }
 
@@ -7702,24 +7701,6 @@ button.pip-shop-tile:hover,
   flex: none;
   align-items: flex-end;
   justify-content: center;
-}
-
-.pip-base-portrait-foe {
-  position: absolute;
-  right: -6px;
-  bottom: -2px;
-}
-
-/* What to do, over a raid's field until the first scout is down. */
-.pip-base-hint {
-  position: absolute;
-  inset: auto 0 10px 0;
-  text-align: center;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: #fff;
-  text-shadow: 0 1px 2px rgb(0 0 0 / 0.7);
-  pointer-events: none;
 }
 
 /* Under a game between runs: paid runs in hand, and a wager. */

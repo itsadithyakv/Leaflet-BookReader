@@ -414,6 +414,7 @@ pub fn run() {
       commands::word_record,
       commands::words_review,
       commands::words_delete,
+      commands::words_restore,
       commands::fonts_list,
       commands::font_add,
       commands::font_data,

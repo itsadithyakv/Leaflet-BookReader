@@ -271,3 +271,57 @@ html[data-input="touch"] .read-aloud-rate input[type="range"] {
 .reader-scope:has(.read-aloud-pill) .reader-toast {
   bottom: calc(132px + env(safe-area-inset-bottom, 0px));
 }
+
+/* A tablet's page reader keeps its page dock at the foot at all times: the pill sits just over it. */
+html[data-input="touch"] .reader-scope.page-reader:not([data-shape]) .read-aloud-dock {
+  bottom: calc(var(--inset-bottom, 0px) + 68px);
+}
+
+/* A phone's page reader: its page dock stands a little taller than the text
+   reader's chapter dock, so the pill is lifted that much more over it while
+   the chrome is up (readers/touch.css places it). */
+html .reader-scope.page-reader[data-shape]:not(.reader-chrome-hidden) .read-aloud-dock {
+  transform: translate(
+    calc(-50% - var(--reader-side-room) / 2),
+    calc(var(--reader-footer-height) - var(--reader-foot-chrome) - 12px)
+  );
+}
+
+/* The sentence being read on a PDF's page (usePdfReadAloud.ts), in the
+   colour the text reader lights it in, and the word being said a little
+   more. Fractions of the page, laid over the picture of the page and under
+   its text layer, as the search's marks are. Blended into a light page so
+   the words stay as dark as they were; laid thinly on top of a dark one,
+   where blending would leave nothing to see. No motion: it moves with the
+   voice, a sentence at a time. */
+.pdf-reader-page > .pdf-read-aloud {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.pdf-read-aloud-mark,
+.pdf-read-aloud-word {
+  position: absolute;
+  border-radius: 2px;
+  mix-blend-mode: multiply;
+}
+
+.pdf-read-aloud-mark {
+  --lit: color-mix(in srgb, var(--reader-accent, #d6a028) 24%, transparent);
+  background: var(--lit);
+  box-shadow: 0 0 0 2px var(--lit);
+}
+
+.pdf-read-aloud-word {
+  background: color-mix(in srgb, var(--reader-accent, #d6a028) 22%, transparent);
+}
+
+.pdf-reader-page[data-dark="true"] :is(.pdf-read-aloud-mark, .pdf-read-aloud-word) {
+  mix-blend-mode: normal;
+}
+
+.pdf-reader-page[data-dark="true"] .pdf-read-aloud-mark {
+  --lit: color-mix(in srgb, var(--reader-accent, #d6a028) 22%, transparent);
+}

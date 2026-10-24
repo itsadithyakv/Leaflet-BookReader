@@ -26,6 +26,11 @@ type WordQuizProps = {
 
 type Mode = "words" | "who";
 type Round = { mode: Mode; questions: Question[]; at: number; picked: number | null; right: number };
+/** A word removed from its question; `failed` when the removal, or putting it back, did not go through. */
+type Gone = { word: SavedWord; failed?: "remove" | "back" };
+
+/** How long Undo stays after a word is removed. */
+const UNDO_MS = 8000;
 
 /** What Pip says. Lower case, short, and the drama is hers. */
 const ASKS: Record<Question["way"], string[]> = {
@@ -43,14 +48,18 @@ const WRONG_MOVES = ["nervous", "melt"];
 const pick = <T,>(items: T[], seed: number) => items[Math.abs(seed) % items.length];
 
 /**
- * The word quiz, a game in the Attic Arcade. Pip holds up a word the reader
- * once looked up and the reader picks its meaning from four (or the other way
- * round); in "Who is this?" she names someone from a character sheet and the
- * reader picks the note about them.
+ * The word quiz, a game in the Attic Arcade (and "Revise words" on the
+ * Library, ReviseWords.tsx). Pip holds up a word the reader once looked up
+ * and the reader picks its meaning from four (or the other way round); in
+ * "Who is this?" she names someone from a character sheet and the reader
+ * picks the note about them.
  *
  * Rounds of ten at most. A right answer moves the word up a box, a wrong one
  * back to the first (boxes.ts), and that is saved as it happens, so a round
  * left half way loses nothing. It earns nothing: no seeds, no mood.
+ *
+ * A word not worth asking again is removed from its question (the bin on the
+ * card): the round goes on without it, and Undo puts it back as it was.
  *
  * Keys: 1 to 4 pick an answer, Enter goes on.
  */
@@ -64,6 +73,61 @@ export const WordQuiz = ({ words, onChanged, onMyWords, skin, outfit }: WordQuiz
   const rootRef = useRef<HTMLDivElement | null>(null);
   const nextRef = useRef<HTMLButtonElement | null>(null);
   const today = dayNumber(getDateKey());
+  // The word just removed from its question, for Undo; and the removal itself, which Undo waits for.
+  const [gone, setGone] = useState<Gone | null>(null);
+  const removing = useRef<Promise<unknown>>(Promise.resolve());
+  const goneRef = useRef<HTMLDivElement | null>(null);
+  const changedRef = useRef(onChanged);
+  changedRef.current = onChanged;
+
+  // Undo stays a few seconds, longer while the reader is on it.
+  useEffect(() => {
+    if (!gone) {
+      return undefined;
+    }
+    let timer = 0;
+    const wait = () => {
+      timer = window.setTimeout(() => {
+        if (goneRef.current?.contains(document.activeElement)) {
+          wait();
+        } else {
+          setGone((now) => (now === gone ? null : now));
+        }
+      }, UNDO_MS);
+    };
+    wait();
+    return () => window.clearTimeout(timer);
+  }, [gone]);
+
+  const undo = (which: Gone) => {
+    setGone(null);
+    rootRef.current?.focus();
+    void removing.current
+      .then(() => wordService.restore([which.word.id]))
+      .then(
+        () => {
+          useLibraryStore.getState().requestBackup();
+          changedRef.current();
+        },
+        () => setGone({ word: which.word, failed: "back" })
+      );
+  };
+
+  // Ctrl+Z works too while Undo shows (typing keeps its own).
+  useEffect(() => {
+    if (!gone || gone.failed) {
+      return undefined;
+    }
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.key.toLowerCase() !== "z") return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest("input, textarea, [contenteditable='true']")) return;
+      event.preventDefault();
+      undo(gone);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   // The character sheets, for "Who is this?": only with the tracker on, and
   // only the books that have been opened. Each as far as that book was read.
@@ -138,6 +202,41 @@ export const WordQuiz = ({ words, onChanged, onMyWords, skin, outfit }: WordQuiz
     }
   };
 
+  /**
+   * "Don't ask this one again": the word leaves the reader's words (a
+   * tombstone, as from My words, so it leaves the other copies too) and the
+   * round goes on to the next question without it, counted as if it had not
+   * been asked. At once, with Undo after, rather than a question first.
+   */
+  const removeAsked = () => {
+    if (!round || !question || round.mode !== "words") {
+      return;
+    }
+    const word = words?.find((entry) => entry.id === question.id);
+    if (!word) {
+      return;
+    }
+    const rest = round.questions.filter((_, index) => index !== round.at);
+    const right = round.right - (round.picked !== null && round.picked === question.answer ? 1 : 0);
+    if (round.at < rest.length) {
+      setRound({ ...round, questions: rest, picked: null, right });
+    } else {
+      // It was the last question: the round ends there (or, the only one, never was).
+      setRound(null);
+      setDone(round.at > 0 ? { mode: round.mode, right, of: rest.length } : null);
+    }
+    setGone({ word });
+    const removal = wordService.remove([word.id]);
+    removing.current = removal.catch(() => undefined);
+    removal.then(
+      () => {
+        useLibraryStore.getState().requestBackup();
+        changedRef.current();
+      },
+      () => setGone({ word, failed: "remove" })
+    );
+  };
+
   // After an answer the way on is under the reader's finger; before one, the keys are the answers.
   useEffect(() => {
     if (round?.picked !== null && round) {
@@ -165,6 +264,29 @@ export const WordQuiz = ({ words, onChanged, onMyWords, skin, outfit }: WordQuiz
     return <p className="pip-quiz-note">Fetching your words…</p>;
   }
 
+  // Over the foot of the quiz, whichever screen it is on: a removal can end the round.
+  const goneNote = gone && (
+    <div ref={goneRef} className="pip-quiz-gone" role="status" data-failed={gone.failed ? "" : undefined}>
+      <span className="pip-quiz-gone-text">
+        {gone.failed === "remove"
+          ? `“${gone.word.word}” couldn't be removed. Try again from My words.`
+          : gone.failed === "back"
+            ? `“${gone.word.word}” couldn't be put back.`
+            : `Removed “${gone.word.word}”`}
+      </span>
+      {gone.failed ? (
+        <button type="button" className="pip-key pip-key-small pip-key-quiet" onClick={() => setGone(null)} aria-label="Dismiss">
+          <UiIcon name="close" size={13} />
+        </button>
+      ) : (
+        <button type="button" className="pip-key pip-key-small" onClick={() => undo(gone)} aria-label={`Undo: put “${gone.word.word}” back`}>
+          <UiIcon name="undo" size={13} />
+          Undo
+        </button>
+      )}
+    </div>
+  );
+
   // ---- a question --------------------------------------------------------------------------
   if (round && question) {
     const answeredNow = round.picked !== null;
@@ -186,12 +308,25 @@ export const WordQuiz = ({ words, onChanged, onMyWords, skin, outfit }: WordQuiz
         </p>
         <div className="pip-quiz-stage">
           <PipSprite move={move} size={96} skin={skin} outfit={outfit} playKey={`${plays.current}-${round.at}-${answeredNow}`} />
-          <div className="pip-quiz-card">
+          <div className="pip-quiz-card" data-droppable={who ? undefined : ""}>
             <p className="pip-quiz-says">{says}</p>
             <p className="pip-quiz-prompt" data-long={question.way === "word" || undefined}>
               {question.prompt}
             </p>
             {book && <p className="pip-quiz-from">from {book}</p>}
+            {/* Only the reader's own words are asked (the game's own only fill out the wrong answers), so any word
+                asked can go. Not a person: their notes are the character sheet's. */}
+            {!who && (
+              <button
+                type="button"
+                className="pip-quiz-drop"
+                onClick={removeAsked}
+                aria-label="Don't ask this word again: remove it from My words"
+                title="Don't ask this word again (removes it from My words)"
+              >
+                <UiIcon name="trash" size={15} />
+              </button>
+            )}
           </div>
         </div>
         <ol className="pip-quiz-options" aria-label={question.way === "meaning" ? `What does “${question.prompt}” mean?` : question.way === "word" ? "Which word means this?" : `Who is ${question.prompt}?`}>
@@ -221,6 +356,7 @@ export const WordQuiz = ({ words, onChanged, onMyWords, skin, outfit }: WordQuiz
             </button>
           )}
         </div>
+        {goneNote}
       </div>
     );
   }
@@ -286,6 +422,7 @@ export const WordQuiz = ({ words, onChanged, onMyWords, skin, outfit }: WordQuiz
           ? "“Who is this?” is made from your character sheets, and only from what you had read and written by where each book is now: it cannot spoil."
           : "The quiz earns nothing: no seeds, no mood. It is only for the words."}
       </p>
+      {goneNote}
     </div>
   );
 };

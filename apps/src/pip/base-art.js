@@ -121,6 +121,24 @@
                         order: the ranger's straw target, the watchman's lantern, the
                         keeper's living stump, the knight's shield and hilt, the dragon's
                         burnt post, the gardener's flowerpot, the whistler's note board
+
+   the Magpie Lands, the raid key's map (its ground and path are painted by the screen,
+   components/pip/arcade/base/landsPaint.ts); opts.variant is the region where it says so,
+   0 to 5: the Twig Nest woods, Bramble Roost, the Tin Hoard hills, Crow's Corner, the Old
+   Rookery, the Far Rookeries
+   landnode   20 x 18   a stronghold, a nest on its mound; opts.rank 1 taken (Pip's flag)
+   landkeep   26 x 28   a lord's keep; opts.rank 1 taken (Pip's flag, the lord's pennant)
+   landroost  40 x 40   the King's roost on the peak; variant 1 lit
+   landflag    7 x 10   a banner won, small; variant 0 to 3, summer to spring
+   landbit    14 x 16   the land: variant 0 to 11, two for each region (see LAND_BITS)
+   landfog    30 x 14   a puff of fog; variant 1 the smaller
+   landfolk   14 x 12   4 frames, a road camp on foot, walking right (the legs move, the
+                        body never bobs); variant 0 stragglers, 1 a patrol, 2 a caravan
+   landsign   16 x 18   the friends' signpost
+   landhere    9 x  9   2 frames, the marker over the next stronghold
+
+   the raid field (2026-10-24): raidperch, raidwall, raidhoard, raidnest, raidrubble, raidzone, raidflag, in
+   raid-art.js (its header has their sizes and variants)
  }
 
  The screen places a sprite by its bottom-centre, so every building stands on
@@ -128,6 +146,7 @@
  So do the trophies, the banner, the decor, the units, the raid's pieces, the
  guardians and the animals. */
 import { rnd } from "./room.js";
+import { RAID_SPRITES } from "./raid-art.js";
 
 const TAU = Math.PI * 2;
 const level = (o, max) => Math.max(0, Math.min(max, Math.round(Number(o && o.variant) || 0)));
@@ -3765,11 +3784,221 @@ const readtree = {
   }
 };
 
+// ---------------------------------------------------------------- the Magpie Lands (the raid key's map)
+/**
+ * The map's pieces, drawn small, as on a hand-drawn map: a stronghold on its mound, a lord's keep, the King's roost on
+ * the peak, the land's trees and stones, fog, the day's road camps on foot, the friends' signpost, a banner, and the
+ * marker over the next stronghold. Each region has its own ground: the Twig Nest woods, Bramble Roost, the Tin Hoard
+ * hills, Crow's Corner, the Old Rookery, and the Far Rookeries beyond (`variant` 0 to 5).
+ */
+const LAND_MOUNDS = [
+  ["#A8E07C", "#64B44E", "#3F8F4A"],
+  ["#93C870", "#5A9448", "#3C6E3A"],
+  ["#E6D48C", "#C2AA60", "#8E7A40"],
+  ["#B2C0A2", "#84947A", "#5C6A54"],
+  ["#B2A6C2", "#837596", "#5C5070"],
+  ["#9A92C4", "#6A6298", "#463F70"]
+];
+/** Pip's own flag, leaf green, planted once a place is hers. */
+const PIP_FLAG = ["#C4F2A6", "#5FB34C", "#2F7340"];
+/** A small flag on a stick standing on row `by`: three rows of cloth flying right. */
+const mapFlag = (g, x, by, P, h = 7) => {
+  g.stamp((l) => l.rect(x, by - h, 1, h + 1, STICK[1]).px(x, by - h, "#F0D9A8"), INK);
+  g.stamp((l) => l.rect(x + 1, by - h, 3, 1, P[0]).rect(x + 1, by - h + 1, 4, 1, P[1]).rect(x + 1, by - h + 2, 3, 1, P[2]), INK);
+};
+/** The mound a place stands on, `hw` either side of `cx`, its foot on row `G`. */
+const mound = (g, cx, G, hw, hh, M) => g.stamp((l) => l.ell(cx, G - hh + 0.5, hw, hh, (nx, ny) => (ny < -0.35 ? M[0] : nx > 0.45 || ny > 0.55 ? M[2] : M[1])), INK);
+
+/** A stronghold: a twig nest on its region's ground. opts.rank 1: taken, Pip's flag in it. */
+const landnode = {
+  w: 20, h: 18,
+  draw(g, f, o) {
+    const r = level(o, 5), taken = Number(o && o.rank) === 1, G = 17, cx = 10;
+    mound(g, cx, G, 9, 3.5, LAND_MOUNDS[r]);
+    let top = G - 6;
+    if (r === 2) {
+      // A heap of stones, a bit of tin shining in it.
+      g.stamp((l) => l.ell(cx, G - 4.5, 6, 2.6, (nx, ny) => (ny < -0.2 ? STONE[0] : nx > 0.4 ? STONE[2] : STONE[1])), INK_STONE);
+      g.px(cx + 3, G - 5, "#FFFFFF");
+      top = G - 8;
+    } else if (r >= 3) {
+      // A post (Crow's Corner) or a dead stump (the rookeries), the nest up on it.
+      const P = r === 3 ? STICK : DEADWOOD;
+      g.stamp((l) => l.rect(cx - 2, G - 9, 4, 7, P[1]).rect(cx - 2, G - 9, 1, 7, P[0]).rect(cx + 1, G - 9, 1, 7, P[2]), INK);
+      if (r === 3) g.stamp((l) => l.rect(cx + 2, G - 7, 3, 2, "#C8453B").px(cx + 4, G - 5, "#8E2F28"), INK);
+      top = G - 11;
+    }
+    if (!taken) g.px(cx - 1, top - 1, GOLD[0]).px(cx + 2, top - 1, "#3EC1F0");
+    g.stamp((l) => bowl(l, cx, top, 6, 4), INK);
+    mapFlag(g, cx + 5, top - 1, taken ? PIP_FLAG : PURPLE, 6);
+  }
+};
+
+/** A lord's keep: a twig tower behind a stone wall. opts.rank 1: taken, Pip's flag on top and the lord's pennant hung on the wall. */
+const landkeep = {
+  w: 26, h: 28,
+  draw(g, f, o) {
+    const r = level(o, 5), taken = Number(o && o.rank) === 1, G = 27, cx = 13;
+    mound(g, cx, G, 12, 4, LAND_MOUNDS[r]);
+    g.stamp((l) => dome(l, cx, G - 5, 6, 15, (u, t, x, y, edge) => (edge ? TWIG[0] : u > 0.55 ? TWIG[2] : twig(x, y)), 3), INK);
+    g.stamp((l) => {
+      for (let j = 0; j < 5; j++) for (let i = 0; i < 19; i++) {
+        const seam = j % 3 === 2 || (i + (Math.floor(j / 3) % 2 ? 3 : 0)) % 5 === 4;
+        l.px(cx - 9 + i, G - 8 + j, i === 0 ? ROOK[0] : i >= 17 ? ROOK[3] : seam ? ROOK[2] : j === 0 ? ROOK[0] : ROOK[1]);
+      }
+      for (let x = cx - 9; x < cx + 10; x += 4) l.rect(x, G - 10, 2, 2, ROOK[1]).px(x, G - 10, ROOK[0]);
+    }, INK_STONE);
+    g.stamp((l) => dome(l, cx, G - 4, 2, 4, "#1E1620"), INK);
+    mapFlag(g, cx, G - 20, taken ? PIP_FLAG : PURPLE, 6);
+    if (taken) {
+      // The lord's pennant, won: red and gold, hung on the wall.
+      g.stamp((l) => {
+        for (let j = 0; j < 5; j++) for (let i = 0; i < 4; i++) if (!(j === 4 && i % 3 !== 0)) l.px(cx - 7 + i, G - 9 + j, i === 0 ? RED[0] : i === 3 ? RED[2] : RED[1]);
+        l.rect(cx - 6, G - 7, 2, 1, GOLD[1]);
+      }, INK);
+    }
+  }
+};
+
+/** The Magpie King's roost on the peak: a crag with snow on it, the dead tree and its crown. Variant 1: lit, he can be fought. */
+const landroost = {
+  w: 40, h: 40,
+  draw(g, f, o) {
+    const lit = level(o, 1) === 1, G = 39, cx = 20;
+    g.stamp((l) => {
+      for (let j = 0; j < 20; j++) {
+        const hw = Math.round(4 + j);
+        for (let i = -hw; i < hw; i++) {
+          const y = G - 19 + j;
+          const snow = j < 5 - Math.abs(i) * 0.3 || (j < 7 && (i * 3 + j) % 5 === 0 && Math.abs(i) < 5);
+          l.px(cx + i, y, snow ? (i > 1 ? "#D4E2F0" : "#FFFFFF") : i > hw - 4 ? ROOK[2] : i < -hw + 3 ? ROOK[0] : (i * 5 + j * 3) % 9 === 0 ? ROOK[2] : ROOK[1]);
+        }
+      }
+    }, INK_STONE);
+    // The dead tree on the summit, two bare limbs, and the hoard and crown in its fork.
+    g.stamp((l) => {
+      l.rect(cx - 1, G - 27, 3, 9, DEADWOOD[1]).rect(cx - 1, G - 27, 1, 9, DEADWOOD[0]);
+      l.line(cx - 1, G - 24, cx - 7, G - 30, DEADWOOD[1]).line(cx + 1, G - 25, cx + 7, G - 31, DEADWOOD[2]);
+      l.line(cx - 6, G - 29, cx - 8, G - 33, DEADWOOD[0]).line(cx + 6, G - 30, cx + 9, G - 33, DEADWOOD[1]);
+    }, INK);
+    g.stamp((l) => bowl(l, cx, G - 28, 6, 3), INK);
+    g.stamp((l) => chart(l, cx - 4, G - 35, CROWN, CROWN_KEY), INK_GOLD);
+    if (lit) {
+      for (const x of [cx - 9, cx + 9]) {
+        g.ell(x + 0.5, G - 22, 4.5, 4.5, "#FFB03A40");
+        g.stamp((l) => l.rect(x, G - 21, 1, 5, TWIG[1]), INK);
+        g.stamp((l) => chart(l, x - 1, G - 26, [".y.", "yYo", "oYr"], FIRE), "#7A2A0A");
+      }
+    }
+  }
+};
+
+/** One banner won from the King, small, for the summit: variant 0 to 3, summer to spring. */
+const landflag = {
+  w: 7, h: 10,
+  draw(g, f, o) {
+    const P = FLAGS[level(o, 3)].P;
+    g.stamp((l) => l.rect(1, 1, 1, 9, STICK[1]).px(1, 0, GOLD[1]), INK);
+    g.stamp((l) => l.rect(2, 1, 4, 1, P[0]).rect(2, 2, 4, 2, P[1]).rect(2, 4, 3, 1, P[2]).px(5, 4, P[2]), INK);
+  }
+};
+
+/**
+ * The land itself, a piece at a time: variant 0 a pine, 1 a round tree (the woods); 2 a bramble with berries, 3 a
+ * thorn bush (Bramble Roost); 4 a rock with tin in it, 5 a grassy knoll (the hills); 6 a dead tree, 7 a crow post
+ * with a rag (Crow's Corner); 8 a tall dark elm with a rook's nest, 9 reeds (the Old Rookery); 10 a crag, 11 a
+ * twilight pine (the Far Rookeries).
+ */
+const LAND_BITS = [
+  (g) => g.stamp((l) => { l.rect(6, 13, 2, 3, BARK[1]); for (let j = 0; j < 12; j++) { const hw = 1 + Math.floor((j % 4) * 0.8 + j / 3); l.rect(7 - hw, 2 + j, hw * 2, 1, j % 4 === 3 ? LEAF[2] : hw > 2 && j % 2 ? LEAF[1] : "#2E8048"); } }, INK_LEAF),
+  (g) => { g.stamp((l) => l.rect(6, 11, 2, 5, BARK[1]), INK); g.stamp((l) => dome(l, 7, 12, 6, 9, (u, t, x, y, edge) => (edge ? LEAF[0] : u > 0.5 ? LEAF[2] : LEAF[1])), INK_LEAF); },
+  (g) => { g.stamp((l) => dome(l, 7, 15, 6, 6, (u, t, x, y, edge) => (edge ? "#5A9448" : (x * 3 + y) % 5 === 0 ? "#2A4E2A" : "#3C6E3A")), INK_LEAF); [[4, 11], [8, 12], [10, 14], [6, 13], [3, 14]].forEach(([x, y]) => g.px(x, y, "#7A3A9A").px(x + 1, y, "#4A2070")); },
+  (g) => g.stamp((l) => { for (let k = 0; k < 5; k++) l.line(7, 15, 2 + k * 2.5, 8 + (k % 2) * 2, k % 2 ? TWIG[2] : "#56493C"); l.px(3, 9, "#C8453B").px(11, 9, "#C8453B"); }, INK),
+  (g) => { g.stamp((l) => l.ell(7, 13, 6, 3.4, (nx, ny) => (ny < -0.3 ? STONE[0] : nx > 0.4 ? STONE[2] : STONE[1])), INK_STONE); g.px(5, 12, "#FFFFFF").px(9, 13, "#DCE6F2"); },
+  (g) => { g.stamp((l) => l.ell(7, 14, 7, 3, (nx, ny) => (ny < -0.3 ? "#E6D48C" : nx > 0.45 ? "#8E7A40" : "#C2AA60")), INK); g.px(4, 12, "#64B44E").px(9, 12, "#64B44E").px(10, 11, "#64B44E"); },
+  (g) => g.stamp((l) => { l.rect(6, 6, 2, 10, DEADWOOD[1]).rect(6, 6, 1, 10, DEADWOOD[0]); l.line(6, 9, 2, 4, DEADWOOD[1]).line(7, 8, 12, 3, DEADWOOD[2]).line(3, 5, 2, 2, DEADWOOD[0]); }, INK),
+  (g) => { g.stamp((l) => l.rect(6, 4, 2, 12, STICK[1]).rect(3, 5, 8, 1, STICK[2]), INK); g.stamp((l) => l.rect(8, 6, 3, 3, "#8A8A98").px(10, 9, "#5A5A68"), INK); },
+  (g) => { g.stamp((l) => l.rect(6, 9, 3, 7, BARK[2]), INK); g.stamp((l) => dome(l, 7, 11, 6, 10, (u, t, x, y, edge) => (edge ? "#4E6E4A" : u > 0.5 ? "#253A26" : "#32503A")), INK_LEAF); g.stamp((l) => bowl(l, 8, 4, 3, 2), INK); },
+  (g) => { for (let k = 0; k < 5; k++) g.stamp((l) => l.rect(3 + k * 2, 9 + (k % 3), 1, 7 - (k % 3), k % 2 ? "#8E7A40" : "#6E8E4A").px(3 + k * 2, 8 + (k % 3), "#7A5230"), INK_LEAF); },
+  (g) => g.stamp((l) => { for (let j = 0; j < 11; j++) { const hw = 1 + Math.round(j * 0.55); for (let i = -hw; i < hw; i++) l.px(7 + i, 5 + j, j < 3 ? "#FFFFFF" : i > hw - 3 ? ROOK[2] : i < -hw + 2 ? ROOK[0] : ROOK[1]); } }, INK_STONE),
+  (g) => g.stamp((l) => { l.rect(6, 13, 2, 3, "#3A2E48"); for (let j = 0; j < 12; j++) { const hw = 1 + Math.floor((j % 4) * 0.8 + j / 3); l.rect(7 - hw, 2 + j, hw * 2, 1, j % 4 === 3 ? "#2A2448" : "#463F70"); } }, "#141028")
+];
+const landbit = {
+  w: 14, h: 16,
+  draw(g, f, o) {
+    LAND_BITS[level(o, LAND_BITS.length - 1)](g);
+  }
+};
+
+/** Fog over a region not yet reached: a puff of cloud, lit from above. Variant 1 is the smaller. */
+const landfog = {
+  w: 30, h: 14,
+  draw(g, f, o) {
+    const small = level(o, 1) === 1, P = ["#FBF7EE", "#E9E2D2", "#CFC6B2"];
+    g.stamp((l) => {
+      const col = (nx, ny) => (ny < -0.3 ? P[0] : ny > 0.45 ? P[2] : P[1]);
+      if (small) { l.ell(15, 9, 9, 4, col); l.ell(12, 7, 5, 4, col); l.ell(18, 7, 4, 3.5, col); return; }
+      l.ell(15, 9.5, 14, 4, col); l.ell(9, 7, 6, 4.5, col); l.ell(17, 5.5, 7, 5, col); l.ell(23, 8, 5, 4, col);
+    }, "#A69C86");
+  }
+};
+
+/**
+ * A camp on the road, on foot: a magpie walking right, 4 frames (the legs, never the body: it does not bob).
+ * Variant 0 stragglers (a bundle on a stick), 1 a patrol (a spear), 2 a loot caravan (a little cart behind).
+ */
+const landfolk = {
+  w: 14, h: 12, frames: 4,
+  draw(g, f, o) {
+    const kind = level(o, 2), k = ((Math.round(f) % 4) + 4) % 4, G = 11, bx = kind === 2 ? 8 : 5;
+    if (kind === 2) {
+      g.stamp((l) => l.rect(0, G - 5, 5, 3, TIMBER[1]).rect(0, G - 5, 5, 1, TIMBER[0]).px(1, G - 6, GOLD[1]).px(3, G - 6, GOLD[0]).line(5, G - 4, bx - 1, G - 4, STICK[2]), INK);
+      g.stamp((l) => l.rect(1, G - 2, 2, 2, TIMBER[3]).px(2, G - 1, TIMBER[2]), INK);
+    }
+    // Legs: one forward, then together, then the other, then together.
+    const legs = [[-1, 1], [0, 0], [1, -1], [0, 0]][k];
+    g.stamp((l) => {
+      l.px(bx + legs[0], G, "#3A3A48").px(bx + legs[0], G - 1, "#3A3A48").px(bx + 2 + legs[1], G, "#3A3A48").px(bx + 2 + legs[1], G - 1, "#3A3A48");
+      l.ell(bx + 1.5, G - 4, 3, 2.6, (nx) => (nx < -0.2 ? PIE.K : PIE.W));
+      l.rect(bx + 2, G - 8, 3, 3, PIE.K).px(bx + 5, G - 7, "#3A3A48");
+      l.line(bx - 1, G - 4, bx - 3, G - 6, PIE.B);
+    }, "#0B0B14");
+    g.px(bx + 3, G - 7, "#FFFFFF");
+    if (kind === 0) g.stamp((l) => l.line(bx + 3, G - 5, bx + 6, G - 9, STICK[1]).ell(bx + 6.5, G - 9.5, 1.6, 1.4, CLOTH[1]), INK);
+    if (kind === 1) g.stamp((l) => l.rect(bx + 5, G - 11, 1, 9, STICK[1]).px(bx + 5, G - 11, STONE[0]), INK);
+  }
+};
+
+/** The friends' signpost at the edge of the map: two boards pointing away, a heart on one. */
+const landsign = {
+  w: 16, h: 18,
+  draw(g) {
+    g.stamp((l) => l.rect(7, 4, 2, 13, STICK[1]).rect(7, 4, 1, 13, STICK[0]), INK);
+    g.stamp((l) => {
+      l.rect(2, 4, 10, 4, "#E8C48A").rect(2, 4, 10, 1, "#FFF0C8").px(12, 5, "#E8C48A").px(12, 6, "#E8C48A").px(13, 5, "#C99A62");
+      l.rect(4, 10, 10, 3, "#E8C48A").rect(4, 10, 10, 1, "#FFF0C8").px(3, 11, "#E8C48A").px(2, 11, "#C99A62");
+    }, INK);
+    g.px(5, 5, "#E0393E").px(7, 5, "#E0393E").rect(5, 6, 3, 1, "#E0393E").px(6, 7, "#E0393E");
+    g.rect(6, 11, 6, 1, "#C99A62");
+  }
+};
+
+/** Over the next stronghold: a gold marker pointing down at it. Frame 1 sits a pixel lower (a slow bob). */
+const landhere = {
+  w: 9, h: 9, frames: 2,
+  draw(g, f) {
+    const y = (((Math.round(f) % 2) + 2) % 2) === 1 ? 1 : 0;
+    g.stamp((l) => { for (let j = 0; j < 4; j++) l.rect(j, y + 2 + j, 9 - j * 2, 1, j === 0 ? GOLD[0] : j === 3 ? GOLD[2] : GOLD[1]); l.rect(3, y, 3, 2, GOLD[1]).px(3, y, GOLD[0]); }, INK_GOLD);
+  }
+};
+
 export const BASE_SPRITES = {
   title: "The Hollow", bg, burrow, oak, store, fence, tower, hut, scaffold, acorn, magpie, nest,
   workshop, hive, well, stall, trophy, banner: flagpole, king, hedgehog, lantern: lamp, burst, scout, puffcap,
   slinger, mole, perch, hoard, twigwall, nestdown, kingdown, pebble, battleground, decor,
   hero, champion, raider, fencepiece, ring: reach, guardian, animal, heart, land, work, blade,
   spire, darkwatch, foe, skytop, groundend, gardenbed, signpost,
-  page, bloom: pathBloom, bud, wildflower, standing, animalhome, statue, bookstall, readtree
+  page, bloom: pathBloom, bud, wildflower, standing, animalhome, statue, bookstall, readtree,
+  landnode, landkeep, landroost, landflag, landbit, landfog, landfolk, landsign, landhere,
+  ...RAID_SPRITES
 };

@@ -296,3 +296,87 @@
     font-size: 22px;
   }
 }
+
+/* "Don't ask this word again": a small bin in the card's corner, clear of what Pip says. */
+.pip-quiz-card[data-droppable] {
+  padding-right: 48px;
+}
+
+.pip-quiz-drop {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  background: transparent;
+  color: var(--hud-ink-soft);
+  box-shadow: 0 0 0 1px transparent;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.pip-quiz-drop:hover {
+  background: var(--hud-face-hover);
+  color: var(--hud-ink);
+  box-shadow: 0 0 0 1px var(--hud-line);
+}
+
+.pip-quiz-drop:focus-visible {
+  outline: 2px solid rgb(var(--color-primary));
+  outline-offset: 2px;
+}
+
+/* The word just removed, and Undo: a slip of the HUD's paper over the foot of the screen. */
+.pip-quiz-gone {
+  position: fixed;
+  bottom: max(20px, calc(var(--inset-bottom, 0px) + 12px));
+  left: 50%;
+  z-index: 8;
+  display: flex;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px 8px 14px;
+  background: var(--hud-face);
+  color: var(--hud-ink);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 8px 0 0 var(--hud-drop);
+  transform: translateX(-50%);
+}
+
+.pip-quiz-gone-text {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pip-quiz-gone[data-failed] .pip-quiz-gone-text {
+  white-space: normal;
+}
+
+/* It pops up a little; for a reader who asked for less motion it is simply there. */
+@media (prefers-reduced-motion: no-preference) {
+  .pip-quiz-gone {
+    animation: pip-quiz-gone-in 220ms cubic-bezier(0.3, 1.4, 0.5, 1) both;
+  }
+}
+
+@keyframes pip-quiz-gone-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 10px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}

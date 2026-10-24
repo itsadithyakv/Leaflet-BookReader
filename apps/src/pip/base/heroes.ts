@@ -15,6 +15,35 @@ import type { HeroTraits } from "./battle";
  * are Leaflet's.
  */
 
+/**
+ * A hero's move (the raids plan, 2026-10-24): one big act a raid, given as an
+ * order (`orders.ts`) when the reader says, and in keeping with what the hero
+ * already does. What each does in the fight, in figures, is in `battle.ts`
+ * (`MOVE`).
+ */
+export type HeroMoveKind = "mend" | "hush" | "wave" | "vault" | "volley" | "veil" | "stand" | "cleave" | "shield" | "stake";
+export type HeroMove = {
+  name: string;
+  /** What it does, in a few words. */
+  does: string;
+  /** It is aimed at one of the camp's buildings (else it is done where the hero stands). */
+  aimed?: boolean;
+};
+export const HERO_MOVES: Readonly<Record<HeroMoveKind, HeroMove>> = {
+  mend: { name: "A chapter aloud", does: "Every scout on the field mends by half" },
+  hush: { name: "A crooked spell", does: "The perches near him stop throwing for a while" },
+  wave: { name: "The tide comes in", does: "A wave hits everything near him, walls twice over" },
+  vault: { name: "Over the top", does: "She vaults to the building you choose", aimed: true },
+  volley: { name: "A volley", does: "Every perch in her long reach is badly hurt" },
+  veil: { name: "A false trail", does: "No sentry sees any scout for a few seconds" },
+  stand: { name: "None shall pass", does: "Every sentry throws at him alone, and he shrugs half of it off" },
+  cleave: { name: "Through the wall", does: "Every piece of wall near her falls at once" },
+  shield: { name: "Tea and courage", does: "Scouts near her take no harm for a few seconds" },
+  stake: { name: "Stake and lantern", does: "The champion is held still and badly hurt, or the nest is" }
+};
+/** A hero's move, by the hero's number. */
+export const heroMove = (id: number): HeroMoveKind | null => HEROES[id]?.move ?? null;
+
 export type Hero = {
   id: number;
   name: string;
@@ -30,6 +59,8 @@ export type Hero = {
   /** Trophies of any kind that bring them all the same. */
   total: number;
   traits: Omit<HeroTraits, "id">;
+  /** Their one big act in a planned raid, when the reader says (`HERO_MOVES`). */
+  move: HeroMoveKind;
 };
 
 export const HEROES: readonly Hero[] = [
@@ -42,7 +73,8 @@ export const HEROES: readonly Hero[] = [
     kinds: [0],
     need: 1,
     total: 1,
-    traits: { hp: 70, dps: 8, speed: 18, reach: 3, heals: 5 }
+    traits: { hp: 70, dps: 8, speed: 18, reach: 3, heals: 5 },
+    move: "mend"
   },
   {
     id: 1,
@@ -53,7 +85,8 @@ export const HEROES: readonly Hero[] = [
     kinds: [1],
     need: 1,
     total: 4,
-    traits: { hp: 46, dps: 14, speed: 18, reach: 34 }
+    traits: { hp: 46, dps: 14, speed: 18, reach: 34 },
+    move: "hush"
   },
   {
     id: 2,
@@ -64,7 +97,8 @@ export const HEROES: readonly Hero[] = [
     kinds: [9, 10],
     need: 1,
     total: 7,
-    traits: { hp: 95, dps: 11, speed: 21, reach: 3, splash: 16 }
+    traits: { hp: 95, dps: 11, speed: 21, reach: 3, splash: 16 },
+    move: "wave"
   },
   {
     id: 3,
@@ -75,7 +109,8 @@ export const HEROES: readonly Hero[] = [
     kinds: [1],
     need: 3,
     total: 11,
-    traits: { hp: 85, dps: 10, speed: 34, reach: 3, leaps: true, prefers: "hoard", times: { hoard: 2.5 } }
+    traits: { hp: 85, dps: 10, speed: 34, reach: 3, leaps: true, prefers: "hoard", times: { hoard: 2.5 } },
+    move: "vault"
   },
   {
     id: 4,
@@ -86,7 +121,8 @@ export const HEROES: readonly Hero[] = [
     kinds: [10],
     need: 2,
     total: 15,
-    traits: { hp: 50, dps: 8, speed: 20, reach: 52, prefers: "perch", times: { perch: 1.4 } }
+    traits: { hp: 50, dps: 8, speed: 20, reach: 52, prefers: "perch", times: { perch: 1.4 } },
+    move: "volley"
   },
   {
     id: 5,
@@ -97,7 +133,8 @@ export const HEROES: readonly Hero[] = [
     kinds: [3],
     need: 1,
     total: 20,
-    traits: { hp: 60, dps: 12, speed: 20, reach: 3, unseen: true, prefers: "perch", times: { perch: 1.5 } }
+    traits: { hp: 60, dps: 12, speed: 20, reach: 3, unseen: true, prefers: "perch", times: { perch: 1.5 } },
+    move: "veil"
   },
   {
     id: 6,
@@ -108,7 +145,8 @@ export const HEROES: readonly Hero[] = [
     kinds: [8, 1],
     need: 2,
     total: 26,
-    traits: { hp: 130, dps: 8, speed: 15, reach: 3, taunts: true }
+    traits: { hp: 130, dps: 8, speed: 15, reach: 3, taunts: true },
+    move: "stand"
   },
   {
     id: 7,
@@ -119,7 +157,8 @@ export const HEROES: readonly Hero[] = [
     kinds: [2],
     need: 1,
     total: 33,
-    traits: { hp: 60, dps: 10, speed: 22, reach: 34, times: { wall: 6 } }
+    traits: { hp: 60, dps: 10, speed: 22, reach: 34, times: { wall: 6 } },
+    move: "cleave"
   },
   {
     id: 8,
@@ -130,7 +169,8 @@ export const HEROES: readonly Hero[] = [
     kinds: [4],
     need: 1,
     total: 40,
-    traits: { hp: 70, dps: 6, speed: 18, reach: 3, heals: 9 }
+    traits: { hp: 70, dps: 6, speed: 18, reach: 3, heals: 9 },
+    move: "shield"
   },
   {
     id: 9,
@@ -141,7 +181,8 @@ export const HEROES: readonly Hero[] = [
     kinds: [5],
     need: 1,
     total: 50,
-    traits: { hp: 100, dps: 10, speed: 19, reach: 3, times: { nest: 1.8, champion: 2.5 } }
+    traits: { hp: 100, dps: 10, speed: 19, reach: 3, times: { nest: 1.8, champion: 2.5 } },
+    move: "stake"
   }
 ];
 

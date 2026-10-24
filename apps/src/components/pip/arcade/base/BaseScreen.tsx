@@ -20,7 +20,6 @@ import {
   Moon,
   Move,
   Nut,
-  Send,
   Shield,
   ShieldAlert,
   BedDouble,
@@ -106,7 +105,6 @@ import {
   rewardOf,
   RAIDS_IN_HAND,
   RAID_EVERY,
-  SENT_SHARE,
   SITES,
   TROPHY_GIVES,
   YARD_KINDS,
@@ -114,7 +112,6 @@ import {
   blocked,
   burrowFor,
   campStructures,
-  championName,
   charm,
   clubBoss,
   clubClaimed,
@@ -126,25 +123,20 @@ import {
   holds,
   jobLeft,
   jobOn,
-  kingClosed,
   levelOf,
   minutesOf,
   monthName,
   monthOf,
-  nextCamp,
   oakHolds,
   oakReady,
   oakStatus,
-  raidBlocked,
   raidsReady,
   restIn,
   scoutsOf,
-  scoutsSay,
   seasonOf,
   siteName,
   spotBlocked,
   streakAdds,
-  theKing,
   topOf,
   wallAt,
   wallBlocked,
@@ -160,10 +152,8 @@ import {
   type Now,
   type Placed,
   type QuestAt,
-  type Raid,
   type RaidBlocked,
   type RaidEnd,
-  type RaidKind,
   type RaidPlan,
   type Site,
   type YardKind,
@@ -206,7 +196,6 @@ import { gameArt } from "../gameArt";
 import { GAME_H, GAME_W } from "../games";
 import { isTouchInput } from "../../../../platform/device";
 import { currentShellShape } from "../../../../platform/shape";
-import { BattleScreen } from "./BattleScreen";
 import { coverPicture, drawAt, fitPicture, screenRatio, type Fit } from "./fit";
 import { DOUBLE_TAP_MS, DOUBLE_TAP_SLOP, HOLD_MS, PHONE_ZOOM, SLACK_CSS, awayFrom, boundsOf, cardSide, centredOn, easeTo, isDrag, rubber, showIn, stepGlide, velocityOf, type Box as CamBox, type Glide, type Point, type Sample } from "./camera";
 import { plotChoices, plotComesAt, reachOf, sheetOf, type Need } from "./siteSheet";
@@ -227,8 +216,9 @@ import { isGhostClick, type Press } from "./ghostClick";
 import { HollowTop } from "./HollowTop";
 import { BUILD_TABS, BuildTabs, HollowDock, type BuildTab, type EditMode } from "./HollowDock";
 import type { HollowNav } from "./HollowMenu";
-import { chapterGoalAt, newsOf, putBack, seeNews, seeOff, askedRaids, boardOf, campOpened, chapterCardOf, chapterChipOf, chapterNewsOf, raidsAsked, seeChapter } from "./hollowRules";
-import { RaidBoard } from "./RaidBoard";
+import { chapterGoalAt, newsOf, putBack, seeNews, seeOff, askedRaids, campOpened, chapterCardOf, chapterChipOf, chapterNewsOf, raidsAsked, seeChapter } from "./hollowRules";
+import { LandsMap } from "./LandsMap";
+import { RaidFlow, type RaidAim } from "./RaidFlow";
 import { FriendNews } from "./FriendNews";
 import { HollowGuide, type GuidePage } from "./HollowGuide";
 import { ChapterCard, ChapterThings } from "./ChapterCard";
@@ -577,9 +567,8 @@ export const BaseScreen = ({
   const [arrange, setArrange] = useState<"move" | "fence" | null>(null);
   const [carrying, setCarrying] = useState<Placed | null>(null);
   const [watching] = useState(false);
-  const [raid, setRaid] = useState<Raid | null>(null);
-  const [end, setEnd] = useState<RaidEnd | null>(null);
-  const [sent, setSent] = useState<RaidEnd | null>(null);
+  /** A raid under way, from its scouting to its end card (RaidFlow.tsx); `sent` when it opened on a Send's result. */
+  const [raid, setRaid] = useState<{ aim: RaidAim; sent: RaidEnd | null } | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [fit, setFit] = useState<Fit>({ css: 2, backing: 2, crisp: true });
@@ -1359,14 +1348,6 @@ export const BaseScreen = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [art, look, selected, chosenDecor, placing, burst, tab, raid, arrange, carrying, watching, defence, panel, fit, chosenLand, area, lay, panelOpen, chosenGuard, slotPick]);
 
-  // The scouts' word on each raid: worked out when the camp or the day changes, not on every paint.
-  const scouting = useMemo(() => {
-    if (!base || base.levels.hut < 1) return null;
-    // (The road's three camps a day are not shown since 2026-10-15: the strongholds are one ladder to climb.)
-    return { camp: scoutsSay(base, nextCamp(base)), king: scoutsSay(base, theKing(base)) };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [base?.levels.hut, base?.camps, base?.forks.hut, now.day]);
-
   // The reader's clubs, for their bosses: asked for when the journal is opened.
   const signedIn = useAccountStore((state) => state.status.signedIn);
   const [clubs, setClubs] = useState<Club[] | null>(null);
@@ -1698,37 +1679,6 @@ export const BaseScreen = ({
     return <p className="mt-4 text-sm text-on-surface-variant">…</p>;
   }
 
-  if (raid) {
-    return (
-      <BattleScreen
-        mode="raid"
-        raid={raid}
-        skin={skin}
-        outfit={outfit}
-        season={season}
-        end={end}
-        onDone={(result) => {
-          if ("friend" in raid) {
-            // A friend's camp: the prize is the game's, and the friend is told who came and how it went.
-            const friendly = raid as FriendRaid;
-            setEnd(store.finishFriendRaid(friendly, result));
-            void socialService.reportRaid(friendly.friend.handle, result.stars).catch(() => undefined);
-            setTargets((list) => list?.map((target) => (target.handle === friendly.friend.handle ? { ...target, raidedToday: true } : target)) ?? list);
-          } else setEnd(store.finishRaid(raid, result));
-        }}
-        onClose={() => {
-          // What was brought home is seen going into the larder.
-          if (end && end.loot > 0) {
-            const from = performance.now() + 250;
-            flights.current = Array.from({ length: Math.min(6, 1 + Math.floor(end.loot / 8)) }, (_, index) => from + index * 90);
-            acornsSound(end.loot);
-          }
-          setRaid(null);
-          setEnd(null);
-        }}
-      />
-    );
-  }
   /** The lookout that has taken a path is another tower to look at: which picture, for its tile and its card. */
   const pathLook = (site: Site, level: number) => (site === "tower" && base.forks.tower && level >= 3 ? { name: base.forks.tower === "a" ? "spire" : "darkwatch", variant: level - 3 } : null);
   /** What is set down in the clearing that is looked at. */
@@ -3095,70 +3045,6 @@ export const BaseScreen = ({
     );
   };
 
-  // ---- one raid's card -----------------------------------------------------------------------
-  const raidCard = (kind: RaidKind, plan: RaidPlan, said: ReturnType<typeof scoutsSay>, slot = 0) => {
-    const why = raidBlocked(base, kind, now, slot);
-    const begin = () => {
-      setSent(null);
-      const begun = store.startRaid(kind, slot, false);
-      if (begun) {
-        setRaid(begun);
-        playSound("horn");
-      }
-    };
-    return (
-      <section key={`${kind}-${slot}`} className="pip-base-card min-w-0">
-        <div className="flex items-start gap-3">
-          <span className="pip-base-portrait">
-            <Sprite name={kind === "king" ? "king" : "nest"} variant={kind === "king" ? undefined : plan.tier} box={52} />
-            {plan.champion !== null && <Sprite name="champion" variant={plan.champion} box={30} className="pip-base-portrait-foe" />}
-          </span>
-          <div className="min-w-0 flex-1">
-            <h3 className="pip-base-heading">
-              <span className="truncate">{plan.name}</span>
-              {kind === "camp" && <span className="ml-auto shrink-0 text-xs font-normal tabular-nums text-on-surface-variant">{plan.n + 1}</span>}
-            </h3>
-            {championName(plan) && <p className="truncate text-xs text-on-surface-variant" title={championName(plan) ?? undefined}>{championName(plan)}</p>}
-            <p className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-sm tabular-nums text-on-surface">
-              <span title={`Up to ${plan.loot} acorns${kind === "king" ? `, and ${monthName(monthOf(now.day))}'s banner` : ""}`}>{acorns(plan.loot, 13)}</span>
-              {kind === "king" && <Sprite name="banner" variant={seasonOf(now.day)} box={18} />}
-              {said && <span title="How the raid would go if the scouts were left to it. Fought well, it goes at least this well.">{stars(said.stars, 12)}</span>}
-            </p>
-          </div>
-        </div>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            className="tactile-button tactile-button-primary flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold disabled:opacity-60"
-            disabled={why !== null}
-            title={`Fight it yourself. Provisions: ${plan.cost} acorns.`}
-            onClick={begin}
-          >
-            <Swords size={13} aria-hidden /> Raid {acorns(plan.cost)}
-          </button>
-          <button
-            type="button"
-            className="tactile-button flex items-center gap-1.5 px-3 py-1.5 text-xs disabled:opacity-60"
-            disabled={why !== null}
-            title={`The scouts go without you, and bring ${Math.round(SENT_SHARE * 100)}% of what they take`}
-            onClick={(event) => {
-              const from = centreOf(event.currentTarget);
-              const came = store.sendRaid(kind, slot);
-              setSent(came);
-              if (came) {
-                playSound(came.won ? "fanfare" : "womp", { volume: 0.8 });
-                if (came.loot > 0) acornsIn(from, came.loot);
-              }
-            }}
-          >
-            <Send size={12} aria-hidden /> Send
-          </button>
-          {why && <span className="text-xs text-on-surface-variant">{WHY_NO_RAID[why](base, plan, now)}</span>}
-        </div>
-      </section>
-    );
-  };
-
   // ---- who lives here: Pip, and the heroes who have come ------------------------------------------------
   const peopleCard = () => (
     <section className="pip-base-card mt-3" aria-live="polite">
@@ -4024,7 +3910,7 @@ export const BaseScreen = ({
               {area === "camp" ? <ArrowRight size={18} aria-hidden /> : <ArrowLeft size={18} aria-hidden />}
             </button>
           )}
-          <HollowDock
+          {!raid && <HollowDock
             dock={
               arrange || decorEdit
                 ? {
@@ -4110,7 +3996,7 @@ export const BaseScreen = ({
                 </p>
               ) : null
             }
-          />
+          />}
 
           {tab === "camp" && panelOpen && (!placing || carriedOff) && !arrange && (
           <div
@@ -4221,27 +4107,52 @@ export const BaseScreen = ({
           </div>
           )}
 
-      {tab === "raids" && (
-        <RaidBoard
+      {raid ? (
+        // (The Magpie Lands, 2026-10-24) A raid fills the picture as the map does: scout, plan, fight, end.
+        <RaidFlow
+          key={JSON.stringify(raid.aim.kind === "friend" ? raid.aim.target.handle : raid.aim.target)}
           base={base}
           now={now}
-          board={boardOf(base, now)}
+          art={art}
+          season={season}
+          aim={raid.aim}
+          sent={raid.sent}
+          why={(blocked, plan) => WHY_NO_RAID[blocked](base, plan, now)}
+          onScouted={(n) => store.markScouted(n)}
+          onStart={(aim, squad) => (aim.kind === "friend" ? store.startFriendRaid(aim.target.camp, { handle: aim.target.handle, name: aim.target.name }, squad) : store.startRaid(aim.target.kind, aim.target.slot, false, squad))}
+          onFinish={(begun, result) => {
+            if ("friend" in begun) {
+              // A friend's camp: the prize is the game's, and the friend is told who came and how it went.
+              const friendly = begun as FriendRaid;
+              void socialService.reportRaid(friendly.friend.handle, result.stars).catch(() => undefined);
+              setTargets((list) => list?.map((target) => (target.handle === friendly.friend.handle ? { ...target, raidedToday: true } : target)) ?? list);
+              return store.finishFriendRaid(friendly, result);
+            }
+            return store.finishRaid(begun, result);
+          }}
+          onLoot={(from, loot) => acornsIn(centreOf(from), loot)}
+          onClose={() => {
+            setRaid(null);
+            setTab("raids");
+          }}
+        />
+      ) : tab === "raids" && (
+        // (The Magpie Lands, 2026-10-24) The raid key opens the map; it was the raid board (RaidBoard.tsx).
+        <LandsMap
+          base={base}
+          now={now}
+          art={art}
           rested={rested}
           restIn={restIn(base, now.minutes)}
           why={(blocked, plan) => WHY_NO_RAID[blocked](base, plan, now)}
-          sent={sent}
-          onFight={(kind) => {
-            setSent(null);
-            const begun = store.startRaid(kind, 0, false);
-            if (begun) setRaid(begun);
-          }}
-          onSend={(kind, from) => {
-            const came = store.sendRaid(kind, 0);
-            setSent(came);
-            if (came) {
-              playSound(came.won ? "fanfare" : "womp", { volume: 0.8 });
-              if (came.loot > 0) acornsIn(centreOf(from), came.loot);
-            }
+          // (What a Send brought is on the raid's end card now.)
+          sent={null}
+          // The one hand-off to the raid: what the map chose is scouted first; nothing is spent until "Go".
+          onRaid={(target) => setRaid({ aim: { kind: "stronghold", target }, sent: null })}
+          // Sent without the reader: its result on the raid's own end card (the loot flies home from there).
+          onSend={(target) => {
+            const came = store.sendRaid(target.kind, target.slot);
+            if (came) setRaid({ aim: { kind: "stronghold", target }, sent: came });
           }}
           onHut={() => {
             setTab("camp");
@@ -4273,14 +4184,7 @@ export const BaseScreen = ({
                     const why = target.raidedToday ? "today" : friendBlocked(base, now, target.handle);
                     return why === "today" ? "Raided today. More tomorrow." : why === "rest" ? "The scouts are resting" : why ? "Not now" : null;
                   },
-                  onRaid: (target) => {
-                    const begun = store.startFriendRaid(target.camp, { handle: target.handle, name: target.name });
-                    if (begun) {
-                      setSent(null);
-                      setRaid(begun);
-                      playSound("horn");
-                    }
-                  },
+                  onRaid: (target) => setRaid({ aim: { kind: "friend", target }, sent: null }),
                   scouts: scoutsOf(base)
                 }
               : null

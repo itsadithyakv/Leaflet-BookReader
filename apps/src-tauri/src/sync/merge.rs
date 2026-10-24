@@ -680,21 +680,145 @@ fn merge_pip(a: &Option<PipState>, b: &Option<PipState>) -> Option<PipState> {
 /// A side that no device would keep (not a JSON object, or too large) is
 /// passed over as if it were absent: a damaged document must not replace a
 /// real camp, or be handed on.
+///
+/// One part of the camp is merged rather than taken whole: the strongholds'
+/// record (the Magpie Lands, `raids_mark`), each stronghold's best stars and
+/// whether it has been scouted. It only ever goes up, so the best of the two
+/// is folded into the winner, and a replay won on the other device is not
+/// lost to a later save here.
 pub(crate) fn merge_camp(a: &Option<CampEntry>, b: &Option<CampEntry>) -> Option<CampEntry> {
   let kept = |side: &Option<CampEntry>| side.clone().filter(|camp| CampEntry::problem(&camp.state).is_none());
   match (kept(a), kept(b)) {
-    (Some(x), Some(y)) => Some(match instant(&x.saved_at).cmp(&instant(&y.saved_at)) {
-      Ordering::Greater => x,
-      Ordering::Less => y,
-      Ordering::Equal => {
-        if (&x.state, &x.saved_at) >= (&y.state, &y.saved_at) {
-          x
-        } else {
-          y
+    (Some(x), Some(y)) => {
+      let (winner, loser) = match instant(&x.saved_at).cmp(&instant(&y.saved_at)) {
+        Ordering::Greater => (x, y),
+        Ordering::Less => (y, x),
+        Ordering::Equal => {
+          if (&x.state, &x.saved_at) >= (&y.state, &y.saved_at) {
+            (x, y)
+          } else {
+            (y, x)
+          }
+        }
+      };
+      Some(raids_mark::fold(winner, &loser))
+    }
+    (x, y) => x.or(y)
+  }
+}
+
+/// The Magpie Lands' record as a camp keeps it (`apps/src/pip/base/raidMark.ts`
+/// writes and reads it, and the two must agree): up to four lines of the
+/// camp's `taught`, `rd:`, `rd1:`, `rd2:`, `rd3:`, each 76 characters at most
+/// after its prefix. Each character is two strongholds, each 0 to 7 (its best
+/// stars, plus 4 once scouted), in a 64-letter alphabet; zeros at the end of a
+/// line are left off. Every build keeps `taught` as it is, so older builds
+/// carry the record unchanged.
+pub(crate) mod raids_mark {
+  use super::{CampEntry, CAMP_MAX_BYTES};
+  use serde_json::Value;
+
+  const ALPHABET: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_";
+  const PAGE_CHARS: usize = 76;
+  const PAGES: usize = 4;
+
+  fn prefix(page: usize) -> String {
+    if page == 0 {
+      "rd:".to_string()
+    } else {
+      format!("rd{page}:")
+    }
+  }
+
+  /// Whether a line of `taught` is part of the record.
+  pub(crate) fn is_mark(entry: &str) -> bool {
+    let bytes = entry.as_bytes();
+    bytes.starts_with(b"rd:") || (bytes.len() >= 4 && bytes.starts_with(b"rd") && (b'0'..=b'3').contains(&bytes[2]) && bytes[3] == b':')
+  }
+
+  /// Each stronghold's value, 0 to 7, by its number; None where the camp has no record.
+  pub(crate) fn read(taught: &[Value]) -> Option<Vec<u8>> {
+    let mut values: Vec<u8> = Vec::new();
+    let mut found = false;
+    for page in 0..PAGES {
+      let prefix = prefix(page);
+      let Some(body) = taught.iter().filter_map(Value::as_str).find(|entry| entry.starts_with(&prefix)).map(|entry| &entry[prefix.len()..]) else {
+        continue;
+      };
+      found = true;
+      for (k, char) in body.bytes().take(PAGE_CHARS).enumerate() {
+        let value = ALPHABET.iter().position(|letter| *letter == char).unwrap_or(0) as u8;
+        for (half, part) in [value % 8, value / 8].into_iter().enumerate() {
+          let n = page * PAGE_CHARS * 2 + k * 2 + half;
+          if part != 0 {
+            if values.len() <= n {
+              values.resize(n + 1, 0);
+            }
+            values[n] = part;
+          }
         }
       }
-    }),
-    (x, y) => x.or(y)
+    }
+    found.then_some(values)
+  }
+
+  /// The record as lines of `taught`, as the app writes them.
+  pub(crate) fn write(values: &[u8]) -> Vec<String> {
+    let one = |n: usize| values.get(n).copied().unwrap_or(0).min(7) as usize;
+    (0..PAGES)
+      .filter_map(|page| {
+        let mut body: String = (0..PAGE_CHARS)
+          .map(|k| {
+            let n = page * PAGE_CHARS * 2 + k * 2;
+            ALPHABET[one(n) + one(n + 1) * 8] as char
+          })
+          .collect();
+        while body.ends_with('0') {
+          body.pop();
+        }
+        (!body.is_empty()).then(|| format!("{}{body}", prefix(page)))
+      })
+      .collect()
+  }
+
+  /// The best of two records: the more stars for each stronghold, scouted in either.
+  pub(crate) fn best(a: &[u8], b: &[u8]) -> Vec<u8> {
+    (0..a.len().max(b.len()))
+      .map(|n| {
+        let (x, y) = (a.get(n).copied().unwrap_or(0), b.get(n).copied().unwrap_or(0));
+        (x % 4).max(y % 4) + if x >= 4 || y >= 4 { 4 } else { 0 }
+      })
+      .collect()
+  }
+
+  /// The winning camp, with the losing one's record folded into its own. Unchanged (to the byte) when the loser adds
+  /// nothing, or either cannot be read, or the camp would be too large to keep.
+  pub(crate) fn fold(winner: CampEntry, loser: &CampEntry) -> CampEntry {
+    let Ok(lost) = serde_json::from_str::<Value>(&loser.state) else {
+      return winner;
+    };
+    let Some(theirs) = lost.get("taught").and_then(Value::as_array).and_then(|taught| read(taught)) else {
+      return winner;
+    };
+    let Ok(mut won) = serde_json::from_str::<Value>(&winner.state) else {
+      return winner;
+    };
+    let taught: Vec<Value> = won.get("taught").and_then(Value::as_array).cloned().unwrap_or_default();
+    let mine = read(&taught).unwrap_or_default();
+    let lines = write(&best(&mine, &theirs));
+    if lines == write(&mine) {
+      return winner;
+    }
+    let mut next: Vec<Value> = taught.into_iter().filter(|entry| !entry.as_str().is_some_and(is_mark)).collect();
+    next.extend(lines.into_iter().map(Value::String));
+    let Some(object) = won.as_object_mut() else {
+      return winner;
+    };
+    object.insert("taught".to_string(), Value::Array(next));
+    match serde_json::to_string(&won) {
+      Ok(state) if state.len() <= CAMP_MAX_BYTES => CampEntry { state, saved_at: winner.saved_at },
+      _ => winner
+    }
   }
 }
 
@@ -2421,6 +2545,55 @@ mod tests {
       assert_eq!(merge(&damaged, &mine, CAMP_NOW).camp, mine.camp, "{:.20}", broken);
       assert_eq!(merge(&damaged, &doc(vec![]), CAMP_NOW).camp, None, "{:.20}", broken);
     }
+  }
+
+  /// The Magpie Lands' record (`raids_mark`): the marks below are as the app writes them (`raidMark.ts`), for
+  /// stars [1, 3, 2] (rd:P2), and [3, 1, 2] with stronghold 4 scouted (rd:B24); their best is rd:R24.
+  #[test]
+  fn the_strongholds_best_stars_are_kept_from_both_camps() {
+    let older = camp_at("2026-10-01T10:00:00+00:00", r#"{"v":2,"camps":3,"taught":["oak","rd:B24"]}"#);
+    let newer = camp_at("2026-10-02T10:00:00+00:00", r#"{"v":2,"camps":3,"taught":["oak","rd:P2","fern"]}"#);
+    let merged = merge(&older, &newer, CAMP_NOW).camp.expect("a camp");
+    // The newer camp wins, with its own stamp, and the best of both records.
+    assert_eq!(merged.saved_at, "2026-10-02T10:00:00+00:00");
+    let state: serde_json::Value = serde_json::from_str(&merged.state).expect("json");
+    assert_eq!(state["taught"], serde_json::json!(["oak", "fern", "rd:R24"]));
+    assert_eq!(state["camps"], 3);
+    // Either way round, and again, the same.
+    assert_eq!(merge(&newer, &older, CAMP_NOW).camp.as_ref(), Some(&merged));
+    let again = SyncDoc { camp: Some(merged.clone()), ..doc(vec![]) };
+    assert_eq!(merge(&again, &older, CAMP_NOW).camp.as_ref(), Some(&merged));
+    assert_eq!(merge(&again, &newer, CAMP_NOW).camp, merge(&newer, &again, CAMP_NOW).camp);
+    assert_eq!(merge(&again, &merge(&again, &newer, CAMP_NOW), CAMP_NOW).camp, merge(&again, &newer, CAMP_NOW).camp);
+  }
+
+  #[test]
+  fn a_camp_is_left_as_it_was_when_the_other_adds_nothing_to_its_record() {
+    let mine = camp_at("2026-10-02T10:00:00+00:00", r#"{"v":2,"taught":["rd:R24"],"camps":3}"#);
+    for other in [r#"{"v":2,"camps":2}"#, r#"{"v":2,"taught":["rd:P2"]}"#, r#"{"v":2,"taught":[]}"#] {
+      let theirs = camp_at("2026-10-01T10:00:00+00:00", other);
+      assert_eq!(merge(&mine, &theirs, CAMP_NOW).camp, mine.camp, "{other}");
+    }
+    // A camp from before the record takes the other's, and keeps everything else of its own.
+    let before = camp_at("2026-10-03T10:00:00+00:00", r#"{"v":2,"camps":3,"taught":["oak"],"acorns":5}"#);
+    let merged: serde_json::Value = serde_json::from_str(&merge(&before, &mine, CAMP_NOW).camp.expect("a camp").state).expect("json");
+    assert_eq!(merged, serde_json::json!({ "v": 2, "camps": 3, "taught": ["oak", "rd:R24"], "acorns": 5 }));
+  }
+
+  #[test]
+  fn the_record_reads_and_writes_as_the_app_does() {
+    use super::raids_mark::{best, is_mark, read, write};
+    assert_eq!(read(&[serde_json::json!("rd:P2")]), Some(vec![1, 3, 2]));
+    assert_eq!(read(&[serde_json::json!("rd:B24")]), Some(vec![3, 1, 2, 0, 4]));
+    assert_eq!(read(&[serde_json::json!("oak")]), None);
+    assert_eq!(write(&best(&[1, 3, 2], &[3, 1, 2, 0, 4])), vec!["rd:R24".to_string()]);
+    // Stronghold 159 is on the second line.
+    let mut long = vec![0; 160];
+    long[159] = 2;
+    assert_eq!(write(&long), vec!["rd1:000G".to_string()]);
+    assert_eq!(read(&[serde_json::json!("rd1:000G")]).map(|values| values.len()), Some(160));
+    assert!(is_mark("rd:") && is_mark("rd3:x") && !is_mark("rdx:") && !is_mark("rd4:") && !is_mark("raids"));
+    assert!(write(&[]).is_empty());
   }
 
   /// The field is left out until there is a camp, and is read as written.

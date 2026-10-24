@@ -68,7 +68,8 @@ import {
   type Place
 } from "../pip/base/rules";
 import { seeChapter } from "../pip/base/chapters";
-import type { Result } from "../pip/base/battle";
+import type { Result, Squad } from "../pip/base/battle";
+import { markScouted } from "../pip/base/lands";
 import { trophyKind } from "../pip/base/trophies";
 import { learnt, noTips } from "../pip/base/tips";
 import { finishTutorial, giveWelcome, openWelcomeBasket, pawFinish, setTutorialStep } from "../pip/base/welcome";
@@ -165,12 +166,14 @@ type BaseStore = {
   /** Raises a finished book's trophy: of the kind its genres make it. */
   raise: (bookId: string, title: string, genres?: readonly unknown[] | null) => void;
   claimClub: (clubId: string, week: string, reward: number) => void;
-  /** Sets out on a raid the reader will fight; null when it cannot set out. */
-  startRaid: (kind: RaidKind, slot: number, tip: boolean) => Raid | null;
+  /** Sets out on a raid the reader will fight; null when it cannot set out. With a squad, planned (the Magpie Lands). */
+  startRaid: (kind: RaidKind, slot: number, tip: boolean, squad?: Squad) => Raid | null;
+  /** A stronghold has been scouted: the map shows its quirk from now on. */
+  markScouted: (n: number) => void;
   /** The raid is over: what came of it. */
   finishRaid: (raid: Raid, result: Result) => RaidEnd | null;
   /** Sets out for a friend's camp; null when the scouts cannot go. And the end of that raid. */
-  startFriendRaid: (camp: SharedCamp, friend: Friend) => FriendRaid | null;
+  startFriendRaid: (camp: SharedCamp, friend: Friend, squad?: Squad) => FriendRaid | null;
   finishFriendRaid: (raid: FriendRaid, result: Result) => RaidEnd | null;
   /** One of the camp's fighters took a knock from a prowler he did not finish. */
   woundFighter: (who: number) => void;
@@ -496,19 +499,22 @@ export const useBaseStore = create<BaseStore>((set, get) => {
     claimClub(clubId, week, reward) {
       change((base, now) => claimClub(base, clubId, week, reward, now.day));
     },
-    startRaid(kind, slot, tip) {
+    startRaid(kind, slot, tip, squad) {
       let raid: Raid | null = null;
       change((base, now) => {
-        const begun = startRaid(base, kind, now, tip, slot);
+        const begun = startRaid(base, kind, now, tip, slot, squad);
         raid = begun?.raid ?? null;
         return begun?.state ?? base;
       });
       return raid;
     },
-    startFriendRaid(camp, friend) {
+    markScouted(n) {
+      change((base) => markScouted(base, n));
+    },
+    startFriendRaid(camp, friend, squad) {
       let raid: FriendRaid | null = null;
       change((base, now) => {
-        const begun = startFriendRaid(base, camp, friend, now);
+        const begun = startFriendRaid(base, camp, friend, now, squad);
         raid = begun?.raid ?? null;
         return begun?.state ?? base;
       });

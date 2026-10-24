@@ -271,6 +271,55 @@ The full setup, restore drill and disaster steps are in
   > Drive, in the old "Leaflet" folder. Download it and add the files to
   > Leaflet. Sorry for the trouble!
 
+### 2026-10-24
+
+- **1.5.13 started**, uncommitted in the worktree: **read aloud for PDFs**.
+  It was never built before; it existed only in the EPUB reader.
+  - The new modules are in `apps/src/readers/readAloud/`: `pdfSource.ts`,
+    `usePdfReadAloud.ts`, `useReadAloudCore.ts` (the part the EPUB and PDF
+    readers share), and `ReadAloudMenuRow.tsx`.
+  - Running headers and page numbers are skipped conservatively.
+  - Scanned PDFs show a notice. Comics get no option.
+  - Checked in the preview with a generated PDF. Not yet checked on a real
+    phone, with real voices, or with multi-column PDFs.
+- **Revise words, from the Library** (uncommitted, for the next build):
+  - a "Revise words · N due" key on the desktop toolbar, and an icon with a
+    badge on the phone, opening Pip's quiz over the Library;
+  - a bin on each quiz card, with an Undo toast;
+  - "Don't keep" on the lookup card now has Undo.
+  
+  Undo is a new Rust command, `words_restore`. It is dated after the removal,
+  so it wins the merge between devices.
+- **Raids redesign started.** The owner's complaints: raids look bad, show no
+  progress, and have no challenge or strategy. The plan is
+  [design/hollow/raids-plan.md](design/hollow/raids-plan.md):
+  - the Magpie Lands map;
+  - per-stronghold stars and replays;
+  - approaches, quirks, squads, orders, and feats for the third star;
+  - balance measured naive against good plans.
+  
+  - **Step 1 is done:** rules, quirks, orders and feats, events, and the sim.
+    Every section 4 target is met (`raids-balance-results.md`).
+  - **Step 2 is done:** the Magpie Lands map, best stars in the `rd:` mark
+    with a Rust merge, and replay for stars.
+  - **Road camps were taken off again:** they are not played.
+- **Paused at the owner's "save and stop now"**, with step 3 of the raids
+  part done.
+  - **In the tree:** `RaidFlow`, `RaidScout`, `RaidPlan`, `RaidBattle`,
+    `RaidField`, `RaidEndCard`, `raidPaint`, `raidFx` (+ test), `raidLayout`,
+    `raidWords`, `raid.css` and `pip/raid-art.js`.
+  - **Deleted:** `BattleScreen.tsx` and `RaidBoard.tsx`.
+  - **State:** tsc is clean and vitest passes 4,456.
+  - **Not done in step 3:**
+    - the styles only the deleted screens used were being trimmed;
+    - the tests the brief asked for, beyond `raidFx`;
+    - the `pip.md` and `features.md` updates;
+    - screenshots and the 4× throttle frame time.
+  - **To resume:** check `RaidFlow` end to end (map → scout → plan → battle →
+    end card, Send, friends) against raids-plan.md sections 2, 3 and 5, then
+    finish that list.
+  - **Also uncommitted, not built:** PDF read aloud and Revise words.
+
 ## 7. Open items
 
 | # | What | Who |

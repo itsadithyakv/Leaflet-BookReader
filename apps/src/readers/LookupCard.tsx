@@ -99,6 +99,7 @@ export const LookupCard = ({ term, language, onClose, avoid, place: wordPlace, i
   // The word as it was kept, and whether the reader then took it back.
   const [kept, setKept] = useState<SavedWord | null>(null);
   const [unkept, setUnkept] = useState(false);
+  const unkeeping = useRef<Promise<unknown>>(Promise.resolve());
   const wordPlaceRef = useRef(wordPlace);
   wordPlaceRef.current = wordPlace;
   /** The term already counted, so "Try again" is not a second look-up of it. */
@@ -251,7 +252,16 @@ export const LookupCard = ({ term, language, onClose, avoid, place: wordPlace, i
       return;
     }
     setUnkept(true);
-    wordService.remove([kept.id]).catch(() => setUnkept(false));
+    unkeeping.current = wordService.remove([kept.id]).catch(() => setUnkept(false));
+  };
+
+  // Taken back by mistake: the word as it was (its quiz box too), once the removal is through.
+  const rekeep = () => {
+    if (!kept) {
+      return;
+    }
+    setUnkept(false);
+    void unkeeping.current.then(() => wordService.restore([kept.id])).catch(() => setUnkept(true));
   };
 
   const more = (label: string, url: string) => (
@@ -426,11 +436,16 @@ export const LookupCard = ({ term, language, onClose, avoid, place: wordPlace, i
           {kept && sections.length > 0 && (
             <p className="reader-lookup-kept" role="status">
               {unkept ? (
-                "Not kept."
+                <>
+                  Not kept.{" "}
+                  <button type="button" className="reader-lookup-inline" onClick={rekeep}>
+                    Undo
+                  </button>
+                </>
               ) : (
                 <>
                   Kept in My words{kept.count > 1 ? `, looked up ${kept.count} times` : ""}.{" "}
-                  <button type="button" className="reader-lookup-inline" onClick={unkeep}>
+                  <button type="button" className="reader-lookup-inline" onClick={unkeep} title="Remove it from My words and the quiz">
                     Don’t keep
                   </button>
                 </>

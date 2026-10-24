@@ -79,6 +79,8 @@ export type PdfExtras = {
    * says nothing. Read once (readers/pageLabels.ts decides what to show).
    */
   pageLabels(): Promise<string[] | null>;
+  /** The language the document says it is in ("en-GB"), for reading it aloud; null when it says nothing. */
+  language?(): Promise<string | null>;
   /**
    * The first page as a picture, for a book with no cover: a JPEG `data:`
    * URL about `width` pixels wide, on white whatever the finish. A blank
@@ -538,6 +540,15 @@ export const createPdfPageSource = async (bookId: string): Promise<PageSource> =
         return await document.getPageLabels();
       } catch {
         // Labels that cannot be read are no labels.
+        return null;
+      }
+    },
+    async language() {
+      try {
+        const { info } = await document.getMetadata();
+        const said = (info as { Language?: unknown } | null)?.Language;
+        return typeof said === "string" && said.trim() ? said.trim() : null;
+      } catch {
         return null;
       }
     },

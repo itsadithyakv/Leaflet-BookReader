@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { SlidersHorizontal, Timer } from "lucide-react";
 import type { BookFilter } from "@shared/models/book";
 import { UiIcon } from "../../components/UiIcon";
@@ -149,9 +149,11 @@ type ShelfToolsProps = {
   /** Highlights in the library: the key to them shows only when there are some. */
   highlightTotal: number;
   openHighlights: () => void;
+  /** Keys of their own ahead of the highlights' (the word quiz's: ReviseWordsKey). */
+  lead?: ReactNode;
 };
 
-/** One key for sort, filters and grid or list (a sheet), and the highlights as an icon beside it. */
+/** One key for sort, filters and grid or list (a sheet), and the highlights (and the word quiz) as icons beside it. */
 export const PhoneShelfTools = ({
   filters,
   setFilter,
@@ -160,12 +162,14 @@ export const PhoneShelfTools = ({
   genreValue,
   sortOptions,
   highlightTotal,
-  openHighlights
+  openHighlights,
+  lead
 }: ShelfToolsProps) => {
   const [open, setOpen] = useState(false);
   const narrowed = filters.author !== "all" || filters.genre !== "all";
   return (
     <div className="flex shrink-0 items-center gap-2">
+      {lead}
       {highlightTotal > 0 && (
         <button
           type="button"

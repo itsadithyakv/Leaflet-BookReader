@@ -38,7 +38,10 @@
  * needs a clock or a place to keep things, and all of it is tested.
  */
 
-import { DROP_STRONGHOLD, SIDES, autoBest, autoBestLane, layout, runAuto, type Result, type Setup, type Side, type Structure, type UnitKind } from "./battle";
+import { DROP_STRONGHOLD, SIDES, autoBest, autoBestLane, layout, runAuto, type Result, type Setup, type Side, type Squad, type Structure, type UnitKind } from "./battle";
+import { endStars, type Feat, type Missed } from "./feats";
+import { quirkOfPlan } from "./quirks";
+import { forecastPlan, naiveSquad, playPlan, type PlanForecast } from "./squad";
 import {
   ANIMALS,
   BLADES,
@@ -68,6 +71,7 @@ import {
   type Guardian
 } from "./guards";
 import { CHAMPIONS, HEROES, KING_CHAMPION, heroOpen, heroTraits } from "./heroes";
+import { isRaidsMark, noStrongholds, raidsMark, readStrongholds, starsOf, withStars, type Strongholds } from "./raidMark";
 import { FOX_LOOT, GOAT_WALL, HEN_EGGS, MEADOW_MARK, OWL_MEND, TORTOISE_LARDER, giftOf, heartLine, heartsOf, meadowMark, readMeadowMark } from "./fondness";
 import {
   CHAPTER_OF,
@@ -335,6 +339,11 @@ export type BaseState = {
    */
   seenAt: number;
   animalsFrom: number[];
+  /**
+   * (The Magpie Lands) Each stronghold's best stars, and which have been scouted (`raidMark.ts`). Kept in `taught`
+   * too (`rd:`); a stronghold taken before this was kept has 0: taken, stars unknown.
+   */
+  strongholds: Strongholds;
 };
 
 /** A friend's raid on this camp, for the card that tells of it: who, how it went, the fence it cost, and the day. */
@@ -581,8 +590,12 @@ const DROP_FRIEND = 20;
 const SENT_BRINGS = 0.75;
 /** A stronghold taken with all three stars brings this much more of its loot (it used to empty the next one instead). */
 export const THREE_STAR_BONUS = 0.25;
-/** A rematch of the last stronghold taken brings this share of what that stronghold was worth. */
-const REMATCH_LOOT = 0.4;
+/**
+ * A stronghold replayed for stars (the Magpie Lands; it was a rematch, a sure thing for 0.4 of what the stronghold was
+ * worth): this share of what it is worth, by how much of it came down, and this much more for each star past its best.
+ */
+const REPLAY_SHARE = 0.2;
+const REPLAY_STAR = 1 / 3;
 /** The King is not shown until this many strongholds have fallen (it was 3; 10 since 2026-10-15, so a new camp has one ladder to climb). */
 const KING_FROM_CAMPS = 10;
 
@@ -715,7 +728,8 @@ export const newBase = (minutesRead: number, day: string): BaseState => ({
   downed: [],
   front: freshFront(minutesRead),
   seenAt: Math.max(0, Math.floor(minutesRead)),
-  animalsFrom: Array.from({ length: ANIMALS.length }, () => -1)
+  animalsFrom: Array.from({ length: ANIMALS.length }, () => -1),
+  strongholds: noStrongholds()
 });
 
 /** The welcome as a new camp has it: nothing given yet (`welcome.ts` `giveWelcome`). */
@@ -915,7 +929,7 @@ export const readBase = (raw: unknown): BaseState | null => {
       return book && mark !== null && since !== null ? { book, mark, from: since } : null;
     })(),
     parcels: wholeOr(from.parcels, 0, PARCELS_MOST, 0),
-    taught: allTaught.filter((entry) => !entry.startsWith(KEPT_MARK) && !entry.startsWith(FRONT_MARK) && !entry.startsWith(MEADOW_MARK)),
+    taught: allTaught.filter((entry) => !entry.startsWith(KEPT_MARK) && !entry.startsWith(FRONT_MARK) && !entry.startsWith(MEADOW_MARK) && !isRaidsMark(entry)),
     prowled: (() => {
       const had = record(from.prowled);
       return { day: text(had.day) ?? "", knocks: wholeOr(had.knocks, 0, 1000, 0), thefts: wholeOr(had.thefts, 0, 1000, 0) };
@@ -993,7 +1007,9 @@ export const readBase = (raw: unknown): BaseState | null => {
     ...readChapters(from, levels.burrow, oakFrom, mark),
     front: freshFront(0),
     seenAt: 0,
-    animalsFrom: []
+    animalsFrom: [],
+    // (The Magpie Lands) The field and the `rd:` mark, the best of both: an older build keeps the mark, and drops the field.
+    strongholds: readStrongholds(from.strongholds, allTaught)
   };
   return readFront(readMeadow(read, from, allTaught), from.front, allTaught, from.works);
 };
@@ -1086,10 +1102,11 @@ export const keptForm = (state: BaseState): BaseState & { bank: number } => {
     acorns: acorns - bank,
     bank,
     taught: [
-      ...state.taught.filter((entry) => !entry.startsWith(KEPT_MARK) && !entry.startsWith(FRONT_MARK) && !entry.startsWith(MEADOW_MARK)),
+      ...state.taught.filter((entry) => !entry.startsWith(KEPT_MARK) && !entry.startsWith(FRONT_MARK) && !entry.startsWith(MEADOW_MARK) && !isRaidsMark(entry)),
       mark,
       frontMark(state.front),
-      meadowMark(state.seenAt, state.animalsFrom)
+      meadowMark(state.seenAt, state.animalsFrom),
+      ...raidsMark(state.strongholds)
     ]
   };
 };
@@ -2291,15 +2308,15 @@ export const seenReport = (state: BaseState): BaseState => (state.report ? { ...
 // ---- raids ---------------------------------------------------------------------------
 
 /** The camps' names, by how far along they are; the last one's serves every camp after it. */
-const CAMP_NAMES = ["The Twig Nest", "Bramble Roost", "The Tin Hoard", "Crow's Corner", "The Old Rookery"];
+export const CAMP_NAMES = ["The Twig Nest", "Bramble Roost", "The Tin Hoard", "Crow's Corner", "The Old Rookery"];
 /** Camps to a name: three of each, growing, before the next kind. */
-const CAMPS_A_NAME = 3;
+export const CAMPS_A_NAME = 3;
 
 export type RaidPlan = {
   kind: RaidKind;
   /** How hard it is: a stronghold's place on the ladder, or the camp the others are as hard as. */
   n: number;
-  /** Which of the day's camps on the road it is. */
+  /** Which of the day's camps on the road it is. (A replay's stronghold is `n`, and is started with it as the slot.) */
   slot?: number;
   /** Which camp of its size: 0 for a stronghold, which is always the same one. */
   seed: number;
@@ -2356,15 +2373,29 @@ export const nextCamp = (state: BaseState): RaidPlan => {
 const strongholdLoot = (state: BaseState, n: number) => Math.round((20 + n * 10) * lootTimes(state));
 
 /**
- * A rematch (1.5.10): the last stronghold taken, again. The magpies have not
- * got over it, so it is a sure thing (★★★ whatever is sent, and the forecast
- * says so), for a small share of what it was worth; it moves nothing on. An
- * acorn top-up with nothing to judge. Null before any stronghold has fallen.
+ * A replay (the Magpie Lands, 2026-10-24): a stronghold already taken, raided again for stars. It is fought as it was
+ * (its lord too, in a keep) and never moves the ladder; it brings a small share of what it is worth and more for every
+ * star past its best (`replayLoot`). Kind "rematch", as it was called when it was a sure ★★★ of the last stronghold
+ * taken (1.5.10), with nothing to judge. `n` is which (the last taken, when not said); null before any stronghold has
+ * fallen, and for one not taken.
  */
-export const rematchOf = (state: BaseState): RaidPlan | null => {
-  if (state.camps < 1) return null;
-  const n = state.camps - 1;
-  return { kind: "rematch", n, seed: 0, name: CAMP_NAMES[tierOf(n)], tier: tierOf(n), cost: 0, loot: Math.max(1, Math.round(strongholdLoot(state, n) * REMATCH_LOOT)), need: 1, champion: null };
+export const rematchOf = (state: BaseState, n = state.camps - 1): RaidPlan | null => {
+  if (state.camps < 1 || !Number.isInteger(n) || n < 0 || n >= state.camps) return null;
+  return { kind: "rematch", n, seed: 0, name: CAMP_NAMES[tierOf(n)], tier: tierOf(n), cost: 0, loot: strongholdLoot(state, n), need: 1, champion: lordOf(n) };
+};
+/** A stronghold's best, as a replay counts it: one taken before stars were kept was taken with one at least. */
+export const bestStars = (state: BaseState, n: number) => (n >= 0 && n < state.camps ? Math.max(1, starsOf(state.strongholds, n)) : starsOf(state.strongholds, n));
+/** What a replay brings for so many stars and so much pulled down, before the season. */
+export const replayLoot = (state: BaseState, plan: RaidPlan, stars: number, destroyed: number) =>
+  plan.loot * (REPLAY_SHARE * Math.max(0, Math.min(1, destroyed)) + Math.max(0, Math.min(3, stars) - bestStars(state, plan.n)) * REPLAY_STAR);
+/**
+ * The stronghold a replay has most to win at: the fewest stars, the latest of those. Null before any has fallen, and
+ * once every one taken has all three.
+ */
+export const replayPick = (state: BaseState): number | null => {
+  let pick: number | null = null;
+  for (let n = 0; n < state.camps; n++) if (bestStars(state, n) < 3 && (pick === null || bestStars(state, n) <= bestStars(state, pick))) pick = n;
+  return pick;
 };
 
 /**
@@ -2447,7 +2478,7 @@ export const roadDone = (state: BaseState, day: string, slot: number) => state.w
 
 /** The raid of a kind, as things stand. (A rematch before any stronghold has fallen is the first stronghold's.) */
 export const planFor = (state: BaseState, kind: RaidKind, day: string, slot = 0): RaidPlan =>
-  kind === "king" ? theKing(state) : kind === "camp" ? nextCamp(state) : kind === "rematch" ? (rematchOf(state) ?? { ...nextCamp(state), kind: "rematch", champion: null }) : roadCamp(state, day, slot);
+  kind === "king" ? theKing(state) : kind === "camp" ? nextCamp(state) : kind === "rematch" ? (rematchOf(state, slot) ?? { ...nextCamp(state), kind: "rematch", champion: null }) : roadCamp(state, day, slot);
 
 /**
  * Why the King cannot be gone after today, or null when he can. He comes with chapter 10 (1.5.10); a camp from before
@@ -2480,7 +2511,8 @@ export const raidBlocked = (state: BaseState, kind: RaidKind, now: Now, slot = 0
     if (closed) return closed;
   }
   if (kind === "wild" && roadDone(state, now.day, slot)) return "done";
-  if (kind === "rematch" && state.camps < 1) return "none";
+  // (A replay's `slot` is which stronghold: one taken.)
+  if (kind === "rematch" && rematchOf(state, slot) === null) return "none";
   if (raidsReady(state, now.minutes) < 1) return "rest";
   return state.acorns < planFor(state, kind, now.day, slot).cost ? "acorns" : null;
 };
@@ -2488,7 +2520,13 @@ export const raidBlocked = (state: BaseState, kind: RaidKind, now: Now, slot = 0
 /** A raid that has set out: where to, with whom. */
 export type Raid = { plan: RaidPlan; setup: Setup; month: string | null };
 
-const setupFor = (state: BaseState, plan: RaidPlan, tipped: boolean, at?: number): Setup => ({
+/**
+ * A raid's setup. With a squad (the Magpie Lands, 2026-10-24) it is a planned
+ * raid: the squad comes down the camp's approaches, and the camp has its
+ * quirk (`quirks.ts`); without one it is fought by hand, as before.
+ */
+const setupFor = (state: BaseState, plan: RaidPlan, tipped: boolean, at?: number, squad?: Squad): Setup => ({
+  ...(squad ? { squad, quirk: quirkOfPlan(plan) } : {}),
   n: plan.n,
   king: plan.kind === "king",
   capacity: scoutsOf(state) + (tipped ? TIP_SCOUTS : 0),
@@ -2502,6 +2540,14 @@ const setupFor = (state: BaseState, plan: RaidPlan, tipped: boolean, at?: number
   drop: DROP_STRONGHOLD,
   bombers: bombersOf(state)
 });
+
+/** A raid's setup as it would set out now (with a squad, planned): for the planning screen's scout view and forecast. */
+export const raidSetup = (state: BaseState, plan: RaidPlan, squad?: Squad, at?: number): Setup => setupFor(state, plan, false, at, squad);
+/**
+ * The plan a reader makes without thinking about it (`squad.ts` `naiveSquad`): everyone down the trail, nobody held
+ * back. What the planning screen starts from, so a reader can just go, and what a raid sent without them takes.
+ */
+export const naivePlanOf = (state: BaseState, plan: RaidPlan, at?: number): Squad => naiveSquad(setupFor(state, plan, false, at));
 
 /** Trophies in all: what a hero may be brought by, whatever kind they are. */
 const trophies = (state: BaseState) => Math.max(state.raised.length, state.shelf.reduce((sum, count) => sum + count, 0));
@@ -2535,12 +2581,14 @@ export const championName = (plan: RaidPlan) => (plan.champion === null ? null :
  * one is used) is two more of them. From here the raid is fought
  * (`battle.ts`) and `finishRaid` takes how it went; a raid walked away from
  * has already cost what it costs, so leaving is not a way out of a bad one.
+ * With a squad it is a planned raid (`squad.ts` `checkSquad` says whether one
+ * can go); the reader's orders are kept by the battle (`Battle.given`).
  */
-export const startRaid = (state: BaseState, kind: RaidKind, now: Now, tip = false, slot = 0): { state: BaseState; raid: Raid } | null => {
+export const startRaid = (state: BaseState, kind: RaidKind, now: Now, tip = false, slot = 0, squad?: Squad): { state: BaseState; raid: Raid } | null => {
   if (raidBlocked(state, kind, now, slot)) return null;
   const plan = planFor(state, kind, now.day, slot);
   const tipped = tip && state.intel > 0;
-  const setup = setupFor(state, plan, tipped, now.at);
+  const setup = setupFor(state, plan, tipped, now.at, squad);
   return {
     state: {
       ...state,
@@ -2568,6 +2616,10 @@ export type RaidEnd = {
   blade: number | null;
   /** A thing the raiders had carried off, brought home: which kind. */
   home: number | null;
+  /** (A planned raid) Each star (the nest, most of it, the feat), the stronghold's feat, and why each star missed was missed (`feats.ts` `MISSED`). */
+  earned?: [boolean, boolean, boolean];
+  feat?: Feat;
+  missed?: Missed[];
 };
 
 // ---- worn out, and asleep --------------------------------------------------------------
@@ -2859,9 +2911,12 @@ export type FriendBlocked = "hut" | "today" | "rest";
 export const friendBlocked = (state: BaseState, now: Now, handle: string): FriendBlocked | null =>
   state.levels.hut < 1 ? "hut" : state.rivals.day === now.day && state.rivals.raided.includes(handle) ? "today" : raidsReady(state, now.minutes) < 1 ? "rest" : null;
 
-/** Sets out for a friend's camp. It costs the scouts' rest and nothing else. */
-export const startFriendRaid = (state: BaseState, camp: SharedCamp, friend: Friend, now: Now): { state: BaseState; raid: FriendRaid } | null => {
-  if (friendBlocked(state, now, friend.handle)) return null;
+/**
+ * A friend's camp as a raid on it would be, before setting out: the plan, the setup and the camp fought over. The
+ * scout view and the planning screen look at it; nothing is spent. With a squad it is planned: their camp's
+ * approaches come from its own layout, and it has no quirk.
+ */
+export const friendRaidOf = (state: BaseState, camp: SharedCamp, friend: Friend, now: Now, squad?: Squad): FriendRaid => {
   const theirs = campOfShared(camp, now.day);
   const plan: RaidPlan = {
     kind: "wild",
@@ -2875,19 +2930,25 @@ export const startFriendRaid = (state: BaseState, camp: SharedCamp, friend: Frie
     champion: null
   };
   return {
+    plan,
+    // Their constructs act on the scouts as they do on the night's raiders: a hedge cuts, a patch slows, a pit takes, a bell rings.
+    setup: { ...setupFor(state, plan, false, now.at, squad), ...(squad ? { quirk: null } : {}), works: true, drop: DROP_FRIEND },
+    month: null,
+    friend,
+    structures: campStructures(theirs, false).map((entry) => ({ ...entry, hp: entry.hp * FRIEND_STURDY, max: entry.max * FRIEND_STURDY, hit: entry.hit * FRIEND_HITS }))
+  };
+};
+
+/** Sets out for a friend's camp. It costs the scouts' rest and nothing else. With a squad it is planned (`friendRaidOf`). */
+export const startFriendRaid = (state: BaseState, camp: SharedCamp, friend: Friend, now: Now, squad?: Squad): { state: BaseState; raid: FriendRaid } | null => {
+  if (friendBlocked(state, now, friend.handle)) return null;
+  return {
     state: {
       ...state,
       raidFrom: spend(state.raidFrom, now.minutes, RAID_EVERY, RAIDS_IN_HAND),
       rivals: { day: now.day, raided: [...(state.rivals.day === now.day ? state.rivals.raided : []), friend.handle].slice(-60) }
     },
-    raid: {
-      plan,
-      // Their constructs act on the scouts as they do on the night's raiders: a hedge cuts, a patch slows, a pit takes, a bell rings.
-      setup: { ...setupFor(state, plan, false, now.at), works: true, drop: DROP_FRIEND },
-      month: null,
-      friend,
-      structures: campStructures(theirs, false).map((entry) => ({ ...entry, hp: entry.hp * FRIEND_STURDY, max: entry.max * FRIEND_STURDY, hit: entry.hit * FRIEND_HITS }))
-    }
+    raid: friendRaidOf(state, camp, friend, now, squad)
   };
 };
 
@@ -2898,7 +2959,7 @@ export const finishFriendRaid = (state: BaseState, raid: FriendRaid, result: Res
   const text = won ? `Raided ${raid.friend.name}'s camp: ${result.stars} ${result.stars === 1 ? "star" : "stars"}.` : `${raid.friend.name}'s camp held against the scouts.`;
   return {
     state: heroHome({ ...state, acorns: state.acorns + loot, events: noted(state, day, text) }, raid, result, day, at),
-    end: { won, stars: result.stars, loot, name: raid.plan.name, banner: null, fled: false, bonus: 0, blade: null, home: null }
+    end: { won, stars: result.stars, loot, name: raid.plan.name, banner: null, fled: false, bonus: 0, blade: null, home: null, ...endStars(result) }
   };
 };
 
@@ -2962,7 +3023,7 @@ export const raidsAsked = (state: BaseState) => state.taught.includes(RAIDS_ASKE
 export const askedRaids = (state: BaseState): BaseState => (raidsAsked(state) ? state : { ...state, taught: [...state.taught, RAIDS_ASKED] });
 
 /** Whether a stronghold is its lord's own: the last of each name. */
-const lordOf = (n: number) => ((n + 1) % CAMPS_A_NAME === 0 ? tierOf(n) : null);
+export const lordOf = (n: number) => ((n + 1) % CAMPS_A_NAME === 0 ? tierOf(n) : null);
 
 /**
  * A raid is over. What came down is what is brought home (as far as the
@@ -3002,7 +3063,9 @@ const finishRaidPlain = (state: BaseState, raid: Raid, result: Result, day: stri
   // All three stars on a stronghold: a little more of its loot (1.5.10; it used to empty the next stronghold, which
   // moved the ladder two steps without a word of why).
   const bonus = won && plan.kind === "camp" && result.stars === 3 ? give(state, plan.loot * THREE_STAR_BONUS * brings) : 0;
-  const loot = give(state, plan.loot * result.destroyed * brings) + bonus;
+  // (A replay brings a share, and more for stars past its best: `replayLoot`.)
+  const loot = give(state, (plan.kind === "rematch" ? replayLoot(state, plan, result.stars, result.destroyed) : plan.loot * result.destroyed) * brings) + bonus;
+  const bettered = won && plan.kind === "rematch" && result.stars > bestStars(state, plan.n);
   const king = plan.kind === "king";
   const month = raid.month ?? monthOf(day);
   const what = plan.kind === "wild" ? plan.name : `Stronghold ${plan.n + 1}`;
@@ -3012,7 +3075,9 @@ const finishRaidPlain = (state: BaseState, raid: Raid, result: Result, day: stri
       ? `The Magpie King fell. ${monthName(month)}'s banner flies over the camp.`
       : "The Magpie King kept his nest."
     : plan.kind === "rematch"
-      ? `${what} again: ${loot} acorns.`
+      ? bettered
+        ? `${what} again, with ${result.stars} stars: its best yet. ${loot} acorns.`
+        : `${what} again: ${loot} acorns.`
       : won
         ? `${what} taken with ${result.stars} ${result.stars === 1 ? "star" : "stars"}: ${loot} acorns.`
         : `The raid on ${what[0].toLowerCase()}${what.slice(1)} was beaten back${loot > 0 ? `, with ${loot} acorns carried off` : ""}.`;
@@ -3022,6 +3087,8 @@ const finishRaidPlain = (state: BaseState, raid: Raid, result: Result, day: stri
       // The pack is for a raid won: a lost one leaves it for the next.
       pack: won ? false : state.pack,
       camps: won && plan.kind === "camp" ? state.camps + 1 : state.camps,
+      // (The Magpie Lands) A stronghold's best stars, taken or replayed.
+      strongholds: won && (plan.kind === "camp" || plan.kind === "rematch") ? withStars(state.strongholds, plan.n, result.stars) : state.strongholds,
       banners: won && king && !state.banners.includes(month) ? [...state.banners, month] : state.banners,
       // (A hero brought home from a raid won was noted for their daily want; wants are not asked since 2026-10-15.)
       stats: { ...state.stats, raids: state.stats.raids + (won ? 1 : 0), stars: state.stats.stars + result.stars },
@@ -3043,7 +3110,7 @@ const finishRaidPlain = (state: BaseState, raid: Raid, result: Result, day: stri
             ? noted({ ...next, events: next.events.slice(1) }, day, `${line} The ${DECOR[home.kind].name.toLowerCase()} is home again.`)
             : next.events
     },
-    end: { won, stars: result.stars, loot, name: plan.name, banner: won && king ? month : null, fled, bonus, blade, home: home?.kind ?? null }
+    end: { won, stars: result.stars, loot, name: plan.name, banner: won && king ? month : null, fled, bonus, blade, home: home?.kind ?? null, ...endStars(result) }
   };
 };
 
@@ -3058,9 +3125,8 @@ export const SENT_SHARE = SENT_BRINGS;
  * without being told.
  */
 export const scoutsSay = (state: BaseState, plan: RaidPlan): Result | null =>
-  state.levels.hut < 1 ? null : plan.kind === "rematch" ? SURE_WIN : autoBest(setupFor(state, plan, false));
-/** A rematch's result, whoever goes: the magpies of a stronghold already taken do not stand. */
-const SURE_WIN: Result = { stars: 3, destroyed: 1, hoards: 1 };
+  state.levels.hut < 1 ? null : autoBest(setupFor(state, plan, false));
+// (A rematch was a sure ★★★ whoever went until the Magpie Lands; a replay is fought for its stars like any raid.)
 
 /** What the scouts say of a raid, in a plain sentence and stars, and whether they can be sent to it. */
 export type Forecast = {
@@ -3075,6 +3141,8 @@ export type Forecast = {
   brings: number;
   /** (1.5.11) Where it is not taken whole: the one thing that would help most, in a few words; null otherwise. */
   hint: string | null;
+  /** (A planned raid's forecast) The worst and best of its runs, and each star's share of them (`squad.ts` `forecastPlan`). */
+  band?: Pick<PlanForecast, "low" | "high" | "earned">;
 };
 const FORECAST_WORDS = [
   "Too strong for now: bring a hero or build up the hut",
@@ -3082,13 +3150,27 @@ const FORECAST_WORDS = [
   "Your scouts take it, though not all of it",
   "Your scouts take it whole"
 ];
-export const raidForecast = (state: BaseState, plan: RaidPlan): Forecast => {
+export const raidForecast = (state: BaseState, plan: RaidPlan, squad?: Squad): Forecast => (squad ? planForecast(state, plan, squad) : handForecast(state, plan));
+/**
+ * A planned raid's forecast (the Magpie Lands): the stars the plan likely
+ * comes to, from a few runs of it, with the worst and best of them. Coarse on
+ * purpose, and with none of the orders that make the most of a plan.
+ */
+const planForecast = (state: BaseState, plan: RaidPlan, squad: Squad): Forecast => {
+  if (state.levels.hut < 1) return { stars: 0, words: FORECAST_WORDS[0], canSend: false, sure: false, brings: 0, hint: null, band: { low: 0, high: 0, earned: [0, 0, 0] } };
+  const said = forecastPlan(setupFor(state, plan, false, undefined, squad));
+  const won = said.likely >= plan.need;
+  const words = plan.need > 1 && said.likely > 0 && !won ? "Not enough to take him: he needs two stars" : FORECAST_WORDS[said.likely];
+  return { stars: said.likely, words, canSend: won, sure: false, brings: Math.round(plan.loot * said.destroyed * SENT_BRINGS), hint: null, band: { low: said.low, high: said.high, earned: said.earned } };
+};
+const handForecast = (state: BaseState, plan: RaidPlan): Forecast => {
   const said = scoutsSay(state, plan);
   const stars = (said?.stars ?? 0) as Forecast["stars"];
   const won = said !== null && stars >= plan.need;
-  const sure = plan.kind === "rematch";
+  // (Never since the Magpie Lands: a replay is fought for stars.)
+  const sure = false;
   const bonus = won && plan.kind === "camp" && stars === 3 ? Math.round(plan.loot * THREE_STAR_BONUS * SENT_BRINGS) : 0;
-  const brings = said ? Math.round(plan.loot * said.destroyed * SENT_BRINGS) + bonus : 0;
+  const brings = said ? Math.round((plan.kind === "rematch" ? replayLoot(state, plan, stars, said.destroyed) : plan.loot * said.destroyed) * SENT_BRINGS) + bonus : 0;
   const words = sure
     ? "A sure thing: they have not got over the last time"
     : plan.need > 1 && stars > 0 && !won
@@ -3102,7 +3184,7 @@ export const raidForecast = (state: BaseState, plan: RaidPlan): Forecast => {
  */
 const raidHint = (state: BaseState, plan: RaidPlan): string => {
   const setup = setupFor(state, plan, false);
-  const walled = plan.kind !== "rematch" && layout(plan.n, plan.kind === "king", plan.seed).some((entry) => entry.kind === "wall");
+  const walled = layout(plan.n, plan.kind === "king", plan.seed).some((entry) => entry.kind === "wall");
   if (walled && bombersOf(state) === 0) return `Their wall is strong: Puffcaps come with the hut's level ${TRAINED_AT.bomber}`;
   const lane = autoBestLane(setup).side;
   if (walled && lane !== "left") return `Go round the ${lane === "top" ? "top" : "foot"} of their wall`;
@@ -3112,34 +3194,42 @@ const raidHint = (state: BaseState, plan: RaidPlan): string => {
 
 /**
  * Sends the scouts without the reader, for a reader who would rather not
- * fight the raid (or cannot): it goes as the scouts said it would, and brings
- * less of the loot for it (`SENT_SHARE`). Null when they cannot set out, and
- * (1.5.10) when they would lose: "Send" is not a way to throw a raid's rest
- * away.
+ * fight the raid (or cannot): it goes as the plan a reader makes without
+ * thinking would (`naivePlanOf`: everyone down the trail, nobody held back, no
+ * orders), and brings less of the loot for it (`SENT_SHARE`). Null when they
+ * cannot set out, and (1.5.10) when that plan would likely lose: "Send" is not
+ * a way to throw a raid's rest away. (Until the Magpie Lands it was the raid by
+ * hand, played by rule.)
  */
 export const sendRaid = (state: BaseState, kind: RaidKind, now: Now, slot = 0): { state: BaseState; end: RaidEnd } | null => {
   if (raidBlocked(state, kind, now, slot)) return null;
-  if (!raidForecast(state, planFor(state, kind, now.day, slot)).canSend) return null;
-  const begun = startRaid(state, kind, now, false, slot);
-  return begun ? finishRaid(begun.state, begun.raid, kind === "rematch" ? SURE_WIN : autoBest(begun.raid.setup), now.day, SENT_BRINGS) : null;
+  const plan = planFor(state, kind, now.day, slot);
+  const squad = naivePlanOf(state, plan, now.at);
+  if (!raidForecast(state, plan, squad).canSend) return null;
+  const begun = startRaid(state, kind, now, false, slot, squad);
+  return begun ? finishRaid(begun.state, begun.raid, playPlan(begun.raid.setup), now.day, SENT_BRINGS) : null;
 };
 
 /** One of the raid board's cards: what it is, the raid, what the scouts say, and why it cannot set out (null when it can). */
-export type BoardCard = { kind: "rematch" | "camp" | "king"; plan: RaidPlan; forecast: Forecast; blocked: RaidBlocked | null };
+export type BoardCard = { kind: "rematch" | "camp" | "king"; plan: RaidPlan; forecast: Forecast; blocked: RaidBlocked | null; /** A replay's stronghold (the `slot` to start it with); 0 otherwise. */ slot: number };
 /**
  * The raid board (1.5.10): the rematch (once a stronghold has fallen), the
  * next stronghold, and the King (from chapter 10, while this month's banner
- * is still his). Nothing on it costs acorns.
+ * is still his). Nothing on it costs acorns. (Since the Magpie Lands the raid
+ * key opens the map, `lands.ts`; the board is kept for what still reads it,
+ * and its rematch is the replay with most to win, `replayPick`.)
  */
 export const raidBoard = (state: BaseState, now: Now): BoardCard[] => {
   const cards: BoardCard[] = [];
-  const rematch = rematchOf(state);
-  if (rematch) cards.push({ kind: "rematch", plan: rematch, forecast: raidForecast(state, rematch), blocked: raidBlocked(state, "rematch", now) });
+  // (The Magpie Lands) The replay with most to win: the fewest stars. (The map, `lands.ts`, offers every one.)
+  const pick = replayPick(state);
+  const rematch = pick === null ? null : rematchOf(state, pick);
+  if (rematch && pick !== null) cards.push({ kind: "rematch", plan: rematch, forecast: raidForecast(state, rematch), blocked: raidBlocked(state, "rematch", now, pick), slot: pick });
   const next = nextCamp(state);
-  cards.push({ kind: "camp", plan: next, forecast: raidForecast(state, next), blocked: raidBlocked(state, "camp", now) });
+  cards.push({ kind: "camp", plan: next, forecast: raidForecast(state, next), blocked: raidBlocked(state, "camp", now), slot: 0 });
   if (opened(state, now.minutes, "king") && !state.banners.includes(monthOf(now.day))) {
     const king = theKing(state);
-    cards.push({ kind: "king", plan: king, forecast: raidForecast(state, king), blocked: raidBlocked(state, "king", now) });
+    cards.push({ kind: "king", plan: king, forecast: raidForecast(state, king), blocked: raidBlocked(state, "king", now), slot: 0 });
   }
   return cards;
 };

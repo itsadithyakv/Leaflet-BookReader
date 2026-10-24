@@ -1290,102 +1290,13 @@
   gap: 6px;
 }
 
-/* ---- The raid board (RaidBoard.tsx) ------------------------------------------------------------------------ */
-
-.pip-raid-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
-  margin: 2px 40px 10px 0;
-}
-
-.pip-raid-rest {
-  font-weight: 700;
-}
+/* ---- What the Magpie Lands' card keeps of the raid board's (LandsMap.tsx) ------------------------------------- */
 
 .pip-raid-heroes {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 10px;
-}
-
-.pip-raid-sent {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin: 0 2px 10px;
-  padding: 5px 9px;
-  background: var(--whim-butter);
-  font-weight: 700;
-  box-shadow: 0 0 0 2px var(--hud-line);
-}
-
-.pip-raid-sent.is-lost {
-  background: var(--hud-face);
-}
-
-.pip-raid-cards {
-  display: grid;
-  gap: 12px;
-  padding: 2px;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr));
-}
-
-.pip-arcade .pip-raid-card {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 6px;
-  padding: 9px 11px 10px;
-  border: 0;
-  border-radius: 0;
-  background: var(--hud-face);
-  color: var(--hud-ink);
-  box-shadow:
-    0 -2px 0 0 var(--hud-line),
-    0 2px 0 0 var(--hud-line),
-    -2px 0 0 0 var(--hud-line),
-    2px 0 0 0 var(--hud-line),
-    0 4px 0 0 var(--hud-drop);
-}
-
-.pip-arcade .pip-raid-card.is-friend {
-  flex-direction: row;
-  align-items: center;
-}
-
-.pip-raid-card-top {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.pip-raid-card-kind {
-  color: var(--hud-ink-soft);
-  font-size: 0.6875rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.pip-raid-card-name {
-  overflow: hidden;
-  font-family: "ZT Nature", "Segoe UI", system-ui, sans-serif;
-  font-size: 1rem;
-  font-weight: 800;
-  line-height: 1.2;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.pip-raid-card-loot {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 700;
 }
 
 .pip-raid-forecast {
@@ -1402,31 +1313,9 @@
   margin-top: 1px;
 }
 
-.pip-raid-card.is-hard .pip-raid-forecast {
-  color: var(--hud-ink-soft);
-}
-
-.pip-raid-keys {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin-top: auto;
-}
-
 .pip-raid-why {
   color: var(--hud-ink-soft);
   font-size: 0.75rem;
-}
-
-.pip-raid-friends {
-  margin-top: 16px;
-}
-
-.pip-raid-friends-head {
-  display: flex;
-  align-items: center;
-  margin-bottom: 6px;
 }
 
 .pip-raid-ask {
@@ -1448,17 +1337,6 @@
 .pip-raid-ask-keys {
   display: flex;
   gap: 6px;
-}
-
-.pip-raid-none,
-.pip-raid-friend-camp {
-  color: var(--hud-ink-soft);
-  font-size: 0.75rem;
-}
-
-.pip-raid-friend-camp {
-  display: flex;
-  gap: 8px;
 }
 
 /* ---- The guide behind the (i) (HollowGuide.tsx) --------------------------------------------------------------- */
@@ -1625,80 +1503,6 @@
   margin-top: 6px;
 }
 
-/* ---- A raid on a phone on its side (BattleScreen, 1.5.10): the field as large as the screen, the rest over it ---- */
-
-.pip-arcade .pip-base.pip-battle.is-full {
-  position: relative;
-  display: flex;
-  width: 100%;
-  height: 100dvh;
-  align-items: center;
-  justify-content: center;
-  margin: 0;
-  overflow: hidden;
-}
-
-.pip-arcade .pip-battle.is-full > :first-child {
-  position: absolute;
-  top: calc(var(--inset-top, 0px) + 6px);
-  right: calc(var(--inset-right, 0px) + 8px);
-  left: calc(var(--inset-left, 0px) + 8px);
-  z-index: 3;
-  pointer-events: none;
-}
-
-.pip-arcade .pip-battle.is-full > :first-child > p:first-child {
-  padding: 2px 10px 3px;
-  background: var(--hud-face);
-  color: var(--hud-ink);
-  box-shadow: 0 0 0 2px var(--hud-line);
-}
-
-.pip-arcade .pip-battle.is-full > .pip-base-scene {
-  margin: 0;
-  padding: 0;
-}
-
-.pip-arcade .pip-battle.is-full > .pip-base-scene .pip-arcade-canvas {
-  box-shadow: none;
-}
-
-.pip-arcade .pip-battle.is-full > .mt-3:not(.pip-base-result) {
-  position: absolute;
-  right: calc(var(--inset-right, 0px) + 8px);
-  bottom: calc(var(--inset-bottom, 0px) + 6px);
-  left: calc(var(--inset-left, 0px) + 8px);
-  z-index: 3;
-  margin: 0;
-}
-
-.pip-arcade .pip-battle.is-full > .mt-3:not(.pip-base-result) > .pip-base-chip {
-  background: var(--hud-face);
-  box-shadow: 0 0 0 2px var(--hud-line);
-}
-
-.pip-arcade .pip-battle.is-full > .pip-base-result {
-  position: absolute;
-  inset: 0;
-  z-index: 4;
-  width: min(420px, calc(100% - 24px));
-  height: fit-content;
-  max-height: calc(100% - 16px);
-  margin: auto;
-  overflow-y: auto;
-}
-
-.pip-arcade .pip-battle.is-full .pip-base-hint {
-  inset: calc(var(--inset-top, 0px) + 44px) 0 auto 0;
-}
-
-.pip-base-result-says {
-  max-width: 34ch;
-  margin: 2px auto 4px;
-  font-weight: 700;
-  text-align: center;
-}
-
 /* A narrow panel (a phone on its side): the Build tabs are their names alone, so all four fit beside the close key. */
 :where(html[data-shape="sideways"]) .pip-arcade .pip-build-tab {
   padding: 2px 7px;
@@ -1711,21 +1515,6 @@
 
 :where(html[data-shape="sideways"]) .pip-build-tabs {
   gap: 4px;
-}
-
-/* The raid board is as tall as its cards, not the whole picture (a chapter-2 camp has one card), and the cards keep a
-   card's width rather than stretching across an empty sheet. */
-.pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-base-sheet.pip-raid-board.pip-raid-board {
-  bottom: auto;
-  width: fit-content;
-  min-width: min(420px, calc(100% - 24px));
-  max-width: calc(100% - 24px);
-  max-height: calc(100% - 64px - var(--inset-top, 0px) - var(--inset-bottom, 0px));
-  margin: 0 auto;
-}
-
-.pip-raid-board .pip-raid-cards {
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 300px));
 }
 
 /* ==== The Front (1.5.11): tonight's chip and card, and the Defence shelf's trap spots and tower pads ================
@@ -1876,27 +1665,12 @@
   font-weight: 800;
 }
 
-/* (The Front, continued) The raid card's one hint, and the Puffcaps still to put down on their key. */
+/* (The Front, continued) The raid card's one hint. */
 .pip-raid-hint {
   margin: -2px 0 2px;
   color: var(--hud-ink-soft);
   font-size: 0.6875rem;
   line-height: 1.3;
-}
-
-.pip-base-tile-count {
-  position: absolute;
-  top: -5px;
-  right: -5px;
-  min-width: 15px;
-  padding: 0 3px;
-  background: var(--whim-butter);
-  color: var(--hud-ink);
-  font-size: 0.625rem;
-  font-weight: 800;
-  line-height: 15px;
-  text-align: center;
-  box-shadow: 0 0 0 2px var(--hud-line);
 }
 
 /* (The Front, continued) Tonight's chip keeps its night colours while its card is open. */
@@ -1979,4 +1753,351 @@
   gap: 8px;
   min-width: 0;
   font-size: 0.75rem;
+}
+
+/* ==== The Magpie Lands (2026-10-24): the raid key's map, LandsMap.tsx =============================================
+   The map is the page, as the camp is: it fills the picture's whole room on a large screen and on a phone on its side,
+   with the bar along the top and the keys at the foot over it, and scrolls along where the path is longer than the
+   screen. Upright (and in a small window) it is a tall page of its own under the bar. Its two canvases are art pixels,
+   scaled up by a whole number of device pixels (landsLayout.ts), hard-edged. Kept to this one block. */
+.pip-lands {
+  position: relative;
+  overflow: hidden;
+  background: #7cc35e;
+  color: var(--hud-ink);
+}
+
+.pip-arcade .pip-base.is-stage[data-mode="stage"] > .pip-lands {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+}
+
+.pip-arcade .pip-base.is-stage[data-mode="stack"] > .pip-lands,
+.pip-arcade .pip-base.is-stage[data-mode="side"] > .pip-lands {
+  order: 5;
+  grid-column: 1 / -1;
+  grid-row: 5;
+  min-width: 0;
+  height: max(360px, 72dvh);
+  box-shadow:
+    0 0 0 2px var(--hud-line),
+    0 6px 0 2px var(--hud-drop);
+}
+
+.pip-lands-scroll {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--hud-line) transparent;
+  cursor: grab;
+}
+
+.pip-lands-scroll:active {
+  cursor: grabbing;
+}
+
+.pip-lands-world {
+  position: relative;
+}
+
+.pip-lands-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+/* What can be tapped: laid over the art, its foot on the thing's foot. */
+.pip-lands-hit {
+  position: absolute;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  transform: translate(-50%, -100%);
+}
+
+.pip-lands-hit:focus-visible,
+.pip-lands-hit.is-chosen {
+  outline: 2px dashed var(--whim-butter, #ffd86b);
+  outline-offset: 2px;
+}
+
+.pip-lands-hit.is-fog {
+  cursor: help;
+  transform: translate(-50%, -50%);
+}
+
+.pip-lands-hit.is-sign.is-new::after {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 9px;
+  height: 9px;
+  background: #e0393e;
+  box-shadow: 0 0 0 2px var(--hud-line);
+  content: "";
+}
+
+/* Star pips under a stronghold, and in the card: pixel stars, ink round gold. */
+.pip-lands-stars {
+  display: inline-flex;
+  gap: 2px;
+  pointer-events: none;
+}
+
+.pip-lands-hit > .pip-lands-stars {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 50%;
+  padding: 2px 3px;
+  background: var(--hud-face);
+  box-shadow: 0 0 0 2px var(--hud-line);
+  transform: translateX(-50%);
+}
+
+.pip-lands-stars > i {
+  position: relative;
+  display: block;
+  /* About five art pixels of the map, within reason (--lands-px: CSS pixels to its art pixel). */
+  width: clamp(8px, calc(var(--lands-px, 2px) * 5), 13px);
+  height: clamp(8px, calc(var(--lands-px, 2px) * 5), 13px);
+  background: var(--hud-line);
+  clip-path: polygon(50% 0, 64% 34%, 100% 38%, 72% 62%, 82% 100%, 50% 80%, 18% 100%, 28% 62%, 0 38%, 36% 34%);
+}
+
+.pip-lands-stars > i::after {
+  position: absolute;
+  inset: 1.5px;
+  background: var(--hud-track);
+  clip-path: inherit;
+  content: "";
+}
+
+.pip-lands-stars > i.is-won::after {
+  background: #ffd23f;
+}
+
+.pip-lands-stars.is-card > i {
+  width: 14px;
+  height: 14px;
+}
+
+/* The regions' names: paper tags where each begins. */
+.pip-lands-region {
+  position: absolute;
+  padding: 1px 7px 2px;
+  background: var(--hud-face);
+  box-shadow: 0 0 0 2px var(--hud-line);
+  color: var(--hud-ink);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.pip-lands-region.is-fogged {
+  color: var(--hud-ink-soft);
+}
+
+/* The one line along the top, under the bar. */
+.pip-lands-line {
+  position: absolute;
+  top: calc(var(--lands-top, 0px) + 8px);
+  right: 8px;
+  left: 8px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.pip-lands-line > * {
+  pointer-events: auto;
+}
+
+.pip-lands-line > .pip-base-chip {
+  flex: none;
+  background: var(--hud-face);
+  box-shadow:
+    0 0 0 2px var(--hud-line),
+    0 4px 0 2px var(--hud-drop);
+  white-space: nowrap;
+}
+
+.pip-lands-line > .pip-lands-progress {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.pip-lands[data-orient="tall"] .pip-lands-line > .pip-lands-progress {
+  border-radius: 10px;
+  white-space: normal;
+  text-align: left;
+}
+
+.pip-lands-line > .pip-lands-rest.is-good {
+  background: var(--whim-good, #cfeec0);
+}
+
+.pip-lands-sent {
+  position: absolute;
+  top: calc(var(--lands-top, 0px) + 46px);
+  left: 50%;
+  z-index: 4;
+  display: flex;
+  max-width: calc(100% - 24px);
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--hud-face);
+  box-shadow: 0 0 0 2px var(--hud-line);
+  font-size: 0.8125rem;
+  transform: translateX(-50%);
+}
+
+/* A tap's card: down the right of a wide map, across the foot of a tall one. */
+.pip-lands-card {
+  position: absolute;
+  top: calc(var(--lands-top, 0px) + 50px);
+  right: 12px;
+  bottom: auto;
+  z-index: 5;
+  width: min(340px, calc(100% - 24px));
+  max-height: calc(100% - var(--lands-top, 0px) - var(--lands-bottom, 0px) - 64px);
+  overflow-y: auto;
+  padding: 12px 14px 14px;
+  background:
+    radial-gradient(var(--hud-track) 1px, transparent 1.5px) 0 0 / 14px 14px,
+    var(--hud-face);
+  box-shadow:
+    0 0 0 2px var(--hud-line),
+    0 6px 0 2px var(--hud-drop);
+  color: var(--hud-ink);
+}
+
+.pip-lands[data-orient="tall"] .pip-lands-card {
+  top: auto;
+  right: 8px;
+  bottom: calc(var(--lands-bottom, 0px) + 8px);
+  left: 8px;
+  width: auto;
+  max-height: 62%;
+}
+
+.pip-lands-card-close {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  float: right;
+  margin-left: 8px;
+}
+
+.pip-lands-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.pip-lands-card-pic {
+  display: flex;
+  width: 48px;
+  height: 48px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+}
+
+.pip-lands-card-name {
+  font-size: 0.9375rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.pip-lands-card-sub {
+  display: block;
+  color: var(--hud-ink-soft);
+  font-size: 0.75rem;
+}
+
+.pip-lands-card-best {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.pip-lands-card-best:empty {
+  display: none;
+}
+
+.pip-lands-quirk {
+  margin: 4px 0;
+}
+
+.pip-lands-lord {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+}
+
+.pip-lands-card-loot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0;
+  font-size: 0.8125rem;
+}
+
+.pip-lands-keys {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.pip-lands-totals {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0 0;
+  font-size: 0.8125rem;
+}
+
+.pip-lands-totals > li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.pip-lands-friends {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.pip-lands-friends > li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8125rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pip-lands-scroll {
+    scroll-behavior: auto;
+  }
 }

@@ -222,6 +222,50 @@ fn delete(db: &Database, ids: &[String], now: &str) -> Result<(), String> {
   Ok(())
 }
 
+/// A stamp later than `after`: `now`, unless the clock says otherwise. The
+/// copies settle a row by its newest edit, and in a tie the tombstone wins
+/// (`merge_edited` then compares the rows, and a removal sorts after none),
+/// so an undo must be dated after the removal it takes back, even in the same
+/// millisecond or on a clock that has stepped back since.
+fn later_than(after: &str, now: &str) -> String {
+  use chrono::{DateTime, Duration, SecondsFormat, Utc};
+  let parse = |value: &str| DateTime::parse_from_rfc3339(value).ok().map(|at| at.with_timezone(&Utc));
+  match (parse(after), parse(now)) {
+    (Some(before), Some(at)) if at.timestamp_millis() <= before.timestamp_millis() => {
+      (before + Duration::milliseconds(1)).to_rfc3339_opts(SecondsFormat::Millis, true)
+    }
+    _ => now.to_string()
+  }
+}
+
+/// Puts removed words back as they were: the meaning, the place and the
+/// quiz's box. It is the undo of a removal. Only words, only removed ones,
+/// and only rows that still hold the word and its meaning (the removals
+/// "Start empty" sends keep nothing of what they remove, so there is nothing
+/// to put back). Each is dated after its removal, so the other copies take
+/// the word back too. Resolves with the words put back.
+fn restore(db: &Database, ids: &[String], now: &str) -> Result<Vec<Annotation>, String> {
+  if ids.len() > MAX_BATCH {
+    return Err("Too many words at once.".to_string());
+  }
+  let mut back = Vec::new();
+  for id in ids {
+    let Some(row) = db.find_annotation(id).map_err(|e| e.to_string())? else {
+      continue;
+    };
+    let whole = row.note.as_deref().is_some_and(|word| !word.trim().is_empty())
+      && detail_of(&row).get("m").and_then(|m| m.as_str()).is_some_and(|m| !m.trim().is_empty());
+    if row.kind != WORD_KIND || row.deleted_at.is_none() || !whole {
+      continue;
+    }
+    let updated_at = later_than(&row.updated_at, now);
+    let row = Annotation { deleted_at: None, updated_at, ..row };
+    db.put_annotation(&row).map_err(|e| e.to_string())?;
+    back.push(row);
+  }
+  Ok(back)
+}
+
 #[tauri::command(async)]
 pub fn words_list(state: State<'_, AppState>) -> Result<Vec<Annotation>, String> {
   let db = state.db.guard();
@@ -244,6 +288,12 @@ pub fn words_review(reviews: Vec<WordReview>, state: State<'_, AppState>) -> Res
 pub fn words_delete(ids: Vec<String>, state: State<'_, AppState>) -> Result<(), String> {
   let db = state.db.guard();
   delete(&db, &ids, &db::now_iso())
+}
+
+#[tauri::command]
+pub fn words_restore(ids: Vec<String>, state: State<'_, AppState>) -> Result<Vec<Annotation>, String> {
+  let db = state.db.guard();
+  restore(&db, &ids, &db::now_iso())
 }
 
 #[cfg(test)]
@@ -481,6 +531,80 @@ mod tests {
     assert_eq!(merged.annotations, merge(&b, &a, LATER).annotations, "either way round");
     apply(&to, &merged).expect("apply");
     assert!(list(&to).expect("list").is_empty());
+  }
+
+  #[test]
+  fn a_removed_word_put_back_is_as_it_was_and_only_words_come_back() {
+    let db = memory_db();
+    let row = record(&db, looked_up("brume", "Mist; fog."), NOW).expect("record");
+    review(&db, &[WordReview { id: row.id.clone(), to_box: 3, due: 20_400 }], NOW).expect("review");
+    let before = db.find_annotation(&row.id).expect("find").expect("row");
+    delete(&db, std::slice::from_ref(&row.id), LATER).expect("delete");
+    assert!(list(&db).expect("list").is_empty());
+
+    let back = restore(&db, &[row.id.clone(), "nobody".to_string()], "2026-10-06T10:00:00Z").expect("restore");
+    assert_eq!(back.len(), 1, "an id that is not kept is passed over");
+    assert_eq!(list(&db).expect("list"), back);
+    let kept = &back[0];
+    assert_eq!(kept.deleted_at, None);
+    assert_eq!(kept.updated_at, "2026-10-06T10:00:00Z");
+    // Everything else as it was: the meaning, the place, the count and the quiz's box.
+    assert_eq!(Annotation { updated_at: before.updated_at.clone(), ..kept.clone() }, before);
+    assert_eq!((detail(kept)["b"].as_i64(), detail(kept)["d"].as_i64()), (Some(3), Some(20_400)));
+    // It can be reviewed again.
+    review(&db, &[WordReview { id: row.id.clone(), to_box: 4, due: 20_430 }], "2026-10-06T10:00:01Z").expect("review");
+
+    // A word that is not removed, a highlight, and a removal that kept nothing are left alone.
+    assert!(restore(&db, std::slice::from_ref(&row.id), "2026-10-07T10:00:00Z").expect("restore").is_empty());
+    let mut gone_highlight = highlight("h1");
+    gone_highlight.deleted_at = Some(NOW.into());
+    db.put_annotation(&gone_highlight).expect("save");
+    let emptied = record(&db, looked_up("mizzle", "Fine rain."), NOW).expect("record");
+    db.put_annotation(&Annotation { text: None, note: None, chapter: None, deleted_at: Some(LATER.into()), updated_at: LATER.into(), ..emptied.clone() })
+      .expect("save");
+    assert!(restore(&db, &["h1".to_string(), emptied.id.clone()], "2026-10-07T10:00:00Z").expect("restore").is_empty());
+    assert_eq!(db.find_annotation("h1").expect("find"), Some(gone_highlight));
+    assert!(db.find_annotation(&emptied.id).expect("find").expect("row").deleted_at.is_some());
+    assert_eq!(list(&db).expect("list").len(), 1);
+  }
+
+  #[test]
+  fn an_undo_is_dated_after_its_removal_even_on_a_clock_that_stepped_back() {
+    let db = memory_db();
+    let row = record(&db, looked_up("brume", "Mist; fog."), NOW).expect("record");
+    delete(&db, std::slice::from_ref(&row.id), LATER).expect("delete");
+    // The same instant as the removal, and earlier than it: both come out a millisecond after it.
+    let same = restore(&db, std::slice::from_ref(&row.id), LATER).expect("restore");
+    assert_eq!(same[0].updated_at, "2026-10-05T10:00:00.001Z");
+    delete(&db, std::slice::from_ref(&row.id), "2026-10-05T10:00:00.002Z").expect("delete");
+    let earlier = restore(&db, std::slice::from_ref(&row.id), NOW).expect("restore");
+    assert_eq!(earlier[0].updated_at, "2026-10-05T10:00:00.003Z");
+    assert_eq!(later_than(NOW, LATER), LATER, "a clock that is ahead is taken at its word");
+  }
+
+  #[test]
+  fn a_word_put_back_comes_back_on_the_other_copies_too() {
+    let here = memory_db();
+    let there = memory_db();
+    let row = record(&here, looked_up("brume", "Mist; fog."), NOW).expect("record");
+    apply(&there, &snapshot(&here, NOW).expect("snapshot")).expect("apply");
+    // Removed here, and the removal reaches the other copy (a backup ran in between).
+    delete(&here, std::slice::from_ref(&row.id), LATER).expect("delete");
+    let removed = merge(&snapshot(&there, LATER).expect("snapshot"), &snapshot(&here, LATER).expect("snapshot"), LATER);
+    apply(&there, &removed).expect("apply");
+    assert!(list(&there).expect("list").is_empty());
+    // Undone in the same millisecond: the word still wins, either way round.
+    restore(&here, std::slice::from_ref(&row.id), LATER).expect("restore");
+    let (a, b) = (snapshot(&there, LATER).expect("snapshot"), snapshot(&here, LATER).expect("snapshot"));
+    let merged = merge(&a, &b, LATER);
+    assert_eq!(merged.annotations, merge(&b, &a, LATER).annotations);
+    apply(&there, &merged).expect("apply");
+    apply(&here, &merged).expect("apply");
+    for db in [&here, &there] {
+      let words = list(db).expect("list");
+      assert_eq!(words.len(), 1);
+      assert_eq!(detail(&words[0])["m"], "Mist; fog.");
+    }
   }
 
   #[test]

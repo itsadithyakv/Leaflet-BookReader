@@ -105,6 +105,10 @@ describe("what the app loads at start", () => {
     "pip/tour.ts",
     // The Hollow's dot on the Pip tab is worked out after the start too.
     "components/pip/arcade/base/pipTabWaits.ts",
+    // The word quiz, which the Library's "Revise words" opens (pages/library/ReviseWordsKey.tsx).
+    "components/pip/arcade/quiz/ReviseWords.tsx",
+    "components/pip/arcade/quiz/WordQuiz.tsx",
+    "components/pip/arcade/quiz/MyWords.tsx",
     // Pages and the card after a session.
     "pages/PipPage.tsx",
     "pages/SocialPage.tsx",

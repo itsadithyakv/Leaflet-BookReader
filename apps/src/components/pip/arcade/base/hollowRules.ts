@@ -1,15 +1,15 @@
 /**
- * The screens' view of the 1.5.10 rules (chapters, goals, the raid board, friends' news), in one place: what the
- * top bar, the chapter card, the raid board and the news card show, read off `pip/base/chapters.ts` (the contract)
+ * The screens' view of the 1.5.10 rules (chapters, goals, friends' news), in one place: what the
+ * top bar, the chapter card and the news card show, read off `pip/base/chapters.ts` (the contract)
  * and `pip/base/rules.ts`. Nothing here decides anything the rules decide.
  *
  */
 import { barLine, chapterBrings, chapterNews, chapterProgress, goalsOf, opened, type ChapterBrings, type ChapterNews, type GoalAt, type GoalState, type Unlock } from "../../../../pip/base/chapters";
-import { raidBoard, raidsAsked as askedYet, raidSummary, type BaseState, type BoardCard, type Now, type RaidEnd, type RaidNews } from "../../../../pip/base/rules";
+import { raidsAsked as askedYet, raidSummary, type BaseState, type RaidEnd, type RaidNews } from "../../../../pip/base/rules";
 import { useBaseStore } from "../../../../store/baseStore";
 import type { ChapterChip } from "./HollowTop";
 
-export type { BoardCard, RaidNews };
+export type { RaidNews };
 
 /** The camp with its 1.5.10 fields filled in where an older camp (read before the rules caught up) has none. */
 export const chaptered = (base: BaseState): BaseState => ({
@@ -63,9 +63,6 @@ export const newsOf = (base: BaseState): RaidNews[] => base.news ?? [];
 
 /** Whether the reader has been asked if friends may raid their camp. */
 export const raidsAsked = (base: BaseState): boolean => askedYet(base);
-
-/** The raid board: Rematch (once a stronghold has fallen), the next stronghold, and the King when he can be raided. */
-export const boardOf = (base: BaseState, now: Now): BoardCard[] => raidBoard(base, now);
 
 /** A raid's result in plain words. */
 export const raidWords = (end: RaidEnd): string => raidSummary(end);
