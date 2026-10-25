@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, Flag, Map as MapIcon, RotateCcw, Star } from "lucide-react";
+import { Check, Flag, Map as MapIcon, RotateCcw } from "lucide-react";
 import { FEATS, MISSED } from "../../../../pip/base/feats";
 import { BLADES } from "../../../../pip/base/guards";
 import { DECOR, type RaidEnd } from "../../../../pip/base/rules";
@@ -14,6 +14,9 @@ import { Sprite } from "./Sprite";
  * why (`feats.ts` `MISSED`). Then what was carried home, flying up to the acorn count as the camp's acorns always do
  * (`collect.tsx`, through `onLoot`). "Try again" while there is rest for it; "Back to the map", where the stronghold's
  * stars are already filled in. A raid sent without the reader ends on the same card.
+ *
+ * (2026-10-25) Pip's pixel paper, its stars the map's pixel stars, large; on a phone on its side a narrow card down
+ * the right (raid.css), so the field it was fought on stays in view beside it.
  */
 
 const FIRST_STAR_MS = 450;
@@ -84,14 +87,14 @@ export const RaidEndCard = ({ end, friend = false, onAgain, againWhy = null, onM
   }, [end]);
 
   return (
-    <section className={`pip-base-result pip-raid-end-card ${end.won ? "is-won" : "is-lost"}`} aria-label="How the raid went">
-      <p className="pip-base-result-word">{end.banner ? "The King falls!" : end.won ? (friend ? "Raided!" : "Taken!") : "Beaten back"}</p>
-      <p className="pip-base-result-stars" role="img" aria-label={`${end.stars} of 3 stars`}>
-        {[1, 2, 3].map((star) => (
-          <span key={star} className={`pip-base-result-star ${star <= landed ? "is-won" : ""}`}>
-            <Star size={34} aria-hidden fill={star <= landed ? "currentColor" : "none"} />
-          </span>
-        ))}
+    <section className={`pip-raid-end-card ${end.won ? "is-won" : "is-lost"}`} aria-label="How the raid went">
+      <p className="pip-raid-end-word">{end.banner ? "The King falls!" : end.won ? (friend ? "Raided!" : "Taken!") : "Beaten back"}</p>
+      <p className="pip-raid-end-stars" role="img" aria-label={`${end.stars} of 3 stars`}>
+        <span className="pip-lands-stars is-end" aria-hidden="true">
+          {[1, 2, 3].map((star) => (
+            <i key={star} className={star <= landed ? "is-won" : ""} />
+          ))}
+        </span>
       </p>
       {lines && (
         <ul className="pip-raid-lines">
@@ -103,7 +106,7 @@ export const RaidEndCard = ({ end, friend = false, onAgain, againWhy = null, onM
           ))}
         </ul>
       )}
-      <p className="pip-base-result-loot">
+      <p className="pip-raid-end-loot">
         <span ref={acornRef} className="inline-flex">
           <Sprite name="acorn" box={20} />
         </span>

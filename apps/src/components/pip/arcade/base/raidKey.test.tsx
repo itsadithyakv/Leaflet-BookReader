@@ -65,4 +65,19 @@ describe("the raid key", () => {
     });
     expect(byClass("pip-lands")).toBeUndefined();
   });
+
+  it("opens them at the first tap: the finger's press before its click (which ends Pip's arrival and wakes the camera) takes nothing from it", async () => {
+    // (2026-10-25: a production build at a phone's shape needed a second tap. It was the turn veil (platform/shape.ts)
+    // over the app while it waited for the screen to turn sideways for Pip's tab, which an emulated phone never does;
+    // a phone that turns takes the first tap. The camp itself never swallows it.)
+    expect(byClass("pip-lands")).toBeUndefined();
+    const key = body().findAll((element) => element.tagName === "BUTTON" && element.getAttribute("title") === "Raid the magpies' strongholds")[0];
+    await React.act(async () => {
+      for (const type of ["pointerdown", "touchstart", "pointerup", "touchend", "click"]) {
+        const event = Object.assign(makeEvent(type, key), { pointerType: "touch", clientX: 40, clientY: 40, button: 0 });
+        key.dispatchEvent(event);
+      }
+    });
+    expect(byClass("pip-lands")).toBeTruthy();
+  });
 });

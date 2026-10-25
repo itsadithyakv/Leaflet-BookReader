@@ -54,6 +54,24 @@ name must match the reserved name exactly ("Leaflet Book Reader", as in
 
 ## What's new in this version
 
+For 1.5.13 (written on 2026-10-25). If the Store is still on 1.5.11 or
+older, put this first and the 1.5.12 text below it, within 1,500
+characters:
+
+> Raids, remade. The Magpie Lands is now a map you travel across, region by
+> region, with your stars on every stronghold and the King's roost on the
+> peak. Each stronghold is a small puzzle with its own trick: scout it, pick
+> your squad, send groups down different paths, and give a few orders in
+> the fight. Earn the third star with each stronghold's own feat, and
+> replay any of them for more. Walls topple, perches tip and hoards burst
+> as you break through.
+>
+> Read aloud now works in PDFs, lighting each sentence on the page as it's
+> read.
+>
+> Revise your words straight from the Library, and remove any word you
+> don't want asked again (with Undo).
+
 For 1.5.12 (written on 2026-10-23). It says what 1.5.11 and 1.5.12 bring,
 because the Store may still be on 1.5.10 (about 1,150 characters):
 

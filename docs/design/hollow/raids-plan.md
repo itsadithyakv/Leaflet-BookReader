@@ -186,6 +186,25 @@ screen. make the UI more like what hollow looks like … progress maps." So:
   - within the Adreno 619 budget;
   - works on a phone upright and sideways.
 
+**Built (2026-10-25, for 1.5.13).** Everything above, in `RaidFlow.tsx` and
+the files beside it (docs/pip.md, "Raids: the Magpie Lands"):
+- The raid fills the picture under the camp's top bar. The ground covers the
+  whole room: the field's grass carried out to the window's edges with the
+  region's woods from the map, so there is no frame. The field is drawn at a
+  whole number of pixels and grows a size where its empty edges can lie under
+  the bars (7× at 1920×1080, 4× at 1366×768, 2.5× on a phone upright).
+- The camp's dock steps aside during a raid: the fight has its own bar of
+  orders, and the end card its two keys.
+- Every fall, the cracks, the call, the pit and the stars play once from the
+  battle's event log, and rubble stays; reduced motion and the lightest tier
+  show the end at once. Scouts' health shows only for a moment after a hit,
+  or when badly hurt, so a crowd is not a tower of pips.
+- Send's end card stands over the field as that raid left it, and a
+  stronghold just taken stays the flow's (as a replay) for Try again.
+
+**Left:** the timing on the real phone; the Front's broken wall sections do
+not use the raid's rubble yet; a hero's move is not measured for stars.
+
 ## What does not change
 
 - Rest comes from reading, and supplies stay free.
@@ -203,6 +222,9 @@ screen. make the UI more like what hollow looks like … progress maps." So:
 - Older builds keep the mark untouched.
 
 ## Work, in order
+
+Steps 1 to 3 are done (2026-10-24 and 25), and step 4 but for the emulator and
+the real phone (section 5, "Built").
 
 1. **Rules and simulation** (pure TS: `battle.ts`, new modules for
    approaches, quirks, orders and feats, and a sim script), tuned to section

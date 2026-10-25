@@ -41,7 +41,7 @@
 import { DROP_STRONGHOLD, SIDES, autoBest, autoBestLane, layout, runAuto, type Result, type Setup, type Side, type Squad, type Structure, type UnitKind } from "./battle";
 import { endStars, type Feat, type Missed } from "./feats";
 import { quirkOfPlan } from "./quirks";
-import { forecastPlan, naiveSquad, playPlan, type PlanForecast } from "./squad";
+import { forecastPlan, naiveSquad, playOut, type PlanForecast } from "./squad";
 import {
   ANIMALS,
   BLADES,
@@ -3201,13 +3201,16 @@ const raidHint = (state: BaseState, plan: RaidPlan): string => {
  * a way to throw a raid's rest away. (Until the Magpie Lands it was the raid by
  * hand, played by rule.)
  */
-export const sendRaid = (state: BaseState, kind: RaidKind, now: Now, slot = 0): { state: BaseState; end: RaidEnd } | null => {
+export const sendRaid = (state: BaseState, kind: RaidKind, now: Now, slot = 0): { state: BaseState; end: RaidEnd; raid: Raid } | null => {
   if (raidBlocked(state, kind, now, slot)) return null;
   const plan = planFor(state, kind, now.day, slot);
   const squad = naivePlanOf(state, plan, now.at);
   if (!raidForecast(state, plan, squad).canSend) return null;
   const begun = startRaid(state, kind, now, false, slot, squad);
-  return begun ? finishRaid(begun.state, begun.raid, playPlan(begun.raid.setup), now.day, SENT_BRINGS) : null;
+  if (!begun) return null;
+  // (The raid as it set out comes back with it: played out again from its setup, `playOut`, it is the same raid to the
+  // pebble, so its end card can stand over the field as that raid left it.)
+  return { ...finishRaid(begun.state, begun.raid, playOut(begun.raid.setup).result(), now.day, SENT_BRINGS), raid: begun.raid };
 };
 
 /** One of the raid board's cards: what it is, the raid, what the scouts say, and why it cannot set out (null when it can). */

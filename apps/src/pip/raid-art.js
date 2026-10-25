@@ -21,6 +21,8 @@
  raidzone   16 x 12  a hazard: variant 0 a clump of thorns, 1 a pit under leaves (scuffed, as a careful eye would
                      see it), 2 a pit sprung, 3 reeds at the ford's edge
  raidflag    8 x 12  a group's pennant, where its approach begins; variant 0 to 3 its colour (`FLAG_COLOURS`)
+ raidunit   16 x 16  4 frames, walking right: one of the reader's scouts, outlined dark, its shadow under it.
+                     variant 0 a sprout, 1 a slinger, 2 a mole, 3 a Puffcap
 */
 import { rnd } from "./room.js";
 
@@ -391,4 +393,85 @@ const raidflag = {
   }
 };
 
-export const RAID_SPRITES = { raidperch, raidwall, raidhoard, raidnest, raidrubble, raidzone, raidflag };
+// ---------------------------------------------------------------- the reader's scouts, in a raid
+/**
+ * The scouts as the raid shows them (2026-10-25): the camp's own sprout folk, drawn for the field. The camp's 14 by 14
+ * scouts are outlined in a dark green that melts into the grass at a raid's size, and a sprout, a slinger and a
+ * Puffcap there differ by a few pixels in the hand; here each kind has its own shape and colour, a near-black outline
+ * all round, and a small shadow on the ground under it, so a crowd on the grass reads as so many folk of so many kinds.
+ * The planner's and the fight's icons are these same pictures (raidWords.ts `KIND_ART`).
+ *
+ * Only the feet and what is in the hand move: the body stands still, so a crowd never shimmers.
+ */
+const UNIT_INK = "#141012";
+/** A sprout's round body, eight wide: L lit, B body, D shade, H shine, E eye. */
+const BUD = ["..LLBB..", ".LHLBBB.", "LLBBEBEB", "LBBBEBED", "BBBBBBDD", ".BBBBDD.", "..DDDD.."];
+const SPROUT_GREEN = { L: "#A6EA7A", B: "#62BC48", D: "#3A8A3A", H: "#F2FFE0", E: "#10231A" };
+/** The slinger's: a warmer, yellower green, told from a sprout's across the field. */
+const SLINGER_GREEN = { L: "#E4EE88", B: "#B4C84A", D: "#7A8E30", H: "#FFFFE8", E: "#10231A" };
+/** Where a foot is, frame by frame: a step, together, the other step, together. */
+const STEPS = [[-1, 1], [0, 0], [1, -1], [0, 0]];
+/** A shadow on the ground under a scout, `hw` either side of `cx`, translucent so the grass shows through it. */
+const footShadow = (g, cx, hw) => g.ell(cx, 14.6, hw, 1.4, "#0000004A");
+/** Two feet under a body standing on row 13, `x0` its left, moving with the frame. */
+const feet = (l, x0, wide, k, colour) => {
+  const [a, b] = STEPS[k];
+  l.rect(x0 + 1 + a, 13, 2, 1, colour).rect(x0 + wide - 3 + b, 13, 2, 1, colour);
+};
+const raidunit = {
+  w: 16, h: 16, frames: 4,
+  draw(g, f, o) {
+    const kind = level(o, 3), k = mod(f, 4);
+    if (kind === 0) {
+      // A sprout: one big leaf up from its crown, a twig sword held out ahead.
+      footShadow(g, 7.5, 4.5);
+      g.stamp((l) => {
+        feet(l, 3, 8, k, "#2E6B33");
+        chart(l, 3, 6, BUD, SPROUT_GREEN);
+        l.rect(6, 4, 1, 2, "#2E6B33");
+        l.rect(7, 2, 2, 1, "#8EE06A").rect(6, 3, 4, 1, "#4FB04A").px(9, 2, "#C8F7A8").rect(7, 4, 2, 1, "#2F8A44");
+        const tip = k % 2 ? 0 : 1;
+        l.px(11, 10, STICK[2]).px(12, 9, STICK[1]).px(12, 8 - tip, STICK[0]).px(13, 7 - tip, "#F0D9A8");
+      }, UNIT_INK);
+      return;
+    }
+    if (kind === 1) {
+      // A slinger: yellow-green, a red band round its head, the sling going round over it with its stone.
+      footShadow(g, 7.5, 4.5);
+      const loop = [[[11, 4], [12, 3]], [[10, 3], [10, 2]], [[9, 3], [8, 2], [7, 2]], [[10, 3], [11, 2]]][k];
+      const stone = [[13, 2], [10, 1], [6, 1], [12, 1]][k];
+      g.stamp((l) => {
+        feet(l, 3, 8, k, "#5E6E22");
+        chart(l, 3, 6, BUD, SLINGER_GREEN);
+        l.rect(3, 7, 8, 1, "#D8392E").px(2, 8, "#D8392E").px(2, 9, "#A82820");
+        l.px(10, 6, SLINGER_GREEN.B).px(11, 5, SLINGER_GREEN.L);
+        loop.forEach(([x, y]) => l.px(x, y, "#FFF6DF"));
+        l.rect(stone[0], stone[1], 2, 1, STONE[1]).px(stone[0], stone[1], STONE[0]);
+      }, UNIT_INK);
+      return;
+    }
+    if (kind === 2) {
+      // A mole: brown and low, a pink nose and paws, a miner's lamp; the front paws scissor.
+      footShadow(g, 8, 6.5);
+      const PAW = "#FFB8A8", front = [11, 10, 9, 10][k], back = [2, 3, 4, 3][k];
+      g.stamp((l) => {
+        l.rect(front, 13, 3, 1, PAW).rect(back, 13, 2, 1, PAW);
+        chart(l, 1, 6, ["....hhhhhh....", "..hhHMMMMMMM..", ".hHMMMMMMMMME.", "hMMMMMMMMMMMMP", "MMMMMMMMMMMMMP", ".dMMMMMMMMMdd.", "..dddddddddd.."], { h: "#B08A64", H: "#CCA67E", M: "#7E5A3E", d: "#4E3424", E: "#10181A", P: "#FF8E9A" });
+        l.rect(9, 5, 3, 2, "#7E8698").px(9, 5, "#C4CCD8").px(12, 5, "#FFE36B").px(12, 6, "#FFE36B");
+      }, UNIT_INK);
+      return;
+    }
+    // A Puffcap: a toadstool on legs, its red cap spotted white, a fuse on top alight.
+    footShadow(g, 7.5, 4.5);
+    g.stamp((l) => {
+      feet(l, 3, 8, k, "#8A6A48");
+      l.rect(5, 9, 5, 4, "#F4E6C8").rect(5, 12, 5, 1, "#D8C29C").px(9, 10, "#D8C29C").px(9, 11, "#D8C29C");
+      l.px(7, 10, "#10181A").px(9, 10, "#10181A");
+      dome(l, 8, 8, 6, 5, (u, t, x, y) => (y === 8 ? "#9A2420" : (x === 4 && y === 6) || (x === 8 && y === 5) || (x === 11 && y === 7) || (x === 6 && y === 4) ? "#FFFFFF" : u < -0.4 && t > 0.3 ? "#F06A5A" : "#D8342C"));
+      l.px(8, 3, "#3A2A1A").px(8, 2, "#3A2A1A");
+    }, UNIT_INK);
+    g.px(9, 1, k % 2 ? "#FFE36B" : "#FF9E3D");
+  }
+};
+
+export const RAID_SPRITES = { raidperch, raidwall, raidhoard, raidnest, raidrubble, raidzone, raidflag, raidunit };

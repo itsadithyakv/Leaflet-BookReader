@@ -153,6 +153,7 @@ import {
   type Placed,
   type QuestAt,
   type RaidBlocked,
+  type Raid,
   type RaidEnd,
   type RaidPlan,
   type Site,
@@ -428,7 +429,7 @@ const EASE_UNTOUCHED_MS = 2000;
  * and every reach is shown. The raids: who goes, the next stronghold (and,
  * after ten, the month's King), with what the scouts say of it. The (i):
  * how the camp works, and what happened lately. A raid takes the whole
- * screen (BattleScreen).
+ * picture, from scouting to its end card (RaidFlow).
  *
  * The camp page is three things and no more: Pip's bubble, the picture, and
  * one card for whatever is chosen. The bubble has three lines at most: a
@@ -568,7 +569,7 @@ export const BaseScreen = ({
   const [carrying, setCarrying] = useState<Placed | null>(null);
   const [watching] = useState(false);
   /** A raid under way, from its scouting to its end card (RaidFlow.tsx); `sent` when it opened on a Send's result. */
-  const [raid, setRaid] = useState<{ aim: RaidAim; sent: RaidEnd | null } | null>(null);
+  const [raid, setRaid] = useState<{ aim: RaidAim; sent: { end: RaidEnd; raid: Raid } | null } | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [fit, setFit] = useState<Fit>({ css: 2, backing: 2, crisp: true });
@@ -1641,7 +1642,7 @@ export const BaseScreen = ({
 
   // Android's Back steps out of the camp's own states one at a time, as a hand would: what is being set down, the
   // moving about, the panel, a trophy's line, the raids or the journal, the meadow. With none of them, it is not the
-  // camp's (the Pip tab's, then the app's). A raid's own Back is BattleScreen's; the postcard's, its own.
+  // camp's (the Pip tab's, then the app's). A raid's own Back is RaidFlow's; the postcard's, its own.
   useBackFallback(() => {
     if (raid) return false;
     if (chipOpen) {
@@ -4152,7 +4153,9 @@ export const BaseScreen = ({
           // Sent without the reader: its result on the raid's own end card (the loot flies home from there).
           onSend={(target) => {
             const came = store.sendRaid(target.kind, target.slot);
-            if (came) setRaid({ aim: { kind: "stronghold", target }, sent: came });
+            // A stronghold that fell to it is a replay from now on: the end card's "Try again" is at it, not the next.
+            const aimed = came?.end.won && target.kind === "camp" ? { kind: "rematch" as const, slot: came.raid.plan.n } : target;
+            if (came) setRaid({ aim: { kind: "stronghold", target: aimed }, sent: came });
           }}
           onHut={() => {
             setTab("camp");

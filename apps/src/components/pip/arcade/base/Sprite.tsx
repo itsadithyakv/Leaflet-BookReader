@@ -36,13 +36,15 @@ export const Sprite = ({ name, variant, box, className = "", frame = 0 }: Props)
     ctx.clearRect(0, 0, sprite.w, sprite.h);
     ctx.drawImage(sprite.image, 0, 0);
   }, [sprite]);
+  // Which picture it is, for a test to read (the planner's kinds are the field's own scouts).
+  const which = variant === undefined ? name : `${name}:${variant}`;
   if (!sprite) {
-    return <span className={className} style={{ display: "inline-block", width: box, height: box }} aria-hidden="true" />;
+    return <span className={className} style={{ display: "inline-block", width: box, height: box }} aria-hidden="true" data-sprite={which} />;
   }
   // Whole steps of size where there is room for them, so the pixels stay square and even.
   const fit = Math.min(box / sprite.w, box / sprite.h);
   const scale = fit >= 1 ? Math.floor(fit * 2) / 2 : fit;
-  return <canvas ref={canvasRef} className={`pip-sprite ${className}`} style={{ width: sprite.w * scale, height: sprite.h * scale }} aria-hidden="true" />;
+  return <canvas ref={canvasRef} className={`pip-sprite ${className}`} style={{ width: sprite.w * scale, height: sprite.h * scale }} aria-hidden="true" data-sprite={which} />;
 };
 
 const stillOnly = () => {

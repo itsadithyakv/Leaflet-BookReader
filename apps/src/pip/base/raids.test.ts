@@ -10,7 +10,7 @@ import { BELL_SECONDS, FEATS, MISSED, starsOf, type Tally } from "./feats";
 import { HEROES, HERO_MOVES, heroTraits } from "./heroes";
 import { HELD_LATEST, ordersAt, type Order } from "./orders";
 import { QUIRKS, QUIRK_IDS, quirkOf } from "./quirks";
-import { checkSquad, forecastPlan, naiveSquad, planned, playOut, roomOf, scoutOf } from "./squad";
+import { checkSquad, forecastInSteps, forecastPlan, naiveSquad, planned, playOut, roomOf, scoutOf } from "./squad";
 import { campOfShared, campStructures, finishFriendRaid, finishRaid, newBase, raidForecast, startFriendRaid, startRaid, nextCamp, type BaseState, type SharedCamp } from "./rules";
 import { beforeChapters } from "./testing";
 
@@ -509,6 +509,18 @@ describe("a plan's forecast", () => {
     expect(forecastPlan(setup)).toBe(forecast);
     const good = forecastPlan(planned(setupAt(9, 4), one({ mole: 6, sprout: 1 }, 0), [{ tick: at(10), kind: "rally", group: 0, target: 0 }]));
     expect(good.likely).toBeGreaterThan(forecast.likely);
+  });
+
+  it("can be worked a run at a time, to the same figures, and keeps them with the rest", () => {
+    const setup = planned(setupAt(7, 3), naiveSquad(setupAt(7, 3)));
+    const step = forecastInSteps(setup);
+    expect(step()).toBeNull();
+    expect(step()).toBeNull();
+    const said = step();
+    expect(said).not.toBeNull();
+    // The same as all at once, and kept: asked again, all at once or a run at a time, it is not run again.
+    expect(forecastPlan(setup)).toBe(said);
+    expect(forecastInSteps(setup)()).toBe(said);
   });
 });
 

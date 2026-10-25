@@ -210,8 +210,8 @@ type BaseStore = {
   robSite: (site: Placed) => number;
   /** Friends' raids on this camp, as the server hands them over. */
   sufferRaids: (raids: ReadonlyArray<{ name: string; stars: number }>) => void;
-  /** Sends the scouts without the reader; null when they cannot go. */
-  sendRaid: (kind: RaidKind, slot: number) => RaidEnd | null;
+  /** Sends the scouts without the reader: how it ended, and the raid as it set out (to show the field as it was left); null when they cannot go. */
+  sendRaid: (kind: RaidKind, slot: number) => { end: RaidEnd; raid: Raid } | null;
   /** A finished arcade game: what it paid (and how a wager placed before wagers were put away went); null before there is a camp. */
   played: (game: PayingGame, score: number) => Pick<GameEnd, "paid" | "wager"> | null;
 
@@ -608,13 +608,13 @@ export const useBaseStore = create<BaseStore>((set, get) => {
       return end;
     },
     sendRaid(kind, slot) {
-      let end: RaidEnd | null = null;
+      let came: { end: RaidEnd; raid: Raid } | null = null;
       change((base, now) => {
         const sent = sendRaid(base, kind, now, slot);
-        end = sent?.end ?? null;
+        came = sent ? { end: sent.end, raid: sent.raid } : null;
         return sent?.state ?? base;
       });
-      return end;
+      return came;
     },
     played(game, score) {
       let came: Pick<GameEnd, "paid" | "wager"> | null = null;

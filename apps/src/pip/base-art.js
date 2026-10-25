@@ -1793,6 +1793,8 @@ const FIELDS = [
   { grass: ["#C6D0DC", "#D4DCE6", "#B8C4D2"], earth: ["#A6977D", "#8C7E66", "#BEB19B"], tuft: ["#B4A680", "#A8B6C8"] },
   { grass: ["#80B058", "#90BE62", "#74A24E"], earth: ["#B8A274", "#A08E60", "#CCB88E"], tuft: ["#B2DE82", "#6A9C48"] }
 ];
+/** The ground's grass in each season (top, bottom, fleck) and its tufts, for the land a raid's field lies in (raidPaint.ts). */
+export const BATTLE_GRASS = FIELDS.map((S) => ({ grass: S.grass, tuft: S.tuft }));
 const battleground = {
   w: 240, h: 120,
   draw(g, f, o) {

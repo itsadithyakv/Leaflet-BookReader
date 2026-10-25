@@ -52,7 +52,7 @@
     ]
   },
   "productName": "Leaflet",
-  "version": "1.5.12",
+  "version": "1.5.13",
   "identifier": "com.leaflet.app",
   "plugins": {},
   "app": {

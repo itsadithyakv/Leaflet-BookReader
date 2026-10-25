@@ -6,7 +6,7 @@ import { CHAMPIONS, HEROES } from "../../../../pip/base/heroes";
 import { REGION_NAMES, FAR_NAME, regionOf, strongholdName, type LandsTarget } from "../../../../pip/base/lands";
 import { QUIRKS } from "../../../../pip/base/quirks";
 import { starsOf } from "../../../../pip/base/raidMark";
-import { forecastPlan, naiveSquad } from "../../../../pip/base/squad";
+import { forecastInSteps, naiveSquad, playOut } from "../../../../pip/base/squad";
 import {
   friendBlocked,
   friendRaidOf,
@@ -36,7 +36,8 @@ import { approachShort } from "./raidWords";
 import { RaidPlan as PlanPanel } from "./RaidPlan";
 import { QuirkIcon, RaidScout } from "./RaidScout";
 import { newFx } from "./raidFx";
-import { fieldView, fieldViewBeside, offPath, roomToField, tagPoint, toRoom, type Clear, type FieldView } from "./raidLayout";
+import { DOCK_ROOM, HUD_ROOM, SIDE_ROOM, focusOf, framedView, offPath, roomToField, shownOnField, tagPoint, toField, toRoom, type Clear, type FramedView } from "./raidLayout";
+import type { PanAt } from "./RaidField";
 import { APPROACH_COLOURS, newLooks, type RaidScene } from "./raidPaint";
 import { Sprite } from "./Sprite";
 import "./raid.css";
@@ -50,8 +51,12 @@ import "./raid.css";
  * 3. **Go** spends the rest (`onStart`), and the **fight** plays on the field (`RaidBattle`).
  * 4. The **end card** (`RaidEndCard`): "Try again" (with rest) back to the plan, or back to the map.
  *
- * A friend's camp goes the same way, its approaches from its own layout. A raid sent without the reader opens here on
- * its end card, over the scouted field.
+ * A friend's camp goes the same way, its approaches from its own layout. A raid sent without the reader ("Send" on the
+ * map: the plan made without thinking, `naiveSquad`) opens here on its end card, over the field as that raid left it:
+ * it is played out again from its setup (`playOut`), the same raid to the pebble, so its rubble lies where it fell.
+ *
+ * Once a stronghold falls it is the map's to replay: the flow carries on aimed at it as a replay, so the end card and
+ * "Try again" stay with the stronghold just taken and not the next one along.
  */
 
 export type RaidAim = { kind: "stronghold"; target: LandsTarget } | { kind: "friend"; target: RaidTarget };
@@ -64,8 +69,8 @@ type Props = {
   art: GameArt;
   season: number;
   aim: RaidAim;
-  /** Opened on a raid sent without the reader: its end card. */
-  sent?: RaidEnd | null;
+  /** Opened on a raid sent without the reader: how it ended, and the raid as it set out. */
+  sent?: { end: RaidEnd; raid: Raid | FriendRaid } | null;
   why: (blocked: RaidBlocked, plan: RaidPlan) => string;
   onScouted: (n: number) => void;
   /** Sets out: spends the rest. Null when it cannot. */
@@ -74,8 +79,8 @@ type Props = {
   onLoot: (from: Element, loot: number) => void;
   /** Back to the map. */
   onClose: () => void;
-  /** The plan's forecast (`squad.ts`); a test may count how often it is asked. */
-  forecast?: typeof forecastPlan;
+  /** The plan's forecast, a run at a time (`squad.ts`); a test may count how often it is asked. */
+  forecast?: typeof forecastInSteps;
 };
 
 const stillOnly = () => {
@@ -99,10 +104,10 @@ const measure = (element: HTMLElement | null) => {
 };
 
 /** The planner's tag for each approach, over its path: its colour, its name, walled, its hazard. */
-const ApproachTags = ({ battle, view, plan, groups, short, onPick }: { battle: Battle; view: FieldView; plan: boolean; groups: number[]; short: boolean; onPick: (approach: number) => void }) => (
+const ApproachTags = ({ battle, view, shown, plan, groups, short, onPick }: { battle: Battle; view: FramedView; shown: Shown; plan: boolean; groups: number[]; short: boolean; onPick: (approach: number) => void }) => (
   <>
     {battle.approaches.map((approach, index) => {
-      const at = tagPoint(approach.path, index);
+      const at = tagPoint(approach.path, index, shown);
       const spot = toRoom(view, at.x, at.y);
       const style = { left: spot.left, top: spot.top, "--group": APPROACH_COLOURS[index % APPROACH_COLOURS.length] } as CSSProperties;
       const going = groups.filter((via) => via === index).length;
@@ -137,13 +142,30 @@ const ApproachTags = ({ battle, view, plan, groups, short, onPick }: { battle: B
   </>
 );
 
+/**
+ * The room the fight's field is framed in: wide, beside the bar and the orders, which stand down the right (past the
+ * camp, where the field has only grass); upright, between the bar along the top and the orders at the foot.
+ */
+const battleClear = (room: { top: number }, tall: boolean): Clear =>
+  tall ? { top: room.top + HUD_ROOM, right: 6, bottom: DOCK_ROOM, left: 6 } : { top: room.top + 6, right: SIDE_ROOM, bottom: 6, left: 6 };
+
+/** The field's points in the clear part of the room (not under the card, the bars or the camp's bar along the top). */
+type Shown = { x0: number; x1: number; y0: number; y1: number };
+const clearOnField = (view: FramedView, w: number, h: number, clear: Clear): Shown => {
+  const a = toField(view, (clear.left - view.left) / view.css, (clear.top - view.top) / view.css);
+  const b = toField(view, (w - clear.right - view.left) / view.css, (h - clear.bottom - view.top) / view.css);
+  return { x0: Math.min(a.x, b.x), x1: Math.max(a.x, b.x), y0: Math.min(a.y, b.y), y1: Math.max(a.y, b.y) };
+};
+
 export const RaidFlow = (props: Props) => {
   const { base, now, art, season } = props;
   const still = useMemo(() => stillOnly(), []);
   const [aim, setAim] = useState<RaidAim>(props.aim);
   const [step, setStep] = useState<Step>(props.sent ? "end" : "scout");
-  const [end, setEnd] = useState<RaidEnd | null>(props.sent ?? null);
-  const [fight, setFight] = useState<{ raid: Raid | FriendRaid; battle: Battle } | null>(null);
+  const [end, setEnd] = useState<RaidEnd | null>(props.sent?.end ?? null);
+  const [fight, setFight] = useState<{ raid: Raid | FriendRaid; battle: Battle } | null>(() =>
+    props.sent ? { raid: props.sent.raid, battle: playOut(props.sent.raid.setup, (props.sent.raid as FriendRaid).structures) } : null
+  );
 
   // ---- what is raided, as it would set out now (nothing spent)
   const shape = `${base.levels.hut}|${base.hero}|${base.forks.hut}|${base.camps}`;
@@ -200,19 +222,24 @@ export const RaidFlow = (props: Props) => {
   const tall = room.h > room.w * 1.15;
   /** A short room (a phone on its side): the card keeps to the few things that matter, the tags to a word. */
   const short = !tall && room.h < 420;
+  /** A large room (a desktop's full window): the cards, tags and bars are a size larger, in keeping with the field. */
+  const big = !tall && room.w >= 1500 && room.h >= 860;
   const side = step === "scout" || step === "plan";
   const clear: Clear = side
     ? tall
       ? { top: room.top + 6, right: 6, bottom: room.sideH + 14, left: 6 }
       : { top: room.top + 8, right: room.sideW + 24, bottom: 8, left: 8 }
-    : short
-      ? { top: room.top + 4, right: 4, bottom: 4, left: 4 }
-      : { top: room.top + 30, right: 8, bottom: step === "battle" ? 50 : 8, left: 8 };
-  // Beside the card the field may run a little under it, where nothing stands, to be a whole size larger.
-  const view = side ? fieldViewBeside(room.w, room.h, screenRatio(), clear, tall ? 36 : 32) : fieldView(room.w, room.h, screenRatio(), clear);
-  // The fight keeps the field where it was laid out for it when the end card comes up over it.
-  // (In a short room the bar and the orders lie over the field's far corner, where nothing stands: raid.css.)
-  const battleView = fieldView(room.w, room.h, screenRatio(), short ? { top: room.top + 4, right: 4, bottom: 4, left: 4 } : { top: room.top + 30, right: 8, bottom: 50, left: 8 });
+    : battleClear(room, tall);
+  // (2026-10-25) Framed on the stronghold and the last stretch of its approaches, as large as that lets the field be;
+  // the rest of the field is still there, a drag away (RaidField.tsx).
+  const focus = (orient: FramedView["orient"]) => focusOf(orient, scoutBattle.structures, scoutBattle.approaches, scoutBattle.zones);
+  const view = framedView(room.w, room.h, screenRatio(), clear, focus);
+  // The fight keeps the field where it was framed for it when the end card comes up over it.
+  const battleView = framedView(room.w, room.h, screenRatio(), battleClear(room, tall), focus);
+  /** Where the picture has been dragged to, for what is dropped on it. */
+  const panRef = useRef<PanAt>({ dx: 0, dy: 0 });
+  const shown = clearOnField(view, room.w, room.h, clear);
+  const edge = useMemo(() => shownOnField(view, room.w, room.h), [view.left, view.top, view.css, view.orient, room.w, room.h]);
 
   // ---- why it cannot set out (no rest), for Go and "Try again"
   const blocked = (target: RaidAim): string | null => {
@@ -224,7 +251,7 @@ export const RaidFlow = (props: Props) => {
     return why ? props.why(why, planFor(base, target.target.kind, now.day, target.target.slot)) : null;
   };
 
-  const forecast = props.forecast ?? forecastPlan;
+  const forecast = props.forecast ?? forecastInSteps;
   const go = () => {
     const begun = props.onStart(aim, squad);
     if (!begun) {
@@ -236,13 +263,15 @@ export const RaidFlow = (props: Props) => {
     setStep("battle");
   };
   const done = (result: Result) => {
-    if (!fight) return;
-    setEnd(props.onFinish(fight.raid, result));
+    if (!fight || step !== "battle") return;
+    const ended = props.onFinish(fight.raid, result);
+    // The stronghold just taken is a replay from now on: the flow stays with it (the map's next is the one after).
+    if (ended?.won && aim.kind === "stronghold" && aim.target.kind === "camp") setAim({ kind: "stronghold", target: { kind: "rematch", slot: aimedN } });
+    setEnd(ended);
     setStep("end");
   };
-  // Again: the stronghold just taken is a replay now; anything else is raided as it was.
-  const again: RaidAim | null =
-    aim.kind === "friend" ? null : aim.target.kind === "camp" && base.camps > aimedN ? { kind: "stronghold", target: { kind: "rematch", slot: aimedN } } : aim;
+  // Again: as it was aimed (a stronghold taken is aimed at as a replay by now). A friend's camp, once a day.
+  const again: RaidAim | null = aim.kind === "friend" ? null : aim;
   const againWhy = again ? blocked(again) : "Raided today. More tomorrow.";
 
   // Back: from the scout, the plan or the end card, to the map. (A fight's own Back ends it as it stands.)
@@ -255,7 +284,7 @@ export const RaidFlow = (props: Props) => {
     let approach = tag ? Number(tag.getAttribute("data-approach")) : -1;
     if (approach < 0) {
       const box = rootRef.current?.getBoundingClientRect();
-      const at = box ? roomToField(view, clientX - box.left, clientY - box.top) : null;
+      const at = box ? roomToField(view, clientX - box.left - panRef.current.dx, clientY - box.top - panRef.current.dy) : null;
       if (at) {
         let best = 18;
         scoutBattle.approaches.forEach((entry, index) => {
@@ -288,23 +317,32 @@ export const RaidFlow = (props: Props) => {
   const heroName = preview.setup.hero ? (HEROES[preview.setup.hero.id]?.short ?? "The hero") : null;
 
   const scene: RaidScene = useMemo(
-    () => ({ battle: scoutBattle, art, fx: newFx(true), region, season, marks: { reach: true, chosen: null, targets: [] } }),
-    [scoutBattle, art, region, season]
+    () => ({ battle: scoutBattle, art, fx: newFx(true), region, season, marks: { reach: true, chosen: null, targets: [] }, edge }),
+    [scoutBattle, art, region, season, edge]
   );
   const looks = useMemo(() => newLooks(scoutBattle), [scoutBattle]);
   const chosenVia = step === "plan" ? (squad.groups[chosen]?.approach ?? null) : null;
   const shownScene: RaidScene = { ...scene, marks: { reach: step !== "end", chosen: chosenVia, targets: [] } };
 
   return (
-    <div ref={rootRef} className="pip-raid" data-orient={view.orient} data-short={short ? "" : undefined} data-step={step} style={{ "--raid-top": `${room.top}px` } as CSSProperties}>
+    <div
+      ref={rootRef}
+      className="pip-raid"
+      data-orient={view.orient}
+      data-short={short ? "" : undefined}
+      data-big={big ? "" : undefined}
+      data-step={step}
+      style={{ "--raid-top": `${room.top}px` } as CSSProperties}
+    >
       {fight && (step === "battle" || step === "end") ? (
-        <RaidBattle battle={fight.battle} art={art} view={battleView} region={region} season={season} name={title} still={still} onDone={done} />
+        <RaidBattle battle={fight.battle} art={art} view={battleView} roomW={room.w} roomH={room.h} clear={battleClear(room, tall)} region={region} season={season} name={title} still={still} onDone={done} />
       ) : (
-        <RaidField view={view} scene={shownScene} looks={looks} paintKey={`${step}|${chosenVia}`} label={`${title}, scouted`}>
+        <RaidField view={view} roomW={room.w} roomH={room.h} pan={view.pan} panRef={panRef} scene={shownScene} looks={looks} paintKey={`${step}|${chosenVia}`} label={`${title}, scouted`}>
           {step !== "end" && (
             <ApproachTags
               battle={scoutBattle}
               view={view}
+              shown={shown}
               plan={step === "plan"}
               short={tall || short}
               groups={squad.groups.map((entry) => entry.approach)}

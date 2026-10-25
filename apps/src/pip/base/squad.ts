@@ -136,29 +136,54 @@ export type PlanForecast = {
 /** The last few forecasts, by what they were of: a plan looked at again (the screen drawn again) costs nothing. */
 const FORECASTS_KEPT = 12;
 const forecasts = new Map<string, PlanForecast>();
-/**
- * How a plan will likely go, from a few runs of it shaken a little. Cheap
- * enough to call as a plan changes (about 4 ms for three runs on a desktop,
- * 2026-10-24), and the same plan again is not run again.
- */
-export const forecastPlan = (setup: Setup, structures?: Structure[], runs = FORECAST_RUNS): PlanForecast => {
-  const key = JSON.stringify([setup, structures ?? null, runs]);
-  const kept = forecasts.get(key);
-  if (kept) return kept;
-  const results: Result[] = [];
-  for (let run = 0; run < runs; run++) results.push(playPlan({ ...setup, jitter: run + 1 }, structures));
+/** What the runs came to. */
+const summarise = (results: readonly Result[]): PlanForecast => {
   const stars = results.map((result) => result.stars).sort((a, b) => a - b);
   const share = (star: 0 | 1 | 2) => results.filter((result) => result.earned?.[star]).length / Math.max(1, results.length);
-  const made: PlanForecast = {
+  return {
     likely: stars[Math.floor((stars.length - 1) / 2)] ?? 0,
     low: stars[0] ?? 0,
     high: stars[stars.length - 1] ?? 0,
     earned: [share(0), share(1), share(2)],
     destroyed: results.reduce((sum, result) => sum + result.destroyed, 0) / Math.max(1, results.length)
   };
+};
+const keyOf = (setup: Setup, structures: Structure[] | undefined, runs: number) => JSON.stringify([setup, structures ?? null, runs]);
+const keep = (key: string, made: PlanForecast) => {
   if (forecasts.size >= FORECASTS_KEPT) forecasts.delete(forecasts.keys().next().value!);
   forecasts.set(key, made);
   return made;
+};
+/**
+ * How a plan will likely go, from a few runs of it shaken a little. Cheap
+ * enough to call as a plan changes (about 4 ms for three runs on a desktop,
+ * 2026-10-24), and the same plan again is not run again.
+ */
+export const forecastPlan = (setup: Setup, structures?: Structure[], runs = FORECAST_RUNS): PlanForecast => {
+  const key = keyOf(setup, structures, runs);
+  const kept = forecasts.get(key);
+  if (kept) return kept;
+  const results: Result[] = [];
+  for (let run = 0; run < runs; run++) results.push(playPlan({ ...setup, jitter: run + 1 }, structures));
+  return keep(key, summarise(results));
+};
+/**
+ * The same forecast a run at a time (2026-10-25), for the planning screen:
+ * each call of the step it hands back plays one run, and the last says the
+ * forecast (null until then). Three runs at once held the page for 50 to 75 ms
+ * at a quarter of a desktop's speed, and 240 ms the first time; one at a time,
+ * between frames, the page never waits long. The figures are `forecastPlan`'s
+ * exactly, and kept with its.
+ */
+export const forecastInSteps = (setup: Setup, structures?: Structure[], runs = FORECAST_RUNS): (() => PlanForecast | null) => {
+  const key = keyOf(setup, structures, runs);
+  const results: Result[] = [];
+  return () => {
+    const kept = forecasts.get(key);
+    if (kept) return kept;
+    results.push(playPlan({ ...setup, jitter: results.length + 1 }, structures));
+    return results.length < runs ? null : keep(key, summarise(results));
+  };
 };
 
 /** A squad group, for building plans by hand (the sim, tests). */

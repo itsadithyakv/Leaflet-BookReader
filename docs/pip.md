@@ -340,7 +340,8 @@ this is the map and the state of it.
 | `src/store/baseStore.ts` | The camp's store: the save, and the actions the screens call |
 | `src/components/pip/arcade/base/BaseScreen.tsx`, `scene.ts` | The camp's screen and its picture, painted by `runScene` (`../frameGate.ts`) only when the art turns or something is being done to it |
 | `…/base/HollowTop.tsx`, `ChapterCard.tsx`, `HollowDock.tsx`, `HollowGuide.tsx`, `HollowMenu.tsx` | The chapter bar, the chapter card, the Build panel's tabs, the guide, the menu |
-| `…/base/RaidBoard.tsx`, `FriendNews.tsx`, `BattleScreen.tsx` | The raid board with forecasts, friends' raids as news, a raid fought |
+| `src/pip/base/lands.ts`, `raidMark.ts`, `squad.ts`, `approaches.ts`, `quirks.ts`, `orders.ts`, `feats.ts` | The Magpie Lands (1.5.13): the map's model and best stars, squads and the forecast, approaches, quirks, orders, the stars' feats |
+| `…/base/LandsMap.tsx`, `RaidFlow.tsx` (`RaidScout`, `RaidPlan`, `RaidBattle`, `RaidEndCard`), `raidPaint.ts`, `raidFx.ts`, `FriendNews.tsx` | The map the raid key opens, a raid from scouting to its end card, its field and its falls, friends' raids as news |
 | `…/base/siteSheet.ts`, `camera.ts`, `mapCoach.ts`, `collect.tsx`, `currency.ts` | A building's sheet, the phone's camera, the first-time pointers, acorns flying to the count, what the chips say |
 | `src-tauri/src/commands/pip_shop.rs` (`camp_summary`), `server/src/routes/raids.js` | A friend's card of the camp, and raids between friends |
 
@@ -350,6 +351,32 @@ nothing expires; a raid board with plain forecasts and free supplies;
 friends' raids shown as news, with Put them back; and being raidable by
 friends off until the reader says yes. That last needs the server change in
 `server/src/routes/raids.js` and `social.js` deployed by the owner.
+
+### Raids: the Magpie Lands (1.5.13)
+
+The plan is [design/hollow/raids-plan.md](design/hollow/raids-plan.md), the
+balance [design/hollow/raids-balance-results.md](design/hollow/raids-balance-results.md),
+and the rules are in features.md ("Raids: the Magpie Lands").
+
+- **Step 1, the rules** (`battle.ts` with a `Squad`, and the modules in the
+  table above), measured by `apps/scripts/raids/sim.ts` against the targets
+  in the plan's section 4.
+- **Step 2, the map**: `LandsMap.tsx`, `landsLayout.ts`, `landsPaint.ts`; best
+  stars and the scouted strongholds ride in the `rd:` mark.
+- **Step 3, the screens**: `RaidFlow.tsx` takes a raid from the map's hand-off
+  (`onRaid`) through scout, plan, the fight and the end card. The field is
+  `RaidField.tsx` (two canvases, the ground covering the whole room so the
+  field never sits in a frame), placed by `raidLayout.ts` at a whole number
+  of pixels and painted by `raidPaint.ts`; the battle's event log
+  (`Battle.events`) becomes falls, rubble, specks and flights in `raidFx.ts`;
+  the stronghold's pieces and their rubble are `pip/raid-art.js`.
+  `BattleScreen.tsx` and `RaidBoard.tsx` are gone.
+- **Tests**: `raidFlow.test.tsx` (the flow end to end, Send, a friend, the
+  King, replays, orders played again from `given`), `raidPaint.test.ts`,
+  `raidFx.test.ts`, `landsMap.test.tsx`, and `pip/base/raids.test.ts`.
+
+**Still open:** no real play on the owner's phone yet; how many stars a
+hero's move is worth is not measured.
 
 ### The Front (shipped in 1.5.11)
 

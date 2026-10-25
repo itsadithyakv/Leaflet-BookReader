@@ -10,12 +10,31 @@ import type { SquadProblem } from "../../../../pip/base/squad";
 
 export const KIND_NAMES: Readonly<Record<ScoutKind, string>> = { sprout: "Scouts", slinger: "Slingers", mole: "Moles", bomber: "Puffcaps" };
 export const KIND_ONE: Readonly<Record<ScoutKind, string>> = { sprout: "Scout", slinger: "Slinger", mole: "Mole", bomber: "Puffcap" };
-export const KIND_ART: Readonly<Record<ScoutKind, string>> = { sprout: "scout", slinger: "slinger", mole: "mole", bomber: "puffcap" };
+/**
+ * Each kind's picture: the raid's own scouts (raid-art.js `raidunit`), the same in the field, the planner and the
+ * fight's chips, so a kind is known by the one picture wherever it is.
+ */
+export const KIND_ART: Readonly<Record<ScoutKind, { name: string; variant: number }>> = {
+  sprout: { name: "raidunit", variant: 0 },
+  slinger: { name: "raidunit", variant: 1 },
+  mole: { name: "raidunit", variant: 2 },
+  bomber: { name: "raidunit", variant: 3 }
+};
 /** In the order the planner lists them. */
 export const KINDS: readonly ScoutKind[] = ["sprout", "slinger", "mole", "bomber"];
 
-/** An approach in a word: "Trail", "Ridge", "Hollow". */
-export const approachShort = (approach: Pick<Approach, "kind"> | undefined) => (approach ? approach.kind[0].toUpperCase() + approach.kind.slice(1) : "?");
+/**
+ * An approach in a word: "Trail", "Ridge", "Hollow"; a trail by what lies on it where that is what it is called ("The
+ * ford" is "Ford", "The thorn trail" "Thorns"), so a group's chip says what its path's tag says.
+ */
+export const approachShort = (approach: Pick<Approach, "kind"> & Partial<Pick<Approach, "hazard">> | undefined) =>
+  !approach
+    ? "?"
+    : approach.kind === "trail" && approach.hazard === "ford"
+      ? "Ford"
+      : approach.kind === "trail" && approach.hazard === "hedge"
+        ? "Thorns"
+        : approach.kind[0].toUpperCase() + approach.kind.slice(1);
 
 /** A structure as a button says it: "the nest", "a hoard", "the watch-crow's perch". */
 export const structureName = (entry: Structure, king = false): string =>

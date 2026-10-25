@@ -27,7 +27,7 @@ export const QuirkIcon = ({ quirk, box = 22 }: { quirk: Quirk; box?: number }) =
 };
 
 /** Three star pips, `count` of them won (the map's own, `pip-lands-stars`). */
-export const StarPips = ({ count, earned, size = "card" }: { count?: number; earned?: readonly boolean[]; size?: "card" | "map" }) => {
+export const StarPips = ({ count, earned, size = "card" }: { count?: number; earned?: readonly boolean[]; size?: "card" | "map" | "hud" }) => {
   const won = earned ?? [0, 1, 2].map((index) => index < (count ?? 0));
   return (
     <span className={`pip-lands-stars is-${size}`} role="img" aria-label={`${won.filter(Boolean).length} of 3 stars`}>
@@ -59,7 +59,7 @@ export const RaidScout = ({ name, sub, picture, quirk, featWords, champion, best
   const info = quirk ? QUIRKS[quirk] : null;
   return (
     <section className="pip-raid-panel pip-raid-scout" aria-label={`Scouting ${name}`}>
-      <button type="button" className="pip-base-round pip-raid-panel-close" aria-label="Back to the map" title="Back to the map" onClick={onClose}>
+      <button type="button" className="pip-raid-key pip-raid-panel-close" aria-label="Back to the map" title="Back to the map" onClick={onClose}>
         <X size={15} aria-hidden />
       </button>
       <header className="pip-lands-card-head">
@@ -75,7 +75,7 @@ export const RaidScout = ({ name, sub, picture, quirk, featWords, champion, best
             <QuirkIcon quirk={quirk} box={20} />
             {info.name}
           </span>
-          <button type="button" className="pip-base-round pip-raid-info" aria-label={`What ${info.name.toLowerCase()} does`} aria-expanded={told} title={`${info.does}. ${info.beats}.`} onClick={() => setTold((was) => !was)}>
+          <button type="button" className="pip-raid-key pip-raid-info" aria-label={`What ${info.name.toLowerCase()} does`} aria-expanded={told} title={`${info.does}. ${info.beats}.`} onClick={() => setTold((was) => !was)}>
             <Info size={13} aria-hidden />
           </button>
           {told && (

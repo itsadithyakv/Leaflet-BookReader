@@ -4065,6 +4065,77 @@ Two things outside the camp came with 1.5.10:
   day's goal met during the visit, is now a moment too, on the same terms:
   Leaflet used on 3 days, and not again for 14 days after "Later".
 
+### Raids: the Magpie Lands (1.5.13)
+
+The owner: raids "look really bad", show no progress, and have no challenge
+or strategy. The plan is
+[design/hollow/raids-plan.md](design/hollow/raids-plan.md), and the rules as
+measured are in
+[design/hollow/raids-balance-results.md](design/hollow/raids-balance-results.md).
+It replaces the raid board above.
+
+- **The map** (`LandsMap.tsx`, `pip/base/lands.ts`): the raid key opens a
+  level-select map from Pip's camp through five regions of three strongholds
+  (the third a lord's keep) to the King's peak, then the Far Rookeries. Each
+  stronghold shows its best stars (0 to 3); regions past the reading's
+  chapter lie under fog. Kept in the `rd:` mark (`raidMark.ts`).
+- **Replay, not rematch.** A stronghold taken can be raided again for stars:
+  a small share of its loot, more for each star past its best. The daily road
+  camps stay retired.
+- **Scout, plan, fight** (`RaidFlow.tsx`), filling the picture as the camp
+  does, under the camp's own top bar, with the land and the region's woods
+  carried out to the window's edges:
+  - **Scout** (free): the stronghold whole, the perches' reach, its one quirk
+    (what it does and what beats it behind the (i)), and its three stars.
+    Looking marks it scouted, so the map shows its quirk.
+  - **Plan**: groups within the hut's room (a sprout or slinger takes one
+    place, a mole or a Puffcap two), each down one of the stronghold's two or
+    three approaches (tap a path's tag, or drag the group's chip onto it), one
+    group perhaps held back as a second wave, the hero with one group. It
+    starts from the plan made without thinking, so Go works at once. A
+    problem is a small mark where it is, its words in a tooltip. The forecast
+    is coarse ("Likely ★★"), worked out a moment after the plan stops
+    changing.
+  - **Go** spends the raid's rest. The fight plays itself; the reader has
+    three orders (five at hut 5): **rally** (a group's chip, then a target),
+    **Release** the held group, and the **hero's move** by its name. Along the
+    top: the bell (it rings at 30 s), three star pips as they are won, orders
+    left.
+- **Quirks**, one per stronghold and always the same:
+
+  | Quirk | Does | Beaten by | Third star |
+  | --- | --- | --- | --- |
+  | Thorn hedge | The trail runs through thorns | Moles go under | Lose no more than two who went through |
+  | Watch-crow | At a third down, calls a second flight | Silence its perch first | Silence it before it calls |
+  | Ford | The trail crosses water: slow | Moles that way, or go round | Take the nest before the bell |
+  | Fog | Perches see less far, peck hard up close | Slingers walk right up | Pull down every perch |
+  | Second gate | A stout gate and a weak one | Use the weak gate | Leave the stout gate standing |
+  | Pitfalls | Hidden holes take whoever is on them | Sprouts first | Lose nobody to the pits |
+
+- **Stars mean something**: ★ the nest, ★★ most of it, ★★★ the feat. The end
+  card (`RaidEndCard.tsx`) ticks each star earned and says in one line why a
+  missed one was missed (`feats.ts` `MISSED`); the loot flies to the count;
+  then **Try again** (a stronghold just taken is tried again as a replay) or
+  **Back to the map**, where its stars are already filled in.
+- **Send** goes as the plan made without thinking, for 75% of the loot, only
+  where it would likely win; its end card stands over the field as that raid
+  left it (played out again from its setup).
+- **Friends' camps** go through the same screens, their approaches from their
+  own walls and no quirk; their third star is "pull all of it down". One raid
+  each a day, so no Try again.
+- **The look** (`raidPaint.ts`, `raidFx.ts`, `pip/raid-art.js`): the field at a
+  whole number of pixels, as large as the room allows (its empty edges may lie
+  under the bars), turned upright on a phone held upright. Perches wind up
+  before they throw; health shows as pips only on what is hurt; a hit is a
+  flash and dust, and nothing shakes. Each kind of structure falls its own way
+  and leaves rubble for the rest of the raid: cracks at two thirds and a
+  third, a wall splinters and topples, a gate breaks, a perch tips and its
+  magpie flaps off, a hoard bursts with acorns hopping out, the nest
+  collapses in twigs and feathers; the watch-crow squawks, a pit opens. Each
+  plays once. With reduced motion (or the lightest tier) everything shows its
+  end at once. The field is painted at about 30 a second only while
+  something moves.
+
 ### The rest of the app, looked at with fresh eyes
 
 Asked to "critique the app", a read of everything outside the arcade found

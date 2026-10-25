@@ -15,9 +15,12 @@
  */
 import { BATTLE_TICK, type Battle, type Structure, type Unit } from "../../../../pip/base/battle";
 import type { Zone } from "../../../../pip/base/approaches";
+import { FIELD_H, FIELD_W } from "../../../../pip/base/field";
+import { BATTLE_GRASS } from "../../../../pip/base-art.js";
 import type { GameArt, GameSprite } from "../gameArt";
 import { FALL_FRAMES, RUBBLE_VARIANT, fallFrame, type FallKind, type FxState } from "./raidFx";
-import { toPicture, type FieldView, type Orient } from "./raidLayout";
+import { toField, toPicture, type FieldView, type GroundBox, type Orient } from "./raidLayout";
+import { KIND_ART } from "./raidWords";
 
 /** What the field shows besides the battle itself: the scout's and the planner's marks, and the rally's targets. */
 export type Marks = {
@@ -40,6 +43,11 @@ export type RaidScene = {
   /** 0 summer to 3 spring: the ground it is fought on. */
   season: number;
   marks: Marks;
+  /**
+   * The part of the field the room shows where the view is framed on the stronghold (field points): a path whose start
+   * is cropped off gets its flag again where it comes into view, so it still reads as coming in from the edge.
+   */
+  edge?: { x0: number; x1: number; y0: number; y1: number } | null;
 };
 
 /** Each approach's colour, by its place: the trail's gold, the ridge's sky, the hollow's rose (`raid-art.js` `FLAG_COLOURS`). */
@@ -173,17 +181,31 @@ const rand = (seed: number) => {
   return x - Math.floor(x);
 };
 
-/** The water of a ford across the trail: two blues, a light edge, ripples in rows. */
+/** Between two colours (`#rrggbb`), as the art mixes them. */
+const mixHex = (a: string, b: string, t: number) => {
+  const part = (colour: string, at: number) => parseInt(colour.slice(at, at + 2), 16);
+  return "#" + [1, 3, 5].map((at) => Math.round(part(a, at) + (part(b, at) - part(a, at)) * t).toString(16).padStart(2, "0")).join("");
+};
+
+/**
+ * The water of a ford across the trail (2026-10-25: it was speckled pixel by pixel in four blues with a ragged bank, and
+ * read as a noisy blob). Now a pool with a clean edge: a sandy bank, a light rim, one blue deepening toward the middle
+ * in two bands, and nothing else; its few ripples are the live picture's (`ripples`), so they can move.
+ */
 type Stretch = Extract<Zone, { x0: number }>;
+const WATER = { bank: "#D9C68E", rim: "#9FDAF2", shallow: "#5FAEE4", deep: "#4596D6" };
+/** How far a point of the ford is from its middle, 0 there and 1 at its bank: a rounded box, not an oval, so it fills its stretch. */
+const fordReach = (zone: Stretch, x: number, y: number) => {
+  const u = Math.abs(x + 0.5 - (zone.x0 + zone.x1 + 1) / 2) / ((zone.x1 - zone.x0 + 1) / 2);
+  const v = Math.abs(y + 0.5 - (zone.y0 + zone.y1 + 1) / 2) / ((zone.y1 - zone.y0 + 1) / 2);
+  return Math.pow(Math.pow(u, 4) + Math.pow(v, 4), 1 / 4);
+};
 const water = (ctx: CanvasRenderingContext2D, orient: Orient, zone: Stretch) => {
-  for (let y = Math.round(zone.y0); y <= zone.y1; y++) {
-    for (let x = Math.round(zone.x0); x <= zone.x1; x++) {
-      // Ragged at its banks: the corners rounded off.
-      const u = (x - (zone.x0 + zone.x1) / 2) / ((zone.x1 - zone.x0) / 2 + 0.5);
-      const v = (y - (zone.y0 + zone.y1) / 2) / ((zone.y1 - zone.y0) / 2 + 0.5);
-      if (u * u * 0.6 + v * v > 1.02 + (rand(x * 3 + y * 7) - 0.5) * 0.1) continue;
-      const edge = u * u * 0.6 + v * v > 0.8;
-      ctx.fillStyle = edge ? "#9CD8F0" : (x + y * 3) % 11 === 0 || (x * 2 + y) % 13 === 0 ? "#BDEBFF" : y % 4 === 0 ? "#3E8FD0" : "#4FA0DC";
+  for (let y = Math.floor(zone.y0) - 1; y <= zone.y1 + 1; y++) {
+    for (let x = Math.floor(zone.x0) - 1; x <= zone.x1 + 1; x++) {
+      const d = fordReach(zone, x, y);
+      if (d > 1.08) continue;
+      ctx.fillStyle = d > 0.97 ? WATER.bank : d > 0.88 ? WATER.rim : d > 0.6 ? WATER.shallow : WATER.deep;
       const at = toPicture({ orient }, x, y);
       ctx.fillRect(at.x, at.y, 1, 1);
     }
@@ -191,20 +213,119 @@ const water = (ctx: CanvasRenderingContext2D, orient: Orient, zone: Stretch) => 
 };
 
 /**
+ * The ford's ripples, on the live picture: a few short pale strokes on the water, each drifting a pixel to and fro
+ * about once in two seconds, not together. Still (reduced motion, the lightest tier, a still field), they lie still.
+ */
+const RIPPLE_SPOTS: ReadonlyArray<readonly [number, number]> = [
+  [0.22, 0.3],
+  [0.62, 0.22],
+  [0.4, 0.55],
+  [0.78, 0.6],
+  [0.28, 0.78],
+  [0.6, 0.84]
+];
+export const ripples = (ctx: CanvasRenderingContext2D, orient: Orient, zone: Stretch, now: number, still: boolean) => {
+  ctx.fillStyle = "#D6F2FF";
+  RIPPLE_SPOTS.forEach(([u, v], index) => {
+    const shift = still ? 0 : Math.round(Math.sin(now * Math.PI + index * 1.9));
+    const x = Math.round(zone.x0 + (zone.x1 - zone.x0) * u) + (orient === "wide" ? shift : 0);
+    const y = Math.round(zone.y0 + (zone.y1 - zone.y0) * v) + (orient === "wide" ? 0 : shift);
+    if (fordReach(zone, x, y) > 0.7) return;
+    // Level on the picture, whichever way the field is turned.
+    const at = toPicture({ orient }, x, y);
+    ctx.fillRect(Math.round(at.x) - 1, Math.round(at.y), 3, 1);
+  });
+};
+
+/** Which pieces of the map's land (`landbit`) grow round a stronghold of each region: the region's own two. */
+const WOODS: ReadonlyArray<readonly number[]> = [[0, 1, 0], [2, 3, 1], [4, 5, 1], [6, 7, 6], [8, 9, 8], [11, 10, 11]];
+
+/**
+ * The land round the field, out to the room's edges, so the stronghold stands in the open and not in a box: the
+ * field's own grass carried on (its colour by its height on the field, its flecks and tufts), and further out the
+ * region's woods, as the map draws them. A pixel grid with the field's: `box` places the field in it.
+ */
+const paintLand = (ctx: CanvasRenderingContext2D, orient: Orient, box: GroundBox, art: GameArt, season: number, region: number) => {
+  const S = BATTLE_GRASS[((season % 4) + 4) % 4] ?? BATTLE_GRASS[0];
+  const fieldW = orient === "wide" ? FIELD_W : FIELD_H;
+  const fieldH = orient === "wide" ? FIELD_H : FIELD_W;
+  const inField = (px: number, py: number) => px >= box.ox && px < box.ox + fieldW && py >= box.oy && py < box.oy + fieldH;
+  // The grass's colour runs with the field's height (down the picture wide, across it turned): a row or column at a time.
+  const shade = (fieldY: number) => mixHex(S.grass[0], S.grass[1], Math.max(0, Math.min(1, fieldY / (FIELD_H - 1))));
+  if (orient === "wide") {
+    for (let py = 0; py < box.h; py++) {
+      ctx.fillStyle = shade(py - box.oy);
+      ctx.fillRect(0, py, box.w, 1);
+    }
+  } else {
+    for (let px = 0; px < box.w; px++) {
+      ctx.fillStyle = shade(px - box.ox);
+      ctx.fillRect(px, 0, 1, box.h);
+    }
+  }
+  // Its flecks, as the field's own (the same scatter, by the field's own points).
+  ctx.fillStyle = S.grass[2];
+  for (let py = 0; py < box.h; py++) {
+    for (let px = 0; px < box.w; px++) {
+      if (inField(px, py)) continue;
+      const at = toField({ orient }, px - box.ox, py - box.oy);
+      if (rand(at.x * 7.7 + at.y * 31.3 + 2) > 0.975) ctx.fillRect(px, py, 1, 1);
+    }
+  }
+  // Tufts, and the woods further out: a loose grid, each spot shaken, nothing within a few pixels of the field.
+  const near = (px: number, py: number, margin: number) => px > box.ox - margin && px < box.ox + fieldW + margin && py > box.oy - margin && py < box.oy + fieldH + margin;
+  const woods = WOODS[Math.max(0, Math.min(WOODS.length - 1, region))];
+  const pieces: Array<{ x: number; y: number; variant: number }> = [];
+  for (let gy = -8; gy < box.h + 16; gy += 10) {
+    for (let gx = -8; gx < box.w + 8; gx += 13) {
+      const seed = gx * 3.1 + gy * 17.3;
+      const x = Math.round(gx + rand(seed) * 9);
+      const y = Math.round(gy + rand(seed + 5) * 7);
+      if (near(x, y, 2)) continue;
+      const deep = !near(x, y, 16);
+      if (deep && rand(seed + 9) < 0.5) pieces.push({ x, y, variant: woods[Math.floor(rand(seed + 11) * woods.length)] });
+      else if (rand(seed + 13) < 0.5) {
+        ctx.fillStyle = rand(seed + 17) < 0.2 ? S.tuft[0] : S.tuft[1];
+        ctx.fillRect(x, y, 1, 1);
+        ctx.fillRect(x + 1, y - 1, 1, 1);
+        ctx.fillRect(x + 2, y, 1, 1);
+      }
+    }
+  }
+  pieces.sort((a, b) => a.y - b.y);
+  for (const piece of pieces) {
+    const sprite = art.sprite("landbit", 0, { variant: piece.variant });
+    if (sprite) ctx.drawImage(sprite.image, Math.round(piece.x - sprite.w / 2), Math.round(piece.y - sprite.h));
+  }
+};
+
+/**
  * The ground for a raid, painted at the field's pixels: the magpies' ground (the art's own, turned with the field), a
  * trampled patch round the camp, each approach as a worn path with its flag where it begins, the thorns, the ford, and
- * where a pit is hidden (a careful eye sees the leaves). `chosen`, the approach picked out, is painted lighter.
+ * where a pit is hidden (a careful eye sees the leaves). `chosen`, the approach picked out, is painted lighter. With a
+ * `box`, the canvas covers the room and the land round the field is painted too (`paintLand`).
  */
-export const paintGround = (canvas: HTMLCanvasElement, view: Pick<FieldView, "orient" | "w" | "h">, scene: Pick<RaidScene, "battle" | "art" | "season">): void => {
+export const paintGround = (
+  canvas: HTMLCanvasElement,
+  view: Pick<FieldView, "orient" | "w" | "h">,
+  scene: Pick<RaidScene, "battle" | "art" | "season"> & { region?: number; edge?: RaidScene["edge"] },
+  box?: GroundBox
+): void => {
   const ctx = canvas.getContext?.("2d");
   if (!ctx) return;
   const { orient } = view;
-  if (canvas.width !== view.w || canvas.height !== view.h) {
-    canvas.width = view.w;
-    canvas.height = view.h;
+  const w = box ? box.w : view.w;
+  const h = box ? box.h : view.h;
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
   }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.imageSmoothingEnabled = false;
+  if (box) {
+    paintLand(ctx, orient, box, scene.art, scene.season, scene.region ?? 0);
+    ctx.setTransform(1, 0, 0, 1, box.ox, box.oy);
+  }
   const { battle, art } = scene;
   const ground = art.sprite("battleground", 0, { variant: scene.season % 4 });
   if (ground) {
@@ -263,9 +384,20 @@ export const paintGround = (canvas: HTMLCanvasElement, view: Pick<FieldView, "or
       if (leaves) ctx.drawImage(leaves.image, Math.round(at.x - leaves.w / 2), Math.round(at.y - leaves.h + 4));
     } else if (zone.kind === "water") water(ctx, orient, zone);
     else {
+      // (2026-10-25) A hedge: a patch of dark, trodden ground with a clean edge, and the clumps on it in loose staggered
+      // rows with the ground between them showing (packed edge to edge they were one noisy block).
+      for (let y = Math.floor(zone.y0); y <= zone.y1; y++) {
+        for (let x = Math.floor(zone.x0); x <= zone.x1; x++) {
+          const d = fordReach(zone, x, y);
+          if (d > 1.02) continue;
+          ctx.fillStyle = d > 0.9 ? "#6E7E3A" : "#5E6E34";
+          const at = toPicture({ orient }, x, y);
+          ctx.fillRect(at.x, at.y, 1, 1);
+        }
+      }
       const clump = art.sprite("raidzone", 0, { variant: 0 });
-      for (let y = zone.y0; y <= zone.y1 - 4; y += 7) {
-        for (let x = zone.x0 + ((y / 7) % 2 ? 4 : 0); x <= zone.x1 - 4; x += 9) {
+      for (let row = 0, y = zone.y0 + 2; y <= zone.y1 - 2; row++, y += 9) {
+        for (let x = zone.x0 + (row % 2 ? 8 : 2); x <= zone.x1 - 2; x += 13) {
           const at = toPicture({ orient }, x, y + 6);
           if (clump) ctx.drawImage(clump.image, Math.round(at.x - clump.w / 2), Math.round(at.y - clump.h));
         }
@@ -293,6 +425,17 @@ export const paintGround = (canvas: HTMLCanvasElement, view: Pick<FieldView, "or
     if (!flag || !start) return;
     const at = toPicture({ orient }, start.x + 3, start.y - 6);
     ctx.drawImage(flag.image, Math.round(at.x - flag.w / 2), Math.round(at.y - flag.h + 2));
+    // Cropped off: the flag again, a little in from the edge of what is shown, on the path.
+    const edge = scene.edge;
+    if (!edge || start.x >= edge.x0 + 2) return;
+    const inView: Array<{ x: number; y: number }> = [];
+    along(approach.path, (x, y) => {
+      if (x >= edge.x0 + 8 && y >= edge.y0 + 4 && y <= edge.y1 - 2) inView.push({ x, y });
+    });
+    if (inView.length === 0) return;
+    const { x, y } = inView[0];
+    const again = toPicture({ orient }, x + 3, y - 6);
+    ctx.drawImage(flag.image, Math.round(again.x - flag.w / 2), Math.round(again.y - flag.h + 2));
   });
 };
 
@@ -327,6 +470,8 @@ export const newLooks = (battle: Battle): Looks => ({
 export const WIND_S = 0.35;
 const THROW_S = 0.2;
 const FLASH_S = 0.09;
+/** How long a scout's health shows after a hit. */
+const PIPS_AFTER_HIT_S = 1.2;
 /** At most so often a thing hit flashes, and puffs dust: a sprout at a wall strikes every step, and a flash then would strobe. */
 const FLASH_EVERY = 0.45;
 const DUST_EVERY = 0.35;
@@ -364,12 +509,67 @@ export const notice = (looks: Looks, scene: RaidScene, now: number) => {
   }
 };
 
-const UNIT_ART: Record<Unit["kind"], string> = { sprout: "scout", slinger: "slinger", mole: "mole", bomber: "puffcap", hero: "hero" };
+/**
+ * Each unit's picture, by kind: the scouts are the raid's own (`KIND_ART`, outlined dark, a shadow under each, the
+ * same pictures as the planner's), the hero the camp's.
+ */
+export const unitArt = (kind: Unit["kind"], heroId: number): { name: string; variant: number; foot: number; half: number } =>
+  kind === "hero" ? { name: "hero", variant: heroId, foot: 1, half: 6 } : { ...KIND_ART[kind], foot: 2, half: kind === "mole" ? 7 : 5 };
+/**
+ * A scout's group, on the ground round its feet: a ring of its colour (the colour of its path's flag and its chip), as
+ * a game marks whose side a piece is on. On the ground, under every scout, so a crowd is a patch of its colour and
+ * never a tower of marks over its heads. Ink on the ring's outer edge keeps it off the grass and the trail alike.
+ */
+const groupRing = (ctx: CanvasRenderingContext2D, x: number, y: number, half: number, colour: string) => {
+  const left = Math.round(x - half);
+  const top = Math.round(y - 2);
+  const w = half * 2;
+  ctx.fillStyle = "#141012";
+  ctx.fillRect(left + 2, top - 1, w - 4, 1);
+  ctx.fillRect(left + 2, top + 4, w - 4, 1);
+  ctx.fillRect(left - 1, top + 1, 1, 2);
+  ctx.fillRect(left + w, top + 1, 1, 2);
+  ctx.fillStyle = colour;
+  ctx.fillRect(left + 2, top, w - 4, 1);
+  ctx.fillRect(left + 2, top + 3, w - 4, 1);
+  ctx.fillRect(left, top + 1, 1, 2);
+  ctx.fillRect(left + w - 1, top + 1, 1, 2);
+  ctx.fillRect(left + 1, top, 1, 1);
+  ctx.fillRect(left + w - 2, top, 1, 1);
+  ctx.fillRect(left + 1, top + 3, 1, 1);
+  ctx.fillRect(left + w - 2, top + 3, 1, 1);
+};
+/** A shadow on the ground, for a picture that has none of its own (the hero, the champion). */
+const shadowAt = (ctx: CanvasRenderingContext2D, x: number, y: number, half: number) => {
+  ctx.fillStyle = "rgba(0, 0, 0, 0.28)";
+  ctx.fillRect(Math.round(x - half + 1), Math.round(y - 1), half * 2 - 2, 1);
+  ctx.fillRect(Math.round(x - half), Math.round(y), half * 2, 1);
+};
 /** The picture's frame for walking and for striking: eight and twelve a second. */
 const WALK_FPS = 8;
 const STRIKE_FPS = 12;
 
 type Thing = { y: number; draw: () => void };
+
+/**
+ * Where each scout is drawn beside where it stands, in field pixels, by its number (see `paintLive`): a dozen places
+ * about it, none of them two the same, so the most a group ever is is a crowd of a dozen, side by side and one behind
+ * another. (2026-10-25: a pixel or two apart, a group held up at the ford was one green-and-black lump.)
+ */
+const SPREAD: ReadonlyArray<readonly [number, number]> = [
+  [0, 0],
+  [5, -4],
+  [-5, 4],
+  [6, 3],
+  [-6, -3],
+  [1, -7],
+  [-1, 7],
+  [10, 0],
+  [-10, 1],
+  [4, 8],
+  [-4, -8],
+  [11, -6]
+];
 
 /** A sprite stood with its foot at a picture point, whole pixels, turned to face left if asked. */
 const stand = (ctx: CanvasRenderingContext2D, image: CanvasImageSource, w: number, h: number, x: number, y: number, flip = false) => {
@@ -473,6 +673,8 @@ export const paintLive = (ctx: CanvasRenderingContext2D, view: Pick<FieldView, "
     const spot = toPicture({ orient }, zone.x, zone.y);
     if (hole) ctx.drawImage(hole.image, Math.round(spot.x - hole.w / 2), Math.round(spot.y - hole.h + 4));
   });
+  // The ford's ripples: moving only while the fight does.
+  for (const zone of battle.zones) if (zone.kind === "water") ripples(ctx, orient, zone, now, still || battle.over);
   // The approach picked out: its path dotted bright.
   if (marks.chosen !== null && battle.approaches[marks.chosen]) {
     ctx.fillStyle = APPROACH_COLOURS[marks.chosen % APPROACH_COLOURS.length];
@@ -499,6 +701,8 @@ export const paintLive = (ctx: CanvasRenderingContext2D, view: Pick<FieldView, "
 
   const things: Thing[] = [];
   const bars: Array<() => void> = [];
+  /** The groups' rings, on the ground: drawn before anything stands on it. */
+  const rings: Array<() => void> = [];
   for (const entry of battle.structures) {
     if (entry.flat || entry.traps !== undefined) continue;
     const foot = footOf(orient, entry);
@@ -546,34 +750,50 @@ export const paintLive = (ctx: CanvasRenderingContext2D, view: Pick<FieldView, "
   for (const unit of battle.units) {
     if (unit.hp <= 0) continue;
     const spot = at(unit);
-    const picture = toPicture({ orient }, spot.x, spot.y);
+    // A group comes out a step apart and walks its path in file: drawn as they stand they are one blob. Each is drawn
+    // a few pixels to one side of where it is, always the same for it (by its number), so a group reads as a crowd.
+    const [sx, sy] = SPREAD[unit.id % SPREAD.length];
+    const picture = toPicture({ orient }, spot.x + sx, spot.y + sy);
     // Facing: where it is going, on the picture, kept until that is clearly the other way.
     const target = unit.target !== null ? battle.structures[unit.target] : null;
     const towards = target ? toPicture({ orient }, target.x, target.y).x - picture.x : 0;
     const was = looks.facing.get(unit.id) ?? true;
     const right = towards > 2 ? true : towards < -2 ? false : was;
     looks.facing.set(unit.id, right);
+    // Its group's colour on the ground round its feet, so it is clear which group is where.
+    const band = unit.band !== undefined ? battle.bands[unit.band] : undefined;
+    if (band) {
+      const half = unitArt(unit.kind, 0).half;
+      rings.push(() => groupRing(ctx, picture.x, picture.y, half, APPROACH_COLOURS[band.via % APPROACH_COLOURS.length]));
+    }
     things.push({
       y: picture.y,
       draw: () => {
-        const name = UNIT_ART[unit.kind];
+        const look = unitArt(unit.kind, battle.setup.hero?.id ?? 0);
         const frame = Math.floor(now * (unit.busy ? STRIKE_FPS : WALK_FPS) + unit.id * 1.7);
-        const sprite = art.sprite(name, frame, unit.kind === "hero" ? { variant: battle.setup.hero?.id ?? 0 } : {});
+        const sprite = art.sprite(look.name, frame, { variant: look.variant });
         if (!sprite) {
           ctx.fillStyle = unit.kind === "mole" ? "#6B4A2E" : "#4FBF5A";
           ctx.fillRect(Math.round(picture.x - 3), Math.round(picture.y - 7), 6, 7);
           return;
         }
-        stand(ctx, sprite.image, sprite.w, sprite.h, picture.x, picture.y + 1, !right);
+        const foot = picture.y + look.foot;
+        if (unit.kind === "hero") shadowAt(ctx, picture.x, picture.y, 5);
+        stand(ctx, sprite.image, sprite.w, sprite.h, picture.x, foot, !right);
         if (!still && now - (looks.unitHitAt.get(unit.id) ?? -9) < FLASH_S) {
           const white = flashOf(sprite);
           if (white) {
             ctx.globalAlpha = 0.7;
-            stand(ctx, white, sprite.w, sprite.h, picture.x, picture.y + 1, !right);
+            stand(ctx, white, sprite.w, sprite.h, picture.x, foot, !right);
             ctx.globalAlpha = 1;
           }
         }
-        if (unit.hp < unit.max) bars.push(() => pips(ctx, picture.x, picture.y - sprite.h - 2, unit.hp / unit.max, unit.kind === "hero" ? 4 : 3, true));
+
+        // A crowd of scouts each with its pips is a tower of them: a scout's show for a moment after it is hit, or
+        // while it is badly hurt; the hero's whenever it is hurt.
+        const share = unit.hp / unit.max;
+        const lately = now - (looks.unitHitAt.get(unit.id) ?? -9) < PIPS_AFTER_HIT_S;
+        if (share < 1 && (unit.kind === "hero" || lately || share <= 1 / 3)) bars.push(() => pips(ctx, picture.x, picture.y - sprite.h - 2, share, unit.kind === "hero" ? 4 : 3, true));
       }
     });
   }
@@ -588,12 +808,14 @@ export const paintLive = (ctx: CanvasRenderingContext2D, view: Pick<FieldView, "
         const sprite = art.sprite("champion", Math.floor(now * (foe.busy ? STRIKE_FPS : WALK_FPS)), { variant: foe.variant });
         if (!sprite) return;
         const faces = orient === "wide" ? foe.left : foe.home.y > spot.y;
+        shadowAt(ctx, picture.x, picture.y, 6);
         stand(ctx, sprite.image, sprite.w, sprite.h, picture.x, picture.y + 1, !faces);
         if (foe.hp < foe.max) bars.push(() => pips(ctx, picture.x, picture.y - sprite.h - 2, foe.hp / foe.max, 5, false));
       }
     });
   }
 
+  for (const ring of rings) ring();
   things.sort((a, b) => a.y - b.y);
   for (const thing of things) thing.draw();
 
@@ -676,6 +898,7 @@ export const paintLive = (ctx: CanvasRenderingContext2D, view: Pick<FieldView, "
       ctx.globalAlpha = 1;
     }
   }
+
 
   for (const bar of bars) bar();
 };

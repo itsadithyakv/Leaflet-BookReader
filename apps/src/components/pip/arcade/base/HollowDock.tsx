@@ -49,7 +49,7 @@ type MeadowDock = {
 
 /**
  * The row of keys at the foot of the picture (1.5.10): three keys, Build, Raid and Edit. Build opens the panel of
- * everything there is to build, post or buy, in four tabs; Raid the raid board; Edit lays the camp out (move, fence,
+ * everything there is to build, post or buy, in four tabs; Raid the Magpie Lands; Edit lays the camp out (move, fence,
  * decorate). The meadow has its own small row, and Edit its own bar while it is on.
  */
 export const HollowDock = ({ dock, after }: { dock: CampDock | EditDock | MeadowDock; after?: ReactNode }) => (

@@ -320,6 +320,55 @@ The full setup, restore drill and disaster steps are in
     finish that list.
   - **Also uncommitted, not built:** PDF read aloud and Revise words.
 
+### 2026-10-25
+
+- **Raids step 3 finished** (uncommitted, for 1.5.13; raids-plan.md section 5,
+  "Built"):
+  - the ground covers the whole window, the region's woods round the field, so
+    a raid is never a framed box; the field is a size larger where its empty
+    edges can lie under the bars (7× on a 1920×1080 desktop);
+  - on a phone held upright the raid is the Hollow page's height, so the
+    fight's orders are never under the bar along the foot;
+  - Send opens on its end card over the field as that raid left it; a
+    stronghold just taken stays the flow's for Try again (as a replay);
+  - the plan's forecast runs a run at a time; scouts' health shows only after
+    a hit; a crowd of scouts is drawn spread a little; groups named alike on
+    chips and paths ("Ford", "Thorns").
+- **Checked:** tsc, vitest 4,472, the raids sim (every target still met),
+  screenshots at 1366×768, 1920×1080, 375×812 and 812×375 in headless Chrome.
+- **Timing (production build, 4× CPU throttle):** a busy fight holds every
+  frame (95th percentile 8.4 ms at 120 Hz, no long tasks); the forecast makes
+  one task of 50 to 75 ms at most after a change.
+- **`npm run perf` Hollow idle is over its 1.5.12 budgets.** v1.5.12 itself
+  fails the same budgets today, in 13 runs out of 13, and CPU profiles show
+  no new idle work. It is the machine's state, not a regression. The budgets
+  were **not** raised. Re-run on a quiet, plugged-in machine; if v1.5.12
+  still fails there, re-baseline with `--update` and say why.
+- **Polish pass:**
+  - the fight is framed on the stronghold (6× at 1366×768, 10× at
+    1920×1080), with drag to pan and a calm camera;
+  - four distinct scout sprites with outlines, shadows and group-coloured
+    rings;
+  - a pixel-paper HUD and planner, coloured group chips, and pixel keys;
+  - calmer water;
+  - the "second tap" on the Raid key was the turn-to-landscape veil in a
+    phone emulation that never turns, so not a bug;
+  - the old `.pip-base-result*` styles were removed.
+- **Still weak**, for later:
+  - on an upright phone the planner sheet leaves the field small;
+  - scouts at the ford are out of view on an upright phone while the camera
+    holds the stronghold;
+  - second-gate strongholds stay zoomed out;
+  - thorns are a dark block;
+  - a pan made while scouting carries into the plan step.
+- **1.5.13 committed and tagged `v1.5.13`**, and the Store MSIX and test APK
+  were built from that commit.
+  - It holds the raids redesign, PDF read aloud, and Revise words with
+    remove and Undo.
+  - Checked: tsc; vitest 4,494; cargo test 1,129; clippy clean; the raids sim
+    (every target met).
+  - No server change since 1.5.12, so no deploy is needed for it.
+
 ## 7. Open items
 
 | # | What | Who |

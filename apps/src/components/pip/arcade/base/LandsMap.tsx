@@ -37,8 +37,8 @@ import { ROOST_ACROSS, ROOST_ALONG, SIGN_ACROSS, SIGN_ALONG, frontierAlong, node
  * the picture: a winding path from Pip's camp through the five regions to the King's peak and on into the Far
  * Rookeries, scrolled along where it is longer than the screen, Pip standing at the next stronghold. A tap on a
  * stronghold opens its card: its best stars, its quirk once scouted, and Raid (or Replay, for one taken). Everything
- * the raid board had is here: the King, the day's camps on the road, the friends' signpost, the hero who goes, the
- * scouts' hut, what the last Send brought.
+ * the raid board had is here: the King, the friends' signpost, the hero who goes, the scouts' hut. (The day's camps on
+ * the road are not played since 2026-10-15; what a Send brought is on the raid's end card.)
  *
  * Starting a raid is one call, `onRaid({ kind, slot })`: the raid's own screens (RaidFlow.tsx: scout, plan, fight)
  * take over from it without the map knowing.
@@ -363,7 +363,7 @@ export const LandsMap = (props: LandsMapProps) => {
 
       {/* The one line along the top: a tap for the totals. And the scouts' rest beside it. */}
       <div className="pip-lands-line">
-        <button type="button" className="pip-base-round pip-lands-back" aria-label="Back to the camp" title="Back to the camp" onClick={props.onClose}>
+        <button type="button" className="pip-raid-key pip-lands-back" aria-label="Back to the camp" title="Back to the camp" onClick={props.onClose}>
           <X size={15} aria-hidden />
         </button>
         <button type="button" className="pip-base-chip pip-lands-progress" aria-expanded={chosen?.what === "totals"} onClick={() => choose(chosen?.what === "totals" ? null : { what: "totals" })}>
@@ -386,7 +386,7 @@ export const LandsMap = (props: LandsMapProps) => {
 
       {chosen && (
         <section className="pip-base-enter pip-lands-card" aria-live="polite">
-          <button type="button" className="pip-base-round pip-lands-card-close" aria-label="Close" title="Close" onClick={() => setChosen(null)}>
+          <button type="button" className="pip-raid-key pip-lands-card-close" aria-label="Close" title="Close" onClick={() => setChosen(null)}>
             <X size={15} aria-hidden />
           </button>
           <LandsCard {...props} lands={lands} chosen={chosen} />
