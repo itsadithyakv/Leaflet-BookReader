@@ -1,0 +1,425 @@
+/* Making study cards in the reader (study/CardMaker.tsx, PictureCardMaker.tsx):
+   in the reader's own colours, over the page. No blur behind: a plain shade. */
+
+.study-maker-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 76;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: color-mix(in srgb, var(--reader-bg, #1b1d21) 62%, transparent);
+}
+
+.study-maker {
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 34rem);
+  max-height: min(100%, 38rem);
+  border-width: 1px;
+  border-style: solid;
+  border-radius: 16px;
+  padding: 16px 18px 14px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+  outline: none;
+}
+
+.study-maker-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.study-maker-title {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-headline, inherit);
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.study-maker-kinds {
+  display: inline-flex;
+  flex: none;
+  align-self: flex-start;
+  margin-top: 12px;
+  border: 1px solid var(--reader-border);
+  border-radius: 999px;
+  padding: 2px;
+}
+
+.study-maker-kinds.is-small {
+  margin-top: 0;
+}
+
+.study-maker-kind {
+  min-height: 32px;
+  border-radius: 999px;
+  padding: 4px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--reader-muted);
+}
+
+.study-maker-kinds.is-small .study-maker-kind {
+  min-height: 26px;
+  padding: 2px 10px;
+  font-size: 11px;
+}
+
+.study-maker-kind[aria-checked="true"] {
+  background: var(--reader-pill);
+  color: var(--reader-text);
+}
+
+.study-maker-kind:focus-visible,
+.study-fill-word:focus-visible {
+  outline: 2px solid var(--reader-accent);
+  outline-offset: 2px;
+}
+
+.study-maker-info {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.study-maker-body {
+  min-height: 0;
+  margin-top: 14px;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+/* The passage's words, each a button; the hidden ones covered in the accent, their letters still read. */
+.study-fill-words {
+  font-family: var(--reader-font, Georgia, serif);
+  font-size: 17px;
+  line-height: 1.9;
+  color: var(--reader-text);
+}
+
+.study-fill-word {
+  border-radius: 4px;
+  padding: 1px 1px;
+  margin: 0 -1px;
+  color: inherit;
+  font: inherit;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.study-fill-word:hover {
+  background: var(--reader-hover-bg);
+}
+
+.study-fill-word[aria-pressed="true"] {
+  background: var(--reader-accent);
+  color: var(--reader-panel);
+}
+
+.study-maker-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.study-maker-field {
+  width: 100%;
+  border-width: 1px;
+  border-style: solid;
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--reader-panel-soft);
+  color: var(--reader-text);
+  font-size: 15px;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+.study-maker-field:focus {
+  outline: 2px solid var(--reader-accent);
+  outline-offset: 1px;
+}
+
+.study-maker-answer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.study-maker-quote {
+  margin-top: 6px;
+  border-left-width: 3px;
+  border-left-style: solid;
+  padding: 2px 0 2px 12px;
+  font-family: var(--reader-font, Georgia, serif);
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--reader-text);
+}
+
+.study-maker-foot {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.study-maker-status {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.study-maker-foot .reader-notes-action {
+  min-height: 36px;
+  padding: 6px 14px;
+}
+
+/* A phone held upright: a sheet from the foot of the screen, the keys under the thumb. */
+@media (max-width: 640px) {
+  .study-maker-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .study-maker {
+    width: 100%;
+    max-height: 88dvh;
+    border-bottom: 0;
+    border-radius: 18px 18px 0 0;
+    padding-bottom: max(14px, calc(var(--inset-bottom, 0px) + 10px));
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .study-maker {
+    animation: study-maker-in 180ms ease-out backwards;
+  }
+}
+
+@keyframes study-maker-in {
+  from {
+    opacity: 0;
+    translate: 0 10px;
+  }
+}
+
+/* "Card made": a slip over the foot of the page, gone by itself. */
+.study-said {
+  position: fixed;
+  bottom: max(24px, calc(var(--inset-bottom, 0px) + 16px));
+  left: 50%;
+  z-index: 77;
+  border-width: 1px;
+  border-style: solid;
+  border-radius: 999px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+/* ---- Picture cards: over the whole window, as the picture viewer is ---- */
+
+.study-picture-maker {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  background: #0e0f11;
+  color: #f2f4f7;
+}
+
+.study-picture-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  outline: none;
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+
+.study-picture-stage.is-panning {
+  cursor: grab;
+}
+
+.study-picture-image {
+  position: absolute;
+  max-width: none;
+  pointer-events: none;
+}
+
+.study-picture-box {
+  position: absolute;
+  border: 2px solid #f2c94c;
+  background: rgba(242, 201, 76, 0.18);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+
+.study-picture-box[data-chosen] {
+  border-color: #7fd1ff;
+  background: rgba(127, 209, 255, 0.22);
+}
+
+.study-picture-box.is-sketch {
+  border-style: dashed;
+  background: rgba(242, 201, 76, 0.1);
+}
+
+.study-picture-box-number {
+  position: absolute;
+  top: -10px;
+  left: -10px;
+  display: grid;
+  min-width: 20px;
+  height: 20px;
+  place-items: center;
+  border-radius: 10px;
+  padding: 0 5px;
+  background: #f2c94c;
+  color: #1a1a1a;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.study-picture-box[data-chosen] .study-picture-box-number {
+  background: #7fd1ff;
+}
+
+.study-picture-bar {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 10px max(12px, var(--inset-right, 0px)) max(10px, calc(var(--inset-bottom, 0px) + 8px)) max(12px, var(--inset-left, 0px));
+  background: #16181c;
+}
+
+.study-picture-tools,
+.study-picture-end,
+.study-picture-chosen {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* As tall with a box chosen as without: the bar never grows under the reader's finger, so the
+   picture over it does not move between one box and the next. */
+.study-picture-chosen {
+  flex: 1;
+  min-width: 12rem;
+  min-height: 40px;
+}
+
+.study-picture-key {
+  display: inline-flex;
+  min-width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 10px;
+  padding: 0 8px;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.study-picture-key:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.study-picture-key[aria-pressed="true"] {
+  border-color: #f2c94c;
+  color: #f2c94c;
+}
+
+.study-picture-key.is-wide {
+  min-width: 56px;
+  font-variant-numeric: tabular-nums;
+}
+
+.study-picture-key.is-text {
+  padding: 0 14px;
+}
+
+.study-picture-key.is-primary {
+  border-color: #8bc34a;
+  background: #8bc34a;
+  color: #10200a;
+}
+
+.study-picture-key:disabled {
+  opacity: 0.45;
+}
+
+.study-picture-key:focus-visible,
+.study-picture-label:focus-visible {
+  outline: 2px solid #7fd1ff;
+  outline-offset: 2px;
+}
+
+.study-picture-count {
+  flex: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(242, 244, 247, 0.75);
+}
+
+.study-picture-label {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 10px;
+  padding: 0 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font-size: 14px;
+}
+
+.study-picture-info {
+  flex-basis: 100%;
+  order: -1;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(242, 244, 247, 0.8);
+}
+
+.study-picture-said {
+  position: absolute;
+  top: max(12px, calc(var(--inset-top, 0px) + 8px));
+  left: 50%;
+  border-radius: 10px;
+  padding: 6px 12px;
+  background: #3a1b18;
+  font-size: 12px;
+  transform: translateX(-50%);
+}
+
+.study-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

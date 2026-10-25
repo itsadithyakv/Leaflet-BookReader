@@ -145,8 +145,11 @@ fn tick<R: Runtime>(app: &AppHandle<R>) {
   // Marked as sent even if Windows refused it: a toast that failed once
   // would fail again every minute for the next hour.
   let _ = toast::show(&identifier(app), &due.reminder, expires);
-  // Pip on the desktop, if she is out there, holds up a sign for it.
-  crate::desktop_pip::runtime::nudge(app, &due.reminder);
+  // Pip on the desktop, if she is out there, holds up a sign for it. Not
+  // for the year's notice: her sign leads back to the book.
+  if due.reminder.kind != ReminderKind::Year {
+    crate::desktop_pip::runtime::nudge(app, &due.reminder);
+  }
   log.mark(due.reminder.kind, &due.reminder.date_key);
   for kind in &due.superseded {
     log.mark(*kind, &due.reminder.date_key);
@@ -367,8 +370,14 @@ pub fn reminders_preview(
 }
 
 /// The sample reminder for "Send a Test": what it says now, in Pip's voice.
+/// The year's is about the year the story is: in January, the one just gone.
 pub(super) fn sample(db: &db::Database, kind: ReminderKind, voice: PipVoice) -> Result<super::Reminder, String> {
   let now = Local::now().naive_local();
+  if kind == ReminderKind::Year {
+    let year = if chrono::Datelike::month(&now) == 1 { chrono::Datelike::year(&now) - 1 } else { chrono::Datelike::year(&now) };
+    let key = format!("{year:04}-{:02}-{:02}", super::YEAR_MONTH, super::YEAR_DAY);
+    return Ok(super::compose(kind, voice, 1, 1, &key));
+  }
   let settings = read_settings(db);
   let (habit, goal) = habit_view(db, &settings, now)?;
   let remaining = if habit.met { goal.max(1) } else { (habit.goal as f64 - habit.minutes).ceil().max(1.0) as i64 };

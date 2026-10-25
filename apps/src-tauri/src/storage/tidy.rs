@@ -12,7 +12,7 @@
 //! which refuses a folder that still holds anything.
 
 use super::library_copy;
-use super::{extract_basic_metadata, hash_for_import};
+use super::{book_hash_for_import, extract_basic_metadata};
 use crate::formats;
 use crate::metadata::normalize;
 use serde::{Deserialize, Serialize};
@@ -229,8 +229,10 @@ fn walk(dir: &Path, prefix: &str, depth: usize, limit: usize, out: &mut Vec<(Str
 }
 
 /// One file's hash and what it says about itself, by the rules import uses.
+/// A smaller copy made for a Drive backup has its original's hash: it is that
+/// book, not another one beside it.
 fn read_one(relative: &str, path: &Path) -> Result<Found, String> {
-  let hash = hash_for_import(path).map_err(|error| error.to_string())?;
+  let hash = book_hash_for_import(path).map_err(|error| error.to_string())?;
   let size = fs::metadata(path).map(|metadata| metadata.len()).map_err(|_| GONE.to_string())?;
   let basic = extract_basic_metadata(path).unwrap_or_default();
   let stem = path.file_stem().and_then(|value| value.to_str()).unwrap_or("Untitled");
@@ -1136,6 +1138,26 @@ mod tests {
     let scan = scan_checked(&scratch.books(), 3);
     assert_eq!(scan.files.len(), 3);
     assert!(scan.capped);
+  }
+
+  /// A smaller copy from a Drive backup is the book it was made from: its
+  /// hash is the original's, so the library knows it, and beside the
+  /// original it is the same book, not a second one to be tidied apart.
+  #[test]
+  fn a_smaller_copy_from_the_backup_is_its_original_book() {
+    use crate::storage::smaller::{self, tests as made};
+    let scratch = Scratch::new("smaller");
+    let original = scratch.put("Dune.epub", b"");
+    made::epub_with(&original, &made::jpeg(800, 600, 98), &[]);
+    let id = crate::storage::hash_file(&original).expect("hash");
+    let copy = smaller::prepare(&original, &id, &scratch.path.join("out"));
+    assert!(copy.made());
+    fs::copy(copy.path(), scratch.books().join("Dune from Drive.epub")).expect("copy");
+
+    let scan = scan_checked(&scratch.books(), MAX_FILES);
+    assert_eq!(scan.files.len(), 2);
+    assert!(scan.files.iter().all(|file| file.hash == id), "{:?}", scan.files);
+    assert!(scan.left_alone.is_empty());
   }
 }
 

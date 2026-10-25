@@ -57,6 +57,11 @@ import "./raid.css";
  *
  * Once a stronghold falls it is the map's to replay: the flow carries on aimed at it as a replay, so the end card and
  * "Try again" stay with the stronghold just taken and not the next one along.
+ *
+ * (2026-10-26) Each step starts from its own framing: a drag made while scouting is not carried into the plan, whose
+ * card and tags are laid out for the field as framed (`frame` on the field). The fight's field is its own, and the end
+ * card keeps it as the fight left it. On a phone held upright the planner starts folded to a row (`fold`), and the field
+ * is framed for the room the card leaves, folded or open.
  */
 
 export type RaidAim = { kind: "stronghold"; target: LandsTarget } | { kind: "friend"; target: RaidTarget };
@@ -107,7 +112,7 @@ const measure = (element: HTMLElement | null) => {
 const ApproachTags = ({ battle, view, shown, plan, groups, short, onPick }: { battle: Battle; view: FramedView; shown: Shown; plan: boolean; groups: number[]; short: boolean; onPick: (approach: number) => void }) => (
   <>
     {battle.approaches.map((approach, index) => {
-      const at = tagPoint(approach.path, index, shown);
+      const at = tagPoint(approach.path, index, shown, view.orient);
       const spot = toRoom(view, at.x, at.y);
       const style = { left: spot.left, top: spot.top, "--group": APPROACH_COLOURS[index % APPROACH_COLOURS.length] } as CSSProperties;
       const going = groups.filter((via) => via === index).length;
@@ -337,7 +342,7 @@ export const RaidFlow = (props: Props) => {
       {fight && (step === "battle" || step === "end") ? (
         <RaidBattle battle={fight.battle} art={art} view={battleView} roomW={room.w} roomH={room.h} clear={battleClear(room, tall)} region={region} season={season} name={title} still={still} onDone={done} />
       ) : (
-        <RaidField view={view} roomW={room.w} roomH={room.h} pan={view.pan} panRef={panRef} scene={shownScene} looks={looks} paintKey={`${step}|${chosenVia}`} label={`${title}, scouted`}>
+        <RaidField view={view} roomW={room.w} roomH={room.h} pan={view.pan} panRef={panRef} frame={step} scene={shownScene} looks={looks} paintKey={`${step}|${chosenVia}`} label={`${title}, scouted`}>
           {step !== "end" && (
             <ApproachTags
               battle={scoutBattle}
@@ -390,6 +395,7 @@ export const RaidFlow = (props: Props) => {
               onGo={go}
               onBack={() => setStep("scout")}
               onClose={props.onClose}
+              fold={tall}
             />
           )}
         </div>

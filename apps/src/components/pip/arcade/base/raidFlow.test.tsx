@@ -483,6 +483,116 @@ describe("a raid, on screen", () => {
     expect(shown.finished).toHaveLength(1);
   });
 
+  it("folds the planner to one row on a phone held upright: the groups' tabs and Go; a tab opens it, a key folds it (2026-10-26)", async () => {
+    const { RaidPlan } = await import("./RaidPlan");
+    const base = camp();
+    const setup = rules.raidSetup(base, rules.planFor(base, "camp", DAY));
+    const approaches = new battleMod.Battle({ ...setup, squad: { groups: [] } }).approaches;
+    const naive = squadMod.naiveSquad(setup);
+    let went = 0;
+    const Planner = ({ fold }: { fold: boolean }) => {
+      const [squad, setSquad] = React.useState<Squad>(naive);
+      const [chosen, setChosen] = React.useState(0);
+      return (
+        <RaidPlan
+          setup={setup}
+          approaches={approaches}
+          squad={squad}
+          onSquad={setSquad}
+          chosen={chosen}
+          onChoose={setChosen}
+          forecast={() => () => ({ likely: 2, low: 2, high: 2, earned: [1, 1, 0], destroyed: 0.7 })}
+          naive={naive}
+          heroName={null}
+          blocked={null}
+          onDrop={() => undefined}
+          onGo={() => (went += 1)}
+          onBack={() => undefined}
+          onClose={() => undefined}
+          fold={fold}
+        />
+      );
+    };
+    const container = document.createElement("div") as MiniElement;
+    document.body.appendChild(container);
+    root = createRoot(container as unknown as Element);
+    await React.act(async () => root!.render(<Planner fold />));
+    const plan = () => byClass("pip-raid-plan")[0];
+    const tabs = () => byClass("pip-raid-groups")[0].findAll((element) => classes(element).includes("pip-raid-group"));
+    // Folded: one row, the tabs and Go (with the forecast's stars), and no group's page.
+    expect(classes(plan())).toContain("is-folded");
+    expect(byClass("pip-raid-fold-row")).toHaveLength(1);
+    expect(tabs()).toHaveLength(naive.groups.length);
+    expect(byClass("pip-raid-kind")).toHaveLength(0);
+    expect(byClass("pip-raid-group-edit")).toHaveLength(0);
+    await React.act(async () => wait(FORECAST_WAIT_MS + 60));
+    expect(all((element) => element.getAttribute("data-likely") === "2")).toHaveLength(1);
+    await press(button(/Go$/));
+    expect(went).toBe(1);
+    // A tab opens the card on its group; the fold key folds it again.
+    await press(tabs()[0], "the first group's tab");
+    expect(classes(plan())).not.toContain("is-folded");
+    expect(byClass("pip-raid-kind").length).toBeGreaterThanOrEqual(3);
+    await press(button("Fold the plan away"));
+    expect(classes(plan())).toContain("is-folded");
+    // Another group opens the card on it, to be filled.
+    await press(button("Another group"));
+    expect(classes(plan())).not.toContain("is-folded");
+    expect(tabs()).toHaveLength(naive.groups.length + 1);
+    expect(tabs()[naive.groups.length].getAttribute("aria-selected")).toBe("true");
+    // Beside a wide field it is never folded, and has no fold key.
+    await React.act(async () => root!.render(<Planner fold={false} />));
+    expect(classes(plan())).not.toContain("is-folded");
+    expect(button("Fold the plan away")).toBeUndefined();
+  });
+
+  it("starts each step from its own framing: a drag made while scouting is not carried into the plan (2026-10-26)", async () => {
+    await show(camp(), { kind: "stronghold", target: { kind: "rematch", slot: 2 } });
+    const field = byClass("pip-raid-field")[0];
+    expect(field.getAttribute("data-pannable")).not.toBeNull();
+    const layer = () => byClass("pip-raid-pan")[0];
+    const pointer = (type: string, x: number, y: number) => Object.assign(makeEvent(type, field), { pointerId: 1, pointerType: "mouse", button: 0, clientX: x, clientY: y });
+    await React.act(async () => {
+      field.dispatchEvent(pointer("pointerdown", 300, 300));
+      field.dispatchEvent(pointer("pointermove", 330, 290));
+      field.dispatchEvent(pointer("pointermove", 380, 280));
+      field.dispatchEvent(pointer("pointerup", 380, 280));
+    });
+    expect(String(layer().style.transform ?? "")).toMatch(/^translate\(/);
+    await press(button(/^Plan/));
+    expect(byClass("pip-raid-plan")).toHaveLength(1);
+    expect(String(layer().style.transform ?? "")).toBe("");
+  });
+
+  it("marks a group out of view at the window's edge, and a tap on the mark brings it into view (2026-10-26)", async () => {
+    const { framedView, focusOf, NO_PAN } = await import("./raidLayout");
+    const setup = { n: 7, king: false, capacity: 13, level: 4, kinds: ["sprout", "slinger"] as Array<"sprout" | "slinger">, fast: false, squad: { groups: [squadMod.group({ sprout: 6, slinger: 2 }, 0)] } };
+    const battle = new battleMod.Battle(setup);
+    for (let k = 0; k < 20; k++) battle.step(battleMod.BATTLE_TICK);
+    expect(battle.units.filter((unit) => unit.hp > 0).length).toBeGreaterThanOrEqual(4);
+    const clear = { top: 6, right: 160, bottom: 6, left: 6 };
+    const view = framedView(720, 420, 1, clear, (orient) => focusOf(orient, battle.structures, battle.approaches, battle.zones));
+    expect(view.pan).not.toEqual(NO_PAN);
+    const container = document.createElement("div") as MiniElement;
+    document.body.appendChild(container);
+    root = createRoot(container as unknown as Element);
+    // Held still (reduced motion): no camera of its own, so the scouts at the trail's start stay out of view.
+    await React.act(async () => root!.render(<RaidBattle battle={battle} art={art} view={view} roomW={720} roomH={420} clear={clear} region={2} season={0} name="Tin Hill" still onDone={() => undefined} />));
+    await frames(200);
+    const marks = () => byClass("pip-raid-edge");
+    expect(marks()).toHaveLength(1);
+    const mark = marks()[0];
+    expect(mark.getAttribute("aria-label")).toMatch(/^\d+ of the ford group, out of view: look$/);
+    expect(mark.style["--group"]).toBe((await import("./raidPaint")).APPROACH_COLOURS[0]);
+    expect(Number.parseFloat(String(mark.style.left))).toBeLessThan(100);
+    // Looked at: the picture goes to them at once (still), and the mark is gone.
+    expect(String(byClass("pip-raid-pan")[0].style.transform ?? "")).toBe("");
+    await press(mark, "the mark");
+    expect(String(byClass("pip-raid-pan")[0].style.transform ?? "")).toMatch(/^translate\(/);
+    await frames(120);
+    expect(marks()).toHaveLength(0);
+  });
+
   it("has no raid board or old battle screen left, and nothing imports them", async () => {
     type Fs = { existsSync: (path: URL) => boolean; readdirSync: (path: URL, options: { withFileTypes: true }) => Array<{ name: string; isDirectory: () => boolean }>; readFileSync: (path: URL, encoding: "utf8") => string };
     const fs = (await import(/* @vite-ignore */ ["node", "fs"].join(":"))) as Fs;

@@ -22,31 +22,55 @@ const row = (word: string, due: number | null = null) => ({
   deletedAt: null
 });
 
-describe("Revise words, on the Library", () => {
+/** A fill-in card's row, from book `bookId`. */
+const card = (id: string, bookId: string, due: number | null = null) => ({
+  id: `card:${id}`,
+  bookId,
+  kind: "card",
+  cfi: "epubcfi(/6/8!/4/2,/1:0,/1:31)",
+  note: null,
+  text: JSON.stringify({ t: "fill", s: "The mitral valve has two cusps.", x: [[4, 10]], p: 0.3, ...(due === null ? {} : { b: 1, d: due }) }),
+  chapter: "The heart",
+  createdAt: "2026-10-24T10:00:00.000Z",
+  updatedAt: "2026-10-24T10:00:00.000Z",
+  deletedAt: null
+});
+
+describe("Revise, on the Library", () => {
   let React: typeof import("react");
   let createRoot: typeof import("react-dom/client").createRoot;
   let root: import("react-dom/client").Root;
   let ReviseWordsKey: typeof import("./ReviseWordsKey").ReviseWordsKey;
+  let StudyOverlay: typeof import("../../study/StudyOverlay").StudyOverlay;
+  let useStudyStore: typeof import("../../study/studyStore").useStudyStore;
   let today: number;
   let rows: ReturnType<typeof row>[] = [];
+  let cards: ReturnType<typeof card>[] = [];
 
   beforeAll(async () => {
     React = await import("react");
     ({ createRoot } = await import("react-dom/client"));
     ({ ReviseWordsKey } = await import("./ReviseWordsKey"));
+    ({ StudyOverlay } = await import("../../study/StudyOverlay"));
+    ({ useStudyStore } = await import("../../study/studyStore"));
     const { resetStartupForTests } = await import("../../platform/afterStartup");
     resetStartupForTests(true);
     const { dayNumber } = await import("../../pip/diary/seed");
     const { getDateKey } = await import("../../services/habitService");
     today = dayNumber(getDateKey());
+    const { useLibraryStore } = await import("../../store/libraryStore");
+    useLibraryStore.setState({ requestBackup: () => undefined } as never);
     // The quiz is loaded on demand: fetched once here, so the tests do not wait on it.
     await import("../../components/pip/arcade/quiz/ReviseWords");
   }, 30_000);
 
   beforeEach(() => {
     localStorage.removeItem("leaflet.reader.keepWords");
+    useStudyStore.setState({ view: null, words: null, cards: null, making: null });
+    rows = [];
+    cards = [];
     invoke.mockReset();
-    invoke.mockImplementation(async (command: string) => (command === "words_list" ? rows : undefined));
+    invoke.mockImplementation(async (command: string) => (command === "words_list" ? rows : command === "cards_list" ? cards : undefined));
   });
 
   afterEach(async () => {
@@ -67,12 +91,21 @@ describe("Revise words, on the Library", () => {
     const container = document.createElement("div") as MiniElement;
     document.body.appendChild(container);
     root = createRoot(container as unknown as Element);
-    await React.act(async () => root.render(<ReviseWordsKey compact={compact} />));
+    // The key, and the overlay where the app keeps it (App.tsx).
+    await React.act(async () =>
+      root.render(
+        <>
+          <ReviseWordsKey compact={compact} />
+          <StudyOverlay />
+        </>
+      )
+    );
     await settle();
   };
   const all = (test: (element: MiniElement) => boolean) => (document.body as unknown as MiniElement).findAll(test);
-  const key = () => all((element) => element.tagName === "BUTTON" && (element.getAttribute("aria-label") ?? "").startsWith("Revise words"))[0];
+  const key = () => all((element) => element.tagName === "BUTTON" && (element.getAttribute("aria-label") ?? "").startsWith("Revise"))[0];
   const button = (label: string) => all((element) => element.tagName === "BUTTON" && element.textContent.trim() === label)[0];
+  const dialog = () => all((element) => element.getAttribute("role") === "dialog")[0];
   const press = async (target: MiniElement | undefined) => {
     expect(target, "something to press").toBeTruthy();
     await React.act(async () => {
@@ -84,29 +117,36 @@ describe("Revise words, on the Library", () => {
   it("shows with words kept, and says how many are due", async () => {
     rows = [row("brume"), row("mizzle"), row("ephemeral", today - 1), row("sagacious", today + 7), row("quiddity", today + 30)];
     await mount();
-    expect(key()?.getAttribute("aria-label")).toBe("Revise words: 3 due");
-    expect(key()?.textContent).toContain("Revise words");
+    expect(key()?.getAttribute("aria-label")).toBe("Revise: 3 due");
+    expect(key()?.textContent).toContain("Revise");
     expect(key()?.textContent).toContain("3 due");
     // What it is for is in its tooltip, not on the page.
     expect(key()?.getAttribute("title")).toBeTruthy();
   });
 
+  it("counts the cards that are due with the words", async () => {
+    rows = [row("brume"), row("mizzle", today + 3), row("ephemeral", today + 3), row("sagacious", today + 7)];
+    cards = [card("a", "b1"), card("b", "b2", today), card("c", "b2", today + 2)];
+    await mount();
+    expect(key()?.getAttribute("aria-label")).toBe("Revise: 3 due");
+  });
+
   it("on a phone is an icon with the count on it", async () => {
     rows = [row("brume"), row("mizzle"), row("ephemeral"), row("sagacious", today + 7)];
     await mount(true);
-    expect(key()?.getAttribute("aria-label")).toBe("Revise words: 3 due");
+    expect(key()?.getAttribute("aria-label")).toBe("Revise: 3 due");
     expect(key()?.textContent.trim()).toBe("3");
   });
 
   it("stays, quietly, when nothing is due", async () => {
     rows = [row("brume", today + 3), row("mizzle", today + 3), row("ephemeral", today + 9), row("sagacious", today + 7)];
+    cards = [card("a", "b1", today + 1)];
     await mount(true);
-    expect(key()?.getAttribute("aria-label")).toBe("Revise words");
+    expect(key()?.getAttribute("aria-label")).toBe("Revise");
     expect(key()?.textContent.trim()).toBe("");
   });
 
-  it("is not there with no words, or with keeping words switched off", async () => {
-    rows = [];
+  it("is not there with nothing to revise; with words switched off it is there for cards alone", async () => {
     await mount();
     expect(key()).toBeUndefined();
     await React.act(async () => root.unmount());
@@ -117,23 +157,59 @@ describe("Revise words, on the Library", () => {
     await mount();
     expect(key()).toBeUndefined();
     expect(invoke).not.toHaveBeenCalledWith("words_list");
+    await React.act(async () => root.unmount());
+
+    cards = [card("a", "b1")];
+    useStudyStore.setState({ cards: null });
+    await mount();
+    expect(key()?.getAttribute("aria-label")).toBe("Revise: 1 due");
   });
 
-  it("opens the quiz over the Library, with My words behind it, and closes back to it", async () => {
+  it("opens over the Library, on all of it, with the words' quiz and My words a choice away, and closes back to it", async () => {
     rows = [row("brume"), row("mizzle"), row("ephemeral"), row("sagacious"), row("quiddity", today + 30)];
+    cards = [card("a", "b1"), card("b", "b2")];
     await mount();
     await press(key());
-    const dialog = () => all((element) => element.getAttribute("role") === "dialog")[0];
-    expect(dialog()?.textContent).toContain("Revise words");
+    expect(dialog()?.textContent).toContain("Revise");
+    // All, words, or cards.
+    expect(button("All")?.getAttribute("aria-pressed")).toBe("true");
+    expect(button("Start")).toBeTruthy();
+    expect(dialog()?.textContent).toContain("6 due");
+    await press(button("Words"));
     // The arcade's quiz itself, with Pip's question menu, not a copy of it.
     expect(button("Play: words")).toBeTruthy();
     await press(button("My words (5)"));
     expect(dialog()?.textContent).toContain("My words");
     expect(dialog()?.textContent).toContain("brume");
-    await press(button("Quiz"));
+    await press(button("Revise"));
     expect(button("Play: words")).toBeTruthy();
+    // Cards, of every book or of one.
+    await press(button("Cards"));
+    expect(dialog()?.textContent).toContain("2 due");
+    const books = all((element) => element.tagName === "SELECT")[0];
+    expect(books?.getAttribute("aria-label")).toBe("Cards from");
     await press(button("Close"));
     expect(dialog()).toBeUndefined();
     expect(key()).toBeTruthy();
+  });
+
+  it("asks a card, shows it, and moves it a box for the answer", async () => {
+    cards = [card("a", "b1")];
+    await mount();
+    await press(key());
+    // Only cards: no choice to make.
+    expect(button("All")).toBeUndefined();
+    await press(button("Start"));
+    expect(dialog()?.textContent).toContain("Cards: 1 of 1");
+    // Before the reveal, the hidden word is a blank.
+    const blank = all((element) => element.getAttribute("class") === "pip-card-blank")[0];
+    expect(blank?.textContent).toContain("blank");
+    await press(button("Reveal"));
+    expect(all((element) => element.getAttribute("class") === "pip-card-blank")[0]?.textContent).toBe("mitral");
+    const answer = all((element) => element.tagName === "BUTTON" && element.textContent.includes("Had it"))[0];
+    await press(answer);
+    expect(invoke).toHaveBeenCalledWith("cards_review", { reviews: [{ id: "card:a", box: 1, due: today + 1 }] });
+    expect(dialog()?.textContent).toContain("1 of 1");
+    expect(button("Another round")).toBeTruthy();
   });
 });

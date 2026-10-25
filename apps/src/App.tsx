@@ -12,6 +12,7 @@ import { StreakMoments } from "./components/streak/StreakMoments";
 import { AccountDialog, accountOffered, markAccountOffered, useAccountDialog } from "./components/account/AccountDialog";
 import { WelcomeModal } from "./components/WelcomeModal";
 import { useShareStore } from "./components/share/shareStore";
+import { StudyOverlay } from "./study/StudyOverlay";
 import { usePipReactions } from "./hooks/usePipReactions";
 import { useCommunityPulse } from "./hooks/useCommunityPulse";
 import { usePipTabDot } from "./hooks/usePipTabDot";
@@ -1661,6 +1662,8 @@ const App = () => {
           <LibrarySearchDialog onOpenInBook={openBookAt} />
         </Suspense>
       )}
+      {/* Revise and a book's study cards: over the Library or a dialog, loaded the first time it opens. */}
+      <StudyOverlay />
       {quoteOpen && (
         <Suspense fallback={null}>
           <QuoteCardDialog />

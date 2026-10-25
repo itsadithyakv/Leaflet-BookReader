@@ -22,6 +22,8 @@ type HighlightCardProps = {
   onShare?: () => void;
   /** The whole list, with this highlight in it. */
   onShowAll: () => void;
+  /** Makes a study card of this highlight. The button is there only when this is. */
+  onMakeCard?: () => void;
   onClose: () => void;
   /** Where the highlighted words are in the window, so the card can keep off them. */
   avoid?: () => Box | null;
@@ -71,6 +73,7 @@ export const HighlightCard = ({
   onCopy,
   onShare,
   onShowAll,
+  onMakeCard,
   onClose,
   avoid
 }: HighlightCardProps) => {
@@ -419,6 +422,20 @@ export const HighlightCard = ({
         <button type="button" className="reader-lookup-inline" onClick={onShowAll}>
           All notes
         </button>
+        {onMakeCard && (
+          <button
+            type="button"
+            className="reader-notes-action reader-note-make-card"
+            onClick={() => {
+              keep();
+              onMakeCard();
+            }}
+            title="Make a study card from this highlight"
+          >
+            <UiIcon name="cards" size={13} />
+            Make a card
+          </button>
+        )}
         <button type="button" className="reader-notes-action is-primary" onClick={onClose} title="Done (Ctrl+Enter)">
           Done
         </button>

@@ -9,7 +9,8 @@ import { syncService } from "./syncService";
 import { syncConfigured } from "./syncTiming";
 import { bookService } from "./bookService";
 import { useLibraryStore } from "../store/libraryStore";
-import { backupLine, backupTitle, driveLine, failedLine, roomLine } from "../components/ProfileButton";
+import { backupLine, backupTitle, driveLine, failedLine, roomLine, stranded } from "../components/ProfileButton";
+import { FEATURES } from "../constants/features";
 
 const status = (over: Partial<SyncStatus>): SyncStatus => ({ ...EMPTY_SYNC_STATUS, ...over });
 const other = { standing: "other", stayOut: false, elsewhere: false, refused: null } as const;
@@ -187,6 +188,19 @@ describe("the profile button's line on sync", () => {
     expect(failedLine({ lastSyncedAt: earlier.toISOString() }, now)).toContain(earlier.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }));
     expect(failedLine({ lastSyncedAt: null }, now)).toMatch(/^Couldn't (sync|back up)$/);
     expect(backupLine("account", "error", status({ accountBackup: true, lastSyncedAt: lastWhole.toISOString() }))).toMatch(/^Couldn't (sync|back up) since /);
+  });
+
+  it("says a device that used to sync has stopped, and leaves one that never synced alone (2026-10-25)", () => {
+    const once = status({ lastSyncedAt: new Date(2026, 9, 24, 9, 5).toISOString() });
+    // Signed out, no Drive, no folder: nothing carries this device's reading any more.
+    expect(stranded("off", once)).toBe(FEATURES.multiDeviceSync);
+    if (FEATURES.multiDeviceSync) expect(backupLine("off", "idle", once)).toMatch(/^Not syncing since /);
+    // Never synced here: one device on its own is a choice.
+    expect(stranded("off", status({ lastSyncedAt: null }))).toBe(false);
+    // Anything carrying it, or another account's library: not stranded.
+    expect(stranded("account", once)).toBe(false);
+    expect(stranded("drive", once)).toBe(false);
+    expect(stranded("off", status({ lastSyncedAt: once.lastSyncedAt, library: other }))).toBe(false);
   });
 
   it("is the usual line for the account's own library", () => {

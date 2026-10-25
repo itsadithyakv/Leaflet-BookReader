@@ -5,6 +5,7 @@ import { ReaderAmbienceRow } from "../../ambience";
 import { SMART_NUDGE } from "./constants";
 import type { ReaderScope } from "./scope";
 import { ReaderMoreRows } from "./ReaderTouchRows";
+import { SyncPlaceRow } from "../SyncPlaceRow";
 import { isPhoneShape } from "../touchLayout";
 import { useTouchInput } from "../../platform/device";
 
@@ -145,6 +146,7 @@ export const ReaderMoreMenu = ({ reader }: { reader: ReaderScope }) => {
             <span>Read aloud</span>
             <span className="reader-toggle" data-on={reader.readAloud.active} />
           </button>
+          <SyncPlaceRow />
           <button
             type="button"
             className="mt-3 flex w-full items-center justify-between rounded-lg border px-3 py-2 text-xs uppercase tracking-widest transition reader-border reader-pill reader-icon"

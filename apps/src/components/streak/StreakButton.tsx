@@ -300,13 +300,14 @@ export const StreakPanel = ({ flame, onRead, readLabel, onOpenCalendar }: PanelP
         )}
         <button
           type="button"
-          className={`tactile-button px-3 py-2.5 text-sm font-semibold ${snapshot.todayMet ? "flex-1" : ""}`}
+          // inline-flex: Tailwind makes every svg a block, which put the icon on a line of its own above the word.
+          className={`tactile-button inline-flex items-center justify-center gap-2 px-3 py-2.5 text-sm font-semibold ${snapshot.todayMet ? "flex-1" : ""}`}
           onClick={onOpenCalendar}
           title="The month's calendar, in Social → Stats"
           aria-label="Calendar"
         >
           <CalendarDays size={16} aria-hidden />
-          {snapshot.todayMet && <span className="ml-2">Calendar</span>}
+          {snapshot.todayMet && <span>Calendar</span>}
         </button>
       </div>
     </div>

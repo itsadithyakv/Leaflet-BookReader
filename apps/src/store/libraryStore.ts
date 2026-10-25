@@ -28,6 +28,8 @@ type LibraryState = {
   filters: BookFilter;
   loading: boolean;
   metadataRefreshing: boolean;
+  /** Counts the reader's place moving, so going out of sight knows there is a place to send (services/syncTiming). */
+  placeMoves: number;
   /**
    * Books a lookup has had its turn at since the app started, answered or
    * not. A PDF takes its first page for a cover only after that
@@ -138,6 +140,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   filters: defaultFilters,
   loading: false,
   metadataRefreshing: false,
+  placeMoves: 0,
   lookupTried: {},
   largeHeld: 0,
   accountHolds: null,
@@ -463,6 +466,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const reading = get().books.find((book) => book.id === id);
     if (reading && progress > (reading.progress ?? 0)) storyMoved(id, reading.title, progress);
     set({
+      placeMoves: reading && moved(reading) ? get().placeMoves + 1 : get().placeMoves,
       books: get().books.map((book) =>
         book.id === id
           ? {

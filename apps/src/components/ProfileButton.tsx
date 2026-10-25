@@ -80,6 +80,16 @@ export const failedLine = (sync: Pick<SyncStatus, "lastSyncedAt">, now = new Dat
 };
 
 /**
+ * A device that used to sync and now has nothing to sync through: signed out
+ * of the account, with no Drive and no folder. Its reading stays on it, and
+ * the other devices never hear of it (2026-10-25: a phone kept 42% while the
+ * laptop showed 29%, and nothing said why). A device that never synced is
+ * left alone: one device on its own is a choice, not a fault.
+ */
+export const stranded = (mode: SyncMode, sync: Pick<SyncStatus, "lastSyncedAt" | "library">) =>
+  FEATURES.multiDeviceSync && mode === "off" && Boolean(sync.lastSyncedAt) && sync.library?.standing !== "other";
+
+/**
  * Google refusing Drive, in a few words, or null: Leaflet's client disabled
  * (nothing for the reader to do), or the reader's grant gone (connect again).
  * Not a failed sync: the account carries the reading meanwhile.
@@ -102,6 +112,7 @@ export const backupLine = (mode: SyncMode, status: DriveSyncStatus, sync: SyncSt
   if (FEATURES.multiDeviceSync) {
     if (status === "syncing") return "Syncing…";
     if (status === "error") return failedLine(sync);
+    if (stranded(mode, sync)) return `Not syncing since ${since(sync.lastSyncedAt as string, new Date())}`;
     if (mode === "off") return "Not synced";
     return sync.lastSyncedAt ? `Synced ${relativeTime(sync.lastSyncedAt)}` : "Sync on, nothing sent yet";
   }
@@ -216,6 +227,8 @@ export const ProfileButton = ({
   const ownerPaused = sync.library?.standing === "other";
   const who = account ? account.displayName || account.email : accountsOn ? "Not signed in" : "Your Pip";
   const failed = status === "error";
+  // The same dot as a failed sync: either way this device's reading is not reaching the others.
+  const alert = failed || stranded(mode, sync);
   const syncing = status === "syncing";
   const driveRefused = driveLine(sync);
   const tooltip = `${account ? `${who}. ` : ""}${lineTitle}${sync.booksPending > 0 ? `. ${sync.booksPending} to download` : ""}`;
@@ -238,7 +251,7 @@ export const ProfileButton = ({
       >
         {/* The whole button inside its 1px border (46px in index.css). */}
         <ProfileFace size={44} />
-        {failed && <span className="profile-button-alert" aria-hidden="true" />}
+        {alert && <span className="profile-button-alert" aria-hidden="true" />}
       </button>
 
       {open && (

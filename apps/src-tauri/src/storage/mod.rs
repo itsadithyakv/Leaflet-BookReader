@@ -22,6 +22,7 @@ pub mod mobi;
 pub mod pdf;
 pub mod sweep;
 pub mod thumbs;
+pub mod smaller;
 pub mod tidy;
 #[cfg(test)]
 mod library_probe;
@@ -158,6 +159,15 @@ pub fn hash_for_import(path: &Path) -> Result<String> {
     Ok(error) => anyhow::anyhow!(describe_read_failure(&error)),
     Err(other) => other
   })
+}
+
+/// The id of the book a file about to be imported is: its hash, or, for a
+/// smaller copy made for a Drive backup (`smaller`), the original's. A copy
+/// from an old backup folder then fills in the book it came from, as the
+/// original would.
+pub fn book_hash_for_import(path: &Path) -> Result<String> {
+  let hash = hash_for_import(path)?;
+  Ok(smaller::identity(path, hash))
 }
 
 /// Why a file could not be read, in the reader's words. The system's own

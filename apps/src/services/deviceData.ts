@@ -16,10 +16,11 @@
 // `leaflet.wikiWords.<wiki>`: the single words a fan wiki has pages for (services/wikiService.ts), by wiki and not by book.
 const PER_BOOK_PREFIXES = ["leaflet.reader.", "leaflet.bookmarks.", "leaflet.pdfChapters.", "leaflet.contents.", "leaflet.wiki.", "leaflet.wikiWords.", "leaflet.kindleTried."];
 /**
- * `leaflet.people.preview` is the browser preview's character sheets (the app
+ * `leaflet.people.preview` is the browser preview's character sheets (and
+ * `.words.preview`, `.cards.preview` its words and study cards; the app
  * keeps them in the database, which the delete clears).
  */
-const LISTS = ["leaflet.pip.nodsSeen", "leaflet.shelf.lastSeen", "leaflet.people.preview", "leaflet.words.preview", "leaflet.pip.lastStop", "leaflet.pip.spines", "leaflet.pip.visits", "leaflet.pip.playdates", "leaflet.pip.findSeen"];
+const LISTS = ["leaflet.pip.nodsSeen", "leaflet.shelf.lastSeen", "leaflet.people.preview", "leaflet.words.preview", "leaflet.cards.preview", "leaflet.pip.lastStop", "leaflet.pip.spines", "leaflet.pip.visits", "leaflet.pip.playdates", "leaflet.pip.findSeen"];
 /**
  * How the reader likes every book laid out, and what the reader has already
  * been shown once: settings. Most are kept under the per-book prefix; the

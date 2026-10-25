@@ -17,6 +17,10 @@ import { KindleImport } from "./KindleImport";
 import { SheetHandle } from "../ui/SheetHandle";
 import ScrollEdge from "../ui/ScrollEdge";
 import { useBackClose } from "../../hooks/useBackClose";
+import { dueCount } from "../pip/arcade/quiz/boxes";
+import { dayNumber } from "../../pip/diary/seed";
+import { getDateKey } from "../../services/habitService";
+import { loadCards, openBookCards, useStudyStore } from "../../study/studyStore";
 import { backdropClose } from "../ui/backdrop";
 
 type Tab = "highlights" | "bookmarks";
@@ -178,6 +182,38 @@ const BookEntry = ({ book, count }: { book: Book; count: number }) => {
   );
 };
 
+/**
+ * The study cards made from this book's highlights (and pictures), and how
+ * many are due: one press to see them, edit them and revise them
+ * (components/pip/arcade/quiz/BookCards.tsx). Not there when it has none.
+ */
+const BookCardsKey = ({ bookId }: { bookId: string }) => {
+  const cards = useStudyStore((state) => state.cards);
+  useEffect(() => {
+    if (cards === null) void loadCards();
+  }, [cards]);
+  const today = dayNumber(getDateKey());
+  const mine = (cards ?? []).filter((card) => card.bookId === bookId);
+  if (mine.length === 0) {
+    return null;
+  }
+  const due = dueCount(mine, today);
+  return (
+    <button
+      type="button"
+      className="tactile-button flex items-center gap-2 px-3 py-2 text-xs font-semibold"
+      onClick={() => {
+        close();
+        openBookCards(bookId);
+      }}
+      title="The study cards made from this book"
+    >
+      <UiIcon name="cards" size={14} />
+      Cards ({mine.length}){due > 0 ? ` · ${due} due` : ""}
+    </button>
+  );
+};
+
 /** One book's highlights, in reading order under their chapters, and its bookmarks. */
 const BookView = ({
   book,
@@ -316,6 +352,7 @@ const BookView = ({
             { id: "bookmarks", label: `Bookmarks (${bookmarks.length})` }
           ]}
         />
+        {tab === "highlights" && <BookCardsKey bookId={book.id} />}
         {tab === "highlights" && (
           <button
             type="button"

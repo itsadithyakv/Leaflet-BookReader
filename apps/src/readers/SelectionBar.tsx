@@ -27,6 +27,8 @@ type SelectionBarProps = {
   onShare?: () => void;
   /** Dotty reads on from the selection (Smart Read). The button is there only when this is. */
   onReadFromHere?: () => void;
+  /** Highlights the selection and makes a study card of it. The button is there only when this is. */
+  onMakeCard?: () => void;
 };
 
 /** The colour last highlighted in: a finger's one-tap highlight uses it. */
@@ -80,7 +82,8 @@ const MouseSelectionBar = ({
   lookUpOpen = false,
   onSearchBook,
   onWhoIs,
-  whoIsOpen = false
+  whoIsOpen = false,
+  onMakeCard
 }: SelectionBarProps) => (
   <div className="reader-selection-bar pointer-events-auto" role="toolbar" aria-label="Selected text">
     <span className="reader-selection-text reader-muted" title={text}>
@@ -102,6 +105,11 @@ const MouseSelectionBar = ({
     <button type="button" className="reader-mini-control" onClick={onNote} title="Highlight and add a note">
       <UiIcon name="note" size={16} />
     </button>
+    {onMakeCard && (
+      <button type="button" className="reader-mini-control" onClick={onMakeCard} title="Make a study card" aria-label="Make a study card">
+        <UiIcon name="cards" size={16} />
+      </button>
+    )}
     {onRemoveHighlight && (
       <button type="button" className="reader-mini-control" onClick={onRemoveHighlight} title="Remove highlight" aria-label="Remove highlight">
         <UiIcon name="trash" size={16} />
@@ -168,7 +176,8 @@ const TouchSelectionBar = ({
   onWhoIs,
   whoIsOpen = false,
   onShare,
-  onReadFromHere
+  onReadFromHere,
+  onMakeCard
 }: SelectionBarProps) => {
   const [moreOpen, setMore] = useState(false);
   // A phone on its side has the width for all of it in one row: the colours,
@@ -194,6 +203,11 @@ const TouchSelectionBar = ({
               />
             ))}
           </span>
+          {onMakeCard && (
+            <button type="button" className="reader-mini-control" onClick={onMakeCard} title="Make a study card" aria-label="Make a study card">
+              <UiIcon name="cards" size={18} />
+            </button>
+          )}
           {onRemoveHighlight && (
             <button type="button" className="reader-mini-control" onClick={onRemoveHighlight} title="Remove highlight" aria-label="Remove highlight">
               <UiIcon name="trash" size={18} />
@@ -270,7 +284,7 @@ const TouchSelectionBar = ({
           style={lit(more)}
           onClick={() => setMore((open) => !open)}
           title="More"
-          aria-label="More: colours, share, search"
+          aria-label="More: colours, cards, share, search"
           aria-expanded={more}
         >
           <UiIcon name="more" size={19} />

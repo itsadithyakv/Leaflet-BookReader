@@ -1,4 +1,6 @@
-import { SelectionBar } from "../SelectionBar";
+import { SelectionBar, lastHighlightColor } from "../SelectionBar";
+import { makeCard } from "../../study/studyStore";
+import type { Annotation } from "../../services/annotationService";
 import { pagesViewerMaxWidth } from "../readerTypes";
 import { ChapterDock } from "../ChapterDock";
 import { NotePopover } from "../NotePopover";
@@ -41,6 +43,14 @@ export const ReaderPage = ({ reader }: { reader: ReaderScope }) => {
     clearSelection();
     reader.beginReadingMode("smart", "dot");
   };
+  /** "Make a card" of a highlight: the card maker opens over the page (study/CardMakerHost.tsx). */
+  const cardOf = (highlight: Annotation) =>
+    makeCard({
+      from: "highlight",
+      bookId: book.id,
+      p: lastCfiProgressRef.current ?? book.progress ?? 0,
+      highlight: { id: highlight.id, text: highlight.text ?? "", note: highlight.note ?? null, cfi: highlight.cfi, chapter: highlight.chapter ?? null }
+    });
   // "Where was I?", when nothing else has the foot of the page.
   const recapShown = reader.recap !== null && !selection && !people.card && !note && !(notesFocus && !bookmarkPanelOpen) && bookRef.current;
   // A highlight opened beside the page (tapped, or just made to write a note on).
@@ -135,6 +145,7 @@ export const ReaderPage = ({ reader }: { reader: ReaderScope }) => {
                   onSearchBook={() => searchBookFor(selection.text)}
                   onShare={onAndroid() ? () => void android.shareText(selection.text, book.title) : undefined}
                   onReadFromHere={!paged ? () => readFromSelection() : undefined}
+                  onMakeCard={() => highlightSelection(lastHighlightColor(), false, cardOf)}
                 />
               )}
             </div>
@@ -193,6 +204,14 @@ export const ReaderPage = ({ reader }: { reader: ReaderScope }) => {
                 onCopy={() => copyText(opened.text ?? "")}
                 onShare={() => openQuoteCard({ text: opened.text ?? "", title: book.title, author: book.author })}
                 onShowAll={() => setBookmarkPanelOpen(true)}
+                onMakeCard={
+                  opened.text?.trim()
+                    ? () => {
+                        setNotesFocus(null);
+                        cardOf(opened);
+                      }
+                    : undefined
+                }
                 onClose={() => setNotesFocus(null)}
               />
             </div>

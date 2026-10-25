@@ -36,6 +36,7 @@ import { describeImport } from "../library/importSummary";
 import { genreChoices, genreKey, inGenre } from "../library/genres";
 import { PhoneFocusStrip, PhoneShelfTools } from "./library/PhoneLibrary";
 import { ReviseWordsKey } from "./library/ReviseWordsKey";
+import { YearKey } from "./library/YearKey";
 import { FocusDouble } from "../components/focus/FocusDouble";
 import { focusLengthsWith, rememberFocusMinutes, usualFocusMinutes } from "../components/focus/focusDeal";
 
@@ -755,7 +756,12 @@ const LibraryPageComponent = ({ onOpenBook, onNavigate, showToast, onStartFocus 
                 sortOptions={sortOptions}
                 highlightTotal={highlightTotal}
                 openHighlights={openHighlightsList}
-                lead={<ReviseWordsKey compact />}
+                lead={
+                  <>
+                    <YearKey compact />
+                    <ReviseWordsKey compact />
+                  </>
+                }
               />
             )}
           </div>
@@ -775,6 +781,8 @@ const LibraryPageComponent = ({ onOpenBook, onNavigate, showToast, onStartFocus 
             </div>
           </div>
           <div className="library-toolbar flex flex-wrap items-center gap-3">
+            {/* Your year in pages, from 24 December to 7 January only. */}
+            <YearKey />
             {/* The word quiz, from here as well as from the Attic Arcade (only while there are words). */}
             {!libraryEmpty && <ReviseWordsKey />}
             {/* Every highlight in the library, by book, without opening one. */}

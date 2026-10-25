@@ -7,6 +7,7 @@ import { useLibraryStore } from "../store/libraryStore";
 import { isFinished } from "../constants/books";
 import { getBookExtension, isHighlightableFormat } from "../constants/bookFormats";
 import { openHighlights, useHighlightsStore } from "./highlights/highlightsStore";
+import { cardCount, openBookCards, useStudyStore } from "../study/studyStore";
 import { sizeText } from "../library/largeBooks";
 import { FEATURES } from "../constants/features";
 import { useAccountStore } from "../store/accountStore";
@@ -125,6 +126,8 @@ const BookMenuPanel = ({ book, actions = [], onRemoved, triggerRef, onDismiss }:
   // A book of words can be highlighted (a PDF too, since 1.3); a comic has none to show.
   const highlightable = isHighlightableFormat(getBookExtension(book.localPath));
   const highlightCount = useHighlightsStore((state) => state.counts[book.id] ?? 0);
+  // Read with the Library's Revise key (pages/library/ReviseWordsKey.tsx): none until then.
+  const cardsHere = useStudyStore((state) => cardCount(state.cards, book.id));
   // A finished book can be told of to the readers who follow you (components/community/Posts.tsx).
   const canPost = useAccountStore((state) => state.status.signedIn) && FEATURES.community && (atItsEnd || Boolean(book.finishedAt));
   // A large file the backup is not sending (not asked yet, or the reader said
@@ -481,6 +484,22 @@ const BookMenuPanel = ({ book, actions = [], onRemoved, triggerRef, onDismiss }:
                 {highlightCount > 0 && (
                   <span className="ml-auto text-xs tabular-nums text-on-surface-variant">{highlightCount}</span>
                 )}
+              </button>
+            )}
+            {cardsHere > 0 && (
+              <button
+                type="button"
+                role="menuitem"
+                className={item}
+                onClick={() => {
+                  close();
+                  triggerRef.current?.focus();
+                  openBookCards(book.id);
+                }}
+              >
+                <UiIcon name="cards" size={16} className="text-on-surface-variant" />
+                Study cards
+                <span className="ml-auto text-xs tabular-nums text-on-surface-variant">{cardsHere}</span>
               </button>
             )}
             {heldBytes !== null && (

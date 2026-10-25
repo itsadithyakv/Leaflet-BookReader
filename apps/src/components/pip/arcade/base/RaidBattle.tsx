@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { Bell, Crosshair, Flag, Hourglass, Info, Megaphone, Play } from "lucide-react";
+import { ArrowUp, Bell, Crosshair, Flag, Hourglass, Info, Megaphone, Play } from "lucide-react";
 import { BATTLE_TICK, RAID_SECONDS, type Battle, type Result } from "../../../../pip/base/battle";
 import { BELL_SECONDS } from "../../../../pip/base/feats";
 import { HERO_MOVES, HEROES, heroMove } from "../../../../pip/base/heroes";
@@ -10,7 +10,8 @@ import { RaidField } from "./RaidField";
 import { StarPips } from "./RaidScout";
 import { moving, newFx, stepFx, takeEvents, type FxState } from "./raidFx";
 import { screenRatio } from "./fit";
-import { NO_CLEAR, focusOf, follow, toPicture, toRoom, type Clear, type FieldView, type FramedView, type PictureBox } from "./raidLayout";
+import { NO_CLEAR, centreOn, edgeMarks, focusOf, follow, toPicture, toRoom, type Clear, type EdgeMark, type FieldView, type FramedView, type PictureBox, type ViewWindow } from "./raidLayout";
+import type { PanAt } from "./RaidField";
 import { APPROACH_COLOURS, newLooks, notice, remember, type RaidScene } from "./raidPaint";
 import { KINDS, KIND_ART, approachShort, structureName } from "./raidWords";
 import { Sprite } from "./Sprite";
@@ -32,6 +33,11 @@ import { useBackLayer } from "../../../../platform/back";
  * with its kinds' own pictures (the planner's), and a chip picked for a rally sinks in and shows a sight, while what it
  * can be sent at is ringed in its colour on the field: a tap on the chip, then a tap on the target. The camera keeps
  * the fighting in view (`follow`), slowly, and stays put under reduced motion.
+ *
+ * (2026-10-26) Where the stronghold and a group cannot both be in view (an upright phone, the scouts still at the ford),
+ * the group has a mark at the window's edge: an arrow its colour, toward them, with how many are out there
+ * (`edgeMarks`). A tap on it sends the camera to them, and keeps it with them until the camera's own framing has them in
+ * view again; under reduced motion the picture goes there at once, and stays.
  */
 
 /** Longest real time folded into one frame, so a stall does not skip the fight. */
@@ -83,11 +89,11 @@ type Props = {
   onDone: (result: Result) => void;
 };
 
-/** Where the scouts on the field are, on the picture, a little room round each: what the camera follows. */
-const fightingBox = (battle: Battle, view: FieldView): PictureBox | null => {
+/** Where the scouts on the field are (only those numbered in `ids`, given), on the picture, a little room round each: what the camera follows. */
+const fightingBox = (battle: Battle, view: FieldView, ids: ReadonlySet<number> | null = null): PictureBox | null => {
   let box: PictureBox | null = null;
   for (const unit of battle.units) {
-    if (unit.hp <= 0) continue;
+    if (unit.hp <= 0 || (ids !== null && !ids.has(unit.id))) continue;
     const at = toPicture(view, unit.x, unit.y);
     box = box
       ? { x0: Math.min(box.x0, at.x - 8), y0: Math.min(box.y0, at.y - 18), x1: Math.max(box.x1, at.x + 8), y1: Math.max(box.y1, at.y + 4) }
@@ -120,6 +126,7 @@ export const RaidBattle = ({ battle, art, view, roomW, roomH, clear = NO_CLEAR, 
 
   const tick = (now: number) => {
     const c = clock.current;
+    lookOut();
     const dt = c.last < 0 ? 0 : Math.max(0, Math.min(MAX_FRAME, now - c.last));
     c.last = now;
     if (!battle.over) {
@@ -198,16 +205,68 @@ export const RaidBattle = ({ battle, art, view, roomW, roomH, clear = NO_CLEAR, 
   // under reduced motion (the picture stays as framed, and moves only under a finger).
   const framed = "pan" in view && "focus" in view ? (view as FramedView) : null;
   const keep = useMemo(() => focusOf(view.orient, battle.structures, []).keep, [battle, view.orient]);
-  const camera =
-    still || !framed
-      ? undefined
-      : () => (battle.over ? null : follow(framed, { left: clear.left, top: clear.top, right: roomW - clear.right, bottom: roomH - clear.bottom }, keep, fightingBox(battle, view), screenRatio()));
+  const sight: ViewWindow = { left: clear.left, top: clear.top, right: roomW - clear.right, bottom: roomH - clear.bottom };
+  /** What can be seen of the field past the bars: beside an upright phone's orders too, which stand in the middle of the foot. */
+  const seen: ViewWindow = { left: 0, top: clear.top, right: roomW - clear.right, bottom: view.orient === "tall" ? roomH - clear.bottom / 2 : roomH };
+  /** Each group's scouts on the field, as field points with their numbers. */
+  const groupPoints = (band: number) => battle.units.filter((unit) => unit.hp > 0 && unit.band === band).map((unit) => ({ id: unit.id, x: unit.x, y: unit.y }));
+  /** The scouts a tap on a mark has sent the camera to: it stays with them until its own framing has them in view. */
+  const focus = useRef<ReadonlySet<number> | null>(null);
+  const aim = (): PanAt | null => {
+    if (!framed || battle.over) return null;
+    const home = follow(framed, sight, keep, fightingBox(battle, view), screenRatio());
+    const ids = focus.current;
+    if (ids === null) return home;
+    const box = fightingBox(battle, view, ids);
+    // Done once the camera's own framing would have no mark for them: they are (all but a straggler) in its view.
+    if (!box || edgeMarks(view, home, sight, [{ group: 0, points: battle.units.filter((unit) => unit.hp > 0 && ids.has(unit.id)) }], seen).length === 0) {
+      focus.current = null;
+      return home;
+    }
+    return centreOn(framed, sight, box, screenRatio());
+  };
+  const camera = still || !framed ? undefined : aim;
+  const panRef = useRef<PanAt>({ dx: 0, dy: 0 });
+  const steer = useRef<((to: PanAt | null) => void) | null>(null);
+
+  // ---- the marks at the window's edge, for the groups out of view
+  const [marks, setMarks] = useState<EdgeMark[]>([]);
+  const marksRef = useRef<EdgeMark[]>([]);
+  /** Looked at each frame; set only when a mark comes, goes, or has moved more than a little, so none ever twitches. */
+  const lookOut = () => {
+    const out = battle.over || !framed ? [] : edgeMarks(view, panRef.current, sight, battle.bands.map((_, band) => ({ group: band, points: groupPoints(band) })), seen);
+    const was = marksRef.current;
+    const next = out.map((mark) => {
+      const before = was.find((entry) => entry.group === mark.group);
+      return before && Math.abs(before.left - mark.left) < 12 && Math.abs(before.top - mark.top) < 12 && before.turn === mark.turn ? { ...mark, left: before.left, top: before.top } : mark;
+    });
+    const same = (a: EdgeMark, b: EdgeMark) => a.group === b.group && a.left === b.left && a.top === b.top && a.turn === b.turn && a.count === b.count;
+    // (Which scouts a mark stands for is kept up to date without a fresh paint: a tap goes to those out there now.)
+    if (next.length === was.length && next.every((mark, index) => same(mark, was[index]))) {
+      next.forEach((mark, index) => (was[index].ids = mark.ids));
+      return;
+    }
+    marksRef.current = next;
+    setMarks(next);
+  };
+  const lookAt = (mark: EdgeMark) => {
+    playSound("click");
+    if (!framed) return;
+    const ids = new Set(mark.ids);
+    if (still) {
+      const box = fightingBox(battle, view, ids);
+      if (box) steer.current?.(centreOn(framed, sight, box, screenRatio()));
+      return;
+    }
+    focus.current = ids;
+    steer.current?.(null);
+  };
   /** The colour what can be picked is ringed in: the rallied group's, or the hero's pale gold. */
   const picking = pick?.kind === "rally" ? APPROACH_COLOURS[(hud.bands[pick.group]?.via ?? 0) % APPROACH_COLOURS.length] : pick ? "#FFF6C2" : undefined;
 
   return (
     <>
-      <RaidField view={view} roomW={roomW} roomH={roomH} pan={framed?.pan} camera={camera} scene={scene} looks={looks} paintKey="" tick={tick} label={`${name}: the raid`}>
+      <RaidField view={view} roomW={roomW} roomH={roomH} pan={framed?.pan} camera={camera} panRef={panRef} steer={steer} scene={scene} looks={looks} paintKey="" tick={tick} label={`${name}: the raid`}>
         <button type="button" className="pip-raid-field-hit" aria-label="Let go" tabIndex={-1} onClick={() => setPick(null)} hidden={!pick} />
         {pick &&
           targets.map((id) => {
@@ -227,6 +286,28 @@ export const RaidBattle = ({ battle, art, view, roomW, roomH, clear = NO_CLEAR, 
             );
           })}
       </RaidField>
+
+      {!hud.over &&
+        marks.map((mark) => {
+          const band = hud.bands[mark.group];
+          if (!band) return null;
+          const way = approachShort(battle.approaches[band.via]).toLowerCase();
+          return (
+            <button
+              key={mark.group}
+              type="button"
+              className="pip-raid-edge"
+              data-group={mark.group}
+              style={{ left: mark.left, top: mark.top, "--group": APPROACH_COLOURS[band.via % APPROACH_COLOURS.length] } as CSSProperties}
+              aria-label={`${mark.count} of the ${way} group, out of view: look`}
+              title={`${approachShort(battle.approaches[band.via])}: look`}
+              onClick={() => lookAt(mark)}
+            >
+              <ArrowUp size={14} strokeWidth={3} style={{ transform: `rotate(${mark.turn}deg)` }} aria-hidden />
+              <strong>{mark.count}</strong>
+            </button>
+          );
+        })}
 
       <div className="pip-raid-hud" role="group" aria-label="The raid">
         <span className={`pip-raid-hud-cell pip-raid-bell${hud.rung ? " is-rung" : ""}${hud.seconds <= 10 && !hud.over ? " is-bad" : ""}`} title={hud.rung ? "The bell has rung" : `The bell rings at ${BELL_SECONDS} s`}>

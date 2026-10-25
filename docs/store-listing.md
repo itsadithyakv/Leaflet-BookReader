@@ -54,6 +54,24 @@ name must match the reserved name exactly ("Leaflet Book Reader", as in
 
 ## What's new in this version
 
+For 1.5.14 (written on 2026-10-25). If the Store is still on 1.5.12 or
+older, put this first and the 1.5.13 text below it, within 1,500
+characters:
+
+> Study with your books. Turn a highlight into a card: hide words to fill
+> in, or ask yourself a question. Draw boxes over the labels on a diagram,
+> and name each part in turn, made for anatomy and anything with labels.
+> Revise words and cards together, from the Library.
+>
+> Your Year in Pages: at the end of December, your reading year as a story
+> to watch and share.
+>
+> Raids read better on phones, thorns are real brambles, and groups out of
+> view are marked at the edge.
+>
+> Your place reaches your other devices as soon as you lock your phone, and
+> Sync now is in every book's menu. Backups to Google Drive are smaller.
+
 For 1.5.13 (written on 2026-10-25). If the Store is still on 1.5.11 or
 older, put this first and the 1.5.12 text below it, within 1,500
 characters:

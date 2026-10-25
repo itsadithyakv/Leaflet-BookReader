@@ -67,7 +67,8 @@ struct Alarm {
 struct Schedule {
   alarms: Vec<Alarm>,
   /// Today, when its goal is already met: an alarm for this day that is
-  /// somehow still set is dropped when it fires.
+  /// somehow still set is dropped when it fires (not the year's notice,
+  /// which is not about the goal).
   met_date: Option<String>
 }
 
@@ -150,7 +151,7 @@ pub async fn sync<R: Runtime>(app: AppHandle<R>) {
               Some(Alarm {
                 kind: plan.reminder.kind.tag(),
                 at: epoch_ms(plan.at)?,
-                until: epoch_ms(deliver_until(plan.at))?,
+                until: epoch_ms(deliver_until(plan.reminder.kind, plan.at))?,
                 expires: end_of_day(&plan.reminder.date_key)?.timestamp_millis(),
                 date_key: plan.reminder.date_key,
                 title: plan.reminder.title,

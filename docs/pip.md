@@ -373,7 +373,55 @@ and the rules are in features.md ("Raids: the Magpie Lands").
   `BattleScreen.tsx` and `RaidBoard.tsx` are gone.
 - **Tests**: `raidFlow.test.tsx` (the flow end to end, Send, a friend, the
   King, replays, orders played again from `given`), `raidPaint.test.ts`,
-  `raidFx.test.ts`, `landsMap.test.tsx`, and `pip/base/raids.test.ts`.
+  `raidFx.test.ts`, `raidLayout.test.ts`, `landsMap.test.tsx`,
+  `pip/raidBramble.test.ts`, and `pip/base/raids.test.ts`.
+
+**How the field is framed** (`raidLayout.ts`):
+- **On the stronghold, not the whole field.** `focusOf` gives the stronghold's
+  pieces standing (`keep`), them with the last 44 field pixels of each
+  approach (`core`), and that with the hazards out on the trail (`all`).
+  `framedView` makes the field as large as a whole number of device pixels
+  lets `core` fit the room left clear, and leans toward `all`. The rest of
+  the field is a drag away (`Pan`), the land painted round it far enough
+  for any drag (`groundBox`).
+- **A second gate's wall** (and the King's) runs the field's whole height. It
+  is not framed whole: its two gates are, with the camp and the ways to
+  them. The plain wall runs off the view, and a flank that ends at a plain
+  section is leaned toward, its tag kept at the view's edge (`tagPoint`).
+- **Each step from its own framing.** Scout and plan share one field, but a
+  drag made while scouting is dropped when the plan opens (`frame` on
+  `RaidField`). The fight's field is its own, and the end card keeps it as
+  the fight left it.
+- **Wide (laptop, desktop, a phone on its side):**
+  - The scout's card and the planner stand down the right.
+  - In the fight, the bar (bell, orders left, stars) and the orders (a chip
+    each group, Release, the hero's move) stand in one column down the
+    right, past the camp, where the field has only grass. The field is
+    framed to their left (`SIDE_ROOM`), so they never lie over it.
+- **Upright phone:**
+  - The field is turned a quarter: the trail comes up from the foot.
+  - The fight's bar runs along the top and the orders along the foot
+    (`HUD_ROOM`, `DOCK_ROOM`).
+  - The planner starts folded to one row (the groups' tabs, the forecast's
+    stars, Go), so the field above it is drawn large. A tab opens it on that
+    group, and a key folds it again.
+- **The camera in a fight** (`follow`) keeps the stronghold in view and as
+  much of the fighting as fits. It eases (`easeCamera`: whole pixels, at
+  most 160 CSS pixels a second), and it is off under reduced motion.
+  - Where the stronghold and a group cannot both be in view, the group gets
+    a mark at the window's edge (`edgeMarks`): an arrow in its colour with
+    how many are out there. This covers the rest of a group held at the
+    ford while its mole is already at the gate.
+  - A tap on the mark sends the camera to them (`centreOn`). It stays there
+    until its own framing has them in view; under reduced motion the
+    picture jumps there.
+- **Drawing:**
+  - A group held at the ford or in the thorns is drawn spread into a loose
+    formation at the crossing (`drawnOffset`, `formationSlot`), most across
+    the screen. Each scout has a fixed place by its number, and moves into
+    it evenly down the bank, never drawn going backward.
+  - The thorn hedge is brambles on the grass (`raidzone` 0 and 4), not a
+    dark patch.
 
 **Still open:** no real play on the owner's phone yet; how many stars a
 hero's move is worth is not measured.

@@ -242,6 +242,8 @@ pub fn run() {
       if let Ok(dir) = _app.path().app_data_dir() {
         storage::set_app_data_dir(dir);
       }
+      // Smaller copies for Drive left by a backup cut off when Leaflet closed.
+      storage::smaller::clear_scratch();
       diag::install_panic_hook();
       diag::info(&format!("Leaflet {} starting", env!("CARGO_PKG_VERSION")));
       // Which library opens: the one in use when Leaflet last closed (per-account
@@ -382,6 +384,8 @@ pub fn run() {
       commands::library_stay_out,
       commands::large_books,
       commands::set_large_book_backup,
+      commands::smaller_backups,
+      commands::set_smaller_backups,
       commands::set_sync_folder,
       commands::set_cloud_api,
       commands::social_profile,
@@ -415,6 +419,13 @@ pub fn run() {
       commands::words_review,
       commands::words_delete,
       commands::words_restore,
+      commands::cards_list,
+      commands::cards_save,
+      commands::cards_review,
+      commands::cards_delete,
+      commands::cards_restore,
+      commands::cards_export,
+      commands::book_picture,
       commands::fonts_list,
       commands::font_add,
       commands::font_data,

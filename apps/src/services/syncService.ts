@@ -14,6 +14,9 @@ const EMPTY_REPORT: SyncReport = {
   accountHolds: null
 };
 
+/** Smaller copies of book files for Drive: on or off on this device, and the bytes saved so far. */
+export type SmallerBackups = { on: boolean; savedBytes: number };
+
 /** A place in a book: how far, and exactly where (an EPUB CFI; null for page-based books). */
 export type Place = { progress: number; position: string | null };
 
@@ -126,6 +129,22 @@ export const syncService = {
       return;
     }
     await invoke("set_large_book_backup", { bookIds, backUp });
+  },
+
+  /** This device's "Smaller backups" switch for Drive (on unless turned off), and what it has saved. */
+  async smallerBackups(): Promise<SmallerBackups> {
+    if (!isTauri()) {
+      return { on: true, savedBytes: 0 };
+    }
+    return invoke<SmallerBackups>("smaller_backups");
+  },
+
+  /** Turns smaller Drive copies on or off for files backed up from now on; Drive's files stay as they are. */
+  async setSmallerBackups(on: boolean): Promise<SmallerBackups> {
+    if (!isTauri()) {
+      return { on, savedBytes: 0 };
+    }
+    return invoke<SmallerBackups>("set_smaller_backups", { on });
   },
 
   /**

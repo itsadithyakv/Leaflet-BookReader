@@ -1,0 +1,739 @@
+/* Your Year in Pages (components/share/year): the story.
+
+   Sizes are in the stage's own units (cqw, cqh), so a scene is the same
+   picture on a phone filling its screen and on a computer's 9:16 stage.
+   Motion: each element's resting style is the scene's held end, and its
+   animation runs from where it starts, so a paused stage stops mid-way and a
+   still one (reduced motion) is simply the end. Transforms and opacity only;
+   no blur and no shadows anywhere. */
+
+.ys-root {
+  --ys-sans: "Segoe UI Variable Display", "Segoe UI", Roboto, "Helvetica Neue", Arial, system-ui, sans-serif;
+  --ys-serif: Georgia, "Iowan Old Style", "Palatino Linotype", "Noto Serif", "Times New Roman", serif;
+  /* Springy but calm: one small overshoot. */
+  --ys-spring: cubic-bezier(0.2, 1.18, 0.32, 1);
+  --ys-out: cubic-bezier(0.16, 1, 0.3, 1);
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  background: #13261a;
+  overscroll-behavior: contain;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ys-backdrop,
+.ys-layer,
+.ys-field {
+  position: absolute;
+  inset: 0;
+}
+
+.ys-field {
+  background: linear-gradient(180deg, var(--f1), var(--f2));
+}
+/* A soft light from the top, and the paper's grain: both still, painted once. */
+.ys-field::before,
+.ys-field::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.ys-field::before {
+  background: radial-gradient(120% 70% at 50% 12%, rgba(255, 251, 240, 0.1), rgba(255, 251, 240, 0) 70%);
+}
+.ys-field::after {
+  background-image: var(--grain);
+  background-size: 120px 120px;
+}
+
+/* On a computer the window around the stage is a shade deeper, so the stage reads as the thing to look at. */
+.ys-backdrop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 12, 9, 0.18);
+}
+
+.ys-field.is-entering,
+.ys-layer.is-entering > .ys-field {
+  animation: ys-fade 520ms ease both;
+}
+.ys-layer.is-leaving {
+  animation: ys-leave 440ms ease both;
+  pointer-events: none;
+}
+
+/* The stage: the whole screen on a phone; a 9:16 card on a computer. */
+.ys-stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  /* Clipped, not scrollable: focus moving to something off the stage must not carry the scene with it. */
+  overflow: clip;
+  container-type: size;
+  outline: none;
+  color: var(--ink);
+  font-family: var(--ys-sans);
+}
+
+@media (min-width: 640px) and (min-height: 540px) {
+  .ys-stage {
+    width: auto;
+    height: min(calc(100dvh - 56px), 1000px);
+    aspect-ratio: 9 / 16;
+    border-radius: 22px;
+    /* The stage's edge against the backdrop of the same colours: a hairline, not a shadow. */
+    box-shadow: 0 0 0 1px rgba(255, 251, 240, 0.12);
+  }
+}
+
+.ys-side {
+  display: none;
+}
+@media (min-width: 640px) and (min-height: 540px) {
+  .ys-side {
+    position: relative;
+    z-index: 2;
+    display: inline-flex;
+    width: 44px;
+    height: 44px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    color: var(--ink);
+    background: rgba(255, 251, 240, 0.1);
+    transition: background 0.15s ease, opacity 0.15s ease;
+  }
+  .ys-side:hover:not(:disabled) {
+    background: rgba(255, 251, 240, 0.2);
+  }
+  .ys-side:disabled {
+    opacity: 0;
+  }
+}
+
+/* ---- The bars and the keys ------------------------------------------------ */
+
+.ys-bars {
+  position: absolute;
+  z-index: 4;
+  top: calc(env(safe-area-inset-top, 0px) + 3.2cqw);
+  left: 4cqw;
+  right: 4cqw;
+  display: flex;
+  gap: 1.1cqw;
+  pointer-events: none;
+}
+.ys-bar {
+  position: relative;
+  flex: 1 1 0;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--ink) 26%, transparent);
+}
+.ys-bar > i {
+  position: absolute;
+  inset: 0;
+  background: var(--ink);
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+.ys-bar.is-done > i {
+  transform: none;
+}
+.ys-bar.is-now > i {
+  animation: ys-fill var(--ms, 7000ms) linear forwards;
+}
+.ys-stage.is-paused .ys-bar.is-now > i {
+  animation-play-state: paused;
+}
+
+.ys-keys {
+  position: absolute;
+  z-index: 5;
+  top: calc(env(safe-area-inset-top, 0px) + 6.4cqw);
+  right: 2.6cqw;
+  display: flex;
+  gap: 0.6cqw;
+}
+.ys-key {
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: var(--ink);
+  transition: background 0.15s ease;
+}
+.ys-key:hover {
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+}
+.ys-root :is(.ys-key, .ys-side, .ys-share-key, .ys-year-key, .ys-swap, .ys-chip, .ys-action):focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.ys-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.ys-particles {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* ---- A scene ---------------------------------------------------------------- */
+
+.ys-scene {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  padding: calc(env(safe-area-inset-top, 0px) + 17cqw) 8cqw calc(env(safe-area-inset-bottom, 0px) + 8cqw);
+  color: var(--ink);
+}
+.ys-copy {
+  position: relative;
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.ys-eyebrow {
+  font-size: 4.6cqw;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--soft);
+}
+.ys-big {
+  margin-top: 1.5cqw;
+  font-size: 32cqw;
+  font-weight: 800;
+  line-height: 0.9;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums lining-nums;
+  white-space: nowrap;
+}
+.ys-big.is-name {
+  font-family: var(--ys-serif);
+  font-size: 13.5cqw;
+  font-weight: 700;
+  line-height: 1.02;
+  letter-spacing: -0.015em;
+  white-space: normal;
+  text-wrap: balance;
+}
+.ys-big.is-name.is-long {
+  font-size: 10.5cqw;
+}
+.ys-title {
+  font-size: 34cqw;
+  margin-left: -1.4cqw;
+}
+.ys-title.is-summary {
+  font-size: 30cqw;
+}
+.ys-letter {
+  display: inline-block;
+}
+.ys-letter.is-gap {
+  width: 0.24em;
+}
+.ys-unit {
+  margin-top: 1cqw;
+  font-family: var(--ys-serif);
+  font-size: 10cqw;
+  font-style: italic;
+  line-height: 1.05;
+  color: var(--accent);
+}
+.ys-word {
+  display: inline-block;
+}
+
+.ys-visual {
+  position: relative;
+  min-height: 18cqh;
+  flex: 1 1 auto;
+  margin: 6cqw 0 4cqw;
+}
+.ys-visual.is-pip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ys-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.ys-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2.4cqw;
+  font-size: 4.6cqw;
+  font-weight: 500;
+  line-height: 1.34;
+  text-wrap: pretty;
+}
+.ys-scene.has-pip .ys-lines {
+  min-height: 21cqw;
+  padding-right: 24cqw;
+}
+
+.ys-pip {
+  position: relative;
+  z-index: 2;
+  line-height: 0;
+}
+.ys-pip.is-small {
+  position: absolute;
+  right: 5cqw;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 6cqw);
+}
+.ys-pip-canvas {
+  display: block;
+  image-rendering: pixelated;
+}
+
+.ys-spacer {
+  flex: 1 1 auto;
+}
+
+/* The lines scene: a highlight set large. */
+.ys-quote {
+  position: relative;
+  margin: 3cqw 0 0;
+}
+.ys-quote-mark {
+  display: block;
+  height: 14cqw;
+  margin-left: -1.6cqw;
+  font-family: var(--ys-serif);
+  font-size: 30cqw;
+  line-height: 0.9;
+  color: var(--accent);
+}
+.ys-quote blockquote {
+  font-family: var(--ys-serif);
+  font-size: 7.6cqw;
+  line-height: 1.3;
+  text-wrap: pretty;
+}
+.ys-quote blockquote.is-mid {
+  font-size: 6.4cqw;
+}
+.ys-quote blockquote.is-long {
+  font-size: 5.2cqw;
+}
+.ys-quote figcaption {
+  margin-top: 5cqw;
+  padding-top: 3cqw;
+  border-top: 3px solid var(--accent);
+  width: fit-content;
+  max-width: 70%;
+  font-size: 4cqw;
+  font-weight: 600;
+  color: var(--soft);
+}
+.ys-swap {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  display: inline-flex;
+  width: 38px;
+  height: 38px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: var(--soft);
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+}
+.ys-lines-body {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  justify-content: center;
+  padding-bottom: 20cqw;
+}
+.ys-note {
+  margin-top: 3cqw;
+  max-width: 76%;
+  font-family: var(--ys-serif);
+  font-size: 4.4cqw;
+  font-style: italic;
+  line-height: 1.35;
+  color: var(--glow);
+}
+.ys-note::before {
+  content: "Your note: ";
+  font-family: var(--ys-sans);
+  font-size: 3.4cqw;
+  font-style: normal;
+  font-weight: 600;
+  color: var(--soft);
+}
+.ys-word-card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  column-gap: 3cqw;
+  row-gap: 1cqw;
+  margin-top: 8cqw;
+  padding: 3.4cqw 4cqw;
+  border-left: 4px solid var(--glow);
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+.ys-word-name {
+  font-family: var(--ys-serif);
+  font-size: 7cqw;
+  font-style: italic;
+  font-weight: 700;
+}
+.ys-word-why {
+  font-size: 3.4cqw;
+  color: var(--soft);
+}
+.ys-word-meaning {
+  grid-column: 1 / -1;
+  font-size: 4cqw;
+  line-height: 1.35;
+}
+
+/* The summary. */
+.ys-figures {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 5cqw;
+  row-gap: 4.4cqw;
+  margin: auto 0;
+  padding: 6cqw 2cqw 6cqw 0;
+}
+.ys-figure {
+  padding-top: 2.4cqw;
+  border-top: 2px solid color-mix(in srgb, var(--ink) 20%, transparent);
+}
+.ys-figure-value {
+  font-size: 10cqw;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.ys-figure-label {
+  margin-top: 1cqw;
+  font-size: 3.6cqw;
+  color: var(--soft);
+}
+.ys-summary-keys {
+  display: flex;
+  align-items: center;
+  gap: 2.4cqw;
+  padding-right: 26cqw;
+}
+.ys-share-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 20px;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--f2, #13261a);
+  background: var(--accent);
+  transition: transform 0.15s ease;
+}
+.ys-share-key:active {
+  transform: scale(0.97);
+}
+.ys-year-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--soft);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- The share sheet -------------------------------------------------------- */
+
+.ys-sheet-back {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(10, 14, 11, 0.55);
+  animation: ys-fade 200ms ease both;
+}
+.ys-sheet {
+  width: 100%;
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 16px 16px calc(env(safe-area-inset-bottom, 0px) + 16px);
+  border-radius: 20px 20px 0 0;
+  color: #1f2a22;
+  background: #fffbf0;
+  animation: ys-sheet-up 360ms var(--ys-out) both;
+}
+.ys-sheet-preview {
+  display: flex;
+  height: min(48cqh, 420px);
+  justify-content: center;
+}
+.ys-sheet-preview canvas {
+  height: 100%;
+  width: auto;
+  max-width: 100%;
+  object-fit: contain;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px rgba(31, 42, 34, 0.12);
+}
+.ys-sheet-row {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+.ys-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #55604f;
+  box-shadow: inset 0 0 0 1px rgba(31, 42, 34, 0.18);
+}
+.ys-chip.is-on {
+  color: #fffbf0;
+  background: #2e6136;
+  box-shadow: none;
+}
+.ys-chip-shape {
+  display: inline-block;
+  width: 10px;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+}
+.ys-chip-shape.is-story {
+  height: 17px;
+}
+.ys-chip-shape.is-feed {
+  height: 13px;
+}
+.ys-chip-shape.is-square {
+  height: 10px;
+}
+.ys-switch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2a22;
+  cursor: pointer;
+}
+.ys-switch input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.ys-switch-track {
+  position: relative;
+  width: 36px;
+  height: 22px;
+  border-radius: 999px;
+  background: rgba(31, 42, 34, 0.2);
+  transition: background 0.2s ease;
+}
+.ys-switch-track::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: #fffbf0;
+  transition: transform 0.2s var(--ys-out);
+}
+.ys-switch input:checked + .ys-switch-track {
+  background: #2e6136;
+}
+.ys-switch input:checked + .ys-switch-track::after {
+  transform: translateX(14px);
+}
+.ys-switch input:focus-visible + .ys-switch-track {
+  outline: 2px solid #2e6136;
+  outline-offset: 2px;
+}
+.ys-share-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.ys-said {
+  margin-right: auto;
+  font-size: 12px;
+  color: #55604f;
+}
+.ys-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #1f2a22;
+  box-shadow: inset 0 0 0 1px rgba(31, 42, 34, 0.18);
+}
+.ys-action.is-primary {
+  color: #fffbf0;
+  background: #2e6136;
+  box-shadow: none;
+}
+.ys-action:disabled {
+  opacity: 0.55;
+}
+
+/* ---- Motion ----------------------------------------------------------------- */
+
+.ys-in {
+  animation: ys-rise 900ms var(--ys-out) both;
+  animation-delay: var(--d, 0ms);
+}
+.ys-pop {
+  animation: ys-pop 900ms var(--ys-spring) both;
+  animation-delay: var(--d, 0ms);
+}
+.ys-drop {
+  animation: ys-drop 1000ms var(--ys-spring) both;
+  animation-delay: var(--d, 0ms);
+}
+/* Pip hops in a pixel of hers at a time, so she is never between pixels. */
+.ys-hop {
+  animation:
+    ys-appear 200ms linear both,
+    ys-hop 520ms steps(4, end) both;
+  animation-delay: var(--d, 0ms);
+}
+
+/* The scene stops; the share sheet over it (which is why it is paused) still slides in. */
+.ys-stage.is-paused .ys-layer * {
+  animation-play-state: paused !important;
+}
+.ys-stage.is-still * {
+  animation: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ys-root * {
+    animation: none !important;
+  }
+}
+
+@keyframes ys-rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 4.5cqw, 0);
+  }
+}
+@keyframes ys-pop {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 2cqw, 0) scale(0.84);
+  }
+}
+@keyframes ys-drop {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -9cqw, 0);
+  }
+}
+@keyframes ys-appear {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes ys-hop {
+  from {
+    transform: translateY(calc(var(--pip-step, 4px) * 4));
+  }
+}
+@keyframes ys-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes ys-leave {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes ys-fill {
+  to {
+    transform: scaleX(1);
+  }
+}
+@keyframes ys-sheet-up {
+  from {
+    transform: translate3d(0, 100%, 0);
+  }
+}
+
+/* A short phone (or one on its side): a little less of everything. */
+@container (max-aspect-ratio: 1 / 2.05) {
+  .ys-visual {
+    margin-top: 8cqw;
+  }
+}
+@container (min-aspect-ratio: 9 / 15) {
+  .ys-big {
+    font-size: 26cqw;
+  }
+  .ys-title {
+    font-size: 28cqw;
+  }
+  .ys-scene {
+    padding-top: calc(env(safe-area-inset-top, 0px) + 14cqw);
+  }
+}

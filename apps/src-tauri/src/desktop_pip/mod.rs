@@ -411,7 +411,10 @@ pub fn sign_text(kind: ReminderKind) -> &'static str {
   match kind {
     ReminderKind::Daily => "time to read?",
     ReminderKind::StreakRisk => "your streak!",
-    ReminderKind::Close => "so close!"
+    ReminderKind::Close => "so close!",
+    // Never held up (`reminders::runtime::tick` keeps it to the toast), but
+    // a sign has to say something.
+    ReminderKind::Year => "your year!"
   }
 }
 

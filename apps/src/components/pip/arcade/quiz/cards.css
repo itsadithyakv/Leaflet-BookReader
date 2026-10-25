@@ -1,0 +1,337 @@
+/* Study cards in Revise (CardQuiz.tsx, BookCards.tsx, CardFace.tsx): the word
+   quiz's pixel paper. A passage in the book's kind of lettering, its blanks
+   solid bars of the HUD's ink; a picture framed, its box a patch of paper. */
+
+.pip-quiz-card.pip-card {
+  padding-bottom: 16px;
+}
+
+.pip-card-passage {
+  margin-top: 6px;
+  font-family: Georgia, "Iowan Old Style", serif;
+  font-size: 18px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.pip-card-blank {
+  border-radius: 2px;
+}
+
+.pip-card-blank-fill {
+  color: transparent;
+  background: var(--hud-ink);
+  box-shadow: 0 0 0 1px var(--hud-line);
+  user-select: none;
+}
+
+.pip-card-blank[data-shown] {
+  padding: 0 2px;
+  background: #f6e3a4;
+  color: #2a2208;
+  box-shadow: 0 0 0 2px #e8b43a;
+}
+
+.pip-card-answer {
+  margin-top: 10px;
+  border-top: 2px dashed var(--hud-line);
+  padding-top: 10px;
+  font-family: Georgia, "Iowan Old Style", serif;
+  font-size: 17px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.pip-card-of {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--hud-ink-soft);
+}
+
+.pip-card-hint {
+  display: inline-grid;
+  width: 26px;
+  height: 26px;
+  margin-left: 6px;
+  place-items: center;
+  vertical-align: middle;
+  color: var(--hud-ink-soft);
+}
+
+.pip-card-hint:hover,
+.pip-card-hint[aria-expanded="true"] {
+  color: var(--hud-ink);
+}
+
+/* The picture: as large as the card allows and no taller than most of the screen. The frame is
+   the picture's own size, so the box, placed in fractions of it, sits on what it covers. */
+.pip-card-picture {
+  margin: 8px 0 0;
+  text-align: center;
+}
+
+.pip-card-picture-frame {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: top;
+  overflow: hidden;
+  background: var(--hud-well);
+  box-shadow: 0 0 0 2px var(--hud-line);
+}
+
+.pip-card-picture-frame:not([data-state="ready"]) {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  max-height: min(52dvh, 460px);
+}
+
+.pip-card-picture-frame > img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: min(52dvh, 460px);
+}
+
+.pip-card-picture-wait {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  color: var(--hud-ink-soft);
+}
+
+/* The box covered: a patch of the HUD's paper with a question mark, over the label. */
+/* Solid, over everything in the frame: nothing of the label under it shows. */
+.pip-card-mask {
+  position: absolute;
+  z-index: 1;
+  display: grid;
+  overflow: hidden;
+  place-items: center;
+  opacity: 1;
+  background: #e8b43a;
+  line-height: 1;
+  color: #2a2208;
+  font-size: 15px;
+  font-weight: 900;
+  box-shadow: 0 0 0 2px #2a2208;
+}
+
+.pip-card-mask[data-shown] {
+  background: rgba(232, 180, 58, 0.12);
+  box-shadow:
+    0 0 0 2px #e8b43a,
+    0 0 0 4px rgba(42, 34, 8, 0.6);
+}
+
+.pip-card-label {
+  margin-top: 10px;
+  font-size: 18px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.pip-card-grades {
+  display: flex;
+  flex: 1;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.pip-key > kbd {
+  min-width: 18px;
+  height: 18px;
+  margin-right: 2px;
+  background: var(--hud-well);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 18px;
+  text-align: center;
+  box-shadow: 0 0 0 1px var(--hud-line);
+}
+
+.pip-key.pip-card-missed {
+  background: #f1c9c2;
+  color: #4a100c;
+}
+
+/* A book's cards. */
+.pip-cards-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pip-cards-title {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pip-cards-title > strong {
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
+.pip-cards-title > span {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--hud-ink-soft);
+}
+
+.pip-card-thumb .pip-card-picture {
+  text-align: left;
+}
+
+/* In a book's list, a picture card is a small picture: enough to tell which box. */
+.pip-card-thumb .pip-card-picture-frame:not([data-state="ready"]) {
+  width: min(220px, 100%);
+}
+
+.pip-card-thumb .pip-card-picture-frame > img {
+  max-height: 160px;
+}
+
+.pip-card-thumb .pip-card-picture-wait {
+  font-size: 11px;
+}
+
+.pip-card-thumb .pip-card-label {
+  font-size: 14px;
+  text-align: left;
+}
+
+.pip-card-editor {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.pip-card-edit-words {
+  font-family: Georgia, "Iowan Old Style", serif;
+  font-size: 16px;
+  line-height: 1.9;
+}
+
+.pip-card-edit-word {
+  padding: 0 1px;
+  color: inherit;
+  font: inherit;
+}
+
+.pip-card-edit-word:hover {
+  background: var(--hud-face-hover);
+}
+
+.pip-card-edit-word[aria-pressed="true"] {
+  background: var(--hud-ink);
+  color: var(--hud-face);
+}
+
+.pip-card-edit-word:focus-visible,
+.pip-card-edit-field:focus-visible,
+.pip-card-hint:focus-visible {
+  outline: 2px solid rgb(var(--color-primary));
+  outline-offset: 2px;
+}
+
+.pip-card-edit-label {
+  display: grid;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hud-ink-soft);
+}
+
+.pip-card-edit-field {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--hud-well);
+  color: var(--hud-ink);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+  box-shadow: 0 0 0 2px var(--hud-line);
+  resize: vertical;
+}
+
+/* What to revise: all, words, or cards (of a book). */
+.pip-revise-choose {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.pip-revise-what {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.pip-revise-book {
+  min-width: 0;
+  max-width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  background: var(--hud-face);
+  color: var(--hud-ink);
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line);
+}
+
+.pip-revise-book:focus-visible {
+  outline: 2px solid rgb(var(--color-primary));
+  outline-offset: 4px;
+}
+
+@media (max-width: 520px) {
+  .pip-card-passage {
+    font-size: 16px;
+  }
+
+  .pip-card-grades {
+    justify-content: stretch;
+  }
+
+  .pip-card-grades > .pip-key {
+    flex: 1;
+    justify-content: center;
+  }
+}
+
+/* A phone held upright has more height than a card needs: the card sits in the middle of it,
+   not at the top over an empty page. */
+@media (max-width: 640px) {
+  .pip-revise > .pip-arcade-page:has(> .pip-card-round) {
+    display: flex;
+    min-height: 100%;
+    flex-direction: column;
+  }
+
+  .pip-revise > .pip-arcade-page > .pip-card-round {
+    margin-block: auto;
+    padding-bottom: 12px;
+  }
+}

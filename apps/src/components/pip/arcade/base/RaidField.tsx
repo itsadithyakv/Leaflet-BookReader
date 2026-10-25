@@ -41,6 +41,16 @@ type Props = {
   camera?: () => PanAt | null;
   /** Kept up to date with where the picture is, for what is dropped on it. */
   panRef?: MutableRefObject<PanAt>;
+  /**
+   * Filled in with a way to move the picture from outside (a group's mark at the window's edge): to a place at once
+   * (reduced motion), or null to hand it back to the camera now, past a drag's wait.
+   */
+  steer?: MutableRefObject<((to: PanAt | null) => void) | null>;
+  /**
+   * Which step this is (scouting, planning): each starts from its own framing, never from where the step before was
+   * dragged to (2026-10-26), so a change of it puts the picture back as framed.
+   */
+  frame?: string;
   scene: RaidScene;
   looks: Looks;
   /** What the still field shows, as a key: painted again when it changes. */
@@ -51,7 +61,7 @@ type Props = {
   children?: ReactNode;
 };
 
-export const RaidField = ({ view, roomW, roomH, pan = NO_PAN, camera, panRef, scene, looks, paintKey, tick, label, children }: Props) => {
+export const RaidField = ({ view, roomW, roomH, pan = NO_PAN, camera, panRef, steer, frame = "", scene, looks, paintKey, tick, label, children }: Props) => {
   const groundRef = useRef<HTMLCanvasElement | null>(null);
   const liveRef = useRef<HTMLCanvasElement | null>(null);
   const layerRef = useRef<HTMLDivElement | null>(null);
@@ -74,8 +84,13 @@ export const RaidField = ({ view, roomW, roomH, pan = NO_PAN, camera, panRef, sc
     const layer = layerRef.current;
     if (layer) layer.style.transform = kept.dx === 0 && kept.dy === 0 ? "" : `translate(${kept.dx}px, ${kept.dy}px)`;
   };
+  if (steer)
+    steer.current = (to) => {
+      handsOffUntil.current = 0;
+      if (to) place(to);
+    };
   // Framed again (the room changed, the next step): back home.
-  const panKey = `${view.left}|${view.top}|${view.css}|${pan.minX}|${pan.maxX}|${pan.minY}|${pan.maxY}`;
+  const panKey = `${frame}|${view.left}|${view.top}|${view.css}|${pan.minX}|${pan.maxX}|${pan.minY}|${pan.maxY}`;
   useEffect(() => {
     place({ dx: 0, dy: 0 });
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -46,6 +46,7 @@ import { useLibraryOwnerStore } from "../store/libraryOwnerStore";
 import { InfoTip } from "../components/ui/InfoTip";
 import { setEffectsChoice, useEffectsChoice, type EffectsChoice } from "../platform/perfTier";
 import { OWNER_COPY } from "../components/sync/ownerCopy";
+import { SmallerBackupsSwitch } from "../components/sync/SmallerBackupsSwitch";
 import { ReportProblemSheet } from "../components/ReportProblemSheet";
 import { useCommunityStore } from "../components/community/communityStore";
 import { errorReports } from "../services/errorReports";
@@ -875,6 +876,8 @@ export const SettingsPage = ({ showToast }: SettingsPageProps) => {
                     </button>
                   )}
                 </div>
+
+                {sync.driveConnected && <SmallerBackupsSwitch key={`smaller-${wiped}`} renderToggle={renderToggle} />}
 
                 {sync.driveCredentialSource === "custom" && !showDriveSetup && (
                   <p className="mt-2 text-[11px] text-on-surface-variant">

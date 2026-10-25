@@ -53,24 +53,46 @@ pub const CLOSE_DELAY_MINUTES: i64 = 15;
 /// A reminder missed (asleep laptop, book open) can still go out this late.
 /// Past that, "time to read?" at 23:00 for a 19:00 reminder is just noise.
 pub const CATCH_UP_MINUTES: i64 = 60;
+/// "Your year in pages" goes out on Christmas Eve, the first day the Library's
+/// festive key is up...
+pub const YEAR_MONTH: u32 = 12;
+pub const YEAR_DAY: u32 = 24;
+/// ...in the morning, when there is a whole day left to look at it.
+pub const YEAR_AT: u32 = 10 * 60;
+/// It is left with Windows or the phone this many days ahead, so a reader who
+/// does not open Leaflet for a week before Christmas still gets it.
+pub const YEAR_PLAN_DAYS: i64 = 14;
 
 /// Protocol a toast click launches, registered in the MSIX manifest.
 pub const PROTOCOL: &str = "leaflet-reader";
 /// Where a toast click lands: the book the reader was last in.
 pub const CONTINUE_URI: &str = "leaflet-reader://continue";
+/// Where the year's toast lands: just Leaflet, whose Library has the key.
+#[cfg(any(windows, test))]
+pub const OPEN_URI: &str = "leaflet-reader://open";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ReminderKind {
   Daily,
   StreakRisk,
-  Close
+  Close,
+  /// "Your year in pages", once a year. Not a nudge to read: it keeps none of
+  /// the daily rules (the goal, the streak) and is never part of their contest.
+  Year
 }
 
 impl ReminderKind {
-  /// Most urgent first: when two are due in the same minute, one goes out.
+  /// The daily kinds, most urgent first: when two are due in the same minute,
+  /// one goes out. The year's notice is not among them, so it never retires a
+  /// daily reminder and none retires it.
   pub const BY_PRIORITY: [ReminderKind; 3] =
     [ReminderKind::StreakRisk, ReminderKind::Daily, ReminderKind::Close];
+
+  /// Every kind the log keeps.
+  #[cfg(any(target_os = "android", test))]
+  const ALL: [ReminderKind; 4] =
+    [ReminderKind::StreakRisk, ReminderKind::Daily, ReminderKind::Close, ReminderKind::Year];
 
   /// The toast (or notification) tag, so a new reminder of a kind replaces
   /// the last one.
@@ -79,7 +101,8 @@ impl ReminderKind {
     match self {
       ReminderKind::Daily => "daily",
       ReminderKind::StreakRisk => "streak",
-      ReminderKind::Close => "close"
+      ReminderKind::Close => "close",
+      ReminderKind::Year => "year"
     }
   }
 }
@@ -125,7 +148,10 @@ impl ReminderSettings {
     match kind {
       ReminderKind::Daily => self.daily,
       ReminderKind::StreakRisk => self.streak_risk,
-      ReminderKind::Close => self.close_nudge
+      ReminderKind::Close => self.close_nudge,
+      // There is no switch of its own: a reader who said yes to any reminder
+      // gets this one, and one who said no to all hears nothing.
+      ReminderKind::Year => self.any_enabled()
     }
   }
 }
@@ -211,13 +237,16 @@ impl Activity {
   }
 }
 
-/// The last local day each kind went out, so none fires twice in a day.
+/// The last local day each kind went out, so none fires twice in a day (and
+/// the year's notice not twice in a year).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct FiredLog {
   pub daily: Option<String>,
   pub streak_risk: Option<String>,
-  pub close: Option<String>
+  pub close: Option<String>,
+  /// The day "your year in pages" went out. Logs from before it read as never.
+  pub year: Option<String>
 }
 
 impl FiredLog {
@@ -225,17 +254,28 @@ impl FiredLog {
     match kind {
       ReminderKind::Daily => &mut self.daily,
       ReminderKind::StreakRisk => &mut self.streak_risk,
-      ReminderKind::Close => &mut self.close
+      ReminderKind::Close => &mut self.close,
+      ReminderKind::Year => &mut self.year
     }
   }
 
-  pub fn fired_on(&self, kind: ReminderKind, date_key: &str) -> bool {
-    let fired = match kind {
+  fn get(&self, kind: ReminderKind) -> &Option<String> {
+    match kind {
       ReminderKind::Daily => &self.daily,
       ReminderKind::StreakRisk => &self.streak_risk,
-      ReminderKind::Close => &self.close
-    };
-    fired.as_deref() == Some(date_key)
+      ReminderKind::Close => &self.close,
+      ReminderKind::Year => &self.year
+    }
+  }
+
+  /// Whether `kind` already went out on that day; for the year's notice, on
+  /// any day of that year.
+  pub fn fired_on(&self, kind: ReminderKind, date_key: &str) -> bool {
+    let fired = self.get(kind).as_deref();
+    match kind {
+      ReminderKind::Year => fired.and_then(|day| day.get(..4)).is_some_and(|year| Some(year) == date_key.get(..4)),
+      _ => fired == Some(date_key)
+    }
   }
 
   pub fn mark(&mut self, kind: ReminderKind, date_key: &str) {
@@ -248,13 +288,8 @@ impl FiredLog {
   #[cfg(any(target_os = "android", test))]
   pub fn merge(&mut self, other: &FiredLog) -> bool {
     let mut changed = false;
-    for kind in ReminderKind::BY_PRIORITY {
-      let theirs = match kind {
-        ReminderKind::Daily => &other.daily,
-        ReminderKind::StreakRisk => &other.streak_risk,
-        ReminderKind::Close => &other.close
-      };
-      let Some(theirs) = theirs else {
+    for kind in ReminderKind::ALL {
+      let Some(theirs) = other.get(kind) else {
         continue;
       };
       let ours = self.slot(kind);
@@ -414,7 +449,11 @@ fn lines(kind: ReminderKind, voice: PipVoice, weekend: bool) -> Vec<(&'static st
       ("So close", "Just {left} more and today's goal is done."),
       ("Nearly there", "{left} left for today's goal."),
       ("Almost done", "{left} more and today counts.")
-    ]
+    ],
+    // Once a year, so one line each: there is no yesterday's to differ from.
+    (ReminderKind::Year, PipVoice::Chatty) => vec![("Your {year} in pages", "Pip has your whole year of reading ready to show you.")],
+    (ReminderKind::Year, PipVoice::Quiet) => vec![("Your {year} in pages", "Pip kept every page. Come and see.")],
+    (ReminderKind::Year, PipVoice::Off) => vec![("Your {year} in pages", "Every page you read this year, in one place.")]
   };
   // A Saturday or a Sunday has lines of its own, when there's time for more.
   // (Saturday and Sunday are consecutive days on one list, so `line_for`
@@ -457,7 +496,8 @@ fn line_for(count: usize, kind: ReminderKind, date_key: &str) -> usize {
   let start = match kind {
     ReminderKind::Daily => 0,
     ReminderKind::StreakRisk => 1,
-    ReminderKind::Close => 2
+    ReminderKind::Close => 2,
+    ReminderKind::Year => 3
   };
   let gcd = |mut a: usize, mut b: usize| {
     while b != 0 {
@@ -472,6 +512,7 @@ fn line_for(count: usize, kind: ReminderKind, date_key: &str) -> usize {
 
 /// The words. Which line is chosen by the day (`line_for`), so the same kind
 /// of reminder says something new each day but the same thing all day.
+/// `{year}` is the year of `date_key`, for the year's notice.
 pub fn compose(kind: ReminderKind, voice: PipVoice, remaining: i64, streak: i64, date_key: &str) -> Reminder {
   let weekend = chrono::NaiveDate::parse_from_str(date_key, "%Y-%m-%d")
     .map(|date| matches!(date.weekday(), chrono::Weekday::Sat | chrono::Weekday::Sun))
@@ -483,6 +524,7 @@ pub fn compose(kind: ReminderKind, voice: PipVoice, remaining: i64, streak: i64,
       .replace("{left}", &minutes_phrase(remaining))
       .replace("{streak}", &streak.to_string())
       .replace("{next}", &(streak + 1).to_string())
+      .replace("{year}", date_key.get(..4).unwrap_or_default())
   };
   // A line that starts with the minutes reads better with a capital.
   let body = capitalise(&fill(body));
@@ -501,10 +543,21 @@ fn capitalise(text: &str) -> String {
 /// Shared by both deliveries, so "due now" and "scheduled for later" can never
 /// disagree about the rules.
 fn occurrence(kind: ReminderKind, settings: &ReminderSettings, habit: &HabitView, date: chrono::NaiveDate) -> Option<NaiveDateTime> {
-  if !settings.enabled(kind) || habit.met || habit.goal <= 0 {
+  if !settings.enabled(kind) {
+    return None;
+  }
+  // The year's notice is not about today's reading, so a met goal (or none)
+  // does not stop it.
+  if kind != ReminderKind::Year && (habit.met || habit.goal <= 0) {
     return None;
   }
   let at = match kind {
+    ReminderKind::Year => {
+      if (date.month(), date.day()) != (YEAR_MONTH, YEAR_DAY) {
+        return None;
+      }
+      at_minute(date, YEAR_AT)
+    }
     ReminderKind::Daily => at_minute(date, settings.daily_at),
     ReminderKind::StreakRisk => {
       if habit.streak <= 0 {
@@ -543,24 +596,46 @@ pub fn due_now(
   if habit.date_key != today_key || in_quiet_hours(now) || activity.busy() {
     return None;
   }
-  let due: Vec<ReminderKind> = ReminderKind::BY_PRIORITY
-    .into_iter()
-    .filter(|kind| !log.fired_on(*kind, &today_key))
-    .filter(|kind| {
-      occurrence(*kind, settings, habit, today)
-        .map(|at| now >= at && now < at + Duration::minutes(CATCH_UP_MINUTES))
-        .unwrap_or(false)
-    })
-    .collect();
-  let (first, rest) = due.split_first()?;
-  Some(Due {
-    reminder: compose(*first, voice, habit.remaining(), habit.streak, &today_key),
-    superseded: rest.to_vec()
+  let in_window = |kind: ReminderKind| {
+    !log.fired_on(kind, &today_key)
+      && occurrence(kind, settings, habit, today).is_some_and(|at| now >= at && now < deliver_until(kind, at))
+  };
+  let due: Vec<ReminderKind> = ReminderKind::BY_PRIORITY.into_iter().filter(|kind| in_window(*kind)).collect();
+  if let Some((first, rest)) = due.split_first() {
+    return Some(Due {
+      reminder: compose(*first, voice, habit.remaining(), habit.streak, &today_key),
+      superseded: rest.to_vec()
+    });
+  }
+  // The year's notice is not in that contest: due with a daily reminder, it
+  // waits a minute rather than being retired, and it retires nothing.
+  in_window(ReminderKind::Year).then(|| Due {
+    reminder: compose(ReminderKind::Year, voice, habit.remaining(), habit.streak, &today_key),
+    superseded: Vec::new()
   })
 }
 
+/// The year's notice to leave with Windows or the phone: from
+/// [`YEAR_PLAN_DAYS`] before its day, unless it already went out this year.
+/// If its moment came while the reader was here (the Library's key said it
+/// for it), it is left for a little after they go, as the running app sends
+/// it once they look away; never into the night or past its day.
+fn year_ahead(settings: &ReminderSettings, voice: PipVoice, habit: &HabitView, log: &FiredLog, now: NaiveDateTime) -> Option<Planned> {
+  let day = chrono::NaiveDate::from_ymd_opt(now.year(), YEAR_MONTH, YEAR_DAY)?;
+  let key = day.format("%Y-%m-%d").to_string();
+  if log.fired_on(ReminderKind::Year, &key) || (day - now.date()).num_days() > YEAR_PLAN_DAYS {
+    return None;
+  }
+  let moment = occurrence(ReminderKind::Year, settings, habit, day)?;
+  let at = moment.max(now + Duration::minutes(CLOSE_DELAY_MINUTES));
+  if at >= deliver_until(ReminderKind::Year, moment) {
+    return None;
+  }
+  Some(Planned { reminder: compose(ReminderKind::Year, voice, habit.remaining(), habit.streak, &key), at })
+}
+
 /// What to leave with Windows when the app closes: whatever is still to come
-/// today, and tomorrow's.
+/// today, and tomorrow's (and, before Christmas, the year's notice).
 ///
 /// Tomorrow starts from nothing read, so its daily reminder is certain. Its
 /// streak reminder is only planned when today is already met, because only
@@ -595,6 +670,7 @@ pub fn plan_ahead(
       });
     }
   }
+  plans.extend(year_ahead(settings, voice, habit, log, now));
 
   let Some(tomorrow) = today.succ_opt() else {
     return plans;
@@ -620,12 +696,16 @@ pub fn plan_ahead(
   plans
 }
 
-/// The latest a reminder planned for `at` may still go out when the phone
-/// delivers it late (asleep, saving battery, or Leaflet was in front): the
-/// running app's catch-up, and never into the night.
-#[cfg(any(target_os = "android", test))]
-pub fn deliver_until(at: NaiveDateTime) -> NaiveDateTime {
-  (at + Duration::minutes(CATCH_UP_MINUTES)).min(at_minute(at.date(), QUIET_START))
+/// The latest a reminder meant for `at` may still go out late (a laptop
+/// asleep, a phone saving battery, Leaflet in front): within the catch-up,
+/// and never into the night. The year's notice has the rest of its day: it is
+/// about the year, not this evening's reading.
+pub fn deliver_until(kind: ReminderKind, at: NaiveDateTime) -> NaiveDateTime {
+  let night = at_minute(at.date(), QUIET_START);
+  match kind {
+    ReminderKind::Year => night,
+    _ => (at + Duration::minutes(CATCH_UP_MINUTES)).min(night)
+  }
 }
 
 /// The moment a local wall-clock time happens, in UTC, for Windows' schedule.
@@ -669,17 +749,19 @@ fn escape_xml(text: &str) -> String {
 
 /// The toast. `activation` is off for unpackaged builds: without the MSIX's
 /// protocol registration a click would open Windows' "find an app" dialog.
+/// The year's toast only opens Leaflet: it is not about the book.
 #[cfg(any(windows, test))]
 pub fn toast_xml(reminder: &Reminder, image: Option<&str>, activation: bool) -> String {
+  let to_book = reminder.kind != ReminderKind::Year;
   let launch = if activation {
-    format!(" launch=\"{CONTINUE_URI}\" activationType=\"protocol\"")
+    format!(" launch=\"{}\" activationType=\"protocol\"", if to_book { CONTINUE_URI } else { OPEN_URI })
   } else {
     String::new()
   };
   let image = image
     .map(|src| format!("<image placement=\"appLogoOverride\" src=\"{}\"/>", escape_xml(src)))
     .unwrap_or_default();
-  let actions = if activation {
+  let actions = if activation && to_book {
     format!(
       "<actions><action content=\"Continue reading\" activationType=\"protocol\" arguments=\"{CONTINUE_URI}\"/></actions>"
     )
@@ -1237,10 +1319,10 @@ mod tests {
 
   #[test]
   fn a_late_alarm_may_go_out_within_the_hour_but_never_at_night() {
-    assert_eq!(deliver_until(at("2026-03-03", 19, 0)), at("2026-03-03", 20, 0));
+    assert_eq!(deliver_until(ReminderKind::Daily, at("2026-03-03", 19, 0)), at("2026-03-03", 20, 0));
     // "Streak at risk" at 22:00 may run until the night starts, not past it.
-    assert_eq!(deliver_until(at("2026-03-03", 22, 0)), at("2026-03-03", 23, 0));
-    assert_eq!(deliver_until(at("2026-03-03", 22, 50)), at("2026-03-03", 23, 0));
+    assert_eq!(deliver_until(ReminderKind::StreakRisk, at("2026-03-03", 22, 0)), at("2026-03-03", 23, 0));
+    assert_eq!(deliver_until(ReminderKind::Close, at("2026-03-03", 22, 50)), at("2026-03-03", 23, 0));
   }
 
   #[test]
@@ -1250,7 +1332,8 @@ mod tests {
     let phone = FiredLog {
       daily: Some("2026-03-03".to_string()),
       streak_risk: None,
-      close: Some("2026-03-03".to_string())
+      close: Some("2026-03-03".to_string()),
+      year: None
     };
     assert!(log.merge(&phone));
     assert!(log.fired_on(ReminderKind::Daily, "2026-03-03"));
@@ -1284,5 +1367,199 @@ mod tests {
     let after = plan_ahead(&all_on(), PipVoice::Chatty, &view("2026-03-03", 21.0, 20, 5), 20, &FiredLog::default(), at("2026-03-03", 14, 30));
     assert!(after.iter().all(|plan| plan.reminder.date_key == "2026-03-04"));
     assert!(!after.is_empty(), "tomorrow is still planned");
+  }
+
+  // ---- the year in pages ----------------------------------------------------
+
+  fn one_on() -> ReminderSettings {
+    ReminderSettings { close_nudge: true, ..ReminderSettings::default() }
+  }
+
+  fn year_due(settings: &ReminderSettings, habit: &HabitView, activity: Activity, log: &FiredLog, now: NaiveDateTime) -> bool {
+    due_kind(due_now(settings, PipVoice::Chatty, habit, activity, log, now)) == Some(ReminderKind::Year)
+  }
+
+  fn year_planned(settings: &ReminderSettings, habit: &HabitView, log: &FiredLog, now: NaiveDateTime) -> Option<Planned> {
+    plan_ahead(settings, PipVoice::Chatty, habit, 20, log, now)
+      .into_iter()
+      .find(|plan| plan.reminder.kind == ReminderKind::Year)
+  }
+
+  #[test]
+  fn the_year_is_told_only_to_a_reader_with_a_reminder_on() {
+    let habit = view("2026-12-24", 0.0, 20, 0);
+    let now = at("2026-12-24", 10, 0);
+    let early = at("2026-12-20", 9, 0);
+    let off = ReminderSettings { asked: true, ..ReminderSettings::default() };
+    assert!(!year_due(&off, &habit, idle(), &FiredLog::default(), now));
+    assert!(year_planned(&off, &view("2026-12-20", 0.0, 20, 0), &FiredLog::default(), early).is_none());
+    for settings in [
+      ReminderSettings { daily: true, ..off.clone() },
+      ReminderSettings { streak_risk: true, ..off.clone() },
+      ReminderSettings { close_nudge: true, ..off.clone() }
+    ] {
+      assert!(year_due(&settings, &habit, idle(), &FiredLog::default(), now), "{settings:?}");
+      let plan = year_planned(&settings, &view("2026-12-20", 0.0, 20, 0), &FiredLog::default(), early).unwrap();
+      assert_eq!(plan.at, at("2026-12-24", 10, 0));
+    }
+  }
+
+  #[test]
+  fn the_year_goes_out_on_christmas_eve_from_ten_until_the_night() {
+    let settings = one_on();
+    let log = FiredLog::default();
+    let habit = view("2026-12-24", 0.0, 20, 0);
+    assert!(!year_due(&settings, &habit, idle(), &log, at("2026-12-24", 9, 59)));
+    assert!(year_due(&settings, &habit, idle(), &log, at("2026-12-24", 10, 0)));
+    // Not a nudge with an hour's catch-up: the whole day is its own.
+    assert!(year_due(&settings, &habit, idle(), &log, at("2026-12-24", 16, 30)));
+    assert!(year_due(&settings, &habit, idle(), &log, at("2026-12-24", 22, 59)));
+    assert!(!year_due(&settings, &habit, idle(), &log, at("2026-12-24", 23, 0)));
+    // Missed on the 24th, it is not said on the 25th, nor on any other day.
+    assert!(!year_due(&settings, &view("2026-12-25", 0.0, 20, 0), idle(), &log, at("2026-12-25", 10, 0)));
+    assert!(!year_due(&settings, &view("2026-12-23", 0.0, 20, 0), idle(), &log, at("2026-12-23", 10, 0)));
+    // On the phone, a late alarm has the same span.
+    assert_eq!(deliver_until(ReminderKind::Year, at("2026-12-24", 10, 0)), at("2026-12-24", 23, 0));
+  }
+
+  #[test]
+  fn the_year_waits_while_the_reader_is_looking_at_leaflet() {
+    let settings = one_on();
+    let habit = view("2026-12-24", 0.0, 20, 0);
+    let log = FiredLog::default();
+    let now = at("2026-12-24", 10, 0);
+    for activity in [
+      Activity { session_running: true, ..idle() },
+      Activity { book_open: true, ..idle() },
+      Activity { focused: true, ..idle() }
+    ] {
+      assert!(!year_due(&settings, &habit, activity, &log, now));
+    }
+    // They look away in the afternoon: it still goes out.
+    assert!(year_due(&settings, &habit, idle(), &log, at("2026-12-24", 15, 0)));
+    // Closing Leaflet after its moment leaves it for a little later that day...
+    let plan = year_planned(&settings, &habit, &log, at("2026-12-24", 15, 0)).unwrap();
+    assert_eq!(plan.at, at("2026-12-24", 15, CLOSE_DELAY_MINUTES as u32));
+    // ...but not into the night.
+    assert!(year_planned(&settings, &habit, &log, at("2026-12-24", 22, 50)).is_none());
+  }
+
+  #[test]
+  fn the_year_goes_out_even_with_the_day_read() {
+    let settings = all_on();
+    let met = view("2026-12-24", 30.0, 20, 9);
+    assert!(year_due(&settings, &met, idle(), &FiredLog::default(), at("2026-12-24", 10, 0)));
+    // And with no streak and no goal at all.
+    let none = view("2026-12-24", 0.0, 0, 0);
+    assert!(year_due(&settings, &none, idle(), &FiredLog::default(), at("2026-12-24", 10, 0)));
+    let plan = year_planned(&settings, &met, &FiredLog::default(), at("2026-12-24", 8, 0)).unwrap();
+    assert_eq!(plan.at, at("2026-12-24", 10, 0));
+  }
+
+  #[test]
+  fn the_year_neither_retires_nor_is_retired_by_a_daily_reminder() {
+    // The daily reminder set for 10:00 lands in the same minute.
+    let settings = ReminderSettings { daily: true, daily_at: YEAR_AT, ..ReminderSettings::default() };
+    let habit = view("2026-12-24", 0.0, 20, 0);
+    let mut log = FiredLog::default();
+    let first = due_now(&settings, PipVoice::Chatty, &habit, idle(), &log, at("2026-12-24", 10, 0)).unwrap();
+    assert_eq!(first.reminder.kind, ReminderKind::Daily);
+    assert!(first.superseded.is_empty());
+    log.mark(first.reminder.kind, "2026-12-24");
+    let second = due_now(&settings, PipVoice::Chatty, &habit, idle(), &log, at("2026-12-24", 10, 1)).unwrap();
+    assert_eq!(second.reminder.kind, ReminderKind::Year);
+    assert!(second.superseded.is_empty());
+    log.mark(second.reminder.kind, "2026-12-24");
+    // Marking the year's notice leaves the daily kinds as they were.
+    assert_eq!(log.daily.as_deref(), Some("2026-12-24"));
+    assert_eq!(log.streak_risk, None);
+  }
+
+  #[test]
+  fn the_year_is_told_once_a_year() {
+    let settings = one_on();
+    let habit = view("2026-12-24", 0.0, 20, 0);
+    let mut log = FiredLog::default();
+    log.mark(ReminderKind::Year, "2026-12-24");
+    assert!(!year_due(&settings, &habit, idle(), &log, at("2026-12-24", 15, 0)));
+    assert!(year_planned(&settings, &view("2026-12-20", 0.0, 20, 0), &log, at("2026-12-20", 9, 0)).is_none());
+    // Any day of this year counts as sent this year; last year's does not.
+    let other_day = FiredLog { year: Some("2026-12-20".to_string()), ..FiredLog::default() };
+    assert!(!year_due(&settings, &habit, idle(), &other_day, at("2026-12-24", 10, 0)));
+    let last_year = FiredLog { year: Some("2025-12-24".to_string()), ..FiredLog::default() };
+    assert!(year_due(&settings, &habit, idle(), &last_year, at("2026-12-24", 10, 0)));
+    assert!(year_planned(&settings, &view("2026-12-20", 0.0, 20, 0), &last_year, at("2026-12-20", 9, 0)).is_some());
+    // A toast Windows held while Leaflet was closed counts on the next launch.
+    let plan = year_planned(&settings, &view("2026-12-20", 0.0, 20, 0), &FiredLog::default(), at("2026-12-20", 9, 0)).unwrap();
+    let mut settled = FiredLog::default();
+    settle_scheduled(&mut settled, &[ScheduledRecord::of(&plan)], at("2026-12-26", 9, 0));
+    assert!(settled.fired_on(ReminderKind::Year, "2026-12-24"));
+  }
+
+  #[test]
+  fn the_year_is_planned_up_to_a_fortnight_ahead() {
+    let settings = one_on();
+    let log = FiredLog::default();
+    let plan_on = |key: &str| year_planned(&settings, &view(key, 0.0, 20, 0), &log, at(key, 21, 0));
+    let plan = plan_on("2026-12-10").expect("14 days before");
+    assert_eq!(plan.at, at("2026-12-24", 10, 0));
+    assert_eq!(plan.reminder.date_key, "2026-12-24");
+    assert!(plan_on("2026-12-09").is_none(), "15 days before");
+    assert!(plan_on("2026-12-23").is_some());
+    assert!(plan_on("2026-12-25").is_none());
+    assert!(plan_on("2027-01-03").is_none());
+    // Alongside today's and tomorrow's, in time order: well inside the
+    // phone's eight alarms.
+    let mut close = view("2026-12-23", 16.0, 20, 4);
+    close.last_session_end = Some(at("2026-12-23", 9, 0));
+    let plans = plan_ahead(&all_on(), PipVoice::Chatty, &close, 20, &log, at("2026-12-23", 9, 5));
+    assert!(plans.len() <= 8, "{plans:?}");
+    assert!(plans.windows(2).all(|pair| pair[0].at <= pair[1].at));
+    assert!(plans.iter().any(|plan| plan.reminder.kind == ReminderKind::Year));
+  }
+
+  #[test]
+  fn the_years_words_name_the_year_and_pip_only_when_she_is_on() {
+    for voice in VOICES {
+      let said = compose(ReminderKind::Year, voice, 12, 7, "2026-12-24");
+      assert_eq!(said.title, "Your 2026 in pages");
+      let text = format!("{} {}", said.title, said.body);
+      assert!(!text.contains('{') && !text.contains("minute"), "{text}");
+      match voice {
+        PipVoice::Off => assert_eq!(text.matches("Pip").count(), 0, "{text}"),
+        PipVoice::Quiet => assert!(text.matches("Pip").count() <= 1, "{text}"),
+        PipVoice::Chatty => assert!(text.contains("Pip"), "{text}")
+      }
+    }
+  }
+
+  #[test]
+  fn the_years_toast_only_opens_leaflet() {
+    let reminder = compose(ReminderKind::Year, PipVoice::Chatty, 1, 1, "2026-12-24");
+    let packaged = toast_xml(&reminder, None, true);
+    assert!(packaged.contains("launch=\"leaflet-reader://open\""), "{packaged}");
+    assert!(!packaged.contains("continue") && !packaged.contains("<actions>"), "{packaged}");
+    assert_eq!(activation_route([OPEN_URI.to_string()]), Some("open"));
+    assert_eq!(ReminderKind::Year.tag(), "year");
+  }
+
+  #[test]
+  fn an_old_log_reads_without_the_year_and_the_phone_brings_it() {
+    let old: FiredLog = serde_json::from_str(r#"{"daily":"2026-12-23","streakRisk":null,"close":"2026-12-23"}"#).unwrap();
+    assert_eq!(old.year, None);
+    assert_eq!(old.daily.as_deref(), Some("2026-12-23"));
+    let new: FiredLog = serde_json::from_str(r#"{"year":"2026-12-24"}"#).unwrap();
+    assert!(new.fired_on(ReminderKind::Year, "2026-12-24"));
+    assert_eq!(serde_json::to_value(&new).unwrap()["year"], "2026-12-24");
+
+    let mut log = old.clone();
+    assert!(log.merge(&new));
+    assert_eq!(log.year.as_deref(), Some("2026-12-24"));
+    assert_eq!(log.daily.as_deref(), Some("2026-12-23"), "the daily kinds are kept");
+    // The later wins, whichever side has it.
+    assert!(!log.merge(&FiredLog { year: Some("2025-12-24".to_string()), ..FiredLog::default() }));
+    assert_eq!(log.year.as_deref(), Some("2026-12-24"));
+    assert!(log.merge(&FiredLog { year: Some("2027-12-24".to_string()), ..FiredLog::default() }));
+    assert_eq!(log.year.as_deref(), Some("2027-12-24"));
   }
 }

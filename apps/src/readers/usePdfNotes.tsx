@@ -9,7 +9,8 @@ import { LookupCard } from "./LookupCard";
 import type { Box } from "./lookupPlacement";
 import { comparePlaces, decodePlace, encodePlace, highlightAt, highlightsUnderRects, lineRects, selectedWords, toPageRects } from "./pdfHighlights";
 import type { PageRect } from "./pdfText";
-import { SelectionBar } from "./SelectionBar";
+import { SelectionBar, lastHighlightColor } from "./SelectionBar";
+import { makeCard } from "../study/studyStore";
 import { useAnnotations } from "./useAnnotations";
 
 /** A highlight as a page draws it. */
@@ -242,7 +243,17 @@ export const usePdfNotes = ({ bookId, enabled, stageRef, labelOf, language, prog
   /** The highlights the selected words lie over, and the one that holds them all already. */
   const underPicked = () => highlightsUnderRects(picked ? byPageRef.current.get(picked.page) ?? NONE : NONE, picked?.rects ?? []);
 
-  const highlight = (color: string, withNote = false) => {
+  /** "Make a card" of a highlight: the card maker opens over the page (study/CardMakerHost.tsx). */
+  const cardOf = (made: Annotation) =>
+    makeCard({
+      from: "highlight",
+      bookId,
+      p: progress(),
+      highlight: { id: made.id, text: made.text ?? "", note: made.note ?? null, cfi: made.cfi, chapter: made.chapter ?? null }
+    });
+
+  /** `then`, given, is told of the highlight instead of the toast: "Make a card" highlights first. */
+  const highlight = (color: string, withNote = false, then?: (made: Annotation) => void) => {
     if (!picked) {
       return;
     }
@@ -252,7 +263,9 @@ export const usePdfNotes = ({ bookId, enabled, stageRef, labelOf, language, prog
     // Highlighted already: that highlight, in the colour asked for. Nothing is laid on it.
     if (within) {
       const had = annotations.highlights.find((item) => item.id === within.id);
-      if (withNote) {
+      if (then && had) {
+        then(had);
+      } else if (withNote) {
         setOpened({ id: within.id, writing: true });
       } else if ((had?.color ?? "yellow") === color) {
         toast("Already highlighted.");
@@ -267,7 +280,9 @@ export const usePdfNotes = ({ bookId, enabled, stageRef, labelOf, language, prog
     void annotations
       .addHighlight(encodePlace({ page: made.page, rects: made.rects }), made.text, labelOf(made.page), color)
       .then((saved) => {
-        if (withNote) {
+        if (then) {
+          then(saved);
+        } else if (withNote) {
           setOpened({ id: saved.id, writing: true });
         } else {
           toast("Highlighted.");
@@ -344,6 +359,7 @@ export const usePdfNotes = ({ bookId, enabled, stageRef, labelOf, language, prog
           onShare={onShareText ? () => onShareText(picked.text) : undefined}
           onLookUp={() => setLookUp((open) => !open)}
           lookUpOpen={lookUp}
+          onMakeCard={() => highlight(lastHighlightColor(), false, cardOf)}
           onSearchBook={
             onSearch
               ? () => {
@@ -379,6 +395,14 @@ export const usePdfNotes = ({ bookId, enabled, stageRef, labelOf, language, prog
             setOpened(null);
             onShowAll(id);
           }}
+          onMakeCard={
+            openedItem.text?.trim()
+              ? () => {
+                  setOpened(null);
+                  cardOf(openedItem);
+                }
+              : undefined
+          }
           onClose={() => setOpened(null)}
         />
       </div>

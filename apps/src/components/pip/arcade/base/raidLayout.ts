@@ -13,7 +13,7 @@
  * Field points (x, y) are the battle's; picture points are the canvas's, in its own pixels (one to a field unit).
  * Plain numbers: no DOM, no canvas.
  */
-import { FIELD_H, FIELD_W } from "../../../../pip/base/field";
+import { EDGE, FIELD_H, FIELD_W } from "../../../../pip/base/field";
 import type { Approach, Zone } from "../../../../pip/base/approaches";
 import type { Structure } from "../../../../pip/base/battle";
 import { fitPicture } from "./fit";
@@ -126,8 +126,21 @@ const FRAME_GIVE = 0.05;
  * the hazards further out on the trail (the ford, the thorns, the pits), which it holds too where it can, and leans
  * toward where it cannot. `keep`: the stronghold's pieces alone, which are never cut short where they fit. A little
  * grass round each.
+ *
+ * (2026-10-26) A wall from one edge of the field to the other (a second gate's, the King's) is not framed whole: that
+ * held the view to the field's whole height, as small as the whole field. Its two gates are, with the camp behind them
+ * and the ways that come to them; the rest of the wall runs on out of the view, and an approach that ends at a plain
+ * stretch of it (a flank with no gate, at the field's edge) is leaned toward, not held.
  */
 export type Focus = { core: PictureBox; all: PictureBox; keep: PictureBox };
+/** A wall that runs the field's whole height, as `approaches.ts` finds it (no way round). */
+export const sealedWall = (structures: readonly Structure[]): boolean => {
+  const walls = structures.filter((entry) => entry.kind === "wall");
+  if (walls.length === 0) return false;
+  return Math.min(...walls.map((wall) => wall.y - wall.r)) <= EDGE.top + 8 && Math.max(...walls.map((wall) => wall.y + wall.r)) >= EDGE.bottom - 8;
+};
+/** How near a gate an approach's last stretch comes for it to be one of the ways to that gate. */
+const AT_GATE = 14;
 export const focusOf = (orient: Orient, structures: readonly Structure[], approaches: readonly Pick<Approach, "path">[], zones: readonly Zone[] = []): Focus => {
   const box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
   const take = (x: number, y: number) => {
@@ -140,8 +153,14 @@ export const focusOf = (orient: Orient, structures: readonly Structure[], approa
     const at = toPicture({ orient }, x, y);
     take(at.x, at.y);
   };
+  const sealed = sealedWall(structures);
+  const gates = structures.filter((entry) => entry.kind === "wall" && entry.gate);
+  /** The far ends of the ways that come to a plain stretch of a sealed wall: leaned toward once the core is known. */
+  const later: Array<{ x: number; y: number }> = [];
   for (const entry of structures) {
     if (entry.flat || entry.traps !== undefined) continue;
+    // A sealed wall's plain sections run on out of the view; its gates are framed.
+    if (sealed && entry.kind === "wall" && !entry.gate) continue;
     const at = toPicture({ orient }, entry.x, entry.y);
     const size = STANDS[entry.kind] ?? STANDS.other;
     const half = Math.max(entry.r, size.half);
@@ -157,15 +176,20 @@ export const focusOf = (orient: Orient, structures: readonly Structure[], approa
     // Back from the end of the path, LAST_STRETCH of it.
     const path = approach.path;
     if (path.length === 0) continue;
-    field(path[path.length - 1].x, path[path.length - 1].y);
+    const stretch = [path[path.length - 1]];
     let left = LAST_STRETCH;
     for (let k = path.length - 1; k > 0 && left > 0; k--) {
       const a = path[k];
       const b = path[k - 1];
       const length = Math.hypot(b.x - a.x, b.y - a.y);
       const t = length > 0 ? Math.min(1, left / length) : 1;
-      field(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
+      stretch.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
       left -= length;
+    }
+    const toGate = !sealed || stretch.some((point) => gates.some((gate) => Math.hypot(gate.x - point.x, gate.y - point.y) <= AT_GATE + gate.r));
+    for (const point of stretch) {
+      if (toGate) field(point.x, point.y);
+      else later.push(point);
     }
   }
   const pw = fieldW;
@@ -180,6 +204,7 @@ export const focusOf = (orient: Orient, structures: readonly Structure[], approa
         }
       : { x0: 0, y0: 0, x1: pw, y1: ph };
   const core = padded();
+  for (const point of later) field(point.x, point.y);
   for (const zone of zones) {
     if ("x0" in zone) {
       field(zone.x0, zone.y0);
@@ -262,7 +287,7 @@ export const clampPan = (pan: Pan, dx: number, dy: number, ratio = 1): { dx: num
  */
 export const follow = (
   view: FramedView,
-  window: { left: number; top: number; right: number; bottom: number },
+  window: ViewWindow,
   keep: PictureBox,
   want: PictureBox | null,
   ratio = 1
@@ -289,6 +314,90 @@ export const follow = (
   const x = along(homeX, (window.right - window.left) / css, keep.x0, keep.x1, want.x0, want.x1, true);
   const y = along(homeY, (window.bottom - window.top) / css, keep.y0, keep.y1, want.y0, want.y1, view.orient === "wide");
   return clampPan(view.pan, (homeX - x) * css, (homeY - y) * css, ratio);
+};
+
+/**
+ * The pan that puts the middle of `box` (picture pixels) in the middle of the window, as near as the field's edges let
+ * it: where the camera goes when a group's mark at the edge is tapped (2026-10-26).
+ */
+export const centreOn = (view: FramedView, window: ViewWindow, box: PictureBox, ratio = 1): { dx: number; dy: number } => {
+  const dx = (window.left + window.right) / 2 - (view.left + ((box.x0 + box.x1) / 2) * view.css);
+  const dy = (window.top + window.bottom) / 2 - (view.top + ((box.y0 + box.y1) / 2) * view.css);
+  return clampPan(view.pan, dx, dy, ratio);
+};
+
+/** The clear part of the room, in CSS pixels in the room: between the bars, beside the cards. */
+export type ViewWindow = { left: number; top: number; right: number; bottom: number };
+
+/**
+ * A group out of view in a fight (2026-10-26), marked at the window's edge: where (CSS pixels in the room, the marker's
+ * middle), which way they lie, as a turn clockwise from up in eighths of a circle (0 up, 90 right, 180 down...), how many
+ * are out there, and which (their numbers, for the camera to go to).
+ */
+export type EdgeMark = { group: number; left: number; top: number; turn: number; count: number; ids: number[] };
+/** How far in from the window's edge a marker stands, and how far apart two on one edge are kept. */
+export const EDGE_INSET = 26;
+const EDGE_APART = 46;
+
+/** Where a field point is in the room, the picture panned by `pan`. */
+const inRoom = (view: FieldView, pan: { dx: number; dy: number }, x: number, y: number) => {
+  const at = toRoom(view, x, y);
+  return { left: at.left + pan.dx, top: at.top + pan.dy };
+};
+
+/** Whether a field point is in the window, the picture panned by `pan`. */
+const shownAt = (view: FieldView, pan: { dx: number; dy: number }, window: ViewWindow, point: { x: number; y: number }) => {
+  const at = inRoom(view, pan, point.x, point.y);
+  return at.left >= window.left && at.left <= window.right && at.top >= window.top && at.top <= window.bottom;
+};
+
+/**
+ * The marks for the groups out of the window: each at the edge nearest the middle of those of it out there, an arrow
+ * pointing to them, in eighths of a turn, and how many they are. A group all in view has none, and so has one with a
+ * single straggler out (a group coming in, its first scout just over the edge, is in view); a group whose quick ones
+ * are in view and the rest held up out of it (a mole at the gate, the others still at the ford) has one for the rest.
+ * Two on one edge are kept apart. `seen`: what of the room can be seen past the bars, where it is more than the window
+ * (beside an upright phone's orders, under its bar): a scout there is in view, and not marked.
+ */
+export const edgeMarks = (
+  view: FieldView,
+  pan: { dx: number; dy: number },
+  window: ViewWindow,
+  groups: ReadonlyArray<{ group: number; points: ReadonlyArray<{ id: number; x: number; y: number }> }>,
+  seen: ViewWindow = window
+): EdgeMark[] => {
+  const x0 = window.left + EDGE_INSET;
+  const x1 = Math.max(x0, window.right - EDGE_INSET);
+  const y0 = window.top + EDGE_INSET;
+  const y1 = Math.max(y0, window.bottom - EDGE_INSET);
+  const marks: Array<EdgeMark & { side: number }> = [];
+  for (const { group, points } of groups) {
+    const out = points.filter((point) => !shownAt(view, pan, seen, point));
+    if (out.length === 0 || (out.length < 2 && out.length < points.length)) continue;
+    let left = 0;
+    let top = 0;
+    for (const point of out) {
+      const at = inRoom(view, pan, point.x, point.y);
+      left += at.left / out.length;
+      top += at.top / out.length;
+    }
+    const mark = { left: Math.max(x0, Math.min(x1, left)), top: Math.max(y0, Math.min(y1, top)) };
+    const angle = (Math.atan2(top - mark.top, left - mark.left) * 180) / Math.PI + 90;
+    const turn = (((Math.round(angle / 45) * 45) % 360) + 360) % 360;
+    // Which edge it is on: 0 top, 1 right, 2 bottom, 3 left (a corner counts as the top or the foot).
+    const side = mark.top <= y0 ? 0 : mark.top >= y1 ? 2 : mark.left >= x1 ? 1 : 3;
+    marks.push({ group, left: Math.round(mark.left), top: Math.round(mark.top), turn, count: out.length, ids: out.map((point) => point.id), side });
+  }
+  // Kept apart along their edge, in the order they lie along it.
+  for (const side of [0, 1, 2, 3]) {
+    const along = side % 2 === 0 ? "left" : "top";
+    const most = side % 2 === 0 ? x1 : y1;
+    const on = marks.filter((mark) => mark.side === side).sort((a, b) => a[along] - b[along]);
+    for (let k = 1; k < on.length; k++) on[k][along] = Math.max(on[k][along], on[k - 1][along] + EDGE_APART);
+    // Pushed off the end: back along, each its distance from the next.
+    for (let k = on.length - 1; k >= 0; k--) on[k][along] = Math.min(on[k][along], k === on.length - 1 ? most : on[k + 1][along] - EDGE_APART);
+  }
+  return marks.map(({ side: _side, ...mark }) => mark);
 };
 
 /** How slowly the camera eases (seconds to come most of the way), and the fastest it ever goes, in CSS pixels a second. */
@@ -357,7 +466,7 @@ export const offPath = (path: ReadonlyArray<{ x: number; y: number }>, x: number
  * further along than the one before (`index`), so where the paths run close (the field turned upright) the tags do
  * not sit on one another.
  */
-export const tagPoint = (path: ReadonlyArray<{ x: number; y: number }>, index = 0, shown?: { x0: number; x1: number; y0: number; y1: number }): { x: number; y: number } => {
+export const tagPoint = (path: ReadonlyArray<{ x: number; y: number }>, index = 0, shown?: { x0: number; x1: number; y0: number; y1: number }, orient: Orient = "wide"): { x: number; y: number } => {
   if (path.length === 0) return { x: 20, y: 64 };
   if (path.length === 1) return path[0];
   // Between a third and two thirds of the way along its first leg: in the open, between the edge and the wall.
@@ -367,8 +476,11 @@ export const tagPoint = (path: ReadonlyArray<{ x: number; y: number }>, index = 
   const open = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
   // (2026-10-25) Where the view is framed on the stronghold, that can be out of sight (cropped, or under the planner):
   // then a little way on from where the path comes into view, never on its last steps to the camp.
+  // A tag is wider than it is tall: more room is kept from the view's sides than from its top and foot (field y runs
+  // across the screen where the field is turned upright).
+  const [mx, my] = orient === "wide" ? [14, 8.4] : [8, 16];
   const inside = (point: { x: number; y: number }, margin: number) =>
-    !shown || (point.x >= shown.x0 + margin && point.x <= shown.x1 - margin && point.y >= shown.y0 + margin * 0.6 && point.y <= shown.y1 - margin * 0.6);
+    !shown || (point.x >= shown.x0 + (margin * mx) / 14 && point.x <= shown.x1 - (margin * mx) / 14 && point.y >= shown.y0 + (margin * my) / 14 && point.y <= shown.y1 - (margin * my) / 14);
   if (inside(open, 14)) return open;
   const steps: Array<{ x: number; y: number }> = [];
   for (let k = 0; k + 1 < path.length; k++) {
@@ -378,6 +490,14 @@ export const tagPoint = (path: ReadonlyArray<{ x: number; y: number }>, index = 
     for (let s = 0; s < n; s++) steps.push({ x: from.x + ((to.x - from.x) * s) / n, y: from.y + ((to.y - from.y) * s) / n });
   }
   const first = steps.findIndex((point) => inside(point, 14));
+  if (first < 0 && shown) {
+    // (2026-10-26) None of it in view (a flank to the far end of a second gate's wall, framed out): the tag stands at
+    // the edge of the view nearest the path, so every way in can still be seen and picked.
+    const gap = (point: { x: number; y: number }) => Math.max(0, shown.x0 - point.x, point.x - shown.x1) + Math.max(0, shown.y0 - point.y, point.y - shown.y1);
+    const near = steps.reduce((best, point) => (gap(point) < gap(best) ? point : best), steps[0] ?? open);
+    const clamp = (value: number, low: number, high: number) => (low > high ? (low + high) / 2 : Math.max(low, Math.min(high, value)));
+    return { x: clamp(near.x, shown.x0 + mx, shown.x1 - mx), y: clamp(near.y, shown.y0 + my, shown.y1 - my) };
+  }
   if (first < 0) return open;
   const last = Math.max(first, steps.length - 16);
   return steps[Math.min(last, first + 4 + (index % 3) * 10)];

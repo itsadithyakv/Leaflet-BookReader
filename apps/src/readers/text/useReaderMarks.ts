@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EpubCFI } from "epubjs";
 import { highlightsMarkdown, useAnnotations } from "../useAnnotations";
 import type { SearchHit } from "../searchBook";
+import type { Annotation } from "../../services/annotationService";
 import { HIGHLIGHT_COLORS } from "../highlightColors";
 import { BAR_GAP, placeBar, selectedTextBox } from "../lookupPlacement";
 import { coverFromTop } from "../smartScroll";
@@ -132,7 +133,11 @@ export const useReaderMarks = (reader: WithOutlook & Later<"annotations" | "orde
     setNotesFocus(id);
   };
 
-  const highlightSelection = (color: string, withNote = false) => {
+  /**
+   * `then`, given, is told of the highlight (the one made, or the one the
+   * selection lay in) instead of the toast: "Make a card" highlights first.
+   */
+  const highlightSelection = (color: string, withNote = false, then?: (highlight: Annotation) => void) => {
     if (!selection) {
       return;
     }
@@ -145,7 +150,9 @@ export const useReaderMarks = (reader: WithOutlook & Later<"annotations" | "orde
     // Inside a highlight already: that highlight, in the colour asked for.
     if (under?.within) {
       const had = reader.annotations.highlights.find((item) => item.id === under.within?.id);
-      if (withNote) {
+      if (then && had) {
+        then(had);
+      } else if (withNote) {
         openToWrite(under.within.id);
       } else if ((had?.color ?? "yellow") === color) {
         showFocusToast("Already highlighted.");
@@ -179,7 +186,9 @@ export const useReaderMarks = (reader: WithOutlook & Later<"annotations" | "orde
         if (grown) {
           await Promise.all(joined.map((item) => reader.annotations.remove(item.id).catch(() => undefined)));
         }
-        if (withNote) {
+        if (then) {
+          then(saved);
+        } else if (withNote) {
           openToWrite(saved.id);
         } else {
           showFocusToast("Highlighted.");

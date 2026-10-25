@@ -25,6 +25,8 @@ type ImageViewerProps = {
   /** Blend with the page, or show as drawn there: what a click on an ink picture used to do. */
   onToggleInk: () => void;
   onClose: () => void;
+  /** Makes study cards of the picture (boxes over its labels). The button is there only when this is. */
+  onMakeCard?: () => void;
 };
 
 /** How long the picture eases to rest (a double tap, a settle after a pinch, a swipe away). */
@@ -44,7 +46,7 @@ const reducedMotion = () =>
  * (one write a frame) and the percentage, and nothing of React's runs until
  * it settles.
  */
-export const ImageViewer = ({ picture, onToggleInk, onClose }: ImageViewerProps) => {
+export const ImageViewer = ({ picture, onToggleInk, onClose, onMakeCard }: ImageViewerProps) => {
   const root = useRef<HTMLDivElement | null>(null);
   const image = useRef<HTMLImageElement | null>(null);
   const shade = useRef<HTMLDivElement | null>(null);
@@ -476,6 +478,12 @@ export const ImageViewer = ({ picture, onToggleInk, onClose }: ImageViewerProps)
             title={blended ? "In the page, show this picture as it was drawn" : "In the page, let this picture take the page's colour"}
           >
             {blended ? "Show as drawn" : "Blend with page"}
+          </button>
+        )}
+        {onMakeCard && (
+          <button type="button" className="reader-notes-action reader-image-viewer-card" onClick={onMakeCard} title="Draw boxes over its labels: each box is a study card">
+            <UiIcon name="cards" size={14} />
+            Make a card
           </button>
         )}
         <button type="button" className="reader-mini-control" onClick={close} title="Close (Esc)" aria-label="Close picture">

@@ -57,7 +57,7 @@ object Reminders {
   const val ACTION_TEST = "com.leaflet.app.REMINDER_TEST"
   private const val PREFS = "leaflet_reminders"
   private const val TAG = "leaflet-reminder"
-  /** Today's plan is at most three, tomorrow's two. */
+  /** Today's plan is at most three, tomorrow's two, and the year's notice one. */
   private const val SLOTS = 8
   private const val WINDOWED = 7300
   private const val WHILE_IDLE = 7320
@@ -187,7 +187,9 @@ object Reminders {
     val test = alarm.optBoolean("test", false)
     val now = System.currentTimeMillis()
     if (!test) {
-      if (prefs.getString("met_date", null) == day || prefs.getString("fired_$kind", null) == day) {
+      // The year's notice is not about the day's goal, so a met day keeps it.
+      val met = kind != "year" && prefs.getString("met_date", null) == day
+      if (met || prefs.getString("fired_$kind", null) == day) {
         return
       }
     }
@@ -203,10 +205,14 @@ object Reminders {
   @SuppressLint("MissingPermission")
   fun show(context: Context, kind: String, title: String, body: String, expires: Long) {
     ensureChannel(context)
+    // The year's notice just opens Leaflet (the Library has its key); the rest pick up the book.
+    val toBook = kind != "year"
     val open = Intent(context, MainActivity::class.java)
-      .setAction(ACTION_CONTINUE)
       .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-    val tap = PendingIntent.getActivity(context, 7360, open, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+    if (toBook) {
+      open.setAction(ACTION_CONTINUE)
+    }
+    val tap = PendingIntent.getActivity(context, if (toBook) 7360 else 7361, open, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     val builder = NotificationCompat.Builder(context, CHANNEL)
       .setSmallIcon(R.drawable.ic_stat_leaflet)
       .setContentTitle(title)
@@ -253,8 +259,8 @@ object Reminders {
   }
 
   /** Notification tags (the Rust `ReminderKind::tag`) to `FiredLog` fields. */
-  private val FIELDS = listOf("daily" to "daily", "streak" to "streakRisk", "close" to "close")
-  private val KIND_IDS = mapOf("daily" to 1, "streak" to 2, "close" to 3)
+  private val FIELDS = listOf("daily" to "daily", "streak" to "streakRisk", "close" to "close", "year" to "year")
+  private val KIND_IDS = mapOf("daily" to 1, "streak" to 2, "close" to 3, "year" to 4)
 }
 
 /** Shows a reminder when its alarm goes off. Only Leaflet's own alarms reach it. */

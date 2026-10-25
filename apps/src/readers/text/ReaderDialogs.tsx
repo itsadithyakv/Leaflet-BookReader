@@ -4,6 +4,9 @@ import { ImageViewer } from "../ImageViewer";
 import { bookOfSection } from "../innerBooks";
 import { shortcutSections } from "../readerKeys";
 import { ShortcutsSheet } from "../ShortcutsSheet";
+import { picturePath } from "../pictures";
+import { CardMakerHost } from "../../study/CardMakerHost";
+import { makeCard } from "../../study/studyStore";
 import type { ReaderScope } from "./scope";
 
 /**
@@ -19,7 +22,35 @@ export const ReaderDialogs = ({ reader }: { reader: ReaderScope }) => {
   } = reader;
   return (
     <>
-      {picture && <ImageViewer picture={picture} onToggleInk={togglePictureInk} onClose={() => setPicture(null)} />}
+      {picture && (
+        <ImageViewer
+          picture={picture}
+          onToggleInk={togglePictureInk}
+          onClose={() => setPicture(null)}
+          onMakeCard={(() => {
+            const path = picturePath(bookRef.current, picture.src);
+            return path
+              ? () => {
+                  setPicture(null);
+                  makeCard({
+                    from: "picture",
+                    bookId: reader.book.id,
+                    picture: { kind: "epub", path },
+                    src: picture.src,
+                    alt: picture.alt,
+                    at: {
+                      cfi: reader.readingPlaceCfi() ?? reader.lastCfiRef.current ?? null,
+                      chapter: reader.chapterLabel || null,
+                      p: reader.lastCfiProgressRef.current ?? reader.book.progress ?? 0
+                    }
+                  });
+                }
+              : undefined;
+          })()}
+        />
+      )}
+      {/* "Make a card", from a highlight or a picture: loaded when pressed. */}
+      <CardMakerHost />
 
       {shortcutsOpen && (
         <ShortcutsSheet

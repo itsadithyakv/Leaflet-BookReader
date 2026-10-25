@@ -6,6 +6,8 @@
    --whim-* colours; never the app's soft glass, nothing blurred, nothing that shakes. */
 
 .pip-raid {
+  /* Ink on a group's own colour (its chip, its tab, its count): dark in either theme, as the colours are bright in both. */
+  --group-ink: #1c261f;
   position: relative;
   overflow: hidden;
   color: var(--hud-ink);
@@ -185,6 +187,7 @@
   min-width: 16px;
   padding: 0 3px;
   background: var(--group);
+  color: var(--group-ink);
   box-shadow: 0 0 0 2px var(--hud-line);
   text-align: center;
 }
@@ -324,7 +327,7 @@
 }
 
 .pip-raid-room.is-bad {
-  background: #ffd0c4;
+  background: var(--whim-bad, #ffd6c9);
 }
 
 .pip-raid-mark {
@@ -380,6 +383,7 @@
 .pip-raid-groups .pip-raid-group.is-chosen {
   min-height: 38px;
   background: var(--group);
+  color: var(--group-ink);
 }
 
 .pip-raid-group-count {
@@ -463,6 +467,7 @@
 
 .pip-raid-way.is-chosen {
   background: var(--group);
+  color: var(--group-ink);
   transform: translateY(2px);
   box-shadow:
     0 -2px 0 0 var(--hud-line),
@@ -647,7 +652,7 @@
   padding: 3px 8px;
   background: var(--group);
   box-shadow: 0 0 0 2px var(--hud-line);
-  color: var(--hud-ink);
+  color: var(--group-ink);
   font-size: 0.75rem;
   font-weight: 800;
   pointer-events: none;
@@ -709,7 +714,7 @@
 }
 
 .pip-raid-bell.is-bad {
-  background: #ffd0c4;
+  background: var(--whim-bad, #ffd6c9);
 }
 
 .pip-raid-orders-left.is-spent {
@@ -760,6 +765,7 @@
   min-height: 46px;
   padding: 3px 11px 3px 6px;
   background: var(--group);
+  color: var(--group-ink);
   box-shadow:
     0 -2px 0 0 var(--hud-line),
     0 2px 0 0 var(--hud-line),
@@ -883,6 +889,118 @@
 .pip-raid-target:focus-visible {
   background: rgba(255, 246, 194, 0.22);
   outline-style: solid;
+}
+
+/* ---- the planner folded to one row (a phone held upright, 2026-10-26): the groups' tabs, the forecast's stars and Go,
+   so the field above has the room. A tab opens the card on its group. ---- */
+
+.pip-raid-plan.is-folded {
+  padding: 7px 8px 9px;
+}
+
+.pip-raid-fold-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pip-raid-fold-row > .pip-raid-groups {
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+  align-items: center;
+  overflow-x: auto;
+  /* Room for each tab's ink line and lip, inside the scroll. */
+  padding: 4px 4px 6px;
+  scrollbar-width: none;
+}
+
+.pip-raid-plan.is-folded .pip-raid-groups .pip-raid-group {
+  flex: none;
+  min-height: 32px;
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 4px 0 0 var(--hud-lip);
+}
+
+.pip-raid-plan.is-folded .pip-raid-add {
+  margin-bottom: 0;
+}
+
+.pip-raid-fold-row > .pip-raid-go {
+  flex: none;
+  gap: 6px;
+  margin-top: 0;
+}
+
+/* Folded, the forecast is its stars alone (its word and its range are the open card's). */
+.pip-raid-plan.is-folded .pip-raid-likely > span:not(.pip-lands-stars),
+.pip-raid-plan.is-folded .pip-raid-band {
+  display: none;
+}
+
+/* ---- a group out of view in a fight (2026-10-26): a mark at the window's edge, in its colour, pointing to it, with how
+   many are left. It glides when it moves along the edge, never jumps a pixel at a time. ---- */
+
+.pip-raid-edge {
+  position: absolute;
+  z-index: 4;
+  display: inline-flex;
+  min-width: 40px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 0 7px 0 5px;
+  border: 0;
+  border-radius: 0;
+  background: var(--group, #ffd23f);
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 4px 0 0 var(--hud-lip);
+  color: var(--group-ink);
+  font-family: "ZT Nature", "Segoe UI", system-ui, sans-serif;
+  font-size: 0.9375rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  transform: translate(-50%, -50%);
+  transition:
+    left 240ms ease-out,
+    top 240ms ease-out;
+}
+
+.pip-raid-edge:active {
+  box-shadow:
+    0 -2px 0 0 var(--hud-line),
+    0 2px 0 0 var(--hud-line),
+    -2px 0 0 0 var(--hud-line),
+    2px 0 0 0 var(--hud-line),
+    0 1px 0 0 var(--hud-lip);
+  transform: translate(-50%, calc(-50% + 3px));
+}
+
+.pip-raid-edge:focus-visible {
+  outline: 2px solid var(--hud-line);
+  outline-offset: 4px;
+}
+
+/* A thumb's reach, round a small mark. */
+.pip-raid-edge::after {
+  position: absolute;
+  inset: -8px;
+  content: "";
+}
+
+.pip-raid-edge > svg {
+  flex: none;
 }
 
 /* ---- the end card, over the field ---- */
@@ -1023,7 +1141,8 @@
 
   .pip-raid-key,
   .pip-raid-dock .pip-raid-group,
-  .pip-raid-order {
+  .pip-raid-order,
+  .pip-raid-edge {
     transition: none;
   }
 }

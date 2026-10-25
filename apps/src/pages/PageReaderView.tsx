@@ -79,6 +79,8 @@ import { highlightsMarkdown } from "../readers/useAnnotations";
 import { PdfHighlightMarks, usePdfNotes } from "../readers/usePdfNotes";
 import type { Annotation } from "../services/annotationService";
 import { openQuoteCard } from "../components/share/shareStore";
+import { CardMakerHost } from "../study/CardMakerHost";
+import { makeCard } from "../study/studyStore";
 import { ShortcutsSheet } from "../readers/ShortcutsSheet";
 import { ReaderAmbience, ReaderAmbienceRow, ambiencePopoverOpen, closeAmbiencePopover, useAmbiencePopoverOpen } from "../ambience";
 import { Redo2, Undo2 } from "lucide-react";
@@ -101,6 +103,7 @@ import { AudioLines } from "lucide-react";
 import { usePdfReadAloud } from "../readers/readAloud/usePdfReadAloud";
 import { ReadAloudPill } from "../readers/readAloud/ReadAloudPill";
 import { ReadAloudMenuRow } from "../readers/readAloud/ReadAloudMenuRow";
+import { SyncPlaceRow } from "../readers/SyncPlaceRow";
 import type { ReadAloudControls } from "../readers/readAloud/useReadAloudCore";
 import { openAmbiencePopover, useAmbienceState } from "../ambience";
 import "../readers/pdfTextLayer.css";
@@ -1905,6 +1908,33 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
     onShareText: onAndroid() ? (text) => void android.shareText(text, book.title) : undefined,
     toast: showToast
   });
+  /**
+   * "Make a picture card": the page being read, drawn as a picture to box its
+   * labels on (study/PictureCardMaker.tsx). A PDF's pictures are its pages'
+   * own, with no viewer of their own to start from. Drawn only when asked.
+   */
+  const makePictureCard = () => {
+    setMorePanelOpen(false);
+    if (!pdf) {
+      return;
+    }
+    const page = pageNumber;
+    void import("../study/pictureSource")
+      .then(({ pdfPagePicture }) => pdfPagePicture(pdf, page))
+      .then(
+        (drawn) =>
+          makeCard({
+            from: "picture",
+            bookId: book.id,
+            picture: { kind: "pdf", page },
+            src: drawn.url,
+            ownsSrc: true,
+            alt: `Page ${page}`,
+            at: { cfi: pagePlace(page), chapter: chapterOf(page) ?? null, p: percent / 100 }
+          }),
+        () => showToast("That page couldn't be drawn.")
+      );
+  };
   // A PDF's bookmarks are pages, kept on this device; in the list of notes they sit beside the highlights.
   const bookmarkNotes: Annotation[] = orderedBookmarks.map((bookmark) => {
     const chapter = chapterOf(bookmark.page);
@@ -2424,6 +2454,9 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
                         toggleCurrentBookmark();
                       }}
                     />
+                    {kind === "pdf" && pdf && (
+                      <SheetRow icon={<UiIcon name="cards" size={20} />} label="Make a picture card" onClick={makePictureCard} />
+                    )}
                     <SheetRow
                       icon={<AudioLines size={20} strokeWidth={2} />}
                       label="Sound"
@@ -2498,6 +2531,7 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
                   </button>
                 )}
                 <ReadAloudMenuRow kind={kind} readAloud={readAloud} onChoose={() => setMorePanelOpen(false)} touch={touch} />
+                <SyncPlaceRow />
                 <button
                   type="button"
                   className="mt-3 flex w-full items-center justify-between rounded-lg border px-3 py-2 text-xs uppercase tracking-widest transition reader-border reader-pill reader-icon"
@@ -2507,6 +2541,17 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
                   <span className="reader-toggle" data-on={readerTheme === "light"} />
                 </button>
                 {!phone && <ReaderAmbienceRow onOpen={() => setMorePanelOpen(false)} />}
+                {kind === "pdf" && pdf && !phone && (
+                  <button
+                    type="button"
+                    className="mt-3 flex w-full items-center justify-between rounded-lg border px-3 py-2 text-xs uppercase tracking-widest transition reader-border reader-pill reader-icon reader-hover-accent"
+                    onClick={makePictureCard}
+                    title="Draw boxes over the labels on this page: each box is a study card"
+                  >
+                    <span>Make a picture card</span>
+                    <UiIcon name="cards" size={15} />
+                  </button>
+                )}
                 {/* A phone has no keys to list. */}
                 {!touch && (
                 <button
@@ -2533,6 +2578,9 @@ export const PageReaderView = ({ book, kind, onClose, openAt = null }: PageReade
           <span className="reader-toolbar-handle" />
         </div>
       )}
+
+      {/* "Make a card", from a highlight or this page: loaded when pressed. */}
+      <CardMakerHost />
 
       {shortcutsOpen && (
         <ShortcutsSheet

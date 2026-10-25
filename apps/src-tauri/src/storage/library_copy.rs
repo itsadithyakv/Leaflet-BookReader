@@ -212,14 +212,17 @@ fn candidate_name(stem: &str, ext: &str, attempt: usize) -> String {
 
 /// True when `existing` holds exactly the book with this content hash. The
 /// size is compared first, so a different book is usually told apart without
-/// reading either file.
+/// reading either file. A smaller copy from the Drive backup (the library's
+/// file on a device that downloaded it) does not have the book's hash, but
+/// says whose it is (`smaller::source_of`).
 fn is_same_book(existing: &Path, source_len: u64, hash: &str) -> bool {
   let Ok(metadata) = fs::metadata(existing) else {
     return false;
   };
   metadata.is_file()
     && metadata.len() == source_len
-    && hash_file(existing).map(|found| found == hash).unwrap_or(false)
+    && (super::smaller::source_of(existing).is_some_and(|source| source == hash)
+      || hash_file(existing).map(|found| found == hash).unwrap_or(false))
 }
 
 /// How long the name may be for the whole path to stay one Windows apps can

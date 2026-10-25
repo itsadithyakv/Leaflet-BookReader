@@ -28,6 +28,7 @@ use crate::sync::large;
 use crate::sync::merge::{self, BookEntry, Remote};
 use crate::sync::shared_doc;
 use crate::sync::store;
+use crate::storage::smaller;
 use crate::sync::PendingAuth;
 use crate::sync::DriveState;
 use anyhow::{anyhow, Result};
@@ -1143,6 +1144,22 @@ async fn mark_owner(client: &reqwest::Client, token: &str, file_id: &str, owner:
   Ok(())
 }
 
+/// The `appProperties` keys on a book's file that is a smaller copy
+/// (`storage::smaller`): the original's sha256, and that it is smaller. The
+/// copy carries the same in its marker; these are for a look at Drive alone.
+const SOURCE_PROPERTY: &str = "leafletSource";
+const SMALLER_PROPERTY: &str = "leafletSmaller";
+
+/// What a book's file is made with: its name and folder and, for a smaller
+/// copy, whose it is.
+fn book_metadata(name: &str, parent: &str, smaller_source: Option<&str>) -> serde_json::Value {
+  let mut metadata = serde_json::json!({ "name": name, "parents": [parent] });
+  if let Some(source) = smaller_source {
+    metadata["appProperties"] = serde_json::json!({ SOURCE_PROPERTY: source, SMALLER_PROPERTY: "1" });
+  }
+  metadata
+}
+
 /// Uploads a book in chunks through a resumable session.
 ///
 /// Books run to hundreds of megabytes; a single request holds the whole file in
@@ -1153,10 +1170,11 @@ async fn upload_book(
   token: &str,
   parent: &str,
   path: &Path,
-  name: &str
+  name: &str,
+  smaller_source: Option<&str>
 ) -> Result<()> {
   let total = std::fs::metadata(path)?.len();
-  let metadata = serde_json::json!({ "name": name, "parents": [parent] });
+  let metadata = book_metadata(name, parent, smaller_source);
 
   let session = send(
     client
@@ -1529,6 +1547,11 @@ pub async fn sync_state(
 /// goes only with the reader's word (`sync::large`). With `may_delete`, the
 /// files of books removed stop occupying the reader's quota; never in a
 /// Drive that holds another account's library.
+///
+/// What goes up is a smaller copy of the file where one is worth having
+/// (`storage::smaller`, unless this device switched it off), under the
+/// original's name; the file here is never changed. Files already in Drive
+/// stay as they are.
 pub async fn sync_files(db_mutex: &std::sync::Mutex<Database>, ctx: &DriveCtx, may_delete: bool) -> Result<SyncReport> {
   let (client, token) = (&ctx.client, ctx.token.as_str());
   let remote_files: std::collections::HashMap<String, String> =
@@ -1551,10 +1574,14 @@ pub async fn sync_files(db_mutex: &std::sync::Mutex<Database>, ctx: &DriveCtx, m
     }
   }
 
-  let mut answers = {
+  let (mut answers, mut sizes, smaller_on) = {
     let db = db_mutex.guard();
-    large::Answers::load(&db)
+    (large::Answers::load(&db), large::SentSizes::load(&db), smaller::enabled(&db))
   };
+  // Smaller copies (`storage::smaller`), on unless this device turned them
+  // off. Without a scratch folder, originals.
+  let scratch = smaller::scratch_dir().ok().filter(|_| smaller_on);
+  let (mut saved, mut cover_saved, mut copies) = (0u64, 0u64, 0usize);
   // Whatever happens to an upload, the answers found on the way are kept.
   let mut failed = None;
   for (entry, path) in library.iter().filter(|(entry, _)| !entry.is_deleted()) {
@@ -1569,13 +1596,43 @@ pub async fn sync_files(db_mutex: &std::sync::Mutex<Database>, ctx: &DriveCtx, m
       answers.found_backed_up(&entry.id, bytes);
       continue;
     }
-    match large::decide(bytes, answers.get(&entry.id)) {
+    // What is judged is what would be sent: a large book's smaller copy
+    // may well be under the limit.
+    let answer = answers.get(&entry.id);
+    match large::first_look(bytes, sizes.get(&entry.id), answer, scratch.is_some()) {
+      large::FirstLook::Hold => {
+        report.books_held += 1;
+        continue;
+      }
+      large::FirstLook::Skip => continue,
+      large::FirstLook::Prepare => {}
+    }
+    // Made off the async threads, one book at a time; a copy is deleted
+    // once `prepared` goes, sent or not.
+    let prepared = match &scratch {
+      Some(scratch) => {
+        let (file, id, scratch) = (path.clone(), entry.id.clone(), scratch.clone());
+        tokio::task::spawn_blocking(move || smaller::prepare(&file, &id, &scratch))
+          .await
+          .unwrap_or_else(|_| smaller::Prepared::original(path))
+      }
+      None => smaller::Prepared::original(path)
+    };
+    if scratch.is_some() && bytes > large::LARGE_BOOK_BYTES {
+      sizes.set(&entry.id, prepared.bytes);
+    }
+    match large::decide(prepared.bytes, answer) {
       large::Decision::Send => {
-        if let Err(error) = upload_book(client, token, &ctx.books_folder, path, &name).await {
+        if let Err(error) = upload_book(client, token, &ctx.books_folder, prepared.path(), &name, prepared.source.as_deref()).await {
           failed = Some(error);
           break;
         }
         report.books_uploaded += 1;
+        saved += prepared.saved();
+        cover_saved += prepared.cover_saved;
+        copies += usize::from(prepared.made());
+        // A large book whose copy went without a question has nothing left to ask.
+        answers.found_backed_up(&entry.id, bytes);
       }
       large::Decision::Ask => report.books_held += 1,
       large::Decision::Skip => {}
@@ -1584,6 +1641,11 @@ pub async fn sync_files(db_mutex: &std::sync::Mutex<Database>, ctx: &DriveCtx, m
   {
     let db = db_mutex.guard();
     answers.save(&db)?;
+    sizes.save(&db)?;
+    smaller::add_saved(&db, saved)?;
+  }
+  if copies > 0 {
+    crate::diag::info(&format!("Drive backup: {copies} smaller copies sent, {saved} bytes saved ({cover_saved} of them covers)"));
   }
   if let Some(error) = failed {
     return Err(error);
@@ -1592,6 +1654,8 @@ pub async fn sync_files(db_mutex: &std::sync::Mutex<Database>, ctx: &DriveCtx, m
 }
 
 /// Fetches one book's bytes, for a device that has the entry but not the file.
+/// What Drive holds may be a smaller copy (`storage::smaller`): it is kept as
+/// the book's file under the book's id all the same, as its marker says.
 pub async fn fetch_book(db_mutex: &std::sync::Mutex<Database>, book_id: &str) -> Result<String> {
   let token = ensure_access_token(db_mutex).await?;
   let client = reqwest::Client::builder()
@@ -1945,5 +2009,17 @@ mod tests {
     assert_eq!(made["appProperties"][OWNER_PROPERTY], serde_json::json!(tag));
     assert_eq!(made["parents"], serde_json::json!(["root-id"]));
     assert!(create_metadata(STATE_FILE, "root-id", None).get("appProperties").is_none());
+  }
+
+  /// A smaller copy goes up under the original's name, marked as one.
+  #[test]
+  fn a_smaller_copy_is_marked_in_app_properties() {
+    let id = "a".repeat(64);
+    let made = book_metadata(&format!("{id}.epub"), "books-id", Some(&id));
+    assert_eq!(made["name"], serde_json::json!(format!("{id}.epub")));
+    assert_eq!(made["parents"], serde_json::json!(["books-id"]));
+    assert_eq!(made["appProperties"][SOURCE_PROPERTY], serde_json::json!(id));
+    assert_eq!(made["appProperties"][SMALLER_PROPERTY], serde_json::json!("1"));
+    assert!(book_metadata("b.pdf", "books-id", None).get("appProperties").is_none());
   }
 }

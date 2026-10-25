@@ -8,9 +8,10 @@ import { SegmentedTabs, panelId, tabId, type SegmentedTab } from "../ui/Segmente
 import { AnnouncementsPanel } from "./AnnouncementsPanel";
 import { ErrorsPanel } from "./ErrorsPanel";
 import { OverviewPanel } from "./OverviewPanel";
+import { YearPreviewPanel } from "./YearPreviewPanel";
 import "./admin.css";
 
-export type AdminSection = "overview" | "errors" | "problems" | "moderation" | "announcements" | "notice";
+export type AdminSection = "overview" | "errors" | "problems" | "moderation" | "announcements" | "notice" | "year";
 
 const SECTIONS: SegmentedTab<AdminSection>[] = [
   { id: "overview", label: "Overview" },
@@ -18,7 +19,8 @@ const SECTIONS: SegmentedTab<AdminSection>[] = [
   { id: "problems", label: "Problems" },
   { id: "moderation", label: "Moderation" },
   { id: "announcements", label: "Announcements" },
-  { id: "notice", label: "Update notice" }
+  { id: "notice", label: "Update notice" },
+  { id: "year", label: "Year in pages" }
 ];
 const SECTION_KEY = "leaflet.admin.section";
 
@@ -95,6 +97,7 @@ export const AdminPage = ({ onClose, showToast }: { onClose: () => void; showToa
           {section === "moderation" && <AdminPanel showToast={showToast} />}
           {section === "announcements" && <AnnouncementsPanel showToast={showToast} />}
           {section === "notice" && <UpdateNoticeCard showToast={showToast} />}
+          {section === "year" && <YearPreviewPanel />}
         </div>
       </div>
     </div>

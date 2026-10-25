@@ -167,3 +167,23 @@ export const setInkOff = (docs: Document[], src: string, off: boolean) => {
     });
   });
 };
+
+/**
+ * A picture's path inside the book's archive, for a picture card
+ * (docs/design/study-plan.md): the page shows epub.js's own copy of each
+ * picture (a blob's address), and epub.js keeps, for each, the path it came
+ * from. Null when it is not one of the book's own (or the book is not read
+ * from an archive), and then no card is offered.
+ */
+export const picturePath = (epub: unknown, src: string): string | null => {
+  const cache = (epub as { archive?: { urlCache?: Record<string, unknown> } } | null)?.archive?.urlCache;
+  if (!cache || !src) {
+    return null;
+  }
+  for (const [path, address] of Object.entries(cache)) {
+    if (address === src) {
+      return path.replace(/^\/+/, "") || null;
+    }
+  }
+  return null;
+};

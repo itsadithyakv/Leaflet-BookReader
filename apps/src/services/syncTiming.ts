@@ -34,7 +34,8 @@ const GAP: Record<SyncMoment, number> = {
  * Whether to sync now. `sinceLastMs` is how long ago a sync was last started
  * (null: not since launch); `configured` is whether there is anywhere to sync to;
  * `waiting`, whether highlights or notes made in an open book are waiting to go
- * up (services/pushHold): going out of sight never keeps them waiting.
+ * up (services/pushHold), or the reader's place has moved since the last sync:
+ * going out of sight never keeps either waiting.
  */
 export const syncDue = (moment: SyncMoment, sinceLastMs: number | null, configured: boolean, waiting = false): boolean => {
   if (!configured) {
@@ -49,6 +50,14 @@ export const syncDue = (moment: SyncMoment, sinceLastMs: number | null, configur
 /** When a sync was last started, whatever asked for it (null: not since launch). */
 let lastStartedAt: number | null = null;
 let watching = false;
+/**
+ * Whether the reader's place has moved since the last sync started. Going out
+ * of sight then always syncs, whatever the gap: a phone is put down by
+ * locking it, not by closing the book, and opening the book had just started
+ * a pull, so "open, read a page or two, lock" used to leave the place behind
+ * until the next launch (2026-10-25).
+ */
+let placeMoved = false;
 
 /**
  * Whether there is anywhere to sync to. Never while this library belongs to
@@ -69,6 +78,10 @@ const watchStarts = () => {
   useLibraryStore.subscribe((state, previous) => {
     if (state.syncStatus === "syncing" && previous.syncStatus !== "syncing") {
       lastStartedAt = Date.now();
+      // The run reads the library as it now stands, place and all.
+      placeMoved = false;
+    } else if (state.placeMoves !== previous.placeMoves) {
+      placeMoved = true;
     }
   });
 };
@@ -81,12 +94,12 @@ export const syncFor = async (moment: SyncMoment, now = Date.now()): Promise<voi
     await untilSettled();
     // Going out of sight with highlights still waiting (made after the run
     // under way had read the library): they go now, not at the next launch.
-    if (moment === "hidden" && pushHold.waiting()) {
+    if (moment === "hidden" && (pushHold.waiting() || placeMoved)) {
       await useLibraryStore.getState().syncNow().catch(() => {});
     }
     return;
   }
-  if (!syncDue(moment, lastStartedAt === null ? null : now - lastStartedAt, configured(), pushHold.waiting())) {
+  if (!syncDue(moment, lastStartedAt === null ? null : now - lastStartedAt, configured(), pushHold.waiting() || placeMoved)) {
     return;
   }
   // Started at once, not after a timer: on the way to the background the

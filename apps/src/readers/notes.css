@@ -460,6 +460,14 @@
   font-size: 10.5px;
 }
 
+/* "Make a card", beside Done: the study card maker (study/CardMaker.tsx). */
+.reader-note-make-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
 .reader-note-swatch.is-current {
   box-shadow:
     0 0 0 1px var(--reader-panel),

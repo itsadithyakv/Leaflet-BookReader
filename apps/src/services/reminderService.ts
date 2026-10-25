@@ -11,7 +11,7 @@ export type ReminderSettings = {
   asked: boolean;
 };
 
-export type ReminderKind = "daily" | "streakRisk" | "close";
+export type ReminderKind = "daily" | "streakRisk" | "close" | "year";
 
 export type ReminderStatus = {
   settings: ReminderSettings;

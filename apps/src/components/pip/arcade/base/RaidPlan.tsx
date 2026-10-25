@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
-import { ArrowLeft, Hourglass, Minus, Plus, RotateCcw, Swords, Trash2, X } from "lucide-react";
+import { ArrowLeft, ChevronDown, Hourglass, Minus, Plus, RotateCcw, Swords, Trash2, X } from "lucide-react";
 import type { Approach } from "../../../../pip/base/approaches";
 import type { ScoutKind, Setup, Squad, SquadGroup } from "../../../../pip/base/battle";
 import { GROUPS_MOST, ROOM, checkSquad, roomOf, type PlanForecast, type SquadProblem } from "../../../../pip/base/squad";
@@ -22,6 +22,10 @@ import { KINDS, KIND_ART, KIND_NAMES, PROBLEM_WORDS, approachShort } from "./rai
  *
  * (2026-10-25) A card of Pip's pixel paper, as the Hollow's sheets are, never a form: each group a tab in its own
  * colour, each kind a tile with its picture (the field's own scouts, `KIND_ART`) and its count between two pixel keys.
+ *
+ * (2026-10-26) On a phone held upright (`fold`) the card starts folded to one row: the groups' tabs and Go, with the
+ * forecast's stars. The field above it then has the room, so the stronghold is drawn large, and each group's path and
+ * tag are in view to be tapped. A tab opens the card on that group; a key folds it again.
  */
 
 /** How long the plan has to be still before it is forecast again. */
@@ -47,6 +51,8 @@ type Props = {
   onGo: () => void;
   onBack: () => void;
   onClose: () => void;
+  /** Starts folded to one row (a phone held upright), and opens to plan a group. */
+  fold?: boolean;
 };
 
 const scoutsIn = (group: SquadGroup) => KINDS.reduce((sum, kind) => sum + Math.max(0, Math.floor(group.scouts[kind] ?? 0)), 0);
@@ -71,6 +77,11 @@ export const RaidPlan = (props: Props) => {
   const room = roomOf(squad);
   const group = squad.groups[chosen] ?? squad.groups[0];
   const index = squad.groups[chosen] ? chosen : 0;
+  const fold = Boolean(props.fold);
+  const [open, setOpen] = useState(!fold);
+  // Turned (the phone put on its side, or back): folded upright, open beside a wide field.
+  useEffect(() => setOpen(!fold), [fold]);
+  const folded = fold && !open;
 
   // ---- the forecast, a moment after the plan stops changing
   const key = JSON.stringify(squad);
@@ -125,11 +136,15 @@ export const RaidPlan = (props: Props) => {
     const via = (squad.groups[squad.groups.length - 1]?.approach ?? -1) + 1;
     onSquad({ groups: [...squad.groups, { scouts: {}, approach: via % Math.max(1, approaches.length) }] });
     onChoose(squad.groups.length);
+    // A new group has nobody in it yet: the card opens on it.
+    setOpen(true);
     playSound("place");
   };
 
   // ---- a chip dragged onto a path
   const drag = useRef<{ group: number; x: number; y: number; moved: boolean } | null>(null);
+  /** The click that ends a drag is not a tap on the tab (which, folded, would open the card). */
+  const dragged = useRef(false);
   const [ghost, setGhost] = useState<{ group: number; x: number; y: number } | null>(null);
   const down = (event: ReactPointerEvent, at: number) => {
     drag.current = { group: at, x: event.clientX, y: event.clientY, moved: false };
@@ -146,11 +161,111 @@ export const RaidPlan = (props: Props) => {
     const was = drag.current;
     drag.current = null;
     setGhost(null);
+    dragged.current = Boolean(was?.moved);
     if (was?.moved) props.onDrop(was.group, event.clientX, event.clientY);
   };
 
   const canGo = problems.length === 0 && props.blocked === null;
   const roomBad = problems.includes("room");
+  const tabs = (
+    <div className="pip-raid-groups" role="tablist" aria-label="Groups">
+      {squad.groups.map((entry, at) => {
+        const mine = groupProblems(entry, setup);
+        const colour = APPROACH_COLOURS[entry.approach % APPROACH_COLOURS.length];
+        return (
+          <button
+            key={at}
+            type="button"
+            role="tab"
+            aria-selected={at === index}
+            className={`pip-raid-group${at === index ? " is-chosen" : ""}${entry.held ? " is-held" : ""}`}
+            style={{ "--group": colour } as CSSProperties}
+            title={`${approachShort(approaches[entry.approach])}: ${scoutsIn(entry)} ${entry.held ? "(held back)" : ""}. Drag onto a path to send it that way.`}
+            onClick={() => {
+              if (dragged.current) {
+                dragged.current = false;
+                return;
+              }
+              onChoose(at);
+              // Folded, a tab opens the card on its group; open, the tab being planned folds it again.
+              if (folded) setOpen(true);
+              else if (fold && at === index) setOpen(false);
+            }}
+            onPointerDown={(event) => down(event, at)}
+            onPointerMove={move}
+            onPointerUp={up}
+            onPointerCancel={() => {
+              drag.current = null;
+              setGhost(null);
+            }}
+          >
+            <span>{approachShort(approaches[entry.approach])}</span>
+            <strong className="pip-raid-group-count">{scoutsIn(entry)}</strong>
+            {entry.held && <Hourglass size={11} aria-label="Held back" />}
+            {entry.hero && props.heroName && <span className="sr-only">, with {props.heroName}</span>}
+            {mine.map((problem) => (
+              <Mark key={problem} problem={problem} />
+            ))}
+          </button>
+        );
+      })}
+      {squad.groups.length < GROUPS_MOST && (
+        <button type="button" className="pip-raid-key pip-raid-add" aria-label="Another group" title="Another group" onClick={add}>
+          <Plus size={14} aria-hidden />
+        </button>
+      )}
+    </div>
+  );
+  const goRow = (
+    <div className="pip-raid-go">
+      <p className={`pip-raid-likely${waiting ? " is-waiting" : ""}`} aria-live="polite" data-likely={band && !waiting ? band.likely : ""}>
+        {problems.length > 0 ? (
+          problems.filter((problem) => problem !== "room" && problem !== "bombers").map((problem) => <Mark key={problem} problem={problem} />)
+        ) : band ? (
+          <>
+            <span>Likely</span>
+            <StarPips count={band.likely} />
+            {band.low !== band.high && (
+              <span className="pip-raid-band" title={`Between ${band.low} and ${band.high} stars, as it can go`}>
+                {band.low}–{band.high}
+              </span>
+            )}
+          </>
+        ) : (
+          <span>…</span>
+        )}
+      </p>
+      <button
+        type="button"
+        className="tactile-button tactile-button-primary flex items-center gap-1.5 px-4 py-1.5 text-sm font-semibold disabled:opacity-60"
+        disabled={!canGo}
+        title={props.blocked ?? (problems.length > 0 ? problems.map((problem) => PROBLEM_WORDS[problem]).join(". ") : "The scouts set out: this spends a raid's rest")}
+        onClick={props.onGo}
+      >
+        <Swords size={14} aria-hidden /> Go
+      </button>
+    </div>
+  );
+  const ghostTag = ghost && (
+    <span className="pip-raid-ghost" style={{ left: ghost.x, top: ghost.y, "--group": APPROACH_COLOURS[(squad.groups[ghost.group]?.approach ?? 0) % APPROACH_COLOURS.length] } as CSSProperties} aria-hidden="true">
+      <i className="pip-raid-swatch" />
+      {scoutsIn(squad.groups[ghost.group] ?? { scouts: {}, approach: 0 })}
+    </span>
+  );
+
+  if (folded)
+    return (
+      <section className="pip-raid-panel pip-raid-plan is-folded" aria-label="The plan">
+        <div className="pip-raid-fold-row">
+          <button type="button" className="pip-raid-key" aria-label="Back to scouting" title="Back to scouting" onClick={props.onBack}>
+            <ArrowLeft size={15} aria-hidden />
+          </button>
+          {tabs}
+          {goRow}
+        </div>
+        {ghostTag}
+      </section>
+    );
   return (
     <section className="pip-raid-panel pip-raid-plan" aria-label="The plan">
       <button type="button" className="pip-raid-key pip-raid-panel-close" aria-label="Back to the map" title="Back to the map" onClick={props.onClose}>
@@ -179,47 +294,14 @@ export const RaidPlan = (props: Props) => {
         >
           <RotateCcw size={14} aria-hidden />
         </button>
-      </div>
-
-      {/* The groups: a chip each, dragged onto a path to send it that way. */}
-      <div className="pip-raid-groups" role="tablist" aria-label="Groups">
-        {squad.groups.map((entry, at) => {
-          const mine = groupProblems(entry, setup);
-          const colour = APPROACH_COLOURS[entry.approach % APPROACH_COLOURS.length];
-          return (
-            <button
-              key={at}
-              type="button"
-              role="tab"
-              aria-selected={at === index}
-              className={`pip-raid-group${at === index ? " is-chosen" : ""}${entry.held ? " is-held" : ""}`}
-              style={{ "--group": colour } as CSSProperties}
-              title={`${approachShort(approaches[entry.approach])}: ${scoutsIn(entry)} ${entry.held ? "(held back)" : ""}. Drag onto a path to send it that way.`}
-              onClick={() => onChoose(at)}
-              onPointerDown={(event) => down(event, at)}
-              onPointerMove={move}
-              onPointerUp={up}
-              onPointerCancel={() => {
-                drag.current = null;
-                setGhost(null);
-              }}
-            >
-              <span>{approachShort(approaches[entry.approach])}</span>
-              <strong className="pip-raid-group-count">{scoutsIn(entry)}</strong>
-              {entry.held && <Hourglass size={11} aria-label="Held back" />}
-              {entry.hero && props.heroName && <span className="sr-only">, with {props.heroName}</span>}
-              {mine.map((problem) => (
-                <Mark key={problem} problem={problem} />
-              ))}
-            </button>
-          );
-        })}
-        {squad.groups.length < GROUPS_MOST && (
-          <button type="button" className="pip-raid-key pip-raid-add" aria-label="Another group" title="Another group" onClick={add}>
-            <Plus size={14} aria-hidden />
+        {fold && (
+          <button type="button" className="pip-raid-key ml-auto" aria-label="Fold the plan away" title="Fold the plan away" onClick={() => setOpen(false)}>
+            <ChevronDown size={16} aria-hidden />
           </button>
         )}
       </div>
+
+      {tabs}
 
       {group && (
         <div className="pip-raid-group-edit" role="tabpanel" style={{ "--group": APPROACH_COLOURS[group.approach % APPROACH_COLOURS.length] } as CSSProperties}>
@@ -303,40 +385,8 @@ export const RaidPlan = (props: Props) => {
         </div>
       )}
 
-      <div className="pip-raid-go">
-        <p className={`pip-raid-likely${waiting ? " is-waiting" : ""}`} aria-live="polite" data-likely={band && !waiting ? band.likely : ""}>
-          {problems.length > 0 ? (
-            problems.filter((problem) => problem !== "room" && problem !== "bombers").map((problem) => <Mark key={problem} problem={problem} />)
-          ) : band ? (
-            <>
-              <span>Likely</span>
-              <StarPips count={band.likely} />
-              {band.low !== band.high && (
-                <span className="pip-raid-band" title={`Between ${band.low} and ${band.high} stars, as it can go`}>
-                  {band.low}–{band.high}
-                </span>
-              )}
-            </>
-          ) : (
-            <span>…</span>
-          )}
-        </p>
-        <button
-          type="button"
-          className="tactile-button tactile-button-primary flex items-center gap-1.5 px-4 py-1.5 text-sm font-semibold disabled:opacity-60"
-          disabled={!canGo}
-          title={props.blocked ?? (problems.length > 0 ? problems.map((problem) => PROBLEM_WORDS[problem]).join(". ") : "The scouts set out: this spends a raid's rest")}
-          onClick={props.onGo}
-        >
-          <Swords size={14} aria-hidden /> Go
-        </button>
-      </div>
-      {ghost && (
-        <span className="pip-raid-ghost" style={{ left: ghost.x, top: ghost.y, "--group": APPROACH_COLOURS[(squad.groups[ghost.group]?.approach ?? 0) % APPROACH_COLOURS.length] } as CSSProperties} aria-hidden="true">
-          <i className="pip-raid-swatch" />
-          {scoutsIn(squad.groups[ghost.group] ?? { scouts: {}, approach: 0 })}
-        </span>
-      )}
+      {goRow}
+      {ghostTag}
     </section>
   );
 };

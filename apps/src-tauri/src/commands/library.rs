@@ -106,7 +106,8 @@ pub(crate) async fn import_one(path: &str, state: &State<'_, AppState>, epoch: u
     }
     let hash = {
       let source = source.clone();
-      tauri::async_runtime::spawn_blocking(move || storage::hash_for_import(&source))
+      // A smaller copy from a Drive backup is the book it was made from.
+      tauri::async_runtime::spawn_blocking(move || storage::book_hash_for_import(&source))
         .await
         .map_err(|e| format!("Import task failed: {e}"))?
         .map_err(|e| e.to_string())?

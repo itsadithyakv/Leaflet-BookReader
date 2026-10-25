@@ -109,6 +109,25 @@ describe("what the app loads at start", () => {
     "components/pip/arcade/quiz/ReviseWords.tsx",
     "components/pip/arcade/quiz/WordQuiz.tsx",
     "components/pip/arcade/quiz/MyWords.tsx",
+    // Study cards: the review and a book's cards (the same overlay), and making them in a reader (study/CardMakerHost.tsx).
+    "components/pip/arcade/quiz/CardQuiz.tsx",
+    "components/pip/arcade/quiz/BookCards.tsx",
+    "components/pip/arcade/quiz/CardFace.tsx",
+    "study/CardMaker.tsx",
+    "study/PictureCardMaker.tsx",
+    "study/CardMakerHost.tsx",
+    "study/pictureSource.ts",
+    "study/export.ts",
+    // Your Year in Pages: the sums, the story, its pictures, and Admin's preview of it (the Library's key needs only
+    // components/share/yearMoment.ts and the share store).
+    "components/share/YearReviewDialog.tsx",
+    "components/share/yearReview.ts",
+    "components/share/year/YearStory.tsx",
+    "components/share/year/SceneView.tsx",
+    "components/share/year/scenes.ts",
+    "components/share/year/draw.ts",
+    "components/share/year/render.ts",
+    "components/admin/YearPreviewPanel.tsx",
     // Pages and the card after a session.
     "pages/PipPage.tsx",
     "pages/SocialPage.tsx",

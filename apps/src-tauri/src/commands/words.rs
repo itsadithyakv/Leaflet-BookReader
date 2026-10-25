@@ -227,7 +227,7 @@ fn delete(db: &Database, ids: &[String], now: &str) -> Result<(), String> {
 /// (`merge_edited` then compares the rows, and a removal sorts after none),
 /// so an undo must be dated after the removal it takes back, even in the same
 /// millisecond or on a clock that has stepped back since.
-fn later_than(after: &str, now: &str) -> String {
+pub(super) fn later_than(after: &str, now: &str) -> String {
   use chrono::{DateTime, Duration, SecondsFormat, Utc};
   let parse = |value: &str| DateTime::parse_from_rfc3339(value).ok().map(|at| at.with_timezone(&Utc));
   match (parse(after), parse(now)) {

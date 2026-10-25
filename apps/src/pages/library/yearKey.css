@@ -1,0 +1,45 @@
+/* The Library's "Your 2026 in pages" key (YearKey.tsx), in season only: the
+   story's own moss and butter, so it reads as an occasion and not as one
+   more tool. It glints once when it appears, then holds still. */
+.year-key {
+  position: relative;
+  overflow: hidden;
+  border-radius: 999px;
+  color: #ffd86b;
+  background: linear-gradient(135deg, #2e6136, #1f3d2b);
+  box-shadow: inset 0 0 0 1px rgba(255, 216, 107, 0.45);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.year-key:hover {
+  box-shadow: inset 0 0 0 1px rgba(255, 216, 107, 0.85);
+}
+.year-key:active {
+  transform: scale(0.97);
+}
+.year-key:focus-visible {
+  outline: 2px solid #2e6136;
+  outline-offset: 2px;
+}
+.year-key.is-compact {
+  border-radius: 12px;
+}
+.year-key::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 35%, rgba(255, 251, 240, 0.35) 50%, transparent 65%);
+  transform: translateX(-110%);
+  animation: year-key-glint 1.6s 0.8s ease-out both;
+  pointer-events: none;
+}
+@keyframes year-key-glint {
+  to {
+    transform: translateX(110%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .year-key::after {
+    animation: none;
+    display: none;
+  }
+}

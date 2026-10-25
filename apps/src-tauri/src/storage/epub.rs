@@ -450,6 +450,32 @@ pub fn cover(path: &Path) -> Result<Option<Vec<u8>>> {
   Ok(super::sniff_image_mime(&bytes).map(|_| bytes))
 }
 
+/// One picture inside the book, by its path in the archive (as epub.js names
+/// it, with or without the leading slash, its letters escaped or not), for a
+/// study card. Only a picture: the bytes must be one (an SVG is let through by
+/// its name, being text). None when the archive has no such file or it is
+/// over `limit` bytes (a damaged or hostile archive can claim any size).
+pub fn picture(path: &Path, inside: &str, limit: u64) -> Result<Option<Vec<u8>>> {
+  let mut archive = open_archive(path)?;
+  let plain = inside.trim_start_matches('/');
+  let decoded = urlencoding::decode(plain).map(|value| value.into_owned()).unwrap_or_else(|_| plain.to_string());
+  let name = [plain.to_string(), decoded].into_iter().find(|name| archive.by_name(name).is_ok());
+  let Some(name) = name else {
+    return Ok(None);
+  };
+  let file = archive.by_name(&name)?;
+  if file.size() > limit {
+    return Ok(None);
+  }
+  let mut bytes = Vec::with_capacity(file.size() as usize);
+  file.take(limit + 1).read_to_end(&mut bytes)?;
+  if bytes.len() as u64 > limit {
+    return Ok(None);
+  }
+  let svg = name.to_ascii_lowercase().ends_with(".svg");
+  Ok((svg || super::sniff_image_mime(&bytes).is_some()).then_some(bytes))
+}
+
 /// Every section in reading order with its size, read from the archive's
 /// directory (nothing is decompressed), for progress that reflects how much
 /// of the book is behind the reader rather than how many chapters.
@@ -551,6 +577,33 @@ mod tests {
         <itemref idref="note" linear="no"/>
       </spine>
     </package>"#;
+
+  #[test]
+  fn a_picture_is_read_from_the_archive_by_its_path_and_only_a_picture() {
+    use std::io::Write;
+    let dir = std::env::temp_dir().join(format!("leaflet-picture-{}", std::process::id()));
+    fs::create_dir_all(&dir).expect("dir");
+    let book = dir.join("book.epub");
+    {
+      let mut zip = zip::ZipWriter::new(fs::File::create(&book).expect("create"));
+      let options = zip::write::FileOptions::default();
+      zip.start_file("OEBPS/images/Heart Diagram.png", options).expect("file");
+      zip.write_all(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3]).expect("write");
+      zip.start_file("OEBPS/images/vein.svg", options).expect("file");
+      zip.write_all(b"<svg xmlns='http://www.w3.org/2000/svg'/>").expect("write");
+      zip.start_file("OEBPS/text/ch1.xhtml", options).expect("file");
+      zip.write_all(b"<html/>").expect("write");
+      zip.finish().expect("finish");
+    }
+    let png = picture(&book, "/OEBPS/images/Heart%20Diagram.png", 1024).expect("read");
+    assert_eq!(png.as_deref().map(|bytes| bytes.len()), Some(11));
+    assert!(picture(&book, "OEBPS/images/Heart Diagram.png", 1024).expect("read").is_some(), "unescaped too");
+    assert!(picture(&book, "OEBPS/images/vein.svg", 1024).expect("read").is_some());
+    assert_eq!(picture(&book, "OEBPS/text/ch1.xhtml", 1024).expect("read"), None, "not a picture");
+    assert_eq!(picture(&book, "OEBPS/images/missing.png", 1024).expect("read"), None);
+    assert_eq!(picture(&book, "OEBPS/images/Heart Diagram.png", 4).expect("read"), None, "over the limit");
+    let _ = fs::remove_dir_all(&dir);
+  }
 
   #[test]
   fn reads_title_author_spine_and_the_epub3_cover() {

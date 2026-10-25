@@ -190,7 +190,7 @@ export const SocialPage = ({ showToast, nowReading, onReadNow, onNavigate }: Soc
 
           <YearGoalCard />
 
-          {/* The year as one picture to keep or share (components/share). */}
+          {/* The year as a story to look back on and share (components/share/year). */}
           {reviewYear !== null && (
             <button
               type="button"
@@ -199,7 +199,7 @@ export const SocialPage = ({ showToast, nowReading, onReadNow, onNavigate }: Soc
             >
               <span>
                 <span className={EYEBROW}>Year in review</span>
-                <span className="mt-2 block text-xl font-semibold text-on-surface">Your {reviewYear} in books</span>
+                <span className="mt-2 block text-xl font-semibold text-on-surface">Your {reviewYear} in pages</span>
               </span>
               <span className="material-symbols-outlined text-on-surface-variant" aria-hidden="true">
                 chevron_right

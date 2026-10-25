@@ -4,7 +4,7 @@ import { group } from "../../../../pip/base/squad";
 import type { GameArt } from "../gameArt";
 import { FALL_SECONDS, newFx, stepFx, takeEvents } from "./raidFx";
 import { groundBox, type FieldView } from "./raidLayout";
-import { APPROACH_COLOURS, newLooks, notice, paintGround, paintLive, remember, unitArt, type RaidScene } from "./raidPaint";
+import { APPROACH_COLOURS, HEDGE_GROUND, drawnOffset, formationShare, formationSlot, newLooks, notice, paintGround, paintLive, remember, unitArt, type RaidScene } from "./raidPaint";
 import { KIND_ART, KINDS } from "./raidWords";
 
 /**
@@ -223,5 +223,81 @@ describe("the raid's field, painted", () => {
     };
     expect(flags(null)).toBe(battle.approaches.length);
     expect(flags({ x0: 40, x1: 240, y0: 0, y1: 120 })).toBe(battle.approaches.length * 2);
+  });
+
+  it("paints the thorn hedge as brambles on the grass, not a dark block (2026-10-26)", () => {
+    const thorns = new Battle({ n: 9, king: false, capacity: 13, level: 4, kinds: ["sprout"], fast: false, squad: { groups: [group({ sprout: 6 }, 0)] } });
+    const hedge = thorns.zones.find((zone) => zone.kind === "thorns");
+    if (!hedge || !("x0" in hedge)) throw new Error("stronghold 10 has a thorn hedge");
+    const canvasOf = (ctx: CanvasRenderingContext2D) => {
+      const sized = { width: 0, height: 0 };
+      return { getContext: () => ctx, set width(value: number) { sized.width = value; }, get width() { return sized.width; }, set height(value: number) { sized.height = value; }, get height() { return sized.height; } } as unknown as HTMLCanvasElement;
+    };
+    const fills = filled();
+    paintGround(canvasOf(fills.ctx), VIEW, { battle: thorns, art, season: 0, region: 3 });
+    // Its own ground is a scatter of darker blades, a fifth of it at most: the grass shows through. (It was filled.)
+    const area = (hedge.x1 - hedge.x0 + 1) * (hedge.y1 - hedge.y0 + 1);
+    expect(fills.by(HEDGE_GROUND)).toBeGreaterThan(0);
+    expect(fills.by(HEDGE_GROUND)).toBeLessThan(area * 0.2);
+    expect(fills.by("#5E6E34") + fills.by("#6E7E3A")).toBe(0);
+    // Brambles of both shapes, a few, with room between them.
+    const { ctx, placed } = recorder();
+    paintGround(canvasOf(ctx), VIEW, { battle: thorns, art, season: 0, region: 3 });
+    const bushes = placed.filter(([name]) => name === "raidzone:0" || name === "raidzone:4");
+    expect(new Set(bushes.map(([name]) => name)).size).toBe(2);
+    expect(bushes.length).toBeGreaterThanOrEqual(4);
+    expect(bushes.length).toBeLessThanOrEqual(Math.ceil(area / 100));
+  });
+
+  it("spreads a group held up at a crossing into a loose formation, each scout in a place of its own that never changes", () => {
+    const ford = new Battle({ n: 7, king: false, capacity: 13, level: 4, kinds: ["sprout", "mole"], fast: false, squad: { groups: [group({ sprout: 6 }, 0)] } });
+    const water = ford.zones.find((zone) => zone.kind === "water");
+    if (!water || !("x0" in water)) throw new Error("stronghold 8 has a ford");
+    const middle = (water.y0 + water.y1) / 2;
+    for (const orient of ["wide", "tall"] as const) {
+      // Fifteen places, none two the same, all within the water's breadth.
+      const slots = Array.from({ length: 15 }, (_, id) => {
+        const at = drawnOffset(ford, { id, kind: "sprout" }, (water.x0 + water.x1) / 2, middle, orient);
+        return { x: at.x, y: at.y };
+      });
+      expect(new Set(slots.map((slot) => `${slot.x},${slot.y}`)).size).toBe(15);
+      for (const slot of slots) {
+        expect(middle + slot.y).toBeGreaterThanOrEqual(water.y0);
+        expect(middle + slot.y).toBeLessThanOrEqual(water.y1);
+      }
+      // Spread most across the screen (along the trail on a wide field, from bank to bank upright), a scout's width or
+      // so apart, and some the other way too: a formation, not a file.
+      const along = slots.map((slot) => slot.x);
+      const across = slots.map((slot) => slot.y);
+      const [screen, other] = orient === "wide" ? [along, across] : [across, along];
+      expect(Math.max(...screen) - Math.min(...screen), orient).toBeGreaterThanOrEqual(28);
+      expect(Math.max(...other) - Math.min(...other), orient).toBeGreaterThanOrEqual(12);
+    }
+    // A scout wading across, a quarter of a field pixel at a time: it moves out into its place and back into file
+    // smoothly (never a jump, never drawn going backward), is in its place in the water, and on its way as it was
+    // before and after.
+    for (const id of [0, 3, 7, 11, 13]) {
+      const unit = { id, kind: "sprout" as const };
+      let was = drawnOffset(ford, unit, water.x0 - 24, middle);
+      let wasX = water.x0 - 24;
+      const plain = { ...was };
+      for (let x = water.x0 - 23.75; x <= water.x1 + 24; x += 0.25) {
+        const now = drawnOffset(ford, unit, x, middle);
+        expect(Math.hypot(now.x - was.x, now.y - was.y), `scout ${id} at ${x}`).toBeLessThan(0.5);
+        expect(x + now.x, `scout ${id} drawn going forward at ${x}`).toBeGreaterThan(wasX + was.x);
+        was = now;
+        wasX = x;
+      }
+      const slot = formationSlot(id, water, "wide");
+      const at = drawnOffset(ford, unit, (water.x0 + water.x1) / 2, middle);
+      expect(at.x - plain.x).toBeCloseTo(slot.x);
+      expect(at.y).toBeCloseTo(slot.y);
+      expect(drawnOffset(ford, unit, water.x1 + 24, middle)).toEqual(plain);
+      expect(formationShare(water, water.x0 - 24, middle)).toBe(0);
+      // Spreading out on the bank as they come to it, before the first step in.
+      expect(formationShare(water, water.x0 - 1, middle)).toBeGreaterThan(0.25);
+    }
+    // A mole goes under, as it walks.
+    expect(drawnOffset(ford, { id: 3, kind: "mole" }, (water.x0 + water.x1) / 2, middle)).toEqual(drawnOffset(ford, { id: 3, kind: "mole" }, water.x0 - 30, middle));
   });
 });

@@ -18,8 +18,9 @@
                      foot). rank cracked
  raidrubble 44 x 16  what is left once a thing falls, and stays for the rest of the raid: variant 0 a section of
                      wall, 1 a gate, 2 a perch, 3 a hoard, 4 the nest, 5 a building of a friend's camp
- raidzone   16 x 12  a hazard: variant 0 a clump of thorns, 1 a pit under leaves (scuffed, as a careful eye would
-                     see it), 2 a pit sprung, 3 reeds at the ford's edge
+ raidzone   16 x 12  a hazard: variant 0 a bramble (arching canes, pale thorns, a blackberry), 1 a pit under leaves
+                     (scuffed, as a careful eye would see it), 2 a pit sprung, 3 reeds at the ford's edge, 4 a bramble
+                     of another shape
  raidflag    8 x 12  a group's pennant, where its approach begins; variant 0 to 3 its colour (`FLAG_COLOURS`)
  raidunit   16 x 16  4 frames, walking right: one of the reader's scouts, outlined dark, its shadow under it.
                      variant 0 a sprout, 1 a slinger, 2 a mole, 3 a Puffcap
@@ -349,20 +350,65 @@ const raidrubble = {
 };
 
 // ---------------------------------------------------------------- hazards
+/**
+ * A bramble (2026-10-26: the old clump was dark stems and dark leaves, and a hedge of them read as one dark block). Now
+ * a few canes arching up out of the ground and over, the colour of a blackberry's cane, each in its ink line, with the
+ * grass showing under every arch; pale thorns stand out along the canes' backs, and a leaf or two, a blackberry and a
+ * red one hang on them. `other`: the second shape, so a hedge of them is not all one clump over and over.
+ */
+const CANE = ["#D46F84", "#9C3E56", "#6A2436"];
+const THORN = "#FFF1CF";
+const BRAMBLE_ARCS = [
+  // [foot x, top x, top y (rows over the ground), end x, end y over the ground]: a tall cane, a short one, a stub.
+  [[1, 6, 9, 13, 2], [9, 12, 6, 15, 0], [4, 3, 4, 1, 3]],
+  [[2, 4, 6, 8, 1], [6, 10, 9, 15, 3], [12, 13, 3, 14, 0]]
+];
+const bramble = (g, G, other) => {
+  const arcs = BRAMBLE_ARCS[other ? 1 : 0];
+  /** Points along an arch, a pixel apart: up from its foot through its top, and over and down to its end. */
+  const along = ([fx, tx, ty, ex, ey], each) => {
+    // A quadratic curve through the top, as a cane grows and bends over under its own weight.
+    const cx = 2 * tx - (fx + ex) / 2, cy = 2 * ty - ey / 2;
+    let last = "";
+    for (let k = 0; k <= 40; k++) {
+      const t = k / 40, u = 1 - t;
+      const x = Math.round(u * u * fx + 2 * u * t * cx + t * t * ex), y = Math.round(G - (2 * u * t * cy + t * t * ey));
+      if (`${x},${y}` === last) continue;
+      last = `${x},${y}`;
+      each(x, y, t);
+    }
+  };
+  // The canes, two pixels thick: lit along their backs, darker under, darkest at the ground. Grass under every arch.
+  g.stamp((l) => arcs.forEach((arc) => along(arc, (x, y, t) => {
+    l.px(x, y, y >= G - 1 ? CANE[2] : CANE[0]);
+    if (y < G) l.px(x, y + 1, t > 0.85 ? CANE[2] : CANE[1]);
+  })), INK);
+  // Thorns: pale teeth standing up off the canes' backs, out of the ink line into the open, every other pixel.
+  arcs.forEach((arc, k) => {
+    let n = 0;
+    along(arc, (x, y) => {
+      if (y >= G - 2 || n++ % 2 !== k % 2) return;
+      const spot = [[x, y - 2], [x + 1, y - 2], [x - 1, y - 2]].find(([tx, ty]) => !g.get(tx, ty) && g.get(tx, ty + 1));
+      if (spot) g.px(spot[0], spot[1], THORN);
+    });
+  });
+  // A leaf on each of the long canes, and the fruit hanging under the tall one: a blackberry, and one still red.
+  const [fx, tx, ty, ex] = arcs[other ? 1 : 0];
+  const lx = Math.round((tx + ex) / 2), ly = G - ty + 2;
+  g.stamp((l) => l.px(lx, ly + 1, "#7CC456").px(lx + 1, ly + 1, "#4E9A3E").px(lx, ly + 2, "#4E9A3E"), "#1E3A1E");
+  const sx = Math.round((fx + tx) / 2) + (other ? 1 : -1), sy = G - Math.round(ty * 0.55);
+  g.stamp((l) => l.px(sx, sy, "#7CC456").px(sx - 1, sy, "#4E9A3E"), "#1E3A1E");
+  const bx = Math.round(tx + (ex - tx) * 0.3), by = G - ty + 3;
+  g.stamp((l) => l.rect(bx, by, 2, 2, "#3A1E4A").px(bx, by, "#A88AD8"), INK);
+  g.stamp((l) => l.px(other ? 3 : 12, G - 3, "#E0393E"), INK);
+};
+
 const raidzone = {
   w: 16, h: 12,
   draw(g, f, o) {
-    const kind = level(o, 3), G = 11;
-    if (kind === 0) {
-      // Thorns: arching stems, dark leaves, pale thorns, a few red berries.
-      g.stamp((l) => {
-        l.line(2, G, 6, G - 7, "#4A2E1E").line(6, G - 7, 10, G - 2, "#4A2E1E").line(7, G, 11, G - 8, "#3E2A1E").line(11, G - 8, 14, G - 1, "#3E2A1E").line(4, G, 9, G - 9, "#56382A");
-        [[4, G - 4], [9, G - 6], [12, G - 4], [7, G - 2], [5, G - 7]].forEach(([x, y]) => l.px(x, y, "#2F6B3A").px(x + 1, y, "#245A30"));
-      }, "#1A120C");
-      [[3, G - 3], [8, G - 8], [13, G - 5], [10, G - 3]].forEach(([x, y]) => g.px(x, y, "#F0E4C0"));
-      g.px(6, G - 5, "#C8453B").px(11, G - 6, "#C8453B").px(9, G - 1, "#E0393E");
-      return;
-    }
+    const kind = level(o, 4), G = 11;
+    if (kind === 0 || kind === 4) bramble(g, G, kind === 4);
+    if (kind === 0 || kind === 4) return;
     if (kind === 1) {
       // A pit hidden: a patch of leaves a little too neat, sticks laid across under them.
       g.ell(8, G - 3, 6, 2.6, "#3A2A1E22");

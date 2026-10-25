@@ -237,6 +237,54 @@ export const ripples = (ctx: CanvasRenderingContext2D, orient: Orient, zone: Str
   });
 };
 
+/**
+ * A thorn hedge across the trail (2026-10-26: a patch of dark ground under dark clumps, it read as one dark block, not
+ * as brambles). Now the grass shows through all of it: only a scatter of its own darker blades says where the hedge's
+ * ground is. On it, brambles (`raidzone` 0 and 4, the second also turned about) in staggered rows with grass between
+ * every one, and fallen canes, each with a thorn, in the gaps: the canes' pinks, the pale thorns and the fruit read as
+ * bramble on the green, and a thing that will hold and scratch whoever goes through.
+ */
+const BRAMBLES = [0, 4] as const;
+const FALLEN = "#6E2A3C";
+export const HEDGE_GROUND = "#5E7032";
+const hedge = (ctx: CanvasRenderingContext2D, orient: Orient, zone: Stretch, art: GameArt) => {
+  for (let y = Math.floor(zone.y0); y <= zone.y1; y++) {
+    for (let x = Math.floor(zone.x0); x <= zone.x1; x++) {
+      // Its own ground: one blade in four darker, and none at all toward its rim, so it fades into the grass.
+      if (fordReach(zone, x, y) > 0.92 || (x + y * 2) % 4 !== 0 || rand(x * 3.7 + y * 11.1) < 0.35) continue;
+      ctx.fillStyle = HEDGE_GROUND;
+      const at = toPicture({ orient }, x, y);
+      ctx.fillRect(at.x, at.y, 1, 1);
+    }
+  }
+  // Fallen canes in the gaps between the rows: a short dark stroke, a thorn on it.
+  for (let row = 0, y = zone.y0 + 4; y <= zone.y1 - 2; row++, y += 9) {
+    for (let x = zone.x0 + (row % 2 ? 3 : 9); x <= zone.x1 - 3; x += 14) {
+      const at = toPicture({ orient }, x, y);
+      const px = Math.round(at.x);
+      const py = Math.round(at.y);
+      ctx.fillStyle = FALLEN;
+      ctx.fillRect(px, py, 3, 1);
+      ctx.fillRect(px + 3, py - 1, 1, 1);
+      ctx.fillStyle = "#FFF1CF";
+      ctx.fillRect(px + 1, py - 1, 1, 1);
+    }
+  }
+  // The brambles, the back rows first, with the grass under each arch.
+  const drawn: Array<{ x: number; y: number; variant: number; flip: boolean }> = [];
+  for (let row = 0, y = zone.y0 + 8; y <= zone.y1 + 4; row++, y += 9) {
+    for (let x = zone.x0 + (row % 2 ? 10 : 3), k = 0; x <= zone.x1 - 1; x += 14, k++) {
+      const at = toPicture({ orient }, x, y);
+      drawn.push({ x: at.x, y: at.y, variant: BRAMBLES[(row + k) % 2], flip: (row * 3 + k) % 3 === 1 });
+    }
+  }
+  drawn.sort((a, b) => a.y - b.y);
+  for (const bush of drawn) {
+    const sprite = art.sprite("raidzone", 0, { variant: bush.variant });
+    if (sprite) stand(ctx, sprite.image, sprite.w, sprite.h, bush.x, bush.y, bush.flip);
+  }
+};
+
 /** Which pieces of the map's land (`landbit`) grow round a stronghold of each region: the region's own two. */
 const WOODS: ReadonlyArray<readonly number[]> = [[0, 1, 0], [2, 3, 1], [4, 5, 1], [6, 7, 6], [8, 9, 8], [11, 10, 11]];
 
@@ -383,26 +431,7 @@ export const paintGround = (
       const at = toPicture({ orient }, zone.x, zone.y);
       if (leaves) ctx.drawImage(leaves.image, Math.round(at.x - leaves.w / 2), Math.round(at.y - leaves.h + 4));
     } else if (zone.kind === "water") water(ctx, orient, zone);
-    else {
-      // (2026-10-25) A hedge: a patch of dark, trodden ground with a clean edge, and the clumps on it in loose staggered
-      // rows with the ground between them showing (packed edge to edge they were one noisy block).
-      for (let y = Math.floor(zone.y0); y <= zone.y1; y++) {
-        for (let x = Math.floor(zone.x0); x <= zone.x1; x++) {
-          const d = fordReach(zone, x, y);
-          if (d > 1.02) continue;
-          ctx.fillStyle = d > 0.9 ? "#6E7E3A" : "#5E6E34";
-          const at = toPicture({ orient }, x, y);
-          ctx.fillRect(at.x, at.y, 1, 1);
-        }
-      }
-      const clump = art.sprite("raidzone", 0, { variant: 0 });
-      for (let row = 0, y = zone.y0 + 2; y <= zone.y1 - 2; row++, y += 9) {
-        for (let x = zone.x0 + (row % 2 ? 8 : 2); x <= zone.x1 - 2; x += 13) {
-          const at = toPicture({ orient }, x, y + 6);
-          if (clump) ctx.drawImage(clump.image, Math.round(at.x - clump.w / 2), Math.round(at.y - clump.h));
-        }
-      }
-    }
+    else hedge(ctx, orient, zone, art);
   }
   for (const zone of battle.zones) {
     if (zone.kind !== "water") continue;
@@ -570,6 +599,58 @@ const SPREAD: ReadonlyArray<readonly [number, number]> = [
   [-4, -8],
   [11, -6]
 ];
+
+/**
+ * A group held up at the ford or in the thorns (2026-10-26). There they all go at a fifth or half of their pace, so the
+ * ones behind close up on the ones wading, and even spread as above a dozen were a lump in the water. So a scout coming
+ * to one is drawn moving out to its own place in a loose formation at the crossing (`formationSlot`), kept by its
+ * number, so it never changes and nothing twitches. It moves out into it slowly
+ * as it comes down the bank (the group gathers there, spread out, as it waits its turn to wade), and back into file as
+ * it comes out on the far side, by where it is and nothing else. A mole goes under both, and is drawn as it goes.
+ */
+/** How far up the bank (field pixels) a scout starts to move out into its place. */
+const RAMP = 14;
+/**
+ * A scout's place in a crossing's formation, by its number (field pixels): `x`, how far back or on along the trail from
+ * its place in the crowd (`SPREAD`), and `y`, its lane, from the trail's middle. A scout is taller than it is wide, so
+ * the formation is spread most across the screen: on a wide field, along the trail (five ranks, three lanes); upright,
+ * from bank to bank (five lanes, three ranks).
+ */
+export const formationSlot = (id: number, zone: Stretch, orient: Orient = "wide"): { x: number; y: number } => {
+  const half = (zone.y1 - zone.y0) / 2;
+  if (orient === "wide") {
+    const lane = (id % 3) - 1;
+    const rank = Math.floor(id / 3) % 5;
+    return { x: [0, 7, -7, 14, -14][rank] + (lane === 0 ? 3 : 0), y: Math.round(lane * Math.max(2, Math.min(8, half - 4))) };
+  }
+  const lane = (id % 5) - 2;
+  const rank = Math.floor(id / 5) % 3;
+  return { x: [0, -6, 6][rank] + (lane % 2 === 0 ? 0 : 3), y: Math.round(lane * Math.max(2, Math.min(7, (half - 2) / 2))) };
+};
+/**
+ * How far into its formation a scout at (x, y) is drawn: 0 on its way, 1 at the crossing's middle. It goes evenly, over
+ * the bank and half the crossing, so a scout drawn moving back in the formation still goes forward, only more slowly.
+ */
+export const formationShare = (zone: Stretch, x: number, y: number): number => {
+  if (y < zone.y0 - 4 || y > zone.y1 + 4) return 0;
+  const mid = (zone.x0 + zone.x1) / 2;
+  const into = (x - (zone.x0 - RAMP)) / (mid - (zone.x0 - RAMP));
+  const out = (zone.x1 + RAMP - x) / (zone.x1 + RAMP - mid);
+  return Math.max(0, Math.min(1, into, out));
+};
+/** Where a scout is drawn beside where it stands, in field pixels: its place in a crowd, or in a crossing's formation. */
+export const drawnOffset = (battle: Pick<Battle, "zones">, unit: Pick<Unit, "id" | "kind">, x: number, y: number, orient: Orient = "wide"): { x: number; y: number } => {
+  const [sx, sy] = SPREAD[unit.id % SPREAD.length];
+  if (unit.kind === "mole") return { x: sx, y: sy };
+  for (const zone of battle.zones) {
+    if (zone.kind === "pit") continue;
+    const share = formationShare(zone, x, y);
+    if (share <= 0) continue;
+    const slot = formationSlot(unit.id, zone, orient);
+    return { x: sx + slot.x * share, y: sy + (slot.y - sy) * share };
+  }
+  return { x: sx, y: sy };
+};
 
 /** A sprite stood with its foot at a picture point, whole pixels, turned to face left if asked. */
 const stand = (ctx: CanvasRenderingContext2D, image: CanvasImageSource, w: number, h: number, x: number, y: number, flip = false) => {
@@ -752,8 +833,9 @@ export const paintLive = (ctx: CanvasRenderingContext2D, view: Pick<FieldView, "
     const spot = at(unit);
     // A group comes out a step apart and walks its path in file: drawn as they stand they are one blob. Each is drawn
     // a few pixels to one side of where it is, always the same for it (by its number), so a group reads as a crowd.
-    const [sx, sy] = SPREAD[unit.id % SPREAD.length];
-    const picture = toPicture({ orient }, spot.x + sx, spot.y + sy);
+    // At a crossing, its place in the group's formation there (`drawnOffset`).
+    const shift = drawnOffset(battle, unit, spot.x, spot.y, orient);
+    const picture = toPicture({ orient }, spot.x + shift.x, spot.y + shift.y);
     // Facing: where it is going, on the picture, kept until that is clearly the other way.
     const target = unit.target !== null ? battle.structures[unit.target] : null;
     const towards = target ? toPicture({ orient }, target.x, target.y).x - picture.x : 0;

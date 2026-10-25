@@ -1881,6 +1881,11 @@
   background: #ffd23f;
 }
 
+/* On the dark theme's slate an empty star is grey, not a black one hard to see (2026-10-26). */
+:root[data-theme="dark"] .pip-lands-stars > i:not(.is-won)::after {
+  background: #5d6472;
+}
+
 .pip-lands-stars.is-card > i {
   width: 14px;
   height: 14px;

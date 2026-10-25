@@ -51,6 +51,7 @@ import {
   Shovel,
   Gamepad2,
   Eye,
+  GalleryHorizontalEnd,
   NotebookPen,
   UserRoundSearch,
   Users,
@@ -117,7 +118,8 @@ export type UiIconName =
   | "down"
   | "people"
   | "who"
-  | "relations";
+  | "relations"
+  | "cards";
 
 type UiIconProps = Omit<LucideProps, "ref"> & {
   name: UiIconName;
@@ -189,7 +191,8 @@ const icons: Record<UiIconName, LucideIcon> = {
   down: ChevronDown,
   people: Users,
   who: UserRoundSearch,
-  relations: Waypoints
+  relations: Waypoints,
+  cards: GalleryHorizontalEnd
 };
 
 export const UiIcon = ({ name, size = 20, ...props }: UiIconProps) => {

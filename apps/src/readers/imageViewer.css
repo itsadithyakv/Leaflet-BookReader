@@ -149,3 +149,10 @@
 .leaflet-zoom-chip[hidden] {
   display: none;
 }
+
+/* "Make a card": boxes over the picture's labels (study/PictureCardMaker.tsx). */
+.reader-image-viewer-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

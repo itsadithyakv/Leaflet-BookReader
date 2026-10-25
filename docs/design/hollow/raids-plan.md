@@ -202,6 +202,62 @@ the files beside it (docs/pip.md, "Raids: the Magpie Lands"):
 - Send's end card stands over the field as that raid left it, and a
   stronghold just taken stays the flow's (as a replay) for Try again.
 
+**The framing (2026-10-25, polished 2026-10-26 for 1.5.14).**
+- The field is framed on the stronghold and the last stretch of each
+  approach, not the whole field: 6× at 1366×768, 10× at 1920×1080. The
+  rest of the field is a drag away.
+- **On a wide screen** (laptop, desktop, a phone on its side), the cards
+  stand down the right. In the fight, the bar (bell, orders left, stars) and
+  the orders stand in one column there, past the camp, and the field is
+  framed to their left so nothing lies over it.
+- **On an upright phone** the field is turned, with the bar along the top
+  and the orders along the foot.
+- In a fight, a slow camera keeps the stronghold in view, with as much of
+  the fighting as fits.
+
+**The weak spots fixed (2026-10-26, for 1.5.14):**
+- **The planner on an upright phone** starts folded to one row: the groups'
+  tabs, the forecast's stars and Go. The field above it is about twice as
+  large as before (3.5× instead of 2×). A tab opens the card on its group,
+  a key folds it again, and the field is framed for whatever room the card
+  leaves, so every approach and its tag stays in view.
+- **Groups out of view in a fight** get a mark at the window's edge: an
+  arrow in the group's colour, with how many are out there. This covers
+  scouts still at the ford on an upright phone, even when the group's mole
+  is already at the gate.
+  - A tap on the mark eases the camera to them, and it stays with them until
+    its own framing has them in view.
+  - Under reduced motion the picture goes there at once. Otherwise the
+    camera stays calm: eased, at whole pixels.
+- **Second-gate strongholds** are framed on the camp, both gates and the ways
+  to them, and the wall runs off the view top and bottom: 6× instead of 5×
+  on a laptop, 3.5× instead of 3× in an upright phone's fight. A flank that comes
+  to a plain stretch of the wall at the field's edge keeps its tag at the
+  view's edge.
+- **Thorns** are a bramble hedge:
+  - canes in a blackberry's pinks arching over the grass, pale thorns along
+    their backs, leaves, a blackberry and a red one;
+  - two shapes, in staggered rows with grass between, and fallen canes in
+    the gaps.
+  - The grass shows through the hedge's ground, which is only a scatter of
+    darker blades.
+- **Each step starts from its own framing.** A drag made while scouting is
+  no longer carried into the plan. Keeping the scout's drag was never
+  clearly better: the plan's tags are laid out for the field as framed.
+- **A group held at the ford or in the thorns** is drawn as a loose
+  formation at the crossing, spread most across the screen: along the trail
+  on a wide field, from bank to bank on an upright phone. Each scout's place
+  is fixed by its number. It moves into its place evenly as it comes down
+  the bank, and is never drawn going backward. A mole, which goes under,
+  walks on as it is.
+- **The dark theme**, checked on the map and every raid screen:
+  - Ink on a group's own colour (tabs, chips, counts, marks) stays dark.
+  - The "too many" and "nearly out of time" warnings use the theme's own
+    colour, not a light pink.
+  - An empty star is grey, not black on the slate.
+
+No rule changed, so the sim was not run again.
+
 **Left:** the timing on the real phone; the Front's broken wall sections do
 not use the raid's rubble yet; a hero's move is not measured for stars.
 

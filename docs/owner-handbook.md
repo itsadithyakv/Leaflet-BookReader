@@ -368,6 +368,34 @@ The full setup, restore drill and disaster steps are in
   - Checked: tsc; vitest 4,494; cargo test 1,129; clippy clean; the raids sim
     (every target met).
   - No server change since 1.5.12, so no deploy is needed for it.
+- **1.5.14 committed and tagged `v1.5.14`** (local, like `v1.5.13`), and the
+  Store MSIX and test APK were built from that commit. It holds:
+  - **Raids, the weak spots:** a folding planner on upright phones, edge
+    markers for groups out of view, second-gate framing, bramble thorns, ford
+    formations, and dark mode.
+  - **Study cards** (`docs/design/study-plan.md`): fill-in, question and
+    picture cards, kept as annotations rows of kind `card`; one Revise for
+    words and cards; a book's cards with CSV export.
+    - A picture card's box missed its label on phones, because the maker's bar
+      grew. That was fixed before release, with a regression test.
+  - **Smaller Drive backups** (`storage/smaller.rs`), on by default:
+    - EPUB and CBZ pictures resized, covers down to 1000 px;
+    - text bytes unchanged, and a `leaflet-source.json` marker keeps the
+      original's identity;
+    - PDFs are sent as they are;
+    - measured 24% smaller on the owner's 63 books.
+  - **Sync:**
+    - leaving the app always syncs once the place has moved (the 30 s gap no
+      longer holds it back);
+    - **Sync now** in both readers' menus;
+    - a red dot and "Not syncing since …" on a device that used to sync and
+      now has nothing to sync through.
+  - **Your Year in Pages** (`docs/design/year-in-pages.md`): shown from 24
+    December to 7 January, with Admin → Year in pages as a preview. Its
+    Android notification is new Kotlin, compiled first in this APK build.
+  - **The streak panel's Calendar button**, laid out on one line.
+  - Checked: tsc; vitest 4,624; cargo test 1,168; clippy clean; the raids sim
+    (every target met). No server change.
 
 ## 7. Open items
 

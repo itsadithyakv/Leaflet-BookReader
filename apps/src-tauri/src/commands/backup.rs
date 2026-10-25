@@ -283,6 +283,8 @@ pub struct LargeBook {
 
 pub(crate) fn large_books_in(db: &db::Database) -> Result<Vec<LargeBook>, String> {
   let answers = crate::sync::large::Answers::load(db);
+  // With smaller backups, a book is as large as its smaller copy, once made.
+  let sizes = crate::storage::smaller::enabled(db).then(|| crate::sync::large::SentSizes::load(db));
   let mut large: Vec<LargeBook> = db
     .list_books()
     .map_err(|e| e.to_string())?
@@ -290,7 +292,10 @@ pub(crate) fn large_books_in(db: &db::Database) -> Result<Vec<LargeBook>, String
     .filter_map(|book| {
       let entry = crate::sync::merge::BookEntry::from_record(&book);
       let path = crate::sync::store::local_path_for(&entry).ok()?;
-      let bytes = crate::sync::large::file_bytes(&path);
+      let bytes = sizes
+        .as_ref()
+        .and_then(|sizes| sizes.get(&book.id))
+        .unwrap_or_else(|| crate::sync::large::file_bytes(&path));
       (bytes > crate::sync::large::LARGE_BOOK_BYTES).then(|| LargeBook {
         back_up: answers.get(&book.id),
         id: book.id,
@@ -323,6 +328,30 @@ pub fn set_large_book_backup(book_ids: Vec<String>, back_up: bool, state: State<
     answers.set(id, back_up);
   }
   answers.save(&db).map_err(|e| e.to_string())
+}
+
+/// This device's "Smaller backups" switch (`storage::smaller`), and what it
+/// has saved in Drive so far.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmallerBackups {
+  pub on: bool,
+  pub saved_bytes: u64
+}
+
+#[tauri::command(async)]
+pub fn smaller_backups(state: State<'_, AppState>) -> SmallerBackups {
+  let db = state.db.guard();
+  SmallerBackups { on: crate::storage::smaller::enabled(&db), saved_bytes: crate::storage::smaller::saved_bytes(&db) }
+}
+
+/// Turns smaller copies on or off for the files backed up from now on. What
+/// Drive already holds stays as it is, either way.
+#[tauri::command]
+pub fn set_smaller_backups(on: bool, state: State<'_, AppState>) -> Result<SmallerBackups, String> {
+  let db = state.db.guard();
+  crate::storage::smaller::set_enabled(&db, on).map_err(|e| e.to_string())?;
+  Ok(SmallerBackups { on, saved_bytes: crate::storage::smaller::saved_bytes(&db) })
 }
 
 /// Runs whichever transports are configured, as the library's owner allows
