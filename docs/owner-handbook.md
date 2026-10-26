@@ -397,6 +397,25 @@ The full setup, restore drill and disaster steps are in
   - Checked: tsc; vitest 4,624; cargo test 1,168; clippy clean; the raids sim
     (every target met). No server change.
 
+### 2026-10-26
+
+- **1.5.15 committed and tagged `v1.5.15`** (local), and the MSIX and APK
+  were built from that commit. It holds **the People tab**:
+  - search by the start of any word of a name or handle (`nameWords`,
+    indexed);
+  - browse public readers: active, most read, new, cursor-paged at 20;
+  - suggestions with their reasons;
+  - Followers and Following lists, with counts kept on the profile;
+  - "Follows you", three follow states, and kudos this month with an (i);
+  - "View my profile" in the profile menu;
+  - "Friends" renamed "Following".
+- **It needs a server deploy** ([deploy-1.5.15.md](deploy-1.5.15.md)). If
+  1.5.12's server is still not deployed, this deploy carries it too.
+  - Backfills run at start: `nameWords` each start; follow counts and the
+    month's kudos once each, marked in `meta`.
+  - The app degrades quietly on the old server.
+- Checked: tsc; vitest 4,634; server 330; cargo test 1,169; clippy clean.
+
 ## 7. Open items
 
 | # | What | Who |

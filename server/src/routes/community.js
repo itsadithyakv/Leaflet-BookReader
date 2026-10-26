@@ -22,7 +22,7 @@ import {
   socialProfilesById,
   visibleDuels
 } from "../community.js";
-import { asString, blocks, duels, events, followRequests, follows, kudos, profiles } from "../db.js";
+import { asString, duels, events, followRequests, follows, kudos, profiles } from "../db.js";
 import { HttpError, asyncHandler, smallJson } from "../http.js";
 import { wholeNumber } from "../input.js";
 import { defaultLimits } from "../rateLimit.js";
@@ -39,11 +39,13 @@ import {
   socialSelf,
   visibleByHandle
 } from "../readers.js";
-import { blockedWith, hasBlocked, refuseBlocked } from "../standing.js";
+import { blockedAmong, blockedWith, hasBlocked, refuseBlocked } from "../standing.js";
 import { isPlausibleDayKey, isWeekKey, plausibleWeekKeys, weekIsOver } from "../week.js";
 import { readablePost } from "./posts.js";
 import { HANDLE_PATTERN } from "./social.js";
 import { boardStamp, cachedBoard, cachedVisitors, forgetVisitors, rememberBoard, rememberVisitors } from "../boardCache.js";
+import { addFollow, countOf, removeFollow } from "../followCounts.js";
+import { countKudosReceived, forgetSuggestions, kudosThisMonth, queryWords, relationsFor, wordsFilter } from "../people.js";
 
 /**
  * The interactive half of the board: following, kudos, weekly duels, the
@@ -58,7 +60,16 @@ import { boardStamp, cachedBoard, cachedVisitors, forgetVisitors, rememberBoard,
  */
 
 const LEADERBOARD_LIMIT = 100;
-const SEARCH_LIMIT = 10;
+/** How many readers a search answers with (it was ten, by handle alone, before 1.5.15). */
+const SEARCH_LIMIT = 20;
+/**
+ * How many matches a search reads to rank: a word as short as one letter
+ * matches a great many readers, and only so many are read, in the index's
+ * order, before the best twenty of them are picked.
+ */
+const SEARCH_READ = 60;
+/** What a search reads of each profile it finds. */
+const SEARCH_FIELDS = { handle: 1, displayName: 1, avatar: 1, visibility: 1, weekKey: 1, weekMinutes: 1, streak: 1, nameWords: 1 };
 const REQUEST_LIMIT = 100;
 /** The most seeds two readers can put on a duel. The apps hold and settle them. */
 const MAX_STAKE = 50;
@@ -219,17 +230,24 @@ export function communityRoutes(db, limits = defaultLimits()) {
         throw new HttpError(404, NO_SUCH_READER);
       }
       if (!(await canSee(db, meId, profile))) {
-        const [asked, youBlocked] = meId
+        const [asked, youBlocked, followsYou] = meId
           ? await Promise.all([
               followRequests(db).findOne({ fromId: meId, toId: profile._id }, { projection: { _id: 1 } }),
-              hasBlocked(db, meId, profile._id)
+              hasBlocked(db, meId, profile._id),
+              follows(db).findOne({ followerId: profile._id, followeeId: meId }, { projection: { _id: 1 } })
             ])
-          : [null, false];
+          : [null, false, null];
         response.json({
           ...personView(profile),
           visibility: "followers",
           locked: true,
           requested: Boolean(asked),
+          // How the caller stands, in the one word the app's button shows
+          // (1.5.15): asked and waiting, or not yet.
+          followState: asked ? "requested" : "none",
+          // They follow the caller, which the caller's own list of followers
+          // says already.
+          followsYou: Boolean(followsYou),
           isYou: false,
           following: false,
           // Only when it is so (a block removes the follow, so a blocked
@@ -254,11 +272,11 @@ export function communityRoutes(db, limits = defaultLimits()) {
         return;
       }
       const weekKey = askedWeek(request.query.week);
-      const [kudosThisWeek, followerCount, followingCount] = await Promise.all([
-        kudos(db).countDocuments({ toId: profile._id, weekKey }),
-        follows(db).countDocuments({ followeeId: profile._id }),
-        follows(db).countDocuments({ followerId: profile._id })
-      ]);
+      const kudosThisWeek = await kudos(db).countDocuments({ toId: profile._id, weekKey });
+      // Kept on the profile as follows come and go (`followCounts.js`), not
+      // counted here: that was two counts of the follows for every profile shown.
+      const followerCount = countOf(profile.followerCount);
+      const followingCount = countOf(profile.followingCount);
       const view = {
         ...personView(profile),
         visibility: profile.visibility,
@@ -278,6 +296,8 @@ export function communityRoutes(db, limits = defaultLimits()) {
         // which is for the readers who follow them.
         sharesLibrary: profile.shareLibrary === true,
         kudosThisWeek,
+        // Kept on the profile (`people.js`): kudos themselves expire after 21 days.
+        kudosThisMonth: kudosThisMonth(profile),
         followerCount,
         followingCount
       };
@@ -297,6 +317,9 @@ export function communityRoutes(db, limits = defaultLimits()) {
         Object.assign(view, {
           isYou,
           isFollowing: Boolean(following),
+          // The button's word (1.5.15). A full card is never "requested": a
+          // followers-only reader is seen in full only once they accepted.
+          followState: following ? "following" : "none",
           followsYou: Boolean(followsYou),
           // The reader has blocked this one (and can undo it from here).
           youBlocked,
@@ -359,14 +382,16 @@ export function communityRoutes(db, limits = defaultLimits()) {
         response.json({ following: false, requested: true });
         return;
       }
-      const { upsertedCount } = await follows(db).updateOne(pair, { $setOnInsert: { createdAt: now } }, { upsert: true });
+      // Counted on both profiles when this made it (`followCounts.js`).
+      const made = await addFollow(db, me._id, them._id, now);
       // A request left from when they shared with followers only is settled
       // by this follow.
       await followRequests(db).deleteOne(waiting);
       // A visit needs both to follow the other, so this changes both lists.
       forgetVisitors(me._id.toHexString());
       forgetVisitors(them._id.toHexString());
-      if (upsertedCount) {
+      forgetSuggestions(me._id.toHexString());
+      if (made) {
         await events(db).updateOne(
           { userId: them._id, type: "follow", actorId: me._id },
           { $setOnInsert: { refId: null, createdAt: now } },
@@ -390,12 +415,13 @@ export function communityRoutes(db, limits = defaultLimits()) {
       const them = HANDLE_PATTERN.test(handle) ? await profiles(db).findOne({ handle: asString(handle) }, { projection: { _id: 1 } }) : null;
       if (them) {
         await Promise.all([
-          follows(db).deleteOne({ followerId: request.account.id, followeeId: them._id }),
+          removeFollow(db, request.account.id, them._id),
           followRequests(db).deleteOne({ fromId: request.account.id, toId: them._id })
         ]);
         forgetVisitors(them._id.toHexString());
       }
       forgetVisitors(request.account.id.toHexString());
+      forgetSuggestions(request.account.id.toHexString());
       response.json({ following: false, requested: false });
     })
   );
@@ -410,10 +436,11 @@ export function communityRoutes(db, limits = defaultLimits()) {
     auth,
     asyncHandler(async (request, response) => {
       const meId = request.account.id;
-      const [ids, followerCount] = await Promise.all([
+      const [ids, mine] = await Promise.all([
         followedIds(db, meId),
-        follows(db).countDocuments({ followeeId: meId })
+        profiles(db).findOne({ _id: meId }, { projection: { followerCount: 1 } })
       ]);
+      const followerCount = countOf(mine?.followerCount);
       const byId = await socialProfilesById(db, ids, {}, PERSON_FIELDS);
       const following = [...byId.values()]
         .map(personView)
@@ -475,12 +502,9 @@ export function communityRoutes(db, limits = defaultLimits()) {
         throw new HttpError(409, `They already follow ${FOLLOW_LIMIT} readers, which is as many as anyone can.`);
       }
       const now = new Date();
-      await follows(db).updateOne(
-        { followerId: them._id, followeeId: meId },
-        { $setOnInsert: { createdAt: now } },
-        { upsert: true }
-      );
+      await addFollow(db, them._id, meId, now);
       await followRequests(db).deleteOne({ _id: waiting._id });
+      forgetSuggestions(them._id.toHexString());
       forgetVisitors(meId.toHexString());
       forgetVisitors(them._id.toHexString());
       await events(db).updateOne(
@@ -630,8 +654,9 @@ export function communityRoutes(db, limits = defaultLimits()) {
         ...(about ? { about } : {}),
         createdAt: now
       });
-      // Who has cheered whom, for the two kudos badges (`kudosBadges`).
-      await rememberKudos(db, me._id, them._id);
+      // Who has cheered whom, for the two kudos badges (`kudosBadges`), and
+      // this month's count on their profile (`people.js`).
+      await Promise.all([rememberKudos(db, me._id, them._id), countKudosReceived(db, them._id, now)]);
       const kudosThisWeek = await kudos(db).countDocuments({ toId: them._id, weekKey });
       response.status(201).json({ sent: true, kudosThisWeek });
     })
@@ -855,62 +880,79 @@ export function communityRoutes(db, limits = defaultLimits()) {
   );
 
   /**
-   * Shared profiles whose handle starts with `?q=`. At most ten.
+   * Shared profiles found by `?q=`: up to twenty whose name or handle has a
+   * word starting with each word of `q` (1.5.15; it was the start of the
+   * handle alone, at most ten). "ada lov" finds Ada Lovelace; "lov" finds her
+   * and @the_lovebird. The handle asked for exactly comes first, then
+   * handles that start with it, then names; readers who share publicly
+   * before those who share with followers only; then by handle.
    *
    * A reader who shares with followers only is found like any other, as a
    * locked card: `locked: true`, and no minutes or streak (sent as 0, so an
    * app from before `locked` existed still has numbers to draw). Signed in,
    * the cards of the readers who have accepted the reader's follow, and their
-   * own, are not locked.
+   * own, are not locked. Signed in, each also says how the two stand
+   * (`followState`, `followsYou`). A private profile is never found, and
+   * neither side of a block finds the other (the blocker unblocks from their
+   * list of blocked readers).
+   *
+   * One query on the search index (`people_search`), plus one on the handle
+   * when `q` could be a whole handle; then, signed in, one for blocks and
+   * three for how the two stand, each on twenty ids at most.
    */
   router.get(
     "/search",
     maybeAuth,
     asyncHandler(async (request, response) => {
       searches(`ip:${request.ip ?? "unknown"}`);
-      const q = cleanHandle(request.query.q);
-      // Only handle characters, so the anchored prefix is safe as a regex and
-      // is served by the handle index (which is why it says the handle is a
-      // string: see `asString`).
-      if (!/^[a-z0-9_-]{1,24}$/.test(q)) {
+      const words = queryWords(request.query.q);
+      if (words.length === 0) {
         response.json({ results: [] });
         return;
       }
       const weekKey = askedWeek(request.query.week);
-      const rows = await profiles(db)
-        .find(
-          { handle: asString(q, { $regex: `^${q}` }), visibility: { $in: SOCIAL } },
-          { projection: { handle: 1, displayName: 1, avatar: 1, visibility: 1, weekKey: 1, weekMinutes: 1, streak: 1 }, sort: { handle: 1 }, limit: SEARCH_LIMIT }
-        )
-        .toArray();
       const meId = request.account?.id ?? null;
-      // A reader who has blocked the one searching is not found by them.
-      const gone =
-        meId && rows.length
-          ? await blocks(db)
-              .find({ blockerId: { $in: rows.map((row) => row._id) }, blockedId: meId }, { projection: { blockerId: 1 } })
-              .toArray()
-          : [];
-      const unseen = new Set(gone.map((row) => row.blockerId.toHexString()));
-      const found = rows.filter((row) => isSocial(row) && !unseen.has(row._id.toHexString()));
-      const closed = found.filter((row) => row.visibility === "followers" && !(meId && row._id.equals(meId)));
-      // One query for all of them, not one each.
-      const accepted =
-        meId && closed.length
-          ? await follows(db)
-              .find({ followerId: meId, followeeId: { $in: closed.map((row) => row._id) } }, { projection: { followeeId: 1 } })
-              .toArray()
-          : [];
-      const open = new Set(accepted.map((row) => row.followeeId.toHexString()));
+      const handle = cleanHandle(request.query.q);
+      const [rows, exact] = await Promise.all([
+        profiles(db)
+          .find(
+            { ...wordsFilter(words), visibility: { $in: SOCIAL }, handle: { $type: "string" } },
+            { projection: SEARCH_FIELDS, limit: SEARCH_READ, hint: "people_search" }
+          )
+          .toArray(),
+        // The handle asked for exactly, however many others share its words.
+        HANDLE_PATTERN.test(handle)
+          ? profiles(db).findOne({ handle: asString(handle), visibility: { $in: SOCIAL } }, { projection: SEARCH_FIELDS })
+          : null
+      ]);
+      const byId = new Map(rows.map((row) => [row._id.toHexString(), row]));
+      if (exact) {
+        byId.set(exact._id.toHexString(), exact);
+      }
+      const rank = (row) =>
+        (row.handle === handle ? 0 : row.handle.startsWith(handle) ? 1 : 2) * 2 + (row.visibility === "public" ? 0 : 1);
+      const ranked = [...byId.values()]
+        .filter(isSocial)
+        .sort((a, b) => rank(a) - rank(b) || a.handle.localeCompare(b.handle))
+        .slice(0, SEARCH_LIMIT);
+      // Neither side of a block finds the other.
+      const unseen = meId ? await blockedAmong(db, meId, ranked.map((row) => row._id)) : new Set();
+      const found = ranked.filter((row) => !unseen.has(row._id.toHexString()));
+      const others = found.filter((row) => !(meId && row._id.equals(meId)));
+      const stand = await relationsFor(db, meId, others.map((row) => row._id));
       response.json({
         results: found.map((row) => {
-          const locked = closed.includes(row) && !open.has(row._id.toHexString());
+          const key = row._id.toHexString();
+          const self = Boolean(meId && row._id.equals(meId));
+          const how = stand.get(key);
+          const locked = row.visibility === "followers" && !self && how?.followState !== "following";
           return {
             ...personView(row),
             visibility: row.visibility,
             locked,
             weekMinutes: locked ? 0 : minutesFor(row, weekKey),
-            streak: locked ? 0 : row.streak ?? 0
+            streak: locked ? 0 : row.streak ?? 0,
+            ...(meId ? { isYou: self, followState: self ? "none" : how.followState, followsYou: self ? false : how.followsYou } : {})
           };
         })
       });

@@ -9,7 +9,7 @@ import { useAccountStore } from "../../store/accountStore";
 import { randomAvatar } from "../../pip/avatars";
 import { AvatarPicker } from "../AvatarPicker";
 import { EYEBROW } from "../ui/SectionHeader";
-import { COPY } from "./copy";
+import { COPY, PEOPLE_PLACE } from "./copy";
 import { PipAvatar } from "./PipAvatar";
 import { SharedShelf } from "./SharedShelf";
 import { at, errorText, nameToEdit } from "./format";
@@ -216,7 +216,7 @@ export const ProfileCard = ({ profile, loadError = null, onRetry, handleNudge = 
     if (!profile?.handle) {
       return;
     }
-    const invite = `Add me on Leaflet: ${at(profile.handle)} (Social → Board → Find readers)`;
+    const invite = `Add me on Leaflet: ${at(profile.handle)} (${PEOPLE_PLACE})`;
     passOn(invite, showToast, `Your handle is ${at(profile.handle)}.`);
   };
 

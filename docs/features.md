@@ -4545,7 +4545,8 @@ Behind `FEATURES.community`, and needs a Leaflet account. In order:
   avatars, rank changes and your gap to the next place. "Keep reading" starts
   a session long enough to pass the next reader, on the book you were last
   reading, and opens it.
-- **Duels**, the **Inbox** (which Pip reacts to) and **Find readers**.
+- **Duels** and the **Inbox** (which Pip reacts to). Finding readers moved to
+  the **People** tab in 1.5.15 (below).
 - Reader pages (a full page on the Social page since 1.5.5, it was a drawer):
   their camp in the Hollow as the banner (the Hollow postcard's picture),
   follow, kudos and weekly duels (accept or decline right there), their
@@ -4553,7 +4554,8 @@ Behind `FEATURES.community`, and needs a Leaflet account. In order:
   four or five stars), their library where they share it with you, their
   shelf and their other posts.
 - **Kudos**: one a day for each reader, from their page or from one of their
-  posts; one sent from a post says what it was for in their inbox ("for
+  posts (explained behind an (i) on a reader's page since 1.5.15: "A daily pat
+  on the back. One a day per reader; it doesn't cost or buy anything."); one sent from a post says what it was for in their inbox ("for
   finishing Dune"). Nothing is bought or earned with them, so trading them
   gains nothing. Two badges count *different* readers, which the server keeps
   (up to ten each, as the kudos themselves expire after 21 days):
@@ -4615,7 +4617,58 @@ Server side is in `server/`; see `server/README.md`.
 
 ---
 
-### Friends: what readers who follow each other share (1.4)
+### People: finding and following readers (1.5.15)
+
+The owner found profiles, the friend list and searching for people confusing,
+wanted to see every public account, and asked what kudos are. So:
+
+- **A People tab** on the Social page (`components/community/PeoplePanel.tsx`,
+  loaded when first opened), between Board and Following. It replaced "Find
+  readers" on the Board and "Add friends" under Friends (`ReaderSearch.tsx`,
+  removed). At the top a search by **name or handle**: the start of any word of
+  either ("lov" finds Ada Lovelace and @the_lovebird; accents and case do not
+  matter), up to twenty. With the field empty: **Suggested for you** (up to ten
+  public readers who posted about a book you are reading, or whom the readers
+  you follow follow, each with why), then **every public reader** in one of
+  three orders, "Active this week", "Most read" (this week's minutes) or
+  "New", twenty at a time with "Show more". Beside "Everyone", your
+  **Followers** and **Following**, each with its count. A card is a Pip, a
+  name, the @handle, this week's minutes (or why they are suggested), a small
+  "Follows you", and the follow button. Your handle is one tap away, to send
+  to a friend.
+- **Follow, Requested, Following** are the button's three states everywhere
+  (a card, a reader's page). Requested is a reader kept to followers who has
+  not answered; a tap takes the request back. Following is one-way, as before.
+- **A reader's page** says "Follows you", "128 followers · 64 following" under
+  the name, and "Kudos · 21 this month" with the (i). On your own page the
+  counts open your two lists, and in place of follow, kudos and duel it shows
+  who can see you (Public, Followers only) and "Edit profile" (the You card on
+  the Board).
+- **View my profile** in the profile picture's menu (top right) opens your
+  own page; while your profile is private (there is no page), the You card.
+- **"Friends" is "Following"** wherever it meant the readers you follow: the
+  tab, its headings, the club invite ("Social → Following → Join a club").
+  "Friends" stays for two readers who follow each other (a visit, a raid, a
+  present).
+- **Privacy is unchanged.** Browse and suggestions list public profiles only.
+  A profile kept to followers is found by search alone, as a locked card
+  (Pip, name, handle, Follow); a private one nowhere. A block hides both
+  readers from each other everywhere here, search included.
+- **Against an older server** (1.5.14 and before) the tab still searches (by
+  the start of the handle, as before), Following is the whole list at once,
+  and the rest is one quiet line: "More arrives with the next server update."
+  No error, no toast.
+
+**On the server** (`server/README.md`, "Finding readers"; needs the deploy in
+`docs/deploy-1.5.15.md`): search reads one multikey index of each profile's
+name and handle words; browse reads one index a page by cursor; suggestions
+are a handful of indexed queries kept ten minutes per reader; follower and
+following counts and this month's kudos are kept on the profile, backfilled
+once. All API calls go through Rust (`community_people`,
+`community_people_suggested`, `community_people_list`, `community_following`),
+each `None` from a server without the route.
+
+### Following (it was "Friends"): what readers who follow each other share (1.4)
 
 Everything here needs the server of this version (`server/README.md`,
 "Deploying this version"); against an older one the new calls fail quietly
@@ -4667,6 +4720,7 @@ proper reviews with like and dislike, and communities for a book "to discuss
 theories and stuff", all optional, and "creation of communities has to be
 well thought of so people don't abuse it". The Social page has five tabs
 now: Stats, Board (it was "Community"), Friends, Discover, Communities.
+(Since 1.5.15, six: Stats, Board, People, Following, Discover, Communities.)
 
 **What can be posted.** A post is one of three things about a book: that it
 is finished (stars and a line, as before), a review (stars and up to 3,000

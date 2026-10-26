@@ -259,6 +259,36 @@ describe("a reader's card, mounted", () => {
     await React.act(async () => root.unmount());
   });
 
+  it("says they follow you, their counts and this month's kudos with what kudos are behind an (i)", async () => {
+    profiles.ana = { ...full("ana"), isFollowing: false, followState: "none", kudosThisMonth: 9 };
+    await open("ana");
+    expect(shown()).toContain("Follows you");
+    expect(shown()).toContain("10 followers");
+    expect(shown()).toContain("4 following");
+    expect(shown()).toContain("this month");
+    expect(shown()).toContain("9");
+    expect(container.findAll((element) => element.getAttribute("aria-label") === "A daily pat on the back. One a day per reader; it doesn't cost or buy anything.")).toHaveLength(1);
+    expect(container.findAll((element) => element.tagName === "BUTTON" && element.getAttribute("aria-label") === "Follow @ana")).toHaveLength(1);
+    healthy();
+    await React.act(async () => root.unmount());
+  });
+
+  it("shows your own page with who can see it, and opens your lists from its counts", async () => {
+    profiles.me = { ...full("me"), isYou: true, isFollowing: false, followsYou: false, visibility: "followers", activeDuel: null };
+    await open("me");
+    expect(shown()).toContain("Followers only");
+    expect(shown()).toContain("Edit profile");
+    // No following, kudos or duel with yourself.
+    expect(container.findAll((element) => element.tagName === "BUTTON" && /Send kudos|Challenge/.test(element.textContent))).toHaveLength(0);
+    await click((element) => element.textContent.trim() === "4 following");
+    expect(useCommunityStore.getState().peopleView).toBe("following");
+    expect(useCommunityStore.getState().askedView).toBe("people");
+    expect(useCommunityStore.getState().openHandle).toBeNull();
+    useCommunityStore.setState({ askedView: null, peopleView: "everyone" });
+    healthy();
+    await React.act(async () => root.unmount());
+  });
+
   it("opens a handle with no profile, then one with", async () => {
     await open("nobody");
     expect(shown()).toContain("No shared profile");

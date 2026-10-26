@@ -11,7 +11,11 @@ import { MongoClient } from "mongodb";
  *             paying BSON's per-document field names for every book and ledger
  *             day would be pure waste (~15 KB compressed vs ~90 KB).
  * `profiles`  the small, queryable half: what the leaderboard sorts on and the
- *             shelf a reader chose to show.
+ *             shelf a reader chose to show. Since 1.5.15 also what finding
+ *             readers needs (`people.js`): `nameWords` (the folded words of
+ *             the name and handle, for search), `followerCount` and
+ *             `followingCount` (kept as follows are made and removed:
+ *             `followCounts.js`), and `kudosMonthKey`/`kudosMonthCount`.
  *
  * Every per-reader document is keyed by the account's ObjectId.
  *
@@ -235,6 +239,21 @@ export async function ensureIndexes(db) {
     { name: "leaderboard" }
   );
 
+  // Finding readers (1.5.15, `people.js`). Each covers only profiles with a
+  // handle, so each query says the handle is a string (as `asString` does).
+  // Search: the start of any word of a name or handle, multikey on the list
+  // of words; the visibility beside it, so private profiles are left in the
+  // index and not fetched.
+  const named = { partialFilterExpression: { handle: { $type: "string" } } };
+  await profiles(db).createIndex({ nameWords: 1, visibility: 1 }, { name: "people_search", ...named });
+  // Browse "Active this week": the public readers who read lately, the
+  // latest first (`readDay`, the reader's own local date, held only while a
+  // profile is shared and never sent back), `_id` to page through a tie.
+  await profiles(db).createIndex({ visibility: 1, readDay: -1, _id: -1 }, { name: "people_active", ...named });
+  // Browse "New": the public readers, newest account first. ("Most read" is
+  // the leaderboard's own index.)
+  await profiles(db).createIndex({ visibility: 1, _id: -1 }, { name: "people_new", ...named });
+
   await resets(db).createIndex({ expiresAt: 1 }, { name: "expiry", expireAfterSeconds: 0 });
   await confirmations(db).createIndex({ expiresAt: 1 }, { name: "expiry", expireAfterSeconds: 0 });
   // A deleted account is remembered (by id alone) for longer than any backup
@@ -262,8 +281,14 @@ export async function ensureIndexes(db) {
 async function ensureCommunityIndexes(db) {
   // One follow per pair; the prefix also serves "who do I follow".
   await follows(db).createIndex({ followerId: 1, followeeId: 1 }, { name: "pair", unique: true });
-  // Follower counts, and deleting a reader's incoming follows.
-  await follows(db).createIndex({ followeeId: 1 }, { name: "followee" });
+  // A reader's followers, newest first, a page at a time (`GET /v1/people/me/followers`);
+  // the prefix serves deleting a reader's incoming follows. (It replaces `followee`,
+  // on `followeeId` alone, which counted followers before the profile kept the count.)
+  await follows(db).createIndex({ followeeId: 1, _id: -1 }, { name: "followers" });
+  await dropIfPresent(follows(db), "followee", () => false);
+  // Whom a reader follows, newest first, a page at a time; and the readers
+  // followed most lately, for suggestions.
+  await follows(db).createIndex({ followerId: 1, _id: -1 }, { name: "following" });
 
   // Once per sender, per recipient, per local day. The prefix serves deletion by sender.
   await kudos(db).createIndex({ fromId: 1, toId: 1, dayKey: 1 }, { name: "once_a_day", unique: true });

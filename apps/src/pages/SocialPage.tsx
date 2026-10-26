@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import type { Book } from "@shared/models/book";
 import { useLibraryStore } from "../store/libraryStore";
 import { useHabitStore } from "../store/habitStore";
@@ -25,8 +25,12 @@ import { streakText } from "../components/community/copy";
 import { EYEBROW } from "../components/ui/SectionHeader";
 import { SegmentedTabs, panelId, tabId } from "../components/ui/SegmentedTabs";
 
-type SocialView = "stats" | "community" | "friends" | "discover" | "communities";
-const VIEWS: SocialView[] = ["stats", "community", "friends", "discover", "communities"];
+// "friends" is the Following tab: its id is kept so the tab a reader last had open is still found.
+type SocialView = "stats" | "community" | "people" | "friends" | "discover" | "communities";
+const VIEWS: SocialView[] = ["stats", "community", "people", "friends", "discover", "communities"];
+
+/** The People tab is loaded when it is first opened. */
+const PeoplePanel = lazy(() => import("../components/community/PeoplePanel").then((module) => ({ default: module.PeoplePanel })));
 const VIEW_KEY = "leaflet.social.view";
 const ID = "social";
 
@@ -81,6 +85,14 @@ export const SocialPage = ({ showToast, nowReading, onReadNow, onNavigate }: Soc
       // Remembering the tab is a nicety.
     }
   };
+  // A tab asked for from elsewhere: the profile menu, a count on a reader's page.
+  const askedView = useCommunityStore((state) => state.askedView);
+  useEffect(() => {
+    if (askedView) {
+      chooseView(askedView);
+      useCommunityStore.getState().takeAskedView();
+    }
+  }, [askedView]);
 
   // Every figure here is the one your public card shows, computed the same
   // way: minutes from the day ledger (fed by the reading heartbeat), this week
@@ -142,7 +154,8 @@ export const SocialPage = ({ showToast, nowReading, onReadNow, onNavigate }: Soc
           tabs={[
             { id: "stats", label: "Stats", hint: "Your numbers, calendar and session shelf" },
             { id: "community", label: "Board", hint: "The board, following, duels and kudos" },
-            { id: "friends", label: "Friends", hint: "The feed, books in common and book clubs" },
+            { id: "people", label: "People", hint: "Find readers, and who follows whom" },
+            { id: "friends", label: "Following", hint: "The feed, books in common and book clubs" },
             { id: "discover", label: "Discover", hint: "Reviews and quotes from readers everywhere" },
             { id: "communities", label: "Communities", hint: "A place to talk over each book or series" }
           ]}
@@ -158,6 +171,12 @@ export const SocialPage = ({ showToast, nowReading, onReadNow, onNavigate }: Soc
       ) : view === "communities" ? (
         <div role="tabpanel" id={panelId(ID, "communities")} aria-labelledby={tabId(ID, "communities")} className="flex flex-col gap-6">
           <CommunitiesTab showToast={showToast} onNavigate={onNavigate} />
+        </div>
+      ) : view === "people" ? (
+        <div role="tabpanel" id={panelId(ID, "people")} aria-labelledby={tabId(ID, "people")} className="flex flex-col gap-6">
+          <Suspense fallback={null}>
+            <PeoplePanel showToast={showToast} onNavigate={onNavigate} />
+          </Suspense>
         </div>
       ) : view === "friends" ? (
         <div role="tabpanel" id={panelId(ID, "friends")} aria-labelledby={tabId(ID, "friends")} className="flex flex-col gap-6">

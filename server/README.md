@@ -95,10 +95,10 @@ Authenticated routes take `Authorization: Bearer <token>`. Errors are
 | `DELETE /v1/profile/me` | ✓ | `{deleted: true}`. Removes the profile and all community data (see Deletion). |
 | `GET /v1/leaderboard?week=2026-W39&scope=everyone` | optional | Top 100 public profiles for that ISO week (default: the server's). Rows: `{rank, handle, displayName, pipSeed, avatar, weekMinutes, streak, booksFinished, reading, level, isYou}` (`reading` and `level` as on the profile, or `null`). With a token, `you` is the reader's own row and rank even outside the top 100 (public profiles only: a private or followers-only reader gets `null`, and the app draws their own row from the minutes on their device). `sharedReaders` counts the public profiles there are, read this week or not, so an empty board can say why it is empty; followers-only profiles are not on this board and not counted. |
 | `GET /v1/leaderboard?week=…&scope=following` | ✓ | The reader plus the readers they follow who share a profile (public, or followers-only: a follow of those exists only once accepted), zeros included. Same rows. |
-| `GET /v1/profile/:handle?week=&day=` | optional | A shared profile. **In full** (a public one to anyone; a followers-only one to its owner and to readers whose follow it accepted): `{handle, displayName, pipSeed, avatar, visibility, locked: false, weekKey, weekMinutes, streak, booksFinished, shelf, reading, level, badges, arcade, camp, sharesLibrary, kudosThisWeek, followerCount, followingCount}`, where `badges` is what the app saved plus the badges only the server gives, each once: `kudos-from-10` (kudos from 10 different readers) and `kudos-to-10` (kudos sent to 10 different readers); with a token also `isYou`, `isFollowing`, `followsYou`, `kudosSentToday` (for local `day`), `activeDuel`, `youBlocked` (the caller has blocked this reader). **Locked** (a followers-only one to anyone else, signed in or not): `200` with `{handle, displayName, pipSeed, avatar, visibility: "followers", locked: true, requested, isYou: false, following: false}`, where `requested` says the caller has a request waiting, and the figures of a full card as empties (`isFollowing: false, weekKey, weekMinutes: 0, streak: 0, booksFinished: 0, shelf: [], kudosThisWeek: 0, followerCount: 0, followingCount: 0`) so an app from before `locked` can still draw it; and `youBlocked: true`, only when the caller has blocked them (left out otherwise). `404` if private or absent, and to a signed-in reader this one has blocked. |
+| `GET /v1/profile/:handle?week=&day=` | optional | A shared profile. **In full** (a public one to anyone; a followers-only one to its owner and to readers whose follow it accepted): `{handle, displayName, pipSeed, avatar, visibility, locked: false, weekKey, weekMinutes, streak, booksFinished, shelf, reading, level, badges, arcade, camp, sharesLibrary, kudosThisWeek, followerCount, followingCount}`, where `badges` is what the app saved plus the badges only the server gives, each once: `kudos-from-10` (kudos from 10 different readers) and `kudos-to-10` (kudos sent to 10 different readers); with a token also `isYou`, `isFollowing`, `followsYou`, `kudosSentToday` (for local `day`), `activeDuel`, `youBlocked` (the caller has blocked this reader). **Locked** (a followers-only one to anyone else, signed in or not): `200` with `{handle, displayName, pipSeed, avatar, visibility: "followers", locked: true, requested, isYou: false, following: false}`, where `requested` says the caller has a request waiting, and the figures of a full card as empties (`isFollowing: false, weekKey, weekMinutes: 0, streak: 0, booksFinished: 0, shelf: [], kudosThisWeek: 0, followerCount: 0, followingCount: 0`) so an app from before `locked` can still draw it; and `youBlocked: true`, only when the caller has blocked them (left out otherwise). `404` if private or absent, and to a signed-in reader this one has blocked. **Since 1.5.15:** a full card also has `kudosThisMonth` (kudos received this UTC month, kept on the profile since kudos expire after 21 days) and, with a token, `followState` (`"following"` or `"none"`); a locked card has `followState` (`"requested"` or `"none"`) and `followsYou`. `followerCount` and `followingCount` are kept on the profile as follows are made and removed, not counted per request. |
 | `POST /v1/follows/:handle` | ✓ | Follow, or ask to. Idempotent. A public target is followed at once → `{following: true, requested: false}`. A followers-only target gets a request → `{following: false, requested: true}`, and is told once (`follow_request`). Already following → `{following: true, requested: false}`. The caller must share a profile (`403`), the target too (`404`), not yourself (`400`). Up to 500 follows (`409`). `403` "You can't interact with this reader." while either has blocked the other. |
 | `DELETE /v1/follows/:handle` | ✓ | Unfollow, and take back a request that is still waiting → `{following: false, requested: false}` (works whatever either side's visibility). |
-| `GET /v1/follows` | ✓ | `{following: [{handle, displayName, pipSeed, avatar}], followerCount}` (the ones who still share a profile; accepted follows only). |
+| `GET /v1/follows` | ✓ | `{following: [{handle, displayName, pipSeed, avatar}], followerCount}` (the ones who still share a profile; accepted follows only; `followerCount` is the profile's kept count since 1.5.15). |
 | `GET /v1/follow-requests` | ✓ | The requests waiting for the caller, newest first, at most 100: `{requests: [{handle, displayName, pipSeed, avatar, createdAt}]}`. Askers who no longer share a profile are left out. |
 | `POST /v1/follow-requests/:handle/accept` | ✓ | Makes the follow, deletes the request, tells the asker (`follow_accept`) → `{accepted: true}`. `404` if that reader has no request waiting (or no longer shares a profile); `409` if they already follow 500 (the request is kept). |
 | `POST /v1/follow-requests/:handle/decline` | ✓ | Deletes the request, tells nobody → `{declined: true}`. `404` as for accept. |
@@ -108,7 +108,10 @@ Authenticated routes take `Authorization: Bearer <token>`. Errors are
 | `POST /v1/duels/:id/accept` · `/decline` | ✓ | Only the challenged reader, only while pending and the week is not over. Accepting needs both to share a profile still. |
 | `GET /v1/duels` | ✓ | `{duels: […]}`: this week's pending/accepted duels and results settled in the last 8 days, each `{id, weekKey, status, youChallenged, weekOver, you, them, stake, result}` (`stake` is 0 on a duel from before stakes). Settles finished weeks first. |
 | `GET /v1/inbox?since=ISO` | ✓ | `{events, now}`: the newest 50 events after `since`. Types: `follow`, `follow_request`, `follow_accept`, `kudos`, `gift`, `duel_invite`, `duel_accepted`, `duel_result`, each `{id, type, createdAt, actor}`; a `duel_*` event also carries `duel`, and a `follow_request` carries `pending` (whether it is still waiting: the event is written once per pair and stays as history after it is answered or taken back). A `kudos` event for a post also carries `about: {kind, title}` (`kind` is `finished`, `review` or `quote`; `title` the book's, as the post had it when the kudos was sent), and is the actor only otherwise. A `gift` event is the actor only; the gift itself is in `GET /v1/gifts`. Events from readers who no longer share a profile are omitted. So are events from a reader on either side of a block with the caller. |
-| `GET /v1/search?q=ma` | optional | Up to 10 shared profiles whose handle starts with `q`: `{results: [{handle, displayName, pipSeed, avatar, visibility, locked, weekMinutes, streak}]}`. A followers-only reader is `locked: true` with `weekMinutes: 0, streak: 0`, except to themself and, with a token, to readers whose follow they accepted. A reader who has blocked the caller is not among the results. |
+| `GET /v1/search?q=ada lov` | optional | Up to 20 shared profiles (before 1.5.15: 10, by the start of the handle alone) whose name or handle has a word starting with each word of `q` (at most three words; accents and case ignored; see "Finding readers" below): `{results: [{handle, displayName, pipSeed, avatar, visibility, locked, weekMinutes, streak}]}`, with a token also `isYou`, `followState` and `followsYou`. The handle asked for exactly comes first, then handles that start with `q`, then names; public before followers-only; then by handle. A followers-only reader is `locked: true` with `weekMinutes: 0, streak: 0`, except to themself and, with a token, to readers whose follow they accepted. A private reader is never found, and neither side of a block finds the other (before 1.5.15 only the blocked reader lost the blocker). |
+| `GET /v1/people?sort=active\|most\|new&before=&week=` | optional | Every **public** reader with a handle, 20 a page: `{sort, people: [{handle, displayName, pipSeed, avatar, visibility, locked: false, weekMinutes, streak, followState?, followsYou?}], next}`. `active` (the default): read in the last 8 days (their `readDay`, which is never sent), latest first; `most`: this week's minutes, most first (the board, past its hundred); `new`: newest account first. `next` is an opaque cursor for `?before=`, null at the end; a cursor that is not one is `400`. Signed in, the caller is left out, so is either side of a block, and each card says how the two stand. A page can hold fewer than 20 when some are left out; `next` still goes on. Rate limit `people`. |
+| `GET /v1/people/suggested` | ✓ | Up to 10 public readers the caller might follow: `{people: [card + reason]}`, `reason` either `{kind: "book", title}` (they posted for everyone about a book the caller is reading in their uploaded library, or posted about) or `{kind: "follows", count, via}` (followed by `count` of the 50 readers the caller followed most lately; `via` one of them, only when that one is public, else `null`). Never someone already followed or asked, the caller, either side of a block, or anyone not public. Libraries of other readers are not looked in (a library is for its owner's followers). `{people: []}` for a caller who does not share a profile. The pool of ids is kept per reader for 10 minutes in memory; every answer reads the profiles again. Rate limit `people`. |
+| `GET /v1/people/me/followers?before=` · `/v1/people/me/following?before=` | ✓ | The caller's followers, or the readers they follow, newest follow first, 20 a page: `{people: [card], next, count}`, `count` the kept total. Readers who no longer share a profile are left out of the page (and still counted); so is either side of a block. A followers-only follower the caller does not follow is a locked card. Rate limit `people`. |
 | `PUT /v1/library/me` | ✓ | `{books: [{key, title, author, state, percent}]}` → `{count}` (`{count, unchanged: true}` when it is the list already kept, which is then not written). Replaces the reader's uploaded library. At most 3000 books; `key` 1–160 characters (trimmed and lower-cased; sent twice, the later one is kept); `title` 1–160; `author` ≤80 or `null`; `state` one of `reading`, `finished`, `unread`; `percent` whole, 0–100. `400` for anything else, `403` unless the reader shares a profile, `413` over 2 MB, `429` past the library limit. |
 | `DELETE /v1/library/me` | ✓ | `{deleted: true}`. |
 | `GET /v1/profile/:handle/library` | ✓ | `{books, updatedAt}` (`{books: [], updatedAt: null}` when nothing was uploaded), to the owner and to readers who follow them, and only if the owner's `shareLibrary` is on. `404` if the reader is private or absent, is followers-only and has not accepted the caller, or does not share a library (the owner included); `403` for a public reader who does share one, to a caller who does not follow them. |
@@ -272,7 +275,8 @@ In memory, per process (see `src/rateLimit.js`):
 | Likes and dislikes per account, counted separately for posts and for threads and replies | 300 / 15 min each (`react`) |
 | Community directory and lookup by key (`GET /v1/communities`, `/communities/find`) per account | 120 / 5 min (the `search` numbers, its own counter) |
 | Library uploads (`PUT /v1/library/me`) per account, counted before the body is read | 20 / 15 min (`library`) |
-| Searches per IP | 120 / 5 min |
+| Searches per IP | 120 / 5 min (`search`) |
+| Browsing readers, suggestions, and the lists of followers and following (`/v1/people…`) per account, or per IP signed out | 120 / 5 min (`people`) |
 | `POST /v1/library/among` per account | 120 / 5 min (the `search` numbers, its own counter) |
 | Posts per reader, of any kind · of those, quotes · quotes from one book per reader | 20 / UTC day · 10 / UTC day (`tallies`) · 30 ever (`quoteTallies`) |
 | Communities started per reader · kept at once · joined at once · members a keeper removes | 1 / UTC day (`tallies`) · 5 · 50 · 10 / UTC day (`tallies`) |
@@ -299,6 +303,68 @@ to a shared store (e.g. a Mongo collection with a TTL index) before scaling out.
 `trust proxy` is set to `loopback`, so behind Caddy on the same machine the
 limits see the real client IP from `X-Forwarded-For`, and a client cannot spoof
 it by sending the header directly.
+
+### Finding readers (1.5.15)
+
+`GET /v1/search`, `GET /v1/people…` and the counts on a profile, and why they
+are built this way on a free cluster (`src/people.js`, `src/followCounts.js`,
+`src/routes/people.js`).
+
+**Search.** The owner asked for a match "anywhere" in a name or handle. A
+regex that is not anchored (`/velace/`) cannot use an index, so every search
+would read every profile: on a free cluster, a scan per keystroke. What is
+done instead is the start of **any word**: each profile keeps `nameWords`, the
+words of its name (lower case, accents off: "Zoë" is "zoe") plus its handle
+whole and in parts ("the_lovebird", "the", "lovebird"), and one multikey index
+covers them (`people_search`: `{nameWords: 1, visibility: 1}`, profiles with a
+handle only). Each word of the query (three at most, longest first) must start
+a word of the list: `$all` of anchored regexes, the first giving the index its
+range and the rest checked on what it finds. So "lov" finds "Ada Lovelace" and
+"@the_lovebird", "ada lov" finds Ada Lovelace, and "velace" finds nobody. At
+most 60 matches are read and the best 20 kept (the exact handle first, then
+handles that start with the query, then names; public before followers-only),
+plus one lookup on the handle index so that an exact handle is never crowded
+out. Writing the words costs nothing extra: a profile save already reads the
+name and handle, and writes the words only when one of them moved.
+
+`nameWords` is backfilled at every start for profiles that have none (500 at
+a time, so normally nothing), which is also what fills in profiles saved by
+an older server after a rollback.
+
+**Browse.** Each order is read straight off an index, 21 profiles at a time
+(the 21st only says there is more), and goes on by a cursor of what the last
+row was sorted by, never by skipping: `active` uses `people_active`
+(`{visibility, readDay: -1, _id: -1}`), `new` uses `people_new`
+(`{visibility, _id: -1}`), and `most` the leaderboard's own index. All three
+are partial (handle is a string), and the queries say so. A page costs one
+read of 21 small profiles (name, avatar, the week's figures), and signed in,
+one query for blocks and three for follows and requests among those twenty.
+
+**Suggestions** are worked out from the caller's own library (the books they
+are reading) and posts, the public posts about those books (the `book` index),
+and the follows of the 50 readers they followed most lately (capped at 5,000
+rows). That is a handful of indexed queries, kept per reader for ten minutes in
+memory as a list of ids and reasons; each answer re-reads the few profiles, so
+a reader who goes private or blocks someone in between is never shown.
+
+**Counts.** `followerCount` and `followingCount` live on the profile. Every
+follow made goes through `addFollow` (counted only when the upsert inserted
+it), every follow removed through `removeFollow` (only when the delete removed
+one); accepting all requests on going public counts the follows the bulk write
+inserted; a block removes each direction with `removeFollow`; deleting an
+account or a profile removes their follows a thousand at a time and counts each
+down on the other side. A profile read then costs no count of `follows` (it was
+two). The counts and this month's kudos are backfilled **once**, at the first
+start of a 1.5.15 server, before it listens, and marked in `meta`
+(`backfill:followCounts`, `backfill:kudosMonth`). To count again (say after a
+spell on an older server, which does not keep them), delete the marker in
+Atlas and restart:
+`db.meta.deleteOne({_id: "backfill:followCounts"})`.
+
+**Privacy** is as before: browse and suggestions list public profiles only;
+followers-only profiles are found by search alone, as locked cards; private
+ones nowhere; blocks hide both ways. `readDay` orders "active" but is never
+sent; the order says no more than the public board's minutes do over a day.
 
 ## Capacity
 
@@ -485,6 +551,9 @@ and three that hold nothing about any reader: `errorKinds` and `errorFixes`
 - `email` — normalised (trimmed, lower-case); unique
 - `passwordHash` — scrypt string as above (never the password)
 - `displayName` — optional, up to 40 characters, or `null`
+- `nameWords` — since 1.5.15: what the profile is searched by: the folded words of `displayName`, the handle, and the handle's parts split at "-" and "_" (at most 12 words). Written when the name or handle changes.
+- `followerCount`, `followingCount` — since 1.5.15: how many follow them and how many they follow, kept as follows are made and removed (`src/followCounts.js`).
+- `kudosMonthKey`, `kudosMonthCount` — since 1.5.15: the UTC month (`2026-10`) and how many kudos were received in it.
 - `avatar` — optional, one of the ids in `src/avatars.js`, or `null`
 - `createdAt`, `passwordChangedAt` — dates
 - `passwordResets` — when the password was reset with an emailed code, the last 365 days only (for the 3-a-year limit)
@@ -978,6 +1047,10 @@ values. Older apps never ask for it. Until it is deployed, a 1.4.2 app finds
 no notice and shows nothing.
 
 ### Deploying this version
+
+**1.5.15** (finding readers: search by name, browsing, suggestions, the lists
+of followers and following, counts kept on profiles) has its own run sheet:
+[docs/deploy-1.5.15.md](../docs/deploy-1.5.15.md). What follows is 1.4's.
 
 The version that adds followers-only profiles, follow requests, libraries,
 posts, clubs, gifts and duel stakes, and the public layer (reviews and

@@ -54,6 +54,16 @@ name must match the reserved name exactly ("Leaflet Book Reader", as in
 
 ## What's new in this version
 
+For 1.5.15 (written on 2026-10-26). If the Store is still on 1.5.13 or
+older, put this first and the 1.5.14 text below it, within 1,500
+characters:
+
+> Find your people. The new People tab lets you search readers by name or
+> handle, browse everyone who shares their reading, and see who's reading
+> the same books as you. Your followers and who you follow are one tap
+> away, profiles show who follows you back, and "View my profile" is in the
+> menu under your picture.
+
 For 1.5.14 (written on 2026-10-25). If the Store is still on 1.5.12 or
 older, put this first and the 1.5.13 text below it, within 1,500
 characters:

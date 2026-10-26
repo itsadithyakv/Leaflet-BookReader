@@ -181,6 +181,94 @@ pub async fn community_search(query: String, state: State<'_, AppState>) -> Resu
   .await
 }
 
+// ---- people -----------------------------------------------------------------
+//
+// Finding readers to follow (1.5.15): browsing every public reader, a few
+// suggested ones, and the reader's own followers and following. Each is
+// `None` from a server that has no such route yet (1.5.14 and before), which
+// the People tab shows as one quiet line, not an error.
+
+/// The ways a list of readers can be sorted; anything else is the first.
+pub(crate) const PEOPLE_SORTS: [&str; 3] = ["active", "most", "new"];
+/// The longest cursor the server hands out is well under this.
+pub(crate) const CURSOR_MAX: usize = 200;
+
+/// A cursor the server handed out (base64url), or nothing: anything else is
+/// dropped here rather than sent, and the list starts from the top.
+pub(crate) fn people_cursor(before: Option<&str>) -> Option<String> {
+  let before = before?.trim();
+  let fits = !before.is_empty()
+    && before.len() <= CURSOR_MAX
+    && before.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+  fits.then(|| before.to_string())
+}
+
+/// What `GET /v1/people` is asked: the sort (one of three), this week, and where to go on from.
+pub(crate) fn people_query(sort: Option<&str>, before: Option<&str>, week: String) -> Vec<(&'static str, String)> {
+  let sort = sort.filter(|sort| PEOPLE_SORTS.contains(sort)).unwrap_or(PEOPLE_SORTS[0]);
+  let mut query = vec![("sort", sort.to_string()), ("week", week)];
+  if let Some(cursor) = people_cursor(before) {
+    query.push(("before", cursor));
+  }
+  query
+}
+
+/// The path of one of the reader's own lists; only the two there are.
+pub(crate) fn people_list_path(which: &str) -> Option<&'static str> {
+  match which {
+    "followers" => Some("/v1/people/me/followers"),
+    "following" => Some("/v1/people/me/following"),
+    _ => None
+  }
+}
+
+async fn people_call(
+  state: &State<'_, AppState>,
+  path: &str,
+  query: Vec<(&'static str, String)>,
+  auth: CommunityAuth
+) -> Result<Option<serde_json::Value>, String> {
+  let query: Vec<(&str, &str)> = query.iter().map(|(key, value)| (*key, value.as_str())).collect();
+  cloud::community_call_if_there(&state.db, Method::GET, path, &query, auth)
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Every public reader, twenty at a time: `sort` is `active`, `most` or
+/// `new`; `before` the `next` of the page before. Signed in or not.
+#[tauri::command]
+pub async fn community_people(sort: Option<String>, before: Option<String>, state: State<'_, AppState>) -> Result<Option<serde_json::Value>, String> {
+  let query = people_query(sort.as_deref(), before.as_deref(), iso_week_key(&local_today()));
+  people_call(&state, "/v1/people", query, CommunityAuth::Optional).await
+}
+
+/// Up to ten public readers this one might follow, each with why.
+#[tauri::command]
+pub async fn community_people_suggested(state: State<'_, AppState>) -> Result<Option<serde_json::Value>, String> {
+  if !signed_in(&state) {
+    return Ok(Some(serde_json::json!({ "people": [] })));
+  }
+  people_call(&state, "/v1/people/suggested", vec![("week", iso_week_key(&local_today()))], CommunityAuth::Required).await
+}
+
+/// The reader's own `followers` or `following`, newest first, twenty at a time.
+#[tauri::command]
+pub async fn community_people_list(which: String, before: Option<String>, state: State<'_, AppState>) -> Result<Option<serde_json::Value>, String> {
+  let path = people_list_path(&which).ok_or_else(|| "No such list.".to_string())?;
+  let mut query = vec![("week", iso_week_key(&local_today()))];
+  if let Some(cursor) = people_cursor(before.as_deref()) {
+    query.push(("before", cursor));
+  }
+  people_call(&state, path, query, CommunityAuth::Required).await
+}
+
+/// Everyone the reader follows, at once (`GET /v1/follows`, on every server):
+/// the People tab's Following against a server from before 1.5.15.
+#[tauri::command]
+pub async fn community_following(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+  community(&state, Method::GET, "/v1/follows".into(), vec![], None, CommunityAuth::Required).await
+}
+
 /// Whether a newer Leaflet is out, as the owner has said on the server (the
 /// admin panel): `{version, note, at}`, all null when nothing is said. Asked
 /// for with or without an account: most readers have none.
@@ -325,6 +413,25 @@ pub(crate) fn kudos_body(today: &str, post_id: Option<&str>) -> Result<serde_jso
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// A list of readers is asked for in one of three orders, and goes on only
+  /// from a cursor the server could have made: nothing else reaches it.
+  #[test]
+  fn people_are_asked_for_in_a_known_order_from_a_cursor_like_the_servers() {
+    let week = || "2026-W44".to_string();
+    assert_eq!(people_query(Some("most"), None, week()), vec![("sort", "most".to_string()), ("week", week())]);
+    assert_eq!(people_query(None, None, week())[0].1, "active");
+    assert_eq!(people_query(Some("../admin"), None, week())[0].1, "active");
+    let paged = people_query(Some("new"), Some(" WyI2NTNhIl0 "), week());
+    assert_eq!(paged.last(), Some(&("before", "WyI2NTNhIl0".to_string())));
+    for bad in ["", "a b", "x&sort=new", "../../v1/account", "a=="] {
+      assert_eq!(people_cursor(Some(bad)), None, "{bad}");
+    }
+    assert_eq!(people_cursor(Some(&"a".repeat(CURSOR_MAX + 1))), None);
+    assert_eq!(people_list_path("followers"), Some("/v1/people/me/followers"));
+    assert_eq!(people_list_path("following"), Some("/v1/people/me/following"));
+    assert_eq!(people_list_path("blocked"), None);
+  }
 
   /// Kudos carry the day and week, and a post only when it is one.
   #[test]

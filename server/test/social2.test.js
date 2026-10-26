@@ -117,11 +117,11 @@ describe("a followers-only profile", () => {
       const EMPTY = { isFollowing: false, weekMinutes: 0, streak: 0, booksFinished: 0, shelf: [], kudosThisWeek: 0, followerCount: 0, followingCount: 0 };
       assert.deepEqual(
         Object.keys(card.body).sort(),
-        [...PERSON, "following", "isYou", "locked", "requested", "visibility", "weekKey", ...Object.keys(EMPTY)].sort()
+        [...PERSON, "following", "followState", "followsYou", "isYou", "locked", "requested", "visibility", "weekKey", ...Object.keys(EMPTY)].sort()
       );
       assert.deepEqual(
         { ...card.body, avatar: undefined, displayName: undefined, weekKey: undefined },
-        { handle: quiet.handle, pipSeed: quiet.handle, visibility: "followers", locked: true, requested: false, isYou: false, following: false, ...EMPTY, avatar: undefined, displayName: undefined, weekKey: undefined }
+        { handle: quiet.handle, pipSeed: quiet.handle, visibility: "followers", locked: true, requested: false, followState: "none", followsYou: false, isYou: false, following: false, ...EMPTY, avatar: undefined, displayName: undefined, weekKey: undefined }
       );
       assert.equal(JSON.stringify(card.body).includes("555"), false);
     }

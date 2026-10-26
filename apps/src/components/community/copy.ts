@@ -1,4 +1,4 @@
-import type { KudosAbout } from "../../services/socialService";
+import type { FollowState, KudosAbout, PeopleSort, SuggestionReason } from "../../services/socialService";
 import { at } from "./format";
 
 /**
@@ -9,7 +9,10 @@ import { at } from "./format";
  * Monday"). Each idea now has one word, and every screen takes it from here.
  *
  * - **kudos**: the one-a-day nod between readers (drawn as a leaf icon)
- * - **follow** / **follows you** / **you follow each other**
+ * - **follow** / **following** / **follows you**: following is one-way. The
+ *   readers you follow are "Following" (the tab was "Friends" until 1.5.15);
+ *   "friends" is kept for two readers who follow each other (a visit, a
+ *   raid, a present).
  * - **duel**: most minutes by Sunday at midnight wins
  * - **streak**: days in a row, written "12 days"
  * - **the board**: this week's leaderboard; it resets Sunday at midnight
@@ -24,6 +27,9 @@ export const WEEK_ENDS = "Sunday at midnight";
  * takes it from here.
  */
 export const PROFILE_PLACE = "Social → Board → You";
+
+/** Where readers are found and followed (1.5.15; it was "Find readers" on the Board). */
+export const PEOPLE_PLACE = "Social → People";
 
 export const COPY = {
   signIn: "Sign in under Settings → Account to join in.",
@@ -51,6 +57,11 @@ export const COPY = {
   profileLoading: "Checking your profile…",
   profileFailed: "Couldn't load your profile, so it isn't known whether it is shared.",
   kudosRule: "One kudos per reader per day",
+  /** Behind the (i) beside kudos. */
+  kudosExplained: "A daily pat on the back. One a day per reader; it doesn't cost or buy anything.",
+  followsYou: "Follows you",
+  /** The People tab against a server from before 1.5.15: said once, quietly. */
+  peopleLater: "More arrives with the next server update.",
   duelRule: `Most minutes by ${WEEK_ENDS} wins`,
   boardResets: `The board resets ${WEEK_ENDS}, your local time`
 } as const;
@@ -68,6 +79,25 @@ export const duelOnText = (handle: string) => `Duel on. Good luck against ${at(h
 export const duelDeclinedText = "Declined. No hard feelings.";
 export const duelSentText = (handle: string) => `Challenge sent. ${at(handle)} can accept it from their inbox.`;
 
-/** How two readers stand, for the small badge beside a handle. */
-export const relationText = (isFollowing: boolean, followsYou: boolean) =>
-  isFollowing && followsYou ? "you follow each other" : followsYou ? "follows you" : null;
+/** How two readers stand, for the small badge beside a handle: only that they follow you (the button says the rest). */
+export const relationText = (_isFollowing: boolean, followsYou: boolean) => (followsYou ? COPY.followsYou : null);
+
+/** The follow button's word for each state. */
+export const followLabel = (state: FollowState) => (state === "following" ? "Following" : state === "requested" ? "Requested" : "Follow");
+
+/** The orders the People tab lists every public reader in. */
+export const SORT_LABELS: Record<PeopleSort, string> = { active: "Active this week", most: "Most read", new: "New" };
+
+/** Who sees a profile, as its owner's own page says it. */
+export const VISIBILITY_LABELS = { public: "Public", followers: "Followers only", private: "Private" } as const;
+
+/** Why a reader is suggested, in a few words under their name. */
+export const reasonText = (reason: SuggestionReason) => {
+  if (reason.kind === "book") {
+    return `Posted about ${reason.title}`;
+  }
+  if (reason.via) {
+    return reason.count > 1 ? `Followed by ${at(reason.via.handle)} and ${reason.count - 1} more` : `Followed by ${at(reason.via.handle)}`;
+  }
+  return reason.count === 1 ? "Followed by a reader you follow" : `Followed by ${reason.count} readers you follow`;
+};

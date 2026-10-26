@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { ArrowLeft, Flame, Gift, Leaf, Lock, Swords, UserCheck, UserPlus } from "lucide-react";
+import { ArrowLeft, Flame, Gift, Globe, Leaf, Lock, Pencil, Swords, UserCheck, UserPlus } from "lucide-react";
 import { socialService, type LockedProfile, type ReaderProfile } from "../../services/socialService";
 import { friendsService, type BookPost } from "../../services/friendsService";
 import { useCommunityStore } from "./communityStore";
@@ -15,7 +15,8 @@ import { PostList } from "./Posts";
 import { ReaderLibrary } from "./ReaderLibrary";
 import { SharedShelf } from "./SharedShelf";
 import { at, errorText, minutesText, nameOf } from "./format";
-import { COPY, duelDeclinedText, duelOnText, duelSentText, followingText, kudosSentText, relationText, streakText } from "./copy";
+import { COPY, VISIBILITY_LABELS, duelDeclinedText, duelOnText, duelSentText, followLabel, followingText, kudosSentText, relationText, streakText } from "./copy";
+import { InfoTip } from "../ui/InfoTip";
 import { EYEBROW } from "../ui/SectionHeader";
 import { CampBanner } from "../pip/arcade/base/CampExtras";
 import { useBackClose } from "../../hooks/useBackClose";
@@ -31,12 +32,44 @@ type ReaderCardProps = {
   onChanged: () => void;
 };
 
-const Stat = ({ label, value }: { label: string; value: string | number }) => (
+const Stat = ({ label, value, info, note }: { label: string; value: string | number; info?: string; note?: string }) => (
   <div className="paper-surface rounded-xl px-4 py-3">
-    <p className={EYEBROW}>{label}</p>
-    <p className="mt-1 font-headline text-xl font-bold tabular-nums text-on-surface">{value}</p>
+    <p className={`${EYEBROW} flex items-center gap-1`}>
+      {label}
+      {info && <InfoTip text={info} />}
+    </p>
+    <p className="mt-1 font-headline text-xl font-bold tabular-nums text-on-surface">
+      {value}
+      {note && <span className="ml-1.5 font-body text-xs font-normal text-on-surface-variant">{note}</span>}
+    </p>
   </div>
 );
+
+/** "12 followers · 30 following": on your own page each opens that list on the People tab. */
+const FollowCounts = ({ followers, following, own }: { followers: number; following: number; own: boolean }) => {
+  const showPeople = useCommunityStore((state) => state.showPeople);
+  const part = (count: number, one: string, many: string, list: "followers" | "following") => {
+    const words = (
+      <>
+        <span className="font-semibold tabular-nums text-on-surface">{count}</span> {count === 1 ? one : many}
+      </>
+    );
+    return own ? (
+      <button type="button" className="touch-hit rounded hover:text-primary hover:underline" onClick={() => showPeople(list)}>
+        {words}
+      </button>
+    ) : (
+      <span>{words}</span>
+    );
+  };
+  return (
+    <p className="reader-counts mt-1 flex flex-wrap items-center gap-x-1.5 text-sm text-on-surface-variant">
+      {part(followers, "follower", "followers", "followers")}
+      <span aria-hidden>·</span>
+      {part(following, "following", "following", "following")}
+    </p>
+  );
+};
 
 const Section = ({ title, children }: { title: string; children: ReactNode }) => (
   <section aria-label={title} className="flex flex-col gap-3">
@@ -234,7 +267,10 @@ export const ReaderCard = ({ signedIn, canJoin, showToast, onChanged }: ReaderCa
             <PipAvatar seed={lockedOut.pipSeed} avatar={lockedOut.avatar} size={80} label={`${nameOf(lockedOut)}'s Pip`} />
             <div className="min-w-0">
               <h1 className="truncate font-headline text-2xl font-bold text-on-surface">{nameOf(lockedOut)}</h1>
-              <p className="truncate text-sm text-on-surface-variant">{at(lockedOut.handle)}</p>
+              <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-on-surface-variant">
+                <span className="min-w-0 truncate">{at(lockedOut.handle)}</span>
+                {lockedOut.followsYou && <span className="shrink-0 rounded-full bg-surface-container-high px-2 py-0.5 text-[11px]">{COPY.followsYou}</span>}
+              </p>
             </div>
           </div>
           <p className="flex items-center gap-2 text-sm text-on-surface-variant">
@@ -244,7 +280,7 @@ export const ReaderCard = ({ signedIn, canJoin, showToast, onChanged }: ReaderCa
             type="button"
             disabled={!signedIn || !canJoin || busy !== null}
             className={`tactile-button flex items-center justify-center gap-2 self-start px-4 py-2.5 text-sm disabled:cursor-not-allowed disabled:opacity-60 ${lockedOut.requested ? "" : "tactile-button-primary"}`}
-            title={lockedOut.requested ? "Take the request back" : undefined}
+            title={lockedOut.requested ? "Asked. Tap to take it back" : "They accept each follower"}
             onClick={() => {
               const ask = !lockedOut.requested;
               setBusy("follow");
@@ -265,7 +301,7 @@ export const ReaderCard = ({ signedIn, canJoin, showToast, onChanged }: ReaderCa
             }}
           >
             <UserPlus size={16} aria-hidden />
-            {busy === "follow" ? "…" : lockedOut.requested ? "Requested" : "Ask to follow"}
+            {busy === "follow" ? "…" : followLabel(lockedOut.requested ? "requested" : "none")}
           </button>
           {!signedIn ? (
             <p className="text-xs text-on-surface-variant">{COPY.signIn}</p>
@@ -302,6 +338,7 @@ export const ReaderCard = ({ signedIn, canJoin, showToast, onChanged }: ReaderCa
                     </span>
                   )}
                 </p>
+                <FollowCounts followers={reader.followerCount} following={reader.followingCount} own={isYou} />
                 {reader.reading && (
                   <p className="mt-1 truncate text-sm text-on-surface-variant">
                     Reading <span className="font-semibold text-on-surface">{reader.reading.title}</span> · {reader.reading.percent}%
@@ -311,6 +348,22 @@ export const ReaderCard = ({ signedIn, canJoin, showToast, onChanged }: ReaderCa
             </div>
           </header>
 
+          {isYou && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className="reader-privacy inline-flex items-center gap-1.5 rounded-full bg-surface-container-high px-3 py-1.5 text-xs font-semibold text-on-surface"
+                title="Who can see your profile"
+              >
+                {reader.visibility === "public" ? <Globe size={13} aria-hidden /> : <Lock size={13} aria-hidden />}
+                {VISIBILITY_LABELS[reader.visibility]}
+              </span>
+              <button type="button" className="tactile-button flex items-center gap-1.5 px-3 py-1.5 text-xs" onClick={() => useCommunityStore.getState().askView("community")}>
+                <Pencil size={12} aria-hidden /> Edit profile
+              </button>
+            </div>
+          )}
+
+          {!isYou && (
           <div className="flex flex-col gap-2">
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               <button
@@ -346,7 +399,7 @@ export const ReaderCard = ({ signedIn, canJoin, showToast, onChanged }: ReaderCa
                   "…"
                 ) : reader.isFollowing ? (
                   <>
-                    <span className="group-hover:hidden group-focus-visible:hidden">Following</span>
+                    <span className="group-hover:hidden group-focus-visible:hidden">{followLabel("following")}</span>
                     <span className="hidden group-hover:inline group-focus-visible:inline">Unfollow</span>
                   </>
                 ) : (
@@ -427,9 +480,7 @@ export const ReaderCard = ({ signedIn, canJoin, showToast, onChanged }: ReaderCa
               </div>
             )}
 
-            {isYou ? (
-              <p className="text-xs text-on-surface-variant">This is you, looking good.</p>
-            ) : !signedIn ? (
+            {!signedIn ? (
               <p className="text-xs text-on-surface-variant">{COPY.signIn}</p>
             ) : !canJoin ? (
               <p className="text-xs text-on-surface-variant">{COPY.goPublic}</p>
@@ -460,14 +511,18 @@ export const ReaderCard = ({ signedIn, canJoin, showToast, onChanged }: ReaderCa
               </p>
             )}
           </div>
+          )}
 
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <Stat label="Streak" value={streakText(reader.streak)} />
             <Stat label="This week" value={minutesText(reader.weekMinutes)} />
             <Stat label="Finished" value={reader.booksFinished} />
-            <Stat label="Kudos" value={reader.kudosThisWeek} />
-            <Stat label="Followers" value={reader.followerCount} />
-            <Stat label="Following" value={reader.followingCount} />
+            {/* This month's from a 1.5.15 server; this week's from an older one, which keeps no more. */}
+            {typeof reader.kudosThisMonth === "number" ? (
+              <Stat label="Kudos" value={reader.kudosThisMonth} note="this month" info={COPY.kudosExplained} />
+            ) : (
+              <Stat label="Kudos" value={reader.kudosThisWeek} note="this week" info={COPY.kudosExplained} />
+            )}
           </div>
 
           {reader.badges && reader.badges.length > 0 && <BadgeRow ids={reader.badges} />}

@@ -4,6 +4,7 @@ import { forgetAuthor, forgetPosts, leaveCommunities } from "./discussion.js";
 import { removeReactionsBy } from "./reactions.js";
 import { isoWeekKey, weekIsOver } from "./week.js";
 import { avatarView } from "./avatars.js";
+import { countBulkFollows, removeFollowsOf } from "./followCounts.js";
 
 /**
  * The community's data rules, shared by the routes and by account deletion.
@@ -254,7 +255,7 @@ export async function acceptAllRequests(db, userId, now = new Date()) {
     const full = new Set(counts.filter((row) => row.count >= FOLLOW_LIMIT).map((row) => row._id.toHexString()));
     const welcome = askers.filter((id) => !full.has(id.toHexString()));
     if (welcome.length > 0) {
-      await follows(db).bulkWrite(
+      const made = await follows(db).bulkWrite(
         welcome.map((id) => ({
           updateOne: {
             filter: { followerId: id, followeeId: userId },
@@ -264,6 +265,9 @@ export async function acceptAllRequests(db, userId, now = new Date()) {
         })),
         { ordered: false }
       );
+      // Counted on both sides (`followCounts.js`): only the follows this made,
+      // by their place in the list, not one already there.
+      await countBulkFollows(db, Object.keys(made.upsertedIds ?? {}).map((index) => welcome[Number(index)]), userId);
       await events(db).bulkWrite(
         welcome.map((id) => ({
           updateOne: {
@@ -475,8 +479,8 @@ export async function leavePublic(db, userId) {
  */
 export async function deleteCommunityData(db, userId) {
   await Promise.all([
-    follows(db).deleteMany({ followerId: userId }),
-    follows(db).deleteMany({ followeeId: userId }),
+    // Counted down on the other side of each (`followCounts.js`).
+    removeFollowsOf(db, userId),
     followRequests(db).deleteMany({ fromId: userId }),
     followRequests(db).deleteMany({ toId: userId }),
     kudos(db).deleteMany({ fromId: userId }),

@@ -478,15 +478,15 @@ describe("inbox and search", () => {
     assert.equal((await call("GET", "/v1/inbox")).status, 401);
   });
 
-  test("prefix search over public handles, at most ten", async () => {
+  test("prefix search over shared handles, at most twenty", async () => {
     const prefix = `s${randomBytes(2).toString("hex")}`;
-    for (let i = 0; i < 11; i += 1) {
+    for (let i = 0; i < 21; i += 1) {
       await reader({ prefix });
     }
     const hidden = await reader({ prefix, visibility: "private" });
     const found = await call("GET", `/v1/search?q=${prefix}`);
     assert.equal(found.status, 200);
-    assert.equal(found.body.results.length, 10);
+    assert.equal(found.body.results.length, 20);
     assert.ok(found.body.results.every((row) => row.handle.startsWith(prefix)));
     assert.ok(!found.body.results.some((row) => row.handle === hidden.handle));
     assert.deepEqual((await call("GET", "/v1/search?q=.*")).body.results, []);

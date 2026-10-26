@@ -93,7 +93,13 @@ export type LockedProfile = CommunityPerson & {
   requested: boolean;
   isYou?: boolean;
   isFollowing?: boolean;
+  /** How the reader stands with them, and whether they follow back. Absent from servers before 1.5.15. */
+  followState?: FollowState;
+  followsYou?: boolean;
 };
+
+/** Where the reader stands with another: not following, asked and waiting (a profile kept to followers), or following. */
+export type FollowState = "none" | "requested" | "following";
 
 /**
  * Pip's camp in the Hollow, as its reader shows it: building levels and
@@ -146,9 +152,12 @@ export type ReaderProfile = CommunityPerson & {
   booksFinished: number;
   shelf: SocialProfile["shelf"];
   kudosThisWeek: number;
+  /** Kudos received this (UTC) month. Absent from servers before 1.5.15. */
+  kudosThisMonth?: number;
   followerCount: number;
   followingCount: number;
   // Only when signed in:
+  followState?: FollowState;
   isYou?: boolean;
   isFollowing?: boolean;
   followsYou?: boolean;
@@ -183,7 +192,31 @@ export type InboxEvent = {
 /** What kudos were for: a post of the reader's, by its kind and the book's title. */
 export type KudosAbout = { kind: "finished" | "review" | "quote"; title: string };
 
-export type SearchResult = CommunityPerson & { weekMinutes: number; streak: number };
+export type SearchResult = CommunityPerson & {
+  weekMinutes: number;
+  streak: number;
+  /** Kept to followers and not open to this reader: no minutes, a request to follow. */
+  locked?: boolean;
+  visibility?: "public" | "followers";
+  /** Signed in, from servers since 1.5.15. */
+  isYou?: boolean;
+  followState?: FollowState;
+  followsYou?: boolean;
+};
+
+/** Why a reader is suggested: they posted about a book this one reads, or readers this one follows follow them. */
+export type SuggestionReason =
+  | { kind: "book"; title: string }
+  | { kind: "follows"; count: number; via: CommunityPerson | null };
+
+/** A reader as a card in the People tab. */
+export type PersonCard = SearchResult & { reason?: SuggestionReason };
+
+export type PeopleSort = "active" | "most" | "new";
+export type PeopleList = "followers" | "following";
+
+/** A page of readers: `next` goes on from it, null at the end. `count` is the whole list's, for the reader's own lists. */
+export type PeoplePage = { people: PersonCard[]; next: string | null; count?: number };
 
 const EMPTY_COMMUNITY_BOARD = (scope: BoardScope): CommunityBoard => ({
   weekKey: "",
@@ -402,12 +435,52 @@ export const socialService = {
     return call("community_inbox", { since: since ?? null });
   },
 
-  /** Public readers whose handle starts with `query`. */
+  /**
+   * Shared readers found by `query`: by the start of any word of their name
+   * or handle (since 1.5.15's server; an older one matches the start of the
+   * handle alone).
+   */
   async search(query: string): Promise<SearchResult[]> {
     if (!isTauri()) {
       return [];
     }
     return (await call<{ results: SearchResult[] }>("community_search", { query })).results;
+  },
+
+  /**
+   * Every public reader, twenty at a time, in one of three orders. Null from
+   * a server that cannot list them yet (before 1.5.15): not an error.
+   */
+  async people(sort: PeopleSort, before?: string | null): Promise<PeoplePage | null> {
+    if (!isTauri()) {
+      return null;
+    }
+    return call<PeoplePage | null>("community_people", { sort, before: before ?? null });
+  },
+
+  /** Up to ten public readers to follow, each with why. Null from a server before 1.5.15. */
+  async suggested(): Promise<PersonCard[] | null> {
+    if (!isTauri()) {
+      return null;
+    }
+    const page = await call<{ people: PersonCard[] } | null>("community_people_suggested");
+    return page ? page.people : null;
+  },
+
+  /** The reader's own followers, or the readers they follow, twenty at a time. Null from a server before 1.5.15. */
+  async followList(which: PeopleList, before?: string | null): Promise<PeoplePage | null> {
+    if (!isTauri()) {
+      return null;
+    }
+    return call<PeoplePage | null>("community_people_list", { which, before: before ?? null });
+  },
+
+  /** Whom the reader follows, all at once (every server has this; it is the People tab's Following on an older one). */
+  async following(): Promise<{ following: CommunityPerson[]; followerCount: number }> {
+    if (!isTauri()) {
+      return { following: [], followerCount: 0 };
+    }
+    return call("community_following");
   },
 
   /**

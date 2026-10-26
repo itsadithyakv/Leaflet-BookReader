@@ -11,6 +11,7 @@ import { isAdmin, suspendedUntil } from "../standing.js";
 import { forgetBoards } from "../boardCache.js";
 import { defaultLimits } from "../rateLimit.js";
 import { limiter } from "../readers.js";
+import { searchWords } from "../people.js";
 
 /**
  * A reader's own profile: the numbers the board ranks on and the shelf they
@@ -423,8 +424,13 @@ function saysNothingNew(held, update) {
   return Object.entries(update).every(([name, value]) => name === "updatedAt" || isDeepStrictEqual(held[name] ?? null, value ?? null));
 }
 
-/** What a save can read of the profile first: what the answer shows, and two parts it does not. */
-const HELD_VIEW = { ...OWN_VIEW, avatar: 1, readDay: 1 };
+/**
+ * What a save can read of the profile first: what the answer shows, and
+ * three parts it does not (the avatar's copy, the day last read, and the
+ * words the profile is searched by, so a save that changes no name writes
+ * none of them).
+ */
+const HELD_VIEW = { ...OWN_VIEW, avatar: 1, readDay: 1, nameWords: 1 };
 
 /**
  * What every save reads of the profile held, whatever it names: who sees
@@ -492,6 +498,18 @@ export function changedParts(held, update, read = HELD_VIEW) {
       ([name, value]) => name === "updatedAt" || !(name in read) || !isDeepStrictEqual(held[name] ?? null, value ?? null)
     )
   );
+}
+
+/** Sets the profile's search words from its name and handle as they now are, if they differ. */
+async function refreshNameWords(db, id) {
+  const now = await profiles(db).findOne({ _id: id }, { projection: { handle: 1, displayName: 1, nameWords: 1 } });
+  if (!now) {
+    return;
+  }
+  const words = searchWords(now.displayName, now.handle);
+  if (!isDeepStrictEqual(now.nameWords ?? null, words)) {
+    await profiles(db).updateOne({ _id: id }, { $set: { nameWords: words } });
+  }
 }
 
 export function socialRoutes(db, limits = defaultLimits()) {
@@ -632,6 +650,21 @@ export function socialRoutes(db, limits = defaultLimits()) {
         update.suspendedUntil = account.suspendedUntil;
       }
 
+      // What the profile is searched by follows its name and handle
+      // (`people.js`), and is written only when one of them moves (or the
+      // profile has none yet). A save that chooses who sees the profile is
+      // not read first; its words are brought up to date after it.
+      const named = update.displayName !== undefined || update.handle !== undefined;
+      if (named && held) {
+        const words = searchWords(
+          update.displayName !== undefined ? update.displayName : held.displayName,
+          update.handle !== undefined ? update.handle : held.handle
+        );
+        if (!isDeepStrictEqual(held.nameWords ?? null, words)) {
+          update.nameWords = words;
+        }
+      }
+
       // The reading figures are kept for a shared profile only (public, or
       // with followers): that is the privacy policy's promise, and the app's
       // check (made on the device, from what it last heard) can be out of
@@ -740,6 +773,9 @@ export function socialRoutes(db, limits = defaultLimits()) {
           throw new HttpError(409, "That handle is taken.");
         }
         throw error;
+      }
+      if (named && !held) {
+        await refreshNameWords(db, request.account.id);
       }
       if (update.visibility === "private") {
         // And with the figures go the library and the requests to follow

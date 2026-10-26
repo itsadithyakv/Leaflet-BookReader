@@ -4,6 +4,7 @@ import { backfillKudosCircles } from "./community.js";
 import { close, connect } from "./db.js";
 import { dormantPolicyFromEnv, sweepDormant, useDormantPolicy } from "./dormant.js";
 import { mailerFromEnv } from "./mail.js";
+import { backfillPeople } from "./people.js";
 
 /**
  * Leaflet's only server: accounts, the leaderboard, and an opaque copy of each
@@ -80,6 +81,19 @@ try {
   console.log(`[leaflet] kudos badges: counted ${pairs} pairs of readers from the kudos kept.`);
 } catch (error) {
   console.warn("[leaflet] kudos badges: could not count the kudos kept:", error?.message ?? error);
+}
+
+// What finding readers (1.5.15) needs on the profiles already there: the
+// words each is searched by (at every start, writing only the profiles that
+// have none), the follow counts and this month's kudos (once each, marked in
+// `meta`: see `people.js`). Before the server listens, so no follow lands
+// between a count and its marker. Not a reason to stay down if it fails:
+// nothing is marked done until it worked, so the next start tries again.
+try {
+  const done = await backfillPeople(db);
+  console.log(`[leaflet] people: ${JSON.stringify(done)}`);
+} catch (error) {
+  console.warn("[leaflet] people: could not bring the profiles up to date:", error?.message ?? error);
 }
 
 // How many requests are worked on at once before the next is told to come

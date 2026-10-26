@@ -1,6 +1,6 @@
 import { useEffect, useRef, type MutableRefObject, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, UserRound } from "lucide-react";
 import type { DriveSyncStatus, SyncStatus } from "@shared/sync/types";
 import { FEATURES } from "../constants/features";
 import { useAccountStore } from "../store/accountStore";
@@ -222,6 +222,20 @@ export const ProfileButton = ({
     };
   }, [open, onClose, sheet]);
 
+  // Your own page as other readers see it, when it is shared; while it is
+  // private (or has no handle) there is no such page, so the You card on the
+  // Board, where it is shared from.
+  const viewMyProfile = () => {
+    const community = useCommunityStore.getState();
+    const mine = community.me;
+    if (mine?.handle && mine.visibility !== "private") {
+      community.openReader(mine.handle);
+    } else {
+      community.askView("community");
+    }
+    onOpenProfile();
+  };
+
   const line = backupLine(mode, status, sync);
   const lineTitle = backupTitle(mode, status, sync);
   const ownerPaused = sync.library?.standing === "other";
@@ -297,8 +311,10 @@ export const ProfileButton = ({
             </div>
           )}
           {account && FEATURES.community && (
-            <button type="button" className={`${small} mt-3 w-full`} onClick={onOpenProfile}>
-              Your profile
+            <button type="button" className="profile-settings-row tactile-button mt-3 w-full" onClick={viewMyProfile}>
+              <UserRound size={18} aria-hidden />
+              <span className="flex-1 text-left">View my profile</span>
+              <ChevronRight size={16} className="text-on-surface-variant" aria-hidden />
             </button>
           )}
           {account && isAdmin && (

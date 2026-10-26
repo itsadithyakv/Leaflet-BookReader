@@ -14,7 +14,6 @@ import { errorText } from "./community/format";
 import { Leaderboard } from "./community/Leaderboard";
 import { DuelCards } from "./community/DuelCards";
 import { Inbox } from "./community/Inbox";
-import { ReaderSearch } from "./community/ReaderSearch";
 import { ProfileCard } from "./community/ProfileCard";
 import { SignInPrompt } from "./account/SignInPrompt";
 
@@ -224,10 +223,8 @@ export const SocialPanel = ({ configured, showToast, nowReading, onReadNow, onNa
 
       {signedIn && <DuelCards showToast={showToast} />}
 
-      <div className={`grid gap-6 [&>*]:min-w-0 ${signedIn ? "lg:grid-cols-2" : ""}`}>
-        {signedIn && <Inbox showToast={showToast} />}
-        <ReaderSearch showToast={showToast} />
-      </div>
+      {/* Finding readers is the People tab's (1.5.15). */}
+      {signedIn && <Inbox showToast={showToast} />}
     </>
   );
 };

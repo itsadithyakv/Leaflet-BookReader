@@ -10,6 +10,7 @@ import { communityRoutes } from "./routes/community.js";
 import { giftRoutes } from "./routes/gifts.js";
 import { libraryRoutes } from "./routes/library.js";
 import { moderationRoutes } from "./routes/moderation.js";
+import { peopleRoutes } from "./routes/people.js";
 import { postRoutes } from "./routes/posts.js";
 import { problemRoutes } from "./routes/problems.js";
 import { raidRoutes } from "./routes/raids.js";
@@ -124,6 +125,8 @@ export function createApp(
   app.use("/v1", socialRoutes(db, limits));
   // After socialRoutes, so `/profile/me` is matched before `/profile/:handle`.
   app.use("/v1", communityRoutes(db, limits));
+  // Finding readers: browse, suggestions, followers and following (1.5.15).
+  app.use("/v1", peopleRoutes(db, limits));
   // What readers share beyond the board: a library, finished-book posts,
   // clubs, gifts and raids on each other's camps. Their paths under
   // `/profile/:handle/` are longer than the profile's own, so the order

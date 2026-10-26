@@ -14,7 +14,6 @@ import { ErrorLine } from "./ErrorLine";
 import { Inbox } from "./Inbox";
 import { PipAvatar } from "./PipAvatar";
 import { PostList } from "./Posts";
-import { ReaderSearch } from "./ReaderSearch";
 import { composePost, usePostStore } from "./postStore";
 import { at, errorText, minutesText, nameOf } from "./format";
 import { passOn } from "./passOn";
@@ -137,7 +136,7 @@ const FriendsBooksCard = () => {
 
   return (
     <section className="paper-surface rounded-xl p-4 sm:p-6" aria-labelledby="together-title">
-      <SectionHeader eyebrow="Your books, their places" title="Reading with friends" id="together-title" />
+      <SectionHeader eyebrow="Your books, their places" title="Reading together" id="together-title" />
       {error ? (
         <ErrorLine message={error} onRetry={() => (setError(null), setAttempt((count) => count + 1))} />
       ) : found === null ? (
@@ -217,7 +216,7 @@ const ClubCard = ({ club, showToast, onChanged }: { club: Club; showToast: Toast
   };
 
   const copyCode = () => {
-    passOn(`Join my Leaflet book club “${club.name}”: Social → Friends → Join a club, code ${club.code}`, showToast, `The code is ${club.code}.`);
+    passOn(`Join my Leaflet book club “${club.name}”: Social → Following → Join a club, code ${club.code}`, showToast, `The code is ${club.code}.`);
   };
 
   const leave = async () => {
@@ -438,11 +437,11 @@ const ShareFirst = ({ handle, showToast }: { handle: string | null; showToast: T
   return (
     <section className="paper-surface flex flex-wrap items-center gap-5 rounded-xl p-6">
       <div className="min-w-0 flex-1">
-        <SectionHeader eyebrow="Friends" title="Share your profile first" />
+        <SectionHeader eyebrow="Following" title="Share your profile first" />
         <p className="mt-2 max-w-prose text-sm leading-6 text-on-surface-variant">
           {handle
             ? `Your profile (${at(handle)}) is private, so nobody can follow you or be followed back.`
-            : `Pick a handle under ${PROFILE_PLACE}, so friends can find you.`}
+            : `Pick a handle under ${PROFILE_PLACE}, so readers can find you.`}
         </p>
       </div>
       {handle && (
@@ -453,7 +452,7 @@ const ShareFirst = ({ handle, showToast }: { handle: string | null; showToast: T
           onClick={share}
           title="Share with followers only: a reader asks, and you let them in. Change it any time under Board, You."
         >
-          {busy ? "…" : "Share with friends"}
+          {busy ? "…" : "Share with followers"}
         </button>
       )}
     </section>
@@ -461,7 +460,7 @@ const ShareFirst = ({ handle, showToast }: { handle: string | null; showToast: T
 };
 
 /**
- * The Friends tab of the Social page: what the readers you follow finished,
+ * The Following tab of the Social page (it was "Friends"): what the readers you follow finished,
  * where they are in the books you share, and your book clubs. Needs an
  * account and a shared profile, like following does.
  */
@@ -481,7 +480,7 @@ export const FriendsPanel = ({ showToast, onNavigate }: { showToast: Toast; onNa
   if (!live) {
     return (
       <section className="paper-surface rounded-xl p-6">
-        <SectionHeader eyebrow="Friends" title={FEATURES.community ? "Not connected" : "Coming soon"} />
+        <SectionHeader eyebrow="Following" title={FEATURES.community ? "Not connected" : "Coming soon"} />
         <p className="mt-3 max-w-prose text-sm leading-6 text-on-surface-variant">{FEATURES.community ? COPY.notConnected : COPY.comingSoon}</p>
       </section>
     );
@@ -495,14 +494,10 @@ export const FriendsPanel = ({ showToast, onNavigate }: { showToast: Toast; onNa
     return <ShareFirst handle={me.handle} showToast={showToast} />;
   }
 
-  // Finding a reader to follow, and the requests to follow you, first: this is where they are looked for. (They are
-  // under Board as well, where they were before there was a Friends tab, and the owner found no way to send one.)
+  // The news first (requests to follow you among it). Finding readers to follow is the People tab's (1.5.15).
   return (
     <>
-      <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
-        <ReaderSearch showToast={showToast} />
-        <Inbox showToast={showToast} />
-      </div>
+      <Inbox showToast={showToast} />
       <FeedCard showToast={showToast} />
       <FriendsBooksCard />
       <ClubsCard showToast={showToast} />

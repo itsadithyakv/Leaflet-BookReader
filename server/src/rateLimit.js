@@ -83,6 +83,11 @@ export function defaultLimits() {
     library: { limit: 20, windowMs: 15 * MINUTE },
     // Handle searches per IP. Debounced typing is a handful per lookup.
     search: { limit: 120, windowMs: 5 * MINUTE },
+    // Browsing readers, suggestions and the lists of followers and following
+    // (`routes/people.js`), per account (per address signed out): a page of
+    // twenty each, so a hundred and twenty pages in five minutes is far past
+    // any reader scrolling, and a script reads the directory no faster.
+    people: { limit: 120, windowMs: 5 * MINUTE },
     // "Which friends read today" per account. The app asks every ten minutes
     // while the Pip tab is open.
     visitors: { limit: 30, windowMs: 15 * MINUTE },

@@ -30,6 +30,11 @@ export type PassedEvent = {
 
 export type InboxItem = InboxEvent | PassedEvent;
 
+/** What the People tab shows: every reader, or one of the reader's own lists. */
+export type PeopleView = "everyone" | "followers" | "following";
+/** The tabs of the Social page another part of the app can ask for. */
+export type AskedSocialView = "people" | "community";
+
 const SEEN_KEY = "leaflet.community.inboxSeen";
 const SCOPE_KEY = "leaflet.community.scope";
 const KUDOS_KEY = "leaflet.community.kudosSent";
@@ -61,6 +66,10 @@ type CommunityState = {
    * asking the server, which allows one a day either way.
    */
   kudosSent: Record<string, string>;
+  /** A Social tab asked for from elsewhere (the profile menu, a count on a reader's page), until the page takes it. */
+  askedView: AskedSocialView | null;
+  /** What the People tab shows; kept here so a count on a reader's page can open a list. */
+  peopleView: PeopleView;
 
   setMe: (me: SocialProfile | null) => void;
   /** Reads the reader's profile from the server. */
@@ -76,6 +85,13 @@ type CommunityState = {
   markSeen: () => void;
   openReader: (handle: string) => void;
   closeReader: () => void;
+  /** Opens the People tab on `view`, closing any reader's page. */
+  showPeople: (view: PeopleView) => void;
+  setPeopleView: (view: PeopleView) => void;
+  /** Asks the Social page for one of its tabs. */
+  askView: (view: AskedSocialView) => void;
+  /** The page has shown what was asked. */
+  takeAskedView: () => void;
   /** Notes that this reader was sent kudos on `day` (the local date): by this device, or by another, as the server said. */
   noteKudos: (handle: string, day: string) => void;
   respondToDuel: (id: string, accept: boolean) => Promise<void>;
@@ -155,6 +171,8 @@ export const useCommunityStore = create<CommunityState>((set, get) => ({
   seenAt: readJson<string>(SEEN_KEY, new Date(0).toISOString()),
   openHandle: null,
   kudosSent: readJson<Record<string, string>>(KUDOS_KEY, {}),
+  askedView: null,
+  peopleView: "everyone",
 
   setMe(me) {
     set({ me, meError: null });
@@ -276,6 +294,22 @@ export const useCommunityStore = create<CommunityState>((set, get) => ({
     set({ openHandle: null });
   },
 
+  showPeople(view) {
+    set({ peopleView: view, askedView: "people", openHandle: null });
+  },
+
+  setPeopleView(view) {
+    set({ peopleView: view });
+  },
+
+  askView(view) {
+    set({ askedView: view, openHandle: null });
+  },
+
+  takeAskedView() {
+    set({ askedView: null });
+  },
+
   noteKudos(handle, day) {
     const key = handle.toLowerCase();
     if (get().kudosSent[key] === day) {
@@ -331,6 +365,7 @@ export const useCommunityStore = create<CommunityState>((set, get) => ({
       duels: [],
       inbox: [],
       openHandle: null,
+      peopleView: "everyone",
       // Whom this reader cheered is theirs, not the next account's.
       kudosSent: {}
     }));

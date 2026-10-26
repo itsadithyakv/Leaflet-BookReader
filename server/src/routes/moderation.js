@@ -3,7 +3,9 @@ import { LIVE_MAX, announcementView, cleanAnnouncement, isLive } from "../announ
 import { requireAccount } from "../auth.js";
 import { forgetVisitors } from "../boardCache.js";
 import { PERSON_FIELDS, personView, socialProfilesById } from "../community.js";
-import { accounts, asString, blocks, communities, followRequests, follows, posts, profiles, replies, reports, settings, threads } from "../db.js";
+import { accounts, asString, blocks, communities, followRequests, posts, profiles, replies, reports, settings, threads } from "../db.js";
+import { removeFollow } from "../followCounts.js";
+import { forgetSuggestions } from "../people.js";
 import { deleteCommunity, deletePosts, deleteReplies, deleteThreads } from "../discussion.js";
 import { HttpError, asyncHandler, smallJson } from "../http.js";
 import { optionalText, wholeNumber } from "../input.js";
@@ -97,12 +99,15 @@ export function moderationRoutes(db, limits = defaultLimits(), suspensionSalt = 
         { upsert: true }
       );
       await Promise.all([
-        follows(db).deleteMany({ $or: [{ followerId: meId, followeeId: them._id }, { followerId: them._id, followeeId: meId }] }),
+        // One at a time, so each side's counts move with it (`followCounts.js`).
+        removeFollow(db, meId, them._id),
+        removeFollow(db, them._id, meId),
         followRequests(db).deleteMany({ $or: [{ fromId: meId, toId: them._id }, { fromId: them._id, toId: meId }] })
       ]);
       // A visit needs a follow each way, and there is none now.
       forgetVisitors(meId.toHexString());
       forgetVisitors(them._id.toHexString());
+      forgetSuggestions(meId.toHexString());
       response.json({ blocked: true });
     })
   );
