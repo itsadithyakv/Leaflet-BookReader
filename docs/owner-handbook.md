@@ -415,6 +415,12 @@ The full setup, restore drill and disaster steps are in
     month's kudos once each, marked in `meta`.
   - The app degrades quietly on the old server.
 - Checked: tsc; vitest 4,634; server 330; cargo test 1,169; clippy clean.
+- **The owner deployed the `v1.5.15` server** the same day, from a tag
+  export:
+  - health `{"ok":true}`, and the People tab works;
+  - this deploy also carried 1.5.12's server changes: active readers, error
+    reports, announcements, the admin overview, and sync capacity;
+  - the live server is now `v1.5.15`.
 
 ## 7. Open items
 
