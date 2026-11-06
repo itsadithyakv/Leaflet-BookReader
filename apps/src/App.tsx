@@ -23,7 +23,7 @@ const DUSTY_BOOK_DAYS = 30;
 import { MobileNav } from "./components/MobileNav";
 import { UiIcon } from "./components/UiIcon";
 import { LibraryPage } from "./pages/LibraryPage";
-import { useLibraryStore } from "./store/libraryStore";
+import { syncOnVisibility, useLibraryStore } from "./store/libraryStore";
 import { FEATURES } from "./constants/features";
 import { ALIVE_EVERY_MS, AWAY_FREE_MS, flowerGrowing, useHabitStore } from "./store/habitStore";
 import { setAppFullscreen, watchForeground } from "./services/windowService";
@@ -245,6 +245,13 @@ const App = () => {
       });
     }
   }, [sync.driveConnected, syncNow]);
+
+  // And as the window goes out of sight and comes back (docs/two-devices.md).
+  useEffect(() => {
+    const onVisibility = () => syncOnVisibility(document.visibilityState === "hidden");
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
 
   // Closing a book is the moment progress and the habit ledger have changed, so
   // it is when a backup is worth taking. Imports and deletes schedule their own.

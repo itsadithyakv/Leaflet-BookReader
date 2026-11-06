@@ -41,6 +41,12 @@ check for whether the book's bytes are on *this* device.
 | `goal_minutes` INTEGER | Snapshotted per day, so changing the goal does not rewrite history |
 | `freeze_used`, `grace_used` | Whether a missed day was paid for |
 
+`reading_day_devices` (`date_key`, `device_id`, `minutes`) holds what each
+device itself read on a day: this device's row grows with `minutes` above, the
+others' arrive by sync. A day's `minutes` are never below the sum of its rows.
+The device's id is a random value in `settings` (`device_id`), made on first
+use. See [two-devices.md](two-devices.md).
+
 The streak is **derived** from these rows rather than stored, so it can never
 drift from the minutes that earned it. Pip's cold is derived from them too
 (`habit::cold`): no column, no table. The per-device streak state in
@@ -187,7 +193,7 @@ table as the fallback where no keychain exists.
 ## Migrations
 
 The schema is versioned with SQLite's `PRAGMA user_version`
-(`SCHEMA_VERSION` in `db/mod.rs`, currently **4**). `apply_schema()` runs
+(`SCHEMA_VERSION` in `db/mod.rs`, currently **5**). `apply_schema()` runs
 `CREATE TABLE IF NOT EXISTS` for everything at the latest shape, then
 `upgrade()` brings an older file forward one step at a time, in one
 transaction:
@@ -198,6 +204,7 @@ transaction:
 | 2 | `annotations` |
 | 3 | `books.series`, `series_index`; `collections.book_ids`, `created_at`, `updated_at`, `deleted_at` |
 | 4 | `focus_sessions.flower`, `flower_bloomed` |
+| 5 | `reading_day_devices` (what each device read on a day: `date_key`, `device_id`, `minutes`). A table, so nothing is moved; the step exists for the copy taken before an upgrade |
 
 Columns are added only if missing (`add_column`), and only that case is
 forgiven: a full disk or a locked file is an error. Before any upgrade the file
@@ -273,9 +280,19 @@ Book files live beside it as `books/<sha256>.<ext>` and are fetched on demand.
 - **`createdAt`** — the minimum; the earliest import is the truth.
 - **Deletion** — holds unless the other device edited the book *after* it, which
   is how re-importing a removed book brings it back instead of being undone.
-- **Ledger minutes** — the maximum, not the sum. Neither device knows how much of
-  the other's time overlapped its own, and a sum would let repeated syncing
-  inflate a streak.
+- **Ledger minutes** — the largest of three: one side's `minutes`, the other's,
+  and the sum of the day's `byDevice` (what each device itself read, merged
+  figure by figure, the larger of each). Reading on two devices before either
+  synced adds up; syncing again cannot inflate a day; and a version that
+  knows only `minutes` (1.0 to 1.2 drop `byDevice` when they rewrite the
+  document) loses nothing. The whole argument is in
+  [two-devices.md](two-devices.md). `byDevice` is written for the last
+  ninety days and left out where it is empty.
+- **The document's version** — read before the document. One a later version
+  wrote is taken from and never written over (`merge::read_remote`,
+  `Remote::Newer`); the sync report says `updateNeeded` and the reader is
+  told to update. 1.0 to 1.2 do not do this, which is why anything new has to
+  be safe when they drop it.
 - **Freeze / grace** — OR'd. Spending it on one device spends it everywhere.
 - **Sessions** — union by id; a burn (written only by older versions) is a
   tombstone and sticks.

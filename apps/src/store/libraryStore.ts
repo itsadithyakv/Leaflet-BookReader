@@ -1,8 +1,9 @@
 import { create } from "zustand";
 import type { Book, BookFilter } from "@shared/models/book";
-import { EMPTY_SYNC_STATUS, type DriveSyncStatus, type SyncStatus } from "@shared/sync/types";
+import { EMPTY_SYNC_STATUS, SYNC_UPDATE_NEEDED, type DriveSyncStatus, type SyncStatus } from "@shared/sync/types";
 import { bookService, type ImportOutcome } from "../services/bookService";
 import { syncService } from "../services/syncService";
+import { syncDue } from "../services/syncTiming";
 import { socialService } from "../services/socialService";
 import { statsService, type ReadingStats } from "../services/statsService";
 
@@ -64,6 +65,8 @@ type LibraryState = {
 };
 
 let syncTimer: ReturnType<typeof setTimeout> | null = null;
+/** When a sync was last started, whatever asked for it (null: not since launch). */
+let lastSyncStartedAt: number | null = null;
 /**
  * Imports in flight. Counted, because the dialog, a drop and "Open with" can
  * overlap: with a plain flag, the first to finish said importing was over
@@ -293,14 +296,21 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     scheduleSync(set, get);
   },
   async syncNow() {
+    lastSyncStartedAt = Date.now();
     set({ syncStatus: "syncing", syncError: null });
     try {
-      await syncService.syncNow();
+      const report = await syncService.syncNow();
       // Sync can add, remove and re-position books, so the library is re-read
       // rather than patched: guessing which rows changed is how the two views
       // drift apart.
       const [books, status] = await Promise.all([bookService.list(), syncService.status()]);
-      set({ books, sync: status, syncStatus: "success" });
+      // A newer Leaflet wrote the library: what it holds has arrived, and
+      // nothing of this device's went up. Said where a failed sync is said.
+      set(
+        report.updateNeeded
+          ? { books, sync: status, syncStatus: "error", syncError: SYNC_UPDATE_NEEDED }
+          : { books, sync: status, syncStatus: "success" }
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       set({ syncStatus: "error", syncError: message });
@@ -424,6 +434,23 @@ function mergeBooks(existing: Book[], imported: Book[]) {
     byId.set(book.id, book);
   }
   return Array.from(byId.values());
+}
+
+/**
+ * A sync as the app goes out of sight or comes back (services/syncTiming.ts):
+ * a phone is stopped in the background without warning, and a reader back
+ * from another device wants its place. Bound to the page's visibility in App.
+ */
+export function syncOnVisibility(hidden: boolean, now = Date.now()) {
+  const { sync, syncStatus, syncNow } = useLibraryStore.getState();
+  const configured = sync.driveConnected || Boolean(sync.folderPath);
+  const sinceLast = lastSyncStartedAt === null ? null : now - lastSyncStartedAt;
+  if (syncStatus === "syncing" || !syncDue(hidden ? "hidden" : "visible", sinceLast, configured)) {
+    return;
+  }
+  void syncNow().catch(() => {
+    // Recorded in `syncError`, as a background sync's failure is.
+  });
 }
 
 /**

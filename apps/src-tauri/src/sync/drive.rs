@@ -17,7 +17,7 @@
 
 use crate::db::Database;
 use crate::sync::folder::SyncReport;
-use crate::sync::merge::{self, BookEntry, SyncDoc};
+use crate::sync::merge::{self, BookEntry, Remote, SyncDoc};
 use crate::sync::store;
 use crate::sync::{DriveState, PendingAuth};
 use anyhow::{anyhow, Result};
@@ -448,7 +448,7 @@ pub const ACCOUNT_SETTING: &str = "drive_account_email";
 /// The database remains the fallback: on a machine with no usable keychain,
 /// refusing to sync would be worse than the previous behaviour.
 pub fn store_refresh_token(db: &Database, token: &str) -> Result<()> {
-  match keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER).and_then(|entry| entry.set_password(token)) {
+  match crate::sync::secrets::set(KEYRING_SERVICE, KEYRING_USER, token) {
     Ok(()) => {
       // Remove any copy an earlier version left in the database.
       let _ = db.set_setting(REFRESH_SETTING, "");
@@ -459,12 +459,8 @@ pub fn store_refresh_token(db: &Database, token: &str) -> Result<()> {
 }
 
 pub fn load_refresh_token(db: &Database) -> Result<Option<String>> {
-  if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER) {
-    if let Ok(token) = entry.get_password() {
-      if !token.is_empty() {
-        return Ok(Some(token));
-      }
-    }
+  if let Some(token) = crate::sync::secrets::get(KEYRING_SERVICE, KEYRING_USER) {
+    return Ok(Some(token));
   }
   let stored = db.get_setting(REFRESH_SETTING)?.filter(|value| !value.is_empty());
   // Move a legacy plaintext token into the keychain the first time it is read.
@@ -475,9 +471,7 @@ pub fn load_refresh_token(db: &Database) -> Result<Option<String>> {
 }
 
 pub fn clear_tokens(db: &Database) -> Result<()> {
-  if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER) {
-    let _ = entry.delete_credential();
-  }
+  crate::sync::secrets::clear(KEYRING_SERVICE, KEYRING_USER);
   db.set_setting(REFRESH_SETTING, "")?;
   db.set_setting(ACCESS_SETTING, "")?;
   db.set_setting(EXPIRES_SETTING, "")?;
@@ -880,18 +874,17 @@ pub async fn fetch_account_email(client: &reqwest::Client, token: &str) -> Resul
 async fn read_remote_state(
   client: &reqwest::Client,
   token: &str,
-  root: &str,
-  now: &str
-) -> Result<(SyncDoc, Option<DriveFile>)> {
+  root: &str
+) -> Result<(Remote, Option<DriveFile>)> {
   let file = find_file(client, token, STATE_FILE, root).await?;
   let Some(file) = file else {
-    return Ok((SyncDoc::empty(now), None));
+    return Ok((Remote::Absent, None));
   };
   let bytes = download(client, token, &file.id).await?;
-  // A corrupt document must not take the library down. Treating it as empty
-  // means this device republishes its own state, which is recoverable.
-  let doc = serde_json::from_slice::<SyncDoc>(&bytes).unwrap_or_else(|_| SyncDoc::empty(now));
-  Ok((doc, Some(file)))
+  // A corrupt document must not take the library down. Treating it as absent
+  // means this device republishes its own state, which is recoverable. One a
+  // later version wrote is told apart by its version, and is not written over.
+  Ok((merge::read_remote(&bytes), Some(file)))
 }
 
 /// Merges with Drive and applies the result locally.
@@ -916,7 +909,15 @@ pub async fn sync(db_mutex: &std::sync::Mutex<Database>, now: &str) -> Result<Sy
 
   let mut attempt = 0;
   let merged = loop {
-    let (remote, remote_file) = read_remote_state(&client, &token, &root, now).await?;
+    let (remote, remote_file) = read_remote_state(&client, &token, &root).await?;
+    let remote = match remote {
+      Remote::Ours(doc) => doc,
+      Remote::Absent => SyncDoc::empty(now),
+      Remote::Newer(doc) => {
+        let db = db_mutex.guard();
+        return crate::sync::folder::take_from_newer(&db, doc, now);
+      }
+    };
     let local = {
       let db = db_mutex.guard();
       store::snapshot(&db, now)?

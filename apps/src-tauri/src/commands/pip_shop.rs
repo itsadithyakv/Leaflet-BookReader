@@ -603,7 +603,7 @@ mod tests {
   }
 
   fn read(doc: &mut SyncDoc, id: &str, day: &str, ended_at: &str, minutes: f64) {
-    doc.days.push(DayEntry { date_key: day.into(), minutes, goal_minutes: 20, freeze_used: false, grace_used: false });
+    doc.days.push(DayEntry { date_key: day.into(), minutes, goal_minutes: 20, freeze_used: false, grace_used: false, by_device: Default::default() });
     doc.sessions.push(SessionEntry {
       id: id.into(),
       started_at: ended_at.into(),

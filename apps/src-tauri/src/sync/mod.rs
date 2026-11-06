@@ -18,6 +18,7 @@ pub mod folder;
 pub mod merge;
 pub mod reading;
 pub mod remote_config;
+pub mod secrets;
 pub mod store;
 
 use anyhow::Result;

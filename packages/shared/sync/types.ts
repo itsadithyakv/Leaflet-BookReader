@@ -42,7 +42,13 @@ export type SyncReport = {
   booksRemoved: number;
   booksPending: number;
   entriesUpdated: number;
+  /** A later version of Leaflet wrote the shared library: this device read it and wrote nothing back. */
+  updateNeeded: boolean;
 };
+
+/** What the reader is told then, in place of a sync error. */
+export const SYNC_UPDATE_NEEDED =
+  "This library was last saved by a newer Leaflet. Update Leaflet on this device to carry on syncing.";
 
 export const EMPTY_SYNC_STATUS: SyncStatus = {
   driveConnected: false,

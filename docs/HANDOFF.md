@@ -75,16 +75,34 @@ owner". The 1.2 release does not wait on anything in the list below.
      would be a change, not a move. Three functions nothing calls came across
      as they were: `applyContentFlowStyles` (`useReaderLook.ts`),
      `displayNextSpine` and `displayPrevSpine` (`useChapters.ts`).
-2. **The phone, stage 0** ([mobile.md](mobile.md)): tokens kept on Android
-   (the `keyring` crate has no Android store), minutes per device in a ledger
-   day (`sync/merge.rs` takes the larger of two devices' minutes, not their
-   sum), a document version so an older app does not write a newer document,
-   sync when the app goes to the background, and a written two-device test
-   run on two copies of the desktop app. This changes the sync document:
-   design it so that 1.0, 1.1 and 1.2, which are in readers' hands and know
-   none of it, cannot lose data when they meet it, and write that design down
-   before coding. During this stage, run the one-hour Drive experiment in
-   mobile.md ("Signing in"), which needs the owner's Google project.
+2. **The phone, stage 0: built on the branch `phone/stage-0`, 2026-10-05,
+   not in 1.2.** The design, written first, is
+   [two-devices.md](two-devices.md); read it before touching sync. In short:
+   - *Minutes per device.* A day keeps `minutes` as it was and gains
+     `byDevice`; merged minutes are the largest of the two totals and the
+     figures' sum. Twenty and twenty on two devices is forty. 1.0 to 1.2 drop
+     the new field when they rewrite the document and nothing is lost: the
+     total they keep is one of the three, and the figures come back.
+   - *The document's version* is read before the document. One a later
+     version wrote is taken from, never written over, and the reader is told
+     to update. Found on the way: **all three transports replace a document
+     they cannot parse**, which until now included any future format.
+   - *Tokens* go through `sync/secrets.rs`: the keychain on the desktop, a
+     private file on a phone. The Android branch has never been compiled; the
+     Keystore is stage 1.
+   - *A sync* also runs as the window goes out of sight and comes back.
+   - 564 Rust tests (15 new), 2,115 app tests (4 new), `tsc` clean. The
+     local database is at schema version 5 (a new table).
+   - **Left, and the owner's:** the two-device script in
+     [testing.md](testing.md) ("Two devices, by hand"), which needs two
+     installed copies; and the one-hour Drive experiment in mobile.md
+     ("Signing in"), which needs the owner's Google project.
+   - **Known and for stage 3:** the daily goal is a setting of each device,
+     so a phone and a laptop can judge one day against two goals (the design
+     says what that does); and `run_sync` will not start without Drive or a
+     folder, even for a reader signed in to a Leaflet account.
+   - The branch has its own checkout, `.claude/worktrees/stage-0`, so that
+     the folder 1.2 is built from holds nothing unfinished.
 3. **The phone, stages 1 to 6**, as mobile.md orders them. The owner can
    build for Android on this machine today (mobile.md, "Building it today":
    the SDK, NDK and JDK 21 are installed; three environment variables are

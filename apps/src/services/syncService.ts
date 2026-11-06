@@ -6,7 +6,8 @@ const EMPTY_REPORT: SyncReport = {
   booksDownloaded: 0,
   booksRemoved: 0,
   booksPending: 0,
-  entriesUpdated: 0
+  entriesUpdated: 0,
+  updateNeeded: false
 };
 
 /**

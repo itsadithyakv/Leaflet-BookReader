@@ -159,6 +159,33 @@ hidden, the document timeline is frozen, so a CSS transition sits pinned at its
 start value and a transform will look like it is not applying at all. Bypass the
 transition (`el.style.transition = "none"`) before measuring geometry.
 
+**Two devices, by hand.** The merge is tested in `cargo test`, through a
+folder, with an old version in between (`sync/folder.rs`, `sync/merge.rs`).
+What that cannot show is two installed copies and a real Drive. This is the
+script for it, stage 0's "done when" ([two-devices.md](two-devices.md)). It
+needs the test package installed for two Windows accounts on one PC (or two
+PCs), both signed in to the same Google account and the same Leaflet
+account, each with its own daily goal left at the same figure.
+
+Call them A and B. "Sync" is Settings → Backup → Back up now. Write down
+what the Habit tab shows for today after each step.
+
+| | Do | Expect |
+| --- | --- | --- |
+| 1 | On A, import a book and sync. On B, sync | The book is on B's shelf, and opens (it downloads) |
+| 2 | On A, read 3 minutes; do **not** sync. On B, read 4 minutes in the same book; sync B, then A, then B | Both show **7** minutes for today, not 4. Sync either again: still 7 |
+| 3 | On A read to a place further on, close the book; sync A, then B | B opens the book at A's place |
+| 4 | On both, highlight a different line of the same page, offline (Wi-Fi off). Wi-Fi on; sync A, B, A | Both highlights on both |
+| 5 | On both, edit the note of the same highlight, B after A; sync A, B, A | B's wording on both (the later edit) |
+| 6 | On A, remove a book; sync A, then B | Gone from B. Re-import it on B, sync both: back on both |
+| 7 | Wi-Fi off on B for the whole of this step. On A read 2 minutes, sync. On B read 2 minutes, add a bookmark. Wi-Fi on, sync B, then A | Today is the earlier figure plus **4** on both; the bookmark is on A |
+| 8 | Press Back up now on A and B within a second of each other, three times | Neither reports an error it does not recover from; after one more sync each, both show the same library and the same minutes. (This is Drive's `If-Match` conflict, never yet seen to happen) |
+| 9 | Minimise A for three minutes, read on B and sync, restore A | Within a few seconds A shows B's minutes without pressing anything |
+| 10 | Install **1.2** (not this build) for a third account, C, on the same Google account. Sync C. On A and B read a minute each, unsynced; sync A, B, **C**, A, B | The day's total never goes down at any step, and after the last two syncs A and B agree on it |
+
+Anything else is a fault: note the step, what each device showed, and
+Settings → About → Copy diagnostics from both.
+
 **Checking a move of the text reader's code.** The reader has no component
 tests, so a change that should change nothing (the split of `ReaderView.tsx`
 into `readers/text/`, 2026-10-05) is checked by walking the same book the same

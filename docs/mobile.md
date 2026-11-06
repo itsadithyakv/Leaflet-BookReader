@@ -50,7 +50,11 @@ The phone and the laptop are one library and one reader:
 ## Stage 0: make two devices safe (before any phone screen)
 
 These are faults in what exists. They do not show with one computer and will
-show on the first day with a phone.
+show on the first day with a phone. **Where each stands is in
+[two-devices.md](two-devices.md)**, the design written before the code: the
+first three and the fifth are built on the branch `phone/stage-0`
+(2026-10-05), the Keystore half of the first waits for a device, and the
+fourth has its test written and not yet run.
 
 | Fault | Why it bites | Fix |
 | --- | --- | --- |

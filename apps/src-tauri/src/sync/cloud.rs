@@ -15,7 +15,7 @@
 
 use crate::db::Database;
 use crate::sync::folder::SyncReport;
-use crate::sync::merge::{self, SyncDoc};
+use crate::sync::merge::{self, Remote, SyncDoc};
 use crate::sync::store;
 use anyhow::{anyhow, Result};
 use base64::Engine;
@@ -127,17 +127,18 @@ fn compress(doc: &SyncDoc) -> Result<String> {
   Ok(base64::engine::general_purpose::STANDARD.encode(encoder.finish()?))
 }
 
-fn decompress(encoded: &str, now: &str) -> SyncDoc {
+fn decompress(encoded: &str) -> Remote {
   let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(encoded) else {
-    return SyncDoc::empty(now);
+    return Remote::Absent;
   };
   let mut json = Vec::new();
   if GzDecoder::new(&bytes[..]).read_to_end(&mut json).is_err() {
-    return SyncDoc::empty(now);
+    return Remote::Absent;
   }
   // A corrupt document must not take the library down; republishing this
-  // device's own state is the recoverable outcome.
-  serde_json::from_slice(&json).unwrap_or_else(|_| SyncDoc::empty(now))
+  // device's own state is the recoverable outcome. One a later version wrote
+  // is told apart by its version, and is not written over.
+  merge::read_remote(&json)
 }
 
 async fn describe_failure(response: reqwest::Response) -> anyhow::Error {
@@ -187,14 +188,13 @@ pub const ACCOUNT_API_SETTING: &str = "account_api_base";
 pub const ACCOUNT_CACHE_SETTING: &str = "account_cached";
 const SIGN_IN_FIRST: &str = "Sign in to your Leaflet account first.";
 
-/// Also held in memory, so a platform whose keychain does not persist (the
-/// keyring crate falls back to a mock there) still works for the process's life.
+/// Also held in memory, so a device where it could not be kept (see
+/// `secrets`) still works for the process's life.
 static SESSION_CACHE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
 fn store_session_token(token: &str) -> Result<()> {
   *SESSION_CACHE.lock().map_err(|_| anyhow!("session store is busy"))? = Some(token.to_string());
-  keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
-    .and_then(|entry| entry.set_password(token))
+  crate::sync::secrets::set(KEYRING_SERVICE, KEYRING_USER, token)
     .map_err(|e| anyhow!("Could not save your sign-in to the system keychain: {e}"))
 }
 
@@ -202,10 +202,7 @@ fn load_session_token() -> Option<String> {
   if let Some(token) = SESSION_CACHE.lock().ok().and_then(|cache| cache.clone()) {
     return Some(token);
   }
-  let token = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
-    .and_then(|entry| entry.get_password())
-    .ok()
-    .filter(|token| !token.is_empty())?;
+  let token = crate::sync::secrets::get(KEYRING_SERVICE, KEYRING_USER)?;
   if let Ok(mut cache) = SESSION_CACHE.lock() {
     *cache = Some(token.clone());
   }
@@ -217,9 +214,7 @@ pub fn clear_session(db: &Database) {
   if let Ok(mut cache) = SESSION_CACHE.lock() {
     *cache = None;
   }
-  if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER) {
-    let _ = entry.delete_credential();
-  }
+  crate::sync::secrets::clear(KEYRING_SERVICE, KEYRING_USER);
   let _ = db.set_setting(ACCOUNT_API_SETTING, "");
   let _ = db.set_setting(ACCOUNT_CACHE_SETTING, "");
   // Whether the profile is shared belongs to the account that was signed in.
@@ -619,11 +614,14 @@ pub async fn sync(db_mutex: &std::sync::Mutex<Database>, now: &str) -> Result<Sy
       return Err(describe_failure(response).await);
     }
     let pulled: StateResponse = response.json().await?;
-    let remote = pulled
-      .state
-      .as_deref()
-      .map(|encoded| decompress(encoded, now))
-      .unwrap_or_else(|| SyncDoc::empty(now));
+    let remote = match pulled.state.as_deref().map(decompress).unwrap_or(Remote::Absent) {
+      Remote::Ours(doc) => doc,
+      Remote::Absent => SyncDoc::empty(now),
+      Remote::Newer(doc) => {
+        let db = db_mutex.guard();
+        return crate::sync::folder::take_from_newer(&db, doc, now);
+      }
+    };
 
     let local = {
       let db = db_mutex.guard();
@@ -920,7 +918,7 @@ mod tests {
     let doc = store::snapshot(&db, NOW).expect("snapshot");
 
     let encoded = compress(&doc).expect("compress");
-    let back = decompress(&encoded, NOW);
+    let Remote::Ours(back) = decompress(&encoded) else { panic!("a document this version wrote") };
 
     assert_eq!(back.days.len(), 1);
     assert_eq!(back.days[0].minutes, 25.0);
@@ -952,8 +950,8 @@ mod tests {
   /// own state instead of the library disappearing.
   #[test]
   fn a_corrupt_blob_is_survivable() {
-    assert!(decompress("not base64 at all !!!", NOW).books.is_empty());
-    assert!(decompress("aGVsbG8gd29ybGQ=", NOW).books.is_empty());
+    assert_eq!(decompress("not base64 at all !!!"), Remote::Absent);
+    assert_eq!(decompress("aGVsbG8gd29ybGQ="), Remote::Absent);
   }
 
   #[test]
