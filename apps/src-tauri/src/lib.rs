@@ -33,7 +33,7 @@ mod tts;
 mod window_material;
 
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Mutex, MutexGuard, PoisonError, TryLockError};
 use tauri::Manager;
 
 /// `lock()` that survives a panic elsewhere.
@@ -44,12 +44,77 @@ use tauri::Manager;
 /// connection, whose transactions roll back when dropped, and small caches) is
 /// still usable after such a panic, so the guard is recovered instead.
 pub trait LockExt<T> {
+  #[track_caller]
   fn guard(&self) -> MutexGuard<'_, T>;
 }
 
 impl<T> LockExt<T> for Mutex<T> {
+  #[track_caller]
   fn guard(&self) -> MutexGuard<'_, T> {
-    self.lock().unwrap_or_else(PoisonError::into_inner)
+    let caller = std::panic::Location::caller();
+    let key = self as *const Mutex<T> as usize;
+    let guard = match self.try_lock() {
+      Ok(guard) => guard,
+      Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+      Err(TryLockError::WouldBlock) => {
+        let holder = lock_watch::holder(key);
+        let started = std::time::Instant::now();
+        let guard = self.lock().unwrap_or_else(PoisonError::into_inner);
+        lock_watch::waited(caller, started.elapsed(), holder);
+        guard
+      }
+    };
+    lock_watch::taken(key, caller);
+    guard
+  }
+}
+
+/// Who waited long for a lock, and who had it.
+///
+/// A command that runs on the window's thread and waits for the library held
+/// elsewhere is the app "Not Responding" (the owner's laptop, often at start,
+/// 2026-11-03). A wait of a quarter of a second or more is logged with the
+/// thread that waited, where it asked, and where the lock was taken by whoever
+/// had it and how long before, so the log names the holder next time.
+mod lock_watch {
+  use std::collections::HashMap;
+  use std::panic::Location;
+  use std::sync::{Mutex, OnceLock, PoisonError};
+  use std::time::{Duration, Instant};
+
+  const SLOW: Duration = Duration::from_millis(250);
+
+  type Holder = (&'static Location<'static>, Instant);
+
+  fn holders() -> &'static Mutex<HashMap<usize, Holder>> {
+    static HOLDERS: OnceLock<Mutex<HashMap<usize, Holder>>> = OnceLock::new();
+    HOLDERS.get_or_init(Default::default)
+  }
+
+  pub fn taken(key: usize, at: &'static Location<'static>) {
+    holders().lock().unwrap_or_else(PoisonError::into_inner).insert(key, (at, Instant::now()));
+  }
+
+  pub fn holder(key: usize) -> Option<Holder> {
+    holders().lock().unwrap_or_else(PoisonError::into_inner).get(&key).copied()
+  }
+
+  pub fn waited(at: &'static Location<'static>, waited: Duration, holder: Option<Holder>) {
+    if waited < SLOW {
+      return;
+    }
+    let thread = std::thread::current();
+    let held = holder.map_or_else(
+      || "by something unknown".to_string(),
+      |(by, since)| format!("taken at {}:{} {} ms before", by.file(), by.line(), since.elapsed().as_millis())
+    );
+    crate::diag::warn(&format!(
+      "slow lock: {} waited {} ms at {}:{}; it was held, {held}",
+      thread.name().unwrap_or("a thread"),
+      waited.as_millis(),
+      at.file(),
+      at.line()
+    ));
   }
 }
 

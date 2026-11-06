@@ -344,6 +344,18 @@ const App = () => {
     void loadWardrobe();
   }, [loadBooks, loadSyncStatus, loadHabit, loadWardrobe]);
 
+  // A sync can bring the days another device read (the phone's streak): the
+  // ledger is asked again once each run ends, or the streak shown stays the
+  // one read at start (the owner's laptop, 2026-11-03: "start a streak" over
+  // a 19-day streak the phone had, and the database by then held too).
+  useEffect(
+    () =>
+      useLibraryStore.subscribe((state, previous) => {
+        if (previous.syncStatus === "syncing" && state.syncStatus !== "syncing") void useHabitStore.getState().load();
+      }),
+    []
+  );
+
   // Left open past midnight, today's minutes and "goal met" on screen would
   // be yesterday's until something was read: the ledger is asked again.
   useEffect(() => {
@@ -1511,24 +1523,22 @@ const App = () => {
         </div>
       )}
 
-      {toast && (
+      {toast ? (
         <div className="app-toast paper-surface rounded-lg px-4 py-3 text-sm text-on-surface" role="status">
           {toast}
         </div>
-      )}
-
-      {metadataRefreshing && books.length >= 60 && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
-          <div className="modal-surface flex flex-col items-center gap-3 rounded-xl px-6 py-4 text-sm text-on-surface">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-            <div className="text-center">
-              <p className="text-sm font-semibold text-on-surface">Refreshing library metadata</p>
-              <p className="text-xs text-on-surface-variant">
-                {metadataDone}/{metadataTotal} books
-              </p>
-            </div>
+      ) : (
+        // Covers and authors being looked up (after an import, or books another device added): a note in
+        // the toast's corner while the library stays in use. It used to darken the whole app (2026-11-03).
+        metadataRefreshing &&
+        metadataTotal >= 3 && (
+          <div className="app-toast paper-surface flex items-center gap-3 rounded-lg px-4 py-3 text-sm text-on-surface" role="status">
+            <span className="h-4 w-4 flex-none animate-spin rounded-full border-2 border-primary border-t-transparent" aria-hidden="true" />
+            <span>
+              Finding covers and details <span className="tabular-nums text-on-surface-variant">{metadataDone}/{metadataTotal}</span>
+            </span>
           </div>
-        </div>
+        )
       )}
 
       {converterPromptBook && (

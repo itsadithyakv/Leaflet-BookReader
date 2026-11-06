@@ -153,7 +153,7 @@ type ShelfToolsProps = {
   lead?: ReactNode;
 };
 
-/** One key for sort, filters and grid or list (a sheet), and the highlights (and the word quiz) as icons beside it. */
+/** One icon for sort, filters and grid or list (a sheet), the highlights (and the word quiz) as icons beside it: the "Library" title keeps its room. */
 export const PhoneShelfTools = ({
   filters,
   setFilter,
@@ -183,12 +183,12 @@ export const PhoneShelfTools = ({
       )}
       <button
         type="button"
-        className="tactile-button phone-shelf-key relative"
+        className="key-button relative"
         onClick={() => setOpen(true)}
         aria-label={narrowed ? "Sort and filter (filtered)" : "Sort and filter"}
+        title="Sort and filter"
       >
-        <SlidersHorizontal size={16} aria-hidden />
-        Sort &amp; filter
+        <SlidersHorizontal size={18} aria-hidden />
         {narrowed && <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-surface" aria-hidden="true" />}
       </button>
       {open && (

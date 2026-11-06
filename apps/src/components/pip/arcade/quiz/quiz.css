@@ -380,3 +380,138 @@
     transform: translate(-50%, 0);
   }
 }
+
+/* ---- The word quiz on a phone held upright ----------------------------------------------
+   It fills the screen rather than stopping half way down it: Pip and her card in the
+   middle of what is left, the answers and the way on at the foot, under the thumb.
+   (Study cards keep their own: cards.css.) */
+@media (max-width: 640px) {
+  .pip-arcade > .pip-arcade-page:has(> .pip-word-round) {
+    display: flex;
+    min-height: 100%;
+    flex-direction: column;
+  }
+
+  .pip-arcade-page > .pip-word-round {
+    flex: 1;
+    padding-bottom: 8px;
+  }
+
+  .pip-word-round > .pip-quiz-stage {
+    flex: 1;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+  }
+
+  .pip-word-round > .pip-quiz-stage > .pip-sprite {
+    align-self: center;
+  }
+
+  /* Its own height, not the stage's: a word is held up, not a page. */
+  .pip-word-round > .pip-quiz-stage > .pip-quiz-card {
+    flex: none;
+  }
+}
+
+/* Pip comes back on a phone with the height for her; only a short screen leaves her out. */
+@media (max-width: 520px) and (min-height: 640px) {
+  .pip-word-round > .pip-quiz-stage > .pip-sprite {
+    display: block;
+  }
+}
+
+/* ---- Motion -------------------------------------------------------------------------------
+   Each question comes in: the card pops up, the answers follow one by one. An answer
+   picked rightly hops, a wrong one gives a shake, and the way on pops up beside it.
+   For a reader who asked for less motion it is all simply there. */
+@media (prefers-reduced-motion: no-preference) {
+  .pip-word-round > .pip-quiz-stage > .pip-quiz-card {
+    animation: pip-quiz-card-in 260ms cubic-bezier(0.3, 1.4, 0.5, 1) both;
+  }
+
+  .pip-word-round .pip-quiz-options > li {
+    animation: pip-quiz-option-in 220ms cubic-bezier(0.3, 1.3, 0.5, 1) both;
+    animation-delay: calc(90ms + var(--i, 0) * 55ms);
+  }
+
+  .pip-word-round .pip-quiz-option[data-state="right"] {
+    animation: pip-quiz-right 380ms cubic-bezier(0.3, 1.6, 0.5, 1);
+  }
+
+  .pip-word-round .pip-quiz-option[data-state="wrong"] {
+    animation: pip-quiz-wrong 320ms ease-in-out;
+  }
+
+  .pip-word-round .pip-quiz-foot > .pip-key,
+  .pip-word-round .pip-quiz-result {
+    animation: pip-quiz-card-in 220ms cubic-bezier(0.3, 1.4, 0.5, 1) both;
+  }
+
+  .pip-word-round .pip-quiz-marks > span[data-done] {
+    animation: pip-quiz-mark 260ms cubic-bezier(0.3, 1.6, 0.5, 1) both;
+  }
+
+  .pip-word-round > .pip-quiz-menu {
+    animation: pip-quiz-option-in 240ms 120ms cubic-bezier(0.3, 1.3, 0.5, 1) both;
+  }
+}
+
+@keyframes pip-quiz-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes pip-quiz-option-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes pip-quiz-right {
+  0% {
+    transform: none;
+  }
+  40% {
+    transform: translateY(-6px) scale(1.02);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes pip-quiz-wrong {
+  0%,
+  100% {
+    transform: none;
+  }
+  25% {
+    transform: translateX(-6px);
+  }
+  50% {
+    transform: translateX(5px);
+  }
+  75% {
+    transform: translateX(-3px);
+  }
+}
+
+@keyframes pip-quiz-mark {
+  from {
+    transform: scale(0.4);
+  }
+  to {
+    transform: none;
+  }
+}

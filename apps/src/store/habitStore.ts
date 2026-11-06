@@ -375,6 +375,9 @@ export const useHabitStore = create<HabitState>((set, get) => ({
       loadedDay = getDateKey();
       if (snapshot.brokeFrom !== null) {
         set({ pendingBreak: { brokeFrom: snapshot.brokeFrom } });
+      } else if ((get().pendingBreak?.brokeFrom ?? Infinity) <= snapshot.streak) {
+        // A break seen before a sync brought the days another device read: the streak never broke.
+        set({ pendingBreak: null });
       }
     } catch {
       set({ loading: false });

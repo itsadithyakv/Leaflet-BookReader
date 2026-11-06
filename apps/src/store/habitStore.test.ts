@@ -282,6 +282,20 @@ describe("reading held for the ledger", () => {
     expect(store().pendingBreak).toEqual({ brokeFrom: 5 });
   });
 
+  it("drops a break a sync shows never happened, and keeps one that did", async () => {
+    // Opened before the sync brought the phone's days: the laptop saw a 19-day streak broken.
+    const snapshot = vi.spyOn(habitService, "snapshot").mockResolvedValue({ ...EMPTY_SNAPSHOT, streak: 19 });
+    useHabitStore.setState({ pendingBreak: { brokeFrom: 19 } });
+    await store().load();
+    expect(store().pendingBreak).toBeNull();
+
+    // A real break: the streak started again, shorter than what was lost.
+    useHabitStore.setState({ pendingBreak: { brokeFrom: 19 } });
+    snapshot.mockResolvedValue({ ...EMPTY_SNAPSHOT, streak: 1 });
+    await store().load();
+    expect(store().pendingBreak).toEqual({ brokeFrom: 19 });
+  });
+
   it("counts the held reading before a session is recorded, and shows it with the wrap-up", async () => {
     // A 20-minute session against a 20-minute goal: 19 minutes are in the
     // ledger and the last one is still held when the session completes.

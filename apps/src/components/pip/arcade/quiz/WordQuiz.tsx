@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { PipSprite } from "../../../PipSprite";
 import { UiIcon } from "../../../UiIcon";
 import { dayNumber } from "../../../../pip/diary/seed";
@@ -292,12 +292,13 @@ export const WordQuiz = ({ words, onChanged, onMyWords, skin, outfit }: WordQuiz
     const answeredNow = round.picked !== null;
     const wasRight = round.picked === question.answer;
     const seed = plays.current * 31 + round.at;
+    const dealt = `${plays.current}-${round.at}-${question.id}`;
     const who = question.way === "who";
     const says = !answeredNow ? pick(ASKS[question.way], seed) : wasRight ? pick(who ? RIGHT_WHO : RIGHT, seed) : pick(who ? WRONG_WHO : WRONG, seed);
     const move = !answeredNow ? "pointup" : wasRight ? pick(RIGHT_MOVES, seed) : pick(WRONG_MOVES, seed);
     const book = who ? question.context : library.find((entry) => entry.id === words.find((word) => word.id === question.id)?.bookId)?.title;
     return (
-      <div ref={rootRef} className="pip-quiz" tabIndex={-1} onKeyDown={onKeyDown}>
+      <div ref={rootRef} className="pip-quiz pip-word-round" tabIndex={-1} onKeyDown={onKeyDown}>
         <p className="pip-quiz-count">
           {round.mode === "who" ? "Who is this?" : "Words"}: {round.at + 1} of {round.questions.length}
           <span className="pip-quiz-marks" aria-hidden="true">
@@ -306,7 +307,8 @@ export const WordQuiz = ({ words, onChanged, onMyWords, skin, outfit }: WordQuiz
             ))}
           </span>
         </p>
-        <div className="pip-quiz-stage">
+        {/* Keyed by the question, so each one comes in afresh (quiz.css), the answers after it one by one. */}
+        <div key={`${dealt}-stage`} className="pip-quiz-stage">
           <PipSprite move={move} size={96} skin={skin} outfit={outfit} playKey={`${plays.current}-${round.at}-${answeredNow}`} />
           <div className="pip-quiz-card" data-droppable={who ? undefined : ""}>
             <p className="pip-quiz-says">{says}</p>
@@ -329,9 +331,9 @@ export const WordQuiz = ({ words, onChanged, onMyWords, skin, outfit }: WordQuiz
             )}
           </div>
         </div>
-        <ol className="pip-quiz-options" aria-label={question.way === "meaning" ? `What does “${question.prompt}” mean?` : question.way === "word" ? "Which word means this?" : `Who is ${question.prompt}?`}>
+        <ol key={`${dealt}-options`} className="pip-quiz-options" aria-label={question.way === "meaning" ? `What does “${question.prompt}” mean?` : question.way === "word" ? "Which word means this?" : `Who is ${question.prompt}?`}>
           {question.options.map((option, index) => (
-            <li key={option}>
+            <li key={option} style={{ "--i": index } as CSSProperties}>
               <button
                 type="button"
                 className="pip-quiz-option"
@@ -371,8 +373,8 @@ export const WordQuiz = ({ words, onChanged, onMyWords, skin, outfit }: WordQuiz
         : "a rough one. they'll come round again."
     : null;
   return (
-    <div className="pip-quiz">
-      <div className="pip-quiz-stage">
+    <div className="pip-quiz pip-word-round">
+      <div key={plays.current} className="pip-quiz-stage">
         <PipSprite move={done ? (done.right === done.of ? "champ" : done.right * 2 >= done.of ? "kudos" : "tea") : "idea"} size={96} skin={skin} outfit={outfit} playKey={plays.current} />
         <div className="pip-quiz-card">
           {done ? (

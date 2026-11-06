@@ -7,7 +7,10 @@ use super::*;
 /// False for native formats, and false when a conversion is already cached —
 /// the app used to demand a ~200 MB download to reopen a book it had already
 /// converted, purely because the Calibre install had moved.
-#[tauri::command]
+///
+/// Off the window's thread: the Calibre search looks through every folder on
+/// PATH, which stalls on a drive that does not answer (`converter_info`).
+#[tauri::command(async)]
 pub fn needs_converter(
   book_id: String,
   state: State<'_, AppState>,

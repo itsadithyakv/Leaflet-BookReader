@@ -563,8 +563,7 @@ html[data-turning] .mobile-nav-edge {
   padding: 8px 10px 8px 16px;
 }
 
-.phone-focus-key,
-.phone-shelf-key {
+.phone-focus-key {
   display: inline-flex;
   min-height: 44px;
   flex: none;

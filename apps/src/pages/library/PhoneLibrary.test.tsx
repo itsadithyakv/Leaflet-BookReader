@@ -58,7 +58,9 @@ describe("the Library's top on a phone", () => {
 
   it("puts sort, filters and covers-or-list behind one key, not a row of selects", () => {
     const markup = tools();
-    expect(markup).toContain("Sort &amp; filter");
+    expect(markup).toContain('aria-label="Sort and filter"');
+    // An icon only: the words would crowd the "Library" title beside the other keys.
+    expect(markup).not.toContain("Sort &amp; filter");
     expect(markup).not.toContain("<select");
     expect(markup).not.toContain("Grid view");
     // No highlights, no key for them.
